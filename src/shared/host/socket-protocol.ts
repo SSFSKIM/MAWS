@@ -185,6 +185,11 @@ export const PTY_FRAMES_CAPABILITY = 'socket.ptyFrames';
 // its own and reads the machine's.
 export const ATTACHMENT_CAPABILITY = 'host.attachment';
 export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11): on the engine host's welcome, that it
+// hands its sessions over (`host.handover`, the drain, then an exit that leaves every session host and its engine
+// running for the successor to adopt); on a client's hello, that the client will adopt through its successor, so an
+// `exit {when: 'idle'}` it writes on a *refused* link (another wire major, where no command can be sent) asks the drain.
+export const HOLDER_CAPABILITY = 'host.holder';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
 // its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
@@ -193,10 +198,10 @@ export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
 // stops composing the spine on the daemon shape (`mawsd` refuses a hello on engine-host.sock that does not list it).
 // `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O16 M3b: it hands over)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
-  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine)
-  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: under its permanent-client option)
+  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O16 M3b: host.holder)
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: host.attachment under its permanent-client option; P5 O16 M3b: host.holder)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock

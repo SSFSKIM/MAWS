@@ -52,13 +52,16 @@ function harness(over: Partial<DetachedOptions> = {}) {
   const counts = { liveSessions: 0, rows: 0 };
   const lines: string[] = [];
   const exit = vi.fn<(code: number) => void>();
-  const shutdown = vi.fn<(graceMs: number) => Promise<void>>(async () => {});
+  const shutdown = vi.fn<(graceMs: number, mode: 'stop' | 'detach') => Promise<void>>(async () => {});
   // the engine host's Supervision in the real entry; here what the entry tells it is recorded, and `leave` exits
   let leave: ((reason: SupervisorExit) => void) | null = null;
   const life = {
     started: vi.fn<SupervisorLife['started']>((_identity, exit) => void (leave = exit)),
     clientChanged: vi.fn<SupervisorLife['clientChanged']>(),
-    exitWhenIdle: vi.fn<SupervisorLife['exitWhenIdle']>(),
+    // P5 O16 M3b: as Supervision does, `exit now` runs the exit order
+    exitAsked: vi.fn<SupervisorLife['exitAsked']>((when) => {
+      if (when === 'now') leave?.('exit');
+    }),
     orphansSwept: vi.fn<SupervisorLife['orphansSwept']>(),
   };
   let emit!: HostEmit;
@@ -122,7 +125,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment'] /* P5 O3-D: its own list, host.attachment served from M3 */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment', 'host.holder'] /* P5 O16 M3b: host.holder; P5 O3-D: its own list, host.attachment served from M3 */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });
@@ -183,7 +186,7 @@ describe('the detached entry', () => {
     client.send({ t: 'exit', when: 'now' });
     await until(() => host.exit.mock.calls.length === 1);
     expect(host.exit).toHaveBeenCalledWith(0);
-    expect(host.shutdown).toHaveBeenCalledExactlyOnceWith(3_000);
+    expect(host.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'detach'); // P5 O16 M3b: the hosted rows outlive it
     await client.closed;
     expect(readLive(dir)).toBeNull();
     expect(existsSync(join(dir, 'host.lock'))).toBe(false);
@@ -330,7 +333,8 @@ describe('the detached entry', () => {
       await until(() => host.life.clientChanged.mock.calls.length === 1);
       expect(host.life.clientChanged).toHaveBeenLastCalledWith(true);
       client.send({ t: 'exit', when: 'idle' });
-      await until(() => host.life.exitWhenIdle.mock.calls.length === 1);
+      await until(() => host.life.exitAsked.mock.calls.length === 1);
+      expect(host.life.exitAsked).toHaveBeenCalledWith('idle', { refused: false, capabilities: [] });
       expect(host.exit).not.toHaveBeenCalled();
       client.socket.destroy();
       await until(() => host.life.clientChanged.mock.calls.length === 2);
@@ -353,7 +357,7 @@ describe('the detached entry', () => {
       const rows: { lifecycle: 'ready' | 'exited'; status: () => { holder: null } }[] = [{ lifecycle: 'ready', status: () => ({ holder: null }) /* P5 O16 M2 */ }];
       let supervision!: Supervision;
       const host = harness({
-        life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitWhenIdle: () => supervision.armExitWhenIdle(true), orphansSwept: (killed) => supervision.orphansSwept(killed) },
+        life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitAsked: (when, from) => supervision.exitAsked(when, from), orphansSwept: (killed) => supervision.orphansSwept(killed) },
       });
       await host.start(undefined, (on, emit, client) => {
         supervision = new Supervision({
@@ -378,6 +382,35 @@ describe('the detached entry', () => {
       expect(host.exit).toHaveBeenCalledWith(0);
       expect(host.lines.some((line) => line.includes('exiting (stopAll)'))).toBe(true);
       expect(existsSync(join(dir, 'host.lock'))).toBe(false);
+    });
+
+    // P5 O16 M3b (D11): a refused link's one exit carries what its hello listed, so Supervision arms the drain for a
+    // client that adopts through its successor
+    it('tells its life an exit from a refused link, with the capabilities that hello listed', async () => {
+      const host = harness();
+      await host.start();
+      const lock = readLock(dir)!;
+      const client = await connectLines(lock.socketPath);
+      clients.push(client);
+      client.send({ t: 'hello', protocol: SOCKET_PROTOCOL + 1, token: readFileSync(join(dir, 'host.token'), 'utf8'), capabilities: ['host.holder'] });
+      expect(await client.next()).toMatchObject({ t: 'refuse', reason: 'protocol' });
+      client.send({ t: 'exit', when: 'idle' });
+      await until(() => host.life.exitAsked.mock.calls.length === 1);
+      expect(host.life.exitAsked).toHaveBeenCalledWith('idle', { refused: true, capabilities: ['host.holder'] });
+    });
+
+    // P5 O16 M3b: the exit order stops every row only at a stop-all; any other reason (SIGTERM included) detaches
+    it('runs the shutdown in stop mode for a stop-all and in detach mode for every other reason', async () => {
+      const stopAll = harness();
+      await stopAll.start();
+      stopAll.leave('stopAll');
+      await until(() => stopAll.exit.mock.calls.length === 1);
+      expect(stopAll.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'stop');
+      for (const supervisor of running.splice(0)) await supervisor.stop('exit');
+      const signalled = harness();
+      const supervisor = (await signalled.start())!;
+      await supervisor.stop('signal');
+      expect(signalled.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'detach');
     });
   });
 

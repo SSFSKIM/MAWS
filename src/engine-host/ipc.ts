@@ -142,7 +142,7 @@ type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
 // `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision. P5 O3-D:
 // `host.attachment` sets the app's presence at once (declared at M1, served from M3)
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */, 'host.handover': 'bounded' /* P5 O16 M3b: its graceMs */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -196,7 +196,8 @@ export interface EngineIpc {
   plugins: PluginsRunner; // E8
   // E10: engine.shutdown's body (every live row's ladder, and the plugin runner stopped), shared with the detached
   // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
-  shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>;
+  // P5 O16 M3b: `detach` detaches the rows under a session host instead (the detached exit order's, but a stop-all's)
+  shutdown(graceMs: number, mode?: 'stop' | 'detach'): Promise<{ stopped: number; forced: number }>;
   adopt(entry: RosterEntry): Promise<AppSessionId>; // P5 O16 M3: the launcher's adoption of a running session host
 }
 
@@ -339,8 +340,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
-  const shutdown = async (graceMs: number) => {
-    const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */]);
+  // P5 O16 M3b: `detach`, a detached host's exit order but a stop-all's: the hosted rows are detached, the rest stopped
+  const shutdown = async (graceMs: number, mode: 'stop' | 'detach' = 'stop') => {
+    const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };

@@ -97,6 +97,9 @@ const runPs = (): Promise<string> =>
 // O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
 const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
 
+// P5 O16 M3b (D9): the launch refusal while the engine host hands its sessions over
+export const HANDING_OVER = 'the engine host is handing over; try again in a moment';
+
 export class ProcessTable {
   private readonly rows = new Map<AppSessionId, EngineSession>();
   private readonly listeners = new Set<(status: EngineSessionStatus) => void>();
@@ -105,6 +108,7 @@ export class ProcessTable {
   private sampler: ReturnType<typeof setInterval> | null = null;
   private sampling = false;
   private shuttingDown = false;
+  private handingOver = false; // P5 O16 M3b: the handover froze the hosted rows; admission is closed for good
   // C12 start: the budget's policy (on at 25% of physical memory until main's first engine.policy.set) and its state
   private policy: BudgetPolicy;
   private stateful: ReadonlySet<string> = new Set();
@@ -166,6 +170,7 @@ export class ProcessTable {
   // Creates and starts a session unless the id holds one that has not exited. `create` runs only when accepted.
   // P5 O16 M3: an id held for an adoption is live: only the adoption itself (`adoption`) reserves it.
   reserve(appSessionId: AppSessionId, create: () => EngineSession, opts: { adoption?: boolean } = {}): ReserveOutcome {
+    if (this.handingOver) throw new Error(HANDING_OVER); // P5 O16 M3b (D9): the existing `internal` refusal, its own words
     if (this.shuttingDown) throw new Error('engine host is shutting down');
     if (this.adopting.has(appSessionId) && opts.adoption !== true) return { status: 'refused', reason: 'already_live', message: 'process is being adopted' };
     const existing = this.rows.get(appSessionId);
@@ -621,14 +626,34 @@ export class ProcessTable {
   }
   // C12 end -----------------------------------------------------------------------------------------------------------
 
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D34): the handover's one synchronous step.
+  // Admission closes (a launch, an adoption's reservation included, is refused with HANDING_OVER), the idle release
+  // stops, and every live row under a session host is frozen: it consumes nothing more of its transport, so what the
+  // engine says from here on stays in the host's ring for the successor. Answers the frozen rows, for the drain. A live
+  // row with no session host (a direct launch, or one not yet spawned) is left to the exit order's ladder.
+  freezeForHandover(): EngineSession[] {
+    this.handingOver = true;
+    this.idle.close();
+    const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted);
+    for (const session of hosted) session.freeze();
+    return hosted;
+  }
+
   // engine.shutdown: every live process through the ladder in parallel with reason `quit` (the end_session wait capped
   // at 3 s); `stopped` counts the exits before SIGKILL, `forced` the SIGKILLs. Idempotent: a process already exited
   // counts in neither, one already in its ladder is awaited on that ladder.
-  async shutdown(opts: { graceMs: number }): Promise<{ stopped: number; forced: number }> {
+  // P5 O16 M3b: `detach` (a detached host's exit order for every reason but a stop-all) detaches each live row under a
+  // session host instead, leaving it and its engine running for the successor to adopt; it counts in neither.
+  async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
     this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
-    const results = await Promise.all(live.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) })));
+    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted) : [];
+    const stopping = live.filter((session) => !detaching.includes(session));
+    const [results] = await Promise.all([
+      Promise.all(stopping.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) }))),
+      Promise.all(detaching.map((session) => session.detach('exit'))),
+    ]);
     let stopped = 0;
     let forced = 0;
     for (const { session } of results) {

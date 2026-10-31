@@ -290,3 +290,54 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
     expect(ofKind(next.events(id), 'turn.ended')[0]).toMatchObject({ terminalReason: 'completed' });
   });
 });
+
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3's Proves; D9, D34): the handover over the real
+// session host. The old manager (a process) is asked to hand over right after a prompt, before the engine's permission
+// request arrives: nothing in flight, so it detaches at once (the final ack, `host_detach`, the connection ended without
+// `release`) and exits; the engine's request, read by no one, waits in the ring; the successor adopts the same engine,
+// raises the request live (the old manager never did) and its answer completes the turn. One sequence across both.
+describe.skipIf(!existsSync(BINARY))('the handover to a successor', () => {
+  it('the old manager detaches and exits; a request the engine sent after the freeze reaches the successor, never the old manager', { timeout: LONG }, async () => {
+    const stub = writeStubEngine(join(scratch, 'claude-handover'), stubBundle, { fixture: PERMISSION, rowMs: 150 });
+    const id = 'app-handover';
+    const old = startHostedManager(managerBundle, { userData, stub, binary: BINARY, version: TESTED_ENGINE_VERSION });
+    managers.push(old);
+    await old.call('session.launch', { spec: spec(id) });
+    await until(async () => (await old.status(id))?.process === 'ready', 'ready');
+    const before = (await old.status(id))!;
+    await old.call('session.send', { appSessionId: id, content: 'Use Bash to run exactly git log --oneline. Then say DONE.' });
+    expect(await old.handover(10_000)).toEqual({ state: 'detaching' });
+    await old.exited;
+    expect(old.events(id).some((e) => e.kind === 'permission.requested')).toBe(false);
+    expect(isAlive(before.pid!)).toBe(true); // the engine outlived its manager
+
+    const rowsBefore = [...launchRows(join(userData, 'engine-host', 'journal', id), before.launchId)];
+    expect(rowsBefore.at(-1)!.frame).toMatchObject({ event: 'host_detach', reason: 'handover', holderId: before.holder!.holderId });
+
+    const next = successor(stub);
+    expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [] });
+    await until(() => next.events(id).some((e) => e.kind === 'permission.requested'), 'the request raised by the successor', 30_000);
+    expect(next.status(id)).toMatchObject({ pid: before.pid, holder: { holderId: before.holder!.holderId, adopted: true } });
+    const requested = ofKind(next.events(id), 'permission.requested')[0]!;
+    expect(await next.call('session.answer', { appSessionId: id as AppSessionId, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } })).toEqual({ outcome: 'delivered' });
+    await until(() => next.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended', 30_000);
+    expect(ofKind(next.events(id), 'turn.ended')[0]).toMatchObject({ terminalReason: 'completed' });
+
+    const rows = [...launchRows(join(userData, 'engine-host', 'journal', id), before.launchId)];
+    expect(rows.map((r) => r.seq)).toEqual(rows.map((_, i) => i + 1)); // one sequence across both managers
+    const detach = rows.findIndex((r) => (r.frame as { event?: string }).event === 'host_detach');
+    const attach = rows.find((r) => (r.frame as { event?: string }).event === 'host_attach')!;
+    expect(attach.seq).toBeGreaterThan(rows[detach]!.seq);
+    expect(attach.frame).toMatchObject({ replayed: 'exact' });
+    const permissionRows = rows.filter((r) => r.direction === 'in' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'can_use_tool');
+    expect(permissionRows).toHaveLength(1); // journaled once, by the successor
+    expect(permissionRows[0]!.seq).toBeGreaterThan(rows[detach]!.seq);
+    // the engine's frames through the turn's result, each once and in the fixture's order
+    const fixture = fixtureRows();
+    const firstResult = fixture.findIndex((r) => (r.frame as { type?: string }).type === 'result');
+    const promptOf = (of: readonly JournalRow[]) => (of.find((r) => r.direction === 'out' && (r.frame as { type: string }).type === 'user')!.frame as { uuid: string }).uuid;
+    const [recorded, written] = [promptOf(fixture), promptOf(rows)];
+    const played = engineFrames(fixture.slice(0, firstResult + 1)).map((frame) => frame.replaceAll(recorded, written));
+    expect(engineFrames(rows).slice(0, played.length)).toEqual(played);
+  });
+});

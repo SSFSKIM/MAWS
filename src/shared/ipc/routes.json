@@ -412,6 +412,7 @@
   "host.attachment",
   "host.configure",
   "host.exitWhenIdle",
+  "host.handover",
   "host.interest",
   "host.opQuery",
   "host.stopAll",

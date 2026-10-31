@@ -222,6 +222,11 @@ export class SessionMaws {
     return this.toolServer.inFlight + this.askTable.asyncCount;
   }
 
+  // P5 O16 M3b: what the handover's drain waits for (the tool server's calls but `ask`, through their answers' delivery)
+  inFlightThroughDelivery(): number {
+    return this.toolServer.inFlightThroughDelivery();
+  }
+
   // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
   answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
     return this.panes.answer(requestId, result);

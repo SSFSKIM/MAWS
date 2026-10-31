@@ -6,7 +6,10 @@
 //
 //   node hosted-manager.mjs '<config JSON>'
 //
-// stdin, one JSON line each: `{id, call, input}` runs a command handler; `{id, status}` reads a row's status.
+// stdin, one JSON line each: `{id, call, input}` runs a command handler; `{id, status}` reads a row's status; P5 O16 M3b:
+// `{id, handover: graceMs}` arms the handover as the engine host's `host.handover` does (the table's freeze, the drain),
+// answers `detaching` or `deferred` with the calls in flight, and once the drain has settled runs the detached exit
+// order's shutdown (`detach`) and exits 0.
 // stdout, one JSON line each: `{id, value}` or `{id, error}` answers a line; `{emit, payload}` is every event emitted.
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +17,7 @@ import process from 'node:process';
 import { createInterface } from 'node:readline';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
+import { HandoverDrain } from '../../src/engine-host/handover';
 import { hostsDirOf } from '../../src/engine-host/holder/files';
 import { startSessionHost } from '../../src/engine-host/holder/transport';
 import { registerEngineIpc } from '../../src/engine-host/ipc';
@@ -47,8 +51,24 @@ const ipc = registerEngineIpc(on, emit, {
   captureEnv: async () => ({ PATH: '/usr/bin:/bin', ...config.env }),
 });
 
+let drain: HandoverDrain | null = null;
+const handover = async (graceMs: number): Promise<unknown> => {
+  if (!drain) {
+    drain = new HandoverDrain(ipc.table.freezeForHandover(), {
+      log: () => {},
+      settled: () => void ipc.shutdown(3_000, 'detach').then(() => setImmediate(() => process.exit(0))),
+    });
+  }
+  const settled = drain.settled || (await drain.settledWithin(graceMs));
+  return settled ? { state: 'detaching' } : { state: 'deferred', inFlight: drain.inFlight() };
+};
+
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
-  const asked = JSON.parse(line) as { id: number; call?: string; input?: unknown; status?: string };
+  const asked = JSON.parse(line) as { id: number; call?: string; input?: unknown; status?: string; handover?: number };
+  if (asked.handover !== undefined) {
+    void handover(asked.handover).then((value) => out({ id: asked.id, value }));
+    return;
+  }
   if (asked.status !== undefined) {
     out({ id: asked.id, value: ipc.table.get(asked.status as AppSessionId)?.status() ?? null });
     return;

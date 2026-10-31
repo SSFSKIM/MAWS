@@ -120,10 +120,10 @@ describe('x2 deadlines fit the bridge', () => {
   });
 
   // E11 (tracker row E10 "host.* commands lack deadline shapes"): the supervisor's four, registered by Supervision
-  it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
+  it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll, the ledger’s op and the handover are bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */, 'host.handover': 'bounded' /* P5 O16 M3b */ });
     // P5 O3-D M3: `host.attachment` sets the runtime's presence, registered beside it (attachment.ts)
     const attachmentCommands = ['host.attachment'];
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's

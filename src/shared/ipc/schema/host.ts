@@ -43,8 +43,9 @@ export const SupervisorStatusSchema = z.strictObject({
   // P5 O16 (additive; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D): the session hosts of the live
   // rows (`hosts`), those a successor re-attached to and those it could not (`adopted`, `failed`, M3), the gate's socket
   // (M5: null while it is not served) and a handover under way (M3); `mawsd`'s `daemon.status` counts from it. Optional
-  // for an older supervisor.
-  holder: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']) }).optional(),
+  // for an older supervisor. P5 O16 M3b: `adopting`, true until the start's adoptions have ended (a detached host's), so
+  // main counts the re-adopted sessions of a crash once they are known (the crash toast); optional for an older one.
+  holder: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']), adopting: z.boolean().optional() }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 
@@ -70,7 +71,8 @@ export const HostStatusSchema = z.strictObject({
   // while `incompatible`: the sessions the refusing supervisor said it runs (the banner's N); null otherwise
   waitingLiveSessions: z.number().int().nonnegative().nullable(),
   // the last unexpected exit this app run; code and signal only for a supervisor this run spawned
-  lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int() }).nullable(),
+  // P5 O16 M3b: `adopted`, the sessions its successor re-adopted (the crash toast's count), when a session host held any
+  lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int(), adopted: z.number().int().optional() }).nullable(),
   daemon: DaemonStatusSchema.nullable(), // P5 O2 M7
   daemonUnavailable: z.string().nullable(), // P5 O2 M7
   // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §2): why this run does not run the machine's services and
@@ -126,6 +128,11 @@ export const commands = {
   // the supervisor exits after answering; a utility host answers engine.shutdown's body and main forks a fresh one
   'host.stopAll': host(z.strictObject({ graceMs: z.number().int().nonnegative() }), z.strictObject({ stopped: z.number().int(), forced: z.number().int() })),
   'host.exitWhenIdle': host(z.strictObject({ armed: z.boolean() }), z.void()),
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9): the drain armed, then the exit that leaves
+  // every session host and its engine running for the successor; `detaching` once the drain has settled (within
+  // `graceMs`, default 10 s: how long the caller waits, never how long a call may run), else `deferred` with the calls
+  // still in flight, the exit following later. Main-only (`mawsd` sends it).
+  'host.handover': host(z.strictObject({ graceMs: z.number().int().nonnegative().max(600_000).optional() }), z.discriminatedUnion('state', [z.strictObject({ state: z.literal('detaching') }), z.strictObject({ state: z.literal('deferred'), inFlight: z.number().int().nonnegative() })])),
   // P5 O2 M2: the sessions the asking connection holds interest in (main's: open session tabs and on-screen sessions),
   // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
   'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),

@@ -237,13 +237,13 @@ if (mode === 'utility') {
       const { liveSessions, rows } = served().supervision.status(); // the status's live-row rule, in one place
       return { liveSessions, rows };
     },
-    shutdown: async (graceMs) => {
-      await served().ipc.shutdown(graceMs); // engine.shutdown's body
+    shutdown: async (graceMs, mode) => {
+      await served().ipc.shutdown(graceMs, mode); // engine.shutdown's body; P5 O16 M3b: detaching the hosted rows but at a stop-all
     },
     life: {
       started: (identity, exit) => served().supervision.started(identity, exit),
       clientChanged: (connected) => served().supervision.clientChanged(connected),
-      exitWhenIdle: () => served().supervision.armExitWhenIdle(true),
+      exitAsked: (when, from) => served().supervision.exitAsked(when, from), // P5 O16 M3b
       // Task 2.5: the sweep ended; the table records this supervisor's own ledger from now on, and the status the count
       orphansSwept: (killed, recordLive) => {
         const { ipc, supervision } = served();

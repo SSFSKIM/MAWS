@@ -37,7 +37,7 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 // What the stand-in engine host serves: every command it is sent, read as received (z.unknown), so a test sees the
 // relay's inputs exactly; one event, `probe.event`, whose payload is anything (keys no registry names included).
 const ANY = { input: z.unknown(), output: z.unknown(), owner: 'engine-host' as const };
-export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */] as const;
+export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'host.handover' /* P5 O16 M3b */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */] as const;
 const ENGINE_REGISTRY = {
   commands: Object.fromEntries(ENGINE_COMMANDS.map((name) => [name, ANY])),
   events: { 'probe.event': z.unknown() },

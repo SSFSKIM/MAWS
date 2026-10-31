@@ -40,6 +40,9 @@ export interface HostedManager {
   status(appSessionId: string): Promise<EngineSessionStatus | null>;
   events(appSessionId: string): SessionEvent[];
   kill(signal: NodeJS.Signals): Promise<void>; // resolves at the process's exit
+  handover(graceMs: number): Promise<{ state: 'detaching' } | { state: 'deferred'; inFlight: number }>; // P5 O16 M3b
+  readonly exited: Promise<void>; // P5 O16 M3b
+  emitted(name: string): unknown[]; // P5 O16 M3b: every payload of an event it emitted
 }
 
 export function startHostedManager(bundle: string, config: HostedManagerConfig): HostedManager {
@@ -74,5 +77,8 @@ export function startHostedManager(bundle: string, config: HostedManagerConfig):
       child.kill(signal);
       await exited;
     },
+    handover: (graceMs) => ask({ handover: graceMs }) as Promise<{ state: 'detaching' } | { state: 'deferred'; inFlight: number }>,
+    exited,
+    emitted: (name) => emitted.filter((e) => e.emit === name).map((e) => e.payload),
   };
 }

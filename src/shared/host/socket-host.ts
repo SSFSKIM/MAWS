@@ -61,9 +61,12 @@ export interface SocketHostOptions {
   badToken: 'refuse' | 'close'; // what a wrong token gets (socket-server.ts)
   capabilities: readonly string[]; // P5 O3-D: what the welcome lists, this host's own (PEER_CAPABILITIES)
   counts(): { liveSessions: number; rows: number }; // the welcome's and the refusal's
-  shutdown(): Promise<unknown>; // exit order step (2)
+  shutdown(reason: string): Promise<unknown>; // exit order step (2), told the exit's reason (P5 O16 M3b)
   clean?(owner: LockOwner): void; // step (3), a clean exit's, before the files go
   exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
+  // P5 O16 M3b: when given, every client's `exit` goes here instead (`now` → the exit order, `idle` → exitWhenIdle by
+  // default), with what the connection's hello listed and whether it was refused (the engine host's handover, D11, D33)
+  exitAsked?(when: 'now' | 'idle', from: { refused: boolean; capabilities: readonly string[] }): void;
   onClient?(connected: boolean, peer?: WirePeer): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it), or the client left
   listening?(host: SocketHost): void; // serving, synchronously after the listen and before anything can be asked
   log(line: string): void;
@@ -154,7 +157,8 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
     identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: opts.capabilities, wire: wireFingerprint(), pid, startedAt }), // P5 O1 M6: the major, minor and capabilities (OX1)
     counts: () => opts.counts(),
     token: () => token,
-    onExit: (when) => {
+    onExit: (when, from) => {
+      if (opts.exitAsked) return opts.exitAsked(when, { refused: from?.refused ?? false, capabilities: from?.capabilities ?? [] });
       if (when === 'now') void stop('exit');
       else opts.exitWhenIdle();
     },
@@ -167,7 +171,7 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
       log(`exiting (${reason})`);
       server.close(); // (1) no new client; the callback would wait for the client, which (4) closes
       try {
-        await Promise.race([opts.shutdown(), new Promise((resolve) => setTimeout(resolve, SHUTDOWN_BOUND_MS).unref())]); // (2)
+        await Promise.race([opts.shutdown(reason), new Promise((resolve) => setTimeout(resolve, SHUTDOWN_BOUND_MS).unref())]); // (2)
       } catch (error) {
         log(`the exit order's shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
       }

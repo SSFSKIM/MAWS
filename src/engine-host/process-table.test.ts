@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: RequestId
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
-import { parsePsTree, ProcessTable } from './process-table';
+import { HANDING_OVER, parsePsTree, ProcessTable } from './process-table';
 import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
@@ -165,6 +165,28 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
     expect(table.list().every((row) => row.lifecycle === 'exited')).toBe(true);
     expect(() => table.reserve('after' as AppSessionId, create)).toThrow(/shutting down/);
+  });
+
+  // P5 O16 M3b (D9): the handover's one synchronous step and the detached exit order's shutdown
+  it('freezes every live hosted row at the handover, refuses every launch after it, and the detach shutdown leaves hosted rows running', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const hosted = scriptedSession({ spec: { appSessionId: 'app-hosted' as AppSessionId }, transport: { holder: { pid: 4100, holderId: 'L1', fence: 1 } } });
+    const direct = scriptedSession({ spec: { appSessionId: 'app-direct' as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) });
+    for (const s of [hosted, direct]) table.reserve(s.session.status().appSessionId, () => s.session);
+    await hosted.session.start();
+    await direct.session.start();
+    expect(table.freezeForHandover()).toEqual([hosted.session]); // the direct row is the exit order's ladder's
+    const create = vi.fn(() => scriptedSession().session);
+    expect(() => table.reserve('late' as AppSessionId, create)).toThrow(HANDING_OVER);
+    expect(() => table.reserve('adopted' as AppSessionId, create, { adoption: true })).toThrow(HANDING_OVER);
+    expect(create).not.toHaveBeenCalled();
+    const shutdown = table.shutdown({ graceMs: 5_000, mode: 'detach' });
+    await flush();
+    direct.transport.exit(0); // exits on end_session
+    expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
+    expect(hosted.transport.calls).toEqual(['detach:ack']);
+    expect(hosted.session.lifecycle).toBe('ready');
+    expect(direct.session.lifecycle).toBe('exited');
   });
 
   // P5 O16 M3 (D10): a row held for an adoption from before the first client is answered: live, holding the host as a

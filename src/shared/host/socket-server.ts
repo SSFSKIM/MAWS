@@ -94,7 +94,10 @@ export interface SocketServerOptions {
   identity(): SupervisorIdentity;
   counts(): { liveSessions: number; rows: number };
   token(): string;
-  onExit(when: 'now' | 'idle', from?: { refused: boolean; own?: boolean }): void; // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind; P5 O3-D M5: `own`, after an admission's own refusal)
+  // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind; P5 O3-D M5: `own`, after an
+  // admission's own refusal; P5 O16 M3b: `capabilities`, what the connection's hello listed, read loosely from a hello it
+  // refused, so the engine host tells a client that adopts through its successor apart, D11)
+  onExit(when: 'now' | 'idle', from?: { refused: boolean; own?: boolean; capabilities?: readonly string[] }): void;
   onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
   admitHello?(peer: WirePeer, appPid: number): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid
   log(line: string): void;
@@ -130,6 +133,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   function accept(socket: Socket): void {
     let phase: 'hello' | 'refused' | 'done' = 'hello';
     let refusedOwn = false; // P5 O3-D M5: the admission refused it on its own account
+    let helloCapabilities: readonly string[] = []; // P5 O16 M3b: what the hello listed, for its one exit when refused
     let welcome: (() => void) | null = null;
     const deadlineMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     // the hello's deadline, then (E11) a refused connection's for its one exit
@@ -182,7 +186,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         phase = 'done';
         socket.off('data', onData);
         log(`exit ${exit.value.when} asked by a refused connection`);
-        options.onExit(exit.value.when, { refused: true, own: refusedOwn });
+        options.onExit(exit.value.when, { refused: true, own: refusedOwn, capabilities: helloCapabilities });
         return 'stop';
       }
       return onHello(data);
@@ -215,6 +219,8 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       clearTimeout(deadline);
       const preamble = HelloPreambleSchema.safeParse(data);
       if (!preamble.success) return drop('a hello without a protocol number');
+      // P5 O16 M3b: read loosely, whatever the major (the preamble is a loose object): only its string names
+      if (Array.isArray(record.capabilities)) helloCapabilities = record.capabilities.filter((name): name is string => typeof name === 'string');
       const identity = options.identity();
       const refused = (reason: 'protocol' | 'wire', why: string) => {
         log(why);
@@ -356,7 +362,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
           if (exit.ok) {
             logDropped('socket exit', exit.dropped);
             log(`exit ${exit.value.when} asked by the client`);
-            options.onExit(exit.value.when, { refused: false });
+            options.onExit(exit.value.when, { refused: false, capabilities: client.peer.capabilities });
             return;
           }
           if (readTolerant(HostRequestSchema, event.data).ok || readTolerant(HostReadySchema, event.data).ok || readTolerant(HostClientGoneSchema, event.data).ok) {

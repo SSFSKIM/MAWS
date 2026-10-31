@@ -58,8 +58,8 @@ export function scriptedTransport(
   const t: ScriptedTransport = {
     pid: opts.pid ?? 4242,
     // P5 O16 M2; `detach`, M3a fix wave 1: the stream ends, the process does not
-    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq), detach: () => {
-      t.calls.push('detach');
+    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq), detach: (detachOpts?: { ack?: boolean }) => {
+      t.calls.push(detachOpts?.ack ? 'detach:ack' : 'detach'); // P5 O16 M3b: the handover's acknowledges first
       frames.end();
       stderr.end();
     } }),

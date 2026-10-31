@@ -48,6 +48,7 @@ export class OutboundWriter {
   private readonly idleHandlers: (() => void)[] = [];
   private readonly failureHandlers: ((error: Error) => void)[] = [];
   private idleWaiters: (() => void)[] = [];
+  private only: { allow: (frame: StdinFrame) => boolean; why: string } | null = null; // P5 O16 M3b
 
   constructor(
     private readonly transport: EngineTransport,
@@ -70,6 +71,12 @@ export class OutboundWriter {
     this.failureHandlers.push(handler);
   }
 
+  // P5 O16 M3b (the handover's freeze): from here a frame `allow` refuses is never written: its write rejects with
+  // TransportClosed at once, with nothing journaled, and what is in flight goes on.
+  restrict(allow: (frame: StdinFrame) => boolean, why: string): void {
+    this.only = { allow, why };
+  }
+
   whenIdle(): Promise<void> {
     if (!this.busy) return Promise.resolve();
     return new Promise((resolve) => this.idleWaiters.push(resolve));
@@ -88,6 +95,7 @@ export class OutboundWriter {
   // held inbound frame is released; on failure journals `write_failed` and rejects with the transport's error. If the
   // journal itself fails while live, the write rejects with that error after a `transport_error { journal_failed }`.
   write(frame: StdinFrame, opts: WriteOptions = {}): Promise<void> {
+    if (this.only && !this.only.allow(frame)) return Promise.reject(new TransportClosed(this.only.why)); // P5 O16 M3b
     return new Promise<void>((resolve, reject) => {
       const controller = new AbortController();
       const signal = opts.signal ? AbortSignal.any([controller.signal, opts.signal]) : controller.signal;

@@ -267,7 +267,7 @@ class HostedTransport {
         return { pid: o.hostPid, holderId: o.holderId, fence: fence() };
       },
       journaled: (seq) => this.journaled(seq),
-      detach: () => this.detach(),
+      detach: (opts) => this.detach(opts),
     };
     this.attachListeners(connection);
     if (adopt) {
@@ -503,17 +503,23 @@ class HostedTransport {
   // P5 O16 M3a fix wave 1: an adoption given up: the connection closed without `release` (the host keeps its engine and
   // its ring for the next writer), nothing acknowledged further, no reconnect, the streams ended. The process has not
   // exited, so `exited` stays pending.
-  private detach(): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.released = true; // nothing more is owed to this host by this transport: lost() reconnects nothing
+  // P5 O16 M3b (D9): the handover's detach (`ack`): the frontier's last ack written first and the connection ended
+  // gracefully, so the host has it before the close and the successor replays only what this manager never journaled;
+  // also once the engine has exited (the streams are over, nothing is released: the successor reads the exit).
+  private detach(opts: { ack?: boolean } = {}): void {
+    if (this.released) return; // released, or detached already: nothing more is owed to this host
+    this.released = true; // lost() reconnects nothing from here
+    if (opts.ack) this.frontier.flush();
     this.frontier.dispose();
     const connection = this.connection;
     this.connection = null;
-    connection?.close();
+    if (opts.ack) connection?.end();
+    else connection?.close();
+    if (this.ended) return;
+    this.ended = true;
     this.frames.end();
     this.stderr.end();
-    this.answered(() => true, new TransportClosed('the adoption was given up'));
+    this.answered(() => true, new TransportClosed(opts.ack ? 'the engine host handed the session over' : 'the adoption was given up'));
   }
 
   // ---- the connection's loss -----------------------------------------------------------------------------------------

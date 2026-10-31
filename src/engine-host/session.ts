@@ -295,6 +295,12 @@ export class EngineSession {
   // null when open); the re-initialize's renewing wait; the adoption's outcome
   private handshakeHeld: ControlRequestFrame[] | null = null;
   private reinitializeWait: ReturnType<typeof setTimeout> | null = null;
+  // P5 O16 M3b (D9, D34): the handover's freeze (nothing more consumed from the transport), the drain's waiters, the
+  // engine's exit while frozen (the successor reads it), and the detach under way
+  private frozen = false;
+  private readonly drainWaiters: (() => void)[] = [];
+  private exitedWhileFrozen = false;
+  private detaching: Promise<void> | null = null;
   readonly adoption: Promise<void>;
   private settleAdoption: (error: AdoptionFailed | null) => void = () => {};
   // P5 O16 M3 end
@@ -589,6 +595,11 @@ export class EngineSession {
   stop(reason: 'budget', opts: { graceMs?: number; release: BudgetRelease }): Promise<StopResult>;
   stop(reason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
+    // P5 O16 M3b: a frozen row is the successor's: nothing here reads its exit, so no ladder runs (the stop goes to it)
+    if (this.frozen) {
+      this.log(`stop (${reason}) asked during the handover: left to the successor`);
+      return Promise.resolve(this.stopResult());
+    }
     if (reason === 'budget' || reason === 'idle') {
       if (this.stopReason === null) {
         this.stopReason = reason;
@@ -1107,6 +1118,91 @@ export class EngineSession {
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
+  // P5 O16 M3b: the handover (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3 and Interfaces §D; D9, D34, D41)
+
+  // A process under a session host, which a handover detaches; the direct and replay transports have none.
+  get hosted(): boolean {
+    return this.transport?.holder !== undefined;
+  }
+
+  // The `maws` calls the drain waits for: every tool's but `ask`, each until its answer's write settled.
+  inFlightThroughDelivery(): number {
+    return this.maws.inFlightThroughDelivery();
+  }
+
+  // The freeze, one synchronous step: nothing more is consumed from the transport (no record read from here is journaled,
+  // acknowledged or dispatched; the host keeps it in its ring and the successor replays it live), what was read and not
+  // yet processed is dropped, the first-output and re-initialize clocks stop, and the writer writes nothing but answers
+  // (a call's result, a hook's or a human's answer already on its way), so the engine's requests in flight still settle.
+  freeze(): void {
+    if (this.frozen || this.processState === 'exited') return;
+    this.frozen = true;
+    this.held.length = 0;
+    this.heard();
+    if (this.reinitializeWait !== null) clearTimeout(this.reinitializeWait);
+    this.reinitializeWait = null;
+    this.writer?.restrict((frame) => frame.type === 'control_response', 'the engine host is handing the session over');
+    void this.transport?.exited.then(() => {
+      this.exitedWhileFrozen = true;
+      this.checkDrained();
+    });
+    this.log(`frozen for the handover, ${this.inFlightThroughDelivery()} calls in flight`);
+  }
+
+  // Resolves at the first moment the frozen row holds no call in flight (checked at each retirement), or once its engine
+  // has exited (nothing more can be answered).
+  drained(): Promise<void> {
+    if (this.isDrained()) return Promise.resolve();
+    return new Promise((resolve) => this.drainWaiters.push(resolve));
+  }
+
+  private isDrained(): boolean {
+    return this.exitedWhileFrozen || this.inFlightThroughDelivery() === 0;
+  }
+
+  private checkDrained(): void {
+    if (this.frozen && this.isDrained()) for (const resolve of this.drainWaiters.splice(0)) resolve();
+  }
+
+  // The row let go for the successor: the writer's in-flight writes awaited (bounded by EOF_WRITE_WAIT_MS), the
+  // `host_detach` row, the journal and the map closed, then the final ack and the connection ended without `release`, so
+  // the session host and its engine run on. A row frozen before its adoption connected writes no row (the journal is
+  // still the old manager's). The process has not exited: no exit row, no `exited`.
+  detach(reason: 'handover' | 'exit'): Promise<void> {
+    this.freeze();
+    if (!this.frozen) return Promise.resolve(); // exited already
+    this.detaching ??= this.detachNow(reason);
+    return this.detaching;
+  }
+
+  private async detachNow(reason: 'handover' | 'exit'): Promise<void> {
+    const writer = this.writer;
+    if (writer?.busy) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settled = await Promise.race([writer.whenIdle().then(() => true), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), EOF_WRITE_WAIT_MS)))]);
+      clearTimeout(timer);
+      if (!settled) {
+        this.log(`a write did not settle within ${EOF_WRITE_WAIT_MS / 1000} s of the detach; the successor reads what the host applied`);
+        writer.failPending('the engine host detached before the write settled');
+      }
+    }
+    const holder = this.transport?.holder;
+    if (writer !== null) {
+      try {
+        this.record('meta', { event: 'host_detach', reason, holderId: holder?.holderId ?? null, fence: holder?.fence ?? null });
+      } catch (error) {
+        this.log(`host_detach not journaled: ${messageOf(error)}`);
+      }
+    }
+    this.journalClosed = true;
+    this.hostMap?.close();
+    this.tracker.dispose();
+    this.transport?.detach?.({ ack: true });
+    await this.journal.close().catch((error: unknown) => this.log(`journal not closed: ${messageOf(error)}`));
+    this.log(`detached (${reason}): its session host and engine run on for the successor`);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------------
   // P5 O16 M3: adoption (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3 and Interfaces §D; D24, D26, D32, D49)
 
   // The restore fold, the queue's adoption, the restored attention published once, then the reconnect row and the read
@@ -1129,6 +1225,7 @@ export class EngineSession {
       this.abandonAdoption(`the queue could not be restored: ${messageOf(error)}`);
       return;
     }
+    if (this.frozen) return; // P5 O16 M3b: handed over before it connected; the next successor adopts it
     this.sideQuestions.adopted(new Date().toISOString());
     this.emit('brokerItems', this.brokerItems()); // the fold told nothing: the restored list, once
     this.publishCatalog();
@@ -1430,6 +1527,7 @@ export class EngineSession {
     let processExited = false;
     void transport.exited.then(() => { processExited = true; });
     for await (const item of transport.frames) {
+      if (this.frozen) continue; // P5 O16 M3b: left in the host's ring for the successor
       this.heard();
       if (this.writer?.busy || this.held.length > 0) this.held.push(item);
       else this.processItem(item);
@@ -1438,6 +1536,7 @@ export class EngineSession {
     // before releasing what they hold. Once the process has exited, or after EOF_WRITE_WAIT_MS with the process still
     // alive (a wedged child), settle the rest as write_failed, so no response row precedes its request row, no out
     // row can follow the exit row, and a wedged child is ended through the ladder instead of holding the session open.
+    if (this.frozen) return; // P5 O16 M3b: the stream ended at the detach; the engine runs on for the successor
     const writer = this.writer;
     if (writer?.busy) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1463,6 +1562,7 @@ export class EngineSession {
   }
 
   private drainHeld(force = false): void {
+    if (this.frozen) return; // P5 O16 M3b: dropped at the freeze
     while (this.held.length > 0 && (force || !this.writer?.busy)) this.processItem(this.held.shift()!);
   }
 
@@ -1518,6 +1618,7 @@ export class EngineSession {
 
   private async stderrLoop(transport: EngineTransport): Promise<void> {
     for await (const { text: line, hseq } of transport.stderr) {
+      if (this.frozen) continue; // P5 O16 M3b: left in the host's ring for the successor
       this.heard();
       this.stderrTail.push(line);
       if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift();
@@ -1834,6 +1935,7 @@ export class EngineSession {
 
   // The process's one ladder (session-ladder.ts); with no process yet it answers the stop result at once.
   private terminate(endSessionFirst: boolean, graceMs?: number): Promise<StopResult> {
+    if (this.frozen) return Promise.resolve(this.stopResult()); // P5 O16 M3b: the successor's process now
     return this.ladder.terminate(this.transport, endSessionFirst, graceMs);
   }
 
@@ -1846,6 +1948,7 @@ export class EngineSession {
   // process `exited` and the reservation free.
   private handleExit(exit: { code: number | null; signal: NodeJS.Signals | null }): void {
     if (this.processState === 'exited') return;
+    if (this.frozen) return; // P5 O16 M3b: an exit after the freeze is the successor's to read and journal
     this.heard(); // C3 corrective: the bound ends with the process
     // P5 O16 M3: an adopted process answered its first initialize long ago; an exit before the re-initialize is no init failure
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null && !this.opts.adopted) this.writeInitFailed('the process exited before answering initialize', 'exited');
@@ -1921,6 +2024,7 @@ export class EngineSession {
 
   // Emits `status` when anything but the event counter changed.
   private touch(): void {
+    this.checkDrained(); // P5 O16 M3b: a call's retirement reaches the drain through here
     if (this.folding) return; // P5 O16 M3: the fold tells nothing; the adoption's first status follows it
     const status = this.status();
     const signature = JSON.stringify({ ...status, lastEventSeq: 0 });

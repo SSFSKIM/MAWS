@@ -18,6 +18,11 @@
 // P5 O3-D M3: a client that declared `host.attachment` (`mawsd`, whose connection outlives every app) drops it at its
 // {attached: true} instead (attachment.ts), since its welcome is no owner coming back.
 //
+// P5 O16 M3b (D9, D11, D33): the exit order's shutdown detaches every hosted row (its session host and engine left
+// running for a successor to adopt) for every reason but a stop-all, SIGTERM included; a client's `exit` goes to
+// Supervision with what its hello listed and whether its link was refused (`life.exitAsked`), which tells a handover
+// request from E10's idle exit.
+//
 // P5 O16 M3 (D10): before the sweep, in the same synchronous step, the session hosts' roster is read and a row held for
 // each live host the start adopts (`adopt`), so the first welcome counts them; the sweep skips every row a live host
 // holds and stops the live children of dead ones.
@@ -50,7 +55,9 @@ export interface DetachedOptions {
   log: (line: string) => void;
   // How the entry reaches the engine's process table (the welcome's counts, the exit order's ladder).
   counts(): { liveSessions: number; rows: number };
-  shutdown(graceMs: number): Promise<unknown>; // engine.shutdown's body: every live row's ladder and the plugin runner
+  // engine.shutdown's body: every live row's ladder and the plugin runner; P5 O16 M3b: `detach` detaches the hosted rows
+  // instead of stopping them
+  shutdown(graceMs: number, mode: 'stop' | 'detach'): Promise<unknown>;
   life: SupervisorLife;
   // P5 O16 M3 (D10): called in `listening`, synchronously before the sweep and before any client is answered: reads the
   // session hosts' roster, holds a row for each live host it adopts and starts the adoptions; answers what the sweep must
@@ -62,7 +69,8 @@ export interface DetachedOptions {
 export interface SupervisorLife {
   started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void; // serving; `exit` runs the exit order
   clientChanged(connected: boolean): void; // a client was welcomed, or the client left
-  exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
+  // a client's `exit {when}` (P5 O16 M3b: with its hello's capabilities and whether its link was refused)
+  exitAsked(when: 'now' | 'idle', from: { refused: boolean; capabilities: readonly string[] }): void;
   // the start-up sweep ended: how many orphans it stopped, and the writer of this supervisor's own ledger, which the
   // engine host's table takes from here on (writing it before the sweep read the predecessor's would lose its rows)
   orphansSwept(killed: number, recordLive: (rows: readonly LiveRow[]) => void): void;
@@ -102,9 +110,12 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
       capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
-      shutdown: () => opts.shutdown(EXIT_GRACE_MS), // (2) every live row stopped (grace 3 s) and the plugin runner with it
+      // (2) every live row stopped (grace 3 s) and the plugin runner with it; P5 O16 M3b: a hosted row detached instead,
+      // unless all were asked to stop
+      shutdown: (reason) => opts.shutdown(EXIT_GRACE_MS, reason === 'stopAll' ? 'stop' : 'detach'),
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
-      exitWhenIdle: () => opts.life.exitWhenIdle(),
+      exitWhenIdle: () => opts.life.exitAsked('idle', { refused: false, capabilities: [] }),
+      exitAsked: (when, from) => opts.life.exitAsked(when, from), // P5 O16 M3b
       onClient: (connected, peer) => {
         // the owner is back: the next launch captures the shell again (a declaring client says so by host.attachment)
         if (connected && !peer?.capabilities.includes(ATTACHMENT_CAPABILITY)) invalidateShellEnvironment();

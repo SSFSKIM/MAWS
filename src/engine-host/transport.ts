@@ -54,8 +54,9 @@ export interface EngineTransport {
   readonly holder?: { pid: number; holderId: string; fence: number };
   journaled?(seq: number): void;
   // P5 O16 M3a fix wave 1: an adoption given up before its first write lets the session host go without releasing it
-  // or touching its engine, so the next start adopts both again; the stream ends here
-  detach?(): void;
+  // or touching its engine, so the next start adopts both again; the stream ends here. P5 O16 M3b: the handover's
+  // (`ack`) acknowledges the frontier first and ends the connection gracefully
+  detach?(opts?: { ack?: boolean }): void;
 }
 
 export class TransportClosed extends Error {
