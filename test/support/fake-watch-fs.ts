@@ -20,8 +20,9 @@ export function errno(code: string, path: string): NodeJS.ErrnoException {
 }
 
 export class FakeWatchFs {
-  private readonly nodes = new Map<string, { kind: Kind; ino: number }>();
+  private readonly nodes = new Map<string, { kind: Kind; ino: number; born: number }>();
   private nextIno = 1;
+  private nextBorn = 1;
   readonly watches: FakeDirWatch[] = [];
   watchCalls = 0;
   listings = 0;
@@ -32,7 +33,7 @@ export class FakeWatchFs {
   private readonly gates = new Map<string, { promise: Promise<void>; open: () => void }>();
 
   constructor(readonly root = '/r') {
-    this.nodes.set(root, { kind: 'dir', ino: this.nextIno++ });
+    this.nodes.set(root, { kind: 'dir', ino: this.nextIno++, born: this.nextBorn++ });
   }
 
   abs(rel: string): string {
@@ -44,20 +45,27 @@ export class FakeWatchFs {
     const parts = rel.split('/');
     for (let i = 1; i <= parts.length; i++) {
       const path = this.abs(parts.slice(0, i).join('/'));
-      if (!this.nodes.has(path)) this.nodes.set(path, { kind: 'dir', ino: this.nextIno++ });
+      if (!this.nodes.has(path)) this.nodes.set(path, { kind: 'dir', ino: this.nextIno++, born: this.nextBorn++ });
     }
   }
 
   write(rel: string, kind: 'file' | 'link' = 'file'): void {
     const slash = rel.lastIndexOf('/');
     if (slash > 0) this.mkdir(rel.slice(0, slash));
-    this.nodes.set(this.abs(rel), { kind, ino: this.nextIno++ });
+    this.nodes.set(this.abs(rel), { kind, ino: this.nextIno++, born: this.nextBorn++ });
   }
 
   // The entry and everything beneath it.
   rm(rel: string): void {
     const path = this.abs(rel);
     for (const key of [...this.nodes.keys()]) if (key === path || key.startsWith(`${path}/`)) this.nodes.delete(key);
+  }
+
+  // The directory `rel` removed with all it holds and made again under the same inode number, as ext4 does at once.
+  remakeReusingInode(rel: string): void {
+    const ino = this.nodes.get(this.abs(rel))!.ino;
+    this.rm(rel);
+    this.nodes.set(this.abs(rel), { kind: 'dir', ino, born: this.nextBorn++ });
   }
 
   // The listing of `rel` waits until `release` is called.
@@ -111,13 +119,13 @@ export class FakeWatchFs {
     lstatSync: (path: string) => {
       this.lstatSyncs.push(path);
       const node = this.nodes.get(path);
-      return node === undefined ? undefined : { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link', dev: 1, ino: node.ino };
+      return node === undefined ? undefined : { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link', dev: 1, ino: node.ino, birthtimeMs: node.born };
     },
     lstat: async (path: string) => {
       this.lstats.push(path);
       const node = this.nodes.get(path);
       if (node === undefined) throw errno('ENOENT', path);
-      return { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link', dev: 1, ino: node.ino };
+      return { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link', dev: 1, ino: node.ino, birthtimeMs: node.born };
     },
   };
 

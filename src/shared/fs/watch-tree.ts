@@ -77,10 +77,11 @@ class WatchTree implements WatchHandle {
   private readonly reconcileMs: number;
   private readonly burst: { events: number; windowMs: number; settleMs: number };
   private readonly concurrency: number;
-  // Root-relative ('' the root) → its watch and the identity (`dev`, `ino`) of the directory it watches, read as the watch
-  // opens (`ino` null: the directory was not there to read, so not known). Read synchronously and kept as two numbers,
-  // which leaves no promise, stat or string behind (a `dev:ino` string per directory was +4 MiB on a 5,900-directory
-  // walk, the numbers nothing measurable); a read on the next pass instead would adopt whatever stood there then (the task review of
+  // Root-relative ('' the root) → its watch and the identity (`dev`, `ino`, birth time) of the directory it watches, read
+  // as the watch opens (`ino` null: the directory was not there to read, so not known). The birth time, since ext4 gives
+  // a directory made again at once the inode number of the one removed (the VM, D21's run). Read synchronously and kept
+  // as numbers, which leaves no promise, stat or string behind (a `dev:ino` string per directory was +4 MiB on a
+  // 5,900-directory walk, the numbers nothing measurable); a read on the next pass instead would adopt whatever stood there then (the task review of
   // the fix round: a directory replaced while its events were lost kept a dead watch).
   private readonly watches = new Map<string, Watched>();
   private readonly held = new Set<string>(); // directories admitted or awaiting the predicate, not yet watched
@@ -138,10 +139,10 @@ class WatchTree implements WatchHandle {
     // Read before the watch opens: a directory replaced between the two reads as replaced at the next look, never the
     // other way round.
     const stat = this.fs.lstatSync(this.abs(rel), { throwIfNoEntry: false });
-    const [dev, ino] = stat ? [Number(stat.dev), Number(stat.ino)] : [0, null];
+    const [dev, ino, born] = stat ? [Number(stat.dev), Number(stat.ino), Number(stat.birthtimeMs)] : [0, null, 0];
     const watch = this.fs.watch(this.abs(rel), { persistent: true }, (event, name) => this.onEvent(rel, event, name));
     watch.on('error', (error: NodeJS.ErrnoException) => this.onWatchError(rel, watch, error));
-    this.watches.set(rel, { watch, dev, ino, pass: this.passes });
+    this.watches.set(rel, { watch, dev, ino, born, pass: this.passes });
   }
 
   // Whether the directory is watched now. A directory that vanished since its listing (ENOENT, ENOTDIR) or that this
@@ -441,10 +442,11 @@ interface Watched {
   watch: DirWatch;
   dev: number;
   ino: number | null;
+  born: number; // birth time, ms (0 where the filesystem keeps none: dev and ino alone tell then)
   pass: number; // the whole-tree pass it was opened in
 }
 
 // Whether the directory a stat describes is the one the watch was opened on (an identity not read: not known to be).
-function sameDirectory(watched: Watched, stat: { dev: number | bigint; ino: number | bigint }): boolean {
-  return watched.ino !== null && watched.ino === Number(stat.ino) && watched.dev === Number(stat.dev);
+function sameDirectory(watched: Watched, stat: { dev: number | bigint; ino: number | bigint; birthtimeMs: number | bigint }): boolean {
+  return watched.ino !== null && watched.ino === Number(stat.ino) && watched.dev === Number(stat.dev) && watched.born === Number(stat.birthtimeMs);
 }

@@ -262,6 +262,26 @@ describe('the watch tree follows directories created and removed after it opened
     handle.close();
   });
 
+  // ext4 gives a directory made again at once the inode number of the one removed (seen on the VM): its birth time
+  // tells them apart, where dev and ino cannot.
+  it('watches afresh a directory made again under the inode number of the one it replaced', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('dist');
+    const { handle, heard } = open(fake);
+    await drain();
+    const first = fake.watches.find((watch) => watch.path === fake.abs('dist'))!;
+    heard.length = 0;
+    fake.remakeReusingInode('dist');
+    fake.write('dist/new.js');
+    fake.fire('', 'rename', 'dist');
+    fake.fire('', 'rename', 'dist');
+    await drain();
+    expect(first.closed).toBe(true);
+    expect(fake.watched()).toEqual(['', 'dist']);
+    expect(heard).toContainEqual(['rename', 'dist/new.js']);
+    handle.close();
+  });
+
   it('reports a file event once it knows the name is no directory', async () => {
     const fake = new FakeWatchFs();
     const { handle, heard } = open(fake);
