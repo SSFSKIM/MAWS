@@ -37,7 +37,7 @@ describe('EngineReads', () => {
     const reads = new EngineReads(h.call);
     const view = await reads.view('/w');
     expect(view).toMatchObject({ cwd: '/w', installed: [], available: [DIRECTORY_ENTRY], servers: ['linear'] });
-    expect(view!.manifests.get('m')).toEqual({ state: 'read', owner: 'O', plugins: [] });
+    expect(view!.manifests).toEqual([['m', { state: 'read', owner: 'O', plugins: [] }]]); // P5 O4 M3: the wire's entries (D25)
     expect(h.asked.map((a) => a.name).sort()).toEqual([...READS, 'plugins.env'].sort()); // the configuration's place, once
     await reads.view('/w');
     expect(h.asked).toHaveLength(8);
@@ -80,7 +80,7 @@ describe('EngineReads', () => {
     const h = host({ ...ANSWERS, 'plugins.list': { plugins: [INSTALLED] }, 'plugins.available': { plugins: [] }, 'plugins.directoryProvenance': { pluginsDir: '/config/plugins', entries: [{ name: 'fd', repositoryKey: 'github.com/a/b#p' }] } });
     const view = await new EngineReads(h.call).view('/w');
     expect(h.asked.find((a) => a.name === 'plugins.directoryProvenance')?.input).toEqual({ names: ['fd'] });
-    expect(view!.directoryInstalled).toEqual(new Map([['fd', 'github.com/a/b#p']]));
+    expect(view!.directoryInstalled).toEqual([['fd', 'github.com/a/b#p']]);
   });
 
   it('keeps the last 16 cwds', async () => {

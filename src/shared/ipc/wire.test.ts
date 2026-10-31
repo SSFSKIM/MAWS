@@ -191,8 +191,9 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     }
     expect(ownerOf('host.attachment')).toBe('engine-host');
     expect(manifest.entries).toHaveProperty(['commands.host.attachment']);
-    // the client's commands stay main's, out of the manifest (the checkouts' moved at O3-E, below)
-    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'settings.get', 'library.content']) {
+    // the client's commands stay main's, out of the manifest (the checkouts' moved at O3-E, below; P5 O4 M3: the
+    // library's reads of a stored file moved, its export formats and Save as stay)
+    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'settings.get', 'library.exportFormats', 'library.saveAs', 'catalog.home']) {
       expect(ownerOf(name), name).toBe('main');
       expect(manifest.entries, name).not.toHaveProperty([`commands.${name}`]);
     }
@@ -272,6 +273,26 @@ describe('the checkouts on the wire (P5 O3-E M2)', () => {
       expect(REGISTRY.machineEvents, name).toContain(name);
       expect(manifest.entries, name).toHaveProperty([`events.${name}`]);
     }
+  });
+});
+
+// P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D16, D19): the library's reads of a stored
+// file retagged `machine`, the catalog's machine half's two commands and its event, all additive under M2's minor
+describe('the library’s reads and the catalog’s machine half on the wire (P5 O4 M3)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+  const ownerOf = (name: string) => REGISTRY.commands[name as keyof typeof REGISTRY.commands]?.owner;
+
+  it('owns by machine the four retagged reads and the two new catalog commands, each in the manifest and bridged', () => {
+    for (const name of ['library.content', 'library.read', 'library.openExternally', 'library.reveal', 'catalog.engine', 'catalog.engineRefresh']) {
+      expect(ownerOf(name), name).toBe('machine');
+      expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+      expect(REGISTRY.mainOnly.has(name as never), name).toBe(false);
+    }
+  });
+
+  it('lists catalog.engineChanged among the machine host’s events', () => {
+    expect(REGISTRY.machineEvents).toContain('catalog.engineChanged');
+    expect(manifest.entries).toHaveProperty(['events.catalog.engineChanged']);
   });
 });
 

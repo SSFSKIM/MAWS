@@ -1,6 +1,7 @@
 // The watch on the engine's plugin state (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Decision Log 8):
 // a plugin or marketplace changed outside MAWS (an agent's `claude plugin install` in a terminal, an edited settings
-// file) must not read "not installed" until Refresh. Main watches, read-only, the files that state lives in for the
+// file) must not read "not installed" until Refresh. The machine watches (P5 O4 M3: the catalog's machine half,
+// ./machine.ts, composed with the spine), read-only, the files that state lives in for the
 // configuration and each cwd the catalog holds; a change, debounced, names the views to forget: `all` for the
 // configuration's files, the cwd for a project's settings.
 // - The configuration: `<config>/settings.json`; the plugins folder's `installed_plugins.json`,
@@ -11,11 +12,11 @@
 // - The MCP configuration the connectors' installed state and postures read (scalpel-3#1): the engine's global file
 //   (`.claude.json`: user and local servers), MAWS's own settings (its app servers), and `.mcp.json` in the project and
 //   every ancestor below the file system root, as the engine's inventory reads them (customization/inventory.ts). A
-//   change there is `mcp`: main asks the host for the configured servers again and forgets only the views whose servers
+//   change there is `mcp`: the machine asks the host for the configured servers again and forgets only the views whose servers
 //   moved, so the engine's frequent rewrites of `.claude.json` read nothing again.
 // Folders are watched only where the folder is the state's own (the configuration directory, the plugins folder, a
 // project's `.claude`), one non-recursive `fs.watch` each: on macOS a folder watch is an FSEvents stream over the
-// folder's whole tree, so the home folder, a project's root and its ancestors are never watched (they would wake main for
+// folder's whole tree, so the home folder, a project's root and its ancestors are never watched (they would wake the process for
 // every build and checkout beneath them). Single files elsewhere are polled by their stat (`fs.watchFile`, every
 // POLL_MS), which also survives a rename-on-write. MAWS has no watcher of these files to share (files/watch.ts serves a
 // window's session paths, git/watcher.ts a repository). C4's timing gathers changes: a 250 ms trailing debounce capped

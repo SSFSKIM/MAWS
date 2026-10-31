@@ -16,7 +16,7 @@ import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
-import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
+import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
@@ -49,6 +49,7 @@ const noClientPort = {
 const SPINE_REFUSED_COMMANDS = [
   ...CHECKOUTS_COMMANDS,
   ...CONNECTORS_COMMANDS, // P5 O4 M2: the connectors and delivery hold no spine file either
+  ...LIBRARY_CATALOG_COMMANDS, // P5 O4 M3: nor the library's reads and the catalog's machine half
   'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
@@ -501,6 +502,39 @@ describe('the spine and the checkouts composed under plain Node', () => {
     lock.release();
   });
 
+  // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 6 and 7): the library's reads of a stored
+  // file, `library.read` reaching the files service in process (the bus runs no files.readResolved), and the catalog's
+  // machine half, composed by the root alone
+  it('composes the library’s reads of a stored file and the catalog’s machine half', async () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const stored = join(profile, 'artifacts', ART, 'content', '2', 'ledger.csv'); // where the engine host's store keeps it
+    mkdirSync(join(stored, '..'), { recursive: true });
+    writeFileSync(stored, 'item,cost\n');
+    const host = new FakeSpineHost();
+    host.answer('artifacts.content', ({ artifactId }) => ({ revision: 2, kind: 'file', name: 'ledger.csv', size: 10, sha256: 'x'.repeat(64), path: artifactId === ART ? stored : join(profile, 'gone') }));
+    const bus = fakeBus();
+    const register = bus.register;
+    const ran: string[] = []; // each command the bus ran
+    bus.register = (name, handler) => register(name, ((input: never, context: never) => (ran.push(name), handler(input, context))) as typeof handler);
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+
+    expect(await bus.invoke('library.content', { artifactId: ART })).toEqual({ ok: true, value: { revision: 2, kind: 'file', name: 'ledger.csv', path: stored } });
+    expect(await bus.invoke('library.read', { artifactId: ART, offset: 0 })).toMatchObject({ ok: true, value: { content: 'item,cost\n' } });
+    expect(ran).toEqual(['library.content', 'library.read']); // no files.readResolved on the bus
+    // opened and revealed through the client port, which has no client here
+    expect(await bus.invoke('library.openExternally', { artifactId: ART })).toEqual({ ok: true, value: { opened: false, message: 'no client' } });
+    expect(await bus.invoke('library.reveal', { artifactId: ART })).toEqual({ ok: true, value: { revealed: false, message: 'no client' } });
+
+    const engine = await bus.invoke('catalog.engine', { cwd: dir.path });
+    expect(engine).toMatchObject({ ok: true, value: { generation: 0, serial: expect.any(Number), view: { cwd: dir.path, installed: null, manifests: [] } } }); // the fake host lists no plugin
+    expect(await bus.invoke('catalog.engineRefresh', undefined)).toEqual({ ok: true, value: { ok: true } });
+    expect(bus.emittedOf('catalog.engineChanged')).toEqual([{ scope: 'all' }]);
+    host.emit('plugins.changed', {});
+    expect(bus.emittedOf('catalog.engineChanged')).toEqual([{ scope: 'all' }, { scope: 'all' }]);
+    expect(await bus.invoke('catalog.engine', { cwd: dir.path })).toMatchObject({ ok: true, value: { generation: 2 } });
+  });
+
   // P5 O4 M2: on the daemon shape a dispatch to a parked engine host starts it, and the discovery wake waits only for a
   // host it woke itself (src/mawsd/discovery-wake.ts): a load asks a host that does not stream nothing (CI run
   // 41205847879, where sign-in's listing at the load spawned the host before the wake)
@@ -519,6 +553,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(spineBus.registered().sort()).toEqual(SPINE_COMMANDS);
     for (const name of CHECKOUTS_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O3-E: the checkouts' with them
     for (const name of CONNECTORS_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O4: the connectors' and delivery's
+    for (const name of LIBRARY_CATALOG_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O4 M3: the library's reads and the catalog's
     expect(spineBus.intercepted()).toEqual(SPINE_INTERCEPTS); // the checkouts intercept nothing
     expect(spineBus.tapped().sort()).toEqual(SPINE_TAPS); // and tap nothing: they follow the spine through its view
     expect(host.held()).toBeGreaterThan(0);

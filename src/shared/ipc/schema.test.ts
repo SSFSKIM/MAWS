@@ -1933,7 +1933,8 @@ describe('ipc schema validates both directions', () => {
     // P5 O3-D: the three reads and files' admission read are the spine's library, `machine`-owned
     it('owns the three reads in the spine (machine) and the three host reads in the engine host, main-only, and emits library.changed from the spine', () => {
       const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
-      const files = { 'library.exportFormats': 'main', 'library.content': 'main', 'library.openExternally': 'main', 'library.reveal': 'main', 'library.read': 'main', 'library.saveAs': 'main' }; // M5b; M6b fix wave 2: library.read
+      // M5b; M6b fix wave 2: library.read; P5 O4 M3 (D19): the reads of a stored file the machine's, the export formats and Save as main's
+      const files = { 'library.exportFormats': 'main', 'library.content': 'machine', 'library.openExternally': 'machine', 'library.reveal': 'machine', 'library.read': 'machine', 'library.saveAs': 'main' };
       expect(owners).toEqual({ 'library.list': 'machine', 'library.get': 'machine', 'library.spaces': 'machine', 'library.fileLinkedPaths': 'machine', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host', 'library.testImport': 'engine-host' /* M6b */ });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text', 'library.fileLinkedPaths']));
       expect(MAIN_ONLY_COMMANDS).not.toContain('library.testImport'); // M6b: the e2e calls it from a window; the host refuses it outside MAWS_E2E=1

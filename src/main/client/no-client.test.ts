@@ -21,6 +21,7 @@ import { createFilesService } from '../../services/files/service';
 import { pickFiles } from '../files/pick';
 import { saveTextFile } from '../files/save-text';
 import { createLibraryFiles, type LibraryFilesDeps } from '../library/files';
+import { createLibraryReads } from '../../services/library/files';
 import { revealPath } from '../settings/reveal';
 import { openOwnerBrowser } from '../../services/connectors/root';
 import { listenLoopback } from '../../services/connectors/oauth-callback';
@@ -75,10 +76,15 @@ function library(stored: { kind: 'file' | 'presentation'; name: string; path: st
     root: join(dir, 'artifacts'),
     downloads: () => join(dir, 'Downloads'),
     port,
-    readFile: vi.fn(),
     env: {},
     ...over,
   });
+}
+
+// P5 O4 M3: the library's reads of that stored file, the machine's half (src/services/library/files.ts)
+function libraryReads(stored: { kind: 'file'; name: string; path: string }) {
+  const dispatch = (async () => ({ ok: true, value: { revision: 3, kind: stored.kind, name: stored.name, size: 1, sha256: 'x', path: stored.path } })) as never;
+  return createLibraryReads({ hosts: { dispatch }, files: { readResolved: vi.fn() }, port, env: {} });
 }
 
 describe('dialogs answer as cancelled', () => {
@@ -140,7 +146,7 @@ describe('opens and reveals answer not opened, saying there is no client', () =>
   it('library.openExternally and library.reveal', async () => {
     const stored = join(dir, 'report.pdf');
     writeFileSync(stored, 'pdf');
-    const files = library({ kind: 'file', name: 'report.pdf', path: stored });
+    const files = libraryReads({ kind: 'file', name: 'report.pdf', path: stored });
     expect(await settles(files.openExternally({ artifactId: ID }, CLIENT))).toEqual({ opened: false, message: 'no client' });
     expect(await settles(files.reveal({ artifactId: ID }, CLIENT))).toEqual({ revealed: false, message: 'no client' });
   });

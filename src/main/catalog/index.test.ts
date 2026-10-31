@@ -1,30 +1,42 @@
-// P4-AGG M2: the catalog service over `catalog.*` (the Discover spec, M2 Decisions): the engine's reads go through the
-// host and are held per cwd until `plugins.changed`, which also tells the renderer `catalog.changed` once; Refresh reads
-// the engine again; a cwd of null reads the user configuration in the engine's configuration directory; an engine that
-// cannot be read leaves the network's items; the test-source seam makes the local test marketplace discoverable; a read
-// an invalidation overtakes is read again; an outside change to a project's settings invalidates without Refresh.
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// P4-AGG M2: the catalog service over `catalog.*` (the Discover spec, M2 Decisions): the engine's reads are held per cwd
+// until `plugins.changed`, which also tells the renderer `catalog.changed` once; Refresh reads the engine again; a cwd of
+// null reads the user configuration in the engine's configuration directory; an engine that cannot be read leaves the
+// network's items; the test-source seam makes the local test marketplace discoverable; a read an invalidation overtakes
+// is read again. P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D16): the engine's reads and the watch
+// are the machine's half (src/services/catalog/machine.ts, whose own suite holds the watch's cases); here the person's
+// half is composed over the machine's on the services bus, as either root composes them, and over a machine it cannot
+// ask.
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EngineViewWire } from '@shared/catalog/engine-view';
+import { decodeJsonLine, encodeJsonLine } from '@shared/host/json-bytes';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { commands } from '@shared/ipc/schema';
 import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, SCRATCH, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
-import type { HostCall } from './engine-reads';
-import type { PollFn, WatchFn } from './state-watch';
-import { startCatalog } from './index';
-import type { EngineView } from './normalize';
+import { fakeBus } from '../../../test/support/fake-bus';
+import { startCatalogMachine } from '../../services/catalog/machine';
+import type { PollFn, WatchFn } from '../../services/catalog/state-watch';
+import { startCatalog, type CatalogDeps } from './index';
+import { engineViewFromWire, type EngineView } from './normalize';
+
+type HostCall = <N extends CommandName>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
 
 let userData: string;
+let stops: (() => void)[];
 beforeEach(() => {
   userData = mkdtempSync(join(tmpdir(), 'maws-agg-service-'));
+  stops = [];
 });
-afterEach(() => rmSync(userData, { recursive: true, force: true }));
+afterEach(() => {
+  for (const stop of stops.splice(0)) stop();
+  rmSync(userData, { recursive: true, force: true });
+});
 
 const CONFIG_HOME = '/scratch-root/config';
 let endpoints: CommandOutput<'customization.serverEndpoints'>['servers'] = [];
-let globalConfig = `${CONFIG_HOME}/.claude.json`;
-afterEach(() => { endpoints = []; globalConfig = `${CONFIG_HOME}/.claude.json`; });
+afterEach(() => { endpoints = []; });
 
 // The engine host as the catalog asks it, answering from a recorded view; counts each command.
 function host(view: (name: CommandName) => Promise<EngineView>, failing = false) {
@@ -36,7 +48,7 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
     const value = (() => {
       switch (name) {
         case 'plugins.env':
-          return { binary: '/bin/claude', binaryError: null, configHome: CONFIG_HOME, globalConfig };
+          return { binary: '/bin/claude', binaryError: null, configHome: CONFIG_HOME, globalConfig: `${CONFIG_HOME}/.claude.json` };
         case 'plugins.list':
           return { plugins: v.installed };
         case 'plugins.available':
@@ -62,34 +74,51 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
   return { asked, call };
 }
 
-// macOS serves every fs.watch from one FSEvents stream, rebuilt each time a folder is added; a write made while it is
-// rebuilt can go unreported, so a test lets the watches it just made settle before writing.
-const settled = () => new Promise((resolve) => setTimeout(resolve, 500));
+// The machine's watch, inert: its own suite drives it (src/services/catalog/machine.test.ts)
+const inert: { watch: WatchFn; poll: PollFn } = { watch: () => ({ close: () => {}, on: () => undefined }), poll: () => ({ close: () => {} }) };
 
-function service(call: HostCall, env: Record<string, string> = {}, watch?: WatchFn, poll?: PollFn) {
+// The person's half over the machine's, on one services bus (`invoke` as main's own route, the machine's
+// `catalog.engineChanged` heard as main taps it); `machine: false` composes a machine that cannot be asked.
+function service(call: HostCall, env: Record<string, string> = {}, { machine = true } = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: string[] = [];
   const changedListeners = new Set<() => void>();
+  const bus = fakeBus();
+  const part = machine
+    ? startCatalogMachine({
+        hosts: {
+          dispatch: (_owner, name, input) => call(name as CommandName, input as never) as never,
+          onEvent: ((_name: string, listener: () => void) => (changedListeners.add(listener), () => void changedListeners.delete(listener))) as never,
+        },
+        bus,
+        machineSettings: join(userData, 'machine-settings.json'),
+        log: () => {},
+        ...inert,
+      })
+    : null;
+  const unreachable: CatalogDeps['invoke'] = async () => ({ ok: false, error: { code: 'host_unavailable', message: 'the machine host is not running' } });
   const catalog = startCatalog({
     register: ((name: string, handler: (input: unknown) => Promise<unknown>) => handlers.set(name, handler)) as never,
     emit: (name) => emitted.push(name),
     call,
-    onPluginsChanged: (listener) => (changedListeners.add(listener), () => changedListeners.delete(listener)),
+    invoke: machine ? (name, input) => bus.invoke(name, input) : unreachable,
+    onEngineChanged: (listener) => bus.onEmitted('catalog.engineChanged', listener),
     userData,
     env: { MAWS_CATALOG_FIXTURES: NETWORK_FIXTURES, ...env },
     userAgent: 'MAWS/test',
     log: () => {},
-    watch,
-    poll,
   });
+  const stop = () => (catalog.stop(), part?.stop());
+  stops.push(stop);
   const invoke = <N extends CommandName>(name: N, input: CommandInput<N>) => handlers.get(name)!(input) as Promise<CommandOutput<N>>;
-  return { invoke, emitted, catalog, pluginsChanged: () => changedListeners.forEach((l) => l()), handlers };
+  return { invoke, emitted, catalog, stop, bus, pluginsChanged: () => changedListeners.forEach((l) => l()), handlers };
 }
 
 describe('the catalog service', () => {
-  it('registers exactly the catalog commands', () => {
-    const { handlers } = service(host(() => recordedEngine(PROJECT_A)).call);
-    expect([...handlers.keys()].sort()).toEqual(Object.keys(commands).filter((n) => n.startsWith('catalog.')).sort());
+  it('registers exactly the catalog commands but the machine’s', () => {
+    const { handlers, bus } = service(host(() => recordedEngine(PROJECT_A)).call);
+    expect([...handlers.keys()].sort()).toEqual(Object.keys(commands).filter((n) => n.startsWith('catalog.') && !bus.registered().includes(n as CommandName)).sort());
+    expect(bus.registered().sort()).toEqual(['catalog.engine', 'catalog.engineRefresh']);
   });
 
   it('holds the engine’s reads per cwd until plugins.changed, then reads again and says catalog.changed once', async () => {
@@ -159,6 +188,26 @@ describe('the catalog service', () => {
     await expect(invoke('catalog.item', { id: 'nothing', cwd: PROJECT_A })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
   });
 
+  // P5 O4 M3 (D25): the view crosses the socket as entry arrays, read back once per read into the join's Maps
+  it('reads the machine’s view, as it crossed the socket, back into the Maps the join reads', async () => {
+    const view = await recordedEngine(PROJECT_A, { directoryInstalled: new Map([['frontend-design', 'github.com/anthropics/claude-code#plugins/frontend-design']]) });
+    const wire: EngineViewWire = { ...view, servers: view.servers && [...view.servers], manifests: [...view.manifests], directoryInstalled: [...view.directoryInstalled] };
+    expect(engineViewFromWire(decodeJsonLine(encodeJsonLine(wire)) as EngineViewWire)).toEqual(view);
+    expect(engineViewFromWire(null)).toBeNull();
+  });
+
+  // P5 O4 M3: the machine half unreachable (a refused spine, a daemon gone) is an engine that could not be read
+  it('with the machine unreachable, answers the network’s items and still refreshes the network', async () => {
+    const engine = host(() => recordedEngine(PROJECT_A));
+    const { invoke, emitted } = service(engine.call, {}, { machine: false });
+    const page = await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 200 });
+    expect(page.total).toBeGreaterThan(60);
+    expect(page.items.find((i) => i.name === 'agentmail' || i.name === 'AgentMail')?.install).toMatchObject({ kind: 'manual' });
+    emitted.length = 0;
+    expect(await invoke('catalog.refresh', {})).toHaveLength(15);
+    expect(engine.asked).toEqual([]);
+  });
+
   it('reads again a view an invalidation overtook, and never keeps the old one under the new revision', async () => {
     let current = await recordedEngine(PROJECT_A, { installed: [] });
     let release!: () => void;
@@ -191,115 +240,6 @@ describe('the catalog service', () => {
     current = await recordedEngine(PROJECT_A); // and the engine changed meanwhile, with no event MAWS saw
     expect((await invoke('catalog.item', { id: skillsOnly, cwd: PROJECT_A })).installed).toBe('here');
     expect((await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 10, cursor: page.nextCursor })).restarted).toBe(true);
-  });
-
-  it('sees an outside change to a project’s settings and reads that project again without Refresh', async () => {
-    const project = mkdtempSync(join(tmpdir(), 'maws-agg-project-'));
-    try {
-      mkdirSync(join(project, '.claude'));
-      writeFileSync(join(project, '.claude', 'settings.json'), '{}');
-      let current = await recordedEngine(project, { installed: [] });
-      const { invoke, emitted, catalog } = service(host(async () => current).call);
-      const skillsOnly = `local:${SCRATCH}/maws-discover-test#plugins/skills-only`;
-      expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('no');
-      current = await recordedEngine(project); // an agent installed it from a terminal
-      await settled();
-      emitted.length = 0;
-      writeFileSync(join(project, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'skills-only@maws-discover-test': true } }));
-      await vi.waitFor(async () => expect((await invoke('catalog.item', { id: skillsOnly, cwd: project })).installed).toBe('here'), { timeout: 10_000, interval: 100 });
-      expect(emitted).toContain('catalog.changed');
-      catalog.stop();
-    } finally {
-      rmSync(project, { recursive: true, force: true });
-    }
-  }, 15_000); // the file system's change notice, under load
-
-  it('sees an outside change to a project’s .mcp.json and reads the connectors again without Refresh (scalpel-3#1)', async () => {
-    const project = mkdtempSync(join(tmpdir(), 'maws-agg-mcp-'));
-    try {
-      let current = await recordedEngine(project, { servers: [] });
-      const { invoke, emitted, catalog } = service(host(async () => current).call);
-      const linear = async () => (await invoke('catalog.query', { tab: 'connectors', cwd: project, limit: 200 })).items.find((i) => i.name === 'Linear')!;
-      expect((await linear()).installed).toBe('no');
-      const added = { name: 'linear', scope: 'project' as const, path: join(project, '.mcp.json'), transport: 'http' as const, url: 'https://mcp.linear.app/mcp' };
-      current = await recordedEngine(project, { servers: ['linear'] }); // an agent ran `claude mcp add` in a terminal
-      endpoints = [added];
-      await settled();
-      emitted.length = 0;
-      writeFileSync(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { linear: { type: 'http', url: added.url } } }));
-      await vi.waitFor(async () => expect((await linear()).installed).toBe('here'), { timeout: 10_000, interval: 100 });
-      expect(emitted).toContain('catalog.changed'); // the postures read again too (the renderer's postures are a catalog query)
-      catalog.stop();
-    } finally {
-      rmSync(project, { recursive: true, force: true });
-    }
-  }, 15_000);
-
-  it('sees an outside change to the engine’s global .claude.json and reads the connectors again without Refresh (scalpel-3#1)', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'maws-agg-home-'));
-    try {
-      globalConfig = join(home, '.claude.json');
-      writeFileSync(globalConfig, JSON.stringify({ numStartups: 1 }));
-      let current = await recordedEngine(PROJECT_A, { servers: [] });
-      const { invoke, emitted, catalog } = service(host(async () => current).call);
-      const linear = async () => (await invoke('catalog.query', { tab: 'connectors', cwd: PROJECT_A, limit: 200 })).items.find((i) => i.name === 'Linear')!;
-      expect((await linear()).installed).toBe('no');
-      current = await recordedEngine(PROJECT_A, { servers: ['linear'] }); // `claude mcp add --scope user` in a terminal
-      endpoints = [{ name: 'linear', scope: 'user', path: globalConfig, transport: 'http', url: 'https://mcp.linear.app/mcp' }];
-      await settled();
-      emitted.length = 0;
-      writeFileSync(`${globalConfig}.tmp`, JSON.stringify({ numStartups: 1, mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } }));
-      renameSync(`${globalConfig}.tmp`, globalConfig); // the engine writes it by renaming a new file over it
-      await vi.waitFor(async () => expect((await linear()).installed).toBe('here'), { timeout: 10_000, interval: 100 });
-      expect(emitted).toContain('catalog.changed');
-      catalog.stop();
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  }, 15_000);
-
-  it('reads nothing again when an MCP file changed but the configured servers did not (scalpel-3#1)', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      const polled = new Map<string, () => void>();
-      const poll: PollFn = (path, listener) => (polled.set(path, listener), { close: () => void polled.delete(path) });
-      const watch: WatchFn = () => ({ close: () => {}, on: () => undefined });
-      const engine = host(() => recordedEngine(PROJECT_A));
-      const { invoke, emitted } = service(engine.call, {}, watch, poll);
-      await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
-      const reads = () => engine.asked.filter((a) => a.name === 'customization.inventory').length;
-      const before = reads();
-      emitted.length = 0;
-      polled.get(`${CONFIG_HOME}/.claude.json`)!(); // the engine rewrote its global file: stats, not servers
-      await vi.advanceTimersByTimeAsync(1_100);
-      expect(emitted).toEqual([]);
-      await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
-      expect(reads()).toBe(before);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; O3-A acceptance 4): MAWS's own servers are the machine's
-  it('watches machine-settings.json for MAWS’s own servers, not the client’s settings.json, and asks for the servers again on its change', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      const polled = new Map<string, () => void>();
-      const poll: PollFn = (path, listener) => (polled.set(path, listener), { close: () => void polled.delete(path) });
-      const watch: WatchFn = () => ({ close: () => {}, on: () => undefined });
-      const engine = host(() => recordedEngine(PROJECT_A));
-      const { invoke } = service(engine.call, {}, watch, poll);
-      await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
-      expect(polled.has(join(userData, 'machine-settings.json'))).toBe(true);
-      expect(polled.has(join(userData, 'settings.json'))).toBe(false);
-      const asks = () => engine.asked.filter((a) => a.name === 'customization.serverEndpoints').length; // the recheck of the configured servers
-      const before = asks();
-      polled.get(join(userData, 'machine-settings.json'))!();
-      await vi.advanceTimersByTimeAsync(1_100);
-      expect(asks()).toBeGreaterThan(before);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('answers each configured server’s posture from the directory record its endpoint matches, from the copy held', async () => {

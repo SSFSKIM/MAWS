@@ -34,7 +34,7 @@ export interface CheckoutsDeps {
 }
 
 export interface CheckoutsRoot extends Settling {
-  readonly files: Pick<FilesService, 'readResolved'>; // files.readResolved's handler (library.read's reach), for the composition test
+  readonly files: Pick<FilesService, 'readResolved'>; // files.readResolved's handler: library.read's reach in process (P5 O4 M3, src/services/library/files.ts)
   stop(): void;
 }
 

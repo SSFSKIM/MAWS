@@ -41,7 +41,7 @@ export const PATH_COMMANDS = [
   'spaces.create', 'spaces.update',
   'connectors.add', 'connectors.remove', 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directSend',
   'customization.inventory', 'customization.serverEndpoints',
-  'catalog.home', 'catalog.query', 'catalog.item', 'catalog.postures',
+  'catalog.home', 'catalog.query', 'catalog.item', 'catalog.postures', 'catalog.engine' /* P5 O4 M3: the machine's half */,
   'host.op', // P5 O10 M7: main-only (mawsd's ledger), never bridged; its `context.engineSessionId` makes it path
   'files.readResolved', // P5 O3-E: main-only (library.read's reach), never bridged; a bare path
   'machineSettings.set', // P5 O3-D: as settings.set, its engine patch's paths

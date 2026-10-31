@@ -113,7 +113,7 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 import { installStorePolicies, startArtifacts } from './artifacts'; // P5 O5: registerStoreSchemes runs in the entry's shared bootstrap
 // P3-A end
 // P3-L start
-import { readResolvedThrough, registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
+import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index; P5 O4 M3: the export formats and Save as alone
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
 // P3-L end
 // P3-B start
@@ -665,12 +665,15 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   );
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
   // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
-  // cwd through the host, re-read on its `plugins.changed`
+  // cwd. P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D16): those reads and the watch of the engine's
+  // plugin state are the machine's, composed with the spine (mawsd's on the daemon shape, startSpine's above on the
+  // embedded one), asked through main's own route and heard through the bus's tap, which hears mawsd's events too
   const catalog = startCatalog({
     register: registerMainHandler,
     emit: (name, payload) => emit(name, payload),
-    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-    onPluginsChanged: (listener) => hosts.onEvent('plugins.changed', () => listener()),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never, // catalog.postures' configured servers
+    invoke: (name, input) => bus.invoke(name, input, { client: mainClient }),
+    onEngineChanged: (listener) => bus.onEmitted('catalog.engineChanged', listener),
     userData: app.getPath('userData'),
     env: process.env,
     userAgent: `MAWS/${app.getVersion()}`,
@@ -692,17 +695,15 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env, ...exportAuthors })); // WR 73: the same resolved identity for every document/dashboard export entry point
   registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
-  // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports, whatever the index's
-  // state. P5 O3-C (D22): the client's; the library's derived index is the spine's, and `library.read` reaches the
-  // checkouts' files service.
+  // P3-L M5b: the library's export formats and Save as of an export or a stored file, whatever the index's state. P5
+  // O3-C (D22): the client's; the library's derived index is the spine's. P5 O4 M3 (D19): the reads of a stored file
+  // (content, read, open, reveal) are the machine's, composed with the spine; these two stay beside the exporters until O5.
   registerLibraryFiles(registerMainHandler, {
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     exporters: artifacts.exporters,
     root: join(app.getPath('userData'), 'artifacts'),
     downloads: () => app.getPath('downloads'),
-    port: clientPort, // Save as…, the Replace question, Open externally, Reveal
-    // M6b fix wave 2: `library.read`; P5 O3-E (Interfaces §D): the files service's files.readResolved over main's own route
-    readFile: readResolvedThrough((name, input) => bus.invoke(name, input, { client: mainClient })),
+    port: clientPort, // Save as…, the Replace question
     env: process.env,
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
