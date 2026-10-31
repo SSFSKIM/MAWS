@@ -22,7 +22,10 @@ export type MachineIdentity = z.infer<typeof MachineIdentitySchema>;
 
 // A claimed act on the services (Interfaces §H): who claims it (the binding the endpoint verified, as `host.op` carries it),
 // and the `machine`-owned act it runs with its input, which crossed the channel as JSON. The answers are `host.op`'s.
-export const MachineOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated: z.string(), claim: z.strictObject(OpBindingShape), name: z.string().min(1), input: JsonValueSchema });
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `action`, the sealed action as the
+// device sent it (its step-up signature included), kept with the claim and handed to the command's handler
+// (`HandlerContext.op`), so a handler can record who asked and keep the proof (`session.spawn`'s `launchedBy`).
+export const MachineOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated: z.string(), claim: z.strictObject(OpBindingShape), name: z.string().min(1), input: JsonValueSchema, action: JsonValueSchema.optional() });
 
 export const commands = {
   'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' },

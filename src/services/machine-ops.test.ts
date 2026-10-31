@@ -1,7 +1,7 @@
 // The services' operation ledger (P5 O3-D M4; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §H; O3X7,
 // D17): `machine.op` claims and runs a `machine`-owned act through the bus's invoke, once per op id; `machine.opQuery`
 // answers as `host.opQuery` does.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +24,7 @@ function lab(invoke = vi.fn<Invoke>(async (name, input) => ({ ok: true, value: n
   const dir = mkdtempSync(join(tmpdir(), 'machine-ops-'));
   dirs.push(dir);
   const open = () => machineOps({ ledger: OpLedger.open(dir, 'spine-ops.jsonl'), invoke: invoke as never });
-  return { ops: open(), reopen: open, invoke };
+  return { ops: open(), reopen: open, invoke, file: join(dir, 'spine-ops.jsonl') };
 }
 
 describe('machine.op', () => {
@@ -33,11 +33,31 @@ describe('machine.op', () => {
     const input = { opId: 'op-1', opCreated: now(), claim: CLAIM, name: 'session.rename', input: { appSessionId: 'app-1', title: 'New' } };
     expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true } });
     expect(invoke).toHaveBeenCalledTimes(1);
-    expect(invoke).toHaveBeenCalledWith('session.rename', { appSessionId: 'app-1', title: 'New' }, CONTEXT);
+    expect(invoke).toHaveBeenCalledWith('session.rename', { appSessionId: 'app-1', title: 'New' }, { ...CONTEXT, op: { opId: 'op-1', opCreated: input.opCreated, ...CLAIM } });
     expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true } });
     expect(await reopen().op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true } });
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(ops.opQuery({ opId: 'op-1', opCreated: input.opCreated, tombstoneIfAbsent: false })).toEqual({ state: 'done', outcome: { ok: true }, ...CLAIM, target: 'app-1', name: 'session.rename' });
+  });
+
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): the claim and the sealed action
+  // reach the handler, and the action is kept with the claim, never said by a query
+  it('runs the claimed command with the claim and the sealed action in its context, and keeps the action with the claim', async () => {
+    const { ops, invoke, file } = lab();
+    const action = { v: 1, opId: 'op-act-0000000001', action: 'session.rename', args: { appSessionId: 'app-1', title: 'New' }, stepUp: { sig: 'c2ln' } };
+    const opCreated = now();
+    const input = { opId: 'op-act-0000000001', opCreated, claim: CLAIM, name: 'session.rename', input: { appSessionId: 'app-1', title: 'New' }, action };
+    expect(await ops.op(input, CONTEXT)).toEqual({ state: 'done', result: { ok: true } });
+    expect(invoke).toHaveBeenCalledWith('session.rename', { appSessionId: 'app-1', title: 'New' }, { ...CONTEXT, op: { opId: input.opId, opCreated, ...CLAIM, action } });
+    const [claimed] = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { claim?: unknown });
+    expect(claimed?.claim).toEqual({ ...CLAIM, target: 'app-1', name: 'session.rename', action });
+    expect(ops.opQuery({ opId: input.opId, opCreated, tombstoneIfAbsent: false })).toEqual({ state: 'done', outcome: { ok: true }, ...CLAIM, target: 'app-1', name: 'session.rename' });
+    // an op the endpoint sent no action for: the claim alone, in the context and the ledger
+    const bare = { opId: 'op-act-0000000002', opCreated, claim: CLAIM, name: 'session.rename', input: { appSessionId: 'app-1', title: 'B' } };
+    await ops.op(bare, CONTEXT);
+    expect(invoke).toHaveBeenLastCalledWith('session.rename', { appSessionId: 'app-1', title: 'B' }, { ...CONTEXT, op: { opId: bare.opId, opCreated, ...CLAIM } });
+    const second = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { opId: string; claim?: Record<string, unknown> }).find((line) => line.opId === bare.opId && line.claim);
+    expect(second?.claim).not.toHaveProperty('action');
   });
 
   it('keeps a command’s refusal as its result: it was tried', async () => {

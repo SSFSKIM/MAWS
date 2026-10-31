@@ -6,7 +6,7 @@
 //
 // One JSON record per line, appended and fsynced: the claim before the run, then its result, or a tombstone for an op a
 // query answered `not-received`:
-//   { opId, opCreated, at, claim: { member, device, fingerprint, target, name, context? } }
+//   { opId, opCreated, at, claim: { member, device, fingerprint, target, name, context?, action? } }
 //   { opId, result }
 //   { opId, opCreated, at, tombstone: true }
 // Every entry binds its `opId` to one operation and one sender: a known id met again under another fingerprint or member
@@ -33,7 +33,7 @@ import { KEPT_S, OP_HORIZON_S } from 'org-protocol';
 
 /** Who sent an operation and what it is: the binding a query is authorized against. `target` is the executor's own word
  * for what the op acts on (the engine host's appSessionId; null for the machine itself). */
-export type OpClaim = { member: string; device: string; fingerprint: string; target: string | null; name: string; context?: unknown };
+export type OpClaim = { member: string; device: string; fingerprint: string; target: string | null; name: string; context?: unknown; action?: unknown }; // P5 O7 M4: `action`, the sealed action `machine.op` keeps
 
 /** What a new act under a known id meets, or why it is refused before anything is claimed. */
 export type OpAnswer = { state: 'done'; result: unknown } | { state: 'in-progress' } | { state: 'refused'; reason: string };
