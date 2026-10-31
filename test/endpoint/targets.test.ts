@@ -137,6 +137,25 @@ describe('the engine session authorized is the one the request runs on', () => {
     expect(f.spine.acquired).toEqual([]);
   });
 
+  // P5 O7 M4 fix wave 1: the lag is said only to a caller who stands on the recorded engine session. One who owns only the
+  // live engine session is placed on the recorded one like anyone, and holds nothing there: `grade`, as for a session
+  // they can't see, and nothing past placement is read for them.
+  it('answers `grade`, not `unavailable`, to a caller who owns only the live engine session during the lag', async () => {
+    const { f, s, a } = await lagging();
+    const from = f.host.calls.length;
+    expect(await call(a, 'session.status', { appSessionId: 'app-1' })).toMatchObject({ ok: false, error: { code: 'grade' } });
+    expect(await call(a, 'session.get', { appSessionId: 'app-1' })).toMatchObject({ ok: false, error: { code: 'grade' } });
+    expect(await subscribe(a, 's1', { lane: 'B', id: 'app-1' })).toMatchObject({ t: 'ended', reason: 'grade' });
+    const send = a.device.action({ machine: f.ref, action: 'session.send', session: 'app-1', context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: 'app-1', content: 'not yet' } });
+    expect(await act(a, send)).toBe('grade');
+    const acquire = a.device.action({ machine: f.ref, action: 'session.acquire', args: { appSessionId: 'app-1', reason: 'send' } });
+    expect(await act(a, acquire)).toBe('grade');
+    // Placement's reads only: the record and the live row.
+    expect(f.host.calls.slice(from).map((c) => c.name).filter((name) => name !== 'session.get' && name !== 'session.status')).toEqual([]);
+    expect(f.host.runs).toEqual([]);
+    expect(f.spine.acquired).toEqual([]);
+  });
+
   it('once the index names the live engine session, its own record decides: its owner reads and drives it, the stale record’s owner is refused', async () => {
     const { f, s, a, b } = await lagging();
     f.spine.set('app-1', 'eng-new');

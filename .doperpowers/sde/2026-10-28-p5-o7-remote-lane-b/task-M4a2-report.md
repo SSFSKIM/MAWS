@@ -300,3 +300,38 @@ Branch `p5-o7-m4`, worktree `/Users/new/.local/share/maws-worktrees/p5-o7`, from
    - M2's "lagging" case in `targets.test.ts` (the recorded session's owner hears `unavailable`) stays as it is.
 4. **Report corrected:** decision 6 claimed nothing below the floor reads `session.get`. Placement does read it; what
    is not read is the checkout.
+
+### Fix wave 1, addendum (the desk track's notes)
+
+- **Fail-first test:** `test/endpoint/targets.test.ts`, in the describe "the engine session authorized is the one the
+  request runs on", case "answers `grade`, not `unavailable`, to a caller who owns only the live engine session during
+  the lag".
+  - In `lagging()`, `a` owns only `eng-new` (live), and the index records `eng-old`.
+  - `a`'s `session.status`, `session.get`, `sub`, `session.send` and `session.acquire` each answer `grade`. Nothing
+    past placement's own reads (`session.get`, `session.status`) reaches the machine. Nothing runs, nothing is acquired.
+  - Before the wave, each of these answered `unavailable`.
+  - The existing case for `b` (who owns the recorded `eng-old`) still expects `unavailable`, as written.
+  - `actions.test.ts:418` (a sealed context against the live one) is a different check and is unaffected.
+- **`laneB()`'s doc comment** (`targets.ts`) now says `unavailable` is answered only to a caller who stands at the floor
+  on the recorded engine session.
+- **What changed, precisely, against O10's Decision Log entry of 2026-10-31 (#414).** Scope: a lane B session whose
+  index record names an engine session.
+  - **Before:** a mismatch between that recorded engine session and the engine host's live row was `unavailable` to
+    every caller, before any rank check. So was an engine host that couldn't answer the live check.
+  - **Now:** the request is placed on the recorded engine session. The mismatch, or the host's absence, becomes a flag:
+    - **Calls and acts:** authorization reads the caller's standing at the command's floor on the recorded engine
+      session first. A caller below the floor gets that refusal (`grade`, or `no-target` where the rank is needed and
+      absent), whatever engine session they own. Only a caller who stands at the floor hears `unavailable`. This is
+      still step 4, after the floor check and before the `checkout` rule's path check.
+    - **Subscriptions:** the flag is answered `unavailable` after the `view` check (or the ownership check for
+      `cards`); a caller who fails that check gets `grade`, or `class` for web-cards.
+    - **Queries:** they read a flagged placement as unplaceable, as before.
+  - **Unchanged:**
+    - A session with no recorded engine session is placed by the live row alone, and is `unavailable` for every
+      caller when the engine host can't answer. That answer is the same for a known and an unknown session.
+    - A failing spine is `unavailable` for every session.
+    - An engine-host act still skips the live check at placement (`live: false`), and `actions.ts`' context check
+      still refuses a lag `unavailable` after authorization.
+  - So #414's "a request against a lagging index is `unavailable` until it catches up" now holds only for a caller with
+    rank at the floor on the recorded engine session.
+- **Not run (CPU hold):** the new test and everything in this wave. The run commands are listed in the hand-back.

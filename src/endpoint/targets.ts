@@ -70,15 +70,15 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  *
  * Whatever engine session a request is authorized against is the one it runs on, since the engine host runs it by
  * appSessionId: where the host holds a live row for the session, its engine session must be the recorded one, else the
- * index lags a change of engine session (a `/clear`) and the request is `unavailable` until it catches up, so a member's
- * rank on one engine session never reaches another. An engine host that can't answer is `unavailable` too, which a
- * caller may try again.
+ * index lags a change of engine session (a `/clear`), so a member's rank on one engine session never reaches another.
  *
- * P5 O7 M4 (fix wave 1): a session with a recorded engine session is placed on it whatever the live check finds, and a
- * failed check is the placement's `unavailable` flag, which authorization answers only after the caller's rank on the
- * recorded engine session (the conservative choice: the record is what the machine says the session is, and a caller
- * who stands on neither learns nothing). Without a recorded engine session the live row is the only placement, and an
- * engine host that can't answer is `unavailable` for every such session, known or not.
+ * P5 O7 M4 (fix wave 1): a session with a recorded engine session is placed on it whatever the live check finds. A
+ * failed check (the host runs another engine session for it, or can't answer) is the placement's `unavailable` flag,
+ * which authorization answers only to a caller who stands at the floor on the recorded engine session, until the index
+ * catches up; a caller who doesn't is `grade`, as for any session they hold nothing on, whichever engine session they
+ * own (the record is what the machine says the session is, and a caller below it learns nothing of a lag). Without a
+ * recorded engine session the live row is the only placement, and an engine host that can't answer is `unavailable`
+ * for every such session, known or not, which a caller may try again.
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
