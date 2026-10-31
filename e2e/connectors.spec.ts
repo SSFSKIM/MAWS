@@ -27,7 +27,7 @@
 //          rebuilds the lease, and the page reads again through that engine without being reopened.
 // P5 O4 M2 (D10): on the daemon shape an app's quit no longer ends the connectors' state, which is the machine's (the
 // host's verified sources among it), so the product case ends the machine after its quit for the relaunch's fresh start.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
 import { daemonPaths } from '@shared/daemon/files';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -320,6 +320,9 @@ test('daemon restart: the open page’s lease is rebuilt after its mawsd restart
     await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
     const server = scene.toolCalls()[0]!.pid;
     const before = await pageState(frame);
+    // an in-memory mark on the page's document: a reload or a reopened page would not carry it
+    const nonce = randomUUID();
+    await frame.locator('body').evaluate((body, given) => void ((body.ownerDocument.defaultView as unknown as { __restartNonce?: string }).__restartNonce = given), nonce);
     scene.note('before the restart', { daemon, supervisor, engine, page: before });
 
     // the private daemon asked to restart over machine.sock, as the CLI's `mawsd restart` asks: it exits 75 and the
@@ -352,6 +355,7 @@ test('daemon restart: the open page’s lease is rebuilt after its mawsd restart
       }, { timeout: WATCH_MS + 30_000, message: 'the page read again through its rebuilt lease' })
       .toBe(true);
     scene.note('after the restart', { daemon: restarted, page: after, ms: Date.now() - restartedAt });
+    expect(await frame.locator('body').evaluate((body) => (body.ownerDocument.defaultView as unknown as { __restartNonce?: string }).__restartNonce), 'the same page document, never reloaded').toBe(nonce);
     expect(Number(/^ok n=(\d+)/.exec(after.last)![1]), 'the same server’s next calls').toBeGreaterThan(1);
     const since = scene.toolCallsBetween(restartedAt, Date.now());
     expect(since.length, 'a call after the restart').toBeGreaterThan(0);

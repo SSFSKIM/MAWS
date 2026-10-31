@@ -208,13 +208,16 @@ describe('the cancel through the router’s seam', () => {
     expect(hookedNames).toEqual(['delivery.cancel']);
   });
 
-  it('during the export phase: answers cancelled itself, lets the export finish, removes its file and hands nothing off', async () => {
+  it('during the export phase: answers cancelled itself, says so, lets the export finish, removes its file and hands nothing off', async () => {
+    const said: string[] = [];
+    start({ log: (line) => said.push(line) });
     let finish!: () => void;
     exporting = new Promise((resolve) => (finish = resolve));
     const runId = RUN();
     const sending = send(drive(runId));
     await settle();
     expect(await cancel(runId)).toEqual({ ok: true, value: { cancelled: true } });
+    expect(said).toEqual([`a send was cancelled in its export phase (run ${runId})`]); // what an e2e waits for (e2e/delivery.spec.ts)
     finish();
     expect(await sending).toEqual({ ok: false, why: 'cancelled' });
     expect(exported).toHaveLength(1);

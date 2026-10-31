@@ -124,9 +124,11 @@ export function registerDeliverySend({ register, before, exportArtifact, call, i
 
   register('delivery.send', (input) => send(input));
   return before(['delivery.cancel'], async (_name, input) => {
-    const run = runs.get((input as CommandInput<'delivery.cancel'>).runId);
+    const { runId } = input as CommandInput<'delivery.cancel'>;
+    const run = runs.get(runId);
     if (!run) return undefined; // the machine's: a run it holds, or a tombstone for one handed off meanwhile
     run.cancelled = true;
+    log(`a send was cancelled in its export phase (run ${runId})`); // the e2e's sign the cancel was marked (e2e/delivery.spec.ts)
     return { ok: true, value: { cancelled: true } };
   });
 }

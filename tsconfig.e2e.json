@@ -85,6 +85,7 @@
     "src/services/index/side-threads.ts",
     "src/services/library/store.ts",
     "src/services/connectors/deadlines.ts", // P5 O4 M2: the OAuth scene bounds a pending Connect's listener by the flow's own deadline
+    "src/main/delivery/e2e-hold.ts", // P5 O4 M2: the delivery scene bounds its refusal under the export hold by the hold's own limit
     "src/services/owner/answers.ts",
     "src/services/owner/prompt-state.ts",
     "src/services/owner/store.ts",

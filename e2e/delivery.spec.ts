@@ -32,6 +32,8 @@ import { expectQuietJournals, sessionJournals } from './support/connector-direct
 import { invoke, value, wait, withScene } from './support/connector-scene';
 import { launchMaws } from './support/launch';
 import { coldHttpDelivery } from './support/connector-cold-delivery';
+import { MainOutput } from './support/connector-direct-oauth';
+import { HOLD_MAX_MS } from '../src/main/delivery/e2e-hold';
 
 test.skip(process.env.MAWS_DELIVERY_E2E !== '1', 'the delivery group runs under MAWS_DELIVERY_E2E=1 (pnpm e2e:delivery)');
 test.describe.configure({ timeout: 300_000 });
@@ -79,7 +81,8 @@ test('notion: the document header’s Send to makes a readable page through MAWS
     'delivery-notion',
     info,
     async (scene) => {
-      let run = await scene.launch();
+      const output = new MainOutput(); // main's log: the sign its send's cancel was marked
+      let run = await output.launch(scene);
       let { page } = run;
       const daemon = value(await invoke(page, 'host.status', undefined)).transport === 'daemon';
       // a live session in the project, the owner's Start from an HTML page's Connectors sheet (no message, no model)
@@ -105,6 +108,8 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       await expect.poll(() => exportsOf(scene.userData, id), { timeout: 60_000, message: 'the export written, its send held' }).toHaveLength(1);
       await sheetOf(page).getByRole('button', { name: 'Cancel', exact: true }).click();
       await expect(sheetOf(page)).toHaveCount(0);
+      // the page sends its cancel without awaiting it, so the hold lifts only once main says it marked the run
+      await expect.poll(() => output.text(), { timeout: 15_000, message: 'main marked the held run cancelled' }).toMatch(/\[delivery\] a send was cancelled in its export phase \(run [0-9a-f-]{36}\)/);
       rmSync(hold);
       await expect.poll(() => exportsOf(scene.userData, id), { timeout: 15_000, message: 'the cancelled export’s file removed' }).toEqual([]);
       await wait(3_000);
@@ -225,7 +230,8 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
   const scratch = gwsScratch();
   const maws = await launchMaws({
     // P5 O4 M2: zsh named as the login shell, so the daemon's capture reads the scratch zsh profile below (ZDOTDIR)
-    env: { MAWS_HARNESS: '0', MAWS_E2E_OPEN_LOG: scratch.openLog, SHELL: '/bin/zsh' },
+    // the export hold (src/main/delivery/e2e-hold.ts) lets the absent step see that no export starts
+    env: { MAWS_HARNESS: '0', MAWS_E2E_OPEN_LOG: scratch.openLog, SHELL: '/bin/zsh', MAWS_E2E_DELIVERY_HOLD: join(scratch.root, 'delivery-hold') },
     prepare: ({ shellHome }) => {
       // the login shell's PATH holds the scratch bin and the system's alone, so no real gws is ever found
       const profile = `export PATH=${sh(scratch.bin)}:/usr/bin:/bin:/usr/sbin:/sbin\nexport FAKE_GWS_DIR=${sh(scratch.state)}\n`;
@@ -247,11 +253,23 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
       await expect(sheetOf(page).getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
       await info.attach('drive-absent', { body: await page.screenshot(), contentType: 'image/png' });
       expect(gwsRuns(scratch)).toEqual([]);
-      // P5 O4 M2 (D38): a send asked all the same (a page that did not read the status again) is refused before the export
-      const refused = value(await invoke(page, 'delivery.send', { runId: randomUUID(), target: 'drive', artifactId: id, format: 'docx', destination: { kind: 'default' } }));
-      expect(refused, 'refused as absent').toEqual({ ok: false, why: 'absent' });
-      expect(exportsOf(maws.userData, id), 'nothing was exported').toEqual([]);
-      expect(gwsRuns(scratch), 'nothing was uploaded').toEqual([]);
+      // P5 O4 M2 (D38): a send asked all the same (a page that did not read the status again) is refused before the export.
+      // The export hold is in place: an export would be written and then held up to HOLD_MAX_MS, so an answer well inside
+      // that, with the hold still there and no export on disk, is main's own refusal before the export, not the machine's
+      const hold = join(scratch.root, 'delivery-hold');
+      writeFileSync(hold, '');
+      try {
+        const bound = HOLD_MAX_MS / 4;
+        let answer: Awaited<ReturnType<typeof invoke<'delivery.send'>>> | null = null;
+        void invoke(page, 'delivery.send', { runId: randomUUID(), target: 'drive', artifactId: id, format: 'docx', destination: { kind: 'default' } }).then((given) => (answer = given));
+        await expect.poll(() => answer, { timeout: bound, message: 'answered while the hold stands: no export was held' }).not.toBeNull();
+        expect(value(answer!), 'refused as absent').toEqual({ ok: false, why: 'absent' });
+        expect(existsSync(hold), 'the hold still in place').toBe(true);
+        expect(exportsOf(maws.userData, id), 'nothing was exported').toEqual([]);
+        expect(gwsRuns(scratch), 'nothing was uploaded').toEqual([]);
+      } finally {
+        rmSync(hold, { force: true });
+      }
     });
 
     await test.step('installed, signed out: the CLI’s own login is offered', async () => {
