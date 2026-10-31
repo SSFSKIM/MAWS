@@ -94,16 +94,19 @@ async function hoverMachineLine(page: Page, row: ReturnType<typeof sessionRow>, 
   }, `the hover reads "${expected}"`).toPass({ timeout: 20_000 });
   await page.mouse.move(700, 400);
 }
-// A's renderer's event batches, kept from now on (window.__remote), and those of one session.
+// A's renderer's event batches as the raw bridge hears them (a bare id, and the machine it came from), kept from now on
+// (window.__remote), and those of one session.
+type Kept = { machine: string | null; appSessionId: string; events: SessionEvent[] };
 async function keepBatches(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const kept: { appSessionId: string; events: unknown[] }[] = [];
-    (window as unknown as { __remote: typeof kept }).__remote = kept;
-    window.maws.on('session.eventBatch', (batch) => void kept.push(batch as never));
+    const kept: Kept[] = [];
+    (window as unknown as { __remote: Kept[] }).__remote = kept;
+    window.maws.on('session.eventBatch', (batch, machine) => void kept.push({ ...(batch as unknown as Kept), machine: machine ?? null }));
   });
 }
-const batchedEvents = (page: Page, address: string) =>
-  page.evaluate((id) => (window as unknown as { __remote: { appSessionId: string; events: SessionEvent[] }[] }).__remote.filter((b) => b.appSessionId === id).flatMap((b) => b.events), address);
+const keptBatches = (page: Page) => page.evaluate(() => (window as unknown as { __remote: Kept[] }).__remote);
+const batchedEvents = async (page: Page, machine: MachineRef, app: string) =>
+  (await keptBatches(page)).filter((b) => b.machine === machine && b.appSessionId === app).flatMap((b) => b.events);
 // A paste into the focused composer: one PNG file, as a screenshot is pasted (composer.spec.ts's synthetic paste)
 async function pastePng(page: Page): Promise<void> {
   await page.locator('[data-region="main"] [contenteditable="true"]').waitFor();
@@ -208,10 +211,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await page.keyboard.press('Enter');
     await expect.poll(async () => JSON.stringify(await writtenOnB()), { timeout: 60_000, message: `B's transcript records A's send\n${mainSaid(page)}` }).toContain(SECOND);
     await expect(main(page).getByText(SECOND_REPLY).first(), 'the reply in A’s pane').toBeVisible({ timeout: 60_000 });
-    const onA = await batchedEvents(page, address);
+    const onA = await batchedEvents(page, b.ref, app);
     const deltas = onA.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta');
     const onB = (await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: app, afterSeq: null, limit: null })).events;
-    const batchIds = await page.evaluate(() => [...new Set((window as unknown as { __remote: { appSessionId: string }[] }).__remote.map((b) => b.appSessionId))]);
+    const batchIds = [...new Set((await keptBatches(page)).map((k) => `${k.machine ?? 'this Mac'}: ${k.appSessionId}`))];
     const said = () => `A's batches for ${address}: ${onA.map((e) => e.kind).join(', ')}\nthe sessions A's batches named: ${batchIds.join(', ')}\nB's events: ${onB.map((e) => e.kind).join(', ')}`;
     expect(deltas.map((e) => e.textDelta), `the reply streamed to A as its deltas\n${said()}`).toEqual(SECOND_DELTAS);
     await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
