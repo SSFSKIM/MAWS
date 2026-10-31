@@ -162,6 +162,46 @@ export class MessageQueue {
     });
   }
 
+  // P5 O16 M3 (Interfaces §D): the queue of a process an engine host adopts, which lives on. The stored queue as the old
+  // manager last saved it, nothing settled as an exit would (its released prompts run in the same process, its pending
+  // steers wait in the same engine queue); `unended`, the steers this launch wrote that its journal does not end, so its
+  // exit still abandons them; a `submitting` entry whose frame the journal never shows written (`written`, the user
+  // frames' uuids it holds) is the uncertain head of a paused queue, as at a recovery, since its write never happened.
+  // No `recovered` row: this launch's own first recovery wrote it.
+  async adopt(evidence: { written: ReadonlySet<string>; unended: readonly MessageUuid[] }): Promise<void> {
+    await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
+      const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
+      if (this.exitedUnloaded) return;
+      this.paused = loaded.paused;
+      this.releasePaused = this.paused;
+      this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null;
+      this.steers = loaded.steers ?? [];
+      this.withdrawn = loaded.withdrawn ?? [];
+      for (const uuid of evidence.unended) this.unended.add(uuid);
+      const uncertain: QueueEntry[] = [];
+      const kept: QueueEntry[] = [];
+      for (const entry of loaded.entries) {
+        if (entry.state === 'submitting' && (entry.messageUuid === null || !evidence.written.has(entry.messageUuid))) {
+          this.transition('uncertain', { queueId: entry.queueId, messageUuid: entry.messageUuid });
+          uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false });
+          this.notice(`queue:uncertain:${entry.queueId}`, 'A message may not have been delivered while the engine host restarted. Check the transcript, then resume the queue to send it or remove it.');
+          continue;
+        }
+        if (entry.state === 'released') this.started.add(entry.queueId);
+        kept.push(entry);
+      }
+      this.entries = [...uncertain, ...kept];
+      this.loaded = true;
+      if (uncertain.length > 0 && !this.paused) this.pauseFor('uncertain');
+      if (loaded.corrupt !== null) {
+        if (!this.paused) this.pauseFor('state_corrupt');
+        this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session went on without them.`);
+      }
+      await this.persist();
+      this.deps.onPauseChange?.(this.releasePaused);
+    });
+  }
+
   async send(content: SendContent): Promise<{ entry: QueueEntry; disposition: 'sent' | 'queued' }> {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');

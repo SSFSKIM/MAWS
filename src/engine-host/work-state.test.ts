@@ -319,6 +319,20 @@ describe('an adopted process seeded from its records', () => {
     expect(work.snapshot().unknown).toBe('dirty');
   });
 
+  // P5 O16 M3 (D23, D32): a gap in the replay loses what the journal would have told; the crons wait for the next Stop,
+  // the tasks for the next snapshot (the one a re-initialize sends, M0's question 3)
+  it('a gap makes both parts unknown again: the tasks until a snapshot, the crons until the next Stop', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [cron('a')], toolSinceStop: false }, []);
+    work.tasksChanged();
+    work.gap();
+    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: 'adopted_gap' });
+    work.tasksChanged();
+    expect(work.snapshot().unknown).toBe('adopted_gap');
+    work.stopped([], []);
+    expect(work.snapshot()).toEqual({ crons: [], unknown: null });
+  });
+
   it('only an adopted process takes it', () => {
     const work = state('resumed');
     work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, []);

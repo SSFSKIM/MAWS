@@ -97,6 +97,17 @@ export class BashMode {
     }
   }
 
+  // P5 O16 M3 (Interfaces §D; D24): one row of a launch's journal, folded by an adopter: a `bash_command` the old manager
+  // wrote is running again until its output is read, and the output the journal holds ends it. Nothing is written: the
+  // echo needs a ready session, which a fold never is, so the old manager's own echo row stands.
+  restore(row: { direction: string; frame: unknown }): void {
+    const f = (row.frame ?? {}) as { type?: unknown; command?: unknown; uuid?: unknown };
+    if (row.direction === 'out' && f.type === 'bash_command' && typeof f.command === 'string' && typeof f.uuid === 'string') {
+      this.pending.push({ uuid: f.uuid as MessageUuid, command: f.command, inputSeen: false, timer: null });
+      this.running.push({ uuid: f.uuid as MessageUuid, command: f.command, inputSeen: false });
+    } else if (row.direction === 'in') this.observe(f);
+  }
+
   processExited(): void {
     for (const entry of [...this.pending]) this.drop(entry);
     this.running.length = 0; // C12: an exited process runs nothing

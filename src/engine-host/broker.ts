@@ -69,9 +69,37 @@ export class PermissionBroker {
   private readonly tombstones = new Map<string, RetiredReason>(); // retired items keep their id and reason only, the last TOMBSTONE_LIMIT (the process never exits on its own)
   private lostAtAccept = 0;
   private readonly now: () => string;
+  private restoringAt: string | null = null; // P5 O16 M3: a journal row being folded (its time), when nothing is told
 
   constructor(private readonly deps: BrokerDeps) {
-    this.now = deps.now ?? (() => new Date().toISOString());
+    const now = deps.now ?? (() => new Date().toISOString());
+    this.now = () => this.restoringAt ?? now();
+  }
+
+  // P5 O16 M3 (Interfaces §D; D24): one row of a launch's journal, folded by an adopter before it consumes anything: the
+  // requests and their answers as the old manager journaled them, so the items the human had not answered are pending
+  // here again (the engine's redelivery at the re-initialize is a re-delivery, ignored by id), with no meta row written
+  // and no attention published. An answer the journal holds delivered its item, as its flushed row did live.
+  restore(row: { direction: string; at: string; frame: unknown }): void {
+    this.restoringAt = row.at;
+    try {
+      const f = (row.frame ?? {}) as Frame & { request_id?: unknown; response?: { request_id?: unknown } };
+      if (row.direction === 'in') {
+        if (f.type === 'control_request') {
+          const parsed = ControlRequestFrameSchema.safeParse(f);
+          if (parsed.success) this.accept(parsed.data);
+        }
+        this.observe(f);
+      } else if (row.direction === 'out' && f.type === 'control_response') {
+        const entry = this.items.get(String(f.response?.request_id));
+        if (entry?.attention.state === 'pending') {
+          entry.deliveredAt = row.at;
+          this.setState(entry, 'delivered', row.at);
+        }
+      }
+    } finally {
+      this.restoringAt = null;
+    }
   }
 
   // Pending items and delivered ones: what process exit would lose (`EngineSessionStatus.pendingRequests`).
@@ -118,7 +146,7 @@ export class PermissionBroker {
       this.lostAtAccept += 1;
       return;
     }
-    if (shaped.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(req.request.dialog_kind))) {
+    if (shaped.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(req.request.dialog_kind)) && this.restoringAt === null) {
       this.deps.meta({ event: 'notice', level: 'warning', key: `dialog:undeclared:${requestId}`, text: `The engine asked for a "${String(req.request.dialog_kind)}" dialog, which MAWS did not declare; it stays pending.` });
     }
     this.emit();
@@ -271,6 +299,7 @@ export class PermissionBroker {
   }
 
   private emit(): void {
+    if (this.restoringAt !== null) return; // P5 O16 M3: a fold tells nothing; the adopter publishes the list once
     this.deps.onAttention(this.snapshot());
   }
 }

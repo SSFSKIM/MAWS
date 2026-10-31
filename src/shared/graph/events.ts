@@ -67,6 +67,9 @@ export const EventBaseSchema = z.strictObject({
   seq: z.number().int().nullable(), // journal row the event derives from (X8); null for app-synthesised events
   agentId: AgentIdSchema.nullable(), // the child agent this belongs to, when known
   parentToolUseId: ParentToolUseIdSchema.nullable(), // non-null for child-agent traffic; the parent conversation is never joined
+  // P5 O16 M3 (holder design §3.3): rebuilt from the engine's transcript after a session host's ring lost the output it
+  // derives from (the journal's `meta transcript_reseed`); absent on every other event
+  reseeded: z.literal(true).optional(),
 });
 export type EventBase = z.infer<typeof EventBaseSchema>;
 

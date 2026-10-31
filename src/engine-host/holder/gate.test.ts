@@ -162,6 +162,22 @@ describe('health', () => {
     expect(r.health).toEqual(['healthy', 'unhealthy']);
   });
 
+  // P5 O16 M3 (D37, D53): an adopted row whose observer was seen on the process before the handover starts unhealthy,
+  // not absent, and is healthy again at its observer's fresh hello (the bridge reconnects on its 5 s backoff)
+  it('a row restored as seen before is unhealthy until its observer\'s hello, which is not a first sighting', async () => {
+    const seen: number[] = [];
+    const health: ObserverState[] = [];
+    const channel = gate.channel({ lineage: () => new Set(['eng-1']), pid: () => null, seen: () => void seen.push(1), seenBefore: true });
+    channel.listen({ armed: () => {}, turn: () => 'proceed', health: (s) => void health.push(s) });
+    expect(channel.observer).toBe('unhealthy');
+    const o = await connect();
+    o.hello('eng-1');
+    await o.next('welcome');
+    expect(channel.observer).toBe('healthy');
+    expect(health).toEqual(['healthy']);
+    expect(seen).toEqual([]); // the state file already says so
+  });
+
   it('a connection that closes leaves the observer unhealthy until a reconnect’s hello; the reconnect replaces it', async () => {
     const r = row(['eng-1']);
     const first = await connect();

@@ -127,6 +127,45 @@ export async function startSessionHost(launchId: string, deps: SessionHostDeps):
   };
 }
 
+export class HostAdoptFailed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HostAdoptFailed';
+  }
+}
+
+// P5 O16 M3 (Interfaces §C and §D; D23, D26, D45): an engine host's adoption of a session host its predecessor left
+// running. Its `hello` (with the token the predecessor wrote beside it), then the writer's attach at the host's fence + 1
+// (the old writer, if it still lives, is fenced), then `read` from the checkpoint's frontier + 1 at once: the records
+// above it the journal already holds are skipped and counted, the rest handed on as any launch's are, and the replay's
+// end is the `host_caught_up` item, the session's barrier. A host with no engine to adopt (a launch that never
+// committed, a spawn that failed) is refused here.
+export async function adoptHosted(
+  entry: { holderId: string; pid: number; procStart: string; socket: string; appSessionId: string },
+  deps: SessionHostDeps & { token: string; checkpoint: { frontier: number; above: readonly number[] }; maxLineChars: number },
+): Promise<{ transport: EngineTransport; hello: Hello; fence: number }> {
+  const deadline = Date.now() + (deps.startMs ?? HOST_START_MS);
+  const hostGone = (): string | null => (isAlive(entry.pid) ? null : 'its process is gone');
+  const { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: hostGone, log: deps.log });
+  try {
+    if (hello.holderId !== entry.holderId) throw new HostAdoptFailed(`the socket answered as ${hello.holderId}, not ${entry.holderId}`);
+    if (hello.child === null) throw new HostAdoptFailed(`it holds no engine (${hello.state})`);
+    deps.onConnection?.(connection);
+    const fence = hello.fence + 1;
+    connection.send({ t: 'attach', role: 'writer', fence });
+    const attached = await connection.expect('attached', deadline);
+    const hosted = new HostedTransport(connection, {
+      plan: null, appSessionId: entry.appSessionId, token: deps.token, paths: { socket: entry.socket }, holderId: entry.holderId, hostPid: entry.pid, hostProcStart: entry.procStart, hostGone, deps, maxLineChars: deps.maxLineChars,
+      adopt: { fence, frontier: deps.checkpoint.frontier, above: deps.checkpoint.above, child: { pid: hello.child.pid, procStart: hello.child.procStart }, stdinAccepted: attached.stdinAccepted,
+        exit: hello.exit && { code: hello.exit.code, signal: hello.exit.signal as NodeJS.Signals | null } },
+    });
+    return { transport: hosted.transport, hello, fence };
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+}
+
 interface InFlight {
   offset: number;
   end: number;
@@ -161,13 +200,32 @@ class HostedTransport {
   private endSent = false;
   private reconnecting = false;
   private resolveExited!: (exit: Exit) => void;
+  private readonly skip = new Set<number>(); // P5 O16 M3: records an adoption found journaled above the frontier
+  private catchingUp = false; // P5 O16 M3: an adoption's first read, until its `caughtUp`
 
   constructor(
     connection: HostConnection,
-    private readonly o: { plan: LaunchPlan; appSessionId: string; token: string; paths: SessionHostPaths; holderId: string; hostPid: number; hostProcStart: string; hostGone: () => string | null; deps: SessionHostDeps; maxLineChars: number },
+    private readonly o: {
+      plan: LaunchPlan | null; appSessionId: string; token: string; paths: Pick<SessionHostPaths, 'socket'>; holderId: string; hostPid: number; hostProcStart: string; hostGone: () => string | null; deps: SessionHostDeps; maxLineChars: number;
+      // P5 O16 M3: an adoption of a running host (adoptHosted), attached at `fence`: its checkpoint, its child and offsets
+      adopt?: { fence: number; frontier: number; above: readonly number[]; child: { pid: number; procStart: string }; stdinAccepted: number; exit: Exit | null };
+    },
   ) {
     this.connection = connection;
-    this.frontier = new Frontier({ ack: (seq) => this.connection?.send({ t: 'ack', seq }) });
+    const adopt = o.adopt;
+    this.frontier = new Frontier({ start: adopt?.frontier ?? 0, ack: (seq) => this.connection?.send({ t: 'ack', seq }) });
+    if (adopt) {
+      // the records the journal holds above the frontier are not handed on again; the frontier counts them now
+      this.fence = adopt.fence;
+      this.lastDelivered = adopt.frontier;
+      this.child = { ...adopt.child };
+      this.nextOffset = adopt.stdinAccepted;
+      this.pendingExit = adopt.exit; // an engine that exited meanwhile: its exit follows the replay, as a reconnect's does
+      for (const seq of adopt.above) {
+        this.skip.add(seq);
+        this.frontier.journaled(seq);
+      }
+    }
     this.spawnOutcome = new Promise<void>((resolve, reject) => {
       this.settleSpawn = (error) => {
         this.spawnSettled = true;
@@ -195,7 +253,13 @@ class HostedTransport {
       journaled: (seq) => this.journaled(seq),
     };
     this.attachListeners(connection);
-    const { plan } = o;
+    if (adopt) {
+      this.settleSpawn(null); // the engine was spawned under the old manager
+      this.catchingUp = true;
+      connection.send({ t: 'read', fromSeq: adopt.frontier + 1 });
+      return;
+    }
+    const plan = o.plan!;
     connection.send({ t: 'read', fromSeq: 1 });
     connection.send({ t: 'launch', appSessionId: o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env });
     connection.send({ t: 'commit' });
@@ -216,6 +280,7 @@ class HostedTransport {
       // one read's records are contiguous: a first record past the head means the ring lost those before it (D45)
       if (event.seq > this.lastDelivered + 1) this.lostBefore(event.seq);
       this.lastDelivered = event.seq;
+      if (this.skip.delete(event.seq)) return; // P5 O16 M3: journaled by the old manager, counted in the frontier
       const line = cleanLine(event.data.toString('utf8'));
       if (line === null) this.journaled(event.seq); // D44: no row, and the frontier passes it
       else if (event.stream === 'out') this.frames.push({ ...parseStdoutLine(line), hseq: event.seq });
@@ -269,6 +334,11 @@ class HostedTransport {
       case 'caughtUp':
         // a loss no surviving record showed (the ring kept none of what was asked for): reported here instead
         if (message.gap !== null && message.gap > this.lastDelivered + 1) this.lostBefore(message.gap);
+        // P5 O16 M3: an adoption's replay is over: the session disposes of what the old manager left (its barrier)
+        if (this.catchingUp) {
+          this.catchingUp = false;
+          this.frames.push({ frame: null, raw: '', error: { kind: 'host_caught_up', message: `the session host's ring replayed through ${message.lastSeq}`, length: 0, typeGuess: null } });
+        }
         if (this.pendingExit) {
           const exit = this.pendingExit;
           this.pendingExit = null;
@@ -483,7 +553,7 @@ class HostedTransport {
         this.settleSpawn(null);
         return;
       }
-      if (hello.state === 'ready') {
+      if (hello.state === 'ready' && this.o.plan !== null) {
         const { plan } = this.o;
         if (hello.appSessionId === null) connection.send({ t: 'launch', appSessionId: this.o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env });
         connection.send({ t: 'commit' });

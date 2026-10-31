@@ -42,6 +42,8 @@ import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalize
 import type { SafeguardVerdict } from '@shared/graph/enums';
 import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
+import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
+import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
 
 export interface NormalizerWarning {
@@ -88,6 +90,9 @@ export interface NormalizerState {
   // step after it in place of a request (a final message): the turn's result then reads the made-up answer, and the
   // turn's reply is the message
   lastMessage: { text: string | null; final: boolean };
+  // P5 O16 M3 (D23): the transcript records a gap's reseed showed (`meta transcript_reseed`), by uuid; the same message
+  // read later from the stream is shown already, so it yields nothing again
+  reseeded: Set<string>;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -128,6 +133,7 @@ export class Normalizer {
       openAsks: new Set(), // E1
       subagentMawsUses: new Set(), // P2-C3
       lastMessage: { text: null, final: false }, // P4-R7z
+      reseeded: new Set(), // P5 O16 M3
     };
   }
 
@@ -174,6 +180,8 @@ export class Normalizer {
 
   private pushIn(row: JournalRow, out: Emitter): void {
     const frame = parseStdoutFrame(row.frame);
+    const uuid = (frame as { uuid?: unknown }).uuid;
+    if ((frame.type === 'assistant' || frame.type === 'user') && typeof uuid === 'string' && this.state.reseeded.has(uuid)) return; // P5 O16 M3: shown by its reseed
     const sessionId = (frame as { session_id?: unknown }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.state.sessionId = sessionId as SessionId;
     const lane = laneOf(frame);
@@ -632,8 +640,27 @@ export class Normalizer {
         }
         return;
       // P2-C end
+      // P5 O16 M3 (D23; holder design §3.3): output a session host's ring lost before an engine host read it, restored from
+      // the engine's own transcript: each record's events as the disk reader maps them (fs/backfill.ts), ids and seq this
+      // row's, marked `reseeded`; stream events and tool progress inside the gap are not in a transcript. The lanes'
+      // streaming state is reset, so the next message start re-anchors it.
+      case 'transcript_reseed': {
+        const ctx = createBackfillContext({ sessionId: this.state.sessionId ?? ('unknown' as SessionId), agent: null });
+        for (const raw of Array.isArray(meta.rows) ? meta.rows : []) {
+          const parsed = TranscriptRecordSchema.safeParse(raw);
+          if (!parsed.success || typeof parsed.data.uuid !== 'string') continue;
+          this.state.reseeded.add(parsed.data.uuid);
+          for (const event of recordToEvents(parsed.data, ctx)) {
+            const payload: Partial<SessionEvent> = { ...event };
+            for (const key of ['id', 'sessionId', 'seq', 'at', 'agentId', 'parentToolUseId'] as const) delete payload[key]; // the base this row restamps
+            out.emit(payload as EventPayload, { agentId: event.agentId, parentToolUseId: event.parentToolUseId }, { at: event.at, reseeded: true });
+          }
+        }
+        this.state.streaming.clear();
+        return;
+      }
       default:
-        return; // spawn, relay_health, initialize, status_check, the normaliser's own warnings, and the probe's notes
+        return; // spawn, relay_health, initialize, status_check, host_attach, the normaliser's own warnings, and the probe's notes
     }
   }
 }
@@ -658,11 +685,13 @@ class Emitter implements EventSink {
     this.sessionId = () => state.sessionId ?? ('unknown' as SessionId);
   }
 
-  emit(payload: EventPayload, attribution: Attribution | null): void {
+  // P5 O16 M3: `restored`, an event a gap's reseed rebuilt from the transcript (its record's time, `reseeded: true`)
+  emit(payload: EventPayload, attribution: Attribution | null, restored?: { at: string; reseeded: true }): void {
     const id = `${this.appSessionId}:${this.launchId}:${this.row.seq}:${this.events.length}` as EventId;
     this.events.push({
-      id, sessionId: this.sessionId(), at: this.at, seq: this.row.seq,
+      id, sessionId: this.sessionId(), at: restored?.at ?? this.at, seq: this.row.seq,
       agentId: attribution?.agentId ?? null, parentToolUseId: attribution?.parentToolUseId ?? null,
+      ...(restored && { reseeded: true }),
       ...payload,
     } as SessionEvent);
   }

@@ -1,5 +1,6 @@
 // The control channel (charter §4.2; C3 execution document, Interfaces "Control channel"): request/response
-// correlation over the control envelopes with host-minted ids `${launchId}-${n}`, per-class timeouts, cancellation,
+// correlation over the control envelopes with host-minted ids `${launchId}-${n}` (an adopted writer's
+// `${launchId}-${fence}-${n}`, P5 O16 M3), per-class timeouts, cancellation,
 // and a late table so a response that arrives after its deadline is reconciled rather than treated as unexpected.
 // The client is not the wire's reader: the session's read loop journals every stdout frame and feeds it to
 // `observe()`, so the journal row precedes any correlation. Every `out` frame the client authors goes through the
@@ -87,12 +88,16 @@ export class ControlClient {
   // their empty answer failing its schema is expected and journaled as that meta row, so it is not warned
   private readonly standIns = new Set<string>();
   readonly writer: OutboundWriter;
+  private readonly prefix: string; // P5 O16 M3 (D26): `${launchId}` at fence 1, `${launchId}-${fence}` past it
 
   // `writer`: the process's shared OutboundWriter (the session passes the one its read loop gates on); by default
-  // the client makes its own over the transport and sink.
-  constructor(transport: EngineTransport, journal: JournalSink, readonly launchId: string, opts: { warn?: (message: string) => void; writer?: OutboundWriter } = {}) {
+  // the client makes its own over the transport and sink. P5 O16 M3 (D26): `fence`, the session host writer fence the
+  // client writes under; an adopted writer's (past 1) names its requests `${launchId}-${fence}-${n}`, so a late answer
+  // to the old manager's `${launchId}-${n}` never matches one of its own (logged and dropped as any unknown response).
+  constructor(transport: EngineTransport, journal: JournalSink, readonly launchId: string, opts: { warn?: (message: string) => void; writer?: OutboundWriter; fence?: number } = {}) {
     this.warn = opts.warn ?? ((message) => console.warn(`[engine-host] ${message}`));
     this.writer = opts.writer ?? new OutboundWriter(transport, journal);
+    this.prefix = (opts.fence ?? 1) > 1 ? `${launchId}-${opts.fence}` : launchId;
   }
 
   get pending(): number {
@@ -127,7 +132,7 @@ export class ControlClient {
   }
 
   private async exchange(subtype: string, payload: Record<string, unknown>, opts: RequestOptions & { klass?: Exclude<RequestClass, 'human'> }): Promise<{ envelope: ResponseEnvelope & { subtype: 'success' }; requestId: RequestId; standIn: boolean }> {
-    const requestId = `${this.launchId}-${++this.counter}` as RequestId;
+    const requestId = `${this.prefix}-${++this.counter}` as RequestId;
     if (this.closed !== null) throw new ControlError(subtype, requestId, `${subtype} not sent: ${this.closed}`, 'exited');
     if (opts.signal?.aborted) throw new ControlCancelled(subtype, requestId); // never journaled or written: a mutation must not run after the caller heard "cancelled"
     const frame: StdinFrame = { type: 'control_request', request_id: requestId, request: { subtype, ...payload } };

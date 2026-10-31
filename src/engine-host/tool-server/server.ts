@@ -60,6 +60,10 @@ export function defineMawsTool(name: MawsToolName, call: McpToolDefinition['call
   return { ...entry, call };
 }
 
+// P5 O16 M3 (holder design §3.3; Interfaces §D): the answer to a `maws` tool call the old manager left running when its
+// engine host stopped. Never a retryable error: the call's effect may have completed.
+export const ORPHANED_CALL_TEXT = "MAWS's engine host restarted while this tool ran. Its result is unknown and its effect may have completed; check before retrying.";
+
 export const JSONRPC_INVALID_REQUEST = -32600;
 export const JSONRPC_METHOD_NOT_FOUND = -32601;
 const FALLBACK_PROTOCOL_VERSION = '2025-11-25'; // what 2.1.290 offers (E0a seq 5), for a client that names none
@@ -134,6 +138,14 @@ export class MawsToolServer {
       default:
         this.error(requestId, id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${message.method}`);
     }
+  }
+
+  // P5 O16 M3: a `tools/call` an earlier engine host dispatched and never answered (its result unknown): answered with
+  // ORPHANED_CALL_TEXT as a tool error, never run again.
+  orphaned(req: ControlRequestFrame): void {
+    const message = readMcpMessage(req.request);
+    if (message.kind !== 'request') return this.accept(req); // not a call: answered as any request (D36)
+    this.result(req.request_id as RequestId, message.id, toolError(ORPHANED_CALL_TEXT));
   }
 
   // The engine withdrew the request (`control_cancel_request`): the call's signal aborts and nothing is answered.

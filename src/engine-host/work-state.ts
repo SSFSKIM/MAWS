@@ -70,6 +70,13 @@ export class WorkState {
     if (tasks !== 'unknown') this.tasksUnknown = null;
   }
 
+  // P5 O16 M3 (D23, D32): output the adopter could not replay (the ring had dropped it): the crons are unknown until the
+  // next Stop and the tasks until the next snapshot, whatever the records said.
+  gap(): void {
+    this.crons = { state: 'unknown', why: 'adopted_gap', list: this.crons.list };
+    this.tasksUnknown = 'adopted_gap';
+  }
+
   // What the state file keeps, written at each Stop and each cron tool.
   cronRecord(): CronRecord {
     return { sessionCrons: copy(this.crons.list), toolSinceStop: this.crons.state !== 'known' };

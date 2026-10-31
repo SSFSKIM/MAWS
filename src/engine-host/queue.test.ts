@@ -413,6 +413,34 @@ describe('queue submission survives a crash around delivery', () => {
     expect(t.rows).toEqual([]);
   });
 
+  // P5 O16 M3 (Interfaces §D): an adopted process lives on, so nothing of its queue settles as an exit would
+  it('adopted: a released entry stays released and its turn.ended retires it and releases the head; a submitting entry the journal shows written stays, one it never shows is the uncertain head', async () => {
+    const WRITTEN = '66666666-6666-4666-8666-666666666666' as MessageUuid;
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(ID, { entries: [
+      entry({ queueId: 'q-rel', state: 'released', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' }),
+      entry({ queueId: 'q-wr', state: 'submitting', messageUuid: WRITTEN, submittedAt: '2026-09-28T10:00:02.000Z' }),
+      entry({ queueId: 'q-next', content: 'next' }),
+    ], paused: false });
+    const t = await harness({ store, recovered: false });
+    t.h.turn = true;
+    await t.queue.adopt({ written: new Set([SUBMITTED, WRITTEN]), unended: [] });
+    expect(t.queue.state.entries.map((e) => [e.queueId, e.state])).toEqual([['q-rel', 'released'], ['q-wr', 'submitting'], ['q-next', 'queued']]);
+    expect(t.rows.filter((r) => r.event === 'queue' && r.action === 'recovered')).toEqual([]); // the launch's own recovery wrote it
+    expect(notices(t.rows)).toEqual([]);
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [SUBMITTED, WRITTEN] }));
+    expect(t.writes).toHaveLength(1);
+    expect(t.writes[0]).toMatchObject({ message: { content: 'next' } });
+
+    const lost = new MemorySessionStateStore();
+    await lost.saveQueue(ID, { entries: [entry({ queueId: 'q-lost', state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
+    const u = await harness({ store: lost, recovered: false });
+    await u.queue.adopt({ written: new Set(), unended: [] });
+    expect(u.queue.state).toMatchObject({ paused: true, pauseReason: 'uncertain', entries: [{ queueId: 'q-lost', state: 'queued', uncertain: true }] });
+    expect(notices(u.rows)).toEqual(['queue:uncertain:q-lost']);
+  });
+
   it('remove drops an uncertain entry and writes nothing', async () => {
     const store = new MemorySessionStateStore();
     await store.saveQueue(ID, { entries: [entry({ state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });

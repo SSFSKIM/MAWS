@@ -18,7 +18,8 @@ export interface TransportProblem {
   // replay_*: the replay transport only (M2; debt wave 3). P5 O16 M2: host_lost and host_gap, the hosted transport only
   // (holder/transport.ts): its session host died with the session's process, or a reconnect to a live one found output
   // gone from its ring
-  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'stalled_write' | 'replay_mismatch' | 'replay_unrecorded_read' | 'host_lost' | 'host_gap';
+  // P5 O16 M3: host_caught_up, an adoption's replay of the host's ring is over (not a problem: the session's barrier)
+  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'stalled_write' | 'replay_mismatch' | 'replay_unrecorded_read' | 'host_lost' | 'host_gap' | 'host_caught_up';
   message: string;
   length: number; // characters of the offending line (0 for a spawn error or a replay item)
   typeGuess: string | null; // the `"type"` a malformed line seemed to carry

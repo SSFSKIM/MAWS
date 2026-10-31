@@ -10,6 +10,7 @@ import type { SideExchange } from '@shared/side/question';
 import type { SideQuestionResponse } from '@shared/wire/control';
 
 const SESSION_ENDED = 'The session ended';
+const HOST_RESTARTED = 'The engine host restarted before the answer arrived'; // P5 O16 M3
 
 export class SideQuestionLog {
   private readonly entries: SideExchange[] = [];
@@ -51,6 +52,28 @@ export class SideQuestionLog {
   clear(): void {
     const pending = this.entries.filter((e) => e.state === 'pending');
     this.entries.splice(0, this.entries.length, ...pending);
+  }
+
+  // P5 O16 M3 (Interfaces §D; D24): one row of a launch's journal, folded by an adopter: each `side_question` the old
+  // manager wrote is an entry under its request id (the operation id, operations.ts), answered or failed by the
+  // engine's answer the journal holds.
+  restore(row: { direction: string; at: string; frame: unknown }): void {
+    const f = (row.frame ?? {}) as { type?: unknown; request_id?: unknown; request?: { subtype?: unknown; question?: unknown }; response?: { subtype?: unknown; request_id?: unknown; response?: unknown; error?: unknown } };
+    if (row.direction === 'out' && f.type === 'control_request' && f.request?.subtype === 'side_question' && typeof f.request_id === 'string') {
+      this.entries.push({ id: f.request_id, question: String(f.request.question ?? ''), state: 'pending', response: null, synthetic: false, error: null, askedAt: row.at, answeredAt: null });
+    } else if (row.direction === 'in' && f.type === 'control_response' && typeof f.response?.request_id === 'string') {
+      const entry = this.entries.find((e) => e.id === f.response!.request_id);
+      if (!entry || entry.state !== 'pending') return;
+      const value = (f.response.response ?? {}) as { response?: unknown; synthetic?: unknown };
+      if (f.response.subtype === 'success') Object.assign(entry, { state: 'answered', response: typeof value.response === 'string' ? value.response : null, synthetic: value.synthetic === true, answeredAt: row.at });
+      else Object.assign(entry, { state: 'failed', error: typeof f.response.error === 'string' ? f.response.error : 'the engine could not answer', answeredAt: row.at });
+    }
+  }
+
+  // P5 O16 M3: the fold ended; a question still pending was asked by the old manager, whose operation no one completes
+  // now (the engine's late answer names a request this writer never sent), so it reads failed and can be retried.
+  adopted(at: string): void {
+    for (const entry of this.entries) if (entry.state === 'pending') Object.assign(entry, { state: 'failed', error: HOST_RESTARTED, answeredAt: at });
   }
 
   processExited(at: string): void {

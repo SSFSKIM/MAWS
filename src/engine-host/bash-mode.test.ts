@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { replayedSession, scriptedSession } from './conformance/session-harness';
-import { bashCommand } from './bash-mode';
+import { BashMode, bashCommand } from './bash-mode';
 
 const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
 const flush = () => new Promise((r) => setImmediate(r));
@@ -68,5 +68,21 @@ describe('bash mode echo and receipt', () => {
     await flush();
     await s.session.bash('pwd');
     expect(s.transport.writes.at(-1)).toMatchObject({ type: 'bash_command', cwd: '/private/tmp/maws-session' });
+  });
+});
+
+// P5 O16 M3 (Interfaces §D; D24): an adopter folds the journal; a command the old manager wrote runs until its output
+// is read (the status's busy holds the release), and the fold writes nothing, the old manager's echo row standing.
+describe('bash mode restored from a journal', () => {
+  it('a written command is running until its replayed output, and nothing is written', () => {
+    const writes: unknown[] = [];
+    const mode = new BashMode({ cwd: () => '/w', write: async (f) => void writes.push(f), notice: () => {}, canWrite: () => false, log: () => {} });
+    mode.restore({ direction: 'out', frame: { type: 'bash_command', command: 'printf X', cwd: '/w', uuid: 'u-1' } });
+    expect(mode.hasPending).toBe(true);
+    mode.restore({ direction: 'in', frame: { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: '<bash-input>printf X</bash-input>' } } });
+    expect(mode.hasPending).toBe(true);
+    mode.restore({ direction: 'in', frame: { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: '<bash-stdout>X</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' } } });
+    expect(mode.hasPending).toBe(false);
+    expect(writes).toEqual([]);
   });
 });

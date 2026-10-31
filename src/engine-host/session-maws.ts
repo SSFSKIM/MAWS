@@ -22,7 +22,8 @@ import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue, Prepared } from './queue'; // P4-A3: Prepared
-import { AskAnswerMismatch } from './tool-server/ask';
+import { AskAnswerMismatch, pendingAskOf } from './tool-server/ask';
+import { toolCallOf } from '@shared/maws/rpc'; // P5 O16 M3
 import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
 import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
 import { HostBridge } from './tool-server/bridge';
@@ -185,6 +186,25 @@ export class SessionMaws {
   // P4-A2 (X35): the session's events, every lane: an artifact call's input as it streams, and the engine's results.
   observe(events: readonly SessionEvent[]): void {
     this.provisional.observe(events);
+  }
+
+  // P5 O16 M3 (Interfaces §D's table): the `maws` requests an earlier engine host left unanswered. A call of any tool but
+  // `ask` is answered with the orphan text (never run again); an `ask` call is re-raised from its own arguments under its
+  // request id (`accept`), so the human's answer settles the engine's call; an async ask the old manager acknowledged
+  // and the human has not answered is open again, its answers to go as a steer.
+  orphaned(req: ControlRequestFrame): void {
+    this.toolServer.orphaned(req);
+  }
+
+  restoreAsyncAsk(req: ControlRequestFrame, openedAt: string): void {
+    const params = ((req.request as { message?: { params?: unknown } }).message?.params ?? {}) as Record<string, unknown>;
+    const { args, toolUseId } = toolCallOf(params);
+    const ask = pendingAskOf(args, { toolUseId, requestId: req.request_id as RequestId, fromSubagent: false }, openedAt);
+    if (typeof ask === 'string') {
+      this.host.log(`the async ask of ${req.request_id} could not be restored: ${ask}`);
+      return;
+    }
+    this.askTable.open({ ...ask, blocking: false }, { blocking: false });
   }
 
   // The engine withdrew a tool call.

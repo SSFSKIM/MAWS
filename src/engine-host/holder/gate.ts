@@ -46,6 +46,9 @@ export interface GateRow {
   lineage(): ReadonlySet<string>; // every engine session id the process has carried
   pid(): number | null; // the engine's pid, null on a replay
   seen?(): void; // the first hello of this process
+  // P5 O16 M3 (D37, D53): an adopted row whose observer the state file says was seen on the process: unhealthy, never
+  // absent, until a fresh hello (which is then no first sighting)
+  seenBefore?: boolean;
 }
 
 export interface GateChannel {
@@ -71,7 +74,9 @@ class Row implements GateChannel {
   private silence: ReturnType<typeof setTimeout> | null = null;
   private lastHeard = 0;
 
-  constructor(readonly match: GateRow, private readonly silenceMs: number, private readonly now: () => number, private readonly dropped: (row: Row) => void) {}
+  constructor(readonly match: GateRow, private readonly silenceMs: number, private readonly now: () => number, private readonly dropped: (row: Row) => void) {
+    this.seenOnce = match.seenBefore === true;
+  }
 
   // Read against the clock, not only the silence timer: a synchronous step (the reap's, its `ps` slow) can outlast the
   // window before the timer gets to run, and its final read must see the silence.

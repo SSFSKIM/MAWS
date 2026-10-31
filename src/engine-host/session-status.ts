@@ -85,6 +85,9 @@ export class SessionStatusTracker {
   private readonly onCronRecord: (record: CronRecord) => Promise<void>;
   private recorded: string | null = null; // the cron record last written (or being written), as JSON; null after a failure
   private readonly log: (line: string) => void;
+  // P5 O16 M3 (D24, D38): an adopter's fold applies the journal's evidence in order and writes nothing; the next Stop or
+  // cron tool writes the record as it stands then
+  restoring = false;
 
   constructor(
     private readonly spec: LaunchSpec,
@@ -162,6 +165,9 @@ export class SessionStatusTracker {
   // input with the durable crons read at it
   launched(record: CronRecord | null): void {
     if (this.launchKind === 'resumed') this.work.resumedWith(record);
+    // P5 O16 M3 (D32, D38): an adopted process's seed, before the fold applies the journal's later evidence; its tasks
+    // are known from the journal's snapshots, or the re-initialize's
+    if (this.launchKind === 'adopted') this.work.adoptedWith(record, 'unknown');
     if (this.launchKind !== 'fresh') this.work.durableRead(this.durableCrons());
   }
 
@@ -189,12 +195,18 @@ export class SessionStatusTracker {
     this.work.termIgnored();
   }
 
+  // P5 O16 M3 (D23, D32): a gap in an adopted process's replay
+  gap(): void {
+    this.work.gap();
+  }
+
   descendantsRead(readable: boolean): void {
     this.work.descendantsRead(readable);
   }
 
   // The cron record, handed over when it differs from the one last written
   private record(): void {
+    if (this.restoring) return;
     const record = this.work.cronRecord();
     const json = JSON.stringify(record);
     if (json === this.recorded) return;

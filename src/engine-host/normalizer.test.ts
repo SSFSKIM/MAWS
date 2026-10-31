@@ -1025,3 +1025,28 @@ describe('queue.transition (P2-C)', () => {
   });
 });
 // P2-C end
+
+// P5 O16 M3 (D23; holder design §3.3): a gap's reseed. The transcript records the journal's `meta transcript_reseed`
+// carries yield the events the disk reader maps them to, with this row's ids and seq, marked `reseeded`; the same message
+// read later from the stream (by its uuid) yields nothing again; a rebuild from the journal reproduces both.
+describe('a gap reseeded from the transcript', () => {
+  const message = (content: unknown[]) => ({ id: 'msg_9', model: 'claude-sonnet-5', role: 'assistant', content });
+  const rows = [
+    { type: 'user', uuid: 'u-9', parentUuid: 'a-8', timestamp: '2026-09-28T10:01:00.000Z', sessionId: 'sess-1', message: { role: 'user', content: 'go on' } },
+    { type: 'assistant', uuid: 'a-9', parentUuid: 'u-9', timestamp: '2026-09-28T10:01:02.000Z', sessionId: 'sess-1', message: message([{ type: 'text', text: 'carried on' }]) },
+  ];
+
+  it('maps each record to the disk reader\'s events, ids and seq the row\'s, reseeded; the stream\'s copy of a reseeded message yields nothing', () => {
+    const n = make();
+    const events = feed(n, [metaRow({ event: 'transcript_reseed', rows })], 7);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.reseeded === true && e.seq === 7)).toBe(true);
+    expect(events.map((e) => e.id)).toEqual(events.map((_, i) => `app-1:LAUNCH01:7:${i}`));
+    expect(only(events, 'assistant.block.complete').map((e) => e.block)).toContainEqual(expect.objectContaining({ type: 'text', text: 'carried on' }));
+    expect(only(events, 'assistant.block.complete')[0]!.at).toBe('2026-09-28T10:01:02.000Z');
+    const again = feed(n, [inRow({ type: 'assistant', uuid: 'a-9', session_id: 'sess-1', parent_tool_use_id: null, message: { ...message([{ type: 'text', text: 'carried on' }]), stop_reason: 'end_turn', usage: {} } })], 8);
+    expect(again).toEqual([]);
+    const rebuilt = feed(make(), [metaRow({ event: 'transcript_reseed', rows })], 7);
+    expect(rebuilt).toEqual(events);
+  });
+});
