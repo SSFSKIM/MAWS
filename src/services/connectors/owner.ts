@@ -1,4 +1,5 @@
-// P3-HD M3c2: the owner's per-server rows and actions in H's Connectors sheet, main's half
+// P3-HD M3c2: the owner's per-server rows and actions in H's Connectors sheet, the service's half (P5 O4 M2: the
+// machine's, with the connectors)
 // (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, "OAuth custody and owner controls", M3 and Decision Log 19,
 // 21, 22, 29, 30 and 33). Trusted owner commands (`connectors.servers`, `.connect`, `.reconnect`, `.disconnect`), never a
 // page's: the portable ArtifactHost has no OAuth.
@@ -18,7 +19,8 @@
 //   OWNER_QUERY_DEADLINE_MS (or main's stop) and answers with what it has, each selection raced with that end (P3-F
 //   F-connectors 8); an action is acknowledged at once and runs under its own controller (its deadline, the host's
 //   loss and main's stop abort the provider's flow and the host's discoveries).
-//   Its end, and its start, are `connectors.serversChanged {artifactId}` to the windows that read rows: they read again.
+//   Its end, and its start, are `connectors.serversChanged {artifactId}` for each artifact some client read rows of
+//   (P5 O4 D9: to every client; a sheet reads again only for its own artifact).
 // - Disconnect takes a saved connection's id alone (no current source, no decryption). A retirement the host has not
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
 //   provider's, separate from `saved`), whether the owner's Disconnect or (P3-F F-connectors 7) a Reconnect's
@@ -33,12 +35,9 @@
 import { randomUUID } from 'node:crypto';
 import type { ConnectorGrant, ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
-import { eventChannel } from '@shared/ipc/schema';
 import {
   CONNECTOR_OWNER_FAILURES, type ConnectorOwnerAck, type ConnectorOwnerFailure, type ConnectorServerRow, type ConnectorServers, type DirectDiscoverAnswer, type DirectReason, type DirectSource,
 } from '@shared/ipc/schema/connectors';
-import { validateEventPayload } from '@shared/ipc/validate';
-import { pageOf } from '../ipc/clients';
 import type { DirectRoute } from './direct-route';
 import type { ConnectorOAuthConnectFailure, ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
@@ -62,6 +61,8 @@ export interface ConnectorOwnerDeps {
   direct: Pick<DirectRoute, 'resolveSource' | 'discover'>;
   oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'retirements' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
   grants(artifactId: string): Promise<ConnectorGrant[]>; // the artifact's durable grants
+  serversChanged(artifactId: string): void; // P5 O4 M2: `connectors.serversChanged`, to every client
+  track?<T>(action: Promise<T>): Promise<T>; // P5 O4 D17: an action in flight, counted until it ends
   log?: (line: string) => void;
 }
 
@@ -168,7 +169,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
   const connectionRows = new Map<string, string>(); // P3-HD M3c2 correction: connection id → the HTTP row key a listing tied it to
   let stopped = false;
 
-  // ── invalidation, to the windows that read rows ──
+  // ── invalidation, for the artifacts some client read rows of ──
 
   function listen(viewer: ClientRef, artifactId: string): void {
     let entry = viewers.get(viewer.id);
@@ -184,14 +185,9 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
 
   // A saved connection is one identity shared by every artifact naming it, so any change reaches every row read.
   function changed(): void {
-    for (const { viewer, artifacts } of viewers.values()) {
-      const page = pageOf(viewer); // O3 replaces this with an emit to one client through the root's events
-      if (!page || page.isDestroyed()) continue;
-      for (const artifactId of artifacts) {
-        const checked = validateEventPayload('connectors.serversChanged', { artifactId });
-        if (checked.ok) page.send(eventChannel('connectors.serversChanged'), checked.value);
-      }
-    }
+    const artifacts = new Set<string>();
+    for (const entry of viewers.values()) for (const artifactId of entry.artifacts) artifacts.add(artifactId);
+    for (const artifactId of artifacts) deps.serversChanged(artifactId);
   }
 
   function handleFor(artifactId: string, key: string, server: string, tools: string[]): string {
@@ -382,7 +378,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     // the action ends when its lifetime does, whether or not what it awaits has answered (told by the same signal)
     const cancelled: Last = { action: kind, ok: false, why: 'cancelled' };
     const work = run(kind, artifactId, handle.key, handle.server, tools, controller.signal, client).catch((): Last => ({ action: kind, ok: false, why: 'failed' }));
-    void within(work, controller.signal, cancelled)
+    void (deps.track ?? ((action) => action))(within(work, controller.signal, cancelled)
       .then((last) => {
         const ended: Last = controller.signal.aborted ? { action: kind, ok: false, why: timedOut ? 'timeout' : 'cancelled' } : last;
         remember(lastByKey, handle.key, ended);
@@ -392,7 +388,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         controller.signal.removeEventListener('abort', release);
         release();
         if (!stopped) changed();
-      });
+      }));
     return { accepted: true };
   }
 

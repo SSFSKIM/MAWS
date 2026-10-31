@@ -3,19 +3,15 @@
 // engine-only fixture and stay unchanged. Here the same service over a scripted engine host: route E first, route D
 // after it; engine preferred at selection; D's events, streaming, host-loss and stop wired; no engine ever launched,
 // acquired or listed on D's behalf.
-import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
-import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
-import { clientOf } from '../ipc/clients';
-import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
-import type { MainContext } from '../ipc/router';
-import { startConnectors } from '.';
-import { electronWindowShown } from '../client/window-shown';
+import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
+import { composeConnectors } from '.';
 import { createDirectRoute } from './direct-route';
 import { project, record } from '../../../test/support/builders';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 
 // P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
@@ -141,39 +137,25 @@ function fullStatus(session: ReturnType<typeof liveSession>) {
   };
 }
 
-class FakeSender extends EventEmitter {
-  readonly sent: [string, unknown][] = [];
-  isDestroyed = () => false;
-  send = (channel: string, payload: unknown) => void this.sent.push([channel, payload]);
-  constructor(readonly id: number) {
-    super();
-  }
-}
-class FakeWindow extends EventEmitter {
-  isVisible = () => true;
-  isMinimized = () => false;
-  isDestroyed = () => false;
-}
 
 let fake: FakeHost;
-let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
+let bus: FakeBus;
 let service: { stop(): void };
-let me: FakeSender;
+let me: EndableClientRef;
 let logged: string[];
 
 beforeEach(() => {
   vi.useFakeTimers();
   fake = new FakeHost();
   fake.grants.set(KEY, 'read');
-  handlers = new Map();
-  me = new FakeSender(7);
+  bus = fakeBus();
+  me = endableClientRef('page:7');
   logged = [];
-  service = startConnectors({
+  service = composeConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
-    register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
+    bus,
     view: ownView(),
     realpath: (path) => path,
-    windowShown: () => electronWindowShown(new FakeWindow() as never),
     port: { openExternal: vi.fn() },
     log: (line) => void logged.push(line),
     direct: createDirectRoute,
@@ -184,10 +166,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// A client's command through the bus (P5 O4 M2), its page's window reported shown first (D8)
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
-  const checked = validateCommandInput(name, input);
-  if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  return handlers.get(name)!(checked.value, { client: clientOf(me as never), target: TEST_MACHINE });
+  if (name === 'connectors.open') expect(await bus.main('connectors.windowShown', { shown: true }, me)).toEqual({ ok: true, value: { ok: true } });
+  const answer = await bus.invoke(name, input, me);
+  if (!answer.ok) throw new Error(`${name}: ${answer.error.message}`);
+  return answer.value;
 }
 const settle = async () => {
   for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(0);
@@ -282,9 +266,9 @@ describe('route D composed after route E', () => {
   it('invalidates the owner’s rows when the connection streams again after the host’s loss', async () => {
     await invoke('connectors.servers', { artifactId: ART, tools: [ROWS] });
     for (const listener of fake.stateListeners) listener({ state: 'restarting', pid: null, restarts: 1, revision: 2 });
-    expect(me.sent).toContainEqual([eventChannel('connectors.serversChanged'), { artifactId: ART }]);
-    me.sent.length = 0;
+    expect(bus.emittedOf('connectors.serversChanged')).toContainEqual({ artifactId: ART });
+    const before = bus.emittedOf('connectors.serversChanged').length;
     fake.startStreaming();
-    expect(me.sent).toEqual([[eventChannel('connectors.serversChanged'), { artifactId: ART }]]);
+    expect(bus.emittedOf('connectors.serversChanged').slice(before)).toEqual([{ artifactId: ART }]);
   });
 });

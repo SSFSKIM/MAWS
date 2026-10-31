@@ -8,9 +8,10 @@
 // a damaged file) is still listed by id and can be forgotten.
 //
 // The format line is the sealer's own (P5 O4 M1, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §A
-// and D21): Electron's safeStorage writes `maws-connector-oauth/1`, the machine's key file `/2`. A file whose line is
-// not this store's sealer's is unreadable in the same sense, read without asking the sealer: listed by id, failed
-// closed on by the provider, forgotten by `remove`.
+// and D21): Electron's safeStorage wrote `maws-connector-oauth/1`, the machine's key file writes `/2`. A file whose line
+// is not this store's sealer's is unreadable in the same sense, read without asking the sealer: listed by id, failed
+// closed on by the provider, forgotten by `remove`. P5 O4 M2 (Interfaces §C, D23): a format 1 file is replaced in place
+// by the one-time adoption (`adoptSealed`), only while it is still that format 1 file nobody forgot or saved over.
 //
 // - Fails closed: without the sealer, nothing is read or written and nothing is ever stored plain. A store with no record
 //   of its own sealer's format (empty, or only other sealers' files) is listed without touching the sealer.
@@ -31,35 +32,8 @@ import * as z from 'zod';
 import { OAuthClientInformationFullSchema, OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { atomicWriteFile } from '@shared/fs/atomic-write';
 import type { ConnectorOAuthGrant, ConnectorOAuthIdentity, ConnectorOAuthRecord } from '@shared/connectors/oauth-types';
-import { SEALED_FORMAT_V1, type AsyncSafeStorage, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
-
-// Electron's safeStorage through its asynchronous API only, each call after app readiness: the synchronous methods
-// can block main's event loop on a keychain prompt. Its files are format 1; it binds no connection id.
-export function electronOAuthSealer(
-  safeStorage: AsyncSafeStorage,
-  ready: () => Promise<unknown>,
-): ConnectorOAuthSealer {
-  return {
-    format: SEALED_FORMAT_V1,
-    async available() {
-      try {
-        await ready();
-        return await safeStorage.isAsyncEncryptionAvailable();
-      } catch {
-        return false;
-      }
-    },
-    async seal(text) {
-      await ready();
-      return safeStorage.encryptStringAsync(text);
-    },
-    async open(sealed) {
-      await ready();
-      const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(sealed);
-      return { text: result, reseal: shouldReEncrypt };
-    },
-  };
-}
+import type { ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { ConnectorOAuthRecordJsonSchema } from '@shared/ipc/schema/connectors';
 
 // `tooLarge`: a record that could not be read back within the file bound is never written.
 export type ConnectorOAuthStoreFailure = 'unavailable' | 'unreadable' | 'io' | 'stale' | 'full' | 'tooLarge';
@@ -93,39 +67,24 @@ export interface ConnectorOAuthStore {
   save(claim: ConnectorOAuthClaim, identity: ConnectorOAuthIdentity, grant: ConnectorOAuthGrant): Promise<ConnectorOAuthRecord>;
   // Forgets the connection; whether a record was there. Later saves under an earlier claim are refused.
   remove(connectionId: string): Promise<boolean>;
+  // P5 O4 M2 (D23): a record as this store would keep it, or null (its schema, its id, the SDK's metadata and client).
+  recordOf(value: unknown, connectionId: string): ConnectorOAuthRecord | null;
+  // The file text this store's sealer makes of `record` (`unavailable`, `tooLarge`), outside any lock.
+  sealText(record: ConnectorOAuthRecord): Promise<string>;
+  // The adoption's commit, under the write lock: `text` replaces the id's file only while the claim stands, no commit
+  // was made for the id in this process, and the file's first line is still `from` (`present`: another line; `absent`:
+  // no file; `stale`: a removal or a save since the claim).
+  adoptSealed(claim: ConnectorOAuthClaim, text: string, from: string): Promise<'adopted' | 'present' | 'absent' | 'stale'>;
 }
 
 export const OAUTH_STORE_RECORD_LIMIT = 256;
 const FILE_LIMIT_BYTES = 1_048_576;
+const HEADER_LIMIT_BYTES = 64; // past either format line
 const SUFFIX = '.sealed';
 const ConnectionId = z.uuid();
 
-const Text = z.string().min(1).max(16_384);
-const RecordSchema = z.strictObject({
-  version: z.literal(1),
-  connectionId: ConnectionId,
-  identity: z.strictObject({
-    requestUrl: z.string().min(1).max(8_192),
-    server: z.string().min(1).max(256),
-    scope: z.enum(['user', 'local', 'app']),
-    configPath: z.string().min(1).max(4_096),
-    entryPath: z.array(z.string().max(4_096)).max(8),
-  }),
-  issuer: z.string().min(1).max(8_192),
-  resource: z.string().min(1).max(8_192),
-  redirectUri: z.string().min(1).max(8_192),
-  authorizationServer: z.record(z.string(), z.unknown()),
-  client: z.record(z.string(), z.unknown()),
-  tokens: z.strictObject({
-    accessToken: Text,
-    refreshToken: Text.optional(),
-    tokenType: z.literal('Bearer'),
-    grantedScope: z.string().max(8_192).optional(),
-    expiresAt: z.number().int().nonnegative().optional(),
-    obtainedAt: z.number().int().nonnegative(),
-  }),
-  savedAt: z.number().int().nonnegative(),
-});
+// The record as the adoption hands it across (P5 O4 M2) with its version: one schema, so the two never drift.
+const RecordSchema = ConnectorOAuthRecordJsonSchema.extend({ version: z.literal(1) });
 
 function parseRecord(text: string, connectionId: string): ConnectorOAuthRecord | null {
   let json: unknown;
@@ -134,6 +93,10 @@ function parseRecord(text: string, connectionId: string): ConnectorOAuthRecord |
   } catch {
     return null;
   }
+  return validRecord(json, connectionId);
+}
+
+function validRecord(json: unknown, connectionId: string): ConnectorOAuthRecord | null {
   const parsed = RecordSchema.safeParse(json);
   if (!parsed.success || parsed.data.connectionId !== connectionId) return null;
   const metadata = OAuthMetadataSchema.safeParse(parsed.data.authorizationServer);
@@ -190,6 +153,28 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
     } catch (error) {
       if (error instanceof ConnectorOAuthStoreError) throw error;
       throw new ConnectorOAuthStoreError('unreadable');
+    } finally {
+      await handle.close();
+    }
+  }
+
+  // A file's first line as the format reads it, without a sealer; null when there is no regular file to read.
+  async function firstLine(path: string): Promise<string | null> {
+    let handle;
+    try {
+      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new ConnectorOAuthStoreError('io');
+    }
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) return '';
+      const buffer = Buffer.alloc(HEADER_LIMIT_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, HEADER_LIMIT_BYTES, 0);
+      return buffer.subarray(0, bytesRead).toString('utf8').split('\n')[0]!;
+    } catch {
+      throw new ConnectorOAuthStoreError('io');
     } finally {
       await handle.close();
     }
@@ -323,6 +308,31 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
       await ensureDirectory();
       await commit(claim, text);
       return record;
+    },
+    recordOf(value, connectionId) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+      return validRecord({ ...value, version: 1 }, connectionId);
+    },
+    async sealText(record) {
+      fileOf(record.connectionId);
+      return seal(record);
+    },
+    async adoptSealed(claim, text, from) {
+      const id = claim.connectionId;
+      fileOf(id);
+      return locked(async () => {
+        if (generationOf(id) !== claim.generation || (writes.get(id) ?? 0) !== 0) return 'stale';
+        const head = await firstLine(fileOf(id));
+        if (head === null) return 'absent';
+        if (head !== from) return 'present';
+        try {
+          await atomicWriteFile(fileOf(id), text);
+        } catch {
+          throw new ConnectorOAuthStoreError('io');
+        }
+        writes.set(id, (writes.get(id) ?? 0) + 1);
+        return 'adopted';
+      });
     },
     async remove(connectionId) {
       const file = fileOf(connectionId);

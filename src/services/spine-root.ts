@@ -5,7 +5,8 @@
 // channel and mods, the session service with intents, worktrees, prompt history, side threads, yield, observed facts
 // and the sweep, the engine host's configure relays, the design-system defaults relay, the library's derived index and
 // O9's lane A driver, in the order main composed them, and returns the one view staying code reads them through, and
-// its stop. P5 O3-E M2: and, as its last parts, the checkouts (./checkouts-root.ts).
+// its stop. P5 O3-E M2: and, as its last parts, the checkouts (./checkouts-root.ts). P5 O4 M2: and after them the
+// connectors (with the engine's MCP sign-in) and the owner's delivery, stopped before the checkouts.
 //
 // O3-A's refused run (contract O3X2; O3 Decision Log 11) is the root's: a run that does not hold `spine.lock` opens the
 // index unavailable and starts none of the parts that write the machine's files or launch a session (attention's core,
@@ -30,6 +31,11 @@ import type { MachineSettingsService } from '@shared/spine/machine-settings';
 import type { SpineView } from '@shared/spine/view';
 import { startArtifactDefaults } from './artifacts/defaults';
 import { startCheckouts } from './checkouts-root';
+import { startConnectors } from './connectors';
+import { fileKeyCustody } from './connectors/custody';
+import { listenLoopback, type ListenLoopback } from './connectors/oauth-callback';
+import { startSignIn } from './connectors/sign-in';
+import { startDelivery } from './delivery';
 import { uploadRootsOf } from './files/upload';
 import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
@@ -115,6 +121,7 @@ export interface SpineDeps {
   devRoot: string; // the development app root: a scenario's relative path
   home: string;
   enrollment?: () => Enrollment | null; // the machine's (mawsd: its endpoint's in process, D38); main's root has none
+  listenLoopback?: ListenLoopback; // P5 O4 M2: the OAuth callbacks' listener on this machine's loopback; tests give their own
 }
 
 export interface SpineRoot {
@@ -428,6 +435,28 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   const checkouts = startCheckouts({ view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);
+
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §F, §G; D7, D17): the connectors (the
+  // broker, routes E and D, MAWS's own OAuth over the machine's key file, the owner's rows and delivery, the agents'
+  // dataset refresh), the engine's MCP sign-in and the owner's Send to, over the in-process view, the counting bus, the
+  // engine host and the client port. Composed in a run refused the spine too (they write no spine file: the key and the
+  // sealed grants are under connectors/oauth/, as main sealed them beside a refused spine), after the checkouts and
+  // stopped before them, so a lease's work in flight is withdrawn before the files service stops. A release or a yield
+  // waits for an agent's refresh, an owner's action or a sign-in in flight; the commands' own runs are counted above.
+  const oauthDirectory = join(profile, 'connectors', 'oauth');
+  const listen = deps.listenLoopback ?? listenLoopback;
+  const connectors = startConnectors({ hosts, bus, view: spineView.view, port: deps.clientPort, custody: fileKeyCustody(oauthDirectory), directory: oauthDirectory, listen });
+  const signIn = startSignIn({
+    bus,
+    host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
+    onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
+    onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
+    port: deps.clientPort,
+    listen,
+  });
+  const delivery = startDelivery({ bus, hosts, connectors: connectors.delivery, shellEnv: () => engineEnv, port: deps.clientPort, artifactsRoot: join(profile, 'artifacts') });
+  parts.splice(parts.length - 1, 0, ['connectors', () => connectors.stop()], ['connector sign-in', () => signIn.stop()], ['delivery', () => delivery.stop()]);
+  settling.push(connectors, signIn);
 
   const root = allSettling(settling);
   return {

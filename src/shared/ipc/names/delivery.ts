@@ -3,3 +3,7 @@
 export const commands = ['delivery.status', 'delivery.connect', 'delivery.send', 'delivery.cancel', 'delivery.receipts'] as const;
 
 export const events = ['delivery.receipt'] as const;
+
+// P5 O4 M2 (Interfaces §G; D14): the machine's delivery of the export main took for `delivery.send`, main's alone to send
+// (a page never names a path)
+export const mainOnlyCommands = ['delivery.deliver'] as const;

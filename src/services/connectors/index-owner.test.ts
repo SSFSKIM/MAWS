@@ -1,20 +1,17 @@
-// P3-HD M3c2: main's connector service with MAWS's own OAuth supplied beside route D, as the application's root supplies
-// them (src/main/index.ts; Decision Log 14 and 29). The provider prepares route D's credentials and closes host epochs
+// P3-HD M3c2: the connector service with MAWS's own OAuth supplied beside route D, as its production composition
+// supplies them (./index.ts's `startConnectors`; Decision Log 14 and 29). The provider prepares route D's credentials and closes host epochs
 // through `connectors.directClose` with the floor it names; it hears the host's loss and main's stop; the owner's
 // server commands are registered and answer through the trusted handlers. H's engine-only service registers none.
-import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
-import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
-import { clientOf } from '../ipc/clients';
-import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
-import type { MainContext } from '../ipc/router';
-import { startConnectors, type ConnectorsDeps } from '.';
+import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
+import { composeConnectors, type ConnectorsComposition } from '.';
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorOAuthProvider } from './oauth-provider';
 import { project, record } from '../../../test/support/builders';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 
 // P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
@@ -80,31 +77,22 @@ class FakeHost {
   }
 }
 
-class FakeSender extends EventEmitter {
-  readonly sent: [string, unknown][] = [];
-  isDestroyed = () => false;
-  send = (channel: string, payload: unknown) => void this.sent.push([channel, payload]);
-  constructor(readonly id: number) {
-    super();
-  }
-}
 
 let fake: FakeHost;
-let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
+let bus: FakeBus;
 let service: { stop(): void };
-let me: FakeSender;
+let me: EndableClientRef;
 let closeHost: ((target: { connectionId: string; credentialEpoch?: number }) => Promise<boolean>) | null;
 let routeDeps: DirectRouteDeps | null;
 let provider: ConnectorOAuthProvider;
 let changeListeners: Set<() => void>;
 
-function start(over: Partial<ConnectorsDeps> = {}) {
-  service = startConnectors({
+function start(over: Partial<ConnectorsComposition> = {}) {
+  service = composeConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
-    register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
+    bus,
     view: ownView(),
     realpath: (path) => path,
-    windowShown: () => null,
     port: { openExternal: vi.fn() },
     log: () => {},
     direct: (deps) => {
@@ -122,8 +110,8 @@ function start(over: Partial<ConnectorsDeps> = {}) {
 beforeEach(() => {
   vi.useFakeTimers();
   fake = new FakeHost();
-  handlers = new Map();
-  me = new FakeSender(7);
+  bus = fakeBus();
+  me = endableClientRef('page:7');
   closeHost = null;
   routeDeps = null;
   changeListeners = new Set();
@@ -152,13 +140,11 @@ afterEach(() => {
 });
 
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
-  const checked = validateCommandInput(name, input);
-  if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never), target: TEST_MACHINE });
+  const answering = bus.invoke(name, input, me);
   for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
-  const value = await answer;
-  expect(validateCommandOutput(name, value).ok, `${name} output ${JSON.stringify(value)}`).toBe(true);
-  return value;
+  const answer = await answering;
+  if (!answer.ok) throw new Error(`${name}: ${answer.error.message}`);
+  return answer.value;
 }
 
 describe('MAWS’s own OAuth beside route D', () => {
@@ -186,17 +172,17 @@ describe('MAWS’s own OAuth beside route D', () => {
     expect(JSON.stringify(answer)).not.toContain('notes.example');
     expect(await invoke('connectors.disconnect', { connectionId: CONN })).toEqual({ accepted: true });
     expect(provider.disconnect).toHaveBeenCalledWith(CONN);
-    expect(me.sent).toContainEqual([eventChannel('connectors.serversChanged'), { artifactId: ART }]);
+    expect(bus.emittedOf('connectors.serversChanged')).toContainEqual({ artifactId: ART }); // P5 O4 D9: to every client
   });
 
-  // P3-HD M3c2 correction: a provider change (a flow opened, a refresh rejected) reaches the window that read rows
+  // P3-HD M3c2 correction: a provider change (a flow opened, a refresh rejected) reaches the clients, for the rows read
   it('turns the provider’s change notice into the targeted invalidation, and unsubscribes at stop', async () => {
     start();
     await invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] });
-    me.sent.length = 0;
+    const before = bus.emittedOf('connectors.serversChanged').length;
     for (const listener of changeListeners) listener();
     await vi.advanceTimersByTimeAsync(0);
-    expect(me.sent).toEqual([[eventChannel('connectors.serversChanged'), { artifactId: ART }]]);
+    expect(bus.emittedOf('connectors.serversChanged').slice(before)).toEqual([{ artifactId: ART }]);
     service.stop();
     expect(changeListeners.size).toBe(0);
   });
@@ -205,6 +191,6 @@ describe('MAWS’s own OAuth beside route D', () => {
     const oauth = vi.fn();
     start({ direct: undefined, oauth });
     expect(oauth).not.toHaveBeenCalled();
-    for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect']) expect(handlers.has(name), name).toBe(false);
+    for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect']) expect(bus.registered(), name).not.toContain(name);
   });
 });

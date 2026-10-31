@@ -286,6 +286,7 @@ export const MACHINE_EVENTS = [
   'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
   'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
+  'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

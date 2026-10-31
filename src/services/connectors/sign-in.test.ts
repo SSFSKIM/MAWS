@@ -32,8 +32,7 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
       return call(name as never, input as never);
     }) as never;
     const service = startSignIn({
-      register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never,
-      emit: (_name, event) => events.push(event),
+      bus: { register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never, emit: ((_name: string, event: ConnectorSignInChanged) => events.push(event)) as never },
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
@@ -110,6 +109,21 @@ function make(overrides: Partial<SignInDeps> = {}) {
 }
 
 describe('the sign-in operation', () => {
+  // P5 O4 M2 (D17): a release of the spine waits for a sign-in in flight; its end, whichever, settles it
+  it('is busy from a sign-in’s start until it ends, and settles then', async () => {
+    const t = make();
+    expect(t.signIn.busy()).toBe(false);
+    const { opId } = t.signIn.start({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, null);
+    expect(t.signIn.busy()).toBe(true);
+    let settled = false;
+    const settling = t.signIn.settled().then(() => void (settled = true));
+    await t.until(() => t.opened.length > 0, 'the browser');
+    expect(settled).toBe(false);
+    expect(t.signIn.cancel(opId)).toBe(true);
+    await settling;
+    expect(t.signIn.busy()).toBe(false);
+  });
+
   it('opens the engine’s URL through the asking client’s port, and fails when the port did not open it', async () => {
     const asked: unknown[] = [];
     const t = make({ port: { openExternal: async (client) => (asked.push(client), { opened: false, reason: 'only http, https and mailto links open outside MAWS' }) } });
@@ -457,8 +471,7 @@ describe('the sign-in service', () => {
       return { ok: true, value: { servers: [{ name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: 'https://u.example/mcp' }, { name: 'linear', scope: 'local', path: GLOBAL, transport: 'http', url: 'https://l.example/mcp' }] } };
     }) as never;
     const service = startSignIn({
-      register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never,
-      emit: (_name, event) => events.push(event),
+      bus: { register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never, emit: ((_name: string, event: ConnectorSignInChanged) => events.push(event)) as never },
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},

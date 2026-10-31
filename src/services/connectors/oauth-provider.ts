@@ -51,9 +51,16 @@
 //   demand. `stop` (main stopping) ends everything and refuses later work.
 // - P3-HD M3c2 correction: the owner's rows hear `onChange` (no payload) when something they show may differ, and read
 //   `withdrawnUnattributed` as this provider's own flag. Neither grants, fences or delivers anything.
+// - P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D10, D23): the provider is composed per spine load
+//   while the engine host's connection, and so the credential floors it keeps per connection, outlive the load. Epochs
+//   are numbered from the process's one counter, so a later load's first epoch is above any the host still holds, and
+//   `stop` closes in the host every connection this provider issued a credential for. `adopt` takes a grant Electron's
+//   safeStorage sealed (format 1), opened by the app, into the store under this provider's sealer: a conditional
+//   replacement of that file (the store's `adoptSealed`), never a second record for one identity.
 import { randomUUID } from 'node:crypto';
+import { SEALED_FORMAT_V1 } from '@shared/connectors/sealer';
 import type { ClientRef } from '@shared/ipc/client';
-import type { DirectSource } from '@shared/ipc/schema/connectors';
+import type { ConnectorAdoptRefusal, DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
 import { ConnectorOAuthError, type ConnectorOAuthFailure, type ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthStoreError, type ConnectorOAuthClaim, type ConnectorOAuthSaved, type ConnectorOAuthStore } from './oauth-store';
@@ -124,9 +131,15 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   onChange(listener: () => void): () => void;
   // Whether a connection was forgotten without its identity learned in this main's lifetime (Decision Log 33).
   withdrawnUnattributed(): boolean;
+  // P5 O4 M2 (D23): a format 1 record the app opened, re-sealed under this provider's store's sealer in place of its file.
+  adopt(connectionId: string, record: unknown): Promise<{ adopted: true } | { adopted: false; reason: ConnectorAdoptRefusal }>;
   hostLost(): void;
   stop(): void;
 }
+
+// P5 O4 D10: every provider of the process numbers its epochs from this one counter, so a spine load's first epoch is
+// above any an earlier load issued, which the engine host's floors may still hold.
+let processEpochs = 0;
 
 interface Epoch {
   readonly connectionId: string;
@@ -211,7 +224,6 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   const issuedHigh = new Map<string, { epoch: number; key: string }>(); // per connection: the highest epoch issued
   const retirements = new Map<string, Retirement>();
   let unattributed = false; // a connection was forgotten without its identity learned
-  let epochs = 0;
   let stopped = false;
   let attachment = new AbortController(); // the engine host's attachment; aborted when it ends, and at stop
   const lifetime = new AbortController(); // main's: aborted at stop
@@ -230,7 +242,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   const expiring = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt - now() <= OAUTH_REFRESH_MARGIN_MS;
   const expired = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt <= now();
   const epochOf = (slot: Slot, record: ConnectorOAuthRecord): Epoch => {
-    const credentialEpoch = ++epochs;
+    const credentialEpoch = ++processEpochs;
     issuedHigh.set(record.connectionId, { epoch: credentialEpoch, key: slot.key });
     return {
       connectionId: record.connectionId, credentialEpoch, accessToken: record.tokens.accessToken,
@@ -786,6 +798,39 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     withdrawnUnattributed: () => unattributed,
     // P3-HD M3c2 correction end
 
+    // P5 O4 M2 (D23): the claim is taken before anything awaits, so a Forget meanwhile stales the commit; a Connect under
+    // way for the identity, or another record of it, keeps the identity to one record (`present`)
+    async adopt(connectionId, value) {
+      if (stopped) return { adopted: false, reason: 'unavailable' };
+      const record = store.recordOf(value, connectionId);
+      if (record === null) return { adopted: false, reason: 'invalid' };
+      if (forgotten.has(connectionId) || discarding.has(connectionId)) return { adopted: false, reason: 'stale' };
+      const claim = store.claim(connectionId);
+      const slot = slots.get(keyOf(record.identity));
+      if (slot?.flow) return { adopted: false, reason: 'present' };
+      let text: string;
+      try {
+        const listed = await store.list();
+        if (listed.some((entry) => entry.state === 'sealed' && entry.connectionId !== connectionId && sameOAuthIdentity(entry.identity, record.identity))) return { adopted: false, reason: 'present' };
+        text = await store.sealText(record);
+      } catch (error) {
+        return { adopted: false, reason: error instanceof ConnectorOAuthStoreError && error.code === 'unavailable' ? 'unavailable' : error instanceof ConnectorOAuthStoreError && error.code === 'tooLarge' ? 'invalid' : 'io' };
+      }
+      if (slots.get(keyOf(record.identity))?.flow) return { adopted: false, reason: 'present' };
+      let committed: Awaited<ReturnType<ConnectorOAuthStore['adoptSealed']>>;
+      try {
+        committed = await store.adoptSealed(claim, text, SEALED_FORMAT_V1);
+      } catch {
+        return { adopted: false, reason: 'io' };
+      }
+      if (committed !== 'adopted') return { adopted: false, reason: committed };
+      // the identity's state is read afresh: nothing held for it while the file was unreadable stands
+      const held = slots.get(keyOf(record.identity));
+      if (held && !held.held && !held.flow && held.blocked === 'needsConnect') held.blocked = null;
+      notify();
+      return { adopted: true };
+    },
+
     hostLost() {
       attachment.abort();
       attachment = new AbortController();
@@ -800,6 +845,13 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     stop() {
       if (stopped) return;
       stopped = true;
+      // P5 O4 D10: the engine host outlives this load: every connection issued a credential here is closed there, at
+      // the highest epoch issued for it (unbounded and unanswered: the host's own floor is what holds)
+      for (const [connectionId, { epoch }] of issuedHigh) {
+        void Promise.resolve()
+          .then(() => deps.closeHost({ connectionId, credentialEpoch: epoch }))
+          .catch(() => log('connectors: a connection could not be closed in the host at the stop'));
+      }
       attachment.abort();
       lifetime.abort();
       for (const slot of slots.values()) {

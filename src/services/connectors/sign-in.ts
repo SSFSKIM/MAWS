@@ -31,6 +31,11 @@
 //                    server name (mcp_authenticate and the callback carry no scope), so a second flow replaces the
 //                    first and refuses its callback (findings-m4 3, 4).
 //
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §E, §F; D17): the machine's, composed with
+// the connectors by the spine's root: the listener binds this machine's loopback, the authorization URL opens through
+// the client port on the client that asked (OX4; `noClient` when it has gone), and a sign-in in flight keeps the part
+// busy, so a release waits for it (CALLBACK_MS bounds it).
+//
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
@@ -39,6 +44,8 @@ import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/po
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import type { ServicesBus } from '@shared/spine/bus';
+import { Work, type Settling } from '../work';
 import { entryRefusal } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 
@@ -85,7 +92,7 @@ export interface ConnectorConfiguration {
 }
 export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
-export interface SignIn {
+export interface SignIn extends Settling {
   start(input: ConnectorConfiguration & { path: string; appSessionId: string }, client: ClientRef | null): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
@@ -111,6 +118,7 @@ interface Operation {
   state: State;
   listener: LoopbackListener | null;
   timers: Set<NodeJS.Timeout>;
+  ended(): void; // P5 O4 D17: its end, for the part's settling
 }
 
 export function createSignIn(deps: SignInDeps): SignIn {
@@ -121,6 +129,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const configPollMs = deps.configPollMs ?? CONFIG_POLL_MS;
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
+  const flows = new Work(); // P5 O4 D17: each live operation, until it ends
   const byConnector = new Map<string, string>(); // a configured connector (connectorKey) → its live opId
   const byFlow = new Map<string, string>(); // the engine's flow (flowKey: the session and the server name) → its live opId
   const flowKey = (op: { appSessionId: string; name: string }) => `${op.appSessionId}\u0000${op.name}`;
@@ -147,6 +156,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       void op.listener?.close();
       op.listener = null;
       operations.delete(op.opId);
+      op.ended();
       if (byConnector.get(op.connector) === op.opId) byConnector.delete(op.connector);
       if (byFlow.get(flowKey(op)) === op.opId) byFlow.delete(flowKey(op));
     }
@@ -293,7 +303,9 @@ export function createSignIn(deps: SignInDeps): SignIn {
         const op = previous === undefined ? undefined : operations.get(previous);
         if (op) move(op, 'cancelled');
       }
-      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', listener: null, timers: new Set() };
+      let ended!: () => void;
+      void flows.track(new Promise<void>((resolve) => (ended = resolve)));
+      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', listener: null, timers: new Set(), ended };
       operations.set(op.opId, op);
       byConnector.set(connector, op.opId);
       byFlow.set(flowKey(op), op.opId);
@@ -314,14 +326,15 @@ export function createSignIn(deps: SignInDeps): SignIn {
       unsubscribe();
       for (const op of [...operations.values()]) move(op, 'cancelled');
     },
+    busy: () => flows.busy(),
+    settled: () => flows.settled(),
   };
 }
 
-// ---- main's wiring ------------------------------------------------------------------------------------------------
+// ---- the spine's wiring --------------------------------------------------------------------------------------------
 
 export interface SignInServiceDeps {
-  register: typeof import('../ipc/router').registerMainHandler;
-  emit(name: 'connectors.signInChanged', payload: ConnectorSignInChanged): unknown;
+  bus: Pick<ServicesBus, 'register' | 'emit'>;
   host: SignInHost;
   onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
@@ -329,8 +342,8 @@ export interface SignInServiceDeps {
   listen: ListenLoopback;
 }
 
-// `connectors.signIn` and `connectors.signInCancel`, over the sessions main hears ready from the engine host.
-export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
+// `connectors.signIn` and `connectors.signInCancel`, over the sessions the spine hears ready from the engine host.
+export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void } {
   const ready = new Map<string, string>(); // a ready session → its directory
   const goneListeners = new Set<(appSessionId: string) => void>();
   const gone = (appSessionId: string) => {
@@ -356,14 +369,16 @@ export function startSignIn(deps: SignInServiceDeps): { stop(): void } {
     host: deps.host,
     listen: deps.listen,
     port: deps.port,
-    emit: (event) => void deps.emit('connectors.signInChanged', event),
+    emit: (event) => void deps.bus.emit('connectors.signInChanged', event),
     ready: (appSessionId) => ready.has(appSessionId),
     onSessionGone: (listener) => (goneListeners.add(listener), () => goneListeners.delete(listener)),
     check,
   });
-  deps.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client));
-  deps.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
+  deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client));
+  deps.bus.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
+    busy: () => signIn.busy(),
+    settled: () => signIn.settled(),
     stop() {
       offStatus();
       offHost();

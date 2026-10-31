@@ -1,14 +1,21 @@
-// X2 `delivery.*` (P4-B5; docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7 and P4-B5): the owner's Send to, main's
-// alone, from the editor header's Send to and the library's Export menu. Two targets, no Claude turn for either: Notion
-// through MAWS's own connection (route D, P3-HD), Drive through the gws CLI the owner installed, which keeps its own
-// sign-in (MAWS holds no Google credential). A run is named by the window (`runId`) so it can be cancelled before it
-// writes; a receipt is main's record of a delivery made, for this main's life (memory only), shown in the header and the
-// library's row.
+// X2 `delivery.*` (P4-B5; docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7 and P4-B5): the owner's Send to, from
+// the editor header's Send to and the library's Export menu. Two targets, no Claude turn for either: Notion through
+// MAWS's own connection (route D, P3-HD), Drive through the gws CLI the owner installed, which keeps its own sign-in
+// (MAWS holds no Google credential). A run is named by the window (`runId`) so it can be cancelled before it writes; a
+// receipt is the delivery service's record of a delivery made, in memory, shown in the header and the library's row.
+//
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §G; D14, D15, D30): the machine's but its
+// export step. `delivery.status`, `.connect`, `.cancel` and `.receipts` are `machine`-owned (the delivery service runs
+// with the spine, so its receipts live for the spine's residency); `delivery.send` stays main's, exports as before and
+// hands the export's path to the machine's `delivery.deliver` (main-only), which admits it under the artifact's exports
+// directory, sends it and removes it.
 import * as z from 'zod';
 import { ARTIFACT_EXPORT_FORMATS } from '../../maws/tools';
 import type { CommandSpec } from './common';
+import { AbsolutePathSchema } from './settings';
 
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M2
 
 const ArtifactId = z.uuid();
 const RunId = z.uuid();
@@ -72,6 +79,8 @@ export const DeliverySendAnswerSchema = z
   .refine((answer) => (answer.ok ? answer.receipt !== undefined && answer.why === undefined : answer.receipt === undefined && answer.why !== undefined), 'a receipt, or why not');
 // `source`: the handle the window named is no longer kept (its sheet re-reads the state).
 export const DELIVERY_CONNECT_FAILURES = ['cancelled', 'timeout', 'refused', 'denied', 'busy', 'absent', 'needsSetup', 'none', 'source', 'unavailable', 'failed'] as const;
+// The owner's send, as the window asks it (`delivery.send`) and as main hands its export on (`delivery.deliver`).
+export const DeliverySendInputSchema = z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, format: z.enum(ARTIFACT_EXPORT_FORMATS), versionId: z.number().int().positive().optional(), board: z.string().min(1).max(64).optional(), destination: DeliveryDestinationSchema, source: SourceKey.optional() });
 export const DeliveryConnectAnswerSchema = z
   .strictObject({ ok: z.boolean(), why: z.enum(DELIVERY_CONNECT_FAILURES).optional(), message: Words.optional() })
   .refine((answer) => answer.ok === (answer.why === undefined), 'ok, or why not');
@@ -88,23 +97,29 @@ export type DeliveryConnectFailure = (typeof DELIVERY_CONNECT_FAILURES)[number];
 
 export const commands = {
   // What the sheet shows for the target now: Notion's connector found through the live sessions' reports, or gws's state.
-  'delivery.status': main(z.strictObject({ target: DeliveryTargetSchema, artifactId: ArtifactId }), DeliveryStatusSchema),
+  'delivery.status': machine(z.strictObject({ target: DeliveryTargetSchema, artifactId: ArtifactId }), DeliveryStatusSchema),
   // The owner's sign-in: Notion's Connect through MAWS's own OAuth (the browser's consent), or gws's own login (its URL
   // opened in the browser; the CLI keeps the sign-in). Answers when it ended; `delivery.cancel` ends it.
-  'delivery.connect': main(z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, source: SourceKey.optional() }), DeliveryConnectAnswerSchema),
+  'delivery.connect': machine(z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, source: SourceKey.optional() }), DeliveryConnectAnswerSchema),
   // The delivery: the shown artifact (a version's when named; a design's PNG, the board shown) exported in `format`, then
   // put where `destination` says. A `source` handle main no longer keeps is refused (`source`), never found again.
-  'delivery.send': main(
-    z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, format: z.enum(ARTIFACT_EXPORT_FORMATS), versionId: z.number().int().positive().optional(), board: z.string().min(1).max(64).optional(), destination: DeliveryDestinationSchema, source: SourceKey.optional() }),
+  'delivery.send': main(DeliverySendInputSchema, DeliverySendAnswerSchema),
+  // P5 O4 M2 (Interfaces §G; D14): main-only. The send's export, taken by the app (`exportPath`, an own-file export under
+  // `<profile>/artifacts/<artifactId>/exports/`, at `revision`, of the artifact titled `title`), delivered by the machine:
+  // admitted, sent and removed. A path outside the artifact's exports directory, a name outside the export grammar for
+  // `format`, a link on the way or no regular file answer `export` with nothing sent.
+  'delivery.deliver': machine(
+    DeliverySendInputSchema.extend({ exportPath: AbsolutePathSchema.max(4_096), revision: z.number().int().nonnegative(), title: z.string().max(2_000) }),
     DeliverySendAnswerSchema,
   ),
-  // Ends a run that has not written yet (a send already sent is not called back); `cancelled`: it was running.
-  'delivery.cancel': main(z.strictObject({ runId: RunId }), z.strictObject({ cancelled: z.boolean() })),
-  // The latest receipt of each artifact and target, this main's life.
-  'delivery.receipts': main(z.void(), z.strictObject({ receipts: z.array(DeliveryReceiptSchema).max(1_000) })),
+  // Ends a run that has not written yet (a send already sent is not called back); `cancelled`: it was running, or it was
+  // tombstoned before its delivery arrived (P5 O4 M2, D15).
+  'delivery.cancel': machine(z.strictObject({ runId: RunId }), z.strictObject({ cancelled: z.boolean() })),
+  // The latest receipt of each artifact and target, for the delivery service's life (the spine's residency, D30).
+  'delivery.receipts': machine(z.void(), z.strictObject({ receipts: z.array(DeliveryReceiptSchema).max(1_000) })),
 } as const satisfies Record<`delivery.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
-  // main's, to every window: a delivery made
+  // the machine's (P5 O4 M2), to every client: a delivery made
   'delivery.receipt': DeliveryReceiptSchema,
 } as const satisfies Record<`delivery.${string}`, z.ZodType>;

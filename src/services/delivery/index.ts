@@ -1,32 +1,46 @@
-// P4-B5: the owner's Send to, main's service (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7 and P4-B5; the
-// schema src/shared/ipc/schema/delivery.ts). The owner's two rules hold for both targets: a send takes no Claude turn
-// (no session is started, no prompt is sent), and MAWS holds no Google credential of its own.
+// P4-B5: the owner's Send to (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7 and P4-B5; the schema
+// src/shared/ipc/schema/delivery.ts). The owner's two rules hold for both targets: a send takes no Claude turn (no
+// session is started, no prompt is sent), and MAWS holds no Google credential of its own.
 //
-// - Notion: the shown artifact exported in Notion's enhanced Markdown (X31's `notion` dialect, a file of its own,
-//   removed once read) and made into a page by Notion's `notion-create-pages` through MAWS's own connection (route D,
-//   ../connectors/owner-delivery.ts), whose sign-in is the one route D seals; the host admits the write.
-// - Drive: the export in the owner's format uploaded by the gws CLI the owner installed (./gws.ts), run with the owner's
-//   login-shell environment; the CLI keeps its own sign-in, which its own login makes (MAWS opens the URL it prints).
-//   MAWS stores nothing of it.
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §G; D14, D15, D30, D38): the machine's,
+// composed by the spine's root over the connectors' owner delivery, but for the export, which stays the app's step until
+// O5: main's `delivery.send` exports and hands the file's path to `delivery.deliver` (main-only), which admits it only
+// as an own-file export of the artifact under `<profile>/artifacts/<artifactId>/exports/` (its name in the export
+// grammar for the format and revision, a regular file with no link below the profile), sends it and removes it,
+// whatever the answer. A path not admitted is not the delivery's to remove: it answers `export`, nothing sent.
+//
+// - Notion: the export in Notion's enhanced Markdown (X31's `notion` dialect) made into a page by Notion's
+//   `notion-create-pages` through MAWS's own connection (route D, ../connectors/owner-delivery.ts), whose sign-in is
+//   the one route D seals; the host admits the write.
+// - Drive: the export in the owner's format uploaded by the gws CLI the owner installed on this machine (./gws.ts), run
+//   with the login-shell environment the spine captured; the CLI keeps its own sign-in, which its own login makes (its
+//   URL opened on the asking client). MAWS stores nothing of it. A machine with no gws reads `absent` (D38), and a
+//   delivery to Drive there answers `absent`, sends nothing and removes the export.
 // - A run is the window's (`runId`): cancelled until it writes, never after (a request that may have reached the service
 //   is never called back, and a failure after it says so: `maybeSent`); its signal is read again after every await, the
-//   last read and the write one synchronous step. One run per artifact and target at a time.
-// - A located source is named back by its handle; one main no longer keeps is refused (`source`), never found afresh,
-//   so a send goes through the server the sheet showed or not at all.
-// - A receipt is main's memory for its life: the latest of each artifact and target, broadcast as it is made, for the
-//   header and the library's row. No delivery record persists.
+//   last read and the write one synchronous step. One run per artifact and target at a time. A cancel for a run the
+//   service does not know yet (main's hand-off is under way, D15) is a tombstone the run's start consumes, answering
+//   `cancelled` with nothing sent; tombstones have no expiry and are bounded, and a cancel for a run already ended
+//   answers false.
+// - A located source is named back by its handle; one the service no longer keeps is refused (`source`), never found
+//   afresh, so a send goes through the server the sheet showed or not at all.
+// - A receipt is held in memory for the service's life (the spine's residency, D30): the latest of each artifact and
+//   target, broadcast as it is made, for the header and the library's row. No delivery record persists.
 import { randomUUID } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { constants } from 'node:fs';
+import { open, readFile, realpath, rm } from 'node:fs/promises';
+import { basename, dirname, extname, join, normalize } from 'node:path';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
 import type { ClientRef } from '@shared/ipc/client';
-import type { ArtifactExportFormat } from '@shared/maws/tools';
-import type { CommandInput, CommandOutput, CommandResult, EventPayload } from '@shared/ipc/schema';
+import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DeliveryConnectAnswer, DeliveryFailure, DeliveryReceipt, DeliverySendAnswer, DeliveryStatus, DriveStatus, NotionStatus } from '@shared/ipc/schema/delivery';
+import type { ServicesBus } from '@shared/spine/bus';
 import type { DeliverySource, OwnerDelivery } from '../connectors/owner-delivery';
 import type { DirectSendAnswer } from '../connectors/direct-route';
-import type { registerMainHandler } from '../ipc/router';
+import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
+import type { SpineHosts } from '../spine-root';
 import { findGws, gwsLogin, gwsUpload, readGwsState, type GwsState } from './gws';
 import { NOTION_CONTENT_MAX_BYTES, NOTION_HOSTS, NOTION_TOOL, notionArguments, notionTitle, readNotionAnswer } from './notion';
 
@@ -47,7 +61,6 @@ const MIME: Record<ArtifactExportFormat, string> = {
   claude: 'application/zip',
 };
 
-type Export = (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => Promise<CommandOutput<'artifacts.export'>>;
 export interface GwsDriver {
   find: typeof findGws;
   state: typeof readGwsState;
@@ -56,17 +69,53 @@ export interface GwsDriver {
 }
 
 export interface DeliveryDeps {
-  register: typeof registerMainHandler;
-  emit(name: 'delivery.receipt', payload: EventPayload<'delivery.receipt'>): boolean;
-  exportArtifact: Export; // X31's export service, as the library exports
-  call(name: 'artifacts.get', input: CommandInput<'artifacts.get'>): Promise<CommandResult<'artifacts.get'>>; // the engine host's
+  bus: Pick<ServicesBus, 'register' | 'emit'>;
+  hosts: Pick<SpineHosts, 'dispatch'>; // the engine host's `artifacts.get`
   connectors: OwnerDelivery | null; // route D's owner delivery; null: no route D
-  shellEnv(): Promise<Record<string, string>>; // the owner's login-shell environment (the one capture main makes)
+  shellEnv(): Promise<Record<string, string>>; // the login-shell environment the spine captured (SpineDeps.engineEnv)
   port: Pick<ClientPort, 'openExternal'>; // the client port (OX4): gws's sign-in page, in the asking client's browser
+  artifactsRoot: string; // <profile>/artifacts: where `delivery.deliver` admits an export
   gws?: GwsDriver; // tests
   readFile?: (path: string) => Promise<string>; // tests: the Notion export's read
   now?: () => number;
   log?: (line: string) => void;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// The export's canonical path when `exportPath` is an own-file export of the artifact at `revision` in `format` under
+// its exports directory, with no link below the profile (the directory's real path is the artifact's own, and the file
+// opens as a regular file with no link on the way); null otherwise. Links above `artifactsRoot` are the profile's own
+// location, as the profile names it.
+export async function admitExport(artifactsRoot: string, request: { artifactId: string; format: ArtifactExportFormat; revision: number; exportPath: string }): Promise<string | null> {
+  const { artifactId, format, revision, exportPath } = request;
+  if (normalize(exportPath) !== exportPath || dirname(exportPath) !== join(artifactsRoot, artifactId, 'exports')) return null;
+  const name = basename(exportPath);
+  const exportId = /^\d+-[a-z]+-([0-9a-f-]{36})\.[a-z]+$/.exec(name)?.[1];
+  if (exportId === undefined || !UUID.test(exportId) || name !== artifactExportName(revision, format, exportId)) return null;
+  let directory: string;
+  try {
+    directory = await realpath(dirname(exportPath));
+    if (directory !== join(await realpath(artifactsRoot), artifactId, 'exports')) return null;
+    if (WALKED) await walk(directory);
+  } catch {
+    return null;
+  }
+  const canonical = join(directory, name);
+  let handle;
+  try {
+    handle = await open(canonical, constants.O_RDONLY | constants.O_NONBLOCK | NO_LINK);
+  } catch {
+    return null;
+  }
+  try {
+    await confirmOpened(handle.fd, canonical);
+    return (await handle.stat()).isFile() ? canonical : null;
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
 }
 
 interface Run {
@@ -122,6 +171,7 @@ function driveStatusOf(state: GwsState): DriveStatus {
 }
 
 export function startDelivery(deps: DeliveryDeps): { stop(): void } {
+  const { register, emit } = deps.bus;
   const gws: GwsDriver = deps.gws ?? { find: findGws, state: readGwsState, login: gwsLogin, upload: gwsUpload };
   const now = deps.now ?? (() => Date.now());
   const log = deps.log ?? ((line: string) => console.warn(`[delivery] ${line}`));
@@ -129,6 +179,8 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   const sources = new Map<string, DirectSource>(); // a located source's handle, the window's to name back
   const receipts = new Map<string, DeliveryReceipt>(); // by artifact and target
   const runs = new Map<string, Run>(); // by run id
+  const tombstones = new Set<string>(); // P5 O4 D15: runs cancelled before they began here, oldest first
+  const ended = new Set<string>(); // runs that began and ended here, oldest first: a late cancel of one is no tombstone
   const active = new Set<string>(); // artifact and target with a run under way
   const stopping = new AbortController(); // main's going: every run ends
   let stopped = false;
@@ -180,16 +232,26 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   const directOf = (found: DeliverySource | DirectSource): DirectSource => ('source' in found ? found.source : found);
 
   // ── runs ──
-  function begin(runId: string): Run | null {
-    if (stopped || runs.has(runId)) return null;
+  const bounded = (set: Set<string>, runId: string) => {
+    set.add(runId);
+    if (set.size > DELIVERY_RECEIPT_LIMIT) set.delete(set.values().next().value as string);
+  };
+  // `cancelled`: a cancel reached the service before the run did (its tombstone is consumed)
+  function begin(runId: string): Run | 'cancelled' | null {
+    if (tombstones.delete(runId)) return 'cancelled';
+    if (stopped || runs.has(runId) || ended.has(runId)) return null;
     const run: Run = { controller: new AbortController(), written: false };
     runs.set(runId, run);
     return run;
+  }
+  function end(runId: string): void {
+    if (runs.delete(runId)) bounded(ended, runId);
   }
   const signalOf = (run: Run) => AbortSignal.any([run.controller.signal, stopping.signal]);
 
   async function connect({ runId, target, artifactId, source }: CommandInput<'delivery.connect'>, client: ClientRef | null): Promise<DeliveryConnectAnswer> {
     const run = begin(runId);
+    if (run === 'cancelled') return { ok: false, why: 'cancelled' };
     if (!run) return { ok: false, why: 'busy' };
     const signal = signalOf(run);
     try {
@@ -224,15 +286,31 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       log(`the ${target} sign-in failed: ${words(error)}`);
       return { ok: false, why: signal.aborted ? 'cancelled' : 'failed' };
     } finally {
-      runs.delete(runId);
+      end(runId);
     }
   }
 
-  async function send(input: CommandInput<'delivery.send'>): Promise<DeliverySendAnswer> {
-    const { runId, target, artifactId, format, versionId, board, destination } = input;
+  // P5 O4 M2 (Interfaces §G; D14, D38): main's export, admitted, sent and then removed whatever the answer
+  async function deliver(input: CommandInput<'delivery.deliver'>): Promise<DeliverySendAnswer> {
+    const path = await admitExport(deps.artifactsRoot, input);
+    if (path === null) {
+      log(`an export handed over for ${input.target} was not admitted: nothing was sent`);
+      return failure('export');
+    }
+    try {
+      return await send(input, path);
+    } finally {
+      await rm(path, { force: true }).catch(() => log(`an export sent to ${input.target} was not removed`));
+    }
+  }
+
+  async function send(input: CommandInput<'delivery.deliver'>, path: string): Promise<DeliverySendAnswer> {
+    const { runId, target, artifactId, format, versionId, destination, revision, title } = input;
     const slot = `${artifactId}\0${target}`;
+    if (tombstones.delete(runId)) return failure('cancelled'); // P5 O4 D15: cancelled before it arrived
     if (active.has(slot)) return failure('busy');
     const run = begin(runId);
+    if (run === 'cancelled') return failure('cancelled');
     if (!run) return failure('busy');
     active.add(slot);
     const signal = signalOf(run);
@@ -242,15 +320,13 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       run.written = true;
       return true;
     };
-    let path: string | null = null;
     try {
-      const got = await deps.call('artifacts.get', { artifactId, prepare: false });
+      const got = (await deps.hosts.dispatch('engine-host', 'artifacts.get', { artifactId, prepare: false })) as CommandResult<'artifacts.get'>;
       if (signal.aborted) return failure('cancelled');
       if (!got.ok) return failure('unavailable');
-      const artifact = got.value.artifact;
-      if (!artifact) return failure('deleted');
+      if (!got.value.artifact) return failure('deleted');
       if (target === 'notion' && format !== 'md') return failure('invalid');
-      // Notion's connector, or gws, before anything is exported
+      // Notion's connector, or gws, before anything is sent (D38: no gws here is `absent`)
       let notion: DirectSource | null = null;
       let drive: { bin: string; env: Record<string, string> } | null = null;
       if (target === 'notion') {
@@ -269,21 +345,13 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
         if (state.state !== 'ready') return failure(state.state === 'failed' ? 'failed' : 'auth', state.state === 'failed' && state.message ? { message: state.message } : {});
         drive = { bin, env };
       }
-      let exported: CommandOutput<'artifacts.export'>;
-      try {
-        exported = await deps.exportArtifact({ artifactId, format, ownFile: true, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }) }, target === 'notion' ? { dialect: 'notion' } : undefined);
-      } catch (error) {
-        return signal.aborted ? failure('cancelled') : failure('export', { message: words(error) });
-      }
-      path = exported.path;
-      if (signal.aborted) return failure('cancelled');
-      const name = notionTitle(artifact.title);
-      const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision: exported.revision, ...(versionId !== undefined && { versionId }), destination });
+      const name = notionTitle(title);
+      const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision, ...(versionId !== undefined && { versionId }), destination });
       if (notion) {
         const content = await readExport(path);
         if (signal.aborted) return failure('cancelled');
         if (Buffer.byteLength(content) > NOTION_CONTENT_MAX_BYTES) return failure('tooLarge');
-        const args = notionArguments({ title: artifact.title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
+        const args = notionArguments({ title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
         if (!writes()) return failure('cancelled'); // from here the request may reach Notion: no cancel calls it back (route D admits it at its write)
         const answer = await deps.connectors!.send(notion, { artifactId, tool: NOTION_TOOL, arguments: args }, stopping.signal);
         if (!answer.ok) return notionFailure(answer);
@@ -310,8 +378,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       return failure('failed', { maybeSent: run.written });
     } finally {
       active.delete(slot);
-      runs.delete(runId);
-      if (path !== null) await rm(path, { force: true }).catch(() => log(`an export sent to ${target} was not removed`));
+      end(runId);
     }
   }
 
@@ -320,11 +387,11 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     receipts.delete(key);
     receipts.set(key, receipt);
     if (receipts.size > DELIVERY_RECEIPT_LIMIT) receipts.delete(receipts.keys().next().value as string);
-    deps.emit('delivery.receipt', receipt);
+    emit('delivery.receipt', receipt);
     return { ok: true, receipt };
   }
 
-  deps.register('delivery.status', async ({ target, artifactId }): Promise<DeliveryStatus> => {
+  register('delivery.status', async ({ target, artifactId }): Promise<DeliveryStatus> => {
     if (target === 'notion') return notionStatus(artifactId);
     try {
       return driveStatusOf((await driveState(deadline(DELIVERY_STATUS_DEADLINE_MS))).state);
@@ -332,20 +399,26 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       return { target: 'drive', state: 'failed', message: words(error) };
     }
   });
-  deps.register('delivery.connect', (input, { client }) => connect(input, client));
-  deps.register('delivery.send', (input) => send(input));
-  deps.register('delivery.cancel', ({ runId }) => {
+  register('delivery.connect', (input, { client }) => connect(input, client));
+  register('delivery.deliver', (input) => deliver(input));
+  register('delivery.cancel', ({ runId }) => {
     const run = runs.get(runId);
-    if (!run || run.written) return { cancelled: false };
-    run.controller.abort();
+    if (run) {
+      if (run.written) return { cancelled: false };
+      run.controller.abort();
+      return { cancelled: true };
+    }
+    if (stopped || ended.has(runId)) return { cancelled: false }; // ended: nothing is called back
+    bounded(tombstones, runId); // P5 O4 D15: main's hand-off is under way; the run's start answers `cancelled`
     return { cancelled: true };
   });
-  deps.register('delivery.receipts', () => ({ receipts: [...receipts.values()] }));
+  register('delivery.receipts', () => ({ receipts: [...receipts.values()] }));
 
   return {
     stop: () => {
       stopped = true;
       stopping.abort();
+      tombstones.clear();
     },
   };
 }

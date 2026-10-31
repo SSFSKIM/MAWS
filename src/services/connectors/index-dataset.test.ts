@@ -4,16 +4,13 @@
 // publishes, the metadata after the publication's end) answers the window. An agent's refresh is heard by its id alone, read,
 // run through the asking session's own engine with no lease, and answered on the main-only reply; a request already
 // gone is left alone.
-import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
-import { clientOf } from '../ipc/clients';
-import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
-import type { MainContext } from '../ipc/router';
-import { startConnectors } from '.';
-import { electronWindowShown } from '../client/window-shown';
+import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
+import { composeConnectors } from '.';
 import { project, record } from '../../../test/support/builders';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 
 // P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
@@ -98,31 +95,20 @@ function fullStatus(session: ReturnType<typeof status>) {
   };
 }
 
-class FakeSender extends EventEmitter {
-  readonly id = 7;
-  isDestroyed = () => false;
-  send = () => {};
-}
-class FakeWindow extends EventEmitter {
-  isVisible = () => true;
-  isMinimized = () => false;
-  isDestroyed = () => false;
-}
 
 let fake: FakeHost;
-let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
+let bus: FakeBus;
 let service: { stop(): void };
-const sender = new FakeSender();
+const page = endableClientRef('page:7');
 beforeEach(() => {
   vi.useFakeTimers();
   fake = new FakeHost();
-  handlers = new Map();
-  service = startConnectors({
+  bus = fakeBus();
+  service = composeConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
-    register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
+    bus,
     view: ownView(),
     realpath: (path) => path,
-    windowShown: () => electronWindowShown(new FakeWindow() as never),
     port: { openExternal: vi.fn() },
     log: () => {},
   });
@@ -131,18 +117,18 @@ afterEach(() => {
   service.stop();
   vi.useRealTimers();
 });
+// A client's command through the bus (P5 O4 M2), its page's window reported shown first (D8)
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
-  const checked = validateCommandInput(name, input);
-  if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never), target: TEST_MACHINE });
-  expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
-  return value;
+  if (name === 'connectors.open') expect(await bus.main('connectors.windowShown', { shown: true }, page)).toEqual({ ok: true, value: { ok: true } });
+  const answer = await bus.invoke(name, input, page);
+  if (!answer.ok) throw new Error(`${name}: ${answer.error.message}`);
+  return answer.value;
 }
 const settle = async () => {
   for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
 };
 
-describe('main’s connector service with a dataset sink', () => {
+describe('the connector service with a dataset sink', () => {
   it('forwards a window’s sink to route E’s start and answers the publication’s metadata after the host’s phased take', async () => {
     const { leaseId } = (await invoke('connectors.open', { artifactId: ART })) as { leaseId: string };
     await invoke('connectors.declare', { leaseId, tools: [{ server: 'fixture', tool: 'rows' }] });

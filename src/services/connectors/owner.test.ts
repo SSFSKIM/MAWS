@@ -3,13 +3,11 @@
 // provider. Rows bind the source each tool actually selects, revalidated at the action; HTTP rows coalesce by saved
 // identity with every member discovered, stdio rows stay per source; open HTTP is never pushed into OAuth; actions
 // acknowledge at once, run inside their own bounded lifetime and end with a targeted invalidation.
-import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorGrant } from '@shared/artifacts/connectors';
-import { eventChannel } from '@shared/ipc/schema';
 import type { ConnectorServers, DirectDiscoverAnswer, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandOutput } from '@shared/ipc/validate';
-import { clientOf } from '../ipc/clients';
+import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
 import { createConnectorOwner, OWNER_ACTION_DEADLINE_MS, OWNER_QUERY_DEADLINE_MS, type ConnectorOwner, type ConnectorOwnerDeps } from './owner';
@@ -34,18 +32,8 @@ const FP = 'f'.repeat(64);
 const known = { fingerprint: FP, readOnly: true };
 type Resolved = Awaited<ReturnType<ConnectorOwnerDeps['direct']['resolveSource']>>;
 
-class Viewer extends EventEmitter {
-  readonly sent: unknown[] = [];
-  destroyed = false;
-  constructor(readonly id: number) {
-    super();
-  }
-  isDestroyed = () => this.destroyed;
-  send = (channel: string, payload: unknown) => {
-    expect(channel).toBe(eventChannel('connectors.serversChanged'));
-    this.sent.push(payload);
-  };
-}
+// A client that reads rows (P5 O4 M2: `connectors.serversChanged` goes to every client, D9; `sent` is what was emitted)
+const viewerOf = (n: number): EndableClientRef => endableClientRef(`page:${n}`);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -64,7 +52,8 @@ let changeListeners: Set<() => void>; // P3-HD M3c2 correction: the provider's c
 let unattributed: boolean; // P3-HD M3c2 correction: the provider's own flag
 let provider: ConnectorOAuthProvider & { [K in 'connect' | 'reconnect' | 'disconnect' | 'state']: ReturnType<typeof vi.fn> };
 let owner: ConnectorOwner;
-let viewer: Viewer;
+let viewer: EndableClientRef;
+let sent: { artifactId: string }[]; // the owner's `connectors.serversChanged`, in order
 
 const key = (server: string, tool?: string) => `${server}/${tool ?? ''}`;
 const ok = (source: DirectSource, tool?: typeof known): Resolved => ({ ok: true, source, ...(tool && { tool }) });
@@ -84,7 +73,8 @@ beforeEach(() => {
   disconnecting = new Map();
   changeListeners = new Set();
   unattributed = false;
-  viewer = new Viewer(1);
+  viewer = viewerOf(1);
+  sent = [];
   provider = {
     state: vi.fn(async (identity: { requestUrl: string; server: string }) => states.get(identity.server) ?? { state: 'disconnected' }),
     saved: vi.fn(async () => saved),
@@ -117,6 +107,7 @@ beforeEach(() => {
     },
     oauth: provider,
     grants: async () => grants,
+    serversChanged: (artifactId) => void sent.push({ artifactId }),
     log: () => {},
   });
 });
@@ -125,8 +116,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function rows(artifactId = ART, tools = [{ server: 'notes', tool: 'search' }], from: Viewer = viewer): Promise<ConnectorServers> {
-  const answer = owner.servers(artifactId, tools, clientOf(from as never));
+async function rows(artifactId = ART, tools = [{ server: 'notes', tool: 'search' }], from: EndableClientRef = viewer): Promise<ConnectorServers> {
+  const answer = owner.servers(artifactId, tools, from);
   await settle();
   const value = await answer;
   expect(validateCommandOutput('connectors.servers', value).ok, JSON.stringify(value)).toBe(true);
@@ -216,7 +207,7 @@ describe('the owner’s server rows', () => {
       return new Promise((resolve) => signal.addEventListener('abort', () => resolve({ ok: false, why: 'unavailable' }), { once: true }));
     });
     provider.state.mockImplementation(() => new Promise(() => {}));
-    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
+    const answer = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer);
     await settle();
     expect(seen!.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
@@ -233,13 +224,13 @@ describe('the owner’s server rows', () => {
       void promise.then(() => (done = true));
       return () => done;
     };
-    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
+    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer);
     const boundedDone = answered(bounded);
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
     await settle();
     expect(boundedDone()).toBe(true);
     expect((await bounded).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
-    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], clientOf(viewer as never));
+    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer);
     const stoppedDone = answered(stopped);
     await settle();
     owner.stop();
@@ -257,12 +248,12 @@ describe('the owner’s Connect', () => {
     const answer = await rows(ART, [{ server: 'files', tool: 'read' }]);
     expect(owner.connect(ART, handleOf(answer, 'files'), null)).toEqual({ accepted: true });
     await settle();
-    expect(viewer.sent).toEqual([{ artifactId: ART }]); // started
+    expect(sent).toEqual([{ artifactId: ART }]); // started
     expect(discovered).toEqual([{ sourceId: SRC_S, directory: '/repo' }]);
     expect(provider.connect).not.toHaveBeenCalled();
     listing.resolve(listed(3));
     await settle();
-    expect(viewer.sent).toEqual([{ artifactId: ART }, { artifactId: ART }]); // ended
+    expect(sent).toEqual([{ artifactId: ART }, { artifactId: ART }]); // ended
     expect((await rows(ART, [{ server: 'files', tool: 'read' }])).servers[0]).toMatchObject({ last: { action: 'connect', ok: true, tools: 3, credential: 'none' } });
   });
 
@@ -384,10 +375,10 @@ describe('the owner’s Connect', () => {
     const handle = handleOf(await rows(), 'notes');
     owner.connect(ART, handle, null);
     await settle();
-    viewer.sent.length = 0;
+    sent.length = 0;
     owner.hostLost();
     expect(signals[0]!.aborted).toBe(true);
-    expect(viewer.sent).toContainEqual({ artifactId: ART });
+    expect(sent).toContainEqual({ artifactId: ART });
     owner.connect(ART, handle, null);
     await settle();
     owner.stop();
@@ -413,11 +404,11 @@ describe('the owner’s Disconnect', () => {
       expect.objectContaining({ kind: 'source', connection: { state: 'withdrawn' } }),
       { kind: 'retiring', connectionId: CONN, server: 'notes', scope: 'user', path: '/Users/me/.claude.json', disconnecting: 'pending' },
     ]);
-    viewer.sent.length = 0;
+    sent.length = 0;
     disconnecting.set(CONN, 'unconfirmed');
     done.resolve({ local: 'forgotten', host: 'unconfirmed', revocation: 'revoked' });
     await settle();
-    expect(viewer.sent).toEqual([{ artifactId: ART }]);
+    expect(sent).toEqual([{ artifactId: ART }]);
     answer = await rows();
     expect(answer.servers[1]).toEqual({ kind: 'retiring', connectionId: CONN, server: 'notes', scope: 'user', path: '/Users/me/.claude.json', disconnecting: 'unconfirmed', last: { action: 'disconnect', local: 'forgotten', host: 'unconfirmed', revocation: 'revoked' } });
     provider.disconnect.mockImplementation(async () => ({ local: 'absent', host: 'confirmed', revocation: 'none' }));
@@ -461,23 +452,23 @@ describe('the owner’s Disconnect', () => {
     expect(answer.servers[0]).toMatchObject({ server: 'web', connection: { state: 'withdrawn' } });
   });
 
-  it('invalidates only the windows that read rows, every artifact they read, and forgets a closed window', async () => {
-    const other = new Viewer(2);
-    const silent = new Viewer(3);
+  it('invalidates every artifact some client read rows of, once each, and forgets a client’s artifacts at its end', async () => {
+    const other = viewerOf(2);
     await rows(ART, [{ server: 'notes', tool: 'search' }], viewer);
+    await rows(ART, [{ server: 'notes', tool: 'search' }], viewerOf(3)); // the same artifact from another client: told once
     await rows(OTHER_ART, [{ server: 'notes', tool: 'search' }], other);
+    sent.length = 0;
     owner.disconnect(CONN);
     await settle();
-    expect(viewer.sent).toContainEqual({ artifactId: ART });
-    expect(other.sent).toContainEqual({ artifactId: OTHER_ART });
-    expect(other.sent).not.toContainEqual({ artifactId: ART });
-    expect(silent.sent).toEqual([]);
-    other.destroyed = true;
-    other.emit('destroyed');
-    other.sent.length = 0;
+    const told = (artifactId: string) => sent.filter((change) => change.artifactId === artifactId).length;
+    expect(told(ART)).toBeGreaterThan(0);
+    expect(told(OTHER_ART)).toBe(told(ART)); // each change names each artifact read, once, whoever read it
+    other.end();
+    sent.length = 0;
     owner.disconnect(CONN_OLD);
     await settle();
-    expect(other.sent).toEqual([]);
+    expect(sent).not.toContainEqual({ artifactId: OTHER_ART });
+    expect(sent).toContainEqual({ artifactId: ART });
   });
 });
 
@@ -572,19 +563,19 @@ describe('the provider’s changes reach the windows', () => {
   it('a flow the provider opens after the rows were read invalidates them, revealing its Cancel id; coalesced, no payload', async () => {
     selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
     await rows();
-    viewer.sent.length = 0;
+    sent.length = 0;
     states.set('notes', { state: 'connecting', connectionId: CONN });
     for (const listener of changeListeners) listener();
     for (const listener of changeListeners) listener();
-    expect(viewer.sent).toEqual([]); // coalesced, after the provider's own step
+    expect(sent).toEqual([]); // coalesced, after the provider's own step
     await settle();
-    expect(viewer.sent).toEqual([{ artifactId: ART }]);
+    expect(sent).toEqual([{ artifactId: ART }]);
     expect((await rows()).servers[0]).toMatchObject({ connection: { state: 'connecting', connectionId: CONN } });
   });
 
   it('reading the rows never notifies, and stop unsubscribes', async () => {
     await rows();
-    expect(viewer.sent).toEqual([]);
+    expect(sent).toEqual([]);
     expect(changeListeners.size).toBe(1);
     owner.stop();
     expect(changeListeners.size).toBe(0);
