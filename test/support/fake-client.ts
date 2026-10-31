@@ -17,6 +17,7 @@ export interface FakeClient {
   pending(name: CommandName): number;
   invoked(name: CommandName): unknown[]; // the inputs, in order
   machines(name: CommandName): (MachineRef | undefined)[]; // P5 O6 M4: the machine each invocation's options named, in order
+  sessions(name: CommandName): (string | undefined)[]; // P5 O7 M4: the session each invocation's options named, in order
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -31,15 +32,17 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
   const waiting = new Map<string, ((result: CommandResult<CommandName>) => void)[]>();
   const inputs = new Map<string, unknown[]>();
   const named = new Map<string, (MachineRef | undefined)[]>();
+  const madeFrom = new Map<string, (string | undefined)[]>();
   const calls: string[] = [];
   const client = {
     localMachine: TEST_MACHINE,
     // the client's `opts`, or the machine the page's client hands a bridge (installed as `window.maws`)
-    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef } | MachineRef) {
+    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef; session?: string } | MachineRef) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);
       const machine = typeof opts === 'string' ? opts : opts?.machine;
       named.set(name, [...(named.get(name) ?? []), machine]);
+      madeFrom.set(name, [...(madeFrom.get(name) ?? []), typeof opts === 'string' ? undefined : opts?.session]);
       if (name in auto) {
         const given = auto[name];
         return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown, m: MachineRef | undefined) => unknown)(input, machine) : given });
@@ -69,5 +72,6 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
     pending: (name) => waiting.get(name)?.length ?? 0,
     invoked: (name) => inputs.get(name) ?? [],
     machines: (name) => named.get(name) ?? [],
+    sessions: (name) => madeFrom.get(name) ?? [],
   };
 }

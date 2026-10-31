@@ -306,13 +306,17 @@ export type CommandResult<N extends CommandName> = { ok: true; value: CommandOut
 // machine and every event comes from one. `MawsBridge` is the renderer client's surface (`src/renderer/src/ipc/client.ts`),
 // over addresses; `PreloadBridge` is `window.maws`, the raw pipe over bare ids, whose invoke with no machine is the local
 // machine's (the e2e specs' and harness pages' convenience).
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The checkout rule and its boundary"): `session`
+// is the session a path command is made from (a panel tool's, the composer's), as an address on the command's machine;
+// the client sends it bare beside the machine, and a machine that bounds a path read by its session places the read by it.
 export interface InvokeOptions {
   machine?: MachineRef;
+  session?: AppSessionId;
 }
 // A `path` command's options name its machine (`src/shared/ipc/routes.ts`; M4 required it): a path is no machine's by
 // itself, so every call site names the machine of the session or project it is about. Every other command's options are
 // optional: its addresses name its machine, else it is the local machine's.
-export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef }] : [opts?: InvokeOptions];
+export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef; session?: AppSessionId }] : [opts?: InvokeOptions];
 export type InvokeRest<N extends CommandName> = MachineOptions<N>;
 // `invoke` as seen by a wrapper generic over commands whose every input carries an address (a session read, a session
 // operation), which names the machine: TypeScript defers `InvokeRest` over a generic name, so such a wrapper calls this.

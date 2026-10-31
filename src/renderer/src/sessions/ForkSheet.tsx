@@ -33,7 +33,7 @@ export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
   useEffect(() => {
     if (directory === null) return;
     let live = true;
-    void ipc.invoke('git.branches', { directory }, { machine: machineOf(appSessionId) }).then((result) => {
+    void ipc.invoke('git.branches', { directory }, { machine: machineOf(appSessionId), session: appSessionId }) /* P5 O7 M4: made from the session */.then((result) => {
       if (live && result.ok) setBranches(result.value.branches.map((b) => b.name));
     });
     return () => {

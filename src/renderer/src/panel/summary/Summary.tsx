@@ -27,7 +27,7 @@ export const Summary = FloatingSummary;
 function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; record: SessionRecord }) {
   const directory = record.worktree?.path ?? record.directory;
   const machine = machineFor(appSessionId);
-  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
+  useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
   return (
     <div aria-label="Session cards" className="flex max-h-full w-70 max-w-full flex-col gap-1.5 overflow-y-auto p-1">
       <Environment appSessionId={appSessionId} record={record} directory={directory} />

@@ -12,12 +12,16 @@
 // budget, rather than holding it until the host comes back. Such a watch is asked again whenever that machine's
 // `host.status` is heard (main emits one after re-reading the daemon at each ready of the machine host), so the
 // Environment row recovers with the host's restart; a re-ask while the host is still down is answered at once.
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The checkout rule and its boundary"): a watch is
+// made from a session when a panel has one, and every call of the watch (its git.watch, diffs, re-asks and git.unwatch)
+// names the session of its first watcher, by which another machine bounds the checkout read and counts the watch.
 import { create } from 'zustand';
 import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
-import { checkoutKey } from '../ipc/machine';
+import { checkoutKey, pathTarget } from '../ipc/machine';
 
 export interface GitEntry {
   root: string | null; // the status's repoRoot; null until git.watch answers, and after it failed
@@ -28,7 +32,7 @@ export interface GitEntry {
 
 export interface GitStore {
   entries: Map<string, GitEntry>; // by checkoutKey(machine, session.worktree?.path ?? session.directory)
-  watch(machine: MachineRef, directory: string): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
+  watch(machine: MachineRef, directory: string, session?: AppSessionId): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
   applyChanged(event: EventPayload<'git.changed'>, machine: MachineRef): void; // every watched directory of the root on that machine takes the status and re-runs git.diff
   retryUnanswered(machine: MachineRef): void; // that machine's host was heard again (host.status): its watches it could not answer are asked again
 }
@@ -38,6 +42,7 @@ export const GIT_DIFF_DELAY_MS = 250; // trailing debounce of the diffs git.chan
 interface Watched {
   machine: MachineRef;
   directory: string;
+  session: AppSessionId | undefined; // P5 O7 M4: the first watcher's session, named on every call of this watch
   count: number;
   landed: Promise<void>; // the git.watch call settled (unwatch waits for it, or main would count the watch after)
   timer: ReturnType<typeof setTimeout> | null;
@@ -75,7 +80,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
         return;
       }
       w.diffing = true;
-      const result = await settled(client.invoke('git.diff', { directory: w.directory, scope: 'all' }, { machine: w.machine }));
+      const result = await settled(client.invoke('git.diff', { directory: w.directory, scope: 'all' }, pathTarget(w.machine, w.session)));
       w.diffing = false;
       if (watched.get(key) !== w) return; // released meanwhile
       if (get().entries.get(key)?.status?.dirty) {
@@ -104,7 +109,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
     // One git.watch for the directory; `landed` follows the latest, so a release unwatches after it.
     const install = (key: string, w: Watched) => {
       w.unanswered = false;
-      w.landed = settled(client.invoke('git.watch', { directory: w.directory }, { machine: w.machine })).then((result) => {
+      w.landed = settled(client.invoke('git.watch', { directory: w.directory }, pathTarget(w.machine, w.session))).then((result) => {
         if (watched.get(key) !== w) return;
         if (!result.ok) {
           w.unanswered = UNANSWERED.has(result.error.code);
@@ -118,12 +123,12 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
     return {
       entries: new Map(),
 
-      watch(machine, directory) {
+      watch(machine, directory, session) {
         const key = checkoutKey(machine, directory);
         let w = watched.get(key);
         if (w) w.count += 1;
         else {
-          w = { machine, directory, count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false, unanswered: false };
+          w = { machine, directory, session, count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false, unanswered: false };
           watched.set(key, w);
           install(key, w);
         }
@@ -141,7 +146,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
             entries.delete(key);
             return { entries };
           });
-          void held.landed.then(() => settled(client.invoke('git.unwatch', { directory }, { machine })));
+          void held.landed.then(() => settled(client.invoke('git.unwatch', { directory }, pathTarget(machine, held.session))));
         };
       },
 

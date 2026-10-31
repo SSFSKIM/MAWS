@@ -171,7 +171,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
   const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
-  const repo = useGitWatch(machineOf(appSessionId), setup ? null : cwd || null, client);
+  const repo = useGitWatch(appSessionId, setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiff, GitStatus } from '@shared/ipc/schema/git';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -199,6 +200,28 @@ describe('git store', () => {
     await wait();
     expect(fake.machines('git.unwatch')).toEqual([M]);
     expect(entryOn(OTHER_MACHINE)).toBeDefined();
+  });
+
+  // P5 O7 M4: another machine's checkout is read by the session it is watched from (the endpoint's checkout rule), so
+  // each call names that session: the watch, its diffs, a re-ask and the unwatch, all with the first watcher's session.
+  it('names the session a watch is made from on every call of it, the first watcher’s for the shared checkout', async () => {
+    const { fake, store } = setup();
+    const S1 = `${OTHER_MACHINE}/app-1` as AppSessionId;
+    const S2 = `${OTHER_MACHINE}/app-2` as AppSessionId;
+    const first = store.getState().watch(OTHER_MACHINE, DIR, S1);
+    const second = store.getState().watch(OTHER_MACHINE, DIR, S2);
+    await fake.fail('git.watch', 'machine did not answer git.watch within 40 s', 'timeout');
+    store.getState().retryUnanswered(OTHER_MACHINE);
+    await fake.reply('git.watch', status());
+    await fake.reply('git.diff', diff(1));
+    first();
+    second();
+    await wait();
+    expect(fake.sessions('git.watch')).toEqual([S1, S1]);
+    expect(fake.sessions('git.diff')).toEqual([S1]);
+    expect(fake.sessions('git.unwatch')).toEqual([S1]);
+    store.getState().watch(M, DIR); // a local panel names none
+    expect(fake.sessions('git.watch')).toEqual([S1, S1, undefined]);
   });
 
   // P5 O3-E final review, fix 1's follow-up: main's watch replay answers a page's git.watch host_unavailable when the

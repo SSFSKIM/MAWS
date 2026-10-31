@@ -56,6 +56,15 @@ export function withHistoryGap<P extends { events: SessionEvent[]; historyUnavai
   return { ...page, events: [gap, ...page.events] };
 }
 
+// P5 O7 M4 (acceptance 12): a budgeted page that left out items too large for the channel (`omitted`) ends with a bar
+// saying so, just after its last row, where they were; its id names that row, so the same page read again draws one.
+export function withOmittedBar<P extends { events: SessionEvent[]; omitted?: { events: number; bytes: number } }>(page: P, bareApp: string, words: (omitted: { events: number; bytes: number }) => string): P {
+  if (page.omitted === undefined) return page;
+  const last = page.events.at(-1);
+  const bar = historyGapEvent(bareApp, `omitted:${last?.id ?? 'none'}`, last?.at ?? new Date().toISOString(), last?.sessionId ?? (bareApp as SessionId), words(page.omitted));
+  return { ...page, events: [...page.events, bar] };
+}
+
 export class HistoryPager implements OlderPages {
   readonly state = createStore<OlderPagesState>(() => ({ more: false, loadingOlder: false, olderFailed: null, revision: 0 }));
   private held: SessionEvent[] = []; // the store's history in order, kept only while older history remains

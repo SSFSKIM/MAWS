@@ -33,13 +33,14 @@ const isMessage = (name: CommandName) => name === 'session.send' || name === 'se
 /** The channel's image bound, as the composer words it (MESSAGE_MAX_BYTES less headroom, base64): one sentence, shared. */
 export const TOO_LARGE_WORDS = REMOTE_TOO_LARGE_WORDS;
 
-/** What a session on another machine can't take yet, by control: closed with these words whatever the link says. */
+/**
+ * What a session on another machine can't take yet, by control: closed with these words whatever the link says. P5 O7
+ * M4 opened `media` (a file goes up to the machine as an upload, the composer's remote-uploads.ts) and `rewind` and
+ * `rewind-files` (the files panel follows the machine's checkout, so a rewind's effect on the files shows).
+ */
 export const REMOTE_GAPS: Readonly<Partial<Record<ControlKey, string>>> = {
-  media: 'files to a session on another machine wait for uploads',
   'take-over': 'not offered for a session on another machine',
   reopen: 'not offered for a session on another machine',
-  rewind: 'rewinding a session on another machine waits for its files panel',
-  'rewind-files': 'rewinding a session on another machine waits for its files panel',
   'subagent-rows': 'a subagent’s own rows aren’t carried from another machine yet',
 };
 
