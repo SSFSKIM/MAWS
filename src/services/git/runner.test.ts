@@ -216,6 +216,17 @@ describe('the streamed git read', () => {
     return parts;
   };
 
+  // The final re-review (D25): both of the watcher's routes to git (a run: status, check-ignore; the streamed read: the
+  // ignore listings) carry GIT_OPTIONAL_LOCKS=0, so none of its reads writes the index.
+  it('carries GIT_OPTIONAL_LOCKS=0 into a run and into a streamed read alike', async () => {
+    mkdirSync(repo.path('bin'));
+    const git = repo.path('bin/git.sh');
+    writeFileSync(git, '#!/bin/sh\nprintf %s "${GIT_OPTIONAL_LOCKS-unset}"\n', { mode: 0o755 });
+    const env = { ...repo.serviceEnv(), MAWS_GIT: git, GIT_OPTIONAL_LOCKS: '1' }; // the caller's own value never reaches git
+    expect(await createGitRunner({ env })(repo.root, ['status'])).toBe('0');
+    expect(Buffer.concat(await all(createGitReader({ env })(repo.root, ['ls-files', '-z']))).toString()).toBe('0');
+  });
+
   it("hands over git's stdout in the pipe's chunks, the same bytes a run answers", async () => {
     mkdirSync(repo.path("it's")); // a quote in the path: the fixture's script interpolates no path
     const listing = repo.path("it's/listing");

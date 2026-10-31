@@ -24,9 +24,10 @@
 // once, then ask the tree for one pass, which watches every directory the new rules admit; a rebuild is one in flight
 // and one more for whatever changed during it. The index (a force-add, a switch's other half) only marks it stale: the
 // slow timer's next pass rebuilds it once before it walks, since an agent running git in a loop rewrites the index
-// all the time. An index write while this root's own status runs, or within OWN_STATUS_GRACE_MS of its end, is taken
-// as that status's (git refreshes the index opportunistically where optional locks are on), so status → index →
-// rebuild → pass → status never loops. A directory the new rules ignore stays watched.
+// all the time: at most one rebuild per period, whoever writes it (MAWS's own scm.stage and scm.commit included). This
+// watcher's own reads write no index (the runner's GIT_OPTIONAL_LOCKS=0, which `git status` honours, and the diffs'
+// diff.autoRefreshIndex=false), so status → index → rebuild → pass → status cannot start on its own. A directory the
+// new rules ignore stays watched.
 import { constants } from 'node:fs';
 import { access, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -68,9 +69,6 @@ export const INNER_CAP = 2_000; // files beneath untracked directories whose fac
 const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 export const POLL_MS = 5_000; // a polling root's status period, doubled after a timeout until a status succeeds
-// How long after this root's own status ends an index event is still taken as that status's write (its event can
-// reach the loop after the status's answer).
-export const OWN_STATUS_GRACE_MS = 250;
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
@@ -234,7 +232,6 @@ interface Root {
   rescan: boolean; // the pending pass re-reads every cached fact beneath untracked directories
   tree: { reconcileNow?(): void } | null; // the root's own watch, asked for a pass once its rules are rebuilt
   ignores: Ignores;
-  ownUntil: number; // an index event before this (Date.now()) is the root's own status's
 }
 
 type Prune = (dir: string) => Promise<boolean>;
@@ -363,7 +360,6 @@ export class GitWatcher {
       rescan: false,
       tree: null,
       ignores: { snapshot: null, building: null, again: false, stale: false, pass: false },
-      ownUntil: 0,
     };
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
@@ -377,7 +373,7 @@ export class GitWatcher {
     const onGitPath = (sub: string, reason: Exclude<GitChangeReason, 'initial'> | null, common: boolean, own: boolean) => {
       if (common && registration(sub)) this.readNested(root, status);
       if ((own && sub === 'HEAD') || (common && sub === 'info/exclude')) this.ignoresChanged(root);
-      else if (own && sub === 'index' && !root.inFlight && Date.now() >= root.ownUntil) root.ignores.stale = true;
+      else if (own && sub === 'index') root.ignores.stale = true;
       this.changed(root, reason, null, sub);
     };
     const gitDirIsCommon = status.gitDir === status.commonDir;
@@ -646,7 +642,6 @@ export class GitWatcher {
       root.failing = true;
     } finally {
       root.inFlight = false;
-      root.ownUntil = Date.now() + OWN_STATUS_GRACE_MS;
       if (root.again && !root.closed) {
         root.again = false;
         // A polling root's period is the poll's alone: a timed-out one leaves what asked meanwhile to the next poll.

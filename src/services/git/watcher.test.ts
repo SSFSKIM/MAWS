@@ -1123,9 +1123,8 @@ describe('the repository watcher over the watch tree', () => {
 // The final review's finding 3: what git ignores is read when the root's tree first asks and rebuilt when its inputs
 // change, so a directory a removed rule (a switched branch, a force-added file) admits is watched at the tree's next
 // pass. A `.gitignore` anywhere in the tree, the common dir's `info/exclude` and the git dir's HEAD rebuild it at once,
-// coalesced (one in flight, one more for whatever changed meanwhile), followed by one pass; the index only marks it
-// stale, rebuilt once before the slow timer's next pass walks, and an index write inside our own status's window is
-// ours, never a mark.
+// coalesced (one in flight, one more for whatever changed meanwhile), followed by one pass; every index write only
+// marks it stale, rebuilt once before the slow timer's next pass walks.
 describe('the repository watcher rebuilds what git ignores when its rules change', () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
   afterEach(() => vi.useRealTimers());
@@ -1258,27 +1257,56 @@ describe('the repository watcher rebuilds what git ignores when its rules change
     watcher.dispose();
   });
 
-  // The architect's guard: status → index write → rebuild → pass → null event → status must not loop.
-  it('takes an index write its own status made as no change of the rules: a rebuild’s pass whose status rewrites the index starts no second rebuild', async () => {
-    const { fs, ignored, statuses, watcher } = lab({
-      status: async (repo) => {
-        repo.fire('.git', 'change', 'index'); // git status refreshing the index, as a git that takes optional locks does
-        await Promise.resolve();
+  // The re-review's lost case: who wrote the index cannot be told by timing, so an outside write that lands while our
+  // own status runs marks the snapshot stale like any other (our own reads write no index: GIT_OPTIONAL_LOCKS=0).
+  it('marks the snapshot stale for an outside index write made while its own status runs, rebuilt at the next slow pass', async () => {
+    let held: Promise<void> | null = null;
+    const { fs, rules, ignored, statuses, watcher } = lab({
+      status: async () => {
+        await held;
         return status();
       },
     });
     await watcher.watch(ROOT);
     await drain();
-    await vi.advanceTimersByTimeAsync(1_000);
-    fs.fire('', 'change', '.gitignore');
-    await vi.advanceTimersByTimeAsync(1_000); // the rebuild, its pass, the pass's status (which wrote the index)
-    await drain();
-    expect(ignored).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000); // the settle pass
+    let release!: () => void;
+    held = new Promise((resolve) => (release = resolve));
     const runs = statuses.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 4); // each period's pass runs a status, which writes the index again
+    fs.fire('', 'change', 'a.ts');
+    await vi.advanceTimersByTimeAsync(300); // its status, held
+    expect(statuses.mock.calls.length).toBe(runs + 1);
+    rules.build = false; // `git add -f build/x` from outside, while our status runs
+    fs.fire('.git', 'change', 'index');
     await drain();
-    expect(statuses.mock.calls.length).toBeGreaterThan(runs);
+    release();
+    held = null;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS - 1_300);
+    await drain();
     expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  // The architect's bound: an index some outside writer rewrites all the time costs one rebuild per slow period, never more.
+  it('rebuilds at most once per RECONCILE_MS under an index rewritten every few milliseconds', async () => {
+    const { fs, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    let writing = true;
+    const rewrite = () => {
+      if (!writing) return;
+      fs.fire('.git', 'change', 'index');
+      setTimeout(rewrite, 5);
+    };
+    rewrite();
+    for (let period = 1; period <= 4; period++) {
+      await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+      await drain();
+      expect(ignored.mock.calls.length).toBeLessThanOrEqual(1 + period);
+    }
+    expect(ignored.mock.calls.length).toBeGreaterThanOrEqual(4); // it does rebuild, once a period
+    writing = false;
     watcher.dispose();
   });
 

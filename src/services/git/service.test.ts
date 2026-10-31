@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -142,6 +142,19 @@ describe('git service answers status, branches, diff and log', () => {
   // Final-wave probe (2026-09-29, Apple Git 2.50.1): `git diff` over a stale stat cache refreshes and rewrites the
   // index through `index.lock` even under GIT_OPTIONAL_LOCKS=0, which `git status` honours and `git diff` does not;
   // `diff.autoRefreshIndex=false` is the switch it reads.
+  // The final re-review (D25): the watcher's own status is no writer of the index, which is what keeps status → index
+  // → ignore rebuild → pass → status from looping. `git status` refreshes a stale stat cache and writes the index
+  // unless GIT_OPTIONAL_LOCKS=0, which the runner sets for every read.
+  it('never rewrites the index: a status over a stale stat cache leaves .git/index byte-identical', async () => {
+    await repo.setMtime('README.md', 1_700_000_000); // stat-dirty, content clean
+    const index = join(repo.root, '.git', 'index');
+    const before = readFileSync(index);
+    const { mtimeMs } = statSync(index);
+    expect((await service.status(repo.root)).dirty).toBe(false);
+    expect(readFileSync(index).equals(before)).toBe(true);
+    expect(statSync(index).mtimeMs).toBe(mtimeMs);
+  });
+
   it('never rewrites the index: a diff over a stale stat cache leaves .git/index untouched and still shows the real edit', async () => {
     await repo.write('NOTES.md', 'notes\n');
     await repo.git('add', 'NOTES.md');
