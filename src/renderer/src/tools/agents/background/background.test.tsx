@@ -13,7 +13,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
 import { record, status } from '../../../../../../test/support/builders';
-import { at } from '../../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { event, replayed, sidecarsOf, upTo, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { connectAgentWorkEvents } from '../../../ipc/events';
 import * as query from '../../../ipc/query';
@@ -42,6 +42,7 @@ import { cellId } from '../../../transcript/model/keys';
 import { flush } from '../fake-work-client';
 import { formatIn } from '../model/elapsed';
 import { REL } from '../../../test-support/relative-time';
+import { pagedSource } from '../../../harness/paged';
 // E7 end
 
 // The spies are made once, outside the async factories (P2-F S): vitest runs an async factory again for an importer that
@@ -1030,6 +1031,28 @@ describe('scheduled jobs', () => {
     ]);
     expect(document.querySelector('[data-scheduled="481abb0a"]')!.className).toContain('text-fg-faint');
     expect(document.querySelector('[data-scheduled="598b1690"]')!.className).not.toContain('text-fg-faint');
+  });
+
+  // The long-transcript window: a long session not running here opens on its newest window, which holds none of the
+  // turn that scheduled its job; the answer's `cronHistory` lists it anyway, and its creating turn opens through the
+  // pages back to it (a jump into history).
+  it('a long session opened on its newest window lists the job an older page created, and opens its creating turn there', async () => {
+    const now = Date.parse(ONE_SHOT.at) + 1; // before the one-shot's fire in any zone
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    const history = CRON.filter((e) => (e.seq ?? 0) < 384); // turns 1 to 5: the one-shot made in 1, the tick deleted in 5
+    const source = pagedSource(A, history, 0, { soft: 1, hard: 1024 * 1024 }, TEST_MACHINE); // one turn a page
+    await act(() => useTranscriptStore.getState().attach(A, source));
+    const seen = () => useTranscriptStore.getState().entries[A]!.state.seen;
+    expect(seen().has(ONE_SHOT.id)).toBe(false); // the open: the newest window, without the turn that made the job
+    expect(seen().size).toBeLessThan(history.length / 2);
+    await mount({ status: null });
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 1'));
+    expect(scheduled().map(({ id, kind, link }) => ({ id, kind, link }))).toEqual([{ id: '8d1a2582', kind: 'one-shot · session-only', link: 'Open creating turn' }]);
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-scheduled="8d1a2582"]')!).getByRole('button', { name: 'Open creating turn' }));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[A]!.jump?.focus).toBe(cellId.tool(ONE_SHOT.toolUseId)));
+    expect(seen().has(ONE_SHOT.id)).toBe(true); // the pages back to its turn are in
+    expect(scheduled().map(({ id }) => id)).toEqual(['8d1a2582']); // and the list is the same
   });
 
   it('keeps the transcript’s rows and says why when the durable file cannot be read; a change to it is read again', async () => {

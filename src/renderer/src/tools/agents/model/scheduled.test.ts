@@ -8,11 +8,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nextCronMatch, parseCron, RECURRING_MAX_AGE_MS } from '@shared/engine/cron';
 import type { SessionEvent } from '@shared/graph/events';
+import { cronHistoryOf } from '@shared/graph/history-window';
 import { replayed } from '../../../../../../test/support/agents-events';
 import { turnActivity } from '../../../transcript/model/activity';
 import { applyEvents, createState } from '../../../transcript/model/reduce';
 import { builder } from '../../../transcript/model/test-events';
-import { createdCrons, parseScheduledFile, projectRootOf, promptLine, scheduledRows, sessionCrons, type CronJob, type DurableJob, type ScheduledInput } from './scheduled';
+import { createdCrons, cronHistoryActivity, parseScheduledFile, projectRootOf, promptLine, scheduledRows, sessionCrons, type CronJob, type DurableJob, type ScheduledInput } from './scheduled';
 
 const activityOf = (events: SessionEvent[]) => turnActivity(applyEvents(createState(null, null), events));
 const DURABLE_DIR = join(__dirname, '../../../../../../spikes/protocol-probe/fixtures/pass3/e7-cron-durable');
@@ -204,5 +205,28 @@ describe('promptLine and projectRootOf', () => {
   it('is the launch directory, also inside a worktree (the engine’s projectRoot is its launch cwd)', () => {
     expect(projectRootOf({ directory: '/repo' })).toBe('/repo');
     expect(projectRootOf({ directory: '/repo/.claude/worktrees/w1/pkg' })).toBe('/repo/.claude/worktrees/w1/pkg');
+  });
+});
+
+// The long-transcript window: a disk-backed session opens on its newest window, and its answer carries the cron calls
+// of the history before it (`cronHistory`, history-window.ts `cronHistoryOf`). Folded before the loaded turns, they give
+// the whole history's jobs wherever the window starts, and again whatever older pages have been loaded since.
+describe('createdCrons over a window and its cronHistory (e7-cron and its resume)', () => {
+  const all = [...CRON, ...RESUME].map((event) => ({ ...event, seq: null }) as SessionEvent);
+  const facts = (jobs: CronJob[]) => jobs.map(({ id, cron, prompt, recurring, durable, humanSchedule, createdAt, toolUseId, messageUuid }) => ({ id, cron, prompt, recurring, durable, humanSchedule, createdAt, toolUseId, messageUuid }));
+  const whole = facts(createdCrons(activityOf(all)));
+  const turnStarts = all.flatMap((event, i) => (event.kind === 'turn.started' && event.agentId === null && i > 0 ? [i] : []));
+  const folded = (base: number, loaded: number) => facts(createdCrons([...cronHistoryActivity(cronHistoryOf(all, base)), ...activityOf(all.slice(loaded))]));
+
+  it('lists the whole history\u2019s jobs from any window start, though the window alone holds fewer', () => {
+    expect(whole.map((job) => job.id)).toEqual(['8d1a2582', '598b1690', '1040f3a5']);
+    expect(turnStarts.length).toBeGreaterThan(4);
+    for (const start of turnStarts) expect(folded(start, start), `a window from event ${start}`).toEqual(whole);
+    // the newest window alone (the resume's turn) lists none of them: what #377 drew
+    expect(createdCrons(activityOf(all.slice(turnStarts.at(-1)!)))).toEqual([]);
+  });
+
+  it('still lists them once older pages are loaded under the cronHistory the open carried', () => {
+    for (const [i, base] of turnStarts.entries()) for (const loaded of turnStarts.slice(0, i)) expect(folded(base, loaded), `window ${base}, loaded from ${loaded}`).toEqual(whole);
   });
 });

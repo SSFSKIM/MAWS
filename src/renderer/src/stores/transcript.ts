@@ -4,6 +4,7 @@
 // change with `rowsOf`, whose per-turn memo keeps unchanged rows by reference; a streaming block's later deltas change
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
@@ -38,6 +39,9 @@ export interface TranscriptEntry {
   // Additive (the long-transcript window's jumps into history): a jump to a message older than what is loaded, on its way
   // or ended without landing; absent when none
   reach?: Reach;
+  // Additive (the long-transcript window): the cron calls the key's older history holds, as its source's newest window
+  // carried them (`cronHistory`), for the Scheduled section; absent for a source that answers its whole history
+  cronHistory?: readonly SessionEvent[];
 }
 
 export interface MessageAnchor {
@@ -48,7 +52,11 @@ export interface MessageAnchor {
 // A jump into history the transcript says something about: the pages back to the message on their way (`progress`,
 // the share walked once the host has said how far; null until then), the message in none of the history (`missing`:
 // a rewritten transcript, a cleared session, a rewound branch), or a page that did not load (`failed`).
-export type Reach = { anchor: MessageAnchor; phase: 'loading'; progress: number | null } | { anchor: MessageAnchor; phase: 'missing' } | { anchor: MessageAnchor; phase: 'failed'; error: string };
+export type Reach = { anchor: ReachTarget; phase: 'loading'; progress: number | null } | { anchor: ReachTarget; phase: 'missing' } | { anchor: ReachTarget; phase: 'failed'; error: string };
+
+// What a jump into history lands on: an assistant text (a mark's anchor), or a cell of the message `messageUuid` (a
+// Scheduled row's creating call), its turn named when the caller knows it.
+export type ReachTarget = MessageAnchor | { messageUuid: MessageUuid; cell: CellId; turnId?: TurnId };
 
 // How `reachMessage` ended. The store has said so on the key (`reach`) for `missing` and `failed`.
 export type ReachOutcome = 'landed' | 'missing' | 'failed' | 'stopped';
@@ -108,7 +116,7 @@ export interface TranscriptStore {
   // it loaded first when it is older than what is loaded (`reach` says how that goes, and how it ended when it did not
   // land); and the reader giving up on one, or dismissing how it ended.
   attached(key: string): boolean;
-  reachMessage(key: string, anchor: MessageAnchor): Promise<ReachOutcome>;
+  reachMessage(key: string, target: ReachTarget): Promise<ReachOutcome>;
   stopReach(key: string): void;
 }
 
@@ -210,6 +218,7 @@ interface Attached {
   settled: Promise<void>;
   offReset: (() => void) | null;
   offRebuild: (() => void) | null; // the long-transcript window: the source's rebuild subscription
+  offCronHistory: (() => void) | null; // and its older history's cron calls
   // Set while the key is being started over: each hydration builds a fresh state (with this ui, what the reader had
   // opened) and installs it only once its snapshot has applied, so the old rows stay on screen until then, and stay if
   // the snapshot fails (a retry stages afresh).
@@ -237,6 +246,8 @@ export function createTranscriptStore() {
       attached.attachment = null;
       attached.offRebuild?.();
       attached.offRebuild = null;
+      attached.offCronHistory?.();
+      attached.offCronHistory = null;
       attached.offReset?.();
     };
     // The hydration protocol (source/hydrate.ts) over the key's current state. Resolves either way; a failure is
@@ -327,6 +338,15 @@ export function createTranscriptStore() {
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
     };
     const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
+    // A jump to a cell wherever its turn has it (`jumpTo`'s search); false when the key holds no such cell.
+    const jumpToCell = (key: string, cell: CellId, turnId?: TurnId): boolean => {
+      const current = entry(key);
+      if (!current) return false;
+      const found = locate(current.rows, cell) ?? (turnId ? locate(expandedTurnRows(current.state, turnId), cell) : null) ?? locate(allExpandedRows(current.state), cell);
+      if (!found) return false;
+      jump(key, cell, { align: 'center', ...(turnId && { turnId }) }, false);
+      return true;
+    };
 
     return {
       entries: {},
@@ -358,7 +378,7 @@ export function createTranscriptStore() {
         // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
         // cannot recognise. The reducer state starts over in a staged state installed once the snapshot has applied;
         // what the reader opened is kept, keyed by ids that resolve again when the history is in the same form.
-        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, offRebuild: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, offRebuild: null, offCronHistory: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
         attached.offReset = source.onReset?.(() => {
@@ -377,6 +397,15 @@ export function createTranscriptStore() {
           put(key, { phase: 'hydrating', error: null });
           hydrate(key, attached);
         }) ?? null;
+        // The cron calls older history holds, as the source's newest window carried them.
+        const pages = source.older?.state;
+        if (pages) {
+          const carry = (cronHistory: readonly SessionEvent[] | undefined) => {
+            if (attachments.get(key) === attached && entry(key) && entry(key)!.cronHistory !== cronHistory) put(key, { cronHistory });
+          };
+          attached.offCronHistory = pages.subscribe((next, previous) => next.cronHistory !== previous.cronHistory && carry(next.cronHistory));
+          carry(pages.getState().cronHistory);
+        }
         return hydrate(key, attached);
       },
 
@@ -512,7 +541,9 @@ export function createTranscriptStore() {
       },
       attached: (key) => attachments.has(key),
 
-      async reachMessage(key, anchor) {
+      async reachMessage(key, target) {
+        const anchor = target;
+        const land = () => ('cell' in target ? jumpToCell(key, target.cell, target.turnId) : get().jumpToMessage(key, target));
         const run = ++reachRun;
         const previous = reaching.get(key);
         reaching.set(key, run);
@@ -524,7 +555,7 @@ export function createTranscriptStore() {
           if (entry(key) && entry(key)!.reach !== reach) put(key, { reach });
           return outcome;
         };
-        if (get().jumpToMessage(key, anchor)) return end('landed');
+        if (land()) return end('landed');
         const attached = attachments.get(key);
         const pages = attached?.source.older;
         put(key, { reach: { anchor, phase: 'loading', progress: null } });
@@ -539,7 +570,7 @@ export function createTranscriptStore() {
           if (result.outcome === 'found') {
             await (attachments.get(key) ?? attached).settled; // the rebuild the page started
             if (!mine()) return 'stopped';
-            return get().jumpToMessage(key, anchor) ? end('landed') : end('missing', { anchor, phase: 'missing' });
+            return land() ? end('landed') : end('missing', { anchor, phase: 'missing' });
           }
         }
         // The text is not older than what is loaded: it is on its way, or in none of the history.
@@ -559,7 +590,7 @@ export function createTranscriptStore() {
             const current = entry(key);
             if (current?.phase !== 'live' || current === searched) return;
             done = true; // the jump's own change re-enters here
-            if (get().jumpToMessage(key, anchor)) return finish(true);
+            if (land()) return finish(true);
             done = false;
             searched = entry(key);
           };

@@ -13,7 +13,7 @@ import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { SCHEDULED_COPY } from '../copy';
 import { formatAgo, formatIn } from '../model/elapsed';
-import { createdCrons, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
+import { createdCrons, cronHistoryActivity, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
 import { Group, type BackgroundSection } from './Group';
 import { useScheduledFile } from './scheduled-file';
@@ -39,7 +39,11 @@ interface Props {
 }
 
 export function ScheduledSection({ appSessionId, session, live, visible, expanded, onToggle }: Props) {
-  const activity = useTranscriptStore((s) => s.activity(appSessionId));
+  const loaded = useTranscriptStore((s) => s.activity(appSessionId));
+  // The long-transcript window: a long session's older history's cron calls, as its newest window carried them, go
+  // before the loaded turns' own, so the list is the whole history's whatever is loaded.
+  const cronHistory = useTranscriptStore((s) => s.entries[appSessionId]?.cronHistory);
+  const activity = useMemo(() => (cronHistory?.length ? [...cronHistoryActivity(cronHistory), ...loaded] : loaded), [cronHistory, loaded]);
   const file = useScheduledFile(appSessionId, session);
   const created = useMemo(() => createdCrons(activity), [activity]);
   const durable = file?.status === 'ok' ? file.jobs : null;
@@ -53,7 +57,11 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
   const error = file?.status === 'error' ? file.message : null;
   if (rows.length === 0 && error === null) return null;
   const open = (row: ScheduledRow) => {
-    if (row.link) useTranscriptStore.getState().jumpTo(appSessionId, cellId.tool(row.link.toolUseId), { align: 'center', turnId: row.link.turnId });
+    if (!row.link) return;
+    const cell = cellId.tool(row.link.toolUseId);
+    // A creating turn older than what is loaded: its pages first (a jump into history, the bar saying so)
+    if (row.link.messageUuid !== null) void useTranscriptStore.getState().reachMessage(appSessionId, { messageUuid: row.link.messageUuid, cell, turnId: row.link.turnId });
+    else useTranscriptStore.getState().jumpTo(appSessionId, cell, { align: 'center', turnId: row.link.turnId });
   };
   return (
     <Group id="scheduled" heading={SCHEDULED_COPY.heading(rows.length)} expanded={expanded} onToggle={onToggle}>

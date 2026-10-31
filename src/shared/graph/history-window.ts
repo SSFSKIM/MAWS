@@ -126,3 +126,74 @@ function turnOf(events: readonly SessionEvent[], target: MessageUuid, before: nu
   }
   return found === -1 ? null : { start: 0, bytes };
 }
+
+// The cron calls a whole-history read would count that a newest window leaves out (`cronHistory` on a disk-backed
+// newest-window answer; the Scheduled section, docs/doperpowers/plans/2026-10-30-long-transcript-window.md): every
+// `CronCreate` and `CronDelete` of the session's own lane before the window, as C6's activity reads them
+// (transcript/model/orchestration.ts): top-level calls, in a turn no rewind anywhere in the history abandoned, whose
+// message no retraction or supersession dropped. Each with its result (wherever it sits) and, before the first call of
+// its turn, the turn's `turn.started`, so the renderer folds them under their turns and before the window's own. Newest
+// first within `bytes` of event JSON: a session with more cron traffic than that loses its oldest calls until their page
+// is loaded.
+export const CRON_HISTORY_TOOLS: ReadonlySet<string> = new Set(['CronCreate', 'CronDelete']);
+export const CRON_HISTORY_BYTES = 256 * 1024;
+
+export function cronHistoryOf(events: readonly SessionEvent[], start: number, bytes = CRON_HISTORY_BYTES): SessionEvent[] {
+  if (start <= 0) return [];
+  const topLevel = (event: SessionEvent) => event.agentId === null && event.parentToolUseId === null;
+  const turnAt: number[] = []; // each event's turn: the index of its turn's `turn.started` (-1 before the first)
+  const turnOfMessage = new Map<MessageUuid, number>(); // a message's turn, as the reducer indexes messages
+  const turnByKey = new Map<string, number>(); // a turn's first `turn.started` by the reducer's key, which a later start reuses
+  const order: number[] = []; // the visible turns in order
+  const hidden = new Set<number>();
+  const dropped = new Set<string>();
+  const results = new Map<string, SessionEvent>();
+  let turn = -1;
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]!;
+    if (event.kind === 'turn.started' && topLevel(event)) {
+      const key = event.userMessageUuid ?? `e${event.id}`;
+      const known = turnByKey.get(key);
+      if (known === undefined) {
+        turnByKey.set(key, i);
+        order.push(i);
+        if (event.userMessageUuid !== null) turnOfMessage.set(event.userMessageUuid, i);
+      }
+      turn = known ?? i;
+    }
+    turnAt.push(turn);
+    if ('messageUuid' in event && event.messageUuid !== null && turn >= 0 && !turnOfMessage.has(event.messageUuid)) turnOfMessage.set(event.messageUuid, turn);
+    if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) dropped.add(uuid);
+    else if (event.kind === 'assistant.block.complete') for (const uuid of event.supersedes) dropped.add(uuid);
+    else if (event.kind === 'tool.result' && topLevel(event)) results.set(event.toolUseId, event);
+    else if (event.kind === 'boundary.rewind') {
+      // every turn from the target's onward leaves the visible order (reduce.ts `rewind`)
+      const target = turnOfMessage.get(event.targetMessageUuid) ?? turnByKey.get(event.targetMessageUuid);
+      const at = target === undefined ? -1 : order.indexOf(target);
+      if (at >= 0) for (const index of order.splice(at)) hidden.add(index);
+    }
+  }
+  // The calls, newest first within the budget, then put back in order with their turns' starts.
+  const calls: number[] = [];
+  let used = 0;
+  for (let i = start - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.kind !== 'tool.use' || !topLevel(event) || !CRON_HISTORY_TOOLS.has(event.toolName)) continue;
+    if (turnAt[i]! < 0 || hidden.has(turnAt[i]!) || (event.messageUuid !== null && dropped.has(event.messageUuid))) continue;
+    const result = results.get(event.toolUseId);
+    const size = eventBytes(event) + (result ? eventBytes(result) : 0) + eventBytes(events[turnAt[i]!]!);
+    if (used + size > bytes) break;
+    used += size;
+    calls.push(i);
+  }
+  const out: SessionEvent[] = [];
+  let lastTurn = -1;
+  for (const i of calls.reverse()) {
+    const event = events[i]!;
+    if (turnAt[i] !== lastTurn) out.push(events[(lastTurn = turnAt[i]!)]!);
+    out.push(event);
+    const result = event.kind === 'tool.use' ? results.get(event.toolUseId) : undefined;
+    if (result) out.push(result);
+  }
+  return out;
+}

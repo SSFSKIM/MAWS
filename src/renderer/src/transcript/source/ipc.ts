@@ -295,7 +295,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         // would be its older window, and the next older page's rebuild would drop what the current one has shown.
         if (latest === subscription && !subscription?.ended.signal.aborted) {
           appAside = app.filter((event) => !placed.includes(event));
-          pager.started(events, earlier);
+          pager.started(events, earlier, answer.cronHistory);
         }
       }
       if (subscription) {
