@@ -102,6 +102,7 @@ export class SessionService {
   private readonly startedSince = new Set<string>();
   private recovering: Promise<void> | null = null;
   private streamed = false; // the host streamed while a recovery's table read was in flight
+  private hostSettled = false; // the boot's wait for the engine host (`host.ready`) has ended
   private offReady: (() => void) | null = null;
   private readonly manifests: DeletionManifests;
   // P2-A (X16): every run that can launch an engine for an id, registered before its first await; and what the last
@@ -190,6 +191,7 @@ export class SessionService {
     await this.work.track(this.deps.intents.load());
     if (this.disposed) return;
     await this.deps.host.ready?.();
+    this.hostSettled = true;
     if (this.disposed) return;
     const manifests = await this.work.track(this.manifests.list());
     if (this.disposed) return;
@@ -360,6 +362,7 @@ export class SessionService {
   }
 
   private async ready(): Promise<Setup> {
+    if (!this.hostSettled) this.deps.host.need?.(); // the boot still waits for the engine host: this wait is a need for it
     await (this.readyPromise ?? this.start());
     await this.recovering; // E10: a deferred recovery the host's return started
     return this.s;

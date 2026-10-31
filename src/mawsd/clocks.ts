@@ -16,6 +16,9 @@
 //   nor while a discovery wake is out (`discoveryWaking()` to its `parkNow()`): on a daemon idle past `idleExitMs` the
 //   clock's ask is overdue the moment the woken host is ready, and would end it before its pass. Either one's end
 //   evaluates again, the clock's ask still due from `parkSince`.
+//   P5 (a parked host's need): `engineNeeded()`, a command waits on the engine host (the spine's session service waits
+//   for its first streaming), starts the clock again from that moment, so the host woken for it is not asked to park the
+//   moment it is ready, and a discovery wake's park asked after the need is left to the clock.
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
@@ -42,6 +45,7 @@ export class DaemonClocks {
   private armedPid: number | null = null; // the engine host asked to exit when idle, the ask sent
   private discoveryPark = false; // parkNow's ask, until it is sent or no longer wanted
   private discoveryWake = false; // a discovery wake is out: no ask until its parkNow
+  private neededInWake = false; // engineNeeded() came while a discovery wake was out: its parkNow leaves the park to the clock
   private parkSince: number;
   private parked = { engine: true, pty: true };
   private clientCount = 0;
@@ -109,12 +113,22 @@ export class DaemonClocks {
   // P5 O3-D M6 (fix round 3): a discovery wake starts; its parkNow() ends it, heard or given up
   discoveryWaking(): void {
     this.discoveryWake = true;
+    this.neededInWake = false;
+  }
+
+  // P5: a command waits on the engine host (the header's terms)
+  engineNeeded(): void {
+    this.parkSince = Date.now();
+    this.discoveryPark = false;
+    if (this.discoveryWake) this.neededInWake = true;
+    this.evaluate();
   }
 
   // P5 O3-D M6 (fix rounds 1, 2, 3): the discovery wake's park of the engine host it woke (the header's terms)
   parkNow(): void {
     this.discoveryWake = false;
-    if (!this.stopped && !this.parked.engine && !this.attached && this.interestEmpty) this.discoveryPark = true;
+    if (!this.stopped && !this.neededInWake && !this.parked.engine && !this.attached && this.interestEmpty) this.discoveryPark = true;
+    this.neededInWake = false;
     this.evaluate();
   }
 

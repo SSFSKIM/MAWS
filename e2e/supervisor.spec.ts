@@ -48,6 +48,7 @@ import { MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-p
 import type { AttentionItem } from '@shared/graph/attention';
 import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
+import { DISCOVERY_WAKE_BOUND_MS } from '../src/mawsd/discovery-wake';
 import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
@@ -1090,5 +1091,53 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
       expect(st.keepAlive).toContain('background_tasks');
     }
     expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+// (n) on the daemon shape (P5, a parked host's need): with the spine cold and the engine host parked, a machine.sock
+// client's command that waits on the session service's boot (the boot waits for the host's first streaming) wakes the
+// host and answers within the bound a discovery read keeps for the same callers (the tightest caller deadline, 10 s,
+// less the answer's way back). The host it woke is asked to park by mawsd's idle clock only once the idle time has passed
+// from the need, and mawsd exits once idle.
+test('(n) P5: a command that waits on the engine host wakes it from its park with the spine cold, and the idle cycle still ends parked', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  const IDLE_MS = 4_000; // mawsd's idle time, the spine's host.configure (MAWS_E2E_SUPERVISOR_IDLE_MS)
+  const QUIET_MS = 1_000; // the spine's quiet period (MAWS_SPINE_QUIET_MS): it releases well before the host parks
+  const NEED = 'a command waits on the engine host, which is parked: waking it';
+  const ASK = 'no app and no interest for the idle time: asking the engine host to exit when idle';
+  // mawsd.log's timestamp of the last line containing `text`
+  const loggedAt = (s: Scratch, text: string) => {
+    const line = s.daemonLog().split('\n').filter((l) => l.includes(text)).at(-1);
+    return line === undefined ? null : Date.parse(line.slice(0, line.indexOf(' ')));
+  };
+  await withScratch('parked-need', async (s) => {
+    const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_SPINE_QUIET_MS: String(QUIET_MS) });
+    const status = await s.ready(run.page);
+    const [daemonPid, first] = [status.daemon!.pid, status.supervisor!.pid];
+    await s.quit(run); // unbusy: no stop-all on the daemon shape, mawsd's clocks decide
+    await expect.poll(() => s.daemonLog().includes('[spine] released'), { timeout: QUIET_MS + 10_000, message: 'the spine releases once quiet' }).toBe(true);
+    // a CLI's link, held open: mawsd stays up while it is there, and the spine stays cold until a command
+    const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cli' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    let woken: number;
+    try {
+      await expect.poll(() => isAlive(first), { timeout: IDLE_MS + 10_000, message: 'mawsd parks the engine host' }).toBe(false);
+      expect(s.daemonLog().split('\n').filter((l) => l.includes('[spine] loading')), 'the spine is cold: one load, the app’s').toHaveLength(1);
+      const started = Date.now();
+      const answer = await reached.link.request('session.intent.list', undefined, DISCOVERY_WAKE_BOUND_MS);
+      expect(answer, 'session.intent.list answers').toMatchObject({ ok: true, value: { intents: expect.any(Array) } });
+      expect(Date.now() - started, 'within the host’s launch and the boot').toBeLessThan(DISCOVERY_WAKE_BOUND_MS);
+      expect(s.daemonLog()).toContain(NEED);
+      woken = s.lock()!.pid;
+      expect(woken, 'a new engine host').not.toBe(first);
+      expect(isAlive(woken)).toBe(true);
+    } finally {
+      reached.link.close();
+    }
+    // the idle cycle: the woken host parked by the clock once the idle time has passed from the need, then mawsd exits
+    await expect.poll(() => isAlive(woken), { timeout: IDLE_MS + 10_000, message: 'mawsd parks the woken engine host' }).toBe(false);
+    expect(loggedAt(s, ASK)! - loggedAt(s, NEED)!, 'asked to park the idle time after the need, not at once').toBeGreaterThanOrEqual(IDLE_MS - 250);
+    await expect.poll(() => isAlive(daemonPid), { timeout: IDLE_MS + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
+    expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
   });
 });

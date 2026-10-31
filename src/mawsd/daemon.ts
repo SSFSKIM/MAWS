@@ -350,6 +350,17 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
     reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
     wakeOnEvents: options.spine?.wakeOnEvents ?? false,
+    // P5: a command waits on the engine host (the session service's boot, for its first streaming). The park clock starts
+    // again from the need, and a host that is not streaming is sent a ping, which the supervisor holds while the host
+    // starts or closes and for which it launches a parked one.
+    needEngine: () => {
+      clocks.engineNeeded();
+      if (hosts.streaming('engine-host')) return;
+      log(`[spine] a command waits on the engine host, which is ${hosts.parked('engine-host') ? 'parked' : hosts.snapshot('engine-host').state}: waking it`);
+      void hosts.dispatch('engine-host', 'engine.ping', undefined).then((result) => {
+        if (!result.ok) log(`[spine] the wake's engine.ping failed: ${result.error.message}`);
+      });
+    },
     endLink: async () => {
       const drained = hosts.stop(); // the terminal draining close: what the engine host wrote before it saw the end folds now
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);

@@ -222,6 +222,7 @@ export interface SpineHostsAdapterOptions {
   events: SpineEvents;
   intercept: EngineIntercept;
   wanted(): boolean; // the seam's: whether this load may wake the engine host (spine-seam.ts, `wanted`)
+  need(): void; // the seam's: a command waits on the engine host; the daemon wakes it
   log(line: string): void;
   resyncBoundMs?: number;
 }
@@ -276,6 +277,12 @@ export class SpineHostsAdapter implements SpineHosts {
     }
     return this.options.link.dispatch(owner, name, input, client);
   };
+
+  // A command waits on the engine host (the session service's boot, for its first streaming): the daemon wakes it, for a
+  // load that is wanted only (an event's load still wakes nothing)
+  need(): void {
+    if (!this.closed && this.options.wanted()) this.options.need();
+  }
 
   onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void {
     const off = this.options.events.listen(name, listener as Listener);
