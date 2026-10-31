@@ -92,6 +92,35 @@ describe('fileKeyCustody: the key', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  // D34: a directory one failed attempt left in Time Machine is excluded at a later load.
+  it('retries the exclusion once per load while unmarked, an existing key included, and marks it on success', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await custody({ excludeFromBackup: async () => Promise.reject(new Error('osascript failed')) }).available()).toBe(true);
+    const key = readFileSync(keyPath());
+    expect(existsSync(join(dir, CUSTODY_EXCLUDED_MARKER))).toBe(false);
+
+    const retried = custody(); // a later load: the key exists, the marker does not
+    await Promise.all([retried.available(), retried.seal(RECORD, A), retried.available()]);
+    expect(await retried.available()).toBe(true);
+    expect(excluded).toEqual([dir]);
+    expect(existsSync(join(dir, CUSTODY_EXCLUDED_MARKER))).toBe(true);
+    expect(readFileSync(keyPath())).toEqual(key);
+
+    expect(await custody().available()).toBe(true); // marked: never asked again
+    expect(excluded).toEqual([dir]);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('a load whose retry answers false or fails still uses the existing key, unmarked', async () => {
+    expect(await custody({ excludeFromBackup: async () => false }).available()).toBe(true);
+    const sealed = await custody({ excludeFromBackup: async () => false }).seal(RECORD, A);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failing = custody({ excludeFromBackup: async () => Promise.reject(new Error('osascript failed')) });
+    expect((await failing.open(sealed, A)).text).toBe(RECORD);
+    expect(existsSync(join(dir, CUSTODY_EXCLUDED_MARKER))).toBe(false);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['another mode', () => chmodSync(keyPath(), 0o644)],
     ['a narrower mode', () => chmodSync(keyPath(), 0o400)],

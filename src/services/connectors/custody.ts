@@ -12,8 +12,10 @@
 //   or not 32 bytes long is refused, never repaired or replaced: the custody fails closed (`available()` false, seal and
 //   open throw) and every record under it stays unreadable until the owner looks.
 // - Backups: the whole directory, key and records, leaves Time Machine (D5): a restored Mac reconnects, as it registers
-//   its device keys afresh. The exclusion is set once, when this load makes the key, before the key is linked in, and
-//   `key.excluded` records that it was set (no reader yet); a failed exclusion is logged and the key is made anyway.
+//   its device keys afresh. While `key.excluded` is absent, each custody asks for the exclusion once, at its first key
+//   read, before a key it makes is linked in, and writes the marker when the answer is true (D34): a Mac whose attempt
+//   failed is excluded at a later load, as keys.ts excludes at every load. A false or failed answer is logged and the
+//   key is made or used anyway.
 // - The seal (D6): AES-256-GCM under a fresh 12-byte nonce, the connection id as associated data, so a file copied
 //   under another id never opens; the bytes are nonce ‖ ciphertext ‖ tag (12, n, 16). Files carry format line 2.
 // - A failure is not remembered: the next use reads the key again. A key once read is held for the custody's life,
@@ -60,6 +62,7 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
   const uid = process.getuid?.();
   const keyFile = join(directory, CUSTODY_KEY_FILE);
   let held: Promise<Buffer> | null = null;
+  let exclusionAsked = false; // once per custody instance, whatever the key read's outcome
 
   const key = (): Promise<Buffer> => {
     held ??= loadOrCreate().catch((error: unknown) => {
@@ -71,13 +74,10 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
 
   async function loadOrCreate(): Promise<Buffer> {
     await privateDirectory();
+    await excludeUnlessMarked();
     const existing = await readKey();
     if (existing !== null) return existing;
-    const excluded = await exclude(directory).catch((error: unknown) => {
-      console.warn(`[connectors] could not exclude the OAuth custody directory from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    });
-    if ((await createKey()) && excluded) await markExcluded();
+    await createKey();
     const created = await readKey(); // whichever first use linked its key, every use reads that one
     if (created === null) throw new ConnectorCustodyError('missing'); // removed the moment it was linked
     return created;
@@ -124,8 +124,20 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
     }
   }
 
-  // Whether this use's key was linked into place (false: another first use's stands).
-  async function createKey(): Promise<boolean> {
+  async function excludeUnlessMarked(): Promise<void> {
+    if (exclusionAsked) return;
+    exclusionAsked = true;
+    const marker = join(directory, CUSTODY_EXCLUDED_MARKER);
+    if (await fs.lstat(marker).then(() => true, () => false)) return;
+    const excluded = await exclude(directory).catch((error: unknown) => {
+      console.warn(`[connectors] could not exclude the OAuth custody directory from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    });
+    if (excluded) await markExcluded(marker);
+  }
+
+  // A new key linked into place; when another first use's got there first, that one stands.
+  async function createKey(): Promise<void> {
     const temporary = join(directory, `.key-${process.pid}-${randomUUID()}`);
     try {
       const handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, FILE_MODE);
@@ -138,20 +150,19 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
       }
       await fs.link(temporary, keyFile);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return;
       throw error;
     } finally {
       await fs.rm(temporary, { force: true });
     }
     await syncDirectory();
-    return true;
   }
 
-  async function markExcluded(): Promise<void> {
+  async function markExcluded(marker: string): Promise<void> {
     try {
-      const handle = await fs.open(join(directory, CUSTODY_EXCLUDED_MARKER), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, FILE_MODE);
+      const handle = await fs.open(marker, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, FILE_MODE);
       try {
-        await handle.writeFile('the directory was excluded from Time Machine before the key was made\n');
+        await handle.writeFile('the directory is excluded from Time Machine\n');
       } finally {
         await handle.close();
       }
