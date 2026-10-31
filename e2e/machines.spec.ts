@@ -15,9 +15,8 @@
 //      (T1, P5 Decision Log 28); A's folder is a row of its own; B's machine row, `standin-b`, holds the session of the
 //      folder nobody added; hovering B's session names B.
 //   3. The draft. B's `shared` session opened in A shows its transcript (B's engine config alone holds it); a draft typed
-//      into its composer is written to B's index. Its branch (the Environment card) is deferred to O3-E (D22): the card
-//      reads `git.watch`, a `main`-owned command until O3-E moves the checkouts, which no process of B answers once B is
-//      a daemon alone; `[parent-impact]` on O3-D's acceptance 5, the architect's ruling at dispatch (D32).
+//      into its composer is written to B's index; its Environment card shows B's branch, read by `git.watch` from B's
+//      mawsd over the link (the checkouts are `machine`-owned since P5 O3-E, so B's daemon alone answers them).
 //   4. The departure. B's daemon stops: within 2 s it is down, and its rows and its tab grey while A's rows are as they
 //      were. A session is seeded into B's config while B is down; B's daemon starts again over its profile, and within
 //      5 s of its services answering (its spine's first answer, what B's window loading was when B was an app) its rows
@@ -39,7 +38,7 @@ import { localRef } from './support/address';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { seedTranscripts } from './support/maws-tools';
 import { startProfileDaemon, type ProfileDaemon } from './support/profile-daemon';
-import { mainTabById } from './support/shell';
+import { mainTabById, unfoldSessionCard } from './support/shell';
 import { showProjectList, sidebarOf } from './support/sidebar';
 
 test.skip(process.env.MAWS_MACHINES_E2E !== '1', 'the two-machine scenes run under pnpm e2e:machines (MAWS_MACHINES_E2E=1)');
@@ -236,10 +235,10 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       await expect(mainTabById(a.page, `session:${bSharedAt}`), 'the tab’s DOM id is the address').toHaveAttribute('aria-selected', 'true');
       const pane = a.page.locator('[data-region="main"] [data-pane="0"]');
       await expect(pane.getByRole('region', { name: 'Your message' }).filter({ hasText: 'B’s shared session' }), 'its transcript, which only B’s engine config holds').toBeVisible({ timeout: 15_000 });
-      // DEFERRED TO O3-E (P5 O3-D D22, the architect's ruling at dispatch, D32; `[parent-impact]` on acceptance 5): the
-      // Environment card's branch (`⎇ ${B_BRANCH}`, which only B's checkout is on) reads `git.watch`, a `main`-owned
-      // command until O3-E moves the checkouts into mawsd, and no process of B answers it once B is a daemon alone.
-      // O3-E restores the assertion: unfoldSessionCard(a.page, 'Environment'), then the card contains `⎇ ${B_BRANCH}`.
+      // The Environment card's branch: only B's checkout is on B_BRANCH, and `git.watch` is `machine`-owned since P5 O3-E
+      // (O3 Decision Log 16, D22), so B's daemon, with no app of B running, answers it over the link.
+      const environment = await unfoldSessionCard(a.page, 'Environment');
+      await expect(environment, 'its branch, from git on B’s daemon').toContainText(`⎇ ${B_BRANCH}`, { timeout: 15_000 });
 
       await composerOf(a.page).click();
       await a.page.keyboard.type(DRAFT);
