@@ -396,7 +396,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
     - unknown commands take `manage`.
   - Lane B's own compact, which is a queued `/compact` user message (lane-b-control-map), is graded the same way.
 
-**Grades**, from lowest to highest. Each includes the ones below it, except where noted.
+**Grades.** The session grades run from lowest to highest, and each includes the ones above it in the table. The per-machine grades stand apart: each is granted on its own, none includes another, and none ranks against a session grade (OX9).
 
 | Grade | Allows | Default holder |
 |---|---|---|
@@ -406,6 +406,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 | `approve` | Answer permission requests and dialogs that execute | Owners; shares at approve. Never org-wide. Deferred like `converse` (§6.4). |
 | `manage` | Change owners and shares, end the session, compact, rewind | Owners |
 | `spawn` (per machine, not per session) | Start a session on this machine | The machine's owners; members granted it (§6.3) |
+| `shell` (per machine) | Machine-level execution outside a session: MAWS's terminal on the machine, and port forwards (O7) | The machine's owners; members granted it (§6.3) |
 | `machine-admin` (per machine) | Read-only mode, ceilings, grants | The machine's owners; members granted it |
 
 #### 5.6 Step-up
@@ -414,7 +415,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - spawn;
   - approving on a session the member doesn't own;
   - changing shares or owners;
-  - machine-admin changes.
+  - machine-admin changes;
+  - a `shell` request by a member who isn't one of the machine's owners. An owner's own terminal on their machine needs none, as their routine approvals don't (§10.5).
 - **What is signed.** Main builds the action from typed fields, renders the exact text the person confirms, and signs that action's canonical form. The renderer can ask for an action, but it never supplies the bytes that are signed.
 - **Approvals are bound** to the digest of the request as displayed: session, tool-use id, tool name, SHA-256 of the input. The machine executes only if the digest matches the request still pending (desk §6, kept).
 - **Routine approvals** on the member's own session from an unlocked app need no step-up by default. The owner can require it for every approval (§10.5).
@@ -550,7 +552,7 @@ All of this section's choices are decided (owner, 2026-10-26).
 #### 6.3 Machine owners and grants
 
 - **A machine's owners** are one or more members, or the org itself (owner, 2026-10-26). The org owns shared machines such as devcloud VMs and the mini, if the owner says so. A delegation's machines take the delegation's owners (§5.3).
-- **Per-machine IAM.** The machine's owners grant members rights on it: `spawn` and `machine-admin` (owner, 2026-10-26: "IAM can name each user's rights per machine").
+- **Per-machine IAM.** The machine's owners grant members rights on it: `spawn`, `shell` and `machine-admin` (owner, 2026-10-26: "IAM can name each user's rights per machine"; `shell` added by Decision Log 30). The owners hold all three.
   - The grant is `{machine, machineKey, member, rights, version}`, signed by an owner's device, or by an admin device when the org owns the machine. `machineKey` is the id of the machine key it was signed for.
   - **The machine verifies a grant once, when it arrives,** against the org state it holds then, and keeps the highest version per member.
     - A grant in force stays in force when its signer later stops being an owner or an admin, or retires the device that signed it. Re-checking against the current state would lose a lower grant's replacement once its signer was demoted, and the lower grant would be back in force.
@@ -558,7 +560,7 @@ All of this section's choices are decided (owner, 2026-10-26).
     - The hosting machine is the only verifier of its grants (§5.8). Its grant ledger keeps the highest version per member and the ids of the machine keys this daemon has held, and it lives beside the machine key in the daemon's state directory.
     - **Losing that state fails closed.** A daemon that lost its state keeps its ref (§2.3), but has no key, so it re-enrolls with a new one (§5.3). It accepts only grants naming a key its ledger holds. So a grant replayed from before is refused, even one the lost ledger had already superseded. The machine's owners sign its grants again for the new key, and the app shows each one before signing, since the hub that serves the old ones isn't trusted.
     - A daemon that finds its key without its ledger, or its ledger without its key, starts as unenrolled. The state directory is kept out of backups (`tmutil addexclusion` on macOS), so a restore can't bring back an old key with an old ledger. A VM restored from a snapshot can, and that residual is its operator's.
-  - Without a grant, nobody but the owners can spawn there.
+  - Without a grant, nobody but the owners can spawn there or open a shell there.
 - **A grant is permission to use the machine.** A session spawned under a grant runs as the machine's OS account. Its owner and principal are the member who spawned it, and its record names its inference route. Running it under the spawner's own slot or route instead of the machine owner's login is deferred to account-managed inference (§6.4).
 
 #### 6.4 Credentials: the record names the principal and the inference route
@@ -977,3 +979,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - The owner approved the pause, bounded (O14's Q3): a 30-minute window the owner names, with no session waiting and nothing owed, a card test within 10 minutes of the cutover, and an undo back to DX2 within 60 minutes of the redemption. Nothing is lost in it: owed deliveries wait, and after the cutover the phone reaches the machine's questions through `web-cards`.
    - The trust model is the same either way. Accepting one trust model is the machine's rule, enforced at sminos's welcome (O12 M5), and the hub is trusted with availability only.
    - Rejected: keeping the DX2 credential until the endpoint's first RL1 claim (O14 M6 as first written). Its review found that doing it safely needs a migration state for the credential with its own deadline, deletion by token id, and a cutover bound atomically to an accepted claim from the new credential. That is a state machine in a security-sensitive credential lifecycle, to save a few minutes once per machine inside a window the owner already approved.
+30. **2026-10-31, a third machine right, `shell`** (the MAWS architect, from O7's re-plan; P5 Decision Log 166).
+   - OX9, O10 and O8 already grade `shell`, and O7's remote terminals and port forwards are graded by it. §5.5's table, §5.6 and §6.3 now say so.
+   - `shell` is machine-level execution outside any session, so it isn't part of `spawn`, and `spawn` isn't part of it. The per-machine grades are granted one by one, as the endpoint does (`src/endpoint/grants.ts`, `machineRights`), and none ranks against a session grade.
+   - A `shell` request by a member who isn't an owner carries a step-up signature (`src/endpoint/step-up.ts`). An owner's own terminal needs none.
