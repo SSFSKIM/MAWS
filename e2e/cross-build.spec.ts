@@ -63,6 +63,21 @@
 // older `mawsd` is not staged: the app's build check restarts a private `mawsd` of another build at its first status
 // read (src/main/hosts/daemon.ts, watchDaemon), so it serves the app only until then; main reads the welcome at each
 // request (src/main/artifacts/index.ts), and its unit test holds that choice.
+// P5 O5 M4 (acceptance 10, both directions of the render service): an app of one build on a `mawsd` of the other. A
+// private `mawsd` of another build would be restarted by the app's build check at its first status read, so each scene
+// runs the other build's `mawsd` as the profile's LaunchAgent (./support/unit-daemon.ts), which the check leaves as it
+// is; they load a LaunchAgent, so they run in CI alone, and the gate job sweeps the label prefix at its end.
+//   (update, render)    this build's app on the peer's unit `mawsd`, whose welcome lists no `machine.render`: main keeps
+//                       today's capture and export services, so an artifact page loads through main's handler, main's
+//                       capture renders it, and `artifacts.export`, machine-owned now, is answered in main (the router's
+//                       fallback) for the library's Export and with Send to's `dialect`, the peer's `mawsd` rendering
+//                       nothing;
+//   (downgrade, render) the peer's app on this build's unit `mawsd`: the peer's library Export stays its main's, and the
+//                       unit's render seam renders beside it (a capture through `daemon.e2eRender` from a bare
+//                       machine.sock client, the render host started by the unit's `mawsd`).
+// A session's `artifact_screenshot` and `artifact_export` through either pair is not driven: the unit and render-seam
+// unit tests (src/mawsd/daemon-render.test.ts) hold that a post-O5 `mawsd` takes the engine host's requests and posts
+// them to no client, and that an older one's are answered by main's listeners (src/main/artifacts/index.ts).
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -77,6 +92,8 @@ import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
+import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
+import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
@@ -764,5 +781,113 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
     const lock = s.daemonLock();
     said.push(`  then (O2's downgrade, D29; recorded only): mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `exited${s.daemonLog().includes('exited (restart, code 75)') ? ' 75 at the old app’s daemon.restart' : ''}`}; the profile’s mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid}`}; spine.lock ${spineLockOf(s.userData) === null ? 'absent' : `names pid ${spineLockOf(s.userData)!.pid}`}`);
     record(said);
+  });
+});
+
+// ---- P5 O5 M4: the render service across builds, on a unit `mawsd` of the other build (acceptance 10) ------------------
+
+const rendersOn = (build: Build) => build.manifest.capabilities.includes('machine.render');
+const UNIT_SKIP = process.platform !== 'darwin' ? 'a unit mawsd is a LaunchAgent: macOS alone' : ciRefusal(process.env);
+// The unit's environment beside its own: the e2e mark (its seams, daemon.e2eRender), the scratch engine store and usage
+// directory, as a launch gives a private daemon (./support/scratch-env.ts)
+const unitEnv = (userData: string): Record<string, string> => ({ MAWS_E2E: '1', CLAUDE_CONFIG_DIR: join(userData, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop' });
+const RENDER_PAGE = '<!doctype html><html><head><title>Render</title></head><body style="margin:0;background:#2a6"><p>CROSS_BUILD_RENDER</p></body></html>';
+
+async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>): Promise<void> {
+  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: unitEnv(s.userData) });
+  s.daemons.add(unit.pid);
+  try {
+    await body(unit);
+  } finally {
+    unit.remove(); // before the scratch's cleanup ends its processes: KeepAlive would restart a killed unit
+  }
+}
+
+async function createPage(run: Run): Promise<{ id: string; revision: number }> {
+  const created = (await run.page.evaluate(
+    (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Cross-build render', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+    RENDER_PAGE,
+  )) as { ok: true; value: { artifact: { id: string; revision: number } } } | { ok: false; error: { message: string } };
+  if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
+  return created.value.artifact;
+}
+const exported = async (run: Run, input: Record<string, unknown>) => {
+  const answer = (await run.page.evaluate((i) => window.maws.invoke('artifacts.export' as never, i as never), input)) as { ok: true; value: { path: string; revision: number } } | { ok: false; error: { code: string; message: string } };
+  if (!answer.ok) throw new Error(`artifacts.export ${JSON.stringify(input)}: ${answer.error.code} ${answer.error.message}`);
+  return answer.value;
+};
+const machineWelcome = (output: string, daemonPid: number) => output.split('\n').filter((line) => line.includes(`connected to supervisor pid ${daemonPid} build `)).at(-1) ?? '';
+
+test('(update, render) this build’s app on the peer’s unit mawsd, which lists no machine.render: main keeps its capture and export services; the library’s Export and Send to’s are answered in main', async () => {
+  const { here, peer, newer } = builds();
+  test.skip(here !== newer || rendersOn(peer) || !rendersOn(here) || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not an older build of the daemon shape before the render service`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  await withScratch('xb-render-update', async (s) => {
+    await withUnit(s, peer, 'xb-render-update', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain(`mawsd pid ${unit.pid} runs build `);
+      expect(run.output()).toContain('its unit runs another bundle, so it is left as it is');
+      const welcome = machineWelcome(run.output(), unit.pid);
+      expect(welcome, "main's log: the unit mawsd's welcome").not.toBe('');
+      expect(welcome, 'the peer’s mawsd lists no machine.render').not.toContain('machine.render');
+
+      const { id, revision } = await createPage(run);
+      const page = await run.maws.app.evaluate(async ({ session }, url) => {
+        const response = await session.defaultSession.fetch(url);
+        return { status: response.status, text: await response.text() };
+      }, `maws-artifact://${id}/live/index.html`);
+      expect(page.status, 'the page loads through main’s handler').toBe(200);
+      expect(page.text).toContain('CROSS_BUILD_RENDER');
+      // main's capture service, composed as today: the capture seam runs it in main (__maws_captures)
+      const captured = (await run.maws.app.evaluate(
+        (_electron, request) => (globalThis as unknown as { __maws_captures: { capture(r: unknown): Promise<{ ok: boolean; width?: number; error?: string }> } }).__maws_captures.capture(request),
+        { appSessionId: 'xb-render', requestId: 'xb-render-1', artifactId: id, revision, width: 640, height: 480 },
+      )) as { ok: boolean; width?: number; error?: string };
+      expect(captured, JSON.stringify(captured).slice(0, 300)).toMatchObject({ ok: true, width: 640 });
+      // artifacts.export, machine-owned: the router answers it in main while the daemon lists no machine.render
+      const pdf = await exported(run, { artifactId: id, format: 'pdf' });
+      expect(pdf.path.startsWith(join(s.userData, 'artifacts', id, 'exports'))).toBe(true);
+      expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      const sendTo = await exported(run, { artifactId: id, format: 'png', width: 640, height: 480, dialect: 'notion' }); // Send to's export, its dialect on the wire
+      expect(readFileSync(sendTo.path).subarray(1, 4).toString('latin1')).toBe('PNG');
+      expect(s.daemonLog(), 'the peer’s mawsd rendered nothing').not.toMatch(/\[render\]|\[render-host\]/);
+      said.push(`  welcome: ${welcome.trim()}`, `  page, capture (640x480), library Export (${pdf.path}) and Send to's export (${sendTo.path}) answered in main`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(downgrade, render) the peer’s app on this build’s unit mawsd: its library Export stays its main’s, and the unit’s render seam renders beside it', async () => {
+  const { here, peer } = builds();
+  test.skip(rendersOn(peer) || !rendersOn(here) || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not a build of the daemon shape before the render service`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  await withScratch('xb-render-downgrade', async (s) => {
+    await withUnit(s, here, 'xb-render-downgrade', async (unit) => {
+      const said = [`${peer.label} (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(machineWelcome(run.output(), unit.pid), 'this build’s mawsd lists machine.render, which the peer’s main does not read').toContain('machine.render');
+      const { id, revision } = await createPage(run);
+      const pdf = await exported(run, { artifactId: id, format: 'pdf' }); // the peer's registry keeps artifacts.export main's
+      expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      expect(s.daemonLog(), 'the peer’s library Export is its main’s: no render host').not.toContain('[render] starting the render host');
+
+      const windows = () => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+      const before = await windows();
+      const to = join(s.root, 'render-downgrade.png');
+      await unit.request('daemon.e2eRender', { artifactId: id, revision, width: 640, height: 480, to }, 120_000);
+      const png = readFileSync(to);
+      expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([640, 480]);
+      expect(s.daemonLog(), 'the unit’s mawsd started its render host for the capture').toContain('[render] starting the render host for artifact_screenshot');
+      expect((await unit.status()).render, 'daemon.status.render').toMatchObject({ state: 'ready', starts: 1 });
+      expect(await windows(), 'no capture window in the peer’s main').toBe(before);
+      said.push(`  the peer's library Export in its main (${pdf.path}); the unit's render seam captured ${id} at 640x480 beside it`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });

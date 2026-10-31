@@ -7,7 +7,8 @@
 // export service. M9: S2's numbers measured in the product, under MAWS_ARTIFACTS_PERF=1 (the last case). P5 O5 M2
 // (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 4): the two scheme cases run on the daemon shape, where
 // every `maws-artifact:` load, the app's and the capture window's, goes through the scheme proxy to `mawsd`'s artifact
-// endpoint on artifacts.sock, and asserts what they asserted of main's handler.
+// endpoint on artifacts.sock, and asserts what they asserted of main's handler. P5 O5 M4: there `artifacts.export` is a
+// machine command, rendered by `mawsd`'s render host (the library's Export from the app's window, as from any client).
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { loadavg, tmpdir } from 'node:os';
@@ -322,6 +323,10 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
   // Word, which no child registers.)
   const refused = await invoke(page, 'artifacts.export', { artifactId: artifact.id, format: 'docx' });
   expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable', data: { kind: 'html', format: 'docx' } } } });
+  // P5 O5 M4: on the daemon shape every one of them was rendered by mawsd's render host, never by the app's main (the
+  // refusal's IPC error carried back through render.answer)
+  expect(endpointLog(profile), "mawsd's log: the render host started for the library's Export").toContain('[render] starting the render host for the library’s Export');
+  expect(endpointLog(profile)).toContain('[render] the render host is ready');
 });
 
 // M7 fix wave 1 (Decision Log 44a, 44b): the scheme's reach. Only the app's own session and the capture partition serve

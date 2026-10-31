@@ -11,22 +11,34 @@
 // render library's e2e seams moved here from the app's specs run in the render host's main, unchanged in what they
 // assert: the PDF printer's request filter (from artifacts-store.spec.ts) and a document viewport's hostile HTML (as
 // document.spec.ts drives it on the document's own export).
+//
+// e2e:render-host, part (b) (P5 O5 M4; acceptance 2, "the app's quit changes nothing"): the built app on the daemon shape
+// over a scratch profile, an `html` artifact made in its engine host, then the app quit while its private `mawsd` and the
+// engine host keep running. A second client on `machine.sock` (the e2e's, as `mawsd`'s command line would be) asks the
+// library's Export, which `mawsd`'s render seam renders through a render host it starts for it (`mawsd.log`), the PDF
+// under the profile's store; a capture through the seam (`daemon.e2eRender`) answers a PNG of the asked size; the render
+// host ends after its quiet period. The relaunched app finds the artifact and its export, and its main never rendered:
+// no capture window, `mawsd`'s welcome lists `machine.render`.
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import type { RenderAnswer, RenderRequest } from '@shared/ipc/schema/render';
-import { RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { MACHINE_RENDER_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { daemonPaths } from '@shared/daemon/files';
+import type { DaemonStatus } from '@shared/ipc/schema/daemon';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { ipcError } from '@shared/ipc/errors';
 import { startFakeArtifactsEndpoint, type FakeArtifactsEndpoint } from '../test/support/fake-artifacts-endpoint';
 import { startFakeFront, type FakeFront, type FakeFrontClient } from '../test/support/fake-front';
-import { REPO_ROOT } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { launchEnvironment } from './support/scratch-env';
 
 const ARTIFACT = randomUUID();
@@ -246,4 +258,91 @@ test('the render host renders windowless against a fake mawsd, three captures in
     expect(await scene!.exited).toBe(0);
     await client.ended();
   });
+});
+
+// ---- part (b): the daemon shape, the app quit (P5 O5 M4) ---------------------------------------------------------------
+
+const QUIET_MS = 15_000; // the render host's quiet period under the scene (MAWS_RENDER_QUIET_MS)
+const DAEMON_SHAPE = { MAWS_HOST_MODE: 'daemon', MAWS_RENDER_QUIET_MS: String(QUIET_MS) };
+
+test('part (b): on the daemon shape, with the app quit, a second client’s library Export and a capture are rendered by mawsd’s render host, which ends when quiet; the relaunched app finds them', async () => {
+  test.setTimeout(240_000);
+  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-rh-b-'));
+  let launch: MawsLaunch | null = null;
+  const launches: MawsLaunch[] = [];
+  const mawsdLog = () => {
+    try {
+      return readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  try {
+    launch = await launchMaws({ userData, env: DAEMON_SHAPE });
+    launches.push(launch);
+    const { page } = launch;
+    await expect.poll(async () => {
+      const status = (await page.evaluate(() => window.maws.invoke('host.status', undefined))) as { ok: boolean; value?: { state: string; daemon: unknown } };
+      return status.ok && status.value!.state === 'ready' && status.value!.daemon !== null;
+    }, { timeout: 60_000, message: 'main is connected through mawsd' }).toBe(true);
+    const created = (await page.evaluate(
+      (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Quit-proof page', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+      '<!doctype html><html><head><title>Red</title></head><body style="margin:0;background:#ff0000"><p>RH_DAEMON_SHAPE</p></body></html>',
+    )) as { ok: true; value: { artifact: { id: string; revision: number } } } | { ok: false; error: { message: string } };
+    if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
+    const { id, revision } = created.value.artifact;
+    const app = launch.app;
+    const exited = new Promise<void>((done) => app.process().once('exit', () => done()));
+    await app.evaluate(({ app: electron }) => electron.quit());
+    await exited;
+
+    await test.step('a second client’s library Export, with no app, rendered by the render host mawsd starts', async () => {
+      const reached = await reachMachine(daemonPaths(userData), { build: 'e2e-render-host-b' });
+      if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+      try {
+        expect(reached.link.welcome.capabilities).toContain(MACHINE_RENDER_CAPABILITY);
+        const exported = await reached.link.request('artifacts.export', { artifactId: id, format: 'pdf' }, 150_000);
+        expect(exported, JSON.stringify(exported).slice(0, 300)).toMatchObject({ ok: true, value: { revision } });
+        const path = (exported as { value: { path: string } }).value.path;
+        expect(path.startsWith(join(userData, 'artifacts', id, 'exports'))).toBe(true);
+        expect(readFileSync(path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+        expect(mawsdLog()).toContain('[render] starting the render host for the library’s Export');
+        expect(mawsdLog()).toContain('[render] the render host is ready');
+
+        // a capture through the seam, the e2e's (daemon.e2eRender), its PNG written where the scene asks
+        const to = join(userData, 'capture.png');
+        const captured = await reached.link.request('daemon.e2eRender', { artifactId: id, revision, width: 640, height: 480, to }, 150_000);
+        expect(captured, JSON.stringify(captured)).toMatchObject({ ok: true });
+        const png = readFileSync(to);
+        expect(png.subarray(0, 8).toString('hex')).toBe(PNG_SIGNATURE);
+        expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([640, 480]);
+        const status = (await reached.link.request('daemon.status', undefined)) as { ok: true; value: DaemonStatus };
+        expect(status.value.render, 'one render host served both').toMatchObject({ state: 'ready', starts: 1, requests: 0 });
+      } finally {
+        reached.link.close();
+      }
+    });
+
+    await test.step('the render host ends after its quiet period', async () => {
+      await expect.poll(mawsdLog, { timeout: QUIET_MS + 30_000, message: 'the quiet period’s end' }).toContain(`[render] quiet for ${QUIET_MS / 1000} s: ending the render host`);
+      await expect.poll(mawsdLog, { timeout: 15_000, message: 'its exit' }).toMatch(/\[render\] the render host exited \(code 0\)/);
+    });
+
+    await test.step('the relaunched app finds the artifact and its export; its main never captured', async () => {
+      launch = await launchMaws({ userData, env: DAEMON_SHAPE });
+      launches.push(launch);
+      const again = launch.page;
+      await expect.poll(async () => {
+        const row = (await again.evaluate((artifactId) => window.maws.invoke('library.get', { artifactId } as never), id)) as { ok: boolean; value?: { row: { id: string } | null } };
+        return row.ok ? (row.value!.row?.id ?? null) : null;
+      }, { timeout: 60_000, message: 'the library row of the artifact made before the quit' }).toBe(id);
+      const formats = (await again.evaluate(() => window.maws.invoke('library.exportFormats', { kind: 'html' } as never))) as { ok: boolean; value?: { formats: string[] } };
+      expect(formats.value?.formats ?? []).toContain('pdf');
+      const seen = await launch.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((win) => win.webContents.getURL()));
+      expect(seen.filter((url) => url.startsWith('maws-artifact:')), 'no capture window in main on the daemon shape').toEqual([]);
+    });
+  } finally {
+    for (const each of launches.reverse()) await each.cleanup().catch((error: unknown) => console.error(error));
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

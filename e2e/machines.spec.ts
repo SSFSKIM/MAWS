@@ -24,13 +24,19 @@
 //      starts again at zero, is listed (M4's generation reset).
 //   5. The relaunches. A relaunched with B up restores B's tab and its draft, read from B; A relaunched with B down keeps
 //      the tab, greyed.
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 5, the machine side): a second scene. B, a
+// daemon alone, is asked `artifacts.export` over a bare machine.sock client (as A's connection manager would forward it,
+// the remote half being O7 M5's): B's render seam starts B's render host, the file is under B's profile, and B's
+// library lists the artifact.
 // Run by `pnpm e2e:machines` (MAWS_MACHINES_E2E=1).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { daemonPaths } from '../src/shared/daemon/files';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -317,5 +323,41 @@ test('two machines in one sidebar by org project; one leaving greys only its row
     for (const launch of [...launches].reverse()) await launch.cleanup().catch((error: unknown) => console.error('[e2e] cleanup failed', error));
     for (const daemon of daemons) await daemon.stop().catch((error: unknown) => console.error('[e2e] B’s daemon’s stop failed', error));
     for (const dir of [root, aUserData!, bUserData!]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// P5 O5 M4 (acceptance 5, the machine side): B renders an export it is asked for with no app, through its own render host
+test('export on another machine, the machine side: B, a daemon alone, renders artifacts.export through its render host, the file under B’s profile and B’s library naming the artifact', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-mx-render-')));
+  const bUserData = join(root, 'b');
+  mkdirSync(bUserData, { recursive: true });
+  let daemon: ProfileDaemon | null = null;
+  try {
+    daemon = await startProfileDaemon({ userData: bUserData, env: { MAWS_MACHINE_NAME: B_NAME } });
+    const reached = await reachMachine(daemonPaths(bUserData), { build: 'e2e-machines-render' });
+    if (!reached.ok) throw new Error(`B's machine.sock: ${reached.state}: ${reached.why}`);
+    try {
+      const ask = async <T>(name: string, input: unknown, timeoutMs?: number): Promise<T> => {
+        const answer = await reached.link.request(name, input, timeoutMs);
+        if (!answer.ok) throw new Error(`${name} on B: ${answer.error.code} ${answer.error.message}`);
+        return answer.value as T;
+      };
+      expect(reached.link.welcome.capabilities, 'B’s welcome lists machine.render').toContain('machine.render');
+      const page = '<!doctype html><html><head><title>B</title></head><body><h1>MACHINE_B_EXPORT</h1></body></html>';
+      const { artifact } = await ask<{ artifact: { id: string; revision: number } }>('artifacts.create', { kind: 'html', title: 'B’s page', content: { bytes: new TextEncoder().encode(page), name: 'index.html' } });
+      const exported = await ask<{ path: string; revision: number }>('artifacts.export', { artifactId: artifact.id, format: 'pdf' }, 150_000);
+      expect(exported.revision).toBe(artifact.revision);
+      expect(exported.path.startsWith(join(bUserData, 'artifacts', artifact.id, 'exports')), 'the file is under B’s profile').toBe(true);
+      expect(readFileSync(exported.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      expect(daemon.log(), 'B’s mawsd started its render host for the export').toContain('[render] starting the render host for the library’s Export');
+      await expect
+        .poll(async () => (await ask<{ rows: { id: string }[] }>('library.list', {})).rows.some((row) => row.id === artifact.id), { timeout: 30_000, message: 'B’s library lists the artifact' })
+        .toBe(true);
+    } finally {
+      reached.link.close();
+    }
+  } finally {
+    await daemon?.stop().catch((error: unknown) => console.error(error));
+    rmSync(root, { recursive: true, force: true });
   }
 });

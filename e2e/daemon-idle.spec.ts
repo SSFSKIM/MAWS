@@ -55,6 +55,13 @@
 // spine: the built mawsd over the same fixture, the spine loaded by a client's first command, released after the quiet
 // period, and re-executed as a unit daemon; it writes test-results/daemon-idle-mawsd-spine.json.
 //
+// The eighth (P5 O5 M4, docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 8) is warm to idle: the first
+// case's scene, then a capture through `mawsd`'s render seam (`daemon.e2eRender` from a bare machine.sock client) and one
+// artifact fetch through artifacts.sock, then the render host's quiet period (MAWS_RENDER_QUIET_MS 30 s) and its exit in
+// mawsd.log, then the same settle, window, readers, validity rule and bound, with no render host process at the
+// window's start: what the deferred chunks keep resident after use. It writes test-results/daemon-idle-render.json and
+// runs as `pnpm e2e:daemon-idle-render`, which the plain group's and the baseline's --grep-invert leave out.
+//
 // Eight measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
 // scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
 // today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
@@ -67,6 +74,7 @@
 // wake, mawsd with the spine wakes an engine host that replays (MAWS_ENGINE_REPLAY=1) and runs no session, and the enrolled endpoint's hub is a local one on loopback, its machine key a file of the scratch profile.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -159,12 +167,12 @@ const sceneEnv = (shape: Shape) => ({ MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, 
 // seams; supervisorEnv's rewrite) and MAWS_SPINE_QUIET_MS=60000 (D6's measured seam), so the app's launch finds it up
 // and the lock arbitrates. Restarted on exit 75 as launchd would, following the new pid in `held.daemon`; re-execution
 // is off by default (D38), so a restart is not expected and, before the window, not a lost process.
-async function startUnitDaemon(userData: string, held: Held): Promise<void> {
+async function startUnitDaemon(userData: string, held: Held, extraEnv: Record<string, string> = {}): Promise<void> {
   const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
   expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
   const binary = electronBinary();
   const base: Record<string, string> = { ...launchEnvironment(process.env, userData), MAWS_E2E_ENGINE_BIN: writeReplayEngine(userData), ...writeScratchShellHome(join(userData, 'shell-home')).env, ...sceneEnv('daemon') };
-  const env = { ...supervisorEnv(base, { userData, packaged: false }), MAWS_SPINE_QUIET_MS: '60000' };
+  const env = { ...supervisorEnv(base, { userData, packaged: false }), MAWS_SPINE_QUIET_MS: '60000', ...extraEnv }; // P5 O5 M4: extraEnv, the render case's
   const logFile = join(userData, 'mawsd', 'mawsd.log');
   const serving = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter((line) => line.includes(' serving; ')).length : 0);
   let ending = false;
@@ -184,7 +192,7 @@ async function startUnitDaemon(userData: string, held: Held): Promise<void> {
 // asked (P5 O3-D, Q1). On the daemon shape `daemonKind` says whose daemon the app reaches: its private one, or the
 // harness's unit (D7), started here before the launch. Answers the session's id and the Electron version every measured
 // process runs as Node.
-async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape, daemonKind: 'private' | 'unit' = 'private'): Promise<{ id: AppSessionId; electron: string }> {
+async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape, daemonKind: 'private' | 'unit' = 'private', unitEnv: Record<string, string> = {}): Promise<{ id: AppSessionId; electron: string }> {
   const daemon = shape === 'daemon';
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
@@ -201,7 +209,7 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   // P5 O3-D M6 (fix round 1): mawsd's own log published beside the launch's host log (as the mawsd-spine case does), so
   // a run can be read for mawsd's attach and spine lines; taken before the harness's unit starts, so its log is this scene's
   if (daemon) held.evidence = processEvidence(test.info().outputDir, userData, () => true, process.env, { daemon: join(userData, 'mawsd'), host: false });
-  if (daemon && daemonKind === 'unit') await startUnitDaemon(userData, held);
+  if (daemon && daemonKind === 'unit') await startUnitDaemon(userData, held, unitEnv);
   const maws = (held.maws = await launchMaws({ userData, keepConfigHome: true, env: sceneEnv(shape) }));
   const { page, app } = maws;
   const child = app.process();
@@ -273,6 +281,62 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
     leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
+});
+
+// P5 O5 M4 (acceptance 8): warm to idle, the render seam's chunk and the endpoint's handler used once, then the window
+const RENDER_QUIET_MS = 30_000;
+const RENDER_PAGE = '<!doctype html><html><head><title>Idle</title></head><body style="margin:0;background:#2a6"><p>DAEMON_IDLE_RENDER</p></body></html>';
+// One artifact fetch through mawsd's artifact endpoint, as the scheme proxy asks it (src/services/artifacts/scheme/http.ts)
+const fetchThroughEndpoint = (socketPath: string, url: string) =>
+  new Promise<number>((resolve, reject) => {
+    const req = httpRequest({ socketPath, path: `/${encodeURIComponent(url)}`, method: 'GET', agent: false }, (res) => {
+      res.resume();
+      res.once('end', () => resolve(res.statusCode ?? 0));
+    });
+    req.once('error', reject);
+    req.end();
+  });
+
+test('daemon idle render: the footprint and CPU the daemon shape keeps after a render through the seam and an artifact fetch, once the render host has ended', async () => {
+  test.skip(!DAEMON, 'the render seam is the daemon shape’s (MAWS_HOST_MODE=daemon)');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-render-')));
+  const userData = join(root, 'ud');
+  const held: Held = { maws: null, supervisor: null, daemon: null };
+  let leftover: unknown;
+  try {
+    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE, 'unit', { MAWS_RENDER_QUIET_MS: String(RENDER_QUIET_MS) });
+    const paths = daemonPaths(userData);
+    const reached = await reachMachine(paths, { build: 'e2e-daemon-idle-render' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    let artifactId = '';
+    try {
+      const created = await reached.link.request('artifacts.create', { kind: 'html', title: 'Idle render', content: { bytes: new TextEncoder().encode(RENDER_PAGE), name: 'index.html' } }, 30_000);
+      if (!created.ok) throw new Error(`artifacts.create: ${created.error.message}`);
+      const { artifact } = created.value as { artifact: { id: string; revision: number } };
+      artifactId = artifact.id;
+      const rendered = await reached.link.request('daemon.e2eRender', { artifactId, revision: artifact.revision, width: 640, height: 480, to: join(root, 'render.png') }, 150_000);
+      expect(rendered, JSON.stringify(rendered)).toMatchObject({ ok: true });
+    } finally {
+      reached.link.close();
+    }
+    expect(await fetchThroughEndpoint(paths.artifactsSocket, `maws-artifact://${artifactId}/live/index.html`), 'the artifact fetch through artifacts.sock').toBe(200);
+    const mawsdLog = () => readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
+    await expect.poll(mawsdLog, { timeout: RENDER_QUIET_MS + 60_000, message: 'the render host ends after its quiet period' }).toMatch(/\[render\] the render host exited/);
+    const procs = await settledProcesses(root, held, SHAPE);
+    expect(processesNaming(root).filter((p) => p.command.includes('--render-host') || p.command.includes(join('mawsd', 'render-host'))).map((p) => p.command), 'no render host process at the window’s start').toEqual([]);
+    const measurement = await measureWindow(procs);
+    const sessionEnded = launchEnded(journal(userData, id));
+    const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
+    const { footprintKiB, rssKiB, cpuS, load } = measurement;
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound: DAEMON_IDLE_BOUND, electron, load, loadPair: measurement.loadPair });
+    const misses = footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, DAEMON_IDLE_BOUND);
+    report('daemon-idle-render.json', line, reasons, { shape: SHAPE, electron, bound: DAEMON_IDLE_BOUND, misses, ...measurement.record, sessionEnded });
+    expect(misses, `warm to idle, the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
+  } finally {
+    held.endUnit?.();
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
+  }
+  if (leftover !== null) throw leftover;
 });
 
 // The runtime floor (P5 Decision Logs 54 and 57, a diagnostic): what `mawsd` runs on, before any of its code. The Electron binary the engine

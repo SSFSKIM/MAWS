@@ -174,7 +174,7 @@ env:
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of
@@ -880,7 +880,8 @@ jobs:
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
       # e2e:daemon-unit (P5 O2 M7) loads LaunchAgents into this Mac's account, so whatever the run did, every
       # `dev.maws.mawsd.e2e-*` agent and plist in the account is booted out and removed, this job's and any earlier one's.
-      - if: always() && matrix.group == 'daemon-unit' && steps.checkout.outcome == 'success'
+      # P5 O5 M4: e2e:cross-build's render scenes load one too (a unit mawsd of the other build).
+      - if: always() && (matrix.group == 'daemon-unit' || matrix.group == 'cross-build') && steps.checkout.outcome == 'success'
         run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
