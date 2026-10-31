@@ -321,6 +321,7 @@ describe('remote.session', () => {
     l.link.setCaps({ member: 'member-a', device: 'mac1', clientClass: 'native-mac', machine: { grades: ['spawn', 'shell'] }, stateVersion: 3 });
     expect(l.lastState()).toMatchObject({ link: { rights: ['spawn', 'shell'] } });
     l.link.set('down');
-    expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: false } } });
+    // media too since M4c lifted its gap (uploads cross in parts), as a send does while the link is down
+    expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: true } } });
   });
 });

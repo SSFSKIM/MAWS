@@ -29,7 +29,10 @@
 //   session (`recordChanged`), or when the feed opens again (`kick`: what changed meanwhile went untold). Without such a
 //   feed (a peer without `rl2.feeds`) it is tried on a backoff from 1 s doubling to `idleProbeMaxMs`, well past the
 //   machine's park window, so the host parks between tries. `kick` subscribes at once (a resume this app asked for, the
-//   feed's opening). `removed` and `closed` end it for good; any other end ends the stream with its reason.
+//   feed's opening). A record that says the session runs while a try is still out is kept for that try, and taken once
+//   it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
+//   channel's peer without feeds) puts a waiting stream on the backoff (fix wave 1). `removed` and `closed` end it for
+//   good; any other end ends the stream with its reason.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
@@ -107,6 +110,8 @@ export class RemoteSession {
   #cursor: Cursor | null = null;
   #pendingGap: string | null = null; // the launch of a `missing` gap not told yet: its place is the next event's
   #timer: ReturnType<typeof setTimeout> | null = null;
+  /** A record said the session runs while the try out was not yet answered: one more try once it ends. */
+  #started = false;
   #backoffMs: number;
   #batch: SessionEvent[] = [];
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -171,7 +176,15 @@ export class RemoteSession {
     this.state.record = record;
     this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
     if (this.state.stream !== 'idle') return;
-    if (record.holder.kind === 'self' || record.engineSessionId !== before?.engineSessionId) this.kick();
+    if (record.holder.kind !== 'self' && record.engineSessionId === before?.engineSessionId) return;
+    if (this.#sub === null) this.kick();
+    else this.#started = true;
+  }
+
+  /** The record no longer follows (the feed ended for good, not as a stop): a stream waiting on it tries on the backoff. */
+  unfollowed(): void {
+    if (!this.#running || this.state.stream !== 'idle' || this.#sub !== null || this.#timer !== null) return;
+    this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
   }
 
   /**
@@ -286,6 +299,7 @@ export class RemoteSession {
         this.#flush();
         const gap = first ? mode === 'missing' && carried : mode !== 'replay';
         first = false;
+        this.#started = false;
         this.#backoffMs = this.#deps.timing.idleRetryMs[0];
         this.state.launch = at.epoch;
         this.#tellPendingGap();
@@ -349,6 +363,10 @@ export class RemoteSession {
         }
         this.state.stream = 'idle';
         this.publish();
+        if (this.#started) {
+          this.#started = false;
+          return this.#subscribe();
+        }
         if (!this.#deps.followed?.()) this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
       },
     };
@@ -430,6 +448,7 @@ export class RemoteSession {
   /** Every timer, subscription and wait of the run before. */
   #halt(): void {
     this.#token = {};
+    this.#started = false;
     this.#pendingGap = null; // the next subscription's opening from the cursor says it again
     if (this.#sub !== null) this.#cursor = this.#sub.cursor() ?? this.#cursor;
     this.#sub?.close();

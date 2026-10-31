@@ -510,6 +510,49 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await until(() => eventsOf(l.a, 'app-r').some((e) => e.id === row[0].id), 'the new launch’s row');
   });
 
+  // Fix wave 1 (finding 1): the budget is the current channel's peer's to take, page by page.
+  it('goes on with a budgeted hydration on M2’s path when the channel drops and the next one’s endpoint lists no budget', async () => {
+    const l = await lab();
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    const small = l.host.row('app-1', 2);
+    await opened(l.a, 'app-1', s.launchId);
+    const big = (bytes: number) => {
+      const row = [l.host.event(s, s.rows.length + 1, 0, { kind: 'note', text: 'x'.repeat(bytes) })];
+      s.rows.push(row);
+      return row;
+    };
+    const fits = [big(1.5 * MiB), big(1.5 * MiB), big(1.5 * MiB)];
+    const huge = big(5 * MiB);
+    // The first budgeted page is answered by the engine host, then lost with its channel; the endpoint the device
+    // reaches next (an older build, say) lists no budget.
+    const opening = l.host.calls.length;
+    let cut = 0;
+    const answer = l.host.answer.bind(l.host);
+    l.host.answer = (owner, name, input) => {
+      if (name === 'session.events' && (input as { maxBytes?: number }).maxBytes !== undefined && cut++ === 0) {
+        endpointWithout('rl2.events-budget');
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        setTimeout(() => carrier.close('dropped'), 20);
+      }
+      return answer(owner, name, input);
+    };
+    const read = (await l.a.cmd('session.events', { appSessionId: 'app-1', afterSeq: null, limit: null })) as Events;
+    expect(cut).toBeGreaterThan(0);
+    expect(l.a.carriers.length).toBeGreaterThan(1);
+    expect(ids(read.events)).toEqual(ids([...small, ...fits.flat()]));
+    expect(read).toMatchObject({ lastSeq: huge[0].seq, complete: true });
+    // the read's gap, said once (the stream, resumed on the next channel, says its own at `{seq, idx}`)
+    expect(gapsOf(l.a, 'app-1').filter((g) => (g.at as { idx?: number } | undefined)?.idx === undefined)).toEqual([{ appSessionId: 'app-1', launchId: s.launchId, at: { seq: huge[0].seq } }]);
+    // the device's reads (a channel's client), not the machine's in-process stream catch-up
+    const asked = l.host.calls.slice(opening).filter((c) => c.name === 'session.events' && c.client !== undefined).map((c) => (c.input as { maxBytes?: number }).maxBytes !== undefined);
+    // the lost page, and at most its resend by the link; every page after is M2's
+    const last = asked.lastIndexOf(true);
+    expect(last).toBeLessThanOrEqual(1);
+    expect(asked.slice(last + 1).length).toBeGreaterThan(1);
+  });
+
   it('still tries an idle stream on the backoff for an endpoint without feeds, which carries no record', async () => {
     endpointWithout('rl2.feeds');
     const l = await lab();
@@ -814,7 +857,9 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await opened(l.a, 'app-1', s.launchId);
     await until(() => l.host.calls.some((c) => c.name === 'git.status'), 'the feed’s bounds read');
     const page = { client: endableClientRef('page-panel'), session: 'app-1' as AppSessionId };
+    const second = { client: endableClientRef('page-second'), session: 'app-1' as AppSessionId }; // another window's panel
     expect(((await l.a.cmd('git.watch', { directory: repo.root }, page)) as GitStatus).repoRoot).toBe(repo.root);
+    await l.a.cmd('git.watch', { directory: repo.root }, second);
     await l.a.cmd('files.watch', { appSessionId: 'app-1', path: repo.root }, page);
     expect(files.watching()).toEqual([repo.root]);
     const untracked = (name: string) => (c: { status: GitStatus }) => c.status.files.some((x) => x.path === name && x.untracked);
@@ -843,6 +888,13 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(files.followed.size).toBe(1); // the new channel's ref only
     writeFileSync(repo.path('three.ts'), 'export {};\n');
     await until(() => filesChanges(l.a, 'app-1').some((c) => c.path === repo.path('three.ts')), 'a change on the reinstalled watch', 10_000);
+
+    // Fix wave 1 (finding 2): the new channel holds the repository once per page; the second window closing leaves the
+    // first's hold, so its changes still come.
+    second.client.end();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    writeFileSync(repo.path('four.ts'), 'export {};\n');
+    await until(() => gitChanges(l.a).some((c) => c.repoRoot === repo.root && untracked('four.ts')(c)), 'a git change after one page closed', 10_000);
   });
 
   it('spawns as a member who owns nothing there once a grant gives them `spawn`, stepped up; the new session streams, takes a PDF’s upload, then one message naming its path', async () => {

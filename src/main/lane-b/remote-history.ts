@@ -30,13 +30,17 @@
 // - A live launch's events are read on from `afterSeq` in budgeted pages while the launch says more follows, and
 //   assembled into the one answer the renderer asked for; a row alone past the budget is left out with its place told as
 //   `remote.gap {launchId, at: {seq}}`, as above.
-// - An older engine host behind a current endpoint (`mawsd` serves one of an earlier build across a swap) refuses the
-//   field `invalid_input`: that read goes again on the path above. A subagent's slice ignores the budget, so it keeps
-//   that path too. A machine whose endpoint did not list the capability is never sent the field (its registry's strict
-//   schema would refuse it).
+// - The budget is judged per page (fix wave 1): a page goes budgeted only while the current channel's peer lists
+//   `rl2.events-budget` (with no channel current, the link carries it to the next one). A read that meets a peer without
+//   it starts again on the path above from the renderer's input, whatever it had read: a page's peer no longer listing
+//   it, a budgeted page refused `malformed` (a call the link carried to a channel whose endpoint doesn't read the field),
+//   or `invalid_input` (an older engine host behind a current endpoint, which `mawsd` may serve across a swap). The
+//   gaps a budgeted read found are said only once it answers, so a read started again says each once. A subagent's slice
+//   ignores the budget, so it keeps that path too.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { SessionEvent } from '@shared/graph/events';
+import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
 
@@ -83,17 +87,28 @@ export async function readEventsInPages(link: RemoteLink, input: Record<string, 
   return readWhole(link, input, deps);
 }
 
-/** Every window within the byte budget; null when the engine host behind the endpoint refused the budget. */
+/** A page that met a peer without the budget: the read starts again without it. */
+const DOWNGRADED = Symbol('downgraded');
+
+/** Every window within the byte budget; null when a page met a peer, or an engine host, without the budget. */
 async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result | null> {
   const app = String(input.appSessionId);
   const said = `lane B: session.events of ${link.name}/${app}`;
   const maxBytes = deps.pageBytes ?? HISTORY_PAGE_BYTES;
-  const ask = (fields: Record<string, unknown>) => dispatchOverLink(link, 'session.events', { ...fields, maxBytes });
+  const ask = async (fields: Record<string, unknown>): Promise<Result | typeof DOWNGRADED> => {
+    if (link.peerCapabilities() !== null && !peerLists(link, 'rl2.events-budget')) {
+      deps.log(`${said}: the channel's peer no longer takes the byte budget; read again without it`);
+      return DOWNGRADED;
+    }
+    const result = await dispatchOverLink(link, 'session.events', { ...fields, maxBytes });
+    if (!result.ok && (result.error.code === 'invalid_input' || refusalOf(result) === 'malformed')) {
+      deps.log(`${said}: the byte budget was refused (${result.error.code === 'invalid_input' ? 'an older engine host' : 'a peer that does not read it'}); read again without it`);
+      return DOWNGRADED;
+    }
+    return result;
+  };
   const first = await ask(input);
-  if (!first.ok && first.error.code === 'invalid_input') {
-    deps.log(`${said}: the engine host refused the byte budget (an older build); read again without it`);
-    return null;
-  }
+  if (first === DOWNGRADED) return null;
   if (!first.ok) return first;
   let page = first.value as Events;
 
@@ -104,6 +119,7 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
     while (page.omitted !== undefined && page.events.length === 0 && page.earlier !== undefined) {
       deps.log(`${said}: an item of ${page.omitted.bytes} bytes alone past the channel's budget; left out, reading the page before it`);
       const before = await ask({ appSessionId: app, afterSeq: null, limit: null, before: page.earlier });
+      if (before === DOWNGRADED) return null;
       if (!before.ok) return before;
       page = before.value as Events;
       omitted = plus(omitted, page.omitted);
@@ -121,23 +137,26 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
   const events: SessionEvent[] = [];
   let cursor = typeof input.afterSeq === 'number' ? input.afterSeq : 0;
   let lost = false;
+  const gaps: Array<[string, { seq: number }]> = []; // said once the read answers: one started again says its own
   for (;;) {
     if (page.omitted !== undefined) {
       const seq = page.omitted.seq ?? page.lastSeq;
       const launch = deps.launch();
       deps.log(`${said}: row ${seq} alone is past the channel's budget; left out${launch === null ? '' : ', a gap at its place'}`);
       if (launch === null) lost = true;
-      else deps.gap(launch, { seq });
+      else gaps.push([launch, { seq }]);
     }
     events.push(...page.events);
     lost ||= page.historyUnavailable === true;
     const full = total !== null && events.length >= total;
     if (page.complete || page.lastSeq <= cursor || full) {
       const value: Events = { events, lastSeq: Math.max(cursor, page.lastSeq), complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }) };
+      for (const [launch, at] of gaps) deps.gap(launch, at);
       return { ok: true, value } as Result;
     }
     cursor = page.lastSeq;
     const next = await ask({ appSessionId: app, afterSeq: cursor, limit: total === null ? null : total - events.length });
+    if (next === DOWNGRADED) return null;
     if (!next.ok) return next;
     page = next.value as Events;
   }

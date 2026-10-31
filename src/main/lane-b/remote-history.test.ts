@@ -98,6 +98,7 @@ describe('readEventsInPages within a byte budget', () => {
   /** The engine host's two readers under a budget: the transcript's windows (newest, or before a cursor) and the live stream's pages. */
   function budgeted(source: { transcript?: SessionEvent[]; rows?: SessionEvent[][] }) {
     const link = new FakeLink();
+    link.peers = ['rl2.executor.machine', 'rl2.events-budget'];
     const asked: Array<Record<string, unknown>> = [];
     link.answers.set('session.events', (input) => {
       asked.push(input);
@@ -123,7 +124,7 @@ describe('readEventsInPages within a byte budget', () => {
       }
       return { ok: true, output: { events: taken.flat(), lastSeq: taken.at(-1)?.[0].seq ?? (input.afterSeq as number | null) ?? 0, complete: taken.length === rows.length } };
     });
-    return { link, asked };
+    return { link, asked, answer: link.answers.get('session.events')! };
   }
 
   const within = (link: FakeLink, input: Record<string, unknown>, said: { gaps: unknown[]; tooLarge: string[] } = { gaps: [], tooLarge: [] }, budget = true) =>
@@ -168,6 +169,7 @@ describe('readEventsInPages within a byte budget', () => {
 
   it('reads again without the budget when the engine host behind the endpoint refuses it (`invalid_input`)', async () => {
     const link = new FakeLink();
+    link.peers = ['rl2.events-budget'];
     const asked: Array<Record<string, unknown>> = [];
     link.answers.set('session.events', (input) => {
       asked.push(input);
@@ -176,6 +178,40 @@ describe('readEventsInPages within a byte budget', () => {
     });
     expect(await within(link, { appSessionId: APP, afterSeq: null, limit: null })).toEqual({ ok: true, value: { events: [event(1)], lastSeq: 1, complete: true } });
     expect(asked.map((a) => a.maxBytes)).toEqual([4096, undefined]);
+  });
+
+  // Fix wave 1 (finding 1): the budget goes only to the channel whose peer lists it, page by page.
+  describe('across a channel to a peer without the budget', () => {
+    const rows = [...Array.from({ length: 6 }, (_, i) => [event(i + 1, 0, 'r'.repeat(900))]), [event(7, 0, 'y'.repeat(6000))], [event(8)]];
+    /** Budgeted pages from the engine host while the budget is sent; M2's machine (too-large past 4000 bytes) without it. */
+    function downgrading(after: 'peer' | 'malformed') {
+      const within = budgeted({ rows });
+      const whole = machine(rows);
+      const asked: Array<Record<string, unknown>> = [];
+      const link = within.link;
+      link.answers.set('session.events', (input) => {
+        asked.push(input);
+        if (input.maxBytes === undefined) return whole.link.answers.get('session.events')!(input);
+        if (asked.length === 1) {
+          if (after === 'peer') link.peers = ['rl2.executor.machine']; // the next channel's peer lacks the budget
+          return within.answer(input);
+        }
+        return { ok: false, error: { code: 'malformed' } }; // a budgeted call carried to a peer that doesn't read the field
+      });
+      return { link, asked };
+    }
+
+    for (const after of ['peer', 'malformed'] as const) {
+      it(`starts again on M2’s path when ${after === 'peer' ? 'the next channel’s peer no longer lists it' : 'a budgeted page is refused `malformed`'}, its gaps said once`, async () => {
+        const { link, asked } = downgrading(after);
+        const said = { gaps: [] as unknown[], tooLarge: [] as string[] };
+        const answer = await readEventsInPages(link, { appSessionId: APP, afterSeq: null, limit: null }, { launch: () => 'L1', gap: (launchId, at) => void said.gaps.push({ launchId, at }), tooLarge: (window) => void said.tooLarge.push(window), log: () => {}, budget: true, pageBytes: 4096, pageEvents: 8 });
+        expect(answer).toEqual({ ok: true, value: { events: [...rows.slice(0, 6), rows[7]].flat(), lastSeq: 8, complete: true } });
+        expect(said.gaps).toEqual([{ launchId: 'L1', at: { seq: 7 } }]);
+        const sent = asked.map((a) => a.maxBytes !== undefined);
+        expect(sent.slice(after === 'peer' ? 1 : 2).every((budget) => !budget)).toBe(true);
+      });
+    }
   });
 
   it('never sends the budget to a machine whose endpoint did not list it, keeping the bar for a window it can’t page', async () => {

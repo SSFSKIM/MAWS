@@ -28,6 +28,7 @@ function lab() {
   const logs: string[] = [];
   const records: unknown[] = [];
   const followings: string[] = [];
+  const unfollowed: string[] = [];
   const checkout = createRemoteCheckout({
     remote: (machine) => (machine === MINI ? link : null),
     emit: (machine, name, payload) => {
@@ -38,6 +39,7 @@ function lab() {
     },
     recordChanged: (machine, app, record) => void records.push([machine, app, record]),
     following: (machine, app) => void followings.push(`${machine}/${app}`),
+    unfollowed: (machine, app) => void unfollowed.push(`${machine}/${app}`),
     log: (line) => void logs.push(line),
   });
   const page = endableClientRef('page-1');
@@ -49,6 +51,7 @@ function lab() {
     checkout,
     records,
     followings,
+    unfollowed,
     emitted,
     logs,
     page,
@@ -139,8 +142,8 @@ describe('the watches across a reopening', () => {
 
     l.opened(); // the feed's next opening: a new channel, whose ref holds nothing
     await vi.advanceTimersByTimeAsync(0);
-    // page 1's git and files watches, then page 2's git watch: each released first, as many times as it is held
-    expect(l.sent()).toEqual(['git.unwatch', 'git.watch', 'files.unwatch', 'git.unwatch', 'git.watch']);
+    // by directory, both pages' git holds together: all released first, then all made again; then the files watch
+    expect(l.sent()).toEqual(['git.unwatch', 'git.unwatch', 'git.watch', 'git.watch', 'files.unwatch']);
     expect(l.link.calls.filter((c) => c.name.startsWith('git.')).every((c) => c.session?.id === APP)).toBe(true);
     expect(l.of('git.changed')).toEqual([{ repoRoot: REPO, status: status(), reason: 'initial' }]);
     expect(l.of('files.changed')).toEqual([{ appSessionId: APP, path: `${REPO}/src`, kind: 'invalidated' }]);
@@ -186,6 +189,59 @@ describe('the watches across a reopening', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(l.link.open()).toEqual([]);
     expect(l.link.subs).toHaveLength(2);
+  });
+
+  // Fix wave 1 (finding 2): the machine counts git holds per channel client and directory, not per page.
+  it('keeps every page’s git hold on the machine across a new channel and a reopening on the same one, and one page’s end leaves the other’s', async () => {
+    const l = lab();
+    const holds = new Map<string, number>();
+    const held = () => holds.get(REPO) ?? 0;
+    l.link.answers.set('git.watch', (input) => (holds.set(String(input.directory), held() + 1), { ok: true, output: status() }));
+    l.link.answers.set('git.unwatch', (input) => (holds.set(String(input.directory), Math.max(0, held() - 1)), { ok: true, output: null }));
+    l.checkout.open(l.link, APP);
+    l.opened();
+    const two = endableClientRef('page-2');
+    await l.cmd('git.watch', { directory: REPO });
+    await l.cmd('git.watch', { directory: REPO }, { ...l.ctx, client: two });
+    expect(held()).toBe(2);
+
+    holds.clear(); // a new channel: the old one's ref ended, the new one holds nothing
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held()).toBe(2);
+    l.feed().sink.ended('behind'); // the same channel: it still holds both
+    await vi.advanceTimersByTimeAsync(0);
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held()).toBe(2);
+    expect(l.of('git.changed')).toHaveLength(2); // one status per opening and repository
+
+    two.end();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held()).toBe(1); // page 1's watch still follows the repository
+  });
+
+  it('counts a watch made while a reopening gives the watches back after it', async () => {
+    const l = lab();
+    l.checkout.open(l.link, APP);
+    l.opened();
+    await l.cmd('git.watch', { directory: REPO });
+    l.link.calls.length = 0;
+    l.opened();
+    const late = l.cmd('git.watch', { directory: REPO }, { ...l.ctx, client: endableClientRef('page-3') });
+    await vi.advanceTimersByTimeAsync(0);
+    await late;
+    expect(l.sent()).toEqual(['git.unwatch', 'git.watch', 'git.watch']);
+  });
+
+  it('says the session is no longer followed when the feed ends for good but `removed`, `grade` or `closed`', async () => {
+    for (const [reason, said] of [['not-offered', 1], ['too-many', 1], ['removed', 0], ['grade', 0], ['closed', 0], ['behind', 0]] as const) {
+      const l = lab();
+      l.checkout.open(l.link, APP);
+      l.opened();
+      l.feed().sink.ended(reason);
+      expect([reason, l.unfollowed.length]).toEqual([reason, said]);
+    }
   });
 
   it('forgets an unwatched watch, and gives a page’s watches back to the machine when the page ends', async () => {

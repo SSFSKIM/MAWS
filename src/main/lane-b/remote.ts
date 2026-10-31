@@ -181,6 +181,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     timing,
     recordChanged: (machine, app, record) => sessionOf(machine, app)?.recordChanged(record),
     following: (machine, app) => sessionOf(machine, app)?.kick(),
+    unfollowed: (machine, app) => sessionOf(machine, app)?.unfollowed(),
     log: deps.log,
   });
   /** Each session's upload in flight (machine and session): the next waits for it. */

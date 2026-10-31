@@ -506,6 +506,49 @@ describe('the checkout and the spawn (M4)', () => {
     expect(l.link.calls.filter((c) => c.name === 'session.events').map((c) => (c.input as { maxBytes?: number }).maxBytes)).toEqual([undefined, expect.any(Number)]);
   });
 
+  // Fix wave 1 (findings 3 and 4): an idle stream that waits on its record keeps a way back whatever the feed does.
+  async function idleFollowed() {
+    const l = lab();
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await vi.advanceTimersByTimeAsync(0);
+    const streams = () => l.link.subs.filter((s) => s.request.feed === undefined);
+    const stream = () => l.link.open().find((s) => s.request.feed === undefined);
+    const feed = l.link.open().find((s) => s.request.feed === 'checkout')!;
+    stream()!.sink.ended('unavailable'); // not live: the first try
+    feed.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 }); // the feed's opening: one more try, out now
+    expect(streams()).toHaveLength(2);
+    return { l, streams, stream, feed };
+  }
+  const running = { ...record(APP), holder: { kind: 'self' as const } };
+
+  it('takes a start record that comes while a try is out once that try ends, and only once', async () => {
+    const { streams, stream, feed } = await idleFollowed();
+    feed.sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: running, cause: 'live', revision: 2 } });
+    stream()!.sink.ended('unavailable'); // the try out answers after the record
+    expect(streams()).toHaveLength(3);
+    stream()!.sink.ended('unavailable'); // it went again: the record is spent, no storm
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    expect(streams()).toHaveLength(3);
+  });
+
+  it('falls back to the idle backoff when the next channel’s peer offers no feed, and stays put on `removed` or `grade`', async () => {
+    const { l, streams, stream, feed } = await idleFollowed();
+    stream()!.sink.ended('unavailable');
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(streams()).toHaveLength(2); // waiting on the record
+    l.link.peers = ['rl2.executor.machine'];
+    feed.sink.ended('not-offered');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(streams()).toHaveLength(3);
+    for (const reason of ['removed', 'grade']) {
+      const m = await idleFollowed();
+      m.stream()!.sink.ended('unavailable');
+      m.feed.sink.ended(reason);
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+      expect([reason, m.streams()]).toEqual([reason, expect.objectContaining({ length: 2 })]);
+    }
+  });
+
   it('opens the session’s checkout feed beside its stream for a machine whose endpoint lists `rl2.feeds`, and closes it with the stream', async () => {
     const l = lab({ timing: { unsubscribeLingerMs: 100 } });
     l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
