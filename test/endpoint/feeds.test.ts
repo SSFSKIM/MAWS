@@ -4,6 +4,7 @@
 // `seq` after a `subbed` snapshot with nothing to snap. It is authorized as a subscription of the session (`view`), lives
 // with its channel, and a watch the channel's requests installed on the machine ends with the channel's ref, so the
 // files service holds nothing for a device that is gone.
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,7 +70,7 @@ describe('a session’s checkout feed', () => {
     await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
 
     const files = { appSessionId: 'app-1', path: join(repo, 'pkg', 'a.ts'), kind: 'created' };
-    const scm = { appSessionId: 'app-1', token: '2c1f6a5e-9d0b-4c43-9a43-2f6d8f1b7a10', seq: 1, kind: 'stdout', text: 'pushed' };
+    const scm = { appSessionId: 'app-1', token: randomUUID(), seq: 1, kind: 'stdout', text: 'pushed' };
     f.host.emitMachine('files.changed', { ...files, appSessionId: 'app-2' });
     f.host.emitMachine('files.changed', files);
     f.host.emitMachine('scm.remote.output', scm);

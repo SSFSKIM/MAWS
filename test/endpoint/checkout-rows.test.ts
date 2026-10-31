@@ -5,6 +5,7 @@
 // names (`call.session`, the `checkout` rule); the writes are `machine` acts under the services' ledger, which keeps the
 // sealed action beside each claim but an upload's; `session.spawn` is a step-up act graded `spawn`; the machine menu's
 // `session.projects.list` is a `list` read any native device may make.
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,8 @@ afterAll(() => stopAll(started));
 const APP = 'app-1';
 const SESSION = { lane: 'B' as const, id: APP };
 const at = (fields: Record<string, unknown> = {}) => ({ appSessionId: APP, ...fields });
-const TOKEN = '2c1f6a5e-9d0b-4c43-9a43-2f6d8f1b7a10';
+/** A remote run's token (any UUID; minted here so no literal looks like a key). */
+const TOKEN = randomUUID();
 const HASH = '0'.repeat(64);
 
 /** The checkout's reads that name their session (`appSessionId`). */
