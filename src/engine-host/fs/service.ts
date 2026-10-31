@@ -697,17 +697,22 @@ export class FsService {
   }
 
   // Pokes the followers `which` picks (its side effects, a new location, apply now), each once its session's agent
-  // listing has caught up (agentsCaughtUp), at once when nothing waits.
+  // listing has caught up (agentsCaughtUp), at once when nothing waits. The follower reads what the transcript holds
+  // when it is poked, which may be past what was written when the poke was asked for, so what was reported while it
+  // waited is waited for too: once more, not for as long as writes keep coming.
   private pokeFollows(which: (entry: FollowEntry) => boolean): void {
     const picked = new Map<SessionId, FollowEntry[]>();
     for (const entry of this.follows.values()) if (which(entry)) picked.set(entry.sessionId, [...(picked.get(entry.sessionId) ?? []), entry]);
     for (const [sessionId, entries] of picked) {
-      const poke = () => {
+      const poke = (waits: number) => {
+        const caughtUp = waits > 0 ? this.agentsCaughtUp(sessionId) : null;
+        if (caughtUp !== null) {
+          void caughtUp.then(() => poke(waits - 1));
+          return;
+        }
         for (const entry of entries) void entry.follow.poke(); // a follow stopped meanwhile reads nothing
       };
-      const caughtUp = this.agentsCaughtUp(sessionId);
-      if (caughtUp === null) poke();
-      else void caughtUp.then(poke);
+      poke(2);
     }
   }
 

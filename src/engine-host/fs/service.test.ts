@@ -396,7 +396,8 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       const release = hold();
       const asked = fs.subagents(A1); // a walk read the tree before the child, and is held
       await expect.poll(() => walks.length).toBeGreaterThan(0);
-      await addAgent(S1, 'c1'); // gathered behind the held walk
+      await addAgent(S1, 'c1');
+      await sleep(DEBOUNCE_MS * 2); // reported, and gathered behind the held walk, before the parent's result is written
       await fixture.appendLines(parent, agentCall('toolu_c1')); // never reported: only the tick's poke reads it
       await sleep(DEBOUNCE_MS + 400); // the tick has poked the follow at least once meanwhile
       release();
