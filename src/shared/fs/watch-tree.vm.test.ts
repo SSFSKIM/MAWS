@@ -292,12 +292,9 @@ function memory(): Memory {
 
 // RSS growth and its retained part: RSS less the V8 heap committed but free after a full GC, which is the heap used,
 // the external memory (array buffers) and the rest, native (the watch handles, libuv's watcher lists, malloc's arenas).
-// Then RSS once more after a memory-reducing collection (V8's last resort, which gives committed new space back): a
-// walk's survivors grow new space to its cap, and an ordinary collection keeps it (the VM measure of M1's fix round).
 function growth(before: Memory, after: Memory) {
   const mib = (key: keyof Memory) => (after[key] - before[key]) / MiB;
   const committedFree = mib('heapTotal') - mib('heapUsed');
-  gc({ type: 'major', execution: 'sync', flavor: 'last-resort' });
   return {
     rssMiB: round1(mib('rss')),
     retainedMiB: round1(mib('rss') - committedFree),
@@ -305,12 +302,20 @@ function growth(before: Memory, after: Memory) {
     externalMiB: round1(mib('external')),
     nativeMiB: round1(mib('rss') - mib('heapTotal') - mib('external')),
     heapCommittedFreeMiB: round1(committedFree),
-    rssReducedMiB: round1((process.memoryUsage().rss - before.rss) / MiB),
+    rssReducedMiB: null as number | null,
   };
 }
 
+// RSS growth once more at the arm's end, after a memory-reducing collection (V8's last resort, which gives committed new
+// space back: a walk's survivors grow new space to its cap, and an ordinary collection keeps it). At the end, since the
+// collection also drops compiled code, which the arm's later phases would then pay for (a burst lag of 293 ms, once).
+function reduced(before: Memory, grown: ReturnType<typeof growth>): ReturnType<typeof growth> {
+  gc({ type: 'major', execution: 'sync', flavor: 'last-resort' });
+  return { ...grown, rssReducedMiB: round1((process.memoryUsage().rss - before.rss) / MiB) };
+}
+
 function memoryText(memory: ReturnType<typeof growth>): string {
-  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB}; after a memory-reducing collection +${memory.rssReducedMiB})`;
+  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB}; at the arm's end after a memory-reducing collection +${memory.rssReducedMiB})`;
 }
 
 const GC_KINDS: Record<number, string> = {
@@ -386,7 +391,7 @@ async function repositoryArm(root: string) {
       [`largest ${relative(root, largest)}`]: await latencyAt(root, largest, tap),
     };
     const burst = await burstAt(root, tap);
-    return { watches, memory: grown, walkLagMs, walkMs: walkedAt === null ? null : Math.round(walkedAt - start), latency, burst, changes: changed.length };
+    return { watches, memory: reduced(before, grown), walkLagMs, walkMs: walkedAt === null ? null : Math.round(walkedAt - start), latency, burst, changes: changed.length };
   } finally {
     service.dispose();
   }
@@ -403,7 +408,7 @@ async function unprunedArm(root: string) {
   try {
     await walked;
     const walkLagMs = lag.stop();
-    return { watches: inotifyOf().watches - watchesBefore, memory: growth(before, memory()), walkLagMs };
+    return { watches: inotifyOf().watches - watchesBefore, memory: reduced(before, growth(before, memory())), walkLagMs };
   } finally {
     handle.close();
   }
@@ -568,7 +573,7 @@ async function storeArm(storeDir: string) {
     const cpu = process.cpuUsage();
     const listed = await new Discovery(paths).list();
     const used = process.cpuUsage(cpu);
-    return { expectedWatches, watches, memory: grown, latency: stats(appends), rescanCpuMs: Math.round((used.user + used.system) / 1000), rescanListed: listed.length, changes: heard.length };
+    return { expectedWatches, watches, memory: reduced(before, grown), latency: stats(appends), rescanCpuMs: Math.round((used.user + used.system) / 1000), rescanListed: listed.length, changes: heard.length };
   } finally {
     watcher.stop();
   }
