@@ -151,6 +151,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     let updates: number;
     let held: Promise<void> | null; // while set, a walk that begins reads the tree then, and answers once it settles
     let fire: (sessionId: SessionId, rel: string) => void;
+    let projectsChanged: (path: string) => void;
     let restore: () => void;
     const list = SubagentReader.prototype.list;
 
@@ -186,6 +187,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       };
       const fs = await start(watch, undefined, reconcileMs);
       fire = (sessionId, rel) => projects!('change', relative(fixture.paths.projects, join(sessionDirOf(sessionId), rel)));
+      projectsChanged = (path) => projects!('change', relative(fixture.paths.projects, path));
       return fs;
     };
     const sessionDirOf = (sessionId: SessionId) => fixture.transcriptPath(sessionId).slice(0, -'.jsonl'.length);
@@ -346,6 +348,41 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       await expect.poll(() => lastAgents(A1)?.map((a) => a.agentId), { timeout: 2_000 }).toEqual(['a1']);
       expect(walks).toEqual([]);
       expect(updates).toBeGreaterThanOrEqual(1);
+    });
+
+    // The parent's `Agent` tool use and its result, chained after the transcript's first record `u1`.
+    const agentCall = (toolUseId: string) => [
+      JSON.stringify({ type: 'assistant', uuid: `a-${toolUseId}`, parentUuid: 'u1', timestamp: '2026-09-28T10:00:01.000Z', message: { id: `msg-${toolUseId}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Agent', input: { description: 'child', prompt: 'do it', subagent_type: 'general-purpose' } }] } }),
+      JSON.stringify({ type: 'user', uuid: `r-${toolUseId}`, parentUuid: `a-${toolUseId}`, timestamp: '2026-09-28T10:00:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'done' }] } }),
+    ];
+    const lifecycle = (appSessionId: AppSessionId) =>
+      events('session.eventBatch').filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events).flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []));
+
+    it('a followed transcript folds an Agent tool result only once the child\'s meta reported before it is read', async () => {
+      const parent = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.eventsSnapshot(A1, null); // followed, its agents listed
+      await settled();
+      await addAgent(S1, 'x0'); // a pass now, so the child's files below land within AGENT_SETTLE_MS of its end
+      await addAgent(S1, 'c1'); // the engine writes the child's meta (toolu_c1) before the parent's tool result
+      await fixture.appendLines(parent, agentCall('toolu_c1'));
+      projectsChanged(parent);
+      await expect.poll(() => lifecycle(A1), { timeout: 2_000 }).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('a quiet history follow reads the agent changes its session gathered while nothing read it', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first'), ...agentCall('toolu_c1')]);
+      const fs = await startReporting();
+      interestIn(fs); // nobody holds the session open
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.subagents(A1); // listed once, before the child existed
+      await settled();
+      await addAgent(S1, 'c1');
+      await sleep(DEBOUNCE_MS + AGENT_SETTLE_MS * 2); // gathered, not read
+      expect(updates).toBe(0);
+      const page = await fs.eventsSnapshot(A1, null, {}, true);
+      expect(page.events.flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []))).toEqual(['subagent.started c1', 'subagent.finished c1']);
     });
 
     it('a pass that fails is not tried again on every write', async () => {

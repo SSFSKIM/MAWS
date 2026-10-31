@@ -122,6 +122,8 @@ interface AgentSync {
   walk: Deferred<SubagentEntry[]> | null; // a walk asked for and not yet begun, which every caller since shares
   pass: Promise<unknown> | null; // the pass running now
   timer: ReturnType<typeof setTimeout> | null; // the wait before the next pass changes drive
+  begun: number; // passes begun so far: the running one's number, while one runs
+  waiters: { through: number; resolve: () => void }[]; // agentsCaughtUp's, each until pass `through` ends
 }
 
 // W7: one contested session, watched for the foreign process's first write since the contest began.
@@ -368,7 +370,7 @@ export class FsService {
     const sessionId = this.sessionOf(appSessionId);
     const followed = this.follows.get(followKey(appSessionId, null));
     const entry = followed ?? (quiet
-      ? await this.ensureFollow(appSessionId, null, async () => this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true), historyKey(appSessionId))
+      ? await this.ensureFollow(appSessionId, null, () => this.quietFollow(appSessionId, sessionId), historyKey(appSessionId))
       : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
     entry.usedAt = Date.now();
     return snapshotOf(entry.follow, request);
@@ -511,6 +513,14 @@ export class FsService {
     return entry;
   }
 
+  // The quiet follow of a session's older history (eventsSnapshot): its backfill finds the agents' metas in the listing,
+  // so a listing held is brought up to date first (a session nothing read meanwhile gathered its changes), and a
+  // session never listed is walked, as the session's own follow walks.
+  private async quietFollow(appSessionId: AppSessionId, sessionId: SessionId): Promise<FollowEntry> {
+    await (this.agents.has(sessionId) ? this.agentsCaughtUp(sessionId) : this.listAgents(sessionId));
+    return this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true);
+  }
+
   private newFollow(
     appSessionId: AppSessionId,
     sessionId: SessionId,
@@ -568,7 +578,7 @@ export class FsService {
 
   private agentSyncOf(sessionId: SessionId): AgentSync {
     let sync = this.agentSyncs.get(sessionId);
-    if (sync === undefined) this.agentSyncs.set(sessionId, (sync = { dir: null, changed: new Set(), stale: false, failedAt: null, endedAt: -Infinity, walk: null, pass: null, timer: null }));
+    if (sync === undefined) this.agentSyncs.set(sessionId, (sync = { dir: null, changed: new Set(), stale: false, failedAt: null, endedAt: -Infinity, walk: null, pass: null, timer: null, begun: 0, waiters: [] }));
     return sync;
   }
 
@@ -588,6 +598,31 @@ export class FsService {
     }, wait);
   }
 
+  // Settles once every agent-file change gathered for the session so far is in its listing; null when none waits. A
+  // follow folds a transcript record only after this (`pokeInOrder`): the engine writes a child's meta before the
+  // parent's `Agent` tool result, and the backfill looks the child up when it folds that result, once. The pass the
+  // changes are owed begins now rather than after AGENT_SETTLE_MS; one owed to a listing that just failed to read waits
+  // its retry, and the fold does not wait for it.
+  private agentsCaughtUp(sessionId: SessionId): Promise<void> | null {
+    const sync = this.agentSyncs.get(sessionId);
+    if (sync === undefined) return null;
+    const owed = sync.changed.size > 0 && (sync.failedAt === null || Date.now() >= sync.failedAt + AGENT_RETRY_MS);
+    if (sync.pass === null && !owed) return null;
+    const through = sync.begun + (owed ? 1 : 0);
+    const done = new Promise<void>((resolve) => sync.waiters.push({ through, resolve }));
+    if (owed) this.runAgentPass(sessionId, sync);
+    return done;
+  }
+
+  // Pokes the followers `which` picks of a session once its agent listing has caught up (agentsCaughtUp), at once when
+  // nothing waits.
+  private pokeInOrder(sessionId: SessionId, which: (entry: FollowEntry) => boolean): void {
+    if (![...this.follows.values()].some(which)) return;
+    const caughtUp = this.agentsCaughtUp(sessionId);
+    if (caughtUp === null) this.pokeFollows(which);
+    else void caughtUp.then(() => this.pokeFollows(which));
+  }
+
   // One pass over the session's agents, unless one is running (its end starts the next): a walk when one was asked for,
   // a pass failed, or there is no listing of this directory to bring up to date; else the changed files read alone,
   // which falls back to a walk when it cannot be sure. Tells main when a bound session's agent set or one of their metas
@@ -597,8 +632,12 @@ export class FsService {
     if (sync.timer !== null) clearTimeout(sync.timer);
     sync.timer = null;
     const { walk, changed, stale } = sync;
-    if (walk === null && changed.size === 0 && !stale) return;
+    if (walk === null && changed.size === 0 && !stale) {
+      settleWaiters(sync, Infinity); // nothing left to read
+      return;
+    }
     Object.assign(sync, { walk: null, changed: new Set<string>(), stale: false });
+    const number = ++sync.begun;
     const dir = this.sessionDir(sessionId);
     const before = this.agents.get(sessionId);
     const pass = (async () => {
@@ -627,7 +666,8 @@ export class FsService {
       .finally(() => {
         sync.pass = null;
         sync.endedAt = Date.now();
-        if (sync.walk !== null) this.runAgentPass(sessionId, sync);
+        settleWaiters(sync, number);
+        if (sync.walk !== null || sync.waiters.length > 0) this.runAgentPass(sessionId, sync);
         else if (sync.changed.size > 0 && this.agentsRead(sessionId)) this.scheduleAgentPass(sessionId, sync);
       });
   }
@@ -666,9 +706,9 @@ export class FsService {
     for (const entry of this.follows.values()) if (which(entry)) void entry.follow.poke();
   }
 
-  // Under `<sessionId>/`: the title sidecar folds into the summary; an agent transcript or meta re-lists the agents and
-  // pokes that agent's follower; a workflow snapshot or journal tells main, and a snapshot advances a followed
-  // session's progress. Workflow scripts and task outputs are read on demand, never on change.
+  // Under `<sessionId>/`: the title sidecar folds into the summary; an agent transcript or meta is read into the agent
+  // listing (agentFileChanged) and pokes that agent's follower; a workflow snapshot or journal tells main, and a snapshot
+  // advances a followed session's progress. Workflow scripts and task outputs are read on demand, never on change.
   private onSidecarChange(change: Extract<StoreChange, { kind: 'sidecar' }>): void {
     const { rel, sessionId } = change;
     if (rel === 'custom-title.json') {
@@ -691,16 +731,17 @@ export class FsService {
     if (!AGENT_SIDECAR.test(rel)) return;
     this.agentFileChanged(sessionId, rel);
     const path = join(this.paths.projects, change.slug, sessionId, rel);
-    this.pokeFollows((entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path);
+    this.pokeInOrder(sessionId, (entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path); // a nested agent's meta first
   }
 
   private onChange(change: StoreChange): void {
     switch (change.kind) {
       case 'transcript':
-        // Poke at once (an append to the file being followed is the common case), then take the location from the
-        // listing as the re-summary (or removal) left it: a relocation notified new-path-then-old-path-deleted, or the
-        // other way round, must leave the follower on the surviving file, not on whichever path was notified last.
-        this.pokeFollows((entry) => entry.sessionId === change.sessionId && entry.agentId === null);
+        // Poke at once (an append to the file being followed is the common case; after the agent files reported before
+        // it are read, pokeInOrder), then take the location from the listing as the re-summary (or removal) left it: a
+        // relocation notified new-path-then-old-path-deleted, or the other way round, must leave the follower on the
+        // surviving file, not on whichever path was notified last.
+        this.pokeInOrder(change.sessionId, (entry) => entry.sessionId === change.sessionId && entry.agentId === null);
         void this.summarizePath(change.path, change.sessionId, 'changed').then(() => this.locateFollows(change.sessionId));
         this.checkContest(change.sessionId, change.path); // W7
         return;
@@ -968,6 +1009,12 @@ const AGENT_SIDECAR = /^subagents\/(?:.+\/)?agent-[^/]+\.(?:jsonl|meta\.json)$/;
 // incremental pass left alone is the same object in both lists, so only the entries it read again are compared.
 function sameAgentSet(before: readonly SubagentEntry[], after: readonly SubagentEntry[]): boolean {
   return before.length === after.length && before.every((agent, i) => agent === after[i] || agentKey(agent) === agentKey(after[i]));
+}
+
+function settleWaiters(sync: AgentSync, through: number): void {
+  const ready = sync.waiters.filter((waiter) => waiter.through <= through);
+  sync.waiters = sync.waiters.filter((waiter) => waiter.through > through);
+  for (const { resolve } of ready) resolve();
 }
 
 function agentKey({ agentId, transcriptPath, runId, meta }: SubagentEntry): string {
