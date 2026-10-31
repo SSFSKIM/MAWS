@@ -39,6 +39,7 @@
 "commands.files.read.input":[".appSessionId AppSessionId"],
 "commands.files.reveal.input":[".appSessionId AppSessionId"],
 "commands.files.unwatch.input":[".appSessionId AppSessionId"],
+"commands.files.upload.input":[".appSessionId AppSessionId"],
 "commands.files.watch.input":[".appSessionId AppSessionId"],
 "commands.files.write.input":[".appSessionId AppSessionId"],
 "commands.fs.agentEvents.input":[".appSessionId AppSessionId"],

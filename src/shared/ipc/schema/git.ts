@@ -1,6 +1,6 @@
 // X2 `git.*` (C4 execution document, Interfaces "X2 additions" and "Git service"; charter §4.5): main's read-only git
 // service. Status, branches, diff and log for any directory inside a repository or linked worktree, and a ref-counted
-// repository watcher that emits `git.changed` with the fresh status. Owner `main` for every command. Nothing here
+// repository watcher that emits `git.changed` with the fresh status. Owner `machine` from P5 O3-E (below). Nothing here
 // stages, commits, stashes, checks out, fetches or touches a worktree's existence (C10 and P1 own mutation).
 import * as z from 'zod';
 // C10 start
@@ -94,7 +94,7 @@ export type LsFilesInput = z.infer<typeof LsFilesInputSchema>;
 export const LsFilesSchema = z.strictObject({ paths: z.array(z.string()), truncated: z.boolean(), source: z.enum(['git', 'walk']) });
 export type LsFiles = z.infer<typeof LsFilesSchema>;
 const c7Commands = {
-  'git.lsFiles': { input: LsFilesInputSchema, output: LsFilesSchema, owner: 'main' },
+  'git.lsFiles': { input: LsFilesInputSchema, output: LsFilesSchema, owner: 'machine' },
 } as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C7 end
 // C10 start: the worktree service (C10 execution document, Interfaces "Worktrees"; charter §4.5). Every git mutation MAWS
@@ -136,13 +136,16 @@ const c10Commands = {
 } as const satisfies Record<`git.worktree.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C10 end
 
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): the read service's commands and
+// C7's `git.lsFiles` are `machine`-owned, as the worktree service's are since O3-D: `mawsd` serves them with the spine on
+// the daemon shape.
 export const commands = {
-  'git.status': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' },
-  'git.branches': { input: DirectorySchema, output: GitBranchesSchema, owner: 'main' },
-  'git.diff': { input: GitDiffInputSchema, output: GitDiffSchema, owner: 'main' },
-  'git.log': { input: GitLogInputSchema, output: GitLogSchema, owner: 'main' },
-  'git.watch': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' }, // idempotent; ref-counted per repoRoot
-  'git.unwatch': { input: DirectorySchema, output: z.void(), owner: 'main' },
+  'git.status': { input: DirectorySchema, output: GitStatusSchema, owner: 'machine' },
+  'git.branches': { input: DirectorySchema, output: GitBranchesSchema, owner: 'machine' },
+  'git.diff': { input: GitDiffInputSchema, output: GitDiffSchema, owner: 'machine' },
+  'git.log': { input: GitLogInputSchema, output: GitLogSchema, owner: 'machine' },
+  'git.watch': { input: DirectorySchema, output: GitStatusSchema, owner: 'machine' }, // idempotent; ref-counted per repoRoot
+  'git.unwatch': { input: DirectorySchema, output: z.void(), owner: 'machine' },
   ...c7Commands, // C7
   ...c10Commands, // C10
 } as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

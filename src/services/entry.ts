@@ -4,7 +4,6 @@
 // mawsd's rule: Node's builtins, zod and the MCP SDK, never electron. At O3-D `mawsd` composes the same roots from it.
 export { openSpineData, startSpine, type SpineData, type SpineDeps, type SpineHosts, type SpineRoot } from './spine-root';
 export { takeSpineLock, type SpineLock } from './settings/spine-lock'; // P5 O3-D M2: mawsd takes the lock once per process and opens each load's data under it
-export { startCheckouts, type CheckoutsDeps, type CheckoutsRoot } from './checkouts-root';
 export { startMachineIdentity } from './machine/identity';
 export { COMMAND_BUDGETS_MS } from './command-budgets'; // the panel's sweep#3: main's `machine` host applies them
 export { idleReading, type IdleReading, type IdleReadingOptions } from './idle-reading'; // M5: e2e:daemon-idle-spine's subject

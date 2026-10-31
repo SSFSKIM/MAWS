@@ -1,14 +1,15 @@
 // Main's read-only git service (C4 execution document, Interfaces "Git service" and M6; charter §4.5): status,
 // branches, diff and log for any directory inside a repository or linked worktree, and the ref-counted repository
 // watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote get-url`, `config --get-regexp`
-// (remote URLs only), `for-each-ref`, `diff`, `log`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
+// (remote URLs only), `for-each-ref`, `diff`, `log`, and for the watcher's prune on Linux `ls-files` and `check-ignore`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
 // mutation; E6's `refresh` only asks the watcher to read again); worktrees under `<repo>/.claude/worktrees/` need no special case, `rev-parse` reports them as linked.
 // Paths in answers are relative to the repository root, and a `path` argument is read the same way.
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { GitBranches, GitChanged, GitDiff, GitDiffFile, GitDiffInput, GitLog, GitLogInput, GitStatus } from '@shared/ipc/schema/git';
+import { gitIgnored } from './ignored';
 import { parseBranches, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
-import { createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRun } from './runner';
+import { createGitReader, createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRead, type GitRun } from './runner';
 import { GitWatcher, type WatchFn, type WatchOwner } from './watcher';
 
 // The repository a directory lies in: its top level (the watcher's key for a root), git dir and common dir.
@@ -19,15 +20,19 @@ export interface GitServiceOptions {
   env?: NodeJS.ProcessEnv; // where PATH, HOME and MAWS_GIT are read; process.env by default
   execFile?: ExecFileFn;
   watch?: WatchFn;
+  log?: (line: string) => void; // P5 O3-E: the watcher's root lines (GitWatcherDeps.log)
 }
 
 export class GitService {
   private readonly run: GitRun;
+  private readonly read: GitRead; // the prune's listings, streamed (D21)
   private readonly watcher: GitWatcher;
 
   constructor(options: GitServiceOptions = {}) {
     this.run = createGitRunner({ env: options.env, execFile: options.execFile });
-    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch });
+    this.read = createGitReader({ env: options.env });
+    // P5 O3-E M1: the watcher's prune on Linux reads what git ignores through this runner (`ls-files`, `check-ignore`).
+    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read), log: options.log });
   }
 
   async status(directory: string): Promise<GitStatus> {

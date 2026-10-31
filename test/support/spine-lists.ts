@@ -1,7 +1,12 @@
-// The spine's commands as its root registers them through its bus (P5 O3-C's D32 list after the lane A fold), pinned by
-// src/services/spine-root.test.ts and served by mawsd's services front (P5 O3-D M2, src/mawsd/front.test.ts), sorted.
+// The spine's commands as its root registers them through its bus (P5 O3-C's D32 list after the lane A fold; P5 O3-E: with
+// the checkouts), pinned by src/services/spine-root.test.ts and served by mawsd's services front (P5 O3-D M2,
+// src/mawsd/front.test.ts), sorted.
 export const SPINE_COMMANDS = [
   'attention.acknowledge', 'attention.list', 'attention.request',
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C, D4): the checkouts, the root's last
+  // parts (CHECKOUTS_COMMANDS below), interleaved here in sorted order
+  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
+  'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
   'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
   // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
   'laneA.answer', 'laneA.btw', 'laneA.catalog', 'laneA.command', 'laneA.compact', 'laneA.interrupt', 'laneA.list', 'laneA.media', 'laneA.model',
@@ -11,6 +16,8 @@ export const SPINE_COMMANDS = [
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b (Interfaces §G): the machine half, for main's settings mirror
   'mods.list', 'mods.setSessionOverride',
   'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
+  'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
+  'scm.stage', 'scm.status', 'scm.unstage',
   'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
   'session.deletions.keep', 'session.deletions.list', 'session.deletions.preview', 'session.digests', 'session.drafts.get', 'session.drafts.set',
   'session.engineStatuses', // P5 O3-D M5b fix round 6: a scenario's statuses, for main's mirror
@@ -23,4 +30,13 @@ export const SPINE_COMMANDS = [
   'session.visible', // P5 O3-D M5b: the visible set, for main's mirror
   'settings.engineApplied', 'settings.userEngineDefaults',
   'side.screenshot.preview', 'side.sendToMain', 'side.thread.open',
+];
+
+// P5 O3-E M2: what the checkouts register through the spine's bus, in every run (a refused one too): the 26 retagged
+// commands, files.readResolved (library.read's reach) and files.upload (M3's write; refused until then), sorted
+export const CHECKOUTS_COMMANDS = [
+  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
+  'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
+  'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
+  'scm.stage', 'scm.status', 'scm.unstage',
 ];

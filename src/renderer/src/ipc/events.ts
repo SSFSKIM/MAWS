@@ -403,6 +403,9 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
       // P5 O6 M4: a repository is a machine's, so only that machine's sessions in it are read again.
       if (event.reason === 'head' || event.reason === 'refs') invalidateScmQueries((appSessionId) => machineOf(appSessionId) === machine && repoRootOf(appSessionId) === event.repoRoot);
     }),
+    // P5 O3-E: a machine's host heard again (main's host.status, emitted after it re-reads the daemon at each ready of
+    // the machine host): the git watches it could not answer are asked again (stores/git.ts)
+    client.on('host.status', (_status, { machine }) => useGit.getState().retryUnanswered(machine)),
     client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
     client.on('session.status', ({ appSessionId, status }) => refreshPublishedPrState(appSessionId, status.published, client)), // P5 E312

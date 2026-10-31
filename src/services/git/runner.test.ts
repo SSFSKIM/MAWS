@@ -1,7 +1,7 @@
-import { chmodSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { createGitRunner, execGit, GitCommandError, gitEnv, GitTimeoutError, NotARepositoryError, spawnGit, type ExecFileFn } from './runner';
+import { createGitReader, createGitRunner, execGit, GitCommandError, gitEnv, GitTimeoutError, NotARepositoryError, spawnGit, type ExecFileFn } from './runner';
 
 // The `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pairs an environment carries, in order.
 function configOf(env: NodeJS.ProcessEnv): [string, string | undefined][] {
@@ -199,5 +199,61 @@ describe('git runner keeps both streams on failure and accepts named exit codes'
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// D21: the prune's listings, read as git writes them.
+describe('the streamed git read', () => {
+  let repo: GitFixture;
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+  });
+  afterEach(() => repo.dispose());
+
+  const all = async (chunks: AsyncIterable<Buffer>) => {
+    const parts: Buffer[] = [];
+    for await (const chunk of chunks) parts.push(chunk);
+    return parts;
+  };
+
+  // The final re-review (D25): both of the watcher's routes to git (a run: status, check-ignore; the streamed read: the
+  // ignore listings) carry GIT_OPTIONAL_LOCKS=0, so none of its reads writes the index.
+  it('carries GIT_OPTIONAL_LOCKS=0 into a run and into a streamed read alike', async () => {
+    mkdirSync(repo.path('bin'));
+    const git = repo.path('bin/git.sh');
+    writeFileSync(git, '#!/bin/sh\nprintf %s "${GIT_OPTIONAL_LOCKS-unset}"\n', { mode: 0o755 });
+    const env = { ...repo.serviceEnv(), MAWS_GIT: git, GIT_OPTIONAL_LOCKS: '1' }; // the caller's own value never reaches git
+    expect(await createGitRunner({ env })(repo.root, ['status'])).toBe('0');
+    expect(Buffer.concat(await all(createGitReader({ env })(repo.root, ['ls-files', '-z']))).toString()).toBe('0');
+  });
+
+  it("hands over git's stdout in the pipe's chunks, the same bytes a run answers", async () => {
+    mkdirSync(repo.path("it's")); // a quote in the path: the fixture's script interpolates no path
+    const listing = repo.path("it's/listing");
+    writeFileSync(listing, Array.from({ length: 50_000 }, (_, i) => `d${i % 30}/f${i}.txt\0`).join('')); // 900 KB
+    const git = repo.path("it's/git.sh");
+    writeFileSync(git, '#!/bin/sh\ncat "$(dirname "$0")/listing"\n', { mode: 0o755 }); // found through $0: no path is written into the script
+    const env = { ...repo.serviceEnv(), MAWS_GIT: git };
+    const args = ['ls-files', '-z'];
+    const chunks = await all(createGitReader({ env })(repo.root, args));
+    expect(chunks.length).toBeGreaterThan(1); // more than one pipe's worth
+    expect(Buffer.concat(chunks).toString()).toBe(await createGitRunner({ env })(repo.root, args));
+  });
+
+  it("throws as a run throws: the command's failure, and no repository for a directory that is none", async () => {
+    const read = createGitReader({ env: repo.serviceEnv() });
+    const failed = await all(read(repo.root, ['rev-parse', '--verify', 'no-such-ref'])).then(() => null, (e: unknown) => e);
+    expect(failed).toBeInstanceOf(GitCommandError);
+    expect(failed).toMatchObject({ exitCode: 128 });
+    await expect(all(read('/', ['ls-files', '-z']))).rejects.toBeInstanceOf(NotARepositoryError);
+  });
+
+  it('ends git at its timeout and throws GitTimeoutError', async () => {
+    const hang = repo.path('hang.sh');
+    writeFileSync(hang, '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    const read = createGitReader({ env: { ...repo.serviceEnv(), MAWS_GIT: hang } });
+    const started = Date.now();
+    await expect(all(read(repo.root, ['ls-files'], { timeoutMs: 200 }))).rejects.toBeInstanceOf(GitTimeoutError);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });

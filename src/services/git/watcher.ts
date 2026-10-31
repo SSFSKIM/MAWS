@@ -13,18 +13,38 @@
 // beyond the cap is not kept and counts as a change. Watches are ref-counted per root by the
 // directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
 // watch of a root emits its status as `initial`.
-import { constants, watch as fsWatch } from 'node:fs';
+// P5 O3-E M1 (Interfaces §B): the recursive watch is the platform's (`recursiveWatch`): on Linux the watch tree, each
+// call given a prune (the root's: what git ignores, its git dir's object stores and the checkouts nested in it; a git
+// dir or common dir outside it: the object stores alone). A tree that runs out of inotify's watches or instances puts
+// its root in `polling`: its watches closed, `git status` read every POLL_MS (twice that after a timeout) until the
+// root is unwatched. An event with no filename (the tree's reconcile, a poll) also re-reads the cached facts of the
+// files beneath untracked directories, the one recovery for a content write whose event was lost.
+// What git ignores is read when the root's tree first asks and rebuilt when its inputs change (the final review's
+// finding 3): a `.gitignore` anywhere in the tree, the common dir's `info/exclude` and the git dir's HEAD rebuild it at
+// once, then ask the tree for one pass, which watches every directory the new rules admit; a rebuild is one in flight
+// and one more for whatever changed during it. The index (a force-add, a switch's other half) only marks it stale: the
+// slow timer's next pass rebuilds it once before it walks, since an agent running git in a loop rewrites the index
+// all the time: at most one rebuild per period, whoever writes it (MAWS's own scm.stage and scm.commit included). This
+// watcher's own reads write no index (the runner's GIT_OPTIONAL_LOCKS=0, which `git status` honours, and the diffs'
+// diff.autoRefreshIndex=false), so status → index → rebuild → pass → status cannot start on its own. A directory the
+// new rules ignore stays watched.
+import { constants } from 'node:fs';
 import { access, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isExhaustion, recursiveWatch } from '@shared/fs/watch-tree';
 import type { GitChangeReason, GitChanged, GitStatus } from '@shared/ipc/schema/git';
 import { ReleaseFences } from '../release-fences';
 import { GitTimeoutError } from './runner';
 
 export type WatchFn = (
   path: string,
-  options: { recursive: boolean },
+  options: {
+    recursive: boolean;
+    prune?: (dir: string) => boolean | Promise<boolean>; // `dir` relative to `path`; true: never walk it
+    beforeReconcile?: () => Promise<void> | void; // the tree's slow pass waits on it (the root's rules rebuilt when stale)
+  },
   listener: (event: string, filename: string | null) => void,
-) => { close(): void; on(event: 'error', listener: (error: Error) => void): unknown };
+) => { close(): void; on(event: 'error', listener: (error: Error) => void): unknown; reconcileNow?(): void };
 
 export interface FileFacts {
   size: number;
@@ -38,12 +58,17 @@ export interface GitWatcherDeps {
   statFile?(path: string): Promise<FileFacts | null>;
   linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
   isRepository?(directory: string): Promise<boolean>; // whether git reads the directory as a repository of its own; isNestedRepository by default
+  ignored?(root: string): Promise<(dir: string) => Promise<boolean>>; // what git ignores under the root (`gitIgnored`); nothing without it
+  // P5 O3-E M2: a root's first watch and its last release, one line each (`[git] watching <root>`, `[git] released
+  // <root>`), so an operator sees the checkouts working in mawsd's log; none unless given
+  log?(line: string): void;
 }
 
 const DEBOUNCE_MS = 250;
 export const INNER_CAP = 2_000; // files beneath untracked directories whose facts a root keeps (an unignored node_modules)
 const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
+export const POLL_MS = 5_000; // a polling root's status period, doubled after a timeout until a status succeeds
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
@@ -174,6 +199,11 @@ function under(path: string, dir: string): boolean {
   return path === dir || path.startsWith(`${dir}/`);
 }
 
+// A git dir's object stores, relative to it: git's and git-lfs's, whose every path classifies null.
+function objectStore(sub: string): boolean {
+  return sub === 'objects' || sub === 'lfs';
+}
+
 // Who holds a watch: main passes the requesting client's id (`ClientRef.id`); '' is a caller without a client.
 export type WatchOwner = string;
 
@@ -196,6 +226,23 @@ interface Root {
   nested: string[]; // the linked worktrees under the root, root-relative
   nestedRead: 'idle' | 'reading' | 'again';
   clones: string[]; // the repositories nested in the status's untracked directories that a pass found, root-relative
+  state: 'events' | 'polling'; // polling once a watch ran out of inotify's budget, until the root closes
+  pollTimer: NodeJS.Timeout | null;
+  active: Promise<void> | null; // the status pass running now
+  rescan: boolean; // the pending pass re-reads every cached fact beneath untracked directories
+  tree: { reconcileNow?(): void } | null; // the root's own watch, asked for a pass once its rules are rebuilt
+  ignores: Ignores;
+}
+
+type Prune = (dir: string) => Promise<boolean>;
+
+// What git ignores under a root, as its tree's prune reads it.
+interface Ignores {
+  snapshot: Promise<Prune> | null; // null until the tree first asks (never on macOS, whose watch takes no prune)
+  building: Promise<void> | null; // a rebuild in flight, swapped in once read
+  again: boolean; // an input changed during it: one more read follows
+  stale: boolean; // the index moved since the snapshot was read: rebuilt before the slow timer's next pass
+  pass: boolean; // a rule changed: the tree asked for one pass once the reads end
 }
 
 export class GitWatcher {
@@ -208,7 +255,7 @@ export class GitWatcher {
   private readonly isRepository: (directory: string) => Promise<boolean>;
 
   constructor(private readonly deps: GitWatcherDeps) {
-    this.watchFn = deps.watch ?? (fsWatch as unknown as WatchFn);
+    this.watchFn = deps.watch ?? recursiveWatch();
     this.statFile = deps.statFile ?? ((path) => stat(path).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs }), () => null));
     this.linkedWorktrees = deps.linkedWorktrees ?? readLinkedWorktrees;
     this.isRepository = deps.isRepository ?? isNestedRepository;
@@ -282,7 +329,9 @@ export class GitWatcher {
 
   private drop(repoRoot: string, count: number): void {
     const root = this.roots.get(repoRoot);
-    if (root && (root.count -= count) <= 0) this.close(root);
+    if (!root || (root.count -= count) > 0) return;
+    this.close(root);
+    this.deps.log?.(`[git] released ${root.root}`);
   }
 
   private open(status: GitStatus, projection: string, nested: string[]): Root {
@@ -305,37 +354,61 @@ export class GitWatcher {
       nested,
       nestedRead: 'idle',
       clones: [],
+      state: 'events',
+      pollTimer: null,
+      active: null,
+      rescan: false,
+      tree: null,
+      ignores: { snapshot: null, building: null, again: false, stale: false, pass: false },
     };
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
-    const onError = (error: Error) => console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
+    const onError = (error: Error) => {
+      if (isExhaustion(error)) return this.poll(root, error.code);
+      console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
+    };
     // A path in the git dir or the common dir, relative to it; `common`: the directory is the common dir, where the
     // linked worktrees are registered.
-    const onGitPath = (sub: string, reason: Exclude<GitChangeReason, 'initial'> | null, common: boolean) => {
+    // `own`: the directory is this root's git dir (its HEAD and index are the root's).
+    const onGitPath = (sub: string, reason: Exclude<GitChangeReason, 'initial'> | null, common: boolean, own: boolean) => {
       if (common && registration(sub)) this.readNested(root, status);
+      if ((own && sub === 'HEAD') || (common && sub === 'info/exclude')) this.ignoresChanged(root);
+      else if (own && sub === 'index') root.ignores.stale = true;
       this.changed(root, reason, null, sub);
     };
     const gitDirIsCommon = status.gitDir === status.commonDir;
+    const ignored = this.ignoredUnder(root);
+    // The root's prune: inside its git dir only the object stores (refs/, worktrees/ and logs/ are read), elsewhere the
+    // nested checkouts, whose every event is dropped below and which git lists as one untracked entry rather than as
+    // ignored, and then what git ignores.
+    const rootPrune = (rel: string): boolean | Promise<boolean> => {
+      if (gitDirRel !== null && under(rel, gitDirRel)) return rel !== gitDirRel && objectStore(rel.slice(gitDirRel.length + 1));
+      if (ENGINE_WORKTREE.test(`${rel}/`) || root.nested.includes(rel)) return true;
+      return ignored(rel);
+    };
     // A watch that cannot open (the directory vanished since its status was read) fails this call and leaves no root.
     try {
-      const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) => {
-        if (filename === null) return this.changed(root, 'worktree');
+      const beforeReconcile = () => this.ignoresBeforePass(root);
+      const rootWatch = this.watchFn(root.root, { recursive: true, prune: rootPrune, beforeReconcile }, (_event, filename) => {
+        if (filename === null) return this.rescan(root, 'worktree');
         const rel = filename.split(sep).join('/');
-        if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon);
+        if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon, true);
         // An event naming a found repository's directory, its `.git` or a directory above it (a rename names only what
         // moved, never what lay beneath) forgets it, so a replacement's writes count at once; a pass finds a repository
         // still there again from the next write beneath it, for one status.
         if (root.clones.some((dir) => names(rel, dir))) root.clones = root.clones.filter((dir) => !names(rel, dir));
         if (insideNestedCheckout(rel, root.nested, root.clones)) return;
+        if (rel === '.gitignore' || rel.endsWith('/.gitignore')) this.ignoresChanged(root);
         this.changed(root, classifyRootPath(rel, gitDirRel), rel);
       });
       root.handles.push(rootWatch);
+      root.tree = rootWatch;
       rootWatch.on('error', onError);
       if (gitDirRel === null) {
-        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) => {
-          if (filename === null) return this.changed(root, 'index');
+        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true, prune: objectStore }, (_event, filename) => {
+          if (filename === null) return this.rescan(root, 'index');
           const sub = filename.split(sep).join('/');
-          onGitPath(sub, classifyGitPath(sub), gitDirIsCommon);
+          onGitPath(sub, classifyGitPath(sub), gitDirIsCommon, true);
         });
         root.handles.push(gitDirWatch);
         gitDirWatch.on('error', onError);
@@ -345,10 +418,10 @@ export class GitWatcher {
       // those paths, rather than separate watches on `refs/` and `packed-refs`, since `packed-refs` may not exist yet
       // (a watch on a missing file cannot open) and `config` sits beside them.
       if (status.isWorktree) {
-        const commonWatch = this.watchFn(status.commonDir, { recursive: true }, (_event, filename) => {
-          if (filename === null) return this.changed(root, 'refs');
+        const commonWatch = this.watchFn(status.commonDir, { recursive: true, prune: objectStore }, (_event, filename) => {
+          if (filename === null) return this.rescan(root, 'refs');
           const sub = filename.split(sep).join('/');
-          onGitPath(sub, classifyCommonPath(sub), true);
+          onGitPath(sub, classifyCommonPath(sub), true, false);
         });
         root.handles.push(commonWatch);
         commonWatch.on('error', onError);
@@ -358,15 +431,106 @@ export class GitWatcher {
       throw error;
     }
     this.roots.set(root.root, root);
+    this.deps.log?.(`[git] watching ${root.root}`);
     // FSEvents starts its stream asynchronously, and the status above was read before the watch opened: one pass after
     // the debounce closes both gaps (the store watcher's settle rescan, M2, for the same reason).
     this.schedule(root);
     return root;
   }
 
+  // What git ignores under the root, read the first time the root's tree asks (never, where the watch takes no prune),
+  // and answered from the latest snapshot from then on. A root whose listings fail is watched whole rather than missed.
+  private ignoredUnder(root: Root): Prune {
+    return async (dir) => {
+      if (!this.deps.ignored) return false;
+      if (root.ignores.snapshot === null) void this.rebuildIgnores(root, true);
+      return (await root.ignores.snapshot!)(dir);
+    };
+  }
+
+  private readIgnores(repoRoot: string): Promise<Prune> {
+    return this.deps.ignored!(repoRoot).catch((): Prune => async () => false);
+  }
+
+  // A rule changed: rebuilt now, then one pass of the tree. Nothing to rebuild while the tree never asked.
+  private ignoresChanged(root: Root): void {
+    const ignores = root.ignores;
+    if (ignores.snapshot === null || root.closed) return;
+    ignores.pass = true;
+    if (ignores.building) ignores.again = true;
+    else void this.rebuildIgnores(root);
+  }
+
+  // The tree's slow pass is about to walk: a snapshot the index made stale is rebuilt first (a rebuild under way is
+  // waited for).
+  private ignoresBeforePass(root: Root): Promise<void> | undefined {
+    const ignores = root.ignores;
+    if (ignores.building) return ignores.building;
+    if (ignores.stale && ignores.snapshot !== null && !root.closed) return this.rebuildIgnores(root);
+    return undefined;
+  }
+
+  // One read in flight, and one more for whatever changed during it; a later read is swapped in once read, so the tree
+  // never waits on git for it (`first`, the tree's first ask, waits on its own). A rule changed meanwhile asks the tree
+  // for one pass at the end.
+  private rebuildIgnores(root: Root, first = false): Promise<void> {
+    const ignores = root.ignores;
+    const build = async () => {
+      do {
+        ignores.again = false;
+        ignores.stale = false; // what moves from here on is after this read began
+        const next = this.readIgnores(root.root);
+        if (first) ignores.snapshot = next;
+        first = false;
+        await next;
+        if (root.closed) return;
+        ignores.snapshot = next;
+      } while (ignores.again);
+    };
+    const building = build().finally(() => {
+      if (ignores.building === building) ignores.building = null;
+      if (!ignores.pass || root.closed) return;
+      ignores.pass = false;
+      root.tree?.reconcileNow?.();
+    });
+    ignores.building = building;
+    return building;
+  }
+
+  // The root's tree ran out of inotify's budget: its watches closed, its status read on a timer from now on. Kept
+  // until the root closes (no re-attempt: a budget that was short stays short while the other trees hold it).
+  private poll(root: Root, code: string): void {
+    if (root.closed || root.state === 'polling') return;
+    root.state = 'polling';
+    for (const handle of root.handles) handle.close();
+    console.warn(`[git] watch exhausted under ${root.root} (${code}): polling`);
+    this.schedulePoll(root);
+  }
+
+  private schedulePoll(root: Root): void {
+    root.pollTimer = setTimeout(() => void this.pollOnce(root), root.backoff ? 2 * POLL_MS : POLL_MS);
+  }
+
+  // A pass already running stands for this poll; the next is timed from the end of whichever ran, so a timeout's
+  // back-off holds from where it was learnt.
+  private async pollOnce(root: Root): Promise<void> {
+    root.pollTimer = null;
+    if (root.closed) return;
+    root.rescan = true;
+    await (root.active ?? this.refresh(root));
+    if (!root.closed && root.pollTimer === null) this.schedulePoll(root);
+  }
+
+  // An event with no filename: the tree reconciled, or the platform dropped what changed.
+  private rescan(root: Root, reason: Exclude<GitChangeReason, 'initial'>): void {
+    root.rescan = true;
+    this.changed(root, reason);
+  }
+
   private close(root: Root): void {
     root.closed = true;
     if (root.timer) clearTimeout(root.timer);
+    if (root.pollTimer) clearTimeout(root.pollTimer);
     for (const handle of root.handles) handle.close();
     this.roots.delete(root.root);
     for (const directories of this.owners.values()) {
@@ -432,7 +596,16 @@ export class GitWatcher {
     );
   }
 
-  private async refresh(root: Root): Promise<void> {
+  private refresh(root: Root): Promise<void> {
+    const pass = this.read(root);
+    root.active = pass;
+    void pass.finally(() => {
+      if (root.active === pass) root.active = null;
+    });
+    return pass;
+  }
+
+  private async read(root: Root): Promise<void> {
     root.inFlight = true;
     const retrying = root.retry;
     root.retry = false;
@@ -440,6 +613,8 @@ export class GitWatcher {
     const touched = root.touched;
     root.pending = new Set();
     root.touched = new Set();
+    if (root.rescan) for (const rel of root.inner.keys()) touched.add(rel); // the re-stat pass
+    root.rescan = false;
     try {
       const status = await this.deps.status(root.root);
       const { inner, overflow } = await this.innerFacts(root, status, touched);
@@ -459,7 +634,7 @@ export class GitWatcher {
       if (timedOut) root.backoff = true;
       // The failed change may be the last one: retry once after the back-off rather than wait for the next event,
       // unless this pass was that retry, so a repository whose status always times out is not polled.
-      if (timedOut && !retrying && !root.again && !root.timer && !root.closed) {
+      if (timedOut && !retrying && !root.again && !root.timer && !root.closed && root.state === 'events') {
         root.retry = true;
         this.schedule(root);
       }
@@ -469,7 +644,10 @@ export class GitWatcher {
       root.inFlight = false;
       if (root.again && !root.closed) {
         root.again = false;
-        if (root.backoff) this.schedule(root); // a timed-out root waits out the long debounce first
+        // A polling root's period is the poll's alone: a timed-out one leaves what asked meanwhile to the next poll.
+        if (root.state === 'polling') {
+          if (!root.backoff) void this.refresh(root);
+        } else if (root.backoff) this.schedule(root); // a timed-out root waits out the long debounce first
         else void this.refresh(root);
       }
     }

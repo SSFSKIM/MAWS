@@ -34,6 +34,8 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/fs/watcher.test.ts',
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
   'src/services/git/watcher.test.ts',
+  'src/shared/fs/watch-tree.test.ts', // P5 O3-E M1: its Linux cases wait on real inotify, a 2,000-file burst among them
+  'src/services/git/ignored.test.ts', // P5 O3-E M1: the loop's worst gap while a million-path listing is read
   'src/services/index/source.test.ts', // its wired cases follow real transcripts through the fs service
   'src/services/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
@@ -43,6 +45,7 @@ const TIMING_NODE_TESTS = [
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
   'test/services/boundary.test.ts', // P5 O3-C M3: the same pattern, for the services library's boundary (rules A and B)
   'src/services/spine-root.test.ts', // P5 O3-C M4: a replay played at its fastest and a real spine.lock wait (5 s)
+  'test/mawsd/checkouts-clients.test.ts', // P5 O3-E M2: git.changed and files.changed from real watches, over a real machine.sock
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
   'test/endpoint/provision.test.ts', // P5 O14 M1: provisions, retires and unenrolls against the same local runner
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub

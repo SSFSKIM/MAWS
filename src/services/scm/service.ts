@@ -14,6 +14,10 @@
 // chain. Runs, plans and PR state belong to the checkout (its worktree's top level). gh is probed once per process (10
 // minutes) outside any checkout; PR state is kept 60 s per checkout and branch and dropped when a run of that checkout
 // ends.
+//
+// P5 O3-E M2 (Interfaces §H; D14, D17): a mutation, a push and a pull request are admitted within SCM_ADMIT_MS of their
+// call or refused `busy` with nothing run (a push or a pull request then keeps its unspent token); the runs in flight
+// are reported (`runs`), so the spine's release or yield waits for them.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type {
@@ -45,9 +49,16 @@ import { childEnvironment } from './remote-env';
 import { BUSY_DETAIL, pushGitRead, RemoteRunner, runCollected, type KillFn, type SpawnFn } from './remote-runner';
 import { commitRefusal, discardTargets, isRefusal, refusal, stageTargets, UNTRUSTED_DETAIL, unstageTargets } from './validate';
 import { ghProgram, gitProgram } from './which';
+import type { Settling } from '../work';
 
-const LOCAL_TIMEOUT_MS = 10_000; // add, restore, rm, clean
-const COMMIT_TIMEOUT_MS = 60_000; // hooks run linters
+export const LOCAL_TIMEOUT_MS = 10_000; // add, restore, rm, clean
+export const COMMIT_TIMEOUT_MS = 60_000; // hooks run linters
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §H; D11, D17): one deadline per
+// mutation, from its invocation, over everything before its work runs (the checkout's key-resolution queue, the
+// resolution, the repository's chain). Past it a mutation answers `busy` and runs nothing, so a mutation main's
+// request deadline has already answered for (the daemon shape's `timeout`) never starts afterwards, and the command's
+// budget covers the wait rather than accepting it.
+export const SCM_ADMIT_MS = 30_000;
 const GH_PROBE_KEPT_MS = 10 * 60_000;
 const PR_STATE_KEPT_MS = 60_000;
 const GH_PROBE_CWD = '/'; // the probe reads no repository, so it runs in none
@@ -62,6 +73,7 @@ export interface ScmServiceDeps {
   env: NodeJS.ProcessEnv; // MAWS_GIT, MAWS_GH only
   emit(event: ScmRemoteOutput): void;
   spawn?: SpawnFn; // the remote runner's and gh reads' seam for tests
+  admitMs?: number; // SCM_ADMIT_MS unless a test shortens it
   kill?: KillFn; // with `spawn`: a fake child's pid is no process group to signal
   pushRead?: typeof pushGitRead; // the plans' destination reads (the push's git under the remote environment); tests
   now?: () => number;
@@ -184,19 +196,27 @@ export class ScmService {
   }
 
   // `scm.push` and `scm.pr.create`: busy is decided before the token is spent (the sheet keeps it for after the run in
-  // flight); then the token, then the revalidation in the repository's turn, then the spawn only when nothing moved.
+  // flight), once the checkout's key is known and again at admission; then the token, the revalidation in the
+  // repository's turn, and the spawn only when nothing moved. Refused `busy` from the queue (P5 O3-E, SCM_ADMIT_MS), the
+  // token is unspent and the sheet's Retry runs it.
   async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr'): Promise<ScmRunStarted> {
     const checkout = this.checkout(appSessionId);
-    return this.admit(checkout, async ({ checkout: key, repository }): Promise<ScmRunStarted> => {
-      if (this.runner.isRunning(key)) return refusal('busy', BUSY_DETAIL);
-      const issued = this.plans.consume(token, { appSessionId, key, kind });
+    const running = ({ checkout: key }: Keys) => (this.runner.isRunning(key) ? refusal('busy', BUSY_DETAIL) : null);
+    return this.admitted(checkout, async (keys): Promise<ScmRunStarted> => {
+      const busy = running(keys);
+      if (busy !== null) return busy;
+      const issued = this.plans.consume(token, { appSessionId, key: keys.checkout, kind });
       if (isRefusal(issued)) return issued;
-      return this.serial(repository, async (): Promise<ScmRunStarted> => {
-        const moved = await revalidatePlan(await this.sources(checkout), issued);
-        if (moved !== null) return moved;
-        return this.runner.start({ appSessionId, key, plan: issued.plan, captured: await this.deps.captured() });
-      });
-    });
+      const moved = await revalidatePlan(await this.sources(checkout), issued);
+      if (moved !== null) return moved;
+      return this.runner.start({ appSessionId, key: keys.checkout, plan: issued.plan, captured: await this.deps.captured() });
+    }, running);
+  }
+
+  // The push and pull request runs in flight (P5 O3-E, D14): they outlive their command's answer, so the spine's
+  // release or yield waits for them, bounded by the runner's own timeout.
+  get runs(): Settling {
+    return this.runner.inFlight;
   }
 
   // Cancel and the latest run start nothing of the owner's, so they are not behind the trust gate: a run started before
@@ -347,7 +367,7 @@ export class ScmService {
     facts: (checkout: string) => Promise<{ commit?: { sha: string; subject: string } }> = async () => ({}),
   ): Promise<ScmMutation> {
     const checkout = this.checkout(appSessionId);
-    return this.admit(checkout, ({ repository }) => this.serial(repository, async (): Promise<ScmMutation> => {
+    return this.admitted(checkout, async (): Promise<ScmMutation> => {
       if (!(await this.trust(checkout)).trusted) return refusal('untrusted', UNTRUSTED_DETAIL);
       let before: GitStatus;
       try {
@@ -372,18 +392,58 @@ export class ScmService {
       }
       const status = await this.deps.status(checkout);
       return { ok: true, status, output: joinOutput(outputs), ...(await facts(checkout)) };
-    }));
+    });
   }
 
-  // The checkout's keys, resolved in call order: `enter` runs for each call in the order the calls were made, so work
-  // reaches its chain in the order the owner asked for it. `enter` must reach `serial` without awaiting. P4 W2-B
+  // A mutation's way to its work (P5 O3-E, Interfaces §H): its keys resolved in the checkout's queue (admit), then its
+  // turn in the repository's chain (serial), all within SCM_ADMIT_MS of the call; `before` may refuse once the keys are
+  // known, ahead of the chain. Past the deadline with its work not started, it answers `busy` and runs nothing: its
+  // place in each queue becomes a no-op that lets the queue's tail run on in order. A key resolution that fails before
+  // the deadline fails the call, as it did.
+  private admitted<T>(checkout: string, work: (keys: Keys) => Promise<T>, before: (keys: Keys) => T | null = () => null): Promise<T | ScmRefusal> {
+    return new Promise<T | ScmRefusal>((resolve, reject) => {
+      let state: 'waiting' | 'started' | 'expired' = 'waiting';
+      const deadline = setTimeout(() => {
+        if (state !== 'waiting') return;
+        state = 'expired';
+        resolve(refusal('busy', BUSY_DETAIL));
+      }, this.deps.admitMs ?? SCM_ADMIT_MS);
+      const end = () => {
+        state = 'started';
+        clearTimeout(deadline);
+      };
+      queue(this.admissions, checkout, () => (state === 'waiting' ? this.keysOf(checkout) : Promise.resolve(null))).then(
+        (keys) => {
+          if (keys === null || state !== 'waiting') return;
+          const refused = before(keys);
+          if (refused !== null) {
+            end();
+            return resolve(refused);
+          }
+          return this.serial(keys.repository, async () => {
+            if (state !== 'waiting') return;
+            end();
+            try {
+              resolve(await work(keys));
+            } catch (error) {
+              reject(error);
+            }
+          });
+        },
+        (error: unknown) => {
+          if (state !== 'waiting') return;
+          end();
+          reject(error);
+        },
+      );
+    });
+  }
+
+  // The checkout's keys, resolved in call order (`admitted` keeps the order): each call reaches its chain in the order
+  // the owner asked for it, since a call reaches `serial` without awaiting once its keys resolved. P4 W2-B
   // (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): the order is
   // kept per checkout as the session names it, each in a queue of its own, so one whose resolution hangs (a stalled
   // mount) holds up only its own calls; calls naming two directories of one repository are not ordered between them.
-  private admit<T>(checkout: string, enter: (keys: Keys) => Promise<T>): Promise<T> {
-    return queue(this.admissions, checkout, () => this.keysOf(checkout)).then(enter);
-  }
-
   // One promise chain per repository: work starts after every earlier work of the repository settled.
   private serial<T>(repository: string, work: () => Promise<T>): Promise<T> {
     return queue(this.chains, repository, work);

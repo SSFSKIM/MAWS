@@ -129,8 +129,13 @@ describe.skipIf(graph === null)('the built mawsd’s run path', () => {
     }
   });
 
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 9): the checkouts compose inside the
+  // spine's root, so git, scm and files load with the spine, never at mawsd's start
   it('keep the services library off the run path, in the chunk the spine seam loads', () => {
-    const markers = { startSpine: /\bfunction startSpine\(/, IndexSessionSource: /\bclass IndexSessionSource\b/ };
+    const markers = {
+      startSpine: /\bfunction startSpine\(/, IndexSessionSource: /\bclass IndexSessionSource\b/,
+      GitService: /\bclass GitService\b/, createFilesService: /\bfunction createFilesService\(/, ScmService: /\bclass ScmService\b/, FileLister: /\bclass FileLister\b/,
+    };
     const run = runPathOf(MAWSD);
     for (const [what, marker] of Object.entries(markers)) {
       expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);

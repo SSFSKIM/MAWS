@@ -178,6 +178,35 @@ describe('main ipc router', () => {
     });
   });
 
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main's own route, past the
+  // main-only refusal a page's call and dispatchLocal meet, through the same owner switch
+  describe('invokeOwn', () => {
+    const output = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null, utf8: null } as const;
+
+    it('answers a main-only machine command through the embedded binding, which a window and dispatchLocal are refused', async () => {
+      const { mainClient } = await import('./clients');
+      const handler = vi.fn(() => output);
+      router.registerMachineHandler('files.readResolved', handler);
+      await expect(router.invokeOwn('files.readResolved', { path: '/a/b.txt' }, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: true, value: output });
+      expect(handler).toHaveBeenCalledWith({ path: '/a/b.txt' }, { client: mainClient, target: LOCAL });
+      await expect(router.dispatchLocal('files.readResolved', { path: '/a/b.txt' }, { client: mainClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+      await expect(invoke(appWindow(), 'files.readResolved', { path: '/a/b.txt' })).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+      expect(handler).toHaveBeenCalledOnce();
+      await expect(router.invokeOwn('files.readResolved', { path: 1 }, { client: mainClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    });
+
+    it('forwards it to the machine host with main’s own client on the host binding', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async () => ({ ok: true, value: output }));
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host' } });
+      const { mainClient } = await import('./clients');
+      await expect(router.invokeOwn('files.readResolved', { path: '/a/b.txt' }, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: true, value: output });
+      expect(dispatchToHost).toHaveBeenCalledWith('machine', 'files.readResolved', { path: '/a/b.txt' }, mainClient);
+    });
+  });
+
   it('hands a handler the asking page instance’s ClientRef: the same one per page, a new one after a reload', async () => {
     const { pageOf } = await import('./clients');
     const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);

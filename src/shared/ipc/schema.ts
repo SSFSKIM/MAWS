@@ -285,6 +285,7 @@ export const MACHINE_EVENTS = [
   'session.eventBatch', 'session.status', 'engine.budget', // the side threads', setups' and yield's rows; the scenario stub's statuses and budget
   'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
   'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
+  'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

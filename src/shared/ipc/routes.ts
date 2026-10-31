@@ -43,6 +43,7 @@ export const PATH_COMMANDS = [
   'customization.inventory', 'customization.serverEndpoints',
   'catalog.home', 'catalog.query', 'catalog.item', 'catalog.postures',
   'host.op', // P5 O10 M7: main-only (mawsd's ledger), never bridged; its `context.engineSessionId` makes it path
+  'files.readResolved', // P5 O3-E: main-only (library.read's reach), never bridged; a bare path
   'machineSettings.set', // P5 O3-D: as settings.set, its engine patch's paths
 ] as const satisfies readonly CommandName[];
 export type PathCommandName = (typeof PATH_COMMANDS)[number];

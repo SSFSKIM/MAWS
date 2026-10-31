@@ -13,7 +13,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
 import { zipFiles } from '../design-systems/zip';
-import { createLibraryFiles, type LibraryFilesDeps } from './files';
+import { createLibraryFiles, readResolvedThrough, type LibraryFilesDeps } from './files';
 
 // Run real filesystem operations, interleaving another writer at the asynchronous boundaries.
 const diskRace = vi.hoisted(() => ({
@@ -150,6 +150,23 @@ describe('library files', () => {
     expect(reading.readFile).toHaveBeenCalledWith({ path: csv, offset: 0, hash: true });
     const page = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: { 4: { name: 'index.html', path: put('index.html', '<p>x</p>') } } }));
     await expect(page.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+  });
+
+  // P5 O3-E M2 (Interfaces §D): library.read reaches the files service through files.readResolved over main's own route,
+  // which answers the same CommandResult in process (the embedded binding) and from mawsd (the machine host); the
+  // adapter hands library.read the bytes, or throws the route's error for its caller
+  it('reads a File artifact through files.readResolved, and fails library.read with the route’s error', async () => {
+    const csv = put('ledger.csv', 'item,cost\n');
+    const answered = { encoding: 'utf8' as const, content: 'item,cost\n', bytes: 10, offset: 0, length: 10, truncated: false, mime: 'text/csv', hash: null, utf8: null };
+    let answer: CommandResult<'files.readResolved'> = { ok: true, value: answered };
+    const invoke = vi.fn(async () => answer);
+    const files = createLibraryFiles({ ...deps({ kind: 'file', title: 'ledger.csv', files: { 2: { name: 'ledger.csv', path: csv } } }), readFile: readResolvedThrough(invoke) });
+    await expect(files.read({ artifactId: ID, offset: 0 })).resolves.toEqual(answered);
+    expect(invoke).toHaveBeenCalledWith('files.readResolved', { path: csv, offset: 0 });
+    answer = { ok: false, error: ipcError('internal', `not found: ${csv}`) }; // the files service's refusal, as either route answers it
+    await expect(files.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'internal', message: `not found: ${csv}` } });
+    answer = { ok: false, error: ipcError('host_unavailable', 'the spine is held by another MAWS') }; // mawsd's spine refused
+    await expect(files.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'host_unavailable' } });
   });
 
   it('opens a document externally and reveals any file, through the e2e seam’s log when it is set', async () => {

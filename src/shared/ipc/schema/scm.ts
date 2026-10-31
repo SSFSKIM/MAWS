@@ -2,7 +2,9 @@
 // Main owns every one: it resolves the session's checkout from its read model (`worktree.path ?? directory`), so no
 // command takes a directory; it gates everything but `scm.status` on the engine's trust; local mutations run through
 // the mutating git runner, remote commands only through a plan main recorded, the sheet showed and the run revalidated.
-// What the owner can act on is a refusal value (`ScmRefusal`), never an error envelope.
+// What the owner can act on is a refusal value (`ScmRefusal`), never an error envelope. P5 O3-E M2
+// (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): every command is `machine`-owned, served by
+// `mawsd` on the daemon shape with the spine (main's embedded binding answers them on the embedded one).
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
 import type { CommandSpec } from './common';
@@ -140,17 +142,17 @@ export const ScmPrStateInputSchema = z.strictObject({ appSessionId: AppSessionId
 export type ScmPrStateInput = z.infer<typeof ScmPrStateInputSchema>;
 
 export const commands = {
-  'scm.status': { input: Session, output: ScmStatusSchema, owner: 'main' },
-  'scm.stage': { input: ScmPathsInputSchema, output: ScmMutationSchema, owner: 'main' },
-  'scm.unstage': { input: ScmPathsInputSchema, output: ScmMutationSchema, owner: 'main' },
-  'scm.discard': { input: ScmDiscardInputSchema, output: ScmMutationSchema, owner: 'main' },
-  'scm.commit': { input: ScmCommitInputSchema, output: ScmMutationSchema, owner: 'main' },
-  'scm.push.plan': { input: ScmPushPlanInputSchema, output: ScmPlanResultSchema, owner: 'main' },
-  'scm.push': { input: ScmRunInputSchema, output: ScmRunStartedSchema, owner: 'main' },
-  'scm.pr.plan': { input: ScmPrPlanInputSchema, output: ScmPlanResultSchema, owner: 'main' },
-  'scm.pr.create': { input: ScmRunInputSchema, output: ScmRunStartedSchema, owner: 'main' },
-  'scm.remote.cancel': { input: ScmRunInputSchema, output: z.void(), owner: 'main' },
-  'scm.remote.last': { input: Session, output: ScmRemoteLastSchema, owner: 'main' },
-  'scm.pr.state': { input: ScmPrStateInputSchema, output: ScmPrStateSchema, owner: 'main' },
+  'scm.status': { input: Session, output: ScmStatusSchema, owner: 'machine' },
+  'scm.stage': { input: ScmPathsInputSchema, output: ScmMutationSchema, owner: 'machine' },
+  'scm.unstage': { input: ScmPathsInputSchema, output: ScmMutationSchema, owner: 'machine' },
+  'scm.discard': { input: ScmDiscardInputSchema, output: ScmMutationSchema, owner: 'machine' },
+  'scm.commit': { input: ScmCommitInputSchema, output: ScmMutationSchema, owner: 'machine' },
+  'scm.push.plan': { input: ScmPushPlanInputSchema, output: ScmPlanResultSchema, owner: 'machine' },
+  'scm.push': { input: ScmRunInputSchema, output: ScmRunStartedSchema, owner: 'machine' },
+  'scm.pr.plan': { input: ScmPrPlanInputSchema, output: ScmPlanResultSchema, owner: 'machine' },
+  'scm.pr.create': { input: ScmRunInputSchema, output: ScmRunStartedSchema, owner: 'machine' },
+  'scm.remote.cancel': { input: ScmRunInputSchema, output: z.void(), owner: 'machine' },
+  'scm.remote.last': { input: Session, output: ScmRemoteLastSchema, owner: 'machine' },
+  'scm.pr.state': { input: ScmPrStateInputSchema, output: ScmPrStateSchema, owner: 'machine' },
 } as const satisfies Record<`scm.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 export const events = { 'scm.remote.output': ScmRemoteOutputSchema } as const satisfies Record<`scm.${string}`, z.ZodType>;

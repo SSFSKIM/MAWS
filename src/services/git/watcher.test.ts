@@ -1,13 +1,16 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { watch as fsWatch, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { watch as fsWatch, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitChangedSchema, type GitChanged, type GitStatus } from '@shared/ipc/schema/git';
+import { RECONCILE_MS, watchTree } from '@shared/fs/watch-tree';
+import { drain, errno, FakeWatchFs } from '../../../test/support/fake-watch-fs';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError, type ExecFileFn } from './runner';
 import { GitService } from './service';
-import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, INNER_CAP, isNestedRepository, refMatters, type WatchFn } from './watcher';
+import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, INNER_CAP, isNestedRepository, POLL_MS, refMatters, type WatchFn } from './watcher';
 
 const ROOT = '/repo';
 
@@ -211,6 +214,23 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(read.mock.calls.length).toBe(reads + 2);
     expect(emitted).toHaveLength(2);
+    watcher.dispose();
+  });
+
+  // P5 O3-E M2: the checkouts in mawsd's log, one line at a root's first watch and one at its last release
+  it('logs a root once when its first watch opens it and once when its last watcher lets it go', async () => {
+    const fake = fakeWatch();
+    const lines: string[] = [];
+    const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null, log: (line) => void lines.push(line) });
+    await watcher.watch(ROOT, 'page:1.1');
+    await watcher.watch(`${ROOT}/src`, 'page:2.1');
+    expect(lines).toEqual([`[git] watching ${ROOT}`]);
+    watcher.unwatch(ROOT, 'page:1.1');
+    expect(lines).toHaveLength(1);
+    watcher.release('page:2.1');
+    expect(lines).toEqual([`[git] watching ${ROOT}`, `[git] released ${ROOT}`]);
+    watcher.unwatch(ROOT, 'page:1.1'); // nothing held: no second line
+    expect(lines).toHaveLength(2);
     watcher.dispose();
   });
 
@@ -881,6 +901,486 @@ describe('git watcher refreshes a root on demand', () => {
   });
 });
 
+// P5 O3-E M1 (Interfaces §B): on Linux each recursive call is the watch tree, given a prune per call; an exhausted tree
+// puts its root in polling; an event with no filename (a reconcile, a poll) re-reads the status and the cached facts
+// of the files beneath untracked directories.
+describe('the repository watcher over the watch tree', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  afterEach(() => vi.useRealTimers());
+
+  // The tree over an in-memory filesystem rooted at the repository, taking the prune the watcher passes.
+  function treeOver(fs: FakeWatchFs): WatchFn {
+    return (path, options, listener) => watchTree(path, { prune: options.prune, fs: fs.options }, listener);
+  }
+  const dirty = status({ dirty: true, files: [{ path: 'a.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }] });
+
+  it("prunes the root's ignored directories, its git dir's objects/ and lfs/ and the checkouts nested in it; a git dir or common dir outside it loses objects/ and lfs/ alone", async () => {
+    const fake = fakeWatch();
+    const prunes = new Map<string, (dir: string) => boolean | Promise<boolean>>();
+    const watch: WatchFn = (path, options, listener) => {
+      prunes.set(path, options.prune!);
+      return fake.watch(path, options, listener);
+    };
+    const asked: string[] = [];
+    const ignored = vi.fn<(root: string) => Promise<(dir: string) => Promise<boolean>>>(async () => async (dir) => (asked.push(dir), dir === 'node_modules'));
+    const wt = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true, branch: 'wt' });
+    const read = async (directory: string) => (directory === '/wt' ? wt : status());
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch, statFile: async () => null, ignored, linkedWorktrees: async () => [`${ROOT}/wts/other`, '/wt'] });
+    await watcher.watch(ROOT);
+    expect(ignored).not.toHaveBeenCalled(); // read only once the tree asks: never on macOS, whose watch takes no prune
+    const root = prunes.get(ROOT)!;
+    for (const dir of ['node_modules', '.git/objects', '.git/lfs', '.claude/worktrees/wt', 'wts/other']) expect(await root(dir), dir).toBe(true);
+    for (const dir of ['src', '.git', '.git/refs', '.git/refs/heads', '.git/worktrees', '.git/worktrees/wt', '.git/logs', '.git/modules', '.claude', '.claude/worktrees', 'wts']) expect(await root(dir), dir).toBe(false);
+    expect(ignored.mock.calls).toEqual([[ROOT]]); // once per root
+    expect(asked.sort()).toEqual(['.claude', '.claude/worktrees', 'node_modules', 'src', 'wts']); // git's own directories never go to its ignore rules
+
+    await watcher.watch('/wt');
+    for (const path of [wt.gitDir, wt.commonDir]) {
+      const prune = prunes.get(path)!;
+      for (const dir of ['objects', 'lfs']) expect(await prune(dir), `${path} ${dir}`).toBe(true);
+      for (const dir of ['refs', 'refs/heads', 'refs/remotes/origin', 'worktrees', 'worktrees/wt', 'logs', 'reftable', 'modules']) expect(await prune(dir), `${path} ${dir}`).toBe(false);
+    }
+    expect(ignored.mock.calls).toEqual([[ROOT]]);
+    watcher.dispose();
+  });
+
+  it.each(['ENOSPC', 'EMFILE'])('polls git status every POLL_MS once its tree reports %s, emits only when the projection moved, and stops at unwatch', async (code) => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.mkdir('.git/refs');
+    fs.mkdir('src');
+    fs.failWatch = (path) => (path === `${ROOT}/src` ? errno(code, path) : null);
+    let current = status();
+    const read = vi.fn(async () => current);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: treeOver(fs), statFile: async () => null });
+    await watcher.watch(ROOT);
+    await drain();
+    expect(warn.mock.calls).toEqual([[`[git] watch exhausted under ${ROOT} (${code}): polling`]]);
+    expect(fs.watched()).toEqual([]); // the partial tree is closed
+    await vi.advanceTimersByTimeAsync(POLL_MS); // the settle pass after the watch opened, then the first poll
+    const reads = read.mock.calls.length;
+    const quiet = emitted.length;
+    await vi.advanceTimersByTimeAsync(POLL_MS - 1);
+    expect(read.mock.calls.length).toBe(reads);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read.mock.calls.length).toBe(reads + 1);
+    expect(emitted).toHaveLength(quiet); // nothing moved
+
+    current = dirty;
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(read.mock.calls.length).toBe(reads + 2);
+    expect(emitted.slice(quiet)).toEqual([{ repoRoot: ROOT, status: dirty, reason: 'worktree' }]);
+
+    watcher.unwatch(ROOT);
+    await vi.advanceTimersByTimeAsync(POLL_MS * 4);
+    expect(read.mock.calls.length).toBe(reads + 2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    // A new watch starts from events again.
+    fs.failWatch = () => null;
+    await watcher.watch(ROOT);
+    await drain();
+    expect(fs.watched().sort()).toEqual(['', '.git', '.git/refs', 'src']);
+    watcher.dispose();
+  });
+
+  it("polls when the root's own watch reports exhaustion, which reaches it on a later tick", async () => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.failWatch = (path) => errno('ENOSPC', path);
+    const read = vi.fn(async () => status());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch: treeOver(fs), statFile: async () => null });
+    await expect(watcher.watch(ROOT)).resolves.toEqual(status());
+    await drain();
+    expect(warn.mock.calls).toEqual([[`[git] watch exhausted under ${ROOT} (ENOSPC): polling`]]);
+    await vi.advanceTimersByTimeAsync(300);
+    const reads = read.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(read.mock.calls.length).toBe(reads + 1);
+    watcher.dispose();
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(read.mock.calls.length).toBe(reads + 1);
+  });
+
+  it('polls at twice POLL_MS after a status timeout, until a status succeeds', async () => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.failWatch = (path) => errno('ENOSPC', path);
+    let failing = false;
+    const read = vi.fn(async () => {
+      if (failing) throw new GitTimeoutError('git status timed out after 10 s in /repo');
+      return status();
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch: treeOver(fs), statFile: async () => null });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(POLL_MS); // the settle pass and the first poll
+    failing = true;
+    const reads = read.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(POLL_MS); // times out
+    expect(read.mock.calls.length).toBe(reads + 1);
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2 - 1);
+    expect(read.mock.calls.length).toBe(reads + 1); // backed off: one poll per 10 s, and no retry of its own
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read.mock.calls.length).toBe(reads + 2);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2); // succeeds
+    expect(read.mock.calls.length).toBe(reads + 3);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(read.mock.calls.length).toBe(reads + 4);
+    watcher.dispose();
+  });
+
+  // Review of M1 (finding 2): a poll that finds a status already running waits for it, and the next poll is timed from
+  // that pass's end; the debounce's own continuation never adds a second schedule while the root polls.
+  it('times each poll from the end of the pass before it, a status in flight included, at twice POLL_MS after a timeout', async () => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.failWatch = (path) => errno('ENOSPC', path);
+    const start = Date.now();
+    const starts: number[] = [];
+    let first = true;
+    const read = vi.fn(() => {
+      starts.push(Date.now() - start);
+      if (first) {
+        first = false;
+        return Promise.resolve(status());
+      }
+      // Every later status times out at the runner's 10 s.
+      return new Promise<GitStatus>((_resolve, reject) => setTimeout(() => reject(new GitTimeoutError('git status timed out after 10 s in /repo')), 10_000));
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch: treeOver(fs), statFile: async () => null });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(45_000);
+    // The settle pass at 250 ms runs until 10,250; the poll due at 5,000 waits for it, then 10 s after it ends.
+    expect(starts).toEqual([0, 250, 20_250, 40_250]);
+    watcher.dispose();
+  });
+
+  it("finds a tracked file's modification whose event was lost at the tree's next slow reconcile", async () => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.write('a.ts');
+    let current = status();
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: treeOver(fs), statFile: async () => null });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1000);
+    const quiet = emitted.length;
+    current = dirty; // its callback withheld
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS - 1001);
+    await drain();
+    expect(emitted).toHaveLength(quiet);
+    await vi.advanceTimersByTimeAsync(1);
+    await drain();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted.slice(quiet)).toEqual([{ repoRoot: ROOT, status: dirty, reason: 'worktree' }]);
+    watcher.dispose();
+  });
+
+  it('re-reads the facts of a known file beneath an untracked directory on an event with no filename', async () => {
+    const fake = fakeWatch();
+    const files = new Map<string, { size: number; mtimeMs: number }>([[`${ROOT}/new/a.txt`, { size: 3, mtimeMs: 1 }]]);
+    const current = status({ dirty: true, files: [{ path: 'new/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null, isRepository: async () => false });
+    await watcher.watch(ROOT);
+    fake.fire(ROOT, 'new/a.txt'); // known from here on
+    await vi.advanceTimersByTimeAsync(1000);
+    const quiet = emitted.length;
+    files.set(`${ROOT}/new/a.txt`, { size: 3, mtimeMs: 2 }); // its event lost
+    fake.opened[0].listener('rename', null);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 1);
+    fake.opened[0].listener('rename', null); // nothing moved since: silent
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 1);
+    watcher.dispose();
+  });
+
+  it('names a file written in a directory made after the watch within the debounce', async () => {
+    const fs = new FakeWatchFs(ROOT);
+    let current = status();
+    const read = vi.fn(async () => current);
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: treeOver(fs), statFile: async () => null, isRepository: async () => false });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1000);
+    const quiet = emitted.length;
+    fs.write('fresh/inner/a.ts');
+    current = status({ dirty: true, files: [{ path: 'fresh/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    fs.fire('', 'rename', 'fresh');
+    await drain();
+    expect(fs.watched().sort()).toEqual(['', 'fresh', 'fresh/inner']);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(emitted.slice(quiet)).toEqual([{ repoRoot: ROOT, status: current, reason: 'worktree' }]);
+    watcher.dispose();
+  });
+});
+
+// The final review's finding 3: what git ignores is read when the root's tree first asks and rebuilt when its inputs
+// change, so a directory a removed rule (a switched branch, a force-added file) admits is watched at the tree's next
+// pass. A `.gitignore` anywhere in the tree, the common dir's `info/exclude` and the git dir's HEAD rebuild it at once,
+// coalesced (one in flight, one more for whatever changed meanwhile), followed by one pass; every index write only
+// marks it stale, rebuilt once before the slow timer's next pass walks.
+describe('the repository watcher rebuilds what git ignores when its rules change', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  afterEach(() => vi.useRealTimers());
+
+  function treeOver(fs: FakeWatchFs): WatchFn {
+    return (path, options, listener) => watchTree(path, { prune: options.prune, beforeReconcile: options.beforeReconcile, fs: fs.options }, listener);
+  }
+
+  // A repository whose `build/` git ignores until the test says otherwise; `ignored` counts every snapshot read.
+  function lab(over: { status?: (fs: FakeWatchFs) => Promise<GitStatus> } = {}) {
+    const fs = new FakeWatchFs(ROOT);
+    fs.mkdir('.git/info');
+    fs.mkdir('.git/refs');
+    fs.write('.git/HEAD');
+    fs.write('.git/index');
+    fs.write('.gitignore');
+    fs.write('build/out.txt');
+    fs.write('src/.gitignore');
+    const rules = { build: true };
+    let holding: Promise<void> | null = null;
+    const ignored = vi.fn(async () => {
+      const verdict = rules.build; // what git reads at the snapshot's start
+      await holding;
+      return async (dir: string) => verdict && dir === 'build';
+    });
+    const statuses = vi.fn(async () => (over.status ? over.status(fs) : status()));
+    const watcher = new GitWatcher({ status: statuses, emit: () => {}, watch: treeOver(fs), statFile: async () => null, ignored, isRepository: async () => false });
+    const hold = () => {
+      let open!: () => void;
+      holding = new Promise((resolve) => (open = resolve));
+      return () => {
+        holding = null;
+        open();
+      };
+    };
+    return { fs, rules, ignored, statuses, watcher, hold };
+  }
+
+  it('watches a directory its removed rule admits after the pass a .gitignore change starts, and hears an edit inside it', async () => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    expect(fs.watched()).not.toContain('build');
+    expect(ignored).toHaveBeenCalledTimes(1);
+    rules.build = false;
+    fs.fire('', 'change', '.gitignore');
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it.each([
+    ['a nested .gitignore', 'src', '.gitignore'],
+    ["the git dir's info/exclude", '.git/info', 'exclude'],
+    ["the git dir's HEAD", '.git', 'HEAD'],
+  ])('rebuilds at once on %s', async (_name, dir, file) => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    rules.build = false;
+    fs.fire(dir, 'change', file);
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it('coalesces a burst of changes into one rebuild in flight and one more, then one pass', async () => {
+    const { fs, rules, ignored, watcher, hold } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    const release = hold();
+    fs.fire('', 'change', '.gitignore'); // the first rebuild, held
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    rules.build = false;
+    for (let i = 0; i < 20; i++) fs.fire('src', 'change', '.gitignore'); // a checkout's .gitignore files
+    fs.fire('.git', 'change', 'HEAD');
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    const listings = fs.listings;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(3); // one more, for everything that changed during the first
+    expect(fs.watched()).toContain('build');
+    expect(fs.listings - listings).toBeLessThanOrEqual(fs.watched().length + 1); // one whole-tree pass, not one per change
+    watcher.dispose();
+  });
+
+  it('takes a rule changed during the first read as one more read and one pass, never a second read beside it', async () => {
+    const { fs, rules, ignored, watcher, hold } = lab();
+    const release = hold();
+    await watcher.watch(ROOT);
+    await drain(); // the walk asks: the first read, held
+    expect(ignored).toHaveBeenCalledTimes(1);
+    rules.build = false;
+    fs.fire('', 'change', '.gitignore');
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(1);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it('rebuilds on an index change only before the slow timer’s next pass walks, and only once', async () => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1_000); // the settle pass
+    rules.build = false; // a force-add beneath build/: only the index moved
+    fs.fire('.git', 'change', 'index');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(1);
+    expect(fs.watched()).not.toContain('build');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS - 2_000);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build'); // that pass walked with the new snapshot
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 3);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    watcher.dispose();
+  });
+
+  // The re-review's lost case: who wrote the index cannot be told by timing, so an outside write that lands while our
+  // own status runs marks the snapshot stale like any other (our own reads write no index: GIT_OPTIONAL_LOCKS=0).
+  it('marks the snapshot stale for an outside index write made while its own status runs, rebuilt at the next slow pass', async () => {
+    let held: Promise<void> | null = null;
+    const { fs, rules, ignored, statuses, watcher } = lab({
+      status: async () => {
+        await held;
+        return status();
+      },
+    });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1_000); // the settle pass
+    let release!: () => void;
+    held = new Promise((resolve) => (release = resolve));
+    const runs = statuses.mock.calls.length;
+    fs.fire('', 'change', 'a.ts');
+    await vi.advanceTimersByTimeAsync(300); // its status, held
+    expect(statuses.mock.calls.length).toBe(runs + 1);
+    rules.build = false; // `git add -f build/x` from outside, while our status runs
+    fs.fire('.git', 'change', 'index');
+    await drain();
+    release();
+    held = null;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS - 1_300);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  // The architect's bound: an index some outside writer rewrites all the time costs one rebuild per slow period, never more.
+  it('rebuilds at most once per RECONCILE_MS under an index rewritten every few milliseconds', async () => {
+    const { fs, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    let writing = true;
+    const rewrite = () => {
+      if (!writing) return;
+      fs.fire('.git', 'change', 'index');
+      setTimeout(rewrite, 5);
+    };
+    rewrite();
+    for (let period = 1; period <= 4; period++) {
+      await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+      await drain();
+      expect(ignored.mock.calls.length).toBeLessThanOrEqual(1 + period);
+    }
+    expect(ignored.mock.calls.length).toBeGreaterThanOrEqual(4); // it does rebuild, once a period
+    writing = false;
+    watcher.dispose();
+  });
+
+  it('reads nothing of git where the tree never asked (macOS: the watch takes no prune)', async () => {
+    const fake = fakeWatch();
+    const ignored = vi.fn(async () => async () => false);
+    const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null, ignored });
+    await watcher.watch(ROOT);
+    fake.fire(ROOT, '.gitignore');
+    fake.fire(ROOT, '.git/HEAD');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 2);
+    expect(ignored).not.toHaveBeenCalled();
+    watcher.dispose();
+  });
+});
+
+// Real git (the final review's finding 3): the rule removed, the tree's pass, the directory watched, an edit in it heard.
+describe('what git ignores, rebuilt from a real repository when its rule is removed', () => {
+  let repo: GitFixture;
+  let service: GitService;
+  let events: GitChanged[];
+  const watched = new Set<string>();
+  // The tree over the real filesystem, recording the directories it watches.
+  const tree: WatchFn = (path, options, listener) =>
+    watchTree(path, {
+      prune: options.prune,
+      beforeReconcile: options.beforeReconcile,
+      fs: {
+        readdir, lstat, lstatSync,
+        watch: ((dir: string, watchOptions: object, onEvent: (event: string, filename: string | null) => void) => {
+          const handle = fsWatch(dir, watchOptions, onEvent);
+          watched.add(dir);
+          const close = handle.close.bind(handle);
+          handle.close = () => {
+            watched.delete(dir);
+            close();
+          };
+          return handle;
+        }) as typeof fsWatch,
+      },
+    }, listener);
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    events = [];
+    watched.clear();
+    await repo.write('.gitignore', 'build/\n');
+    await repo.git('add', '.gitignore');
+    await repo.git('commit', '-q', '-m', 'ignore build');
+    await repo.write('build/out.txt', 'one\n');
+    service = new GitService({ emit: (e) => events.push(e), env: repo.serviceEnv(), watch: tree });
+  });
+  afterEach(() => {
+    service.dispose();
+    repo.dispose();
+  });
+  const until = async (what: string, ok: () => boolean, withinMs: number) => {
+    for (const start = Date.now(); !ok(); await new Promise((resolve) => setTimeout(resolve, 20))) if (Date.now() - start > withinMs) throw new Error(`not ${what} within ${withinMs} ms`);
+  };
+
+  it('watches build/ once its rule is removed and reports an edit inside it', async () => {
+    await service.watch(repo.root);
+    await until('walked', () => watched.has(repo.path('.git')), 5_000);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(watched).not.toContain(repo.path('build'));
+    await repo.write('.gitignore', '');
+    await until('watching build/', () => watched.has(repo.path('build')), 5_000);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const baseline = events.length;
+    await repo.write('build/out.txt', 'two, edited\n');
+    await until('told of the edit', () => events.length > baseline, 2_000);
+    expect(events.at(-1)!.status.files).toContainEqual(expect.objectContaining({ path: 'build/', untracked: true }));
+  }, 20_000);
+});
+
 // Real repositories, real FSEvents. Each wait is bounded; the "within 1 s" pin is measured from the write.
 describe('git.changed from a watched fixture repository', () => {
   let repo: GitFixture;
@@ -897,6 +1397,14 @@ describe('git.changed from a watched fixture repository', () => {
   });
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 600)); // past the settle pass and one debounce
+  // Until a count of status runs holds still for 800 ms: past the settle pass and, where the watch is the tree (Linux),
+  // the status its initial walk's end asks for, which a check-ignore batch inside the walk can put after `settle`.
+  const runsSettle = async (statusRuns: () => number) => {
+    for (let last = -1; statusRuns() !== last; ) {
+      last = statusRuns();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  };
   async function nextChange(from: number, withinMs: number): Promise<{ event: GitChanged; ms: number }> {
     const start = Date.now();
     while (Date.now() - start < withinMs) {
@@ -1014,7 +1522,7 @@ describe('git.changed from a watched fixture repository', () => {
     const statusRuns = () => execFile.mock.calls.filter(([, args]) => args[2] === 'status' && args[1] === repo.root).length;
     try {
       await local.watch(repo.root);
-      await settle();
+      await runsSettle(statusRuns);
       const [runs, emitted] = [statusRuns(), events.length];
       for (let i = 0; i < 5; i++) {
         await repo.write(`.claude/worktrees/engine/src/f${i}.ts`, `${i}\n`);

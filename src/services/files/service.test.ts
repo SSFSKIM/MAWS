@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_LIST_MAX_ENTRIES, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
+import { NO_LINK } from '../fs/no-link';
 import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 
 const OUT = "path outside the session's directories";
@@ -314,7 +315,8 @@ describe('files service boundary', () => {
     });
   });
 
-  it('opens real0 with numeric flags including O_NONBLOCK and O_NOFOLLOW_ANY (not O_NOFOLLOW), and never calls readFile', async () => {
+  // macOS: O_NOFOLLOW_ANY and not O_NOFOLLOW; Linux, which ignores that bit: O_NOFOLLOW (the open walked and confirmed)
+  it('opens real0 with numeric flags including O_NONBLOCK and the platform’s no-link bit (O_NOFOLLOW_ANY on macOS, not O_NOFOLLOW), and never calls readFile', async () => {
     symlinkSync(root, at('root-link'));
     records.set(A, record(at('root-link')));
     const open = vi.spyOn(fs.promises, 'open');
@@ -327,8 +329,8 @@ describe('files service boundary', () => {
     for (const [, flags] of open.mock.calls) {
       expect(typeof flags).toBe('number');
       expect((flags as number) & O_NONBLOCK).toBe(O_NONBLOCK);
-      expect((flags as number) & O_NOFOLLOW).toBe(0); // macOS answers EINVAL for the two together (below)
-      expect((flags as number) & O_NOFOLLOW_ANY).toBe(O_NOFOLLOW_ANY);
+      expect((flags as number) & (O_NOFOLLOW | O_NOFOLLOW_ANY)).toBe(NO_LINK); // one of them: macOS answers EINVAL for the two (below)
+      if (process.platform === 'darwin') expect(NO_LINK).toBe(O_NOFOLLOW_ANY);
     }
     expect((open.mock.calls[0][1] as number) & O_DIRECTORY).toBe(0);
     expect((open.mock.calls[1][1] as number) & O_DIRECTORY).toBe(O_DIRECTORY);
@@ -817,7 +819,7 @@ describe('files service write', () => {
     expect(readFileSync(file(), 'utf8')).toBe(ORIGINAL);
   });
 
-  it('opens real0 with O_RDWR | O_NONBLOCK | O_NOFOLLOW_ANY and neither O_CREAT nor O_TRUNC, and never writes by path', async () => {
+  it('opens real0 with O_RDWR | O_NONBLOCK | the no-link bit (O_NOFOLLOW_ANY on macOS) and neither O_CREAT nor O_TRUNC, and never writes by path', async () => {
     symlinkSync(root, at('root-link'));
     records.set(A, record(at('root-link')));
     const open = vi.spyOn(fs.promises, 'open');
@@ -830,8 +832,9 @@ describe('files service write', () => {
     expect(typeof flags).toBe('number');
     expect(flags & (O_RDWR | O_WRONLY)).toBe(O_RDWR);
     expect(flags & O_NONBLOCK).toBe(O_NONBLOCK);
-    expect(flags & O_NOFOLLOW_ANY).toBe(O_NOFOLLOW_ANY);
-    expect(flags & (O_CREAT | O_TRUNC | O_NOFOLLOW)).toBe(0);
+    expect(flags & (O_NOFOLLOW | O_NOFOLLOW_ANY)).toBe(NO_LINK);
+    if (process.platform === 'darwin') expect(NO_LINK).toBe(O_NOFOLLOW_ANY);
+    expect(flags & (O_CREAT | O_TRUNC)).toBe(0);
     expect(writeFileSpy).not.toHaveBeenCalled();
     expect(renameSpy).not.toHaveBeenCalled();
   });
@@ -1130,5 +1133,65 @@ describe('readResolved', () => {
     await expect(files.readResolved({ path: join(outside, 'dirs') })).rejects.toThrow();
     await expect(files.readResolved({ path: 'secret.txt' })).rejects.toThrow('path must be absolute');
     await expect(files.readResolved({ path: join(outside, 'gone.txt') })).rejects.toThrow('not found');
+  });
+});
+
+// Linux (P5 O3-E M2 fix round 1): the kernel ignores O_NOFOLLOW_ANY, so the service walks real0's ancestors (an lstat
+// each, none a link), opens with O_NOFOLLOW, and takes the descriptor only if its own path (/proc/self/fd) is real0. A
+// link at the last component or above it, there at the walk or put there after it, is refused at the open: no
+// descriptor to outside bytes is stat'ed, read or written; readResolved, which has no roots, opens the same way (fix
+// round 2). The Linux unit job runs these; macOS's cases are above.
+describe.runIf(process.platform === 'linux')('files service on Linux: no link on the way to the open', () => {
+  const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
+  const ORIGINAL = 'export const a = 1;\n';
+  const file = () => inRoot('src', 'a.ts');
+  const outsideFile = () => join(outside, 'src', 'a.ts');
+  beforeEach(() => writeFileSync(outsideFile(), ORIGINAL)); // what a write through a link would find: its hash matches
+  const reached = () => {}; // `after-open`: deleted once reached, so still there when no descriptor was taken
+
+  describe.each([
+    ['read', () => service().read({ appSessionId: A, path: file() })],
+    ['write', () => service().write({ appSessionId: A, path: file(), content: 'pwned\n', expectedHash: sha(ORIGINAL) })],
+    ['readResolved', () => service().readResolved({ path: file() })], // library.read's reach: read's rules, no roots (§D)
+  ] as const)('%s', (_name, attempt) => {
+    it('refuses a last component replaced by an outside link before the open, at the open (ELOOP)', async () => {
+      points['before-open'] = () => {
+        unlinkSync(file());
+        symlinkSync(outsideFile(), file());
+      };
+      points['after-open'] = reached;
+      const open = vi.spyOn(fs.promises, 'open');
+      await expect(attempt()).rejects.toThrow(new Error(OUT));
+      await expect(open.mock.results[0]!.value).rejects.toMatchObject({ code: 'ELOOP' });
+      expect(points['after-open']).toBe(reached);
+      expect(readFileSync(outsideFile(), 'utf8')).toBe(ORIGINAL);
+    });
+
+    it('refuses an ancestor swapped to an outside link before the walk, opening nothing', async () => {
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      const open = vi.spyOn(fs.promises, 'open');
+      try {
+        await expect(attempt()).rejects.toThrow(new Error(OUT));
+        expect(open).not.toHaveBeenCalled();
+        expect(readFileSync(outsideFile(), 'utf8')).toBe(ORIGINAL);
+      } finally {
+        restore(inRoot('src'));
+      }
+    });
+
+    it('refuses an ancestor swapped to an outside link between the walk and the open, by the descriptor’s own path', async () => {
+      points['after-walk'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      points['after-open'] = reached;
+      const open = vi.spyOn(fs.promises, 'open');
+      try {
+        await expect(attempt()).rejects.toThrow(new Error(OUT));
+        expect(open).toHaveBeenCalledTimes(1);
+        await expect(open.mock.results[0]!.value).resolves.toBeDefined(); // the open followed the link: refused after it
+        expect(points['after-open']).toBe(reached);
+        expect(readFileSync(outsideFile(), 'utf8')).toBe(ORIGINAL);
+      } finally {
+        restore(inRoot('src'));
+      }
+    });
   });
 });

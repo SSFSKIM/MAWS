@@ -1,9 +1,11 @@
 // X2 `files.*` (C8c execution document, Interfaces "`files.*`"; the C8 spec's *`files.*` read service*, K1): main's
-// view of a session's own directories, for the Files tool, the file viewer and (E5) the editor. Owner `main` for every
-// command. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
+// view of a session's own directories, for the Files tool, the file viewer and (E5) the editor. Owner `machine` for
+// every command from P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): `mawsd` serves
+// them with the spine on the daemon shape. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
 // and `worktree.path`) by the open-first boundary in `src/main/files/service.ts`; refusals answer `internal` with
-// `path outside the session's directories`. The one write is E5's `files.write`, the hash-checked save of a file that
-// already exists; nothing here creates, renames or deletes a file.
+// `path outside the session's directories`. One write is E5's `files.write`, the hash-checked save of a file that
+// already exists; the other, P5 O3-E's `files.upload`, creates new files in the session's attachments directory alone;
+// nothing here renames a file, or deletes one but the upload's own.
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
@@ -120,19 +122,69 @@ export const FilesRevealOutputSchema = z.strictObject({ revealed: z.boolean(), m
 export type FilesRevealOutput = z.infer<typeof FilesRevealOutputSchema>;
 // E1 end
 
+// P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach to a File artifact's stored bytes, a path main resolved itself
+// (the artifact's admission), read with `files.read`'s rules (no link on the path, a regular file, the same answer).
+// Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
+// which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told.
+export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true });
+export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema>;
+
+// P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,
+// answered with the stored absolute paths in input order. The bounds are the schema's, so an oversized call is
+// `invalid_input` at main's router and at `machine.op`'s validation, before a line reaches the socket (whose cap is
+// 64 MiB) or the handler: 1 to UPLOAD_FILES_MAX files, each and all together at most 32 MiB decoded. Base64 strings of
+// one length decode to lengths up to two bytes apart (by their padding), so the encoded length is only a pre-cap (the
+// padded encoding of the bound, before the pattern runs) and the bounds are on the decoded lengths, exactly. Declared at
+// M2 (the manifest final then), its write M3's; a refusal is a value, as files.write's.
+const MiB = 1024 * 1024;
+export const UPLOAD_FILE_MAX_BYTES = 32 * MiB; // decoded, per file
+export const UPLOAD_CALL_MAX_BYTES = 32 * MiB; // decoded, per call
+export const UPLOAD_FILES_MAX = 8;
+const encodedLength = (bytes: number) => 4 * Math.ceil(bytes / 3); // padded
+// The bytes a string the base64 pattern took decodes to: three per four characters, less one per pad
+const decodedLength = (base64: string) => (base64.length / 4) * 3 - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+export const FilesUploadInputSchema = z
+  .strictObject({
+    appSessionId: AppSessionIdSchema,
+    files: z
+      .array(
+        z.strictObject({
+          name: z.string(),
+          bytes: z
+            .base64()
+            .max(encodedLength(UPLOAD_FILE_MAX_BYTES))
+            .refine((bytes) => decodedLength(bytes) <= UPLOAD_FILE_MAX_BYTES, { message: `a file of an upload exceeds ${UPLOAD_FILE_MAX_BYTES / MiB} MiB` }),
+        }),
+      )
+      .min(1)
+      .max(UPLOAD_FILES_MAX),
+  })
+  .refine((input) => input.files.reduce((sum, file) => sum + decodedLength(file.bytes), 0) <= UPLOAD_CALL_MAX_BYTES, {
+    message: `the files of one upload exceed ${UPLOAD_CALL_MAX_BYTES / MiB} MiB together`,
+    path: ['files'],
+  });
+export type FilesUploadInput = z.infer<typeof FilesUploadInputSchema>;
+export const FilesUploadOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ok'), paths: z.array(z.string()) }),
+  z.strictObject({ status: z.literal('refused'), reason: z.string() }), // a sentence for the caller to show; nothing written
+]);
+export type FilesUploadOutput = z.infer<typeof FilesUploadOutputSchema>;
+
 export const commands = {
   // No path: the roots as 'dir' entries in record order (directory, additionalDirectories…, worktree when it differs),
   // deduplicated by realpath, root null, path ''.
-  'files.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().optional() }), output: FilesListOutputSchema, owner: 'main' },
-  'files.read': { input: FilesReadInputSchema, output: FilesReadOutputSchema, owner: 'main' },
+  'files.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().optional() }), output: FilesListOutputSchema, owner: 'machine' },
+  'files.read': { input: FilesReadInputSchema, output: FilesReadOutputSchema, owner: 'machine' },
   // A directory; ref-counted per confirmed realpath; re-confirmed after install and before each batch it forwards.
-  'files.watch': { input: SessionPathSchema, output: z.void(), owner: 'main' },
-  'files.unwatch': { input: SessionPathSchema, output: z.void(), owner: 'main' },
-  'files.openExternal': { input: SessionPathSchema, output: FilesOpenExternalOutputSchema, owner: 'main' },
+  'files.watch': { input: SessionPathSchema, output: z.void(), owner: 'machine' },
+  'files.unwatch': { input: SessionPathSchema, output: z.void(), owner: 'machine' },
+  'files.openExternal': { input: SessionPathSchema, output: FilesOpenExternalOutputSchema, owner: 'machine' },
   // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
-  'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'main' },
+  'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
   // E5 end
-  'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'main' }, // E1
+  'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
+  'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only
+  'files.upload': { input: FilesUploadInputSchema, output: FilesUploadOutputSchema, owner: 'machine' }, // P5 O3-E
 } as const satisfies Record<`files.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 // `invalidated`: the watched directory (path is its confirmed realpath) failed a re-confirmation and its watch was

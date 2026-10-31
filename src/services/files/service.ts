@@ -2,26 +2,29 @@
 // watch and open a session's own files, every one confined to the session's allowlist (`allowlist.ts`).
 //
 // The boundary opens before it trusts: a pre-check (step 1) resolves the path to its in-root realpath `real0` and
-// refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY`
-// (`O_DIRECTORY` too for a directory), so the kernel refuses a symlink anywhere on the path and the descriptor names an
-// object reached through `real0`'s own directories; it `fstat`s the descriptor (4), confirms the opened object again
-// by a fresh realpath under a root whose `stat` names the descriptor's `(dev, ino)` (5), and only then judges its type
-// (5b), so no type is ever named for an object outside. `read` serves from the descriptor. `list` and `watch` cannot
-// (Node has no `fdopendir`, and `fs.watch` takes a path), so a listing stays private until a confirmation after its
-// last metadata read, and a watch is confirmed after its install and before every batch.
+// refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK` and no link on its way
+// (`O_DIRECTORY` too for a directory; ../fs/no-link.ts: `O_NOFOLLOW_ANY` on macOS, where the kernel refuses a symlink
+// anywhere on the path; on Linux an lstat of each ancestor, `O_NOFOLLOW`, and the descriptor's own path confirmed as
+// `real0`), so the descriptor names an object reached through `real0`'s own directories; it `fstat`s the descriptor
+// (4), confirms the opened object again by a fresh realpath under a root whose `stat` names the descriptor's
+// `(dev, ino)` (5), and only then judges its type (5b), so no type is ever named for an object outside. `read` serves
+// from the descriptor. `list` and `watch` cannot (Node has no `fdopendir`, and `fs.watch` takes a path), so a listing
+// stays private until a confirmation after its last metadata read, and a watch is confirmed after its install and
+// before every batch.
 //
-// The recorded limits, per operation: `read` none by race, because the open cannot traverse a symlink, so no
-// substitution by symlink is ever followed, and step 5 refuses anything else that changed between the open and the
-// confirmation (the reading that step 5 alone closed it was wrong: its `realpath` and `stat` are two path steps an
-// ancestor flipping symlink, directory, symlink can straddle; M1 review); hard links inside a root, and a directory
-// renamed into a root, are in the tree when opened, accepted by design. `list`: a swap-and-restore between `readdir` and
-// the final confirmation can let outside names and metadata (never contents) into the answer. `watch`: a
-// swap-and-restore between the install and its confirmation attaches the watcher outside until a batch's confirmation
-// catches a standing swap, or forwards outside filenames if it was restored; a swap between a batch's confirmation and
-// its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
-// before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file of a document
-// or media kind (`opensExternally`, an allowlist). E1: `reveal` takes the same pre-check and any regular file, since
-// showing a file in Finder runs nothing.
+// The recorded limits, per operation (on Linux too, P5 O3-E: there a link the open followed is refused by the
+// descriptor's own path before the descriptor is used, rather than by the kernel): `read` none by race, because the
+// open cannot traverse a symlink, so no substitution by symlink is ever followed, and step 5 refuses anything else that
+// changed between the open and the confirmation (the reading that step 5 alone closed it was wrong: its `realpath` and
+// `stat` are two path steps an ancestor flipping symlink, directory, symlink can straddle; M1 review); hard links
+// inside a root, and a directory renamed into a root, are in the tree when opened, accepted by design. `list`: a
+// swap-and-restore between `readdir` and the final confirmation can let outside names and metadata (never contents)
+// into the answer. `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside
+// until a batch's confirmation catches a standing swap, or forwards outside filenames if it was restored; a swap
+// between a batch's confirmation and its per-name `lstat` classifies that batch's kinds from outside metadata.
+// `openExternal` is path-checked immediately before `shell.openPath`, with no descriptor guarantee, and hands the OS
+// only a regular, non-executable file of a document or media kind (`opensExternally`, an allowlist). E1: `reveal` takes
+// the same pre-check and any regular file, since showing a file in Finder runs nothing.
 //
 // `write` (E5) is `read`'s boundary with a read-write open: it compares the file's hash and writes in place through the
 // confirmed descriptor, never by path, so it shares `read`'s guarantee and never creates, renames or replaces a file.
@@ -53,12 +56,13 @@ import {
   type FilesWriteOutput,
   type FilesRevealOutput, // E1
 } from '@shared/ipc/schema/files';
+import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch';
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch';
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -109,16 +113,17 @@ export const FILES_REFUSAL = "path outside the session's directories";
 const LIST_STAT_CONCURRENCY = 64;
 
 const { O_RDONLY, O_RDWR, O_NONBLOCK, O_DIRECTORY } = fs.constants;
-// macOS only (MAWS is macOS only; macOS 11 and later): refuse a symlink anywhere on the path the kernel walks, not only
-// in its last component. Node's fs.constants does not carry it, so it is passed through numerically; a test asserts the
-// kernel honours it, so a port to a platform that ignores the bit fails loudly instead of silently losing the guard.
-// It replaces O_NOFOLLOW rather than joining it: macOS answers EINVAL for the two together (measured, Node 22.23.2 on
-// macOS 26.6.2), and O_NOFOLLOW_ANY alone refuses a symlink in the last component with ELOOP as well.
-export const O_NOFOLLOW_ANY = 0x20000000;
-export const OPEN_FLAGS = O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY;
+// No link on the way (../fs/no-link.ts). macOS 11 and later: O_NOFOLLOW_ANY refuses a symlink anywhere on the path the
+// kernel walks, not only in its last component; Node's fs.constants does not carry it, so it is passed through
+// numerically, and a test asserts the kernel honours it. It replaces O_NOFOLLOW rather than joining it: macOS answers
+// EINVAL for the two together (measured, Node 22.23.2 on macOS 26.6.2), and O_NOFOLLOW_ANY alone refuses a symlink in
+// the last component with ELOOP as well. Linux ignores the bit (P5 O3-E M2 fix round 1: `mawsd` serves files there), so
+// there the bits are O_NOFOLLOW and the open is walked and confirmed (`openConfirmed`, below).
+export { O_NOFOLLOW_ANY } from '../fs/no-link';
+export const OPEN_FLAGS = O_RDONLY | O_NONBLOCK | NO_LINK;
 // E5's write: the same open read-write, and nothing else: no O_CREAT (the editor edits a file it opened), no O_TRUNC
 // (nothing is destroyed before the compare).
-const WRITE_FLAGS = O_RDWR | O_NONBLOCK | O_NOFOLLOW_ANY;
+const WRITE_FLAGS = O_RDWR | O_NONBLOCK | NO_LINK;
 
 class Refusal extends Error {
   constructor() {
@@ -176,6 +181,26 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { roots, real0 };
   }
 
+  // The one open of the service, every descriptor's (`openConfirmed`'s and `readResolved`'s): `real` with no link on
+  // its way (../fs/no-link.ts). On Linux its ancestors are walked first, and an ancestor turned into a link between the
+  // walk and the open, which the open followed, is refused by the descriptor's own path, closed before anything is read
+  // from it or written to it (any failure to confirm it, too). A walk's link is coded ELOOP, a missing ancestor ENOENT,
+  // as the open's own would be.
+  async function openNoLink(real: string, flags: number, path: string): Promise<FileHandle> {
+    if (WALKED) {
+      await walk(dirname(real));
+      await at('after-walk', path);
+    }
+    const handle = await fs.promises.open(real, flags);
+    try {
+      await confirmOpened(handle.fd, real);
+    } catch {
+      await handle.close();
+      throw new Refusal();
+    }
+    return handle;
+  }
+
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
   async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY): Promise<Confirmed> {
@@ -183,9 +208,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     await at('before-open', path);
     let handle: FileHandle;
     try {
-      // real0 with O_NOFOLLOW_ANY: the descriptor names an object reached through no symlink at all, beneath a root that
-      // is itself a realpath, so the open is a containment check of its own and step 5 a second one.
-      handle = await fs.promises.open(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : kind === 'write' ? WRITE_FLAGS : OPEN_FLAGS);
+      // real0 with no link on its way: the descriptor names an object reached through no symlink at all, beneath a root
+      // that is itself a realpath, so the open is a containment check of its own and step 5 a second one.
+      handle = await openNoLink(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : kind === 'write' ? WRITE_FLAGS : OPEN_FLAGS, path);
     } catch (error) {
       // ELOOP (a component of real0 became a symlink), ENOTDIR, EISDIR and the rest: no descriptor exists to confirm,
       // so no type is named; ENOENT says `not found` only under the leak rule. A write refused permission names the
@@ -254,15 +279,17 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     } catch (error) {
       throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
     }
+    await at('before-open', path);
     let handle: FileHandle;
     try {
-      handle = await fs.promises.open(real, OPEN_FLAGS);
+      handle = await openNoLink(real, OPEN_FLAGS, path); // P5 O3-E: read's open, walked and confirmed on Linux (§D)
     } catch (error) {
       throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
     }
     let stat: BigIntStats;
     try {
       stat = await handle.stat({ bigint: true });
+      await at('after-open', path);
       if (!stat.isFile()) throw new Error(`not a regular file: ${path}`);
     } catch (error) {
       await handle.close();

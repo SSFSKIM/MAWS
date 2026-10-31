@@ -14,8 +14,8 @@ export type ServiceHandler<N extends CommandName> = (input: CommandInput<N>, con
 
 export interface ServicesBus {
   // A command the library answers; throws for a name registered twice. The spine's commands are `machine`-owned (O3-D
-  // M1), the checkouts' `main`-owned until O3-E: main binds a `machine` name to its router's embedded machine binding and
-  // a `main` one to its main handlers; `mawsd` binds the spine's to its services front.
+  // M1), and the checkouts' with them from O3-E: main binds a `machine` name to its router's embedded machine binding and
+  // a `main` one to its main handlers; `mawsd` binds both to its services front.
   register<N extends CommandName>(name: N, handler: ServiceHandler<N>): void;
   // Answers a command another owner would answer, before that owner (session.answer's pending check, the scenario
   // stub, O9's reroute); the function returned removes it.

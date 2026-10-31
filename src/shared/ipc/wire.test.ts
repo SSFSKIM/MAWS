@@ -191,8 +191,8 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     }
     expect(ownerOf('host.attachment')).toBe('engine-host');
     expect(manifest.entries).toHaveProperty(['commands.host.attachment']);
-    // the client's and the checkouts' commands stay main's until O3-E, out of the manifest
-    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'git.status', 'settings.get', 'library.content']) {
+    // the client's commands stay main's, out of the manifest (the checkouts' moved at O3-E, below)
+    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'settings.get', 'library.content']) {
       expect(ownerOf(name), name).toBe('main');
       expect(manifest.entries, name).not.toHaveProperty([`commands.${name}`]);
     }
@@ -224,6 +224,35 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
       link: [PTY_FRAMES_CAPABILITY],
     });
     for (const list of Object.values(PEER_CAPABILITIES)) for (const name of list) expect(WIRE_CAPABILITIES).toContain(name);
+  });
+});
+
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): the checkouts' commands retagged
+// `machine` and their events joining the machine host's list, with the two new commands, all additive
+describe('the checkouts on the wire (P5 O3-E M2)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+  const ownerOf = (name: string) => REGISTRY.commands[name as keyof typeof REGISTRY.commands]?.owner;
+  const RETAGGED = [
+    'git.status', 'git.branches', 'git.diff', 'git.log', 'git.watch', 'git.unwatch', 'git.lsFiles',
+    'scm.status', 'scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit', 'scm.push.plan', 'scm.push', 'scm.pr.plan', 'scm.pr.create', 'scm.remote.cancel', 'scm.remote.last', 'scm.pr.state',
+    'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal', 'files.write', 'files.reveal',
+  ];
+
+  it('owns by machine the 26 retagged commands and the two new ones, each in the manifest', () => {
+    expect(RETAGGED).toHaveLength(26);
+    for (const name of [...RETAGGED, 'files.readResolved', 'files.upload']) {
+      expect(ownerOf(name), name).toBe('machine');
+      expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+    }
+    expect(REGISTRY.mainOnly.has('files.readResolved')).toBe(true);
+    expect(REGISTRY.mainOnly.has('files.upload')).toBe(false); // bridged; O7 M4's drag and drop calls it
+  });
+
+  it('lists the checkouts’ three events among the machine host’s', () => {
+    for (const name of ['git.changed', 'scm.remote.output', 'files.changed']) {
+      expect(REGISTRY.machineEvents, name).toContain(name);
+      expect(manifest.entries, name).toHaveProperty([`events.${name}`]);
+    }
   });
 });
 

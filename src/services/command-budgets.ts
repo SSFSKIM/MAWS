@@ -6,6 +6,8 @@
 // only stalled inner host calls (each bounded at 10 s) take it past that.
 import type { CommandName } from '@shared/ipc/schema';
 import { GIT_TIMEOUT_MS } from './git/runner';
+import { GH_READ_TIMEOUT_MS } from './scm/pr-state';
+import { COMMIT_TIMEOUT_MS, LOCAL_TIMEOUT_MS, SCM_ADMIT_MS } from './scm/service';
 import { BRIDGE_SLACK_MS, LANE_A_TIMING } from './lane-a/driver';
 import { CONFIGURE_WAIT_MS } from './settings/engine-configure';
 import { EXIT_WAIT_MS, STOP_WAIT_MS, WATCHDOG_MS } from './sessions/context';
@@ -22,7 +24,47 @@ const BRIDGE_MS = LANE_A_TIMING.commandWaitMs + BRIDGE_SLACK_MS;
 // PAUSED_READY_MS), the old row's clearing, and a rollback's stop wait.
 const PANE_TAKE_OVER_MS = PAUSE_WAIT_MS + CONFIGURE_WAIT_MS + 2 * PAUSED_READY_MS + CLEAR_WAIT_MS + STOP_WAIT_MS;
 
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §H; D11): the checkouts' commands, each
+// the sum of its longest sequential chain of bounded phases as the code runs it (a git call GIT_TIMEOUT_MS, a gh read
+// GH_READ_TIMEOUT_MS; calls made in parallel count once), and for a mutation its admission (SCM_ADMIT_MS, which covers
+// the checkout's key resolution and the repository's chain). A budget short of a legitimate wait would answer `timeout`
+// for a commit mawsd then finishes, inviting a retry.
+const GIT = GIT_TIMEOUT_MS;
+const GH = GH_READ_TIMEOUT_MS;
+const STATUS = 3 * GIT; // GitService.status: rev-parse, then status beside stash list, then the remote's URL
+const TRUST = GIT; // trustedKeyOf's rev-parse (the store read is a file's)
+const KEYS = GIT; // ScmService.keysOf's rev-parse
+const PROBE = GH; // gh --version beside gh auth status
+const MUTATION = (commands: number, timeoutMs: number) => SCM_ADMIT_MS + TRUST + STATUS + commands * timeoutMs + STATUS;
+const CHECKOUTS_BUDGETS_MS = {
+  'git.status': STATUS + MARGIN_MS,
+  'git.watch': STATUS + MARGIN_MS, // the first status; the projection's and the nested checkouts' reads are the filesystem's
+  'git.branches': GIT + MARGIN_MS,
+  'git.diff': STATUS + GIT + MARGIN_MS, // the untracked scope: the status that confines it, then the diff (the others: one round)
+  'git.log': GIT + MARGIN_MS,
+  'git.lsFiles': GIT + MARGIN_MS, // ls-files, or a walk bounded by its entries
+  // trust beside the gh probe, then the remotes, the default remote and its HEAD
+  'scm.status': Math.max(TRUST, PROBE) + 3 * GIT + MARGIN_MS,
+  'scm.stage': MUTATION(1, LOCAL_TIMEOUT_MS) + MARGIN_MS,
+  'scm.unstage': MUTATION(1, LOCAL_TIMEOUT_MS) + MARGIN_MS,
+  'scm.discard': MUTATION(2, LOCAL_TIMEOUT_MS) + MARGIN_MS, // restore, then clean
+  'scm.commit': MUTATION(1, COMMIT_TIMEOUT_MS) + GIT + MARGIN_MS, // the hooks, then the new commit's log read
+  // trust and status, the upstream, the remotes, the push URLs and the fetch URL, the branch's name, the checkout's keys
+  'scm.push.plan': TRUST + STATUS + 5 * GIT + KEYS + MARGIN_MS,
+  // trust and status, the gh probe, the upstream, gh repo view, the base's name, the push URLs and the fetch URL, the keys
+  'scm.pr.plan': TRUST + STATUS + PROBE + GIT + GH + 3 * GIT + KEYS + MARGIN_MS,
+  // admitted, then the revalidation (trust, status, the push URLs); the run answers at its start
+  'scm.push': SCM_ADMIT_MS + TRUST + STATUS + GIT + MARGIN_MS,
+  'scm.pr.create': SCM_ADMIT_MS + TRUST + STATUS + GIT + MARGIN_MS,
+  'scm.remote.cancel': KEYS + MARGIN_MS,
+  'scm.remote.last': KEYS + MARGIN_MS,
+  // trust beside the probe, status, the remotes, the keys, then gh pr view and gh pr checks
+  'scm.pr.state': Math.max(TRUST, PROBE) + STATUS + GIT + KEYS + 2 * GH + MARGIN_MS,
+  'files.upload': GIT + MARGIN_MS, // the exclude's git read (M3's write)
+} as const satisfies Partial<Record<CommandName, number>>;
+
 export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> = {
+  ...CHECKOUTS_BUDGETS_MS,
   // a background job's `claude stop` and the registry's clearing after it, or a terminal pane's pause and resume
   'session.takeOver': Math.max(STOP_TIMEOUT_MS + TAKE_OVER_WAIT_MS, PANE_TAKE_OVER_MS) + MARGIN_MS,
   // a process still exiting, the configure gate, and the launch to ready (the watch fails one silent for WATCHDOG_MS;

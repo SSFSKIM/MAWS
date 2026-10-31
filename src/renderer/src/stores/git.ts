@@ -7,6 +7,11 @@
 // P5 O6 M4 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Path-keyed stores"): a directory is a machine's,
 // so entries key by `checkoutKey(machine, directory)`, every call goes to that machine, and a `git.changed` reaches only
 // the directories of the machine it came from.
+// P5 O3-E (the final review of docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, D25): on the daemon shape main's
+// watch replay answers a git.watch `host_unavailable` while the machine host is crashed and `timeout` at the command's
+// budget, rather than holding it until the host comes back. Such a watch is asked again whenever that machine's
+// `host.status` is heard (main emits one after re-reading the daemon at each ready of the machine host), so the
+// Environment row recovers with the host's restart; a re-ask while the host is still down is answered at once.
 import { create } from 'zustand';
 import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
@@ -25,6 +30,7 @@ export interface GitStore {
   entries: Map<string, GitEntry>; // by checkoutKey(machine, session.worktree?.path ?? session.directory)
   watch(machine: MachineRef, directory: string): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
   applyChanged(event: EventPayload<'git.changed'>, machine: MachineRef): void; // every watched directory of the root on that machine takes the status and re-runs git.diff
+  retryUnanswered(machine: MachineRef): void; // that machine's host was heard again (host.status): its watches it could not answer are asked again
 }
 
 export const GIT_DIFF_DELAY_MS = 250; // trailing debounce of the diffs git.changed schedules
@@ -37,9 +43,11 @@ interface Watched {
   timer: ReturnType<typeof setTimeout> | null;
   diffing: boolean;
   again: boolean; // a change arrived during the diff in flight: run once more when it ends
+  unanswered: boolean; // git.watch was answered host_unavailable or timeout: the machine could not answer it then
 }
 
 const EMPTY: GitEntry = { root: null, status: null, uncommitted: null, error: null };
+const UNANSWERED: ReadonlySet<string> = new Set(['host_unavailable', 'timeout']); // the machine could not answer: ask again when it is heard
 
 // A bridge that throws (not a command's failure answer) is a failure too, with its message, so nothing stays in flight
 // and nothing escapes as an unhandled rejection.
@@ -93,6 +101,20 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
       patch(key, { root: status.repoRoot, status, error: null, ...(status.dirty ? {} : { uncommitted: null }) });
     };
 
+    // One git.watch for the directory; `landed` follows the latest, so a release unwatches after it.
+    const install = (key: string, w: Watched) => {
+      w.unanswered = false;
+      w.landed = settled(client.invoke('git.watch', { directory: w.directory }, { machine: w.machine })).then((result) => {
+        if (watched.get(key) !== w) return;
+        if (!result.ok) {
+          w.unanswered = UNANSWERED.has(result.error.code);
+          return patch(key, { root: null, status: null, uncommitted: null, error: result.error.message });
+        }
+        take(key, result.value);
+        if (result.value.dirty) void diff(key);
+      });
+    };
+
     return {
       entries: new Map(),
 
@@ -101,15 +123,9 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
         let w = watched.get(key);
         if (w) w.count += 1;
         else {
-          const created: Watched = { machine, directory, count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false };
-          w = created;
-          watched.set(key, created);
-          created.landed = settled(client.invoke('git.watch', { directory }, { machine })).then((result) => {
-            if (watched.get(key) !== created) return;
-            if (!result.ok) return patch(key, { root: null, status: null, uncommitted: null, error: result.error.message });
-            take(key, result.value);
-            if (result.value.dirty) void diff(key);
-          });
+          w = { machine, directory, count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false, unanswered: false };
+          watched.set(key, w);
+          install(key, w);
         }
         const held = w;
         let released = false;
@@ -135,6 +151,10 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
           take(key, status);
           if (status.dirty) schedule(key, w);
         }
+      },
+
+      retryUnanswered(machine) {
+        for (const [key, w] of watched) if (w.machine === machine && w.unanswered) install(key, w);
       },
     };
   });

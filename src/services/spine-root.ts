@@ -5,7 +5,7 @@
 // channel and mods, the session service with intents, worktrees, prompt history, side threads, yield, observed facts
 // and the sweep, the engine host's configure relays, the design-system defaults relay, the library's derived index and
 // O9's lane A driver, in the order main composed them, and returns the one view staying code reads them through, and
-// its stop.
+// its stop. P5 O3-E M2: and, as its last parts, the checkouts (./checkouts-root.ts).
 //
 // O3-A's refused run (contract O3X2; O3 Decision Log 11) is the root's: a run that does not hold `spine.lock` opens the
 // index unavailable and starts none of the parts that write the machine's files or launch a session (attention's core,
@@ -29,6 +29,8 @@ import type { ServicesBus } from '@shared/spine/bus';
 import type { MachineSettingsService } from '@shared/spine/machine-settings';
 import type { SpineView } from '@shared/spine/view';
 import { startArtifactDefaults } from './artifacts/defaults';
+import { startCheckouts } from './checkouts-root';
+import { uploadRootsOf } from './files/upload';
 import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
@@ -415,6 +417,17 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // P5 O3-D M4 (Interfaces §H; O3X7): the services' operation ledger, a spine file under the lock, none in a refused run;
   // a remote act on the spine is claimed and run once through it (machine-ops.ts)
   if (spineRuns) registerMachineOps(bus, OpLedger.open(profile, 'spine-ops.jsonl', { log: (line) => console.warn(`[spine-ops] ${line}`) }));
+
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D; D4): the checkouts (git's read
+  // service and watcher, `git.lsFiles`, files and scm) over the in-process view and the counting bus, composed in a run
+  // refused the spine too (they write no spine file but the upload roots' record, which a refused run does not give
+  // them) and stopped last, as main's shutdown stopped them after the spine;
+  // their acts are claimable by machine.op above, and a release or a yield waits for scm's runs in flight (D14)
+  // M3 (Interfaces §F): files.upload's root record, a spine file under the lock beside the intents, none in a refused run
+  const uploadRoots = spineRuns ? uploadRootsOf(join(sessionsDir, 'uploads.json'), { log: (line) => console.warn(`[files] ${line}`) }) : null;
+  const checkouts = startCheckouts({ view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots });
+  parts.push(['checkouts', () => checkouts.stop()]);
+  settling.push(checkouts);
 
   const root = allSettling(settling);
   return {

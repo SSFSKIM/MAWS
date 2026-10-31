@@ -1,5 +1,5 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
-import { COMMAND_BUDGETS_MS, openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
+import { COMMAND_BUDGETS_MS, openSpineData, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
@@ -10,13 +10,13 @@ import { join } from 'node:path';
 import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
-import { pageOf } from './ipc/clients';
+import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
-import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
+import { dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
-import { startDaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
+import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
 import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
@@ -112,7 +112,7 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 import { installStorePolicies, registerStoreSchemes, startArtifacts } from './artifacts';
 // P3-A end
 // P3-L start
-import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
+import { readResolvedThrough, registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
 // P3-L end
 // P3-B start
@@ -389,8 +389,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §E): a page's git.watch and git.unwatch
+  // go through the spine's watch replay, which sends them under units of its own and gives them back at each streaming
   let forwardedToMachine: ((name: string, input: unknown, client: ClientRef | undefined) => void) | null = null;
+  let watchReplay: DaemonSpine['watches'] | null = null;
   const dispatchToHost: typeof hosts.dispatch = (owner, name, input, client) => {
+    if (owner === 'machine' && client !== undefined && watchReplay?.owns(name)) return watchReplay.dispatch(name as 'git.watch' | 'git.unwatch', input, client);
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
   };
@@ -399,15 +403,17 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
   // P5 O3-D M1: the spine's commands are `machine`-owned, so a `machine` name goes to the router's embedded machine
-  // binding (its output checked as a host runtime checks it) and a `main` one, the checkouts' until O3-E, to its main
-  // handlers.
+  // binding (its output checked as a host runtime checks it) and a `main` one to its main handlers (P5 O3-E: the
+  // checkouts' are `machine`-owned too, composed by the spine's root).
   const bus: ServicesBus = {
     register: (name, handler) => (REGISTRY.commands[name].owner === 'machine' ? registerMachineHandler(name, handler) : registerMainHandler(name, handler)),
     intercept: interceptCommand,
     emit,
     onEmitted,
-    // P5 O3-D M2 (Interfaces §H): the router's local route, which answers a `machine` name through the embedded binding
-    invoke: (name, input, context) => dispatchLocal(name, input, { ...context, target: local }) as never,
+    // P5 O3-D M2 (Interfaces §H): the router's local route, which answers a `machine` name through the embedded binding;
+    // P5 O3-E M2 (Interfaces §D): main's own route past the main-only refusal (`machine.op`'s claimed acts are graded
+    // acts, never main-only), which on the daemon shape forwards to mawsd
+    invoke: (name, input, context) => invokeOwn(name, input, { ...context, target: local }) as never,
   };
   remoteLink = (ref) => machines.remote(ref);
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
@@ -444,7 +450,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   let cuaSockets: Browser['cua'] | null = null;
   const spine = data === null
     ? // P5 O3-D M5b: the daemon shape's, mawsd's spine through main's mirror and the client port's answers
-      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null) })
+      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null), emit: (name, payload) => void emit(name, payload), budgetsMs: COMMAND_BUDGETS_MS })
     : startSpine({
         profile: app.getPath('userData'),
         machine: local,
@@ -466,11 +472,11 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
         home,
       });
   shutdown.add('spine', spine.stop);
-  if ('forwarded' in spine) forwardedToMachine = spine.forwarded; // the daemon shape's mirror (the router's forwards above)
+  if ('forwarded' in spine) {
+    forwardedToMachine = spine.forwarded; // the daemon shape's mirror and watch replay (the router's forwards above)
+    watchReplay = spine.watches;
+  }
   const view = spine.view;
-  // P5 O3-C: the checkouts (git, `git.lsFiles`, files and scm), which O3-E moves, over the spine's view
-  const checkouts = startCheckouts({ view, bus, clientPort, engineEnv, env: process.env });
-  shutdown.add('checkouts', checkouts.stop);
 
   // ---- C5: layout store ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
@@ -726,7 +732,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     root: join(app.getPath('userData'), 'artifacts'),
     downloads: () => app.getPath('downloads'),
     port: clientPort, // Save as…, the Replace question, Open externally, Reveal
-    readFile: (input) => checkouts.files.readResolved(input), // M6b fix wave 2: `library.read`
+    // M6b fix wave 2: `library.read`; P5 O3-E (Interfaces §D): the files service's files.readResolved over main's own route
+    readFile: readResolvedThrough((name, input) => bus.invoke(name, input, { client: mainClient })),
     env: process.env,
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through

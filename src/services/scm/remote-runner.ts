@@ -17,6 +17,7 @@ import { StringDecoder } from 'node:string_decoder';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { RemotePlan, ScmRemoteLast, ScmRemoteOutput, ScmRunStarted } from '@shared/ipc/schema/scm';
 import { execGit, GIT_TIMEOUT_MS, spawnGit, type ExecFileFn, type GitRun } from '../git/runner';
+import { Work } from '../work';
 import { childEnvironment } from './remote-env';
 import { refusal } from './validate';
 
@@ -86,6 +87,8 @@ export class RemoteRunner {
   private readonly kill: KillFn;
   private readonly now: () => number;
   private disposed = false;
+  private readonly ending = new Map<Run, () => void>(); // a running run's end, which `runs` counts until
+  readonly inFlight = new Work(); // P5 O3-E (D14): the runs not yet ended, which the spine's release and yield wait for
 
   constructor(private readonly deps: RemoteRunnerDeps) {
     this.spawn = deps.spawn ?? (nodeSpawn as SpawnFn);
@@ -108,6 +111,7 @@ export class RemoteRunner {
       startedAt: this.now(), endedAt: null, timer: null,
     };
     this.runs.set(key, run);
+    void this.inFlight.track(new Promise<void>((resolve) => this.ending.set(run, resolve)));
     run.timer = setTimeout(() => {
       this.note(run, 'stderr', `MAWS: timed out after ${REMOTE_TIMEOUT_MS / 1000} s; stopping it\n`);
       this.stop(run);
@@ -152,8 +156,14 @@ export class RemoteRunner {
       if (run.timer !== null) clearTimeout(run.timer);
       run.running = false;
       if (run.child.pid !== undefined) this.kill(run.child.pid, 'SIGTERM');
+      this.ended(run);
     }
     this.runs.clear();
+  }
+
+  private ended(run: Run): void {
+    this.ending.get(run)?.();
+    this.ending.delete(run);
   }
 
   // Latest runs that ended more than 10 minutes ago, of every checkout.
@@ -177,6 +187,7 @@ export class RemoteRunner {
     run.signal = signal;
     run.endedAt = this.now();
     this.publish(run, { kind: 'exit', exitCode, signal });
+    this.ended(run);
     if (!this.disposed) this.deps.onExit?.(key);
   }
 

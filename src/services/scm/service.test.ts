@@ -57,8 +57,9 @@ describe('scm service', () => {
     remoteUrl: null, ahead: 0, behind: 0, dirty: files.length > 0, files: [...files], stashCount: 0, checkedAt: '2026-10-06T00:00:00.000Z',
   });
 
-  function service(): ScmService {
+  function service({ admitMs }: { admitMs?: number } = {}): ScmService {
     return new ScmService({
+      admitMs,
       view,
       read, status: readStatus, mutate, refresh,
       pushRead: () => read, // E11: status lists remotes through the push's own reader; the fake answers both
@@ -371,6 +372,83 @@ describe('scm service', () => {
       } finally {
         rmSync(link, { force: true });
       }
+    });
+  });
+
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §H; D17): a mutation is admitted
+  // within the admission deadline of its call, or answers `busy` and runs nothing, ever (on the daemon shape main has
+  // answered it by then)
+  describe('bounds a mutation’s wait for its turn', () => {
+    const ADMIT_MS = 60;
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it('answers busy for a stage queued behind a commit whose hooks run past the deadline, and never stages it', async () => {
+      let release!: () => void;
+      mutate.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { stdout: '', stderr: '' };
+      });
+      const scm = service({ admitMs: ADMIT_MS });
+      const commit = scm.commit({ appSessionId: ID, message: 'x', noVerify: false });
+      await vi.waitFor(() => expect(mutate).toHaveBeenCalledOnce());
+      const stage = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
+      expect(await stage).toMatchObject({ refused: 'busy' });
+      release();
+      expect(await commit).toMatchObject({ ok: true });
+      await wait(20);
+      expect(mutate.mock.calls.map(([, args]) => args[0])).toEqual(['commit']); // the stage never ran
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true }); // the chain goes on
+    });
+
+    it('runs the deadline from the call, over slow key resolutions of its checkout', async () => {
+      const answer = read.getMockImplementation()!;
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let first = true;
+      read.mockImplementation(async (directory, args) => {
+        if (args[0] === 'rev-parse' && args.includes('--git-common-dir') && first) {
+          first = false;
+          await held; // the first call's key resolution hangs past the second's deadline
+        }
+        return answer(directory, args);
+      });
+      const scm = service({ admitMs: ADMIT_MS });
+      const one = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
+      const two = scm.stage({ appSessionId: ID, paths: ['u.txt'] });
+      expect(await two).toMatchObject({ refused: 'busy' });
+      expect(await one).toMatchObject({ refused: 'busy' }); // its own resolution outlived its deadline too
+      release();
+      await wait(20);
+      expect(mutate).not.toHaveBeenCalled();
+      expect(await scm.stage({ appSessionId: ID, paths: ['u.txt'] })).toMatchObject({ ok: true });
+    });
+
+    it('runs two commits queued on one repository in turn when the first ends within the second’s deadline, else answers busy for the second', async () => {
+      files = [file('s.ts', 'M.')];
+      const scm = service({ admitMs: ADMIT_MS });
+      const commits = () => mutate.mock.calls.filter(([, args]) => args[0] === 'commit').length;
+      expect(await Promise.all([scm.commit({ appSessionId: ID, message: 'one', noVerify: false }), scm.commit({ appSessionId: ID, message: 'two', noVerify: false })])).toMatchObject([{ ok: true }, { ok: true }]);
+      expect(commits()).toBe(2);
+      let release!: () => void;
+      mutate.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { stdout: '', stderr: '' };
+      });
+      const slow = scm.commit({ appSessionId: ID, message: 'three', noVerify: false });
+      await vi.waitFor(() => expect(commits()).toBe(3));
+      expect(await scm.commit({ appSessionId: ID, message: 'four', noVerify: false })).toMatchObject({ refused: 'busy' });
+      release();
+      expect(await slow).toMatchObject({ ok: true });
+      await wait(20);
+      expect(commits()).toBe(3);
+    });
+
+    it('lets a key resolution that fails within the deadline fail the call, as before', async () => {
+      read.mockImplementation(async (_directory, args) => {
+        if (args[0] === 'rev-parse' && args.includes('--git-common-dir')) throw new GitTimeoutError('git rev-parse timed out');
+        throw new Error('unexpected');
+      });
+      await expect(service({ admitMs: ADMIT_MS }).stage({ appSessionId: ID, paths: ['a.txt'] })).rejects.toBeInstanceOf(GitTimeoutError);
     });
   });
 
