@@ -207,10 +207,12 @@ Gates, from any directory (gate-offload §3.5):
     scripts/ci-gate.sh <wt> --gates static,unit,probes --class1a pool
     scripts/ci-gate.sh <wt> --gates unit:darwin --runner macos --peer none
     scripts/ci-gate.sh <wt> --gates e2e:<group>,e2e:<group>,… --runner macos --lane hosted --peer none
-    scripts/ci-gate.sh <wt> --gates all --runner macos --lane hosted --peer none             # M4; then, on the go:
-    scripts/ci-gate.sh <wt> --gates e2e:default,e2e:local-latency-daemon --runner macos --peer none
-    scripts/ci-gate.sh <wt> --gates e2e:daemon-idle --runner macos --peer none              # three valid runs
-    scripts/ci-gate.sh <wt> --gates e2e:daemon-idle-baseline --runner macos --peer none
+    scripts/ci-gate.sh <wt> --gates all --runner macos --lane hosted --peer none             # M4 (e2e:default rides it, on its usual placement)
+    # then, on the architect's go, CI-opt launches the measured groups under its hold and sampler (the standing rule;
+    # the executor never launches a measured or live group), on the tree the architect names:
+    #   --gates e2e:local-latency-daemon --runner macos --peer none
+    #   --gates e2e:daemon-idle --runner macos --peer none              # three valid runs
+    #   --gates e2e:daemon-idle-baseline --runner macos --peer none
 
 Each prints a line per gate (`PASS`, `FAIL … log=<path>`, `SKIP`, `WAIT`), then `GREEN <run-url>` (exit 0) or `RED <failed>/<total> <run-url>` (exit 1). Two calls on one commit at once need `--label` each, or the second cancels the first. A measured run's line is in the job log and its annotation; a valid window reads `pair` under 4.7 and `peak` under 5 (Rule B).
 
@@ -395,4 +397,14 @@ None required for execution. One taste call the architect may revisit after M3: 
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-10-31, at stop (2) (the measured series pending; this entry is completed with its readings at landing).**
+
+What landed, against the Purpose. On the daemon shape the checkouts are the machine's: `git.*`, `scm.*`, `files.*` and `git.lsFiles` are `machine`-owned (28 commands and 3 events added to the manifest, `WIRE_MINOR` 12 over master's 11, additive only), composed by `startSpine` as its last parts and so loaded, settled and released with the spine; the front serves them to every `machine.sock` client; main forwards them through the router's `host` binding and replays each page's watches at every streaming of `mawsd`, bounded at a crashed host and at `git.watch`'s budget (D25). Watches count per client and release with a page or a connection; reveal and open reach the asking client through the port. Mutations are claimable by `machine.op` and queued scm mutations answer `busy` past a 30 s admission instead of starting after main has reported a timeout. `files.upload` writes bounded bytes into `<working directory>/.claude/desk-uploads/<appSessionId>/` with lane A's rules, now shared. `e2e:machines` reads B's branch from B's daemon alone again. On Linux both watchers run over a directory-level watch tree MAWS owns, measured on three devcloud VMs within §G under D21 and D22, with exhaustion surfacing and the repository watcher polling. The embedded shape is unchanged in behaviour.
+
+What the plan did not foresee, and how it resolved:
+- The VM measures were the costly part. The first read three misses whose causes were the walk's own allocation, a held `writeFileSync` in the test's process and the git runner's single-turn decode of a 3.9 MB listing; two fix rounds and two more VMs later every bound held, with the architect redefining two readings rather than widening any: RSS per root, proven by a second root and an idle settle (V8's young generation is a once-per-process cost), and latency from the write's return with a separate writer. The lesson for a measured bound inherited from a spike: run the product's measure the way the spike ran (one process per arm) before reading a miss, and record the decomposition (retained against committed) beside the bounded figure from the first run.
+- The move made the files service a Linux service for the first time, and its link guard was a macOS-only open flag. The task review caught it; the fix lifted lane A's Linux bar into one shared module, with a `/proc/self/fd` descriptor check that lane A now takes too (D23(g)). Moving a service to a new platform deserves a pass over every platform-specific constant it carries.
+- The high-rung review found four real defects the task reviews had passed, one of them a design choice of §B (an ignore snapshot read once) whose cost was permanent rather than transient. Its fix needed two rounds and two architect rulings: the first no-loop guard (a timing window) dropped real outside writes, and the right mechanism was a property the runner already had (`GIT_OPTIONAL_LOCKS=0`), pinned by a test rather than inferred from timing.
+- The spec's literal §H tallies and §F's encoded-length bound were each off (parallel calls counted twice; padding admitting one byte over); both were corrected in place (D23).
+
+What remains is the PR body's residue and unresolved findings; the measured series' readings complete this entry.
