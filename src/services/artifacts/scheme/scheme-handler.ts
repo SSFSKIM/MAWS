@@ -1,13 +1,13 @@
 // The serving of the app's store scheme (E2 execution document, Design §3, Decision Log 6 and 12; P3-A M7, Decision Log
 // 35e): a resolver names the file a URL serves (or nothing) and `createSchemeHandler` serves it, never anything named
 // by the URL itself, so a scheme serves exactly the store's files. E2's `maws-deliverable:` was served here too until
-// P3-L's cutover (M6b), which left `maws-artifact:` (`./protocol.ts`, its resolver) alone.
+// P3-L's cutover (M6b), which left `maws-artifact:` (`./artifact-handler.ts`, its resolver; main's `protocol.ts` until P5 O5 M2) alone.
 //
 // Every answer carries `nosniff`, `inline`, `no-store` and `Accept-Ranges`; a `Range` is answered 206 from a bounded
 // read of the opened file (media seek through it). Every answer but a PDF's also carries a policy whose leading
 // `sandbox allow-scripts` sandboxes the document wherever it loads (the viewer's frame doubles it; the capture window,
 // which loads it top-level, has nothing else) and which admits no network source and no `'self'`: a self-contained page
-// needs nothing from any origin. The app-wide policy (`window.ts`) leaves this scheme's answers alone, so this one reaches the frame.
+// needs nothing from any origin. The app-wide policy (main's `window.ts`) leaves this scheme's answers alone, so this one reaches the frame.
 // An `html` artifact's page gets the bridge script as the first element of its `<head>` (Design §10); any other file
 // (an asset, a File artifact's HTML) is served byte for byte.
 import { constants } from 'node:fs';

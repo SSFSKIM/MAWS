@@ -56,6 +56,13 @@
 //                       launched on the daemon shape. It is refused at the relay, `mawsd` yields its spine to it, the
 //                       old app finds the index unavailable, and no spine file changes after the yield while it idles.
 //                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 10's artifact page): in (update, daemon) this
+// build's app loads an artifact page made in the kept engine host, the peer's: through its own `mawsd`'s artifact
+// endpoint when that `mawsd`'s welcome lists `machine.artifacts`, which resolves the URL through the peer's engine host
+// (`artifacts.content`, unchanged since P3-A), through main's own handler when it lists it not. A newer app held on an
+// older `mawsd` is not staged: the app's build check restarts a private `mawsd` of another build at its first status
+// read (src/main/hosts/daemon.ts, watchDaemon), so it serves the app only until then; main reads the welcome at each
+// request (src/main/artifacts/index.ts), and its unit test holds that choice.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -363,6 +370,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away' }).toBe(1);
   said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the failure's item and the request's"} reached main`);
 
+  // P5 O5 M2: an artifact page of the kept engine host, loaded by this build's app on the daemon shape
+  if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
+
   // across the gap: the newer build's commands, as the older supervisor answers them
   const before = gap ? await probe(second.page, gap.newer, gap.older, inputsOf(s)) : null;
 
@@ -536,6 +546,30 @@ async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promi
   await expect.poll(async () => (await pendingPermissions(next.page, o.id)).length, { message: 'the request, pending once after the reattach' }).toBe(1);
   o.said.push(`  permanent (acceptance 9): supervisor pid ${o.host} of this build kept mawsd pid ${o.daemon}’s one connection across a quit and a reattach (${connects} connections from it in the log)`);
   return next;
+}
+
+// P5 O5 M2: whether a build's `mawsd` serves the artifact endpoint (its manifest's capabilities, the union its peers list)
+const servesArtifacts = (build: Build) => build.manifest.capabilities.includes('machine.artifacts');
+// P5 O5 M2: an html artifact made in the attached engine host, its page loaded through the app's scheme; the endpoint's
+// load in `mawsd`'s log when the app's own `mawsd` serves the endpoint
+async function artifactPage(s: Scratch, run: Run, label: string, endpoint: boolean): Promise<string> {
+  const MARK = 'CROSS_BUILD_PAGE';
+  const created = (await run.page.evaluate(
+    (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Cross-build page', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+    `<!doctype html><html><head><title>x</title></head><body><p>${MARK}</p></body></html>`,
+  )) as { ok: true; value: { artifact: { id: string } } } | { ok: false; error: { message: string } };
+  if (!created.ok) throw new Error(`artifacts.create on the kept engine host failed: ${created.error.message}`);
+  const url = `maws-artifact://${created.value.artifact.id}/live/index.html`;
+  const page = await run.maws.app.evaluate(async ({ session }, target) => {
+    const response = await session.defaultSession.fetch(target);
+    return { status: response.status, text: await response.text() };
+  }, url);
+  expect(page.status, `${label}'s app loads the page`).toBe(200);
+  expect(page.text).toContain(MARK);
+  expect(page.text).toContain('data-maws-bridge');
+  const throughEndpoint = s.daemonLog().includes('[artifacts] the artifact endpoint’s handler loaded at its first use');
+  expect(throughEndpoint, `mawsd's log: the page came ${endpoint ? 'through' : 'not through'} its artifact endpoint`).toBe(endpoint);
+  return `  artifact page: ${url} loaded with the bridge script, ${throughEndpoint ? "through this build's mawsd's artifact endpoint, resolved by the kept engine host" : "by main's own handler (the app's mawsd lists no machine.artifacts)"}`;
 }
 
 const record = (lines: string[]) => {

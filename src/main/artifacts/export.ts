@@ -46,7 +46,7 @@ import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactE
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
 import { restrictRequests, type SeamEnv } from './policies';
 import { CommandFailure } from '../ipc/router';
-import type { ContentLookup } from './protocol';
+import type { ContentLookup } from '../../render/scheme'; // P5 O5 M2: the scheme's library moved
 
 export const EXPORT_BUDGET_MS = 55_000; // from main's receipt: inside the host's 60 s (EXPORT_ANSWER_MS) with 5 s to spare
 export const EXPORT_QUEUE_MS = 25_000; // the longest wait for a slot (inside the budget, leaving 30 s to run)

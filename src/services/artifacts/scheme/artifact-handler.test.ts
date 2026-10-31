@@ -6,9 +6,7 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { STORE_FRAME_CSP } from './scheme-handler';
-import { createArtifactHandler } from './protocol';
-
-vi.mock('electron', () => ({ protocol: {} }));
+import { createArtifactHandler } from './artifact-handler';
 
 const PAGE = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const FILE = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';

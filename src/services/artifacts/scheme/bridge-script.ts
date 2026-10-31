@@ -1,5 +1,5 @@
 // The bridge script (E2 execution document, Design §10): MAWS's own script, which the `maws-deliverable:` handler puts
-// as the first element of every artifact's HTML it serves (`protocol.ts`, `insertBridgeScript`), so it runs before the
+// as the first element of every artifact's HTML it serves (`scheme-handler.ts`, `insertBridgeScript`), so it runs before the
 // artifact's own scripts, inline under the artifact's policy. The frame is an opaque origin, so whatever needs the
 // page's cooperation happens here. A delivered HTML file never carries it.
 //

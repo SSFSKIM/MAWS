@@ -20,6 +20,7 @@ import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
 import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
+import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
 import { startWithProfileLock } from './files/profile-lock';
@@ -632,6 +633,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
+    artifactsSocket: launch.mode === 'daemon' ? daemonPaths(profile).artifactsSocket : null, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the

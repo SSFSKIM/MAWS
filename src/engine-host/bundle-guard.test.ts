@@ -144,6 +144,21 @@ describe.skipIf(graph === null)('the built mawsd’s run path', () => {
   });
 });
 
+describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
+  // P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 8): the artifact endpoint's handler (the
+  // scheme library, its HTTP server, the bridge script) is a chunk the endpoint loads at its first use, never at start;
+  // the listener on artifacts.sock, which is, costs one bound socket. The markers are definitions.
+  it('keep the artifact endpoint’s handler off the run path, in the chunk the endpoint loads at its first use', () => {
+    const markers = { createSchemeHandler: /\bfunction createSchemeHandler\(/, serveOverHttp: /\bfunction serveOverHttp\(/, endpointLibrary: /\bfunction endpointLibrary\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createArtifactsEndpoint\(/.test(text)), 'the listener is on the run path').toBe(true);
+  });
+});
+
 describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
   it('are a guarded entry: Node builtins and the engine host’s externals at start, never electron, and deferred only chunks beside it', () => {
     expect(guardedEntryProblems({ entry: MAWSD, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: true })).toEqual([]);

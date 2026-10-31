@@ -34,6 +34,7 @@ function services(enrolled = false): DaemonServices & { lines: string[] } {
     onUpstream: none,
     hold: () => () => {},
     interest: { report: () => {}, drop: () => {} },
+    artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
     log: (line) => void lines.push(line),
     lines,
   };

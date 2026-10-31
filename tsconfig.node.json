@@ -13,6 +13,7 @@
     "vitest.config.ts",
     "src/main/**/*",
     "src/services/**/*", // P5 O3-C: the machine services library (the spine and the checkouts)
+    "src/render/*.ts", // P5 O5: the render library (M2: the scheme on an Electron session); with `src/render/**/*` here the renderer's suites ran without the web project's JSX setting (`React is not defined`), so this pattern stays one level deep
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",

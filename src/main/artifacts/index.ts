@@ -16,6 +16,12 @@
 // permission policies on both sessions (`installStorePolicies`, before the first window loads) and `artifact_screenshot`'s
 // capture service (capture.ts), which renders an `html` artifact's revision through the same scheme. Under MAWS_E2E=1
 // `globalThis.__maws_captures` runs a capture in main directly (no IPC command exists for it).
+//
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §D): the scheme's serving is the plain-Node
+// library's (src/services/artifacts/scheme/) and its Electron half src/render/scheme.ts. On the daemon shape the two
+// sessions' handler goes through the scheme proxy to `mawsd`'s artifact endpoint (`artifactsSocket`) for each request
+// made while the daemon's welcome lists `machine.artifacts`, and serves the store's files in main otherwise (an older
+// daemon, or none welcomed yet); the presenter's embeds answer first either way.
 import { MessageChannelMain, session, type BrowserWindow } from 'electron';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
@@ -26,19 +32,20 @@ import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportSer
 import { renderDocumentViewport } from './inspection';
 import { openDocument } from './open';
 import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
-import { serveArtifacts, type ContentLookup } from './protocol';
+import { serveArtifacts, type ContentLookup } from '../../render/scheme'; // P5 O5 M2
 import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
+import { MACHINE_ARTIFACTS_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M2
 
-export { registerStoreSchemes } from './protocol';
 export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
 
 export interface ArtifactsDeps {
-  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent'>;
+  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent' | 'peer'>;
   register: typeof registerMainHandler;
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // P3-A M5: to the renderer
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
+  artifactsSocket: string | null; // P5 O5 M2: the daemon shape's `mawsd` artifacts.sock, proxied to while its welcome lists machine.artifacts; null on the embedded shape
 }
 
 // The store frames' policies on the window's default session and on the capture partition (P3-L M6b; E2's, in
@@ -51,14 +58,16 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, emit, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, emit, env, openWindow, root, artifactsSocket }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);
   const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds);
+  // P5 O5 M2: read per request, so a daemon restarted into another build is followed (the build check's restart)
+  const endpoint = artifactsSocket === null ? undefined : () => (hosts.peer('machine')?.capabilities.includes(MACHINE_ARTIFACTS_CAPABILITY) ? { socketPath: artifactsSocket } : null);
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds, endpoint);
   const exporters = new ExporterRegistry();
   const stopHtml = registerHtmlExporters(exporters, { content, env });
   // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart

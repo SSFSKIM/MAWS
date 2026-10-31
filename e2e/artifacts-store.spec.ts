@@ -4,7 +4,10 @@
 // writer's reaches both; a repeated op id is a no-op; versions list their actors; restore lands whole in both windows;
 // `artifacts.changed` arrives for each change; the store reopens after a relaunch on the same profile; and a SIGKILL of
 // the host while a renderer types loses no acknowledged edit, every replica re-opening by itself. M7: the scheme and the
-// export service. M9: S2's numbers measured in the product, under MAWS_ARTIFACTS_PERF=1 (the last case).
+// export service. M9: S2's numbers measured in the product, under MAWS_ARTIFACTS_PERF=1 (the last case). P5 O5 M2
+// (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 4): the two scheme cases run on the daemon shape, where
+// every `maws-artifact:` load, the app's and the capture window's, goes through the scheme proxy to `mawsd`'s artifact
+// endpoint on artifacts.sock, and asserts what they asserted of main's handler.
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -207,6 +210,27 @@ async function served(app: ElectronApplication, url: string): Promise<Served> {
     return { status: response.status, headers, text: await response.text() };
   }, url);
 }
+// P5 O5 M2: a load with a `Range`, its bytes as they arrived
+async function ranged(app: ElectronApplication, url: string, range: string): Promise<{ status: number; headers: Record<string, string>; bytes: number[] }> {
+  return app.evaluate(
+    async ({ session }, [target, value]) => {
+      const response = await session.defaultSession.fetch(target!, { headers: { Range: value! } });
+      const headers: Record<string, string> = {};
+      response.headers.forEach((v, name) => (headers[name] = v));
+      return { status: response.status, headers, bytes: [...new Uint8Array(await response.arrayBuffer())] };
+    },
+    [url, range] as const,
+  );
+}
+// P5 O5 M2: the shape the scheme cases pin, and what `mawsd`'s log says of its artifact endpoint
+const DAEMON_SHAPE = { MAWS_HOST_MODE: 'daemon' };
+const endpointLog = (userData: string) => {
+  try {
+    return readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
+  } catch {
+    return '';
+  }
+};
 // The width and height a PNG's IHDR chunk declares.
 const pngSize = (bytes: Buffer) => ({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
@@ -214,7 +238,7 @@ const PAGE = '<!doctype html><html><head><title>Report</title><style>@page { siz
 
 test('maws-artifact: serves an html page and its assets to the app, and the export service writes its PDF and PNG', async () => {
   profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
-  launch = await launchMaws({ userData: profile });
+  launch = await launchMaws({ userData: profile, env: DAEMON_SHAPE }); // P5 O5 M2: through mawsd's artifact endpoint
   const { app, page } = launch;
   await seamReady(page);
   await hostReady(page);
@@ -272,6 +296,18 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
   );
   expect(loaded).toEqual({ imageLoaded: true, fontLoaded: true });
 
+  // P5 O5 M2: the loads came through mawsd's artifact endpoint, and a range crosses the proxy byte-exact: 206 with the
+  // handler's Content-Range and Content-Length, the bytes of that range; past the end, 416 with bytes */<size>
+  expect(endpointLog(profile), "mawsd's log: the endpoint's handler loaded for the app's loads").toContain('[artifacts] the artifact endpoint’s handler loaded at its first use');
+  const fontUrl = `maws-artifact://${artifact.id}/live/${face.value.ref}`;
+  const part = await ranged(app, fontUrl, 'bytes=16-47');
+  expect(part.status).toBe(206);
+  expect(part.headers).toMatchObject({ 'content-range': `bytes 16-47/${font.length}`, 'content-length': '32', 'access-control-allow-origin': '*' });
+  expect(Buffer.from(part.bytes).equals(font.subarray(16, 48))).toBe(true);
+  const past = await ranged(app, fontUrl, `bytes=${font.length}-`);
+  expect(past.status).toBe(416);
+  expect(past.headers['content-range']).toBe(`bytes */${font.length}`);
+
   // The library's Export: a PDF on the page's own page size, a PNG of the asked size, a whole-page PNG by default.
   const pdf = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'pdf' });
   expect(pdf).toEqual({ path: join(profile, 'artifacts', artifact.id, 'exports', `${newer.revision}-pdf.pdf`), revision: newer.revision });
@@ -298,7 +334,7 @@ const postTo = (message: string) => `parent.postMessage({ m7: ${JSON.stringify(m
 
 test('maws-artifact: reaches the app and the capture partition only, an artifact frame its own artifact only, and the PDF printer nothing remote', async () => {
   profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
-  launch = await launchMaws({ userData: profile });
+  launch = await launchMaws({ userData: profile, env: DAEMON_SHAPE }); // P5 O5 M2: through mawsd's artifact endpoint
   const { app, page } = launch;
   await seamReady(page);
   await hostReady(page);
@@ -348,6 +384,7 @@ test('maws-artifact: reaches the app and the capture partition only, an artifact
   // The app points its frame at Y: allowed.
   await page.evaluate((src) => void ((document.getElementById('m7-frame') as HTMLIFrameElement).src = src), yUrl);
   await expect.poll(heard, { message: 'the app’s own navigation of the frame to Y' }).toContain('Y');
+  expect(endpointLog(profile), "mawsd's log: the frames' loads came through its endpoint").toContain('[artifacts] the artifact endpoint’s handler loaded at its first use'); // P5 O5 M2
 
   // The PDF printer: a page naming remote resources prints, and none of them is fetched.
   const hits: string[] = [];

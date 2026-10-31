@@ -6,7 +6,7 @@
 import { app } from 'electron';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
-import { registerStoreSchemes } from './artifacts/protocol';
+import { registerStoreSchemes } from '../render/scheme'; // P5 O5 M2: the scheme's Electron half
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);

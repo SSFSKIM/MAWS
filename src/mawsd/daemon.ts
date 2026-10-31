@@ -57,6 +57,12 @@
 // engine relay (its events come on machine.sock), and its relayed requests that the spine intercepts go through the
 // spine's intercepts, as a machine.sock client's and the endpoint's do (front.ts). The spine's trash is `mawsd`'s own
 // move into the user's trash directory (trash.ts), and a load logs `[spine] loaded in N ms`.
+//
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §C): a fourth socket at step (6),
+// `artifacts.sock`, the artifact endpoint (artifacts-endpoint.ts): `maws-artifact:` URLs over HTTP for the app's and the
+// render host's scheme proxy, resolved through the engine host's `artifacts.content`, its handler a chunk loaded at the
+// first use. Every welcome lists `machine.artifacts`; `daemon.status.artifacts` says whether the handler is loaded; the
+// exit ends its connections with the clients' and removes the socket with the others.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -82,7 +88,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
-import type { CommandInput } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
@@ -93,6 +99,7 @@ import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
+import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
 import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
@@ -756,6 +763,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       logPath: paths.log,
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
       spine: spine.status(),
+      artifacts: artifacts.status(), // P5 O5 M2
     };
   }
   // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
@@ -808,6 +816,19 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     log,
   });
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
+
+  // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
+  const artifacts = createArtifactsEndpoint({
+    content: async (input) => {
+      const answer = await hosts.forward('engine-host', { name: 'artifacts.content', input });
+      return (answer.ok ? { ok: true, value: answer.value } : { ok: false, error: answer.error }) as CommandResult<'artifacts.content'>;
+    },
+    load: () => {
+      const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
+      return refused === null ? loadEndpointChunk() : Promise.reject(new Error(refused));
+    },
+    log: (line) => log(`[artifacts] ${line}`),
+  });
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
   const holds = new Map<number, string>();
@@ -899,6 +920,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         void sendInterest();
       },
     },
+    artifacts: { fetch: (request) => artifacts.fetch(request) }, // P5 O5 M2
     log: (line) => log(`[endpoint] ${line}`),
   };
 
@@ -970,6 +992,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       [engineServer, paths.sockets['engine-host']],
       [ptyServer, paths.sockets['pty-host']],
       [machineServer, paths.sockets.machine],
+      [artifacts.server, paths.artifactsSocket], // P5 O5 M2
     ] as const) {
       clearSocketPath(path); // a dead mawsd's socket goes; anything else at the path is refused in place
       await listen(server, path);
@@ -997,11 +1020,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
       await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
+      artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
       if (code !== 1 && lockNamesMe()) {
-        for (const path of Object.values(paths.sockets)) unlinkQuietly(path);
+        for (const path of [...Object.values(paths.sockets), paths.artifactsSocket]) unlinkQuietly(path);
         if (paths.socketDir !== dir) rmdirQuietly(paths.socketDir);
         unlinkQuietly(join(dir, DAEMON_FILES.lock));
       }

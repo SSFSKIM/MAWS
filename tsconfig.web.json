@@ -13,7 +13,7 @@
     "src/renderer/src/**/*",
     "src/shared/**/*",
     "src/artifacts/**/*",
-    "src/main/artifacts/bridge-script.ts",
+    "src/services/artifacts/scheme/bridge-script.ts", // P5 O5 M2: moved with the scheme's library
     "src/main/artifacts/*.dom.test.tsx",
     // What the renderer's suites (and the harness's fixtures) import outside the renderer, directly or through what they
     // import: the project is composite, built so through tsconfig.json's references and by `pnpm typecheck`, and composite
@@ -21,7 +21,7 @@
     // through its conformance harness and that graph grows with the host; main and test support by file, so a suite that
     // imports a new one fails `pnpm typecheck` until it is added here.
     "src/engine-host/**/*",
-    "src/main/artifacts/page-connectors.ts",
+    "src/services/artifacts/scheme/page-connectors.ts", // P5 O5 M2
     "src/main/usage/claude-usage-reader.ts",
     "src/main/usage/request-ledger.ts",
     "test/support/agents-events.ts",

@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
 }));
 vi.mock('./stdio-guard', () => ({ guardStdio: () => order.push('guardStdio') }));
 vi.mock('./chromium-features', () => ({ STARTUP_DISABLED_FEATURES: [], disableChromiumFeatures: () => order.push('disableChromiumFeatures') }));
-vi.mock('./artifacts/protocol', () => ({ registerStoreSchemes: () => order.push('registerStoreSchemes') }));
+vi.mock('../render/scheme', () => ({ registerStoreSchemes: () => order.push('registerStoreSchemes') }));
 vi.mock('./app', () => {
   order.push('app');
   return {};

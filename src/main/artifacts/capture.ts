@@ -23,7 +23,7 @@ import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ip
 import { artifactUrl } from '@shared/artifacts/scheme';
 import { ARTIFACT_SCREENSHOT_MAX_BYTES } from '@shared/maws/tools';
 import { guardFrames, type SeamEnv } from './policies';
-import type { ContentLookup } from './protocol';
+import type { ContentLookup } from '../../render/scheme'; // P5 O5 M2: the scheme's library moved
 
 export const CAPTURE_PARTITION = 'maws-capture';
 export const CAPTURE_GUARD_MS = 20_000;

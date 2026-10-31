@@ -36,6 +36,15 @@ export const DaemonSpineSchema = z.strictObject({
 });
 export type DaemonSpine = z.infer<typeof DaemonSpineSchema>;
 
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §C): the artifact endpoint on
+// artifacts.sock. `loaded`, whether its handler's chunk is in (it loads at the first use, never at the start);
+// `requests`, the requests its handler answered since the start.
+export const DaemonArtifactsSchema = z.strictObject({
+  loaded: z.boolean(),
+  requests: z.number().int().nonnegative(),
+});
+export type DaemonArtifacts = z.infer<typeof DaemonArtifactsSchema>;
+
 export const DaemonStatusSchema = z.strictObject({
   pid: z.number().int(),
   startedAt: z.string(),
@@ -53,6 +62,7 @@ export const DaemonStatusSchema = z.strictObject({
   logPath: localOnly(z.string()),
   endpoint: z.strictObject({ present: z.boolean(), detail: z.unknown() }), // detail: the module's status() (O10), under the same rule
   spine: DaemonSpineSchema.optional(), // P5 O3-D: absent from a daemon before O3-D
+  artifacts: DaemonArtifactsSchema.optional(), // P5 O5 M2: absent from a daemon before it
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
 

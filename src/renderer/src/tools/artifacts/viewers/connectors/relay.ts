@@ -1,5 +1,5 @@
 // P3-H H4: the relay between an HTML artifact page's connector runtime (`window.mawsConnectors`,
-// src/main/artifacts/page-connectors.ts) and the page load's ArtifactHost connector surface. The page's end of the port
+// src/services/artifacts/scheme/page-connectors.ts) and the page load's ArtifactHost connector surface. The page's end of the port
 // is the page's: every request it posts is read against the portable request schemas (a malformed one is answered
 // `invalid: request` here, a command the page has no word for is too), and it reaches only declare, call, watch,
 // unwatch and refresh; the owner's grant, revoke, Start and the surface's visibility are never the page's.
