@@ -62,6 +62,7 @@ import * as org from './names/org'; // P5 O8 M1
 import * as laneA from './names/lane-a'; // P5 O9 M2
 import * as machineSettings from './names/machine-settings'; // P5 O3-D
 import * as clientPort from './names/client-port'; // P5 O3-D
+import * as remote from './names/remote'; // P5 O7 M2
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -105,6 +106,7 @@ export const NAMESPACES = [
   'org', // P5 O8 M1
   'laneA', // P5 O9 M2
   'machineSettings', 'clientPort', // P5 O3-D
+  'remote', // P5 O7 M2
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -135,6 +137,7 @@ export const NAMES = {
   org, // P5 O8 M1
   laneA, // P5 O9 M2
   machineSettings, clientPort, // P5 O3-D
+  remote, // P5 O7 M2
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;

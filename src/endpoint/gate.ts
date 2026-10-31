@@ -63,7 +63,7 @@ export class Gate {
   }
 
   #decide(channel: RemoteChannel, request: AuthorizeRequest, answer: { granted(decision: Granted): void; refused(reason: string): void }): void {
-    const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
+    const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
     this.ctx
       .authorize(request, who, this.ctx.now())
       .then((decision) => {

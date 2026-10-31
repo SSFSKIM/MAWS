@@ -87,6 +87,8 @@ function engineHost() {
       if (!checked.ok) return no('invalid_input');
       return ok(name === 'machine.op' ? await machine.op(checked.value as CommandInput<'machine.op'>, CTX) : machine.opQuery(checked.value as CommandInput<'machine.opQuery'>));
     }
+    // The machine's index holds no record of these sessions (P5 O7 M2): the engine host places each.
+    if (owner === 'machine' && name === 'session.get') return ok(null);
     if (owner !== 'engine-host') return no('unknown_command');
     const { appSessionId, requestId } = (input ?? {}) as { appSessionId?: string; requestId?: string };
     if (name === 'session.status') return appSessionId !== undefined && sessions[appSessionId] !== undefined ? ok({ appSessionId, ...sessions[appSessionId] }) : no('internal');

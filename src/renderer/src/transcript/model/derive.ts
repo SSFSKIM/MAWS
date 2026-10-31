@@ -39,6 +39,7 @@ import type { ContentBlock } from '@shared/graph/events';
 import { denialDisposition } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
 import { messageCallState, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { isHistoryGap } from './gap'; // P5 O7 M2
 // E4c end
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -731,7 +732,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         items.push({ kind: 'row', row: { id: rowId.error(event.id), turnId: turn.id, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null } });
         break;
       case 'notice.posted':
-        if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
+        if (isHistoryGap(event)) items.push({ kind: 'row', row: gapRow(event, turn.id) }); // P5 O7 M2
+        else if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
         break;
       case 'plugin.log':
       case 'plugin.load_issue':
@@ -1503,6 +1505,11 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
 // blocked by hook: …" (2.1.283 cli.pretty.js 807758, 919121).
 const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
 
+// P5 O7 M2: the gap bar, where the transcript's source put its event (model/gap.ts).
+function gapRow(event: Event<'notice.posted'>, turnId: TurnId | null): RowOf<'gap'> {
+  return { id: rowId.error(event.id), turnId, at: event.at, kind: 'gap', text: event.text };
+}
+
 function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): RowOf<'error'> {
   const row: RowOf<'error'> = { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
   if (event.kind === 'notice.posted' && event.key === ENGINE_COMPAT_NOTICE_KEY) row.action = 'engine_settings'; // W13: Settings › Engine, beside the notice
@@ -1570,7 +1577,8 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null });
         break;
       case 'notice.posted':
-        if (!supersededByHookRow(event)) rows.push(noticeRow(event, event.text, null));
+        if (isHistoryGap(event)) rows.push(gapRow(event, null)); // P5 O7 M2
+        else if (!supersededByHookRow(event)) rows.push(noticeRow(event, event.text, null));
         break;
       case 'plugin.log':
       case 'plugin.load_issue':

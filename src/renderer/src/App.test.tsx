@@ -75,6 +75,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         };
       case 'machines.list': // P5 O6 M4: the roster the shell reads at connect: this machine only
         return { machines: [{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00.000Z', generation: 0 }] };
+      case 'org.status': // P5 O7 M2: the hub's access for the sidebar's notice: no org
+        return { state: 'none' };
       case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
         return { machines: [], rows: [], complete: true, pending: [], members: [], member: null }; // M5: and no owners
       case 'session.list':

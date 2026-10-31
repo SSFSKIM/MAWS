@@ -8,7 +8,11 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import { digest, humanTurn, item, record, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
+import { resetRemoteLaneBStore, useRemoteLaneB } from '../../lane-b/remote-session';
+import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { liveBindings } from '../../composer/frame/bindings';
 import { ARCHIVED, ENDED } from '../../composer/submit/submit-state';
 import { resetComposerStore } from '../../stores/composer';
@@ -241,5 +245,118 @@ describe('lane B’s capabilities are today’s gates', () => {
     expect(controls.capability('send')).toEqual({ available: false, reason: ARCHIVED });
     expect(controls.capability('model')).toEqual({ available: false, reason: ARCHIVED });
     expect(controls.capability('answer')).toEqual({ available: true });
+  });
+});
+
+// P5 O7 M2: a lane B session on another machine, driven over main's remote lane B adapter. The port is lane B's own, with
+// main's overlay (`remote.session`'s controls) closing what the session there can't take, the channel's image bound
+// checked before anything is sent, and the send counted while it is on its way ("Sending to <machine>…").
+describe('lane B on another machine', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const remoteInputs = (client: MawsBridge, state: RemoteSession | null = remoteSessionState(REMOTE)) => ({ appSessionId: REMOTE, client, remote: { state } });
+  const remoteRecord = () => useSessions.setState({ records: new Map([[REMOTE, record(REMOTE)]]) });
+  beforeEach(() => resetRemoteLaneBStore());
+
+  it('closes with main’s reasons what the overlay closes, and keeps lane B’s own answers for the rest', () => {
+    remoteRecord(); // idle: a record and no status; sends resume it
+    const controls = { ...ALL_OPEN, rewind: { available: false as const, reason: 'rewinding a session on another machine waits for its files panel' } };
+    const port = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, remoteSessionState(REMOTE, { controls })));
+    expect(port.capability('rewind')).toEqual({ available: false, reason: 'rewinding a session on another machine waits for its files panel' });
+    expect(port.capability('send')).toEqual({ available: true });
+    expect(port.capability('command')).toMatchObject({ available: false }); // lane B's own words where main opens it
+  });
+
+  // The overlay is main's verdict from the record (M2's overlay rule): a link down closes nothing, and this page forgets
+  // a departed machine's statuses, so a status it no longer holds gates nothing; one it holds still says a process is gone
+  it('keeps interrupt, send and answer open while the link is down and no status is held here', () => {
+    remoteRecord();
+    const down = remoteSessionState(REMOTE, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, down));
+    for (const key of ['interrupt', 'send', 'answer', 'model', 'mode'] as ControlKey[]) expect(port.capability(key), key).toEqual({ available: true });
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE, { process: 'exited' }) }, OTHER_MACHINE);
+    expect(laneBControls(record(REMOTE), remoteInputs(fakeClient().client, down)).capability('interrupt')).toEqual({ available: false, reason: ENDED });
+  });
+
+  // One deadline per send (A4): main's adapter resumes a released session itself under the send's own bound, so the
+  // renderer makes one invocation, never `session.acquire` first nor a status or queue read across the link
+  it('sends to a released session with one invocation, leaving the resume to main', async () => {
+    remoteRecord();
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: UUID } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    expect(await port.send('hello', { origin: 'composer' })).toEqual({ disposition: 'sent', started: false, messageUuid: UUID });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.send']);
+  });
+
+  it('steers while the status this page holds says a turn runs, and refuses what the caller’s own check declines', async () => {
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE, { engineState: 'running', turn: humanTurn }) }, OTHER_MACHINE);
+    const fake = fakeClient({ 'session.steer': { messageUuid: UUID } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    expect(await port.send('also this', { origin: 'composer' })).toMatchObject({ disposition: 'steered' });
+    expect(await port.send('too big', { origin: 'composer', precheck: () => false })).toEqual({ disposition: 'refused', started: false });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.steer']);
+  });
+
+  it('closes the chips with the overlay’s reasons, and changes a released session’s model without acquiring it', async () => {
+    remoteRecord();
+    const reason = 'mini refused this device (grade)';
+    const closed = { ...ALL_OPEN, model: { available: false as const, reason }, mode: { available: false as const, reason } };
+    const shut = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, remoteSessionState(REMOTE, { controls: closed }))).bindings();
+    expect([shut.model.disabled, shut.mode.disabled]).toEqual([reason, reason]);
+    expect(await shut.model.set({ model: 'haiku', effort: null })).toEqual({ ok: false, error: reason });
+    expect(await shut.mode.set('plan')).toEqual({ ok: false, error: reason });
+    expect(shut.directories.disabled).toMatch(/another machine/);
+
+    const fake = fakeClient({ 'session.setModel': { ok: true, error: null, code: null }, 'session.setPermissionMode': { refusal: null, error: null } });
+    const open = laneBControls(record(REMOTE), remoteInputs(fake.client)).bindings();
+    expect([open.model.disabled, open.mode.disabled]).toEqual([null, null]);
+    expect(await open.model.set({ model: 'haiku', effort: null })).toEqual({ ok: true });
+    expect(await open.mode.set('plan')).toEqual({ ok: true });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.setModel', 'invoke session.setPermissionMode']);
+  });
+
+  it('closes every control with the reason main says, the answers to cards included', () => {
+    remoteRecord();
+    const reason = 'This Mac is no longer allowed on mini';
+    const closed = Object.fromEntries(Object.keys(ALL_OPEN).map((key) => [key, { available: false, reason }]));
+    const port = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, remoteSessionState(REMOTE, { controls: closed as never, reason })));
+    expect(port.capability('send')).toEqual({ available: false, reason });
+    expect(port.answerCapability(item(REMOTE, 'permission', T0), { kind: 'permission', decision: 'deny' })).toEqual({ available: false, reason });
+  });
+
+  it('refuses a send the overlay closes, with its reason, sending nothing', async () => {
+    remoteRecord();
+    const reason = 'the link to mini closed';
+    const closed = { ...ALL_OPEN, send: { available: false as const, reason } };
+    const fake = fakeClient();
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client, remoteSessionState(REMOTE, { controls: closed, reason })));
+    expect(await port.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual([]);
+  });
+
+  it('sends an image that fits the channel inline, and refuses a larger one before anything is sent, in the composer’s words', async () => {
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE) }, OTHER_MACHINE);
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: UUID }, 'session.queue.list': { entries: [], paused: false } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    const image = (bytes: number) => [{ type: 'text' as const, text: 'look' }, { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'A'.repeat(bytes) } }];
+    expect(await port.send(image(2 * 1024 * 1024), { origin: 'composer' })).toMatchObject({ disposition: 'sent' });
+    expect(await port.send(image(REMOTE_INLINE_MAX_BYTES), { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: REMOTE_TOO_LARGE_WORDS });
+    expect(fake.invoked('session.send')).toHaveLength(1);
+  });
+
+  it('counts a send while it is on its way, and stops counting at its answer or its error', async () => {
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE) }, OTHER_MACHINE);
+    const fake = fakeClient({ 'session.queue.list': { entries: [], paused: false } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    const sent = port.send('hello', { origin: 'composer' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useRemoteLaneB.getState().sending.get(REMOTE)).toBe(1);
+    await fake.reply('session.send', { disposition: 'sent', queueId: 'q1', messageUuid: UUID });
+    await sent;
+    expect(useRemoteLaneB.getState().sending.has(REMOTE)).toBe(false);
+    const failed = port.send('again', { origin: 'composer' }).catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fake.fail('session.send', 'Not sent: mini is offline', 'host_unavailable');
+    expect(await failed).toMatchObject({ message: 'Not sent: mini is offline' }); // main's words, which the composer shows with Send again
+    expect(useRemoteLaneB.getState().sending.has(REMOTE)).toBe(false);
   });
 });

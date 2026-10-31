@@ -10,20 +10,16 @@ import type { SendContent } from '@shared/engine/session-state-store';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
+import type { ControlKey } from '@shared/ipc/schema/remote';
 import type { FrameBindings } from '../../composer/frame/bindings';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import type { SessionCatalog } from '../../stores/catalog';
 
 export type { ControlResult };
 
-// Every control the port names, in the order Session info lists the unreachable ones.
-export const CONTROL_KEYS = [
-  'send', 'interrupt', 'answer', 'decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory',
-  'model', 'mode', 'command', 'btw', 'compact', 'mcp.enable', 'mcp.disable', 'mcp.reconnect',
-  'stop-agent', 'tell', 'stop-task', 'media', 'queue', 'rewind', 'forget', 'rewind-files',
-  'elicitation.answer', 'subagent-rows', 'take-over', 'reopen',
-] as const;
-export type ControlKey = (typeof CONTROL_KEYS)[number];
+// Every control the port names, in the order Session info lists the unreachable ones. P5 O7 M2: the list is the shared
+// one main says each control's state by for a session on another machine (`remote.session`), so there is one source.
+export { CONTROL_KEYS, type ControlKey } from '@shared/ipc/schema/remote';
 
 export type Capability = { available: true } | { available: false; reason: string };
 

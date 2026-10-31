@@ -4,7 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from '
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AppSessionId } from '@shared/graph/ids'; // P2-C
 import { MachineChip } from '../app/MachineChip';
-import { MACHINE_OFFLINE, useMachineMark } from '../app/machine-mark';
+import { greyWords, useMachineMark } from '../app/machine-mark';
 import { openAnchor, ownerAnchorOf } from '../attention/anchor'; // P2-C
 import type { NeedsYouRow } from '../attention/derive';
 import { displayTitle } from '../sessions/title';
@@ -105,7 +105,7 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
           data-needs-you={row.appSessionId}
           data-menu={`session:${row.appSessionId}`}
           data-offline={machine.offline || undefined}
-          aria-label={machine.offline ? `${label}, ${MACHINE_OFFLINE}` : label}
+          aria-label={machine.offline ? `${label}, ${greyWords(machine)}` : label}
           aria-current={selected ? 'page' : undefined}
           tabIndex={tabStop ? 0 : -1}
           onFocus={onFocus}

@@ -17,6 +17,10 @@
 // request is refused `not-offered`, and a query answered `unavailable`), invoked one at a time in arrival order and not
 // awaited, so a slow call holds nothing behind it; `state` is adopted through the org view; a kind this version doesn't
 // know is ignored (OX1), and a known kind out of shape closes the channel (`malformed`).
+//
+// P5 O7 M2: each admitted channel is one asker on the machine, its `client` a `ClientRef` minted at admission
+// (`<device>/<RL2 channel id>`) and ended at the channel's close, which every request it carries passes to `dispatch`, so
+// whatever the machine keys by its asker (a watch, a hold) is released with the channel.
 import {
   acceptChannel,
   keyId,
@@ -38,6 +42,7 @@ import {
   type SubMessage,
   type UnsubMessage,
 } from 'org-protocol';
+import { endableClientRef, type ClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { ChannelHandler } from './hub-link';
 
 export type Carrier = 'relayed' | 'direct';
@@ -52,6 +57,8 @@ export interface RemoteChannel {
   readonly member: string;
   readonly device: string;
   readonly clientClass: DeviceClass;
+  /** The channel as the machine's asker (P5 O7 M2): passed to every `dispatch` its requests make, ended at its close. */
+  readonly client: ClientRef;
   readonly closed: boolean;
   /** Sends `message` after everything sent before it; false once the channel is closed. */
   send(message: EndpointMessage): boolean;
@@ -137,6 +144,7 @@ class Remote implements RemoteChannel {
   readonly member: string;
   readonly device: string;
   readonly clientClass: DeviceClass;
+  readonly #client: EndableClientRef;
 
   constructor(key: string, carrier: Carrier, channel: Channel, io: ChannelCarrier, peer: DevicePeer, log: (line: string) => void) {
     this.key = key;
@@ -147,6 +155,13 @@ class Remote implements RemoteChannel {
     this.device = peer.device;
     this.clientClass = peer.clientClass;
     this.#log = log;
+    // The RL2 channel id is fresh per handshake, so no later channel (a hub number given again) shares the ref's id.
+    this.#client = endableClientRef(`${peer.device}/${channel.id}`);
+    channel.onClose(() => this.#client.end());
+  }
+
+  get client(): ClientRef {
+    return this.#client;
   }
 
   get id(): string {

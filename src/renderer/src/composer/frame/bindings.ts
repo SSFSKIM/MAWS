@@ -148,9 +148,11 @@ export function workspaceDirectoriesOf(raw: readonly unknown[]): string[] {
 // P2-A (2026-10-09; the execution document §5.6): a record with no ready process is writable by its availability: a
 // model, effort, mode or directory choice starts the session (`chip`) and then applies as a live one's does; only a
 // terminal or a job holding it, or its archive, refuses, in words. Without an availability the status decides.
-export function liveBindings(status: EngineSessionStatus | null, record: SessionRecord | null, reads: LiveReads = {}, client: MawsBridge = ipc, availability?: Availability | null): FrameBindings {
+// P5 O7 M2: `acquires` false for a lane B session on another machine, whose host resumes it for the change itself (main's
+// remote adapter, under the change's one bound): no acquisition first, and what may change is the caller's to gate.
+export function liveBindings(status: EngineSessionStatus | null, record: SessionRecord | null, reads: LiveReads = {}, client: MawsBridge = ipc, availability?: Availability | null, acquires = true): FrameBindings {
   const appSessionId = status?.appSessionId ?? record!.appId;
-  const ready = status?.process === 'ready';
+  const ready = status?.process === 'ready' || !acquires;
   const writable = ready ? null : availabilityRefusal(availability === undefined ? 'resumable' : availability, record?.holder ?? null);
   // P2-A: the acquisition a choice on a session with no ready process runs first; a refusal in words
   const acquired = async (progress?: (phase: ChipPhase) => void): Promise<HookResult | null> => {
@@ -211,7 +213,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
         return { ok: true };
       },
     },
-    mode: liveModeBinding({ appId: appSessionId, permissionMode: status?.permissionMode ?? record!.permissionMode, model: status?.model ?? record!.model }, status, reads.models ?? null, client, writable),
+    mode: liveModeBinding({ appId: appSessionId, permissionMode: status?.permissionMode ?? record!.permissionMode, model: status?.model ?? record!.model }, status, reads.models ?? null, client, writable, acquires),
     directories: {
       value: directories,
       options: [],

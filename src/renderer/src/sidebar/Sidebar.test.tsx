@@ -25,6 +25,7 @@ import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
+import { connectRemoteReadMarks, resetRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
 import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
@@ -1432,15 +1433,34 @@ describe('listed rows from another machine', () => {
     expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
   });
 
+  // P5 O7 M2: the record stands where its listing was filed (its project is not known here), so the row doesn't move
   it('draws one row where a record holds a listed address, and none for a row the member does not own', () => {
     const recorded = record(studio('b1'), { projectId: null, title: { text: 'Studio build (record)', source: 'user' } });
     fill([listedOn('b1', { title: 'Studio build (listing)' }), listedOn('b2', { title: 'Someone else’s', mine: false })], [here, recorded]);
     expandAll();
     render(<Sidebar />);
-    expect(drawn(row('MAWS'))).toEqual([['Sidebar pass', 'session']]);
-    expect(drawn(row('Studio'))).toEqual([['Studio build (record)', 'session']]);
+    expect(drawn(row('MAWS')).sort()).toEqual([['Sidebar pass', 'session'], ['Studio build (record)', 'session']]);
+    expect(screen.queryByRole('treeitem', { name: 'Studio' })).toBeNull();
     expect(screen.queryByRole('treeitem', { name: 'Studio build (listing)' })).toBeNull();
     expect(screen.queryByRole('treeitem', { name: 'Someone else’s' })).toBeNull();
+  });
+
+  // P5 O7 M2: a lane B session on another machine is marked read in this app's memory, its owner's record never written
+  it('"Mark all read" marks a session on another machine read in this app’s memory, writing only this Mac’s', async () => {
+    const offMarks = connectRemoteReadMarks();
+    const there = record(studio('b1'), { projectId: maws.id, unread: true, title: { text: 'Over there', source: 'user' } });
+    fill([], [{ ...here, unread: true }, there]);
+    useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+    const fake = fakeClient({ 'session.update': () => recordAsMain({ ...here, unread: false }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    render(<Sidebar />);
+    fireEvent.contextMenu(row('MAWS'));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Mark all read' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.invoked('session.update')).toEqual([expect.objectContaining({ appSessionId: 'here' })]);
+    expect(useSessions.getState().records.get(studio('b1'))?.unread).toBe(false);
+    offMarks();
+    resetRemoteReadMarks();
   });
 
   it('draws each state’s glyph, and counts waiting and busy rows in the collapsed project’s rollups', async () => {
@@ -1602,7 +1622,7 @@ describe('owners and the People toggle', () => {
   it('lists every owner with its email in the hover card of a listed row and of a record at a listed address', async () => {
     const opened = record(studio('b4'), { projectId: null, title: { text: 'Opened', source: 'user' } });
     fill([listedOn('b1', { title: 'Co-owned', owners: ['ana', ME, 'gone'], lane: 'A' }), theirs('b4', { owners: ['ben'] })], [here, opened]);
-    people(STUDIO_ROW);
+    people(ORG); // P5 O7 M2: the record is filed where its listing is
     expandAll();
     render(<Sidebar />);
     await userEvent.click(row('Co-owned'));

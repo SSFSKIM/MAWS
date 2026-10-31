@@ -45,6 +45,7 @@ import {
 import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
 import type { StepUpPrompt } from '../device/step-up';
+import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
 import type { PendingEntry } from './hub-client';
@@ -525,7 +526,7 @@ describe('registration', () => {
     expect([...new Set(steps)]).toEqual(['browser', 'checking', 'approval']);
 
     const current = session.current()!;
-    expect(current.identity).toEqual({ org: ORG, member: A, device: entry.id, clientClass: 'native-mac', channelKey: keys.channel, build: 'maws-test 0.0.0', capabilities: [] });
+    expect(current.identity).toEqual({ org: ORG, member: A, device: entry.id, clientClass: 'native-mac', channelKey: keys.channel, build: 'maws-test 0.0.0', capabilities: [...DEVICE_CAPABILITIES] });
     expect(current.view.head()).toEqual(hub.head);
     expect(current.hub?.url).toBe(HUB);
     expect(Object.keys(await current.hub!.headers())).toEqual(['cf-access-token']);

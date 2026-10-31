@@ -10,7 +10,7 @@ import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's regist
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
-import { app, BrowserWindow, dialog, screen } from 'electron';
+import { app, BrowserWindow, dialog, screen, systemPreferences } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
@@ -32,7 +32,8 @@ import { emit, emitFrom } from './ipc/events'; // P5 O9 M9: emitFrom, remote lan
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
-import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
+import { createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
+import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliveries' links
@@ -46,6 +47,8 @@ import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
+import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
+import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 // C3 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -291,6 +294,11 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
   // (dev-session.ts), and org.status says so. One Registry feed (?app=1) follows the hub for whichever session runs, and
   // hands the production session its notices; org.* answers the Org section.
+  // P5 O7 M2: every step-up signature (the org sessions' acts and M3's state signer) is confirmed on the step-up sheet,
+  // the action's summary and fields on the window, then Touch ID; an e2e harness build injects its own answer instead.
+  const confirm =
+    harnessConfirmation(process.env, app.isPackaged) ??
+    sheetConfirmation({ window: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null, dialog, prompt: promptTouchIDConfirmation(systemPreferences) });
   const devOrg =
     process.env.MAWS_DEV_ORG && !app.isPackaged
       ? createDevOrgSession({
@@ -298,7 +306,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           userData: app.getPath('userData'),
           packaged: app.isPackaged,
           build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
-          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp, confirm }),
           log: (line) => console.log(line),
         })
       : null;
@@ -313,7 +321,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           packaged: app.isPackaged,
           env: process.env,
           openExternal: (url) => openExternalUrl(url),
-          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp, confirm }),
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
@@ -321,7 +329,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2
           // roster's machines over their links.
           signing: {
-            stateSigner: (keys) => createStateSigner({ key: keys.stepUp }),
+            stateSigner: (keys) => createStateSigner({ key: keys.stepUp, confirm }),
             focused: () => BrowserWindow.getFocusedWindow() !== null,
             onFocus: (listener) => {
               const focused = () => listener();
@@ -363,11 +371,29 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     dispatchLocal,
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
+    // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in)
+    ...(devOrg === null ? {} : { linkDeps: { dialDirect: (url: string, timeoutMs: number) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs) } }),
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
   // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
   // no file, so it runs in a run that doesn't hold spine.lock too.
   const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
+  // C5's layout store, made here (its uses are below, under C5) since remote lane B reads `main.tabs` from it.
+  const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
+  // P5 O7 M2: lane B's acts, and the reads the pane makes that no offer row carries, for a machine O7's link reaches are
+  // remote lane B's (src/main/lane-b/remote.ts), around lane A's; its subscriptions follow the tabs of that machine's
+  // sessions. It writes no file either.
+  // The org rows (made below, over the spine's view) say which of a machine's sessions are lane A: O9's, never placed here.
+  let laneOfRow: (machine: MachineRef, session: string) => 'A' | 'B' | null = () => null;
+  const remoteLaneB = createRemoteLaneB({
+    local,
+    layout,
+    laneOf: (machine, session) => laneOfRow(machine, session),
+    remote: (ref) => machines.remote(ref),
+    onRemote: (listener) => machines.onRemote(listener),
+    emit: (machine, name, payload) => void emitFrom(machine, name, payload),
+    log: (line) => console.log(`[lane-b] ${line}`),
+  });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §E): a page's git.watch and git.unwatch
@@ -379,7 +405,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
   };
-  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: { kind: data === null ? 'host' : 'embedded' } });
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: data === null ? 'host' : 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -401,6 +427,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
   const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
+  shutdown.add('remote lane B', () => remoteLaneB.stop()); // P5 O7 M2: its subscriptions closed before the links
   shutdown.add('remote lane A', () => remoteLaneA.stop()); // P5 O9 M9: its subscriptions closed before the links
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields).
@@ -477,8 +504,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   });
   shutdown.add('connectors', appConnectors.stop);
 
-  // ---- C5: layout store ----
-  const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
+  // ---- C5: layout store ---- (the store itself is made above, before the router: remote lane B reads it)
   registerOpenExternal();
   // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
   // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar.
@@ -491,9 +517,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     localProjects: async () => view.projects(),
     onLocalProjects: (listener) => view.on('projects', () => listener()),
     files: orgDir,
-    emit: (rows) => void emit('org.rows.changed', rows),
+    emit: (rows) => {
+      void emit('org.rows.changed', rows);
+      remoteLaneB.refresh(); // P5 O7 M2: a row's lane decides whether its tab is remote lane B's
+    },
     log: (line) => console.log(`[org-rows] ${line}`),
   });
+  laneOfRow = (machine, session) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === session)?.lane ?? null;
+  void remoteRows.loaded.then(() => remoteLaneB.refresh());
   registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   const stopChatPanels = registerChatPanels(layout, view, local); // P5 O6 M2: local; P5 O3-C (reader R4): the view
   shutdown.add('chat panels', stopChatPanels);
