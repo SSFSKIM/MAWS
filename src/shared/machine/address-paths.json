@@ -223,6 +223,7 @@
 "commands.session.setThinking.input":[".appSessionId AppSessionId"],
 "commands.session.setVisible.input":[".appSessionId AppSessionId"],
 "commands.session.sideQuestion.input":[".appSessionId AppSessionId"],
+"commands.session.spawn.output":["<status=ok>.appSessionId AppSessionId"],
 "commands.session.start.input":[".appSessionId AppSessionId"],
 "commands.session.start.output":["<status=already_live>.appSessionId AppSessionId","<status=archived>.appSessionId AppSessionId","<status=held>.appSessionId AppSessionId","<status=invalid>.appSessionId AppSessionId","<status=missing_directory>.appSessionId AppSessionId","<status=needs_trust>.appSessionId AppSessionId","<status=refused>.appSessionId AppSessionId","<status=relay_unreachable>.appSessionId AppSessionId","<status=starting>.appSessionId AppSessionId"],
 "commands.session.status.input":[".appSessionId AppSessionId"],

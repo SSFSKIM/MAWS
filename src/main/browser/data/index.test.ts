@@ -146,8 +146,8 @@ describe('the browser\'s tables leave the index (P5 O3-A, the O3 document §4)',
     expect(before.browser_history).toHaveLength(4);
 
     const migrated = index();
-    expect(migrated.applied).toEqual([14, 15, 16]); // P5 O7 M4: 16
-    expect(userVersion(indexPath)).toBe(16);
+    expect(migrated.applied).toEqual([14, 15]);
+    expect(userVersion(indexPath)).toBe(15);
     expect(tables(indexPath).filter((name) => name.startsWith('browser_'))).toEqual([]);
     expect(migrated.sessions.get(S3)).toMatchObject({ archived: true }); // the index's own rows stay
 

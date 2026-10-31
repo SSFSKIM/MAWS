@@ -35,7 +35,7 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
 
     // The O2-era profile (test/support/o2-profile.ts)
     const { project, one, two, machineRows: before, browserRows } = await writeO2Profile(profile);
-    // every row as it was, with the columns migrations since add, empty (P5 O7 M4: version 16's `launched_by`)
+    // every row as it was, with the columns added since, empty (P5 O7 M4: `launched_by`, ADDED_COLUMNS)
     const rows = { ...before, sessions: before.sessions!.map((row) => ({ ...(row as object), launched_by: null })) };
 
     // O3-A's start, in main's order
@@ -55,10 +55,10 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
       // the index at 14 with no browser table, every other row as it was: nothing re-indexed
-      expect(index.applied).toEqual([14, 15, 16]); // P5 O7 M4: 16
+      expect(index.applied).toEqual([14, 15]);
       index.close();
       const db = new DatabaseSync(indexPath, { readOnly: true });
-      expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(16);
+      expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(15);
       expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'browser_%'").all()).toEqual([]);
       db.close();
       expect(machineRows(indexPath)).toEqual(rows);

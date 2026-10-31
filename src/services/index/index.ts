@@ -7,7 +7,7 @@
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, refusedDb, type Db } from './db';
 import { DraftStore } from './drafts';
-import { MIGRATIONS, REPAIRS } from './migrations';
+import { ADDED_COLUMNS, MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore, type OrgRow } from './projects';
 import { machineEnrollment, type Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16)
 import { deriveOrg, ORG_GIT_TIMEOUT_MS } from './org-project'; // P5 O6 M5
@@ -50,7 +50,7 @@ export class Index {
   // P5 O3-A: `refused`, why this run may not run the spine (src/services/settings/spine-lock.ts): the index is then unavailable
   // with that reason, its file never opened (and so nothing staged for the browser, migration 14's step).
   constructor(path: string, options: IndexOptions = {}) {
-    this.db = options.refused ? refusedDb(options.refused) : openDb(path, MIGRATIONS, REPAIRS);
+    this.db = options.refused ? refusedDb(options.refused) : openDb(path, MIGRATIONS, REPAIRS, ADDED_COLUMNS);
     // One revision per committed change, stamped as each change is announced after its commit (never inside a
     // transaction that may still roll back), so revisions are distinct and in commit order.
     const stamp = () => ++this.stamped;

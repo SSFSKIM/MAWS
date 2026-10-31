@@ -192,6 +192,21 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.session.status.status.modelOverrides': MODEL_OVERRIDES,
   'events.settings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'events.settings.usageChanged.pinsFor': PINS,
+  // P5 O7 M4: the sealed action a device sent, beside machine.op's claim and as a remote spawn's launchedBy (free data, RL9's
+  // proof for O12's observer, never read for an id)
+  'commands.machine.op.input.action': JSON_OBJECT,
+  'commands.session.create.output.intent.launchedBy.action': JSON_OBJECT,
+  'commands.session.get.output.launchedBy.action': JSON_OBJECT,
+  'commands.session.intent.get.output.launchedBy.action': JSON_OBJECT,
+  'commands.session.intent.list.output.intents[].launchedBy.action': JSON_OBJECT,
+  'commands.session.intent.patch.output.launchedBy.action': JSON_OBJECT,
+  'commands.session.intent.release.output.launchedBy.action': JSON_OBJECT,
+  'commands.session.intent.resolveWorktree.output.intent.launchedBy.action': JSON_OBJECT,
+  'commands.session.list.output.sessions[].launchedBy.action': JSON_OBJECT,
+  'commands.session.rename.output.record.launchedBy.action': JSON_OBJECT,
+  'commands.session.update.output.launchedBy.action': JSON_OBJECT,
+  'events.session.changed.record.launchedBy.action': JSON_OBJECT,
+  'events.session.intent.changed.intent.launchedBy.action': JSON_OBJECT,
 };
 
 const isPlainString = (schema: z.ZodType): boolean => {

@@ -73,7 +73,7 @@ interface SessionRow {
   lineage_source: 'intent' | 'disk' | null;
   root_uuid: string | null;
   transcript_birthtime_ms: number | null;
-  launched_by: string | null; // P5 O7 M4 (migration 16): a remote spawn's requester and signed action, as JSON
+  launched_by: string | null; // P5 O7 M4 (an added column, ADDED_COLUMNS): a remote spawn's requester and signed action, as JSON
 }
 
 export interface LaunchInit {
@@ -181,7 +181,7 @@ function toRecord(row: SessionRow): SessionRecord {
       refusal: row.pm_refusal as SessionRecord['permissionMode']['refusal'],
     },
     lineage: row.lineage === null ? null : (JSON.parse(row.lineage) as Lineage), // E3 (X11)
-    ...(row.launched_by !== null && { launchedBy: JSON.parse(row.launched_by) as LaunchedBy }), // P5 O7 M4
+    ...(typeof row.launched_by === 'string' && { launchedBy: JSON.parse(row.launched_by) as LaunchedBy }), // P5 O7 M4
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -275,9 +275,23 @@ ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
   // The conversation-search index resumes a transcript where it last stopped (src/services/index/session-search.ts): a
   // ready text's checkpoint, JSON, null until its next full pass.
   { version: 15, sql: 'ALTER TABLE session_text_state ADD COLUMN resume TEXT;' },
-  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): a session a remote spawn launched
-  // keeps who asked and the signed action (`SessionRecord.launchedBy`, JSON), for O12's observer; null for every other.
-  { version: 16, sql: 'ALTER TABLE sessions ADD COLUMN launched_by TEXT;' },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];
+
+// A column added without moving `user_version` (P5 O7 M4), so the build before it still opens the file: a build that
+// meets a newer `user_version` leaves the whole index unavailable (db.ts), which on a downgrade would cost every read,
+// while a column it does not know costs it nothing (it reads and writes the columns it names, so it leaves this one
+// null). The opener adds each one a database lacks once its migrations have run, at any version. Only a nullable column
+// no build depends on being set qualifies, and one is never dropped or renamed; anything else is a migration.
+export interface AddedColumn {
+  table: string;
+  column: string;
+  definition: string; // what follows the name in `ALTER TABLE … ADD COLUMN`
+}
+
+export const ADDED_COLUMNS: readonly AddedColumn[] = [
+  // a session a remote spawn launched keeps who asked and the signed action (`SessionRecord.launchedBy`, JSON), for O12's
+  // observer (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O); null for every other session
+  { table: 'sessions', column: 'launched_by', definition: 'TEXT' },
+];
