@@ -20,8 +20,10 @@
 // the host's ready at its start deadline (inside the bridge's own) is answered with the start's reason and dropped; one
 // handed over is answered with a sentence at its answer deadline (ANSWER_DEADLINE_MS, from its admission: inside the
 // bridge's for a session's tool, the start's and the library's own budgets for the library's Export) if the host has not
-// answered it by then. A host that has not said ready within START_WATCHDOG_MS of its spawn is ended and counted as a
-// failed start, so a hung start never holds the requests after it.
+// answered it by then. A host that has not said ready within START_WATCHDOG_MS of its spawn is ended (SIGTERM, SIGKILL
+// after the grace) and its exit counted as a failed start, so a hung start never holds the requests after it; it stays
+// the seam's child until that exit (a late ready of its connection not taken, `stop()` waiting for it), and no successor
+// starts beside it.
 //
 // `stop()` (the daemon's exit order, before the spine's stop ends the engine-host link): admission closes, every request
 // in the table is answered `ok: false` over the still-live link, then the host is ended. A request the seam answered
@@ -154,6 +156,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdog: ReturnType<typeof setTimeout> | null = null; // a spawned host's time to say ready
+  let retiring = false; // `child` did not say ready in time and is being ended: its ready is not taken, nothing follows it until its exit
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   let exited: (() => void) | null = null; // stop()'s wait for the host's exit
   const deliveries = new Set<Promise<unknown>>(); // answers on their way to the engine host (stop() awaits them)
@@ -310,32 +313,33 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     }, startWatchdogMs);
   }
 
-  // A host that did not say ready within the watchdog: let go of (its exit is no longer the seam's), ended, a failed start
+  // A host that did not say ready within the watchdog: ended (SIGTERM, then SIGKILL after the grace) and kept as the
+  // seam's child until it exits, so no successor runs beside it and a late ready of its connection is not taken; its
+  // exit is the failed start (onExit), whose backoff then starts the next host for what waits
   function hung(which: RenderChild): void {
-    child = null;
-    childReady = false;
-    abandoned.clear();
+    retiring = true;
+    set('starting', 'ending a render host that did not say ready');
     log(`[render] the render host (pid ${which.pid ?? 'unknown'}) did not say ready within ${startWatchdogMs / 1000} s: SIGTERM, then SIGKILL after ${exitGraceMs / 1000} s`);
-    let exited = false;
-    which.onExit(() => void (exited = true));
     which.kill('SIGTERM');
-    const kill = setTimeout(() => {
-      if (!exited) which.kill('SIGKILL');
+    killTimer = clear(killTimer);
+    killTimer = setTimeout(() => {
+      killTimer = null;
+      if (child === which) which.kill('SIGKILL');
     }, exitGraceMs);
-    (kill as { unref?: () => void }).unref?.();
-    failure(`the render host did not say ready within ${startWatchdogMs / 1000} s`);
   }
 
   function onExit(which: RenderChild, code: number | null, signal: string | null): void {
     if (which !== child) return;
     const wasReady = reached;
+    const hungStart = retiring;
     const expected = state === 'ending';
     child = null;
     childReady = false;
+    retiring = false;
     killTimer = clear(killTimer);
     watchdog = clear(watchdog);
     abandoned.clear(); // no late answer comes from a host that has exited
-    log(`[render] the render host exited (${signal ? `signal ${signal}` : `code ${code}`})${expected ? '' : wasReady ? ': unasked' : ' before it was ready'}`);
+    log(`[render] the render host exited (${signal ? `signal ${signal}` : `code ${code}`})${expected ? '' : hungStart ? ': it had not said ready in time' : wasReady ? ': unasked' : ' before it was ready'}`);
     failAll(`the render service ended on ${machine}`, (entry) => entry.posted);
     const done = exited;
     exited = null;
@@ -345,6 +349,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       set('off');
       return pump();
     }
+    if (hungStart) return failure(`the render host did not say ready within ${startWatchdogMs / 1000} s`);
     failure(wasReady ? `the render host ended unasked (${signal ? `signal ${signal}` : `code ${code}`})` : exitReason(code, signal, which.lastLine()));
   }
 
@@ -434,6 +439,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       });
     },
     clientReady() {
+      if (retiring) return log('[render] a render client said ready after its host’s start watchdog: not taken (it is being ended)');
       if (state !== 'starting' || child === null) return log(`[render] a render client said ready while the seam is ${state}: not taken`);
       childReady = true;
       reached = true;
@@ -490,20 +496,24 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       failAll(`the render service is restarting on ${machine}`);
       // the refusals answered over the live engine-host link (the spine's stop, after this, ends it), each bounded
       if (deliveries.size > 0) await Promise.race([Promise.allSettled([...deliveries]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
-      if (child === null) return set('off');
-      const going = child;
-      const gone = new Promise<void>((resolve) => (exited = resolve));
-      set('ending');
-      options.postExit();
-      const timer = setTimeout(() => {
-        if (child === going) {
-          log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: SIGTERM`);
-          going.kill('SIGTERM');
-        }
-      }, exitGraceMs);
-      await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, exitGraceMs + 1_000))]);
-      clearTimeout(timer);
-      // a late inspection answer's removal, taken while the host finished its work
+      if (child === null) set('off');
+      else {
+        // a host being ended for its start watchdog is not asked: it was sent SIGTERM, and is SIGKILLed at the grace
+        const going = child;
+        const hungStart = retiring;
+        const gone = new Promise<void>((resolve) => (exited = resolve));
+        set('ending');
+        if (!hungStart) options.postExit();
+        const timer = setTimeout(() => {
+          if (child === going) {
+            log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: ${hungStart ? 'SIGKILL' : 'SIGTERM'}`);
+            going.kill(hungStart ? 'SIGKILL' : 'SIGTERM');
+          }
+        }, exitGraceMs);
+        await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, exitGraceMs + 1_000))]);
+        clearTimeout(timer);
+      }
+      // an undelivered or late inspection answer's file removal, whichever branch (bounded)
       if (removals.size > 0) await Promise.race([Promise.allSettled([...removals]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
     },
   };

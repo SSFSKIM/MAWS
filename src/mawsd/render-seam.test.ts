@@ -244,20 +244,21 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.posted, 'nothing left to hand over').toEqual([]);
   });
 
-  it('ends a host that has not said ready at the start watchdog, counts a failed start, and a second start serves what waits', async () => {
+  it('ends a host that has not said ready at the start watchdog, keeps it until its exit, counts a failed start, and a second start serves what waits', async () => {
     const s = scene();
     s.seam.capture(capture('cap-1'));
     await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS - 1);
     expect(s.children[0]!.killed).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(s.children[0]!.killed, 'the hung host is ended').toEqual(['SIGTERM']);
-    expect(s.logs).toContain('[render] the render service could not start on mini: the render host did not say ready within 30 s');
-    await vi.advanceTimersByTimeAsync(500); // the backoff
-    expect(s.children, 'the request is not trapped behind the hung child').toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(4_500);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(s.children, 'no successor beside a live predecessor').toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(s.children[0]!.killed, 'SIGKILL when SIGTERM did not end it').toEqual(['SIGTERM', 'SIGKILL']);
-    s.children[0]!.exit(null, 'SIGKILL'); // its exit is no longer the seam's
-    expect(s.seam.state()).toBe('starting');
+    s.children[0]!.exit(null, 'SIGKILL');
+    expect(s.logs).toContain('[render] the render service could not start on mini: the render host did not say ready within 30 s');
+    await vi.advanceTimersByTimeAsync(500); // the backoff, from its exit
+    expect(s.children).toHaveLength(2);
     s.seam.clientReady();
     expect(s.posted.map((request) => (request.request as { requestId: string }).requestId)).toEqual(['cap-1']);
     s.seam.answer({ id: s.posted[0]!.id, answer: PNG });
@@ -265,14 +266,63 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.engine).toEqual([{ name: 'maws.artifact.captured', input: { appSessionId: 'app-1', requestId: 'cap-1', result: PNG } }]);
   });
 
+  it('a timed-out host’s late ready and its departure are not taken: no work goes to it, and the successor after its exit is served', async () => {
+    const s = scene();
+    s.seam.capture(capture('cap-1'));
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS);
+    s.seam.clientReady(); // its connection's ready, after the watchdog
+    expect(s.seam.state()).toBe('starting');
+    expect(s.posted, 'nothing handed to the host being ended').toEqual([]);
+    expect(s.logs).toContain('[render] a render client said ready after its host’s start watchdog: not taken (it is being ended)');
+    s.seam.clientGone(); // and its connection's end
+    s.children[0]!.exit(null, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(s.children).toHaveLength(2);
+    s.seam.clientReady();
+    expect(s.seam.state()).toBe('ready');
+    expect(s.posted).toHaveLength(1);
+    expect(s.children[1]!.killed, 'the successor is not ended by its predecessor’s departure').toEqual([]);
+  });
+
   it('two hung starts make the seam unavailable, and what waits is answered with the reason', async () => {
     const s = scene();
     s.seam.export(exportOf('exp-1'));
-    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS + 500 + START_WATCHDOG_MS);
-    expect(s.children.map((child) => child.killed)).toEqual([['SIGTERM', 'SIGKILL'], ['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS);
+    s.children[0]!.exit(null, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(500 + START_WATCHDOG_MS);
+    s.children[1]!.exit(null, 'SIGTERM');
     expect(s.seam.state()).toBe('unavailable');
     await flush();
     expect(s.engine.map((call) => call.input)).toEqual([{ appSessionId: 'app-1', requestId: 'exp-1', answer: { ok: false, error: 'the render service could not start on mini: the render host did not say ready within 30 s' } }]);
+  });
+
+  it('stop while a timed-out host is being ended waits for its exit, SIGKILLs it at the grace, and starts nothing after', async () => {
+    const s = scene();
+    s.seam.capture(capture('cap-1'));
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS);
+    let done = false;
+    const stopped = s.seam.stop().then(() => void (done = true));
+    await flush();
+    expect(done, 'the hung host is still the seam’s').toBe(false);
+    expect(s.exits.count, 'a host that never said ready is not asked').toBe(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(s.children[0]!.killed).toContain('SIGKILL');
+    s.children[0]!.exit(null, 'SIGKILL');
+    await stopped;
+    expect(s.children).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.children, 'nothing starts after the stop').toHaveLength(1);
+  });
+
+  it('stop during the backoff after a timed-out host’s exit starts nothing', async () => {
+    const s = scene();
+    s.seam.capture(capture('cap-1'));
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS);
+    s.children[0]!.exit(null, 'SIGTERM');
+    await s.seam.stop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s.children).toHaveLength(1);
+    expect(s.engine.at(-1)!.input).toMatchObject({ requestId: 'cap-1', result: { ok: false, error: 'the render service is restarting on mini' } });
   });
 
   it('a capture handed over just before its start deadline is answered with a sentence inside the bridge’s 45 s, and the host’s late answer is taken', async () => {
@@ -327,6 +377,26 @@ describe('the render seam (P5 O5 M4)', () => {
     await stopped;
     expect(s.removed).toEqual(['/p/inspect-stop.png']);
     expect(s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/x.png' } }), 'forgotten once the host exited').toBe(false);
+  });
+
+  it('stop with no host left still waits for an inspection file’s removal in flight (bounded)', async () => {
+    let finish!: () => void;
+    const removing: string[] = [];
+    const s = scene({ removeFile: (path) => (removing.push(path), new Promise<void>((resolve) => (finish = resolve))) });
+    s.outcome.value = 'not_pending';
+    s.seam.export(exportOf('exp-1', { inspection: true }));
+    s.seam.clientReady();
+    s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/inspect-1.png' } });
+    await flush();
+    expect(removing).toEqual(['/p/inspect-1.png']);
+    s.children[0]!.exit(70); // no host left
+    let done = false;
+    const stopped = s.seam.stop().then(() => void (done = true));
+    await flush();
+    expect(done, 'the removal is awaited').toBe(false);
+    finish();
+    await stopped;
+    expect(done).toBe(true);
   });
 
   it('logs a file it could not remove', async () => {
