@@ -18,6 +18,9 @@ const argOf = (name, fallback) => {
 const out = argOf('--out', path.join(process.cwd(), 'out'));
 const fixtureDir = argOf('--fixture', __dirname);
 fs.mkdirSync(out, { recursive: true });
+// Each run keeps its Chromium profile under its own result directory, never Electron's default (~/Library/Application
+// Support/Electron on a Mac, ~/.config/Electron on Linux), which the first mini run wrote; set before ready.
+app.setPath('userData', path.join(out, 'userData'));
 // The macOS half (../macos/run.sh): the render host's own line, an accessory app with no Dock icon, set before ready.
 const accessory = args.includes('--accessory');
 if (accessory && process.platform === 'darwin') app.setActivationPolicy('accessory');
