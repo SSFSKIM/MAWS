@@ -70,7 +70,7 @@ import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { REPO_ROOT } from './support/launch';
-import { fitTo, isSchema, sampleOf, samplesFor } from './support/cross-build-samples';
+import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
@@ -140,15 +140,7 @@ const inputsOf = (s: Scratch) => samplesFor(s.userData);
 
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
-type Answer = { ok: true } | { ok: false; code: string; message: string };
-// P5 O4 M2: the ids a sample mints, fresh on each probe so a call on one supervisor leaves nothing the next one meets (the
-// same server answers both: a lease, a run or a grant under a reused id would be found the second time); a refusal that
-// names one (`no artifact <id>`) is compared with each probe's own id in its place.
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const mintedIds = (value: unknown): string[] =>
-  typeof value === 'string' ? (UUID.test(value) ? [value] : []) : Array.isArray(value) ? value.flatMap(mintedIds) : isSchema(value) ? Object.values(value).flatMap(mintedIds) : [];
-const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }, input: unknown): Answer =>
-  result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: mintedIds(input).reduce((message, id) => message.replaceAll(id, '<sampled id>'), result.error!.message) };
+type Answer = ProbeAnswer;
 
 // Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
 async function probe(page: Page, newer: Build, older: Build, inputs: Record<string, unknown>): Promise<Map<string, Answer>> {
@@ -356,7 +348,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
     for (const [name, onOlder] of before) {
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
-      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in e2e/support/cross-build-samples.ts (INPUTS, or samplesFor for one naming a scratch path)`).toBe(true);
+      expect(!refusedSample(onOwn), `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in e2e/support/cross-build-samples.ts (INPUTS, or samplesFor for one naming a scratch path)`).toBe(true);
       if (!servedByAttacher(owner)) {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });

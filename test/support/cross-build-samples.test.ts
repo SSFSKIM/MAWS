@@ -6,10 +6,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { ipcError } from '@shared/ipc/errors';
 import { MAIN_ONLY_COMMANDS } from '@shared/ipc/names';
 import type { WireManifest } from '@shared/ipc/wire';
 import { validateCommandInput } from '@shared/ipc/validate';
-import { sampleOf, samplesFor } from '../../e2e/support/cross-build-samples';
+import { answerOf, refusedSample, sampleOf, samplesFor } from '../../e2e/support/cross-build-samples';
 
 const manifest = JSON.parse(readFileSync(join(__dirname, '../../src/shared/ipc/wire-manifest.json'), 'utf8')) as WireManifest;
 const mainOnly = new Set<string>(MAIN_ONLY_COMMANDS);
@@ -50,5 +51,28 @@ describe('the cross-build probe’s samples', () => {
     });
     expect(refused.filter(({ name }) => !NOT_YET_NAMED.includes(name))).toEqual([]);
     expect(refused.map(({ name }) => name).sort()).toEqual([...NOT_YET_NAMED].sort());
+  });
+});
+
+// P5 O4 M3 (the gate's cross-build run 41232909369): a command retagged `machine` joins the manifest and so the probe; one
+// that looks its sampled id up answers it unknown, `invalid_input` by the engine host's store convention. That answer
+// reached the command's handler and changed nothing: the probe counts it as no refused sample, unlike the registry's.
+describe('the probe’s reading of an answer', () => {
+  const sample = sampleOf((manifest.entries['commands.library.content'] as { input: unknown }).input) as { artifactId: string };
+
+  it('counts an unknown sampled id’s refusal as reached, with the id masked so either supervisor’s answer compares', () => {
+    const unknown = ipcError('invalid_input', `no artifact ${sample.artifactId}`, { reason: 'notFound', data: { artifactId: sample.artifactId } });
+    const answer = answerOf({ ok: false, error: unknown }, sample);
+    expect(answer).toEqual({ ok: false, code: 'invalid_input', message: 'no artifact <sampled id>' });
+    expect(refusedSample(answer)).toBe(false);
+    expect(refusedSample(answerOf({ ok: true }, sample))).toBe(false);
+    expect(refusedSample(answerOf({ ok: false, error: ipcError('internal', `no artifact ${sample.artifactId}`) }, sample))).toBe(false);
+  });
+
+  it('counts the registry’s refusal, and a handler’s that names no sampled id, as a refused sample', () => {
+    const registry = validateCommandInput('library.content', { artifactId: 'x' });
+    expect(registry.ok).toBe(false);
+    expect(refusedSample(answerOf(registry as { ok: false; error: { code: string; message: string } }, { artifactId: 'x' }))).toBe(true);
+    expect(refusedSample(answerOf({ ok: false, error: ipcError('invalid_input', 'the screenshot is not under userData') }, sample))).toBe(true);
   });
 });
