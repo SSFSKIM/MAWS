@@ -131,8 +131,8 @@ describe('the spine inside mawsd', () => {
 
   it('releases after the quiet period, every part stopped and its listeners gone, and loads again at the next trigger', async () => {
     const request = client();
-    const baseline = link.held(); // the seam's own subscriptions
-    expect(baseline).toBe(HOST_EVENTS.length);
+    const baseline = link.held(); // the seam's own subscriptions: every event, and the link's state (its coalesced parts' life)
+    expect(baseline).toBe(HOST_EVENTS.length + 1);
     expect(await request('attention.list')).toMatchObject({ ok: true });
     expect(link.held()).toBeGreaterThan(baseline);
     spine.quiet(true);
