@@ -3,7 +3,7 @@
 // (comma-separated) on Linux; it reads /proc/self/fdinfo as O3-G's watch-measure.mjs did. Each root is watched through
 // the product's path, the repository watcher of a GitService over the platform's recursive watch (on Linux the tree,
 // with the git prune built over the real git runner), and read for: the inotify watches it takes; RSS growth with a
-// forced GC and its retained part (RSS less the V8 heap committed but free: the heap used, the external memory and the
+// forced GC and its retained part (RSS less the V8 heap resident but free: the heap used, the external memory and the
 // rest, native), then RSS after MAWS_WATCH_TREE_IDLE_MS idle (60 s by default; no collection forced) and after a
 // memory-reducing collection; the event loop's worst lag during the initial walk; notification latency over 30 writes
 // at the root and at the deepest and the largest tracked directory, the writes made by a writer process of its own and
@@ -25,7 +25,7 @@ import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { constants as perfConstants, performance, PerformanceObserver } from 'node:perf_hooks';
-import { setFlagsFromString } from 'node:v8';
+import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { GitChanged } from '@shared/ipc/schema/git';
@@ -342,6 +342,7 @@ function lagMonitor(periodMs = 10): { stop(): number } {
 interface Memory {
   rss: number;
   heapTotal: number;
+  heapPhysical: number;
   heapUsed: number;
   external: number;
 }
@@ -350,21 +351,28 @@ function memory(): Memory {
   gc();
   gc();
   const { rss, heapTotal, heapUsed, external } = process.memoryUsage();
-  return { rss, heapTotal, heapUsed, external };
+  return { rss, heapTotal, heapPhysical: getHeapStatistics().total_physical_size, heapUsed, external };
 }
 
-// RSS growth and its retained part: RSS less the V8 heap committed but free after a full GC, which is the heap used,
+// RSS growth and its retained part: RSS less the V8 heap resident but free after a full GC, which is the heap used,
 // the external memory (array buffers) and the rest, native (the watch handles, libuv's watcher lists, malloc's arenas).
+// The heap's resident size is V8's physical size, the pages it has touched; its committed size (heapTotal) also counts
+// reserved pages never touched, so a heap that shrinks its committed but untouched space would be credited with pages
+// RSS never held (the second-root arm's first root, once: retained 21.3 MiB on an RSS growth of 8.7). The committed
+// reading stays beside it, retainedByCommittedMiB.
 function growth(before: Memory, after: Memory) {
   const mib = (key: keyof Memory) => (after[key] - before[key]) / MiB;
+  const residentFree = mib('heapPhysical') - mib('heapUsed');
   const committedFree = mib('heapTotal') - mib('heapUsed');
   return {
     rssMiB: round1(mib('rss')),
-    retainedMiB: round1(mib('rss') - committedFree),
+    retainedMiB: round1(mib('rss') - residentFree),
     heapUsedMiB: round1(mib('heapUsed')),
     externalMiB: round1(mib('external')),
-    nativeMiB: round1(mib('rss') - mib('heapTotal') - mib('external')),
+    nativeMiB: round1(mib('rss') - mib('heapPhysical') - mib('external')),
+    heapResidentFreeMiB: round1(residentFree),
     heapCommittedFreeMiB: round1(committedFree),
+    retainedByCommittedMiB: round1(mib('rss') - committedFree),
     rssIdleMiB: null as number | null,
     rssReducedMiB: null as number | null,
   };
@@ -385,7 +393,7 @@ async function settled(before: Memory, grown: ReturnType<typeof growth>): Promis
 }
 
 function memoryText(memory: ReturnType<typeof growth>): string {
-  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB}; at the arm's end after ${IDLE_MS / 1000} s idle ${memory.rssIdleMiB === null ? 'not read' : `+${memory.rssIdleMiB}`}, then after a memory-reducing collection +${memory.rssReducedMiB})`;
+  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 resident and free +${memory.heapResidentFreeMiB}, committed and free +${memory.heapCommittedFreeMiB}, retained by the committed heap +${memory.retainedByCommittedMiB}; ${memory.rssReducedMiB === null ? 'not settled at the arm\'s end' : `at the arm's end after ${IDLE_MS / 1000} s idle ${memory.rssIdleMiB === null ? 'not read' : `+${memory.rssIdleMiB}`}, then after a memory-reducing collection +${memory.rssReducedMiB}`})`;
 }
 
 const GC_KINDS: Record<number, string> = {
