@@ -24,7 +24,7 @@ export interface TransportProblem {
   typeGuess: string | null; // the `"type"` a malformed line seemed to carry
   replay?: { expected: string; got: string }; // the held out row and the unrecorded write, for the `meta replay_mismatch` row
   read?: { subtype: string; requestId: string }; // the unrecorded read the replay answered empty, for the `meta replay_unrecorded_read` row
-  gap?: { holderId: string; fence: number; frontier: number; firstSeq: number }; // host_gap: the `meta host_attach {replayed: 'gap'}` row's fields
+  gap?: { holderId: string; fence: number; frontier: number; firstSeq: number; lostFrom: number }; // host_gap: the `meta host_attach {replayed: 'gap'}` row's fields, and the first sequence lost
 }
 
 // One stdout line: a parsed frame, or a problem with the raw preview. `raw` is the whole line for a frame and at most
@@ -131,7 +131,9 @@ export class LineSplitter {
   }
 }
 
-function cleanLine(line: string): string | null {
+// A line as the engine host reads it: a leading BOM and a trailing `\r` dropped; null for a blank line (P5 O16: the
+// hosted transport applies the same rule to each line its session host relays raw, D43).
+export function cleanLine(line: string): string | null {
   let out = line;
   if (out.charCodeAt(0) === 0xfeff) out = out.slice(1);
   if (out.endsWith('\r')) out = out.slice(0, -1);
@@ -143,10 +145,20 @@ function typeGuess(line: string): string | null {
   return match ? match[1]! : null;
 }
 
+// One cleaned stdout line as an item: its frame, or a parse problem with a bounded preview.
+export function parseStdoutLine(line: string): TransportItem {
+  try {
+    return { frame: JSON.parse(line) as unknown, raw: line, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { frame: null, raw: line.slice(0, PARSE_ERROR_PREVIEW_CHARS), error: { kind: 'parse_error', message, length: line.length, typeGuess: typeGuess(line) } };
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // A single-consumer async queue
 
-class AsyncQueue<T> implements AsyncIterable<T> {
+export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly items: T[] = [];
   private readonly waiters: ((result: IteratorResult<T>) => void)[] = [];
   private done = false;
@@ -198,7 +210,7 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     if (stdoutEnded) return;
     stdoutEnded = true;
     const tail = stdoutLines.flush();
-    if (tail !== null) frames.push(parseLine(tail));
+    if (tail !== null) frames.push(parseStdoutLine(tail));
     frames.end();
   };
 
@@ -231,28 +243,19 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     resolveExited(exit);
   };
 
-  const parseLine = (line: string): TransportItem => {
-    try {
-      return { frame: JSON.parse(line) as unknown, raw: line, error: null };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { frame: null, raw: line.slice(0, PARSE_ERROR_PREVIEW_CHARS), error: { kind: 'parse_error', message, length: line.length, typeGuess: typeGuess(line) } };
-    }
-  };
-
   child.stdout.on('data', (chunk: Buffer) => {
     let lines: string[];
     try {
       lines = stdoutLines.push(chunk);
     } catch (error) {
       const budget = error as LineBudgetExceeded;
-      for (const line of budget.lines) frames.push(parseLine(line)); // what the chunk completed before the overflow, in order
+      for (const line of budget.lines) frames.push(parseStdoutLine(line)); // what the chunk completed before the overflow, in order
       frames.push({ frame: null, raw: '', error: { kind: 'line_budget', message: budget.message, length: budget.length, typeGuess: null } });
       child.stdout.destroy();
       kill('SIGKILL');
       return;
     }
-    for (const line of lines) frames.push(parseLine(line));
+    for (const line of lines) frames.push(parseStdoutLine(line));
   });
   child.stdout.on('end', endFrames);
   child.stdout.on('error', () => {
