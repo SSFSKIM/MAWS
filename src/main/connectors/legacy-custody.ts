@@ -6,14 +6,15 @@
 //
 // - `listLegacy` names the format 1 files from their first line alone, with no sealer, so a profile with none never asks
 //   the Keychain.
-// - `adoptLegacy` is one pass: the sealer's availability once, then each record opened and handed to `adopt`. The pass
-//   stops at the first record the sealer cannot open while none has opened yet: Electron's OSCryptAsync initialises
-//   once, so a denied or unavailable Keychain is not asked again in this launch; the next launch tries again, and a
-//   record the owner will not allow stays an unreadable row they can Forget. Once one record has opened the profile's
-//   one Keychain key is in hand, so a later failure is that record's own damage: it is left and the pass goes on, and
-//   one damaged file never holds back the records after it. A record that opens to anything but its own version 1
-//   record, or that the machine declines or cannot take, is left too. Records cross as opened; the machine validates
-//   them (`invalid`).
+// - `adoptLegacy` is one pass: the sealer's availability once, then a probe, then each record opened and handed to
+//   `adopt` (D32). The probe seals a fixed text and opens it again through the same sealer: Electron's sealer works
+//   under the profile's one Keychain key, so the probe asks for that key (the launch's one prompt) and no other. A
+//   probe that fails stops the pass before any record is opened: OSCryptAsync initialises once, so a denied or
+//   unavailable Keychain is not asked again in this launch; the next launch tries again, and a record the owner will
+//   not allow stays an unreadable row they can Forget. After a passing probe the key is in hand, so a record that does
+//   not open is that file's own damage, wherever it sorts: it is left and the pass goes on. A record that opens to
+//   anything but its own version 1 record, or that the machine declines or cannot take, is left too. Records cross as
+//   opened; the machine validates them (`invalid`).
 // - The log names counts and closed reasons only, never an id's record.
 //
 // Imports nothing from src/services/ (lint rule B): the seam and the record types are @shared/connectors/'s. M2 brings
@@ -28,11 +29,14 @@ const SUFFIX = '.sealed';
 const FILE_LIMIT_BYTES = 1_048_576; // the store's bound
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEADER = `${SEALED_FORMAT_V1}\n`;
+// The probe's round trip: a fixed id and text, never a record's.
+export const ADOPTION_PROBE_ID = '00000000-0000-4000-8000-000000000000';
+const ADOPTION_PROBE_TEXT = 'maws-connector-oauth adoption probe';
 
 export interface LegacyAdoption {
   adopted: number;
   left: number;
-  stopped: boolean; // the sealer opened no record and could not open one: the rest wait for the next launch
+  stopped: boolean; // the sealer failed its probe: every record waits for the next launch
 }
 
 export interface AdoptLegacyDeps {
@@ -73,31 +77,24 @@ export async function adoptLegacy(deps: AdoptLegacyDeps): Promise<LegacyAdoption
   };
   const report = () => {
     const tally = [...reasons].map(([reason, count]) => `${reason} ${count}`).join(', ');
-    deps.log(`[connectors] adopted ${result.adopted} of ${ids.length} legacy grants${tally && `; left: ${tally}`}${result.stopped ? '; stopped: the sealer could not open a record, the next launch tries again' : ''}`);
+    deps.log(`[connectors] adopted ${result.adopted} of ${ids.length} legacy grants${tally && `; left: ${tally}`}${result.stopped ? '; stopped: the sealer is unavailable or failed its round trip, the next launch tries again' : ''}`);
   };
 
-  if (!(await sealer.available().catch(() => false))) {
+  if (!(await sealer.available().catch(() => false)) || !(await roundTrips(sealer))) {
     result.left = ids.length;
     result.stopped = true;
     report();
     return result;
   }
-  let opened = false;
-  for (const [index, id] of ids.entries()) {
+  for (const id of ids) {
     const sealed = await readLegacy(join(directory, `${id}${SUFFIX}`));
     if (sealed === null) continue; // forgotten or replaced since the listing: no longer legacy
     let text: string;
     try {
       text = (await sealer.open(sealed, id)).text;
-      opened = true;
     } catch {
-      if (opened) {
-        leave('unopened');
-        continue;
-      }
-      result.left += ids.length - index;
-      result.stopped = true;
-      break;
+      leave('unopened');
+      continue;
     }
     const record = legacyRecord(text, id);
     if (record === null) {
@@ -114,6 +111,16 @@ export async function adoptLegacy(deps: AdoptLegacyDeps): Promise<LegacyAdoption
   }
   report();
   return result;
+}
+
+// Whether the sealer opens what it sealed: its key is in hand.
+async function roundTrips(sealer: ConnectorOAuthSealer): Promise<boolean> {
+  try {
+    const sealed = await sealer.seal(ADOPTION_PROBE_TEXT, ADOPTION_PROBE_ID);
+    return (await sealer.open(sealed, ADOPTION_PROBE_ID)).text === ADOPTION_PROBE_TEXT;
+  } catch {
+    return false;
+  }
 }
 
 // The record as sealed, its version line dropped, when it is a version 1 record of this id; the machine validates the

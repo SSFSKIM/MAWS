@@ -129,7 +129,8 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
     exclusionAsked = true;
     const marker = join(directory, CUSTODY_EXCLUDED_MARKER);
     if (await fs.lstat(marker).then(() => true, () => false)) return;
-    const excluded = await exclude(directory).catch((error: unknown) => {
+    // never fails the key: a synchronous throw is caught as a rejection is
+    const excluded = await Promise.resolve().then(() => exclude(directory)).catch((error: unknown) => {
       console.warn(`[connectors] could not exclude the OAuth custody directory from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     });

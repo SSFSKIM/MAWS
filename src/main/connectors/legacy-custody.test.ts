@@ -1,5 +1,5 @@
 // P5 O4 M1: the legacy reader and the one-pass adoption driver (./legacy-custody.ts; docs/doperpowers/plans/2026-10-31-
-// p5-o4-services.md, Interfaces §B, Decision Log D3). A reversible fake stands in for Electron's safeStorage and a
+// p5-o4-services.md, Interfaces §B, Decision Log D3 and D32). A reversible fake stands in for Electron's safeStorage and a
 // recording fake for `connectors.adoptGrant`; no keychain is touched.
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorOAuthRecord } from '@shared/connectors/oauth-types';
 import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
-import { adoptLegacy, listLegacy } from './legacy-custody';
+import { ADOPTION_PROBE_ID, adoptLegacy, listLegacy } from './legacy-custody';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -28,17 +28,23 @@ const record = (connectionId: string): ConnectorOAuthRecord => ({
 
 const xor = (bytes: Buffer) => Buffer.from(bytes.map((byte) => byte ^ 0x5a));
 
-// Electron's sealer, as far as the driver sees it: format 1, ignores the id; `failOn` the ids it cannot open.
+// Electron's sealer, as far as the driver sees it: format 1, ignores the id; `failOn` the ids it cannot open, the
+// probe's included; `probe` how its round trip goes wrong.
 class FakeElectronSealer implements ConnectorOAuthSealer {
   readonly format = SEALED_FORMAT_V1;
   isAvailable = true;
+  probe: 'passes' | 'seal throws' | 'open throws' | 'text differs' = 'passes';
   readonly failOn = new Set<string>();
   readonly opened: string[] = [];
   async available() { return this.isAvailable; }
-  async seal(text: string) { return xor(Buffer.from(text, 'utf8')); }
+  async seal(text: string, id: string) {
+    if (id === ADOPTION_PROBE_ID && this.probe === 'seal throws') throw new Error('the keychain denied it');
+    return xor(Buffer.from(text, 'utf8'));
+  }
   async open(sealed: Buffer, id: string) {
     this.opened.push(id);
-    if (this.failOn.has(id)) throw new Error('the keychain denied it');
+    if (this.failOn.has(id) || (id === ADOPTION_PROBE_ID && this.probe === 'open throws')) throw new Error('the keychain denied it');
+    if (id === ADOPTION_PROBE_ID && this.probe === 'text differs') return { text: 'something else', reseal: false };
     return { text: xor(sealed).toString('utf8'), reseal: false };
   }
 }
@@ -103,22 +109,23 @@ describe('adoptLegacy', () => {
     expect(logged).toEqual(['[connectors] adopted 3 of 3 legacy grants']);
   });
 
-  it('stops the pass at the first record the sealer cannot open while none has opened', async () => {
+  it.each(['seal throws', 'open throws', 'text differs'] as const)('a probe whose round trip fails (%s) stops the pass before any record is opened', async (how) => {
     for (const id of [A, B, C]) plant(id);
-    sealer.failOn.add(A);
+    sealer.probe = how;
     expect(await adopt()).toEqual({ adopted: 0, left: 3, stopped: true });
-    expect(sealer.opened).toEqual([A]); // B and C are never asked: a denied keychain is not retried in this launch
+    expect(sealer.opened.filter((id) => id !== ADOPTION_PROBE_ID)).toEqual([]); // a denied keychain is not asked per record
     expect(adopted).toEqual([]);
-    expect(logged).toEqual(['[connectors] adopted 0 of 3 legacy grants; stopped: the sealer could not open a record, the next launch tries again']);
+    expect(logged).toEqual(['[connectors] adopted 0 of 3 legacy grants; stopped: the sealer is unavailable or failed its round trip, the next launch tries again']);
   });
 
-  it('once a record has opened, leaves a damaged one and goes on', async () => {
-    for (const id of [A, B, C]) plant(id);
-    sealer.failOn.add(B);
-    expect(await adopt()).toEqual({ adopted: 2, left: 1, stopped: false });
-    expect(sealer.opened).toEqual([A, B, C]);
-    expect(adopted.map(({ connectionId }) => connectionId)).toEqual([A, C]);
-    expect(logged).toEqual(['[connectors] adopted 2 of 3 legacy grants; left: unopened 1']);
+  it('after a passing probe a damaged file is left wherever it sorts, the first included, and the rest are adopted', async () => {
+    for (const id of [A, B, C, D]) plant(id);
+    sealer.failOn.add(A);
+    sealer.failOn.add(C);
+    expect(await adopt()).toEqual({ adopted: 2, left: 2, stopped: false });
+    expect(sealer.opened).toEqual([ADOPTION_PROBE_ID, A, B, C, D]);
+    expect(adopted.map(({ connectionId }) => connectionId)).toEqual([B, D]);
+    expect(logged).toEqual(['[connectors] adopted 2 of 4 legacy grants; left: unopened 2']);
   });
 
   it('stops before opening anything when the sealer is unavailable', async () => {
@@ -126,8 +133,9 @@ describe('adoptLegacy', () => {
     plant(B);
     sealer.isAvailable = false;
     expect(await adopt()).toEqual({ adopted: 0, left: 2, stopped: true });
-    expect(sealer.opened).toEqual([]);
+    expect(sealer.opened).toEqual([]); // not even the probe
     expect(adopted).toEqual([]);
+    expect(logged).toEqual(['[connectors] adopted 0 of 2 legacy grants; stopped: the sealer is unavailable or failed its round trip, the next launch tries again']);
   });
 
   it('asks nothing of the sealer when there is no format 1 file', async () => {

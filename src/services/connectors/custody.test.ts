@@ -1,6 +1,7 @@
 // P5 O4 M1: the machine's custody of route D's grants (./custody.ts; docs/doperpowers/plans/2026-10-31-p5-o4-services.md,
-// Interfaces §A, D4 to D6). Scratch directories stand in for the profile; the backup exclusion is always a fake, so
-// nothing here runs osascript, and no keychain is touched. Each fresh custody over a directory is a fresh spine load.
+// Interfaces §A, D4 to D6, D34). Scratch directories stand in for the profile; the backup exclusion is a fake, or the
+// real helper with child_process doubled and the platform not darwin, so nothing here runs osascript, and no keychain
+// is touched. Each fresh custody over a directory is a fresh spine load.
 // The store over this custody is pinned beside the store's own suite (src/main/connectors/oauth-store.test.ts) until
 // M2 moves the store into the library.
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -9,6 +10,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SEALED_FORMAT_V2 } from '@shared/connectors/sealer';
+
+// The real exclusion helper's one effect, doubled: off darwin it must never be reached.
+const spawned = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', async (actual) => ({ ...(await actual<typeof import('node:child_process')>()), execFile: spawned }));
 import { CUSTODY_EXCLUDED_MARKER, CUSTODY_KEY_FILE, fileKeyCustody, type CustodyFs } from './custody';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -109,6 +114,33 @@ describe('fileKeyCustody: the key', () => {
     expect(await custody().available()).toBe(true); // marked: never asked again
     expect(excluded).toEqual([dir]);
     expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('off darwin the default exclusion is a no-op: nothing spawned, the key made, no marker', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    try {
+      const sealer = fileKeyCustody(dir); // the real helper
+      expect(await sealer.available()).toBe(true);
+      expect((await sealer.open(await sealer.seal(RECORD, A), A)).text).toBe(RECORD);
+      expect(await fileKeyCustody(dir).available()).toBe(true); // a later load asks again, still a no-op
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+    expect(spawned).not.toHaveBeenCalled();
+    expect(existsSync(keyPath())).toBe(true);
+    expect(existsSync(join(dir, CUSTODY_EXCLUDED_MARKER))).toBe(false);
+  });
+
+  it('an exclusion that throws, even synchronously, never fails the key: logged, and the key made and used', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const throwing = () => fileKeyCustody(dir, { excludeFromBackup: () => { throw new Error('no osascript'); } });
+    const first = throwing();
+    expect(await first.available()).toBe(true);
+    const sealed = await first.seal(RECORD, A);
+    expect((await throwing().open(sealed, A)).text).toBe(RECORD);
+    expect(existsSync(join(dir, CUSTODY_EXCLUDED_MARKER))).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(2); // once per load
   });
 
   it('a load whose retry answers false or fails still uses the existing key, unmarked', async () => {
