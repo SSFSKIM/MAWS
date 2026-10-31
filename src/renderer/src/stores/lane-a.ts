@@ -22,6 +22,7 @@ import type { DeliveryKey, LaneACatalog, LaneADelivery, LaneAState } from '@shar
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
+import { askUntilAnswered } from '../ipc/until-answered';
 import { useSessions } from './sessions';
 
 // One send the strip keeps: `sending` while the bridge has taken it but not said whether it entered, `refused` with the
@@ -228,7 +229,8 @@ export function dismissPendingSend(appSessionId: AppSessionId, key: DeliveryKey)
 }
 
 // Subscribes, then lists this machine's sessions and each listed machine's; a change that raced its machine's list is
-// applied after it.
+// applied after it. 2026-10-31: this machine's list is asked again until answered (an upgrade's mawsd restart answers
+// the page's first reads host_unavailable; ../ipc/until-answered.ts), its changes held again while it is out.
 export function connectLaneA(client: MawsBridge = ipc): () => void {
   catalogClient = client;
   const local = client.localMachine;
@@ -249,7 +251,12 @@ export function connectLaneA(client: MawsBridge = ipc): () => void {
     else console.warn(`[lane-a] laneA.list unavailable on ${machine}; starting empty`, result.error.message);
     for (const [id, state] of raced) applyLaneAState(id, state);
   };
-  void client.invoke('laneA.list', undefined).then((result) => settle(local, result));
+  const stopLocal = askUntilAnswered(client, async () => {
+    if (!buffers.has(local)) buffers.set(local, []);
+    const result = await client.invoke('laneA.list', undefined);
+    settle(local, result);
+    return result.ok;
+  });
   // M9: each machine the rows list, as the roster gains or loses it
   const follow = (machines: ReadonlySet<MachineRef>) => {
     for (const machine of machines) {
@@ -266,6 +273,7 @@ export function connectLaneA(client: MawsBridge = ipc): () => void {
   });
   return () => {
     live = false;
+    stopLocal();
     off();
     offRoster();
     if (catalogClient === client) catalogClient = null;
