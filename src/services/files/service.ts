@@ -181,6 +181,26 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { roots, real0 };
   }
 
+  // The one open of the service, every descriptor's (`openConfirmed`'s and `readResolved`'s): `real` with no link on
+  // its way (../fs/no-link.ts). On Linux its ancestors are walked first, and an ancestor turned into a link between the
+  // walk and the open, which the open followed, is refused by the descriptor's own path, closed before anything is read
+  // from it or written to it (any failure to confirm it, too). A walk's link is coded ELOOP, a missing ancestor ENOENT,
+  // as the open's own would be.
+  async function openNoLink(real: string, flags: number, path: string): Promise<FileHandle> {
+    if (WALKED) {
+      await walk(dirname(real));
+      await at('after-walk', path);
+    }
+    const handle = await fs.promises.open(real, flags);
+    try {
+      await confirmOpened(handle.fd, real);
+    } catch {
+      await handle.close();
+      throw new Refusal();
+    }
+    return handle;
+  }
+
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
   async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY): Promise<Confirmed> {
@@ -190,11 +210,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     try {
       // real0 with no link on its way: the descriptor names an object reached through no symlink at all, beneath a root
       // that is itself a realpath, so the open is a containment check of its own and step 5 a second one.
-      if (WALKED) {
-        await walk(dirname(real0)); // Linux: each ancestor a directory, none a link (a LinkOnTheWay is coded ELOOP)
-        await at('after-walk', path);
-      }
-      handle = await fs.promises.open(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : kind === 'write' ? WRITE_FLAGS : OPEN_FLAGS);
+      handle = await openNoLink(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : kind === 'write' ? WRITE_FLAGS : OPEN_FLAGS, path);
     } catch (error) {
       // ELOOP (a component of real0 became a symlink), ENOTDIR, EISDIR and the rest: no descriptor exists to confirm,
       // so no type is named; ENOENT says `not found` only under the leak rule. A write refused permission names the
@@ -204,11 +220,6 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       throw code === 'ENOENT' ? await missing(path, roots, error) : new Refusal();
     }
     try {
-      // Linux: an ancestor turned into a link between the walk and the open was followed; its descriptor is refused
-      // before anything is read from it or written to it (any failure to confirm it, too)
-      await confirmOpened(handle.fd, real0).catch(() => {
-        throw new Refusal();
-      });
       const stat = await handle.stat({ bigint: true });
       await at('after-open', path);
       const real = await confirm(path, roots, stat);
@@ -268,15 +279,17 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     } catch (error) {
       throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
     }
+    await at('before-open', path);
     let handle: FileHandle;
     try {
-      handle = await fs.promises.open(real, OPEN_FLAGS);
+      handle = await openNoLink(real, OPEN_FLAGS, path); // P5 O3-E: read's open, walked and confirmed on Linux (§D)
     } catch (error) {
       throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
     }
     let stat: BigIntStats;
     try {
       stat = await handle.stat({ bigint: true });
+      await at('after-open', path);
       if (!stat.isFile()) throw new Error(`not a regular file: ${path}`);
     } catch (error) {
       await handle.close();

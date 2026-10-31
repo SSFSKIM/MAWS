@@ -1139,7 +1139,8 @@ describe('readResolved', () => {
 // Linux (P5 O3-E M2 fix round 1): the kernel ignores O_NOFOLLOW_ANY, so the service walks real0's ancestors (an lstat
 // each, none a link), opens with O_NOFOLLOW, and takes the descriptor only if its own path (/proc/self/fd) is real0. A
 // link at the last component or above it, there at the walk or put there after it, is refused at the open: no
-// descriptor to outside bytes is stat'ed, read or written. The Linux unit job runs these; macOS's cases are above.
+// descriptor to outside bytes is stat'ed, read or written; readResolved, which has no roots, opens the same way (fix
+// round 2). The Linux unit job runs these; macOS's cases are above.
 describe.runIf(process.platform === 'linux')('files service on Linux: no link on the way to the open', () => {
   const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
   const ORIGINAL = 'export const a = 1;\n';
@@ -1151,6 +1152,7 @@ describe.runIf(process.platform === 'linux')('files service on Linux: no link on
   describe.each([
     ['read', () => service().read({ appSessionId: A, path: file() })],
     ['write', () => service().write({ appSessionId: A, path: file(), content: 'pwned\n', expectedHash: sha(ORIGINAL) })],
+    ['readResolved', () => service().readResolved({ path: file() })], // library.read's reach: read's rules, no roots (§D)
   ] as const)('%s', (_name, attempt) => {
     it('refuses a last component replaced by an outside link before the open, at the open (ELOOP)', async () => {
       points['before-open'] = () => {
