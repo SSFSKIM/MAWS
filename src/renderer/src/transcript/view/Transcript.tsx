@@ -14,7 +14,7 @@ import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
-import { HYDRATION } from '../model/copy';
+import { HYDRATION, OLDER } from '../model/copy';
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
@@ -23,6 +23,7 @@ import { listElementId, rowElementId, TranscriptProvider, useDisclosures, type R
 import { WorkMotion } from './motion';
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
+import { useSourcePages } from './source-pages'; // the long-transcript window
 import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
 import { withBrowserActivityRows } from '../model/browser-activity'; // E13
@@ -547,6 +548,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
+  // The long-transcript window: a source whose history comes one window at a time pages older ones in as the reader
+  // reaches the top, the reader's place kept through each (lane A's rules, source-pages.ts)
+  const pages = useSourcePages(source, storeKey, listRef, rows, atRest);
   // Reader movement is local to each list, even when two views share a key. Only an accepted send requests follow.
   const sendFollowRequest = useTranscriptStore((state) => state.entries[storeKey]?.sendFollowRequest ?? 0);
   const lastSendFollow = useRef({ storeKey, request: sendFollowRequest });
@@ -636,6 +640,16 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     <TranscriptProvider value={context}>
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
+        {pages.state.olderFailed !== null && (
+          // An older page that did not load: asked again here, since a pane too short to scroll has no other way to ask
+          // (lane A's bar, RemoteTranscriptSlot.tsx)
+          <div role="status" data-testid="older-failed" className="absolute inset-x-0 top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-1.5 text-ui-sm text-fg-muted">
+            <span className="min-w-0 flex-1">{OLDER.failed(pages.state.olderFailed)}</span>
+            <button type="button" onClick={pages.retry} className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+              {OLDER.retry}
+            </button>
+          </div>
+        )}
         {failed !== null && (
           <div className="transcript-failed" role="alert">
             <span>{HYDRATION.failed(failed)}</span>

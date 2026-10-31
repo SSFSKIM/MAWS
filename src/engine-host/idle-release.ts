@@ -88,6 +88,11 @@ export class IdleRelease {
     this.schedule();
   }
 
+  // Every session some holder holds interest in now.
+  interestUnion(): ReadonlySet<AppSessionId> {
+    return this.union();
+  }
+
   // Whether any holder holds interest in any session.
   interested(): boolean {
     for (const set of this.holders.values()) if (set.size > 0) return true;

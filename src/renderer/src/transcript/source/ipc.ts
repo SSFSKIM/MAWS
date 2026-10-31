@@ -3,6 +3,7 @@
 // reads a spilled result, `ipcRewind` backs the receipt's Undo, `ipcOpenExternal` opens a markdown link. Each has an
 // `…Over(client)` form so tests drive it with a fake X2 client; the plain forms use the app's validated client.
 import type { SessionEvent } from '@shared/graph/events';
+import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { bareOf, machineOf } from '@shared/machine/address';
@@ -13,6 +14,7 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
+import { HistoryPager, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
 // How much of a spilled result is read into the detail (residue *Spilled results*): past it, the head and Open full log.
@@ -50,6 +52,12 @@ interface KnownWatch {
   ended: AbortController;
 }
 
+// The long-transcript window: the host answers a disk-backed session whose transcript it is still reading through with
+// an empty, incomplete page (never the oldest records), and sends the newest window as a batch once it has; the
+// snapshot asks again at that batch or the follow's next state, for the window and its `earlier` cursor.
+export const BACKFILL_WAIT_MS = 60_000;
+const backfilling = (page: CommandOutput<'session.events'>) => !page.complete && page.events.length === 0 && page.historyUnavailable !== true;
+
 async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
   let signalled = false;
   let wake: (() => void) | null = null;
@@ -60,15 +68,19 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
   const offs = [
     client.on('session.status', (payload) => payload.appSessionId === appSessionId && signal()),
     client.on('session.changed', (payload) => payload.record.appId === appSessionId && signal()),
+    client.on('fs.followState', (payload) => payload.appSessionId === appSessionId && payload.agentId === null && payload.state !== 'backfilling' && signal()),
   ];
   if (watch) watch.batch = signal;
   const ended = watch?.ended.signal ?? null;
   const deadline = Date.now() + KNOWN_WAIT_MS;
+  const backfillDeadline = Date.now() + BACKFILL_WAIT_MS;
   try {
     for (;;) {
       signalled = false;
       const result = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
-      if (result.ok || !result.error.message.startsWith(UNKNOWN_SESSION) || ended?.aborted) return result;
+      const reading = result.ok && backfilling(result.value);
+      if (!reading && (result.ok || !result.error.message.startsWith(UNKNOWN_SESSION) || ended?.aborted)) return result;
+      if (reading && (ended?.aborted || Date.now() >= backfillDeadline)) return result;
       if (signalled) continue;
       // true at a sign; false when the time is up or the subscription ended
       const woke = await new Promise<boolean>((resolve) => {
@@ -77,7 +89,7 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
           ended?.removeEventListener('abort', stop);
           resolve(signalled);
         };
-        const timer = setTimeout(stop, deadline - Date.now());
+        const timer = setTimeout(stop, (reading ? backfillDeadline : deadline) - Date.now());
         wake = stop;
         ended?.addEventListener('abort', stop);
       });
@@ -176,6 +188,26 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     }
   };
   const resets = new Set<() => void>();
+  // The long-transcript window: the history's older pages (older.ts). Main's app events older than the newest window
+  // wait aside for the page that holds their time.
+  let appAside: SessionEvent[] = [];
+  // The long-transcript window: the engine host released the disk follow this source reads (the session left every
+  // client's interest while the source stayed mounted, as a side thread off screen), so the transcript's later writes
+  // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
+  let stale = false;
+  const atOf = (event: SessionEvent) => Date.parse(event.at);
+  const pager = new HistoryPager(
+    async (before) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before })),
+    (page, last) => {
+      const from = page[0] === undefined ? Infinity : atOf(page[0]);
+      const placed = last ? appAside : appAside.filter((event) => atOf(event) >= from);
+      appAside = appAside.filter((event) => !placed.includes(event));
+      return withAppEvents(placed, page);
+    },
+    () => queueMicrotask(() => {
+      for (const listener of [...resets]) listener();
+    }),
+  );
   // W7: a subscription that has the live form while its record is foreign-live starts over from disk, once.
   const resetIfOverturned = (subscription: Subscription) => {
     if (!subscription.live || !subscription.foreign) return;
@@ -200,7 +232,9 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
             return ofParent(event) && !(subscription.live && diskForm(event));
           });
           track(subscription, events);
-          if (events.length > 0) listener(events);
+          if (events.length === 0) return;
+          pager.delivered(events);
+          listener(events);
         },
       };
       latest = subscription;
@@ -216,6 +250,15 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (record.appId !== appSessionId) return;
         subscription.foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
         resetIfOverturned(subscription);
+        // stale: a staged rebuild whose snapshot asks the host, once this subscription's own snapshot is in
+        if (stale && latest === subscription && subscription.held === null) {
+          stale = false;
+          pager.refresh();
+        }
+      });
+      // A release, not any stop: a resume's handoff to the live stream stops the follow with no message.
+      const offReleased = client.on('fs.followState', (state) => {
+        if (state.appSessionId === appSessionId && state.agentId === null && state.state === 'stopped' && state.message === FOLLOW_RELEASED && !subscription.live) stale = true;
       });
       const offLoss = onHostLoss(client, appSessionId, () => subscription.running, (exit) => { // E10
         if (subscription.held) subscription.held.push([exit]);
@@ -224,6 +267,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       return () => {
         off();
         offChanged();
+        offReleased();
         offLoss();
         subscription.held = null;
         subscription.pass = () => {};
@@ -235,12 +279,29 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     // held batches are passed before the snapshot returns, while the store still buffers.
     async snapshot() {
       const subscription = latest;
-      const journal = valueOf(await eventsOnceKnown(client, appSessionId, subscription)).events;
-      const events = withAppEvents(valueOf(await client.invoke('session.appEvents', { appSessionId })).events, journal);
+      // A rebuild (an older page joined the history) answers the pager's history; any other snapshot asks the host.
+      let events = pager.takeRebuilt();
+      if (events === null) {
+        stale = false; // this read follows the transcript again
+        const answer = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
+        const earlier = answer.earlier ?? null;
+        const first = answer.events[0];
+        const placed = earlier === null || first === undefined ? app : app.filter((event) => atOf(event) >= atOf(first));
+        events = withAppEvents(placed, answer.events);
+        // The pager and the app events set aside are the source's, not the subscription's: a snapshot whose
+        // subscription has ended or been superseded (a close and reopen with two reads in flight) answers only its own
+        // hydration, which discards it. Were it to finish last and start the pager over, the pager's log and cursor
+        // would be its older window, and the next older page's rebuild would drop what the current one has shown.
+        if (latest === subscription && !subscription?.ended.signal.aborted) {
+          appAside = app.filter((event) => !placed.includes(event));
+          pager.started(events, earlier);
+        }
+      }
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
         track(subscription, events); // E10
-        const waiting = subscription.held ?? [];
+        const waiting = withoutOlderThanWindow(subscription.held ?? [], events, diskForm); // the long-transcript window
         subscription.held = null;
         for (const batch of waiting) subscription.pass(batch);
         resetIfOverturned(subscription); // W7: a turn to foreign-live heard while this snapshot was on its way
@@ -251,6 +312,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       resets.add(listener);
       return () => resets.delete(listener);
     },
+    onRebuild: (listener) => pager.onRebuild(listener),
+    older: pager,
   };
 }
 
@@ -270,18 +333,26 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // and passed through that filter once it is.
 interface Subscriber {
   listener: (events: SessionEvent[]) => void;
-  held: SessionEvent[][]; // batches that arrived before the provenance was decided
+  held: SessionEvent[][]; // batches that arrived before the provenance was decided, then the events a disk read holds back
   ended: AbortController;
 }
 
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
+  // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. The child's events that
+  // batches carry meanwhile are held until it completes, then those older than the window it answered are dropped
+  // before they are passed on. What the batches say of the child's lifecycle is taken at once, as at any other time:
+  // a start heard meanwhile decides whether the answer is joined with an end.
+  let reading: object | null = null;
   let ended: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
   const subscribers = new Set<Subscriber>();
   const lifecycleSeen = new Set<EventId>();
   let lifecycleRevision = 0;
   let resetPending = false;
+  // The long-transcript window: the engine host released this child's disk follow (as the session source's `stale`);
+  // the next record change of its session reads the child again.
+  let stale = false;
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
   const names = (taskId: string) => taskId === (agentId as string);
@@ -290,6 +361,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && names(event.taskId);
   const exits = (event: SessionEvent) => event.kind === 'process.exited' && event.agentId === null;
   const liveForm = (event: SessionEvent) => event.seq !== null;
+  const ownOnDisk = (event: SessionEvent) => own(event) && !liveForm(event); // never the parent's reports, whatever their form
   // An exit ends the child only if it follows the child's start in the stream that carried it: an exit the parent's
   // snapshot holds, by its position there; any other exit, once a start has been seen (the snapshot's or a batch's).
   // An explicit child finish survives parent exits until another child start clears it. A replay or backfill batch
@@ -334,16 +406,67 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       if ((own(event) && liveForm(event) === (provenance === 'live')) || (provenance === 'live' && ends)) passed.push(event);
       if (provenance === 'live' && liveForm(event)) lastLive = event;
     }
-    if (passed.length > 0) subscriber.listener(passed);
+    if (passed.length > 0 && reading !== null) subscriber.held.push(passed); // the long-transcript window
+    else if (passed.length > 0) {
+      pager.delivered(passed);
+      subscriber.listener(passed);
+    }
     // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch.
     if (changedEnd && ended !== null) toDisk();
   };
+  const flush = () => {
+    for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) receive(subscriber, events);
+  };
   const decide = (chosen: 'live' | 'disk') => {
     provenance = chosen;
-    for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) receive(subscriber, events);
+    flush();
   };
   // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
   // never receive that batch a second time.
+  // The long-transcript window: a disk-backed child's older pages (older.ts).
+  const pager = new HistoryPager(
+    async (before) => valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId, before })),
+    (page) => page,
+    () => queueMicrotask(() => {
+      for (const listener of [...resets]) listener();
+    }),
+  );
+  // The parent's events for this child. A disk-backed parent whose follow is still reading its transcript through
+  // answers an empty, incomplete page, which says nothing of the child's lifecycle, and since the parent then
+  // broadcasts only its newest window, an old finish would never arrive later: a completed child would read working.
+  // Such a page is asked again once the parent's follow reports its next state, or once BACKFILL_WAIT_MS pass, unless
+  // the child's subscribers all detach.
+  const parentEvents = async (attached: Subscriber[], detached: () => boolean): Promise<SessionEvent[]> => {
+    let signalled: boolean; // a state heard since the latest read was asked
+    let wake: (() => void) | null = null;
+    const signal = () => {
+      signalled = true;
+      wake?.();
+    };
+    const off = client.on('fs.followState', (state) => state.appSessionId === appSessionId && state.agentId === null && state.state !== 'backfilling' && signal());
+    for (const subscriber of attached) subscriber.ended.signal.addEventListener('abort', signal);
+    const deadline = Date.now() + BACKFILL_WAIT_MS;
+    try {
+      for (;;) {
+        signalled = false;
+        const page = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, agentId }));
+        if (!backfilling(page) || detached() || Date.now() >= deadline) return page.events;
+        if (!signalled) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            timer = setTimeout(resolve, deadline - Date.now());
+          });
+          clearTimeout(timer);
+          wake = null;
+        }
+        if (detached()) return [];
+      }
+    } finally {
+      off();
+      for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
+    }
+  };
   const toDisk = () => {
     decide('disk');
     if (resetPending) return;
@@ -365,7 +488,15 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       const offFollow = client.on('fs.followState', (state) => {
         // Both resume and the index's live-status handling stop all session followers. The child's stopped event
         // comes after its entry was removed, unlike parent status (which can precede the index's queued unfollow).
-        if (state.appSessionId === appSessionId && state.agentId === agentId && state.state === 'stopped' && provenance === 'disk') toDisk();
+        if (state.appSessionId !== appSessionId || state.agentId !== agentId || state.state !== 'stopped' || provenance !== 'disk') return;
+        // A release is no reason to follow again at once, which would only be released again two minutes later.
+        if (state.message === FOLLOW_RELEASED) stale = true;
+        else toDisk();
+      });
+      const offChanged = client.on('session.changed', ({ record }) => {
+        if (record.appId !== appSessionId || !stale) return;
+        stale = false;
+        pager.refresh();
       });
       // E11 (W-C): the session source's host-loss rule, for the parent's process as the live child sees it; the exit
       // ends the child as any parent exit does (closed as stopped, then the switch to disk)
@@ -378,16 +509,22 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         subscriber.ended.abort();
         off();
         offFollow();
+        offChanged();
         offLoss();
       };
     },
     async snapshot() {
+      // A rebuild (an older page joined the disk history) answers the pager's history.
+      const rebuilt = pager.takeRebuilt();
+      if (rebuilt !== null) return rebuilt;
       const attached = [...subscribers];
       const detached = () => attached.length > 0 && attached.every((subscriber) => !subscribers.has(subscriber));
       const revision = lifecycleRevision;
       const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
-      // Even disk provenance must refresh lifecycle: a closed/reopened child may have resumed unobserved.
-      const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
+      // Even disk provenance must refresh lifecycle: a closed/reopened child may have resumed unobserved. The parent's
+      // events for this child alone (`agentId`: its own and the parent's reports on it, with the parent's exits, in
+      // order), however long the parent's history: a disk-backed parent answers one window, which may not hold them.
+      const parent = await parentEvents(attached, detached);
       if (detached()) return [];
       const started = parent.findLastIndex(starts);
       startAt = started;
@@ -406,8 +543,13 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
         decide('live');
         lastLive = parent.findLast(liveForm) ?? null;
-        return parent.filter((event) => own(event) && liveForm(event));
+        const live = parent.filter((event) => own(event) && liveForm(event));
+        pager.started(live, null);
+        return live;
       }
+      // The child's events are held, not passed, until the disk answer is in (the long-transcript window: `reading`).
+      const token = {};
+      reading = token;
       if (!onDisk()) decide('disk');
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
       // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
@@ -430,9 +572,15 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       try {
         for (;;) {
           changed = false;
+          stale = false; // this read follows the child's transcript again
           const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId }));
           if (detached()) return [];
-          if (disk.complete) return ended === null ? disk.events : [...disk.events, ended];
+          if (disk.complete) {
+            const history = ended === null ? disk.events : [...disk.events, ended];
+            pager.started(history, disk.earlier ?? null);
+            for (const subscriber of subscribers) subscriber.held = withoutOlderThanWindow(subscriber.held, history, ownOnDisk);
+            return history; // the held batches pass on as this returns (finally), so the hydration drains them after it
+          }
           if (failure !== null) throw new Error(failure);
           if (!changed) await new Promise<void>((resolve) => { wake = resolve; });
           wake = null;
@@ -443,12 +591,18 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         clearTimeout(timer);
         offFollow();
         for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
+        if (reading === token) {
+          reading = null;
+          flush();
+        }
       }
     },
     onReset(listener) {
       resets.add(listener);
       return () => resets.delete(listener);
     },
+    onRebuild: (listener) => pager.onRebuild(listener),
+    older: pager,
   };
 }
 

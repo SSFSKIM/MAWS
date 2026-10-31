@@ -132,7 +132,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     replayTranscripts: replayTranscriptProjects(process.env), // P3-F L242: a replay's transcript, into the e2e scratch store only
-    diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
+    diskEvents: (id, request, quiet) => fs.eventsSnapshot(id, null, request, quiet) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     artifacts: () => store, // P3-A (M6)
@@ -140,6 +140,9 @@ const register: HostRegister = (untimedOn, emit, client) => {
   });
   ({ table } = ipc);
   table.startSampling();
+  // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
+  const interested = table;
+  fs.watchInterest({ set: () => interested.interest(), onChange: (listener) => interested.onHoldChanged(listener) });
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3)
   connectors = registerConnectors(on, emit, client.presence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry

@@ -7,7 +7,7 @@
 import * as z from 'zod';
 import { SessionEventSchema } from '@shared/graph/events';
 import { ForeignHolderSchema } from '@shared/graph/session';
-import { AgentIdSchema, AppSessionIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
+import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
 import {
   HolderSchema,
   JobStateSchema,
@@ -125,10 +125,12 @@ export const commands = {
   'fs.unfollow': { input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema.nullable() }), output: z.void(), owner: 'engine-host' },
   'fs.subagents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ agents: z.array(SubagentEntrySchema) }), owner: 'engine-host' },
   // C6's name: the child's transcript as X1 events; starts following it, and later events arrive on
-  // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished.
+  // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished. One bounded window at a
+  // time, as `session.events` from disk: the newest, or the page `before` a cursor; `earlier` the cursor of the page
+  // before this one, present only while older history remains (2026-10-30, the long-transcript window).
   'fs.agentEvents': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema }),
-    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean() }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, before: EventIdSchema.optional() }),
+    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean(), earlier: EventIdSchema.optional() }),
     owner: 'engine-host',
   },
   'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },

@@ -242,6 +242,12 @@ export class ProcessTable {
     return this.idle.interested();
   }
 
+  // The union of every client's interest now: the fs service's follows live while their session is in it (the
+  // long-transcript window's release, fs/service.ts FOLLOW_RELEASE_MS); `onHoldChanged` tells its changes.
+  interest(): ReadonlySet<AppSessionId> {
+    return this.idle.interestUnion();
+  }
+
   launching(): boolean {
     return this.launches > 0;
   }

@@ -2,6 +2,7 @@
 // from `session.eventBatch`, the snapshot from `session.events`, or `fs.agentEvents` for a child), the default
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
+import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
@@ -411,7 +412,7 @@ describe('child source provenance', () => {
     const received: EventId[][] = [];
     source.subscribe((events) => received.push(events.map((event) => event.id)));
     const snapshot = source.snapshot();
-    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null }]]);
+    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null, agentId: AGENT }]]);
     answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
     await expect(snapshot).resolves.toEqual(child.slice(0, 2));
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
@@ -446,7 +447,7 @@ describe('child source provenance', () => {
     answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
     await flush();
     expect(fake.calls.map((call) => [call.name, call.input])).toEqual([
-      ['session.events', { appSessionId: APP, afterSeq: null, limit: null }],
+      ['session.events', { appSessionId: APP, afterSeq: null, limit: null, agentId: AGENT }],
       ['fs.agentEvents', { appSessionId: APP, agentId: AGENT }],
     ]);
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
@@ -541,6 +542,80 @@ describe('child source provenance', () => {
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, done].map((e) => e.id));
   });
 
+  it('reads its parent again once the parent\'s follow has read through, and decides its lifecycle from that, not from an empty page', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: false }); // the parent's follow still reads its transcript through
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    fake.emit('fs.followState', { ...followState('following'), agentId: null });
+    await flush();
+    answer(fake, 'session.events', { events: [...parent, done].map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect(dividerOf(CHILD_KEY).state).toBe('completed');
+    useTranscriptStore.getState().detach(CHILD_KEY);
+
+    // Detached while it waits: it stops, asking nothing more and listening to nothing.
+    const again = fakeClient();
+    const reading = useTranscriptStore.getState().attach(CHILD_KEY, childSource(again), { agentId: AGENT });
+    answer(again, 'session.events', { events: [], lastSeq: 0, complete: false });
+    await flush();
+    useTranscriptStore.getState().detach(CHILD_KEY);
+    await reading;
+    expect(again.calls.map((call) => call.name)).toEqual(['session.events']);
+    expect(again.listeners.get('fs.followState')?.size ?? 0).toBe(0);
+  });
+
+  it('holds the disk follow\'s batches until fs.agentEvents answers, and drops what they carry from before its window', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, source, { agentId: AGENT });
+    answer(fake, 'session.events', { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true }); // a disk-backed parent
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: [], complete: false }); // the child's follow still reads it through
+    await flush();
+    fake.emit('session.eventBatch', batch(disk.slice(0, 2))); // its window once read through
+    fake.emit('fs.followState', followState('following'));
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(1), complete: true, earlier: disk[1].id }); // appends moved the window on
+    await hydrated;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.slice(1).map((e) => e.id));
+    source.older!.loadOlder();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 1), complete: true });
+    await vi.waitFor(() => expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id)));
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
+  it('a released follow is no reset: the child is read again at the next change of its session\'s record', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const history = { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true };
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 2), complete: true });
+    await hydrated;
+    fake.emit('fs.followState', { ...followState('stopped'), message: FOLLOW_RELEASED });
+    await flush();
+    expect(fake.calls).toHaveLength(2); // following again at once would only be released again
+    fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    await flush();
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await vi.waitFor(() => expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id)));
+    expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('live');
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
   it('reacquires a mounted disk child after both parent relaunch unfollows, including a late index stop', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
@@ -621,6 +696,24 @@ describe('child source provenance', () => {
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
     await expect(second).resolves.toEqual(disk);
     off();
+  });
+
+  it.each(['parent', 'disk'] as const)('a same-agent start heard during the %s read clears an old completion before the disk answer is joined with it', async (during) => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const resumed = { ...parent.find((e) => e.kind === 'subagent.started')!, id: 'resumed' as EventId, seq: 548 };
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    if (during === 'parent') fake.emit('session.eventBatch', batch([resumed]));
+    answer(fake, 'session.events', { events: [...parent, done], lastSeq: 517, complete: true });
+    await flush();
+    if (during === 'disk') fake.emit('session.eventBatch', batch([resumed])); // the agent resumes while fs.agentEvents is on its way
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
+    expect(dividerOf(CHILD_KEY).state).toBe('working');
+    useTranscriptStore.getState().detach(CHILD_KEY);
   });
 
   it('stops requesting incomplete backfill when its attachment is detached', async () => {
@@ -1136,6 +1229,116 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     await vi.waitFor(() => expect(fake.calls).toHaveLength(2)); // the reset's hydration asks again
     expect(fake.calls[1].name).toBe('session.events');
     store.detach(source.key!);
+  });
+});
+
+// The long-transcript window (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): a disk-backed session's
+// snapshot is one window of its history with an `earlier` cursor, and older pages rebuild the key from the pager's log.
+describe('ipcSource over a long transcript\'s window', () => {
+  // Five turns as a disk follow delivers them (`seq: null`): turn n is events 4(n-1) to 4n-1.
+  const disk = (() => {
+    const b = builder();
+    for (const n of [1, 2, 3, 4, 5]) {
+      b.turn(`u${n}`);
+      b.text(`m${n}`, 0, `Answer ${n}`);
+      b.end([`u${n}`]);
+    }
+    return b.events.map((event) => ({ ...event, seq: null }) as SessionEvent);
+  })();
+  const turns = (from: number, to: number) => disk.slice(4 * (from - 1), 4 * to);
+  const page = (events: SessionEvent[], older = false) => ({ ok: true, value: { events, lastSeq: 0, complete: true, ...(older && { earlier: events[0]!.id }) } }) as never;
+  const ids = (events: SessionEvent[]) => events.map((event) => event.id);
+  const seen = () => [...useTranscriptStore.getState().entries[APP]!.state.seen];
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('drops what a held batch carries from before the window the snapshot answered, and the older page brings it back in order', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer({ ok: true, value: { events: [], lastSeq: 0, complete: false } } as never); // the host still reads it through
+    await vi.waitFor(() => expect(fake.listeners.get('fs.followState')?.size ?? 0).toBeGreaterThan(0));
+    fake.emit('session.eventBatch', batch(turns(1, 2))); // its window once read through, held while the snapshot is on its way
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2)); // the batch wakes the read
+    fake.calls[1].answer(page(turns(2, 3), true)); // turn 3 appended meanwhile moved the window on
+    await hydrated;
+    expect(seen()).toEqual(ids(turns(2, 3))); // turn 1 never lands after turn 3
+    source.older!.loadOlder();
+    expect(fake.calls[2].input).toMatchObject({ before: turns(2, 2)[0]!.id });
+    fake.calls[2].answer(page(turns(1, 1)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
+    store.detach(APP);
+  });
+
+  it('reads a session whose follow was released again at the next change of its record, keeping what the reader opened', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer(page(turns(1, 2)));
+    await hydrated;
+    const opened = turnId.ofMessage(uuid('u1'));
+    store.toggleTurn(APP, opened); // the reader opens a closed turn
+    const stopped = (message: string | null): EventPayload<'fs.followState'> => ({ appSessionId: APP, agentId: null, state: 'stopped', chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message });
+    const changed = { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never;
+    fake.emit('fs.followState', stopped(null)); // a plain stop (a resume's handoff to the live stream) is no release
+    fake.emit('session.changed', changed);
+    await flush();
+    expect(fake.calls).toHaveLength(1);
+    fake.emit('fs.followState', stopped(FOLLOW_RELEASED)); // out of every client's interest while still mounted
+    await flush();
+    expect(fake.calls).toHaveLength(1);
+    fake.emit('session.changed', changed); // a terminal wrote to it
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[1].input).toEqual({ appSessionId: APP, afterSeq: null, limit: null });
+    fake.calls[1].answer(page(turns(1, 3)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
+    expect(useTranscriptStore.getState().entries[APP]!.state.ui.expandedTurns.has(opened)).toBe(true);
+    fake.emit('session.changed', changed); // once: following again, the source reads nothing more
+    await flush();
+    expect(fake.calls).toHaveLength(2);
+    store.detach(APP);
+  });
+
+  it('a released session read again lets go of an older page still on its way, which would rebuild the old history over it', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer(page(turns(2, 3), true));
+    await hydrated;
+    source.older!.loadOlder(); // the reader reached the top: the page before turn 2 is on its way
+    expect(fake.calls[1].input).toMatchObject({ before: turns(2, 2)[0]!.id });
+    fake.emit('fs.followState', { appSessionId: APP, agentId: null, state: 'stopped', chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message: FOLLOW_RELEASED });
+    fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(3)); // the session read again
+    expect(source.older!.state.getState()).toMatchObject({ loadingOlder: false, more: false });
+    fake.calls[1].answer(page(turns(1, 1))); // the stale page finishes first
+    await flush();
+    fake.calls[2].answer(page(turns(2, 4), true)); // the terminal wrote turn 4
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(2, 4))));
+    expect(source.older!.state.getState().more).toBe(true);
+    store.detach(APP);
+  });
+
+  it('a snapshot whose subscription was superseded leaves the pager to the current one, so an older page keeps what is shown', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const first = store.attach(APP, source);
+    store.detach(APP); // closed and opened again while the first read is on its way
+    const second = store.attach(APP, source);
+    fake.calls[1].answer(page(turns(3, 4), true));
+    await second;
+    fake.emit('session.eventBatch', batch(turns(5, 5))); // appended after the current window
+    fake.calls[0].answer(page(turns(2, 3), true)); // the obsolete read, an older window, finishes last
+    await first;
+    expect(seen()).toEqual(ids(turns(3, 5)));
+    source.older!.loadOlder();
+    expect(fake.calls[2].input).toMatchObject({ before: turns(3, 3)[0]!.id }); // the current window's cursor
+    fake.calls[2].answer(page(turns(1, 2)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(disk)));
+    store.detach(APP);
   });
 });
 

@@ -800,7 +800,7 @@ describe('exited rows beyond the cap leave the host (C12)', () => {
     expect(host.emitted.some((e) => e.name === 'session.forgotten')).toBe(false);
     expect(existsSync(join(userData, 'engine-host', 'state', 'app-one.json'))).toBe(true);
     expect(await host.call('session.events', { appSessionId: 'app-one', afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
-    expect(disk).toHaveBeenCalledWith('app-one');
+    expect(disk).toHaveBeenCalledWith('app-one', { before: null, limit: null, agentId: null }, false);
     const two = await host.call('session.events', { appSessionId: 'app-two', afterSeq: null, limit: null });
     expect(two.events.length).toBeGreaterThan(0); // still this host's stream
     expect(disk).toHaveBeenCalledTimes(1);
@@ -832,7 +832,7 @@ describe('session.events after an exit reads disk while a foreign process holds 
     transport!.exit(0);
     await stopping;
     expect(await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
-    expect(disk).toHaveBeenCalledWith(id);
+    expect(disk).toHaveBeenCalledWith(id, { before: null, limit: null, agentId: null }, false);
     held.until = Date.now() + 1; // the terminal exits after MAWS's process did: the transcript stays the history
     await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
     expect(disk).toHaveBeenCalledTimes(2);
