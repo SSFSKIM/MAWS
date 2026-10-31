@@ -5,6 +5,7 @@
 // render. ESM imports hoist, so a branch inside one module could not run before the app's imports evaluate: the
 // bootstrap's own imports are kept to what it calls, none of which opens a window, touches the profile or loads a host's
 // native module.
+import { writeSync } from 'node:fs';
 import { app } from 'electron';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
@@ -28,12 +29,26 @@ disableChromiumFeatures(app.commandLine, STARTUP_DISABLED_FEATURES);
 // artifact store's; P3-L M6b: the deliverable store's no more
 registerStoreSchemes();
 
-// The root loads in this script's own turn, before Electron's `ready`. A root that throws while loading fails as it did
-// when its code was this file's: an uncaught exception, never a quietly rejected promise.
+// The render host's exit when it fails (src/render-host/host.ts's EXIT_FAILED, which index.test.ts holds this to): named
+// here, not imported, so the entry loads nothing of the render host's graph before its root.
+const RENDER_HOST_FAILED = 70;
+
+// The root loads in this script's own turn, before Electron's `ready`. The app's root that throws while loading fails as
+// it did when its code was this file's: an uncaught exception, never a quietly rejected promise. The render host's may
+// not: Electron answers an uncaught exception in main with a modal dialog, which in a windowless process holds it (and,
+// before `ready`, Chromium's start) with nothing said. A root chunk that is missing or throws while it loads, before the
+// root's own failure handling exists (src/render-host/root.ts's `fatal`), is written to stderr synchronously and ends
+// the process as that handling would.
 // The render host is told this entry's directory, where mawsd.js is (its build id): its root is a chunk under chunks/,
 // where `__dirname` names another directory, and neither `require.main` nor argv names the entry under every launcher.
-const root = process.argv.includes('--render-host') ? import('../render-host/root').then(({ runRenderHost }) => runRenderHost(__dirname)) : import('./app');
+const rendering = process.argv.includes('--render-host');
+const root = rendering ? import('../render-host/root').then(({ runRenderHost }) => runRenderHost(__dirname)) : import('./app');
 root.catch((error: unknown) => {
+  if (rendering) {
+    writeSync(2, `[render-host] failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    app.exit(RENDER_HOST_FAILED);
+    return;
+  }
   setImmediate(() => {
     throw error;
   });

@@ -174,7 +174,8 @@ describe.skipIf(!existsSync(ENTRY) || !existsSync(APP))('main’s entry and its 
   it('loads the render host’s root only on --render-host, deferred, from a chunk that is no host bundle’s name', () => {
     expect(rootChunk).not.toBeNull();
     expect(rootChunk!.startsWith('index-')).toBe(false);
-    expect(code(entry).filter((line) => line.includes(rootChunk!))).toEqual([expect.stringMatching(/process\.argv\.includes\("--render-host"\) \? Promise\.resolve\(\)\.then\(\(\) => require\("\.\/chunks\/root-/)]);
+    expect(code(entry).filter((line) => line.includes(rootChunk!))).toEqual([expect.stringMatching(/^const root = rendering \? Promise\.resolve\(\)\.then\(\(\) => require\("\.\/chunks\/root-/)]);
+    expect(code(entry)).toContain('const rendering = process.argv.includes("--render-host");');
     expect([...graphOf(APP)!.keys()]).not.toContain(join(OUT, 'chunks', rootChunk!));
     const renderHost = graphOf(join(OUT, 'chunks', rootChunk!))!;
     expect([...renderHost.keys()]).not.toContain(APP);
