@@ -33,7 +33,16 @@ export const SupervisorStatusSchema = z.strictObject({
   orphansKilled: z.number().int(), // engines of a dead predecessor this supervisor stopped at its start
   // P5 O2 M2 (additive): the idle release's role and idle time (a laptop's the idle exit's, null for never; a server's
   // 24 hours); optional for an older supervisor
-  release: z.strictObject({ role: z.enum(['laptop', 'server']), idleMs: z.number().int().positive().nullable() }).optional(),
+  // O16 M5 (additive; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): `gate`, the live rows by their
+  // reap and observer: `armed`, rows whose observer holds the reap's fence; `observed`, rows whose observer is healthy;
+  // `unhealthy`, rows held because the observer seen on them is silent or gone; `absent`, rows on which none was ever seen
+  release: z.strictObject({
+    role: z.enum(['laptop', 'server']), idleMs: z.number().int().positive().nullable(),
+    gate: z.strictObject({ armed: z.number().int(), observed: z.number().int(), unhealthy: z.number().int(), absent: z.number().int() }).optional(),
+  }).optional(),
+  // O16 (additive; Interfaces §D): the session hosts (M2, M3: their counts and the handover) and `gate`, the gate socket's
+  // path (M5; null while it is not served). Optional for an older host.
+  holder: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']) }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 

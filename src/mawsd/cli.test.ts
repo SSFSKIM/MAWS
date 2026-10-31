@@ -98,6 +98,28 @@ describe('mawsd status', () => {
     expect(lines[7]).toBe('endpoint     {"enrolled":false}');
   });
 
+  // O16 M5: the engine host's idle release and its gate, read from its own status through machine.sock
+  it('running: a release line after the engine host’s, with the gate’s counts (held ones named only when there are any)', async () => {
+    const supervisor = (gate: { armed: number; observed: number; unhealthy: number; absent: number } | undefined, role = 'server', idleMs: number | null = 86_400_000) => ({
+      mode: 'detached', pid: 1, startedAt: '2026-10-31T00:00:00.000Z', buildId: 'b', protocol: 3, wire: 'w', liveSessions: 2, rows: 2, idleExitMs: null, idleExitAt: null,
+      exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, release: { role, idleMs, ...(gate && { gate }) },
+    });
+    let answer: unknown = supervisor({ armed: 0, observed: 1, unhealthy: 0, absent: 0 });
+    scene.engineSpawn = { answers: { 'host.supervisorStatus': () => answer } };
+    await scene.start({ role: 'server' });
+    const line = async () => (await cli(['status'])).out.trimEnd().split('\n');
+    const lines = await line();
+    expect(lines[4]).toMatch(/^engine host {2}ready · pid \d+ · build \S+ · 2 live$/);
+    expect(lines[5]).toBe('release      server, 24 h; gate observed 1, armed 0');
+    expect(lines[6]).toBe('pty host     parked');
+    answer = supervisor({ armed: 1, observed: 1, unhealthy: 2, absent: 3 }, 'laptop', 600_000);
+    expect((await line())[5]).toBe('release      laptop, 10 min; gate observed 1, armed 1, unhealthy 2, absent 3');
+    answer = supervisor(undefined, 'laptop', null); // an engine host before O16
+    expect((await line())[5]).toBe('release      laptop, never');
+    answer = null; // one whose status this build cannot read: no line
+    expect((await line())[5]).toBe('pty host     parked');
+  });
+
   it('running with no endpoint module (a daemon a test starts with none): the endpoint line is its null detail', async () => {
     await scene.start();
     const { code, out } = await cli(['status']);

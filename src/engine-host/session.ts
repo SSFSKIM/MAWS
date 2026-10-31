@@ -25,12 +25,13 @@ import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { PermissionBroker } from './broker';
 import { appInitialize } from '@shared/engine/initialize';
-import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setMaxThinkingTokens, setPermissionMode } from './controls';
+import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, mcpStatus, REQUEST_TIMEOUT_MS, requestClassOf, setMaxThinkingTokens, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
 import { HostHookRegistry, registerStopHook } from './host-hooks';
 import type { LaunchKind } from './work-state'; // P5 O2 M2
 import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2 M2
+import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
@@ -216,6 +217,16 @@ export class EngineSession {
   // C10 end
   private kept = false; // P5 O2 M2: the owner's Keep running mark, from the store at the launch and `session.setKeep`
   private readonly durableCrons: DurableCronSource; // P5 O2 M2: the durable crons and the engine session ids they match
+  // O16 M5 start: the reap's view and inputs (holder/reap.ts): its state and the gate's observer, the work under the
+  // engine as last read, an idle reap the engine ignored (until the next Stop), the stdio MCP servers' command lines
+  // (`mcp_status`, read once for the launch), and whether this launch's observer was saved as seen
+  private reapView: ReapView | null = null;
+  private descendants: number | null = 0;
+  private reapIgnored = false;
+  private mcpServerCommands: string[][] | null = null;
+  private mcpRead: Promise<void> | null = null;
+  private observerSaved = false;
+  // O16 M5 end
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -247,6 +258,10 @@ export class EngineSession {
     // P5 O2 M2: the Stop callback, every launch's (host-hooks.ts): its `session_crons` into the work state, answered at once
     registerStopHook(this.hooks, (input) => {
       this.tracker.stopped(input);
+      if (this.reapIgnored) { // O16 M5: the engine ran a turn to its end after ignoring an idle reap: its exit is its own again
+        this.reapIgnored = false;
+        if (this.stopReason === 'idle') this.stopReason = null;
+      }
       this.touch();
       return {};
     });
@@ -485,6 +500,114 @@ export class EngineSession {
     return this.terminate(true, Math.min(opts.graceMs ?? LADDER_MS.endSession, LADDER_MS.endSession));
   }
 
+  // O16 M5 start (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; D15): the reap's signal, once
+  // the reap (holder/reap.ts) found the session verified empty and its fence armed or no observer ever seen. `idle` is a
+  // path of its own, never the ladder (memoised, it marks the process exiting and closes stdin before SIGTERM, which an
+  // engine that ignored the signal could not survive): end_session with the ladder's grace, then one SIGTERM, then
+  // REAP_TERM_MS for the exit; stdin is never closed, no SIGKILL follows, the process state is left alone. An exit within
+  // it is an `idle` release through the exit path; past it the session goes on (`ignored`) with its work unknown
+  // (`reap_term_ignored`) and its stop reason `idle`, so a later exit is still the release, until the next Stop clears
+  // both. An explicit stop meanwhile takes over through the ladder. `budget` runs `stop('budget')`'s ladder (charter §4.4).
+  async reap(reason: 'idle' | 'budget', release?: BudgetRelease): Promise<'exited' | 'ignored'> {
+    if (reason === 'budget') {
+      await this.stop('budget', { release: release ?? { limitKiB: 0, totalKiB: 0 } });
+      return this.processState === 'exited' ? 'exited' : 'ignored';
+    }
+    const transport = this.transport;
+    const client = this.client;
+    if (this.processState === 'exited') return 'exited';
+    if (transport === null || client === null || this.processState !== 'ready') return 'ignored';
+    if (this.stopReason === null) this.stopReason = 'idle';
+    const taken = async (): Promise<'exited' | null> => {
+      if (this.processState === 'exiting') await this.exited; // an explicit stop took over through the ladder
+      return this.processState === 'exited' ? 'exited' : null;
+    };
+    this.reapRow('end_session');
+    endSession(client, { reason: 'stop' }).catch(() => {}); // the exit is the answer that matters
+    if (await this.exitWithin(LADDER_MS.endSession) || await taken()) return 'exited';
+    this.reapRow('term');
+    transport.kill('SIGTERM');
+    if (await this.exitWithin(REAP_TERM_MS) || await taken()) return 'exited';
+    this.reapRow('term_ignored');
+    this.reapIgnored = true;
+    this.tracker.termIgnored();
+    this.touch();
+    return 'ignored';
+  }
+
+  private reapRow(phase: 'end_session' | 'term' | 'term_ignored'): void {
+    try {
+      this.record('meta', { event: 'reap', phase });
+    } catch (error) {
+      this.log(`reap ${phase} not journaled: ${messageOf(error)}`);
+    }
+  }
+
+  private exitWithin(ms: number): Promise<boolean> {
+    if (this.processState === 'exited') return Promise.resolve(true);
+    return Promise.race([
+      this.exited.then(() => true),
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), ms);
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]);
+  }
+
+  // The reap's state and the gate's observer, which the status carries; an observer seen and then silent or gone is
+  // unknown work (`observer_unhealthy`). The table's first, at the reservation, is not told (`touch` false): the launch's
+  // answer goes out before its first status.
+  noteReap(view: ReapView, touch = true): void {
+    this.reapView = { ...view };
+    this.tracker.observer(view.observer === 'unhealthy');
+    if (touch) this.touch();
+  }
+
+  // The work under the engine as the table's last tree read counted it.
+  noteDescendants(read: number | 'unreadable'): void {
+    this.descendants = read === 'unreadable' ? null : read;
+    this.tracker.descendantsRead(read !== 'unreadable');
+    this.touch();
+  }
+
+  // Every engine session id the process has carried (the gate keys an observer's hello against them).
+  engineSessionIds(): ReadonlySet<string> {
+    return this.durableCrons.ids();
+  }
+
+  // The launch's stdio MCP servers as `[command, ...args]`, the registration the descendant veto reads; null until read.
+  mcpCommands(): string[][] | null {
+    return this.mcpServerCommands;
+  }
+
+  // Reads them from `mcp_status` (M0's question 4: `get_settings` carries none), once for the launch; asked when the
+  // tree first shows a child of the engine, a failure asked again at the next such read.
+  readMcpCommands(): Promise<void> {
+    const client = this.client;
+    if (this.mcpServerCommands !== null || client === null || this.processState !== 'ready') return Promise.resolve();
+    this.mcpRead ??= mcpStatus(client, {}).then(
+      (answer) => {
+        this.mcpServerCommands = answer.mcpServers.flatMap((server) => {
+          const config = (server as { config?: { type?: unknown; command?: unknown; args?: unknown } }).config;
+          if (config?.type !== 'stdio' || typeof config.command !== 'string') return [];
+          return [[config.command, ...(Array.isArray(config.args) ? config.args.filter((a): a is string => typeof a === 'string') : [])]];
+        });
+      },
+      (error: unknown) => this.log(`mcp_status for the descendant veto failed: ${messageOf(error)}`),
+    ).finally(() => {
+      this.mcpRead = null;
+    });
+    return this.mcpRead;
+  }
+
+  // The gate saw this process's observer bridge: kept in the state file, once per launch, so an adopter restores it (D37).
+  observerSeen(): void {
+    if (this.observerSaved) return;
+    this.observerSaved = true;
+    this.storeWrite(this.store.saveObserverSeen(this.spec.appSessionId, this.plan.launchId), 'observer seen');
+  }
+  // O16 M5 end
+
   // True once the termination ladder had to send SIGKILL (engine.shutdown's `forced` count).
   get forcedKill(): boolean {
     return this.ladder.killed;
@@ -611,9 +734,10 @@ export class EngineSession {
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
-      work: tracked.work, kept: this.kept, // P5 O2 M2
+      work: { ...tracked.work, descendants: this.transport?.pid == null ? 0 : this.descendants }, kept: this.kept, // P5 O2 M2; O16 M5: descendants
       ...(this.surface.attached && { uiSurface: { clientId: this.surface.clientId } }), // R2
       ...(tracked.published && { published: tracked.published }), // P5 E312
+      ...(this.reapView && { reap: { ...this.reapView } }), // O16 M5
     };
     // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
     if (status.process !== 'exited') status.keepAlive = hardReasons(status, this.opts.statefulMcpServers?.() ?? NO_SERVERS);

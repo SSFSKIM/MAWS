@@ -35,6 +35,8 @@
     // whose seam imports the dialect's IR
     "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
+    // P5 O16 M5: supervisor case (m)'s fake observer on the engine host's gate.sock
+    "src/engine-host/holder/fake-observer.ts",
     // P4-AGG M1: the Discover launch names the catalog's two test seams by their modules' constants
     "src/main/catalog/fetch.ts",
     "src/main/catalog/sources.ts",

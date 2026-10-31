@@ -1,7 +1,8 @@
 // The P0 SessionStateStore (charter §4.4 as amended 2026-09-28; C3 execution document, Interfaces "Queue, steer,
 // interrupt"): one JSON file per app session at `<userData>/engine-host/state/<appSessionId>.json` holding
-// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds? }` (P5 O2 M2: `keep`, the owner's Keep running mark,
-// and `engineSessionIds`, the ids the session has had, each absent when never set; an older build's reader strips them),
+// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds?, observerSeenLaunch? }` (P5 O2 M2: `keep`, the owner's
+// Keep running mark, and `engineSessionIds`, the ids the session has had; O16 M5: `observerSeenLaunch`, the launch whose
+// process an observer bridge was seen on; each absent when never set; an older build's reader strips them),
 // written to a temp file and renamed so a crash leaves the old file or the new one, never half of either. The session's
 // cron record (P5 O2 M2, P5 Decision Log 49) is its own file beside it, `<appSessionId>.cron.json`, written the same way.
 // Operations on one session run strictly in the order they were issued (one chain per session, loads included), so a
@@ -33,7 +34,7 @@ const StoredQueueStateSchema = QueueStateSchema.extend({
 // P2-0 (X6): ignore a later build's state/spec keys on read, rather than moving its queue and grants aside. Strip,
 // not passthrough: an update still writes only this build's shape; saveQueue, saveGrants and saveLaunchSpec keep the
 // strict IPC/write schemas.
-const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */ });
+const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */, observerSeenLaunch: z.string().optional() /* O16 M5 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
@@ -109,6 +110,15 @@ export class FileSessionStateStore implements SessionStateStore {
 
   saveKeep(id: AppSessionId, keep: boolean): Promise<void> {
     return this.update(id, (file) => ({ ...file, keep }));
+  }
+
+  // O16 M5 (D37): the launch whose process an observer was seen on, in the state file beside the keep mark
+  loadObserverSeen(id: AppSessionId): Promise<string | null> {
+    return this.run(id, async () => (await this.read(id)).observerSeenLaunch ?? null);
+  }
+
+  saveObserverSeen(id: AppSessionId, launchId: string): Promise<void> {
+    return this.update(id, (file) => ({ ...file, observerSeenLaunch: launchId }));
   }
 
   // P5 O2 M2 (P5 Decision Log 46): the engine session ids the session has had, which its durable crons are matched against.

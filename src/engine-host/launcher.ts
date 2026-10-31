@@ -59,6 +59,7 @@ export interface LauncherDeps {
   // P3-HD: the local-scope key of a live launch's cwd, captured beside the probes, before the spawn (bounded, never failing
   // the launch: a failure is an unidentified key); tests inject it
   captureLocalKey?: (cwd: string) => Promise<ConnectorLocalKey>;
+  gateSocket?: string; // O16 M5: the gate's path, MAWS_HOLDER_SOCKET in every live launch's environment
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -108,7 +109,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
 
     let plan: LaunchPlan;
     try {
-      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: process.pid, ...engine }); // spawned by this host (ipc.ts spawnEngine)
+      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: process.pid, gateSocket: deps.gateSocket /* O16 M5 */, ...engine }); // spawned by this host (ipc.ts spawnEngine)
     } catch (error) {
       if (error instanceof LaunchSpecConflict) return refused('settings_conflict', error.message);
       throw error;

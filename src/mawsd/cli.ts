@@ -22,6 +22,7 @@ import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
 import { defaultProfileDir } from '@shared/daemon/profile';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { DaemonStatusSchema, type DaemonHost, type DaemonStatus } from '@shared/ipc/schema/daemon';
+import { SupervisorStatusSchema, type SupervisorStatus } from '@shared/ipc/schema/host'; // O16 M5
 import { readTolerant } from '@shared/ipc/tolerant';
 import { IDENTITY_FILE, readMachineRef } from '@shared/machine/identity-file';
 import { SUPERVISOR_FILES } from '../engine-host/supervisor-files';
@@ -195,7 +196,7 @@ async function status(context: Context, json: boolean): Promise<number> {
     if (!read.ok) return failed(deps, 'daemon.status answered a status this command cannot read');
     const value = read.value;
     if (json) deps.out(`${JSON.stringify({ running: true, ...value, unit })}\n`);
-    else deps.out(statusText(value, `${link.welcome.protocol}.${link.welcome.minor}`, unit?.label ?? null, deps.now()));
+    else deps.out(statusText(value, `${link.welcome.protocol}.${link.welcome.minor}`, unit?.label ?? null, deps.now(), await releaseOf(link, value)));
     return EXIT.done;
   } finally {
     link.close();
@@ -213,7 +214,28 @@ function unitState(context: Context): { label: string; installed: boolean; loade
   }
 }
 
-function statusText(status: DaemonStatus, wire: string, label: string | null, now: number): string {
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the engine host's idle release and its
+// gate, from its own status (`host.supervisorStatus` through machine.sock); null while it is parked (a status read never
+// wakes it beyond daemon.status's own read), when it does not answer, or for a host whose status this build cannot read.
+async function releaseOf(link: MachineLink, status: DaemonStatus): Promise<SupervisorStatus['release'] | null> {
+  if (status.hosts['engine-host'].state !== 'ready') return null;
+  const answer = await link.request('host.supervisorStatus', undefined, STATUS_READ_MS).catch(() => null);
+  if (!answer?.ok) return null;
+  const read = readTolerant(SupervisorStatusSchema, answer.value);
+  return read.ok ? (read.value.release ?? null) : null;
+}
+
+const STATUS_READ_MS = 5_000;
+
+function releaseText(release: NonNullable<SupervisorStatus['release']>): string {
+  const idle = release.idleMs === null ? 'never' : release.idleMs % 3_600_000 === 0 ? `${release.idleMs / 3_600_000} h` : `${Math.round(release.idleMs / 60_000)} min`;
+  const gate = release.gate;
+  if (!gate) return `${release.role}, ${idle}`;
+  const held = [gate.unhealthy > 0 && `unhealthy ${gate.unhealthy}`, gate.absent > 0 && `absent ${gate.absent}`].filter(Boolean);
+  return `${release.role}, ${idle}; gate observed ${gate.observed}, armed ${gate.armed}${held.length > 0 ? `, ${held.join(', ')}` : ''}`;
+}
+
+function statusText(status: DaemonStatus, wire: string, label: string | null, now: number, release: SupervisorStatus['release'] | null = null): string {
   const head = ['mawsd running', `pid ${status.pid}`, status.kind === 'unit' ? `unit ${label ?? '(its label is not known here)'}` : 'private', `up ${duration(now - Date.parse(status.startedAt))}`];
   if (status.idleExitAt) head.push(`idle exit in ${duration(Date.parse(status.idleExitAt) - now)}`);
   const { engineHost, ptyHost, machine } = status.clients;
@@ -226,6 +248,7 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
     `machine ${status.machine}`,
     `profile ${status.profile ?? '(not shown)'} · role ${status.role}`,
     `engine host  ${hostText(status.hosts['engine-host'])}`,
+    ...(release ? [`release      ${releaseText(release)}`] : []), // O16 M5
     `pty host     ${hostText(status.hosts['pty-host'])}`,
     `clients      ${clients.length > 0 ? clients.join(' · ') : 'none'}`,
     `endpoint     ${JSON.stringify(status.endpoint.detail)}`,

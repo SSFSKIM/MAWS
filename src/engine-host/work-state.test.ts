@@ -246,3 +246,41 @@ describe('the Stop input, read leniently', () => {
     expect(sessionCronsOf({ session_crons: {} }, () => {})).toBe('unreadable');
   });
 });
+
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the reap's three reasons, each work until
+// it clears, so a row they hold is never verified empty.
+describe('the reap’s unknowns (O16 M5)', () => {
+  it('an unhealthy observer is unknown work until it is heard again', () => {
+    const work = state();
+    work.observer(true);
+    expect(work.snapshot()).toEqual({ crons: [], unknown: 'observer_unhealthy' });
+    work.observer(false);
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('an ignored reap is unknown work until the next Stop', () => {
+    const work = state();
+    work.termIgnored();
+    expect(work.snapshot().unknown).toBe('reap_term_ignored');
+    turn(work); // a turn that ended without its Stop does not clear it
+    expect(work.snapshot().unknown).toBe('reap_term_ignored');
+    turn(work, (w) => w.stopped([], []));
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('an unreadable process tree is unknown work until a read succeeds', () => {
+    const work = state();
+    work.descendantsRead(false);
+    expect(work.snapshot().unknown).toBe('descendants_unreadable');
+    work.descendantsRead(true);
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('a cron reason is named first; the reap’s are named once the crons and tasks are known', () => {
+    const work = state('resumed');
+    work.observer(true);
+    expect(work.snapshot().unknown).toBe('resumed');
+    turn(work, (w) => w.stopped([], []));
+    expect(work.snapshot().unknown).toBe('observer_unhealthy');
+  });
+});

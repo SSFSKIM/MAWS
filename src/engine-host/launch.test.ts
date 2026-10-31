@@ -260,6 +260,14 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.MAWS_LANE).toBe('B');
     });
 
+    // O16 M5 (OX10 as adopted): where the observer bridge connects to the reap's gate, over any value the capture holds
+    it('sets MAWS_HOLDER_SOCKET to the gate’s path when the host serves one, and only then', () => {
+      const captured = { ...CAPTURED, MAWS_HOLDER_SOCKET: '/elsewhere/gate.sock' };
+      expect(buildLaunch(spec(), captured, { ...OPTS, gateSocket: '/p/supervisor/gate.sock' }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
+      expect(buildLaunch(spec({ gateway: 'direct' }), captured, { ...OPTS, gateSocket: '/p/supervisor/gate.sock' }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
+      expect(buildLaunch(spec(), captured, OPTS).env.MAWS_HOLDER_SOCKET).toBeUndefined();
+    });
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({

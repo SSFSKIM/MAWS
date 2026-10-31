@@ -47,7 +47,7 @@ async function replay(name: string, opts: { spec?: Partial<LaunchSpec>; tasksFil
     session: { scheduledTasksFile: opts.tasksFile ?? (() => null) },
     beforeStart: ({ session }) => session.on('status', (s: EngineSessionStatus) => {
       statuses.push(s);
-      works.push(s.work!);
+      works.push({ crons: s.work!.crons, unknown: s.work!.unknown }); // O16 M5: a replay has no process tree (descendants 0)
     }),
   });
   expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);

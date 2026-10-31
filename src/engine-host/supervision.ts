@@ -58,6 +58,9 @@ export interface SupervisionDeps {
   // The idle collection (index.ts), told the quiet; a harness that does not read it leaves it out
   collector?: Pick<IdleCollector, 'set' | 'dropped'>;
   startup?: Promise<unknown>; // the register's startup gate (index.ts's designSystems.ready): quiet waits for it to settle
+  // O16 M5: the gate (holder/gate.ts): its socket's path while it serves (null when it could not listen) and the live
+  // rows' counts by reap and observer (the table's); absent in a harness, which reports neither
+  gate?: { path(): string | null; counts(): { armed: number; observed: number; unhealthy: number; absent: number } };
 }
 
 const NO_STATEFUL: ReadonlySet<string> = new Set(); // a stateful server holds a row's release, not its quiet
@@ -167,7 +170,8 @@ export class Supervision {
       liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length,
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
-      release: { role: this.deps.role, idleMs: this.releaseIdleMs() }, // P5 O2 M2
+      release: { role: this.deps.role, idleMs: this.releaseIdleMs(), ...(this.deps.gate && { gate: this.deps.gate.counts() }) }, // P5 O2 M2; O16 M5: the gate
+      ...(this.deps.gate && { holder: { hosts: 0, adopted: 0, failed: 0, gate: this.deps.gate.path(), handover: 'none' as const } }), // O16 M5: the gate's path; M2 and M3 fill the rest
     };
   }
 

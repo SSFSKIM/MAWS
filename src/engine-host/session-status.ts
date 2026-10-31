@@ -174,6 +174,19 @@ export class SessionStatusTracker {
     this.record();
   }
 
+  // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the reap's three unknowns
+  observer(unhealthy: boolean): void {
+    this.work.observer(unhealthy);
+  }
+
+  termIgnored(): void {
+    this.work.termIgnored();
+  }
+
+  descendantsRead(readable: boolean): void {
+    this.work.descendantsRead(readable);
+  }
+
   // The cron record, handed over when it differs from the one last written
   private record(): void {
     const record = this.work.cronRecord();

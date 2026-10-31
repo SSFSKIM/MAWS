@@ -710,7 +710,9 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(0);
     return { table, s, logs };
   }
-  const lifecycle = (x: Scripted) => x.session.lifecycle;
+  // O16 M5: an idle release goes through the row's reap, which leaves the process state alone and writes end_session
+  // first (holder/reap-session.test.ts): a row it released reads `released` here
+  const lifecycle = (x: Scripted) => (x.transport.requestsOf('end_session').length > 0 ? 'released' : x.session.lifecycle);
 
   it('stops a ready row with no hard reason once the idle time has passed since the release became active, as reason idle', async () => {
     const { table, s, logs } = await idleTable(['a']);
@@ -718,8 +720,8 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
-    expect(logs).toEqual(['idle release of a: idle for 60000 ms with no interest held']); // P5 O2 M2: re-keyed on interest
+    expect(lifecycle(s.a!)).toBe('released');
+    expect(logs).toEqual(['idle release of a: idle for 60000 ms with no interest held', 'idle reap of a: signalled (no observer was ever seen on the process)']); // P5 O2 M2: re-keyed on interest; O16 M5: through the reap
     expect(s.a!.transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']); // `idle` never goes on the wire
     s.a!.transport.exit(0);
     await s.a!.session.exited;
@@ -739,7 +741,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a hard reason that comes and goes inside the idle time restarts the clock', async () => {
@@ -752,7 +754,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a row the engine says is working is not idle (running), even with no hard reason', async () => {
@@ -765,7 +767,7 @@ describe('process table (E10): the idle-row release', () => {
     expect(lifecycle(s.a!)).toBe('ready');
     s.a!.transport.push(engineState('idle', 'st-2'));
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('releases nothing while inactive (a client connected), however long the row has been idle; activation starts the clock', async () => {
@@ -777,7 +779,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a client connecting cancels the clock; one leaving again starts it afresh; a new idle time keeps the activation', async () => {
@@ -793,7 +795,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('never releases with no idle time (never)', async () => {
@@ -811,7 +813,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(0);
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect([s.a, s.b, s.c].map((x) => lifecycle(x!))).toEqual(['exiting', 'ready', 'ready']);
+    expect([s.a, s.b, s.c].map((x) => lifecycle(x!))).toEqual(['released', 'ready', 'ready']);
     s.a!.transport.exit(0);
     await s.a!.session.exited;
     for (const x of [s.b!, s.c!]) {
@@ -922,7 +924,9 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(0);
     return { table, s, logs };
   }
-  const lifecycle = (x: Scripted) => x.session.lifecycle;
+  // O16 M5: an idle release goes through the row's reap, which leaves the process state alone and writes end_session
+  // first (holder/reap-session.test.ts): a row it released reads `released` here
+  const lifecycle = (x: Scripted) => (x.transport.requestsOf('end_session').length > 0 ? 'released' : x.session.lifecycle);
   // One human turn, its frames pushed between the engine's `started` and its result.
   async function humanTurn(x: Scripted, frames: unknown[]): Promise<void> {
     const { messageUuid } = await x.session.send('go');
@@ -965,7 +969,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(budgetOf(s.a!)).toMatchObject({ over: true, release: 'a', blocked: [] });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a session whose last Stop listed a session cron is never released; a Stop listing none starts its clock', async () => {
@@ -978,42 +982,42 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('ready');
     expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
     await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a cron tool (a subagent’s included) in a turn that ended without Stop holds the session until the next Stop', async () => {
     const { table, s } = await releaseTable(['a']);
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await humanTurn(s.a!, [assistantTool('CronCreate', 'toolu-agent')]); // interrupted: no Stop
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'turn_ended_without_stop' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'turn_ended_without_stop', descendants: 0 });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a --resume after an exit that was not a release holds the session until its first Stop (a resurrected session-only cron can fire before it)', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a resume after a release starts known: nothing holds it', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { launchKind: 'resumed_after_release' } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   // P5 Decision Log 46: the durable crons, in the project's scheduled-tasks file, which no Stop lists
@@ -1032,28 +1036,28 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(s.a!.session.status()).toMatchObject({ work: { crons: [job] }, keepAlive: ['background_tasks'] });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await humanTurn(s.a!, [stop([])]); // the Stop lists no durable job; the file still holds it
-    expect(s.a!.session.status().work).toEqual({ crons: [job], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [job], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
     files.set('/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob('someone-else')] })); // CronDelete
     await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a scheduled-tasks file that exists but cannot be read holds the session until a read succeeds', async () => {
     const files = new Map([['/p/.claude/scheduled_tasks.json', '{"tasks": [']]);
     const { table, s } = await releaseTable(['a'], resumeOf('resumed_after_release', files));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     files.delete('/p/.claude/scheduled_tasks.json');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   // P5 Decision Log 49: the cron record beside the state file bounds a resume's unknown
@@ -1077,7 +1081,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // the older, cleaner record was removed
     // a resume while the record is unconfirmed is unknown, not known-empty
     const resumed = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
-    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     // storage recovers: the next Stop, identical to the failed one, is written
     store.cronRecordWriteError = null;
     await humanTurn(s.a!, [stop([cron], 'stop-3')]);
@@ -1092,10 +1096,10 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
 
   it('a resume whose record shows no listed cron and no cron tool since starts known and empty, and is released', async () => {
     const { table, s } = await releaseTable(['a'], resumeWithRecord({ sessionCrons: [], toolSinceStop: false }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it.each<[string, CronRecord | null]>([
@@ -1104,7 +1108,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     ['no record', null],
   ])('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
     const { table, s } = await releaseTable(['a'], resumeWithRecord(record));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
@@ -1116,7 +1120,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
       throw new Error('state file unreadable');
     };
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     expect(s.a!.logs).toContainEqual(expect.stringContaining('cron record not loaded'));
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
@@ -1139,11 +1143,11 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
       const beforeClear = '66666666-6666-4666-8666-666666666666'; // the id the job keeps after a /clear moved the session on
       const files = new Map([['/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob(beforeClear)] })]]);
       const { table, s } = await releaseTable(['a'], () => ({ spec: resumeOf('resumed', files)().spec, session: { launchKind: 'resumed', scheduledTasksFile: tasksFile(files), store } }));
-      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
       expect(s.a!.logs).toContainEqual(expect.stringContaining('engine session ids not loaded'));
       table.setIdleRelease({ idleMs: IDLE_MS, active: true });
       await humanTurn(s.a!, [stop([])]); // a Stop re-reads the file on the same lost lineage
-      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
       await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
       expect(lifecycle(s.a!)).toBe('ready');
       expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a' }] });
@@ -1156,12 +1160,12 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await humanTurn(s.a!, [stop([])]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted' }); // the tasks are not read yet
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted', descendants: 0 }); // the tasks are not read yet
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     s.a!.transport.push(tasks([], 'b-1'));
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('interest holds a row; its end (a set without it, or the holder gone) starts the clock', async () => {
@@ -1175,12 +1179,12 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
     app.end(); // the client's connection ended
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.b!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.b!)).toBe('exiting');
+    expect(lifecycle(s.b!)).toBe('released');
   });
 
   it('interest is the union of its holders; a holder already gone holds nothing', async () => {
@@ -1198,7 +1202,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('ready');
     table.setInterest(second, []);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a server’s idle time (24 hours) on the same rule; a due time passed while the machine slept releases soon after it wakes', async () => {
@@ -1208,12 +1212,12 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(SERVER_RELEASE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
     // b's mark clears; then the wall clock jumps past its due time while no timer runs (the machine slept)
     s.b!.session.setKept(false);
     vi.setSystemTime(Date.now() + 2 * SERVER_RELEASE_MS);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(lifecycle(s.b!)).toBe('exiting');
+    expect(lifecycle(s.b!)).toBe('released');
   });
 
   it('a kept session is never idle-released, though the memory budget may still release it; clearing the mark starts the clock', async () => {
@@ -1228,7 +1232,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('under an armed exit-when-idle interest is ignored, its clock starting at the arming, and the keep mark is honoured', async () => {
@@ -1241,8 +1245,8 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
-    expect(logs).toEqual(['idle release of a: idle for 600000 ms with no interest held (exit-when-idle armed: interest ignored)']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
+    expect(logs).toEqual(['idle release of a: idle for 600000 ms with no interest held (exit-when-idle armed: interest ignored)', 'idle reap of a: signalled (no observer was ever seen on the process)']); // O16 M5: the reap's step reads the interest as ignored too
   });
 });
 // P5 O2 M2 end

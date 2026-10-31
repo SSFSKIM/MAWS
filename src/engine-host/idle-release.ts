@@ -13,6 +13,12 @@
 // the owner kept a session. Interest is per holder (a client connection's ClientRef), each holder's last full set,
 // ended for every session at once when the holder is gone. Due times compare Date.now(), and no timer waits longer than
 // RECHECK_MS, so a due time a laptop slept past is met within a minute of its waking.
+//
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F): a due row is handed to its reap
+// (`release`, holder/reap.ts), which signals only once the row is verified empty and its observer's fence is armed (or
+// none was ever seen on the process), re-reading this rule (`held`) in the step that signals. A reap that ends without
+// a signal, or whose signal the engine ignored, restarts the row's clock (`restart`). The verdict is the reap's; the
+// idle times are unchanged.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientRef } from '@shared/ipc/client';
@@ -30,6 +36,7 @@ export interface IdleReleaseDeps {
   stateful(): ReadonlySet<string>;
   log(line: string): void;
   interestChanged?(): void; // a holder's set replaced or ended (the supervisor's quiet reads `interested`)
+  release(session: EngineSession): void; // O16 M5: the row's reap, due as `idle`
 }
 
 interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null }
@@ -93,6 +100,22 @@ export class IdleRelease {
     return this.union();
   }
 
+  // O16 M5: whether the rule holds the session now, the reap's step reading it again: the release off, or interest held
+  // (unless exit-when-idle ignores it). The keep mark and the row's state are the reap's own reads.
+  held(appSessionId: AppSessionId): boolean {
+    const { idleMs, activeSince, ignoreInterest } = this.policy;
+    return idleMs === null || activeSince === null || (!ignoreInterest && this.union().has(appSessionId));
+  }
+
+  // O16 M5: the row's reap ended without a release: its clock starts again now, if its state still makes it eligible.
+  restart(session: EngineSession): void {
+    const status = this.deps.current(session);
+    if (status === null || status.process === 'exited' || this.closed) return;
+    const eligible = isIdleRow(status, this.deps.stateful());
+    this.rows.set(session, { appSessionId: status.appSessionId, since: eligible ? Date.now() : null, kept: status.kept === true, keptClearedAt: null });
+    this.schedule();
+  }
+
   // Whether any holder holds interest in any session.
   interested(): boolean {
     for (const set of this.holders.values()) if (set.size > 0) return true;
@@ -137,8 +160,8 @@ export class IdleRelease {
     (this.timer as { unref?: () => void }).unref?.();
   }
 
-  // The timer fired: every row whose clock has run out is read again and, still eligible, stopped as `idle` in the same
-  // synchronous step as the read.
+  // The timer fired: every row whose clock has run out is read again and, still eligible, handed to its reap as `idle`
+  // in the same synchronous step as the read (O16 M5: the reap's own step is the release's linearization point).
   private fire(): void {
     this.timer = null;
     const now = Date.now();
@@ -154,7 +177,7 @@ export class IdleRelease {
       this.rows.delete(session);
       const { idleMs, ignoreInterest } = this.policy;
       this.deps.log(`idle release of ${status.appSessionId}: idle for ${idleMs} ms with no interest held${ignoreInterest ? ' (exit-when-idle armed: interest ignored)' : ''}`);
-      session.stop('idle').catch((error: unknown) => this.deps.log(`idle release of ${status.appSessionId} failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.deps.release(session); // O16 M5
     }
     this.schedule();
   }

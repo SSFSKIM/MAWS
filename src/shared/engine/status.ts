@@ -82,6 +82,12 @@ export const EngineSessionStatusSchema = z.strictObject({
   work: z.strictObject({
     crons: z.array(z.strictObject({ id: z.string(), schedule: z.string(), recurring: z.boolean(), prompt: z.string() })),
     unknown: z.string().nullable(),
+    // O16 M5 (additive; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the processes under the engine
+    // that are its work (every descendant but the registered infrastructure, src/engine-host/holder/descendants.ts), as
+    // last read: 0 for a row with no process (a replay's), null while the tree cannot be read (`unknown` then names
+    // `descendants_unreadable`). O16's unknowns beside O2's: 'observer_unhealthy', 'reap_term_ignored',
+    // 'descendants_unreadable'. Optional for an older host.
+    descendants: z.number().int().nullable().optional(),
   }).optional(),
   kept: z.boolean().optional(),
   // P5 O2 M2 end
@@ -90,6 +96,10 @@ export const EngineSessionStatusSchema = z.strictObject({
   // (unverified), the verb, and when. It moves no ref the git watcher sees, so the PR row re-asks gh when `at` moves
   // rather than at its next poll. Absent before the first, and from an older host.
   published: z.strictObject({ url: z.string(), action: z.string().nullable(), at: z.string() }).optional(),
+  // O16 M5 (additive): the idle and budget releases' reap (src/engine-host/holder/reap.ts) and the gate's observer of this
+  // process (holder/gate.ts): `absent` while none was ever seen on it, `unhealthy` once one was seen and went silent or
+  // away. Absent from an older host.
+  reap: z.strictObject({ state: z.enum(['idle', 'arming', 'armed', 'signalled', 'term_ignored']), observer: z.enum(['absent', 'healthy', 'unhealthy']) }).optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

@@ -24,6 +24,7 @@ import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-in
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
 import { createLauncher } from './launcher';
+import type { Gate } from './holder/gate'; // O16 M5
 import { registerOps } from './ops'; // P5 O10 M7
 import { pendingCounts } from './pending-counts'; // P5 O10
 import { SUPERVISOR_FILES } from './supervisor-files'; // P5 O10 M7
@@ -185,6 +186,8 @@ export interface EngineIpcDeps {
   duringShutdown?: () => Promise<void>;
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
   datasetRefresh?: DatasetRefreshRequests; // E3: the host's registry of agents' dataset refreshes (absent: none is ever pending)
+  gate?: Gate; // O16 M5: the engine host's gate, the table's rows' observers (absent: none is ever seen)
+  gateSocket?: string; // O16 M5: its path, every live launch's MAWS_HOLDER_SOCKET
 }
 
 export interface EngineIpc {
@@ -219,7 +222,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     hostOn(name, handler);
   };
   const log = deps.log ?? ((message: string) => console.warn(`[engine-host] ${message}`));
-  const table = deps.table ?? new ProcessTable();
+  const table = deps.table ?? new ProcessTable({ gate: deps.gate }); // O16 M5: the gate
   const store = deps.store ?? new FileSessionStateStore(deps.userData);
   const streams = new Map<AppSessionId, SessionStream>();
   const specs = new Map<AppSessionId, LaunchSpec>();
@@ -291,6 +294,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
+    gateSocket: deps.gateSocket, // O16 M5
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's

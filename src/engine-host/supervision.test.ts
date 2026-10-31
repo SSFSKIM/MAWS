@@ -695,3 +695,41 @@ describe('the engine host’s collection, asked again as it runs', () => {
     expect(h.collect).toHaveBeenCalledTimes(2);
   });
 });
+
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D, §F): the gate in the status, its path in
+// `holder.gate` and the live rows' counts in `release.gate`, both read at each status; absent without a gate.
+describe('host.supervisorStatus: the gate (O16 M5)', () => {
+  it('carries the gate’s path and counts as the gate reports them, valid on the wire', async () => {
+    let counts = { armed: 0, observed: 1, unhealthy: 0, absent: 2 };
+    let path: string | null = '/u/supervisor/gate.sock';
+    const emitted: SupervisorStatus[] = [];
+    const supervision = new Supervision({
+      mode: 'detached', identity: IDENTITY, role: 'server',
+      table: { list: () => [], onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, interested: () => false, launching: () => false, onHoldChanged: () => () => {} } as never,
+      plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
+      shutdown: async () => ({ stopped: 0, forced: 0 }),
+      emit: (status) => {
+        const checked = validateEventPayload('host.supervisorStatus', status);
+        if (!checked.ok) throw new Error(`invalid host.supervisorStatus: ${JSON.stringify(checked.issues)}`);
+        emitted.push(status);
+        return true;
+      },
+      log: () => {},
+      gate: { path: () => path, counts: () => counts },
+    });
+    expect(supervision.status()).toMatchObject({
+      release: { role: 'server', idleMs: SERVER_RELEASE_MS, gate: { armed: 0, observed: 1, unhealthy: 0, absent: 2 } },
+      holder: { hosts: 0, adopted: 0, failed: 0, gate: '/u/supervisor/gate.sock', handover: 'none' },
+    });
+    counts = { armed: 1, observed: 1, unhealthy: 1, absent: 0 };
+    path = null; // its listen failed
+    expect(supervision.status()).toMatchObject({ release: { gate: counts }, holder: { gate: null } });
+    expect(emitted.length).toBeGreaterThan(0);
+  });
+
+  it('a harness with no gate reports neither', () => {
+    const h = harness();
+    expect(h.supervision.status().release).toEqual({ role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS });
+    expect(h.supervision.status().holder).toBeUndefined();
+  });
+});

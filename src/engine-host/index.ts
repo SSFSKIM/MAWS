@@ -53,6 +53,7 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
+import { Gate, gateSocketPath } from './holder/gate'; // O16 M5
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -111,6 +112,16 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
+  // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E): the gate, OX10's server, on both
+  // shapes (no observer connects on a replay); every live launch's environment names it (MAWS_HOLDER_SOCKET). A gate that
+  // cannot listen leaves every observer absent (logged), and the releases then follow owner Q1's rule.
+  const gatePath = gateSocketPath(supervisorDir ?? join(userData, 'supervisor'), userData);
+  const gate = new Gate({ log: (line) => console.log(`[supervisor] ${line}`) });
+  let gateFailed = false; // the status names the path from the start, and null once its listen failed
+  gate.listen(gatePath).catch((error: unknown) => {
+    gateFailed = true;
+    console.warn(`[supervisor] the gate could not listen at ${gatePath}: ${error instanceof Error ? error.message : String(error)}`);
+  });
   const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
@@ -123,6 +134,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
       dashboards.close(); // P3-E
       designs.close(); // P3-E
       googleFaces.close(); // P4-B2
+      void gate.close(); // O16 M5: once no session is left to release
       documents?.close(); // P3-A
     },
     duringShutdown: async () => {
@@ -137,6 +149,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
+    gate, gateSocket: gatePath, // O16 M5
   });
   ({ table } = ipc);
   table.startSampling();
@@ -163,6 +176,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     log: (line) => console.log(`[supervisor] ${line}`),
     collector: idle,
     startup: designSystems.ready, // the register's gate: no collection lands mid-seed
+    gate: { path: () => (gateFailed ? null : gatePath), counts: () => rows.gateCounts() }, // O16 M5
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run

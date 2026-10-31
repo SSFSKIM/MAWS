@@ -35,7 +35,10 @@
 //   (l) the daemon shape only: a kill -9 of `mawsd` mid-turn, which the app's transport replaces, the engine host and the
 //       turn going on;
 //   (m) with the app open and a short idle time, a session with no tab is released and one in a tab, one marked Keep
-//       running and one holding a durable cron (fresh and resumed; P5 Decision Logs 46 and 47) are not.
+//       running and one holding a durable cron (fresh and resumed; P5 Decision Logs 46 and 47) are not; O16 M5: with a
+//       fake observer on the engine host's gate.sock, the release's `arm` arrives, the scene answers `armed` and the
+//       session is released; a `turn` after the arm is answered `proceed` and the session stays live another period;
+//       an observer gone silent holds its session past two periods.
 import { addressed } from './support/address';
 import { openSurface, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
@@ -56,6 +59,7 @@ import { documents, seamReady } from './support/documents'; // P3-A M5
 import { REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
+import { FakeObserver } from '../src/engine-host/holder/fake-observer'; // O16 M5
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
 import { attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
@@ -1088,6 +1092,50 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
       const st = await statusOf(page, id);
       expect(st.work?.crons.map((c) => c.id), 'the durable job, read from the file').toEqual(['efd35f19']);
       expect(st.keepAlive).toContain('background_tasks');
+    }
+
+    // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, acceptance 2): the release armed through the gate. Three
+    // more sessions with no tab, each with a fake observer (the sminos bridge's stand-in) on the engine host's gate.sock,
+    // held by the keep mark until the observer has said hello, then let go together.
+    const gatePath = (await s.ready(page, (st) => typeof st.supervisor?.holder?.gate === 'string')).supervisor!.holder!.gate!;
+    const observers: FakeObserver[] = [];
+    try {
+      const watched = async (name: string, beat: boolean) => {
+        const id = `m7-${name}-${stamp}` as AppSessionId;
+        await launchReady(page, id, fixture, { cwd: s.repo });
+        value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: true }));
+        const observer = await FakeObserver.connect(gatePath);
+        observers.push(observer);
+        observer.hello((await statusOf(page, id)).engineSessionId!, { pid: null, childPid: null });
+        await observer.next('welcome', 10_000);
+        if (beat) observer.beat(5_000); // the bridge's heartbeat
+        await expect.poll(async () => (await statusOf(page, id)).reap?.observer, { message: `${name}: the observer in the status` }).toBe('healthy');
+        return { id, observer };
+      };
+      const armed = await watched('armed', true);
+      const turned = await watched('turned', true);
+      const silent = await watched('silent', false);
+      for (const { id } of [armed, turned, silent]) value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: false }));
+      // armed: the arm comes before any signal; the release follows the scene's armed
+      const arm = await armed.observer.next('arm', IDLE_MS + 15_000);
+      expect(arm).toMatchObject({ t: 'arm', leaseMs: 10_000 });
+      expect(released(s, armed.id), 'no signal before armed').toBeUndefined();
+      armed.observer.send({ t: 'armed', fence: arm.fence as number });
+      await expect.poll(() => released(s, armed.id)?.frame.reason, { timeout: 20_000, message: 'the armed session is released as idle' }).toBe('idle');
+      // turned: a turn after the arm is answered proceed; the session stays live for another period
+      const turnArm = await turned.observer.next('arm', IDLE_MS + 15_000);
+      turned.observer.send({ t: 'turn', fence: turnArm.fence as number, origin: 'query' });
+      expect(await turned.observer.next('proceed', 5_000)).toEqual({ t: 'proceed', fence: turnArm.fence });
+      await new Promise((r) => setTimeout(r, IDLE_MS));
+      expect(released(s, turned.id), 'the session whose turn proceeded is not released').toBeUndefined();
+      expect((await statusOf(page, turned.id)).process).toBe('ready');
+      // silent: once its silence passes the window the session is held, past two periods
+      await expect.poll(async () => (await statusOf(page, silent.id)).work?.unknown, { timeout: 30_000, message: 'the silent observer holds its session' }).toBe('observer_unhealthy');
+      await new Promise((r) => setTimeout(r, 2 * IDLE_MS + 1_000));
+      expect(released(s, silent.id), 'the session whose observer went silent is not released').toBeUndefined();
+      expect((await statusOf(page, silent.id)).process).toBe('ready');
+    } finally {
+      for (const observer of observers) if (!observer.isClosed) await observer.close();
     }
     expect(run.maws.consoleErrors()).toEqual([]);
   });

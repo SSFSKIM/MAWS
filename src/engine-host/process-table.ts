@@ -31,6 +31,14 @@
 // its predecessor's orphans are swept), every change of the live rows that have a process (a launch's pid known, an
 // exit) is handed to the writer as `{appSessionId, pid, procStart, launchId}`, so a successor of a supervisor that died
 // can stop the engines it left. Each process's start time is read once (`ps`), at its first entry.
+//
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F): both releases, the idle clock's and
+// the budget's, end a process through its row's reap (holder/reap.ts), one per row from the reservation, over the row's
+// channel on the engine host's gate (holder/gate.ts; none in a harness: every observer absent). The reap signals only once
+// the row is verified empty, reading the process tree under the engine afresh (holder/descendants.ts) in the step that
+// signals; a budget reap that ends without a signal clears `releasing`, so the next evaluation may pick another. The
+// memory sample's `ps` reads that tree too, each live row's count of work under its engine kept in its status
+// (`work.descendants`), and a child of the engine the row cannot yet name asks its `mcp_status` once.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -42,6 +50,9 @@ import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
 import { procStartOf as psProcStart } from './supervisor-files'; // E10
+import { countWork, parseTree, PS_TREE_ARGS, readTreeSync } from './holder/descendants'; // O16 M5
+import type { Gate, GateChannel } from './holder/gate'; // O16 M5
+import { Reap, type ReapReason } from './holder/reap'; // O16 M5
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -78,8 +89,12 @@ export function parsePsTree(output: string): { sample(pid: number): { rssKiB: nu
 // C12: the budget state's identity for its event, without `sampledAt` (a sample that moved nothing else is not news)
 const signatureOf = (state: BudgetState): string => JSON.stringify({ ...state, sampledAt: null });
 
+// O16 M5: with each process's state and command line, which the descendant veto reads (parsePsTree reads the first three)
 const runPs = (): Promise<string> =>
-  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { timeout: 5_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+  new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+
+// O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
+const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
 
 export class ProcessTable {
   private readonly rows = new Map<AppSessionId, EngineSession>();
@@ -117,9 +132,20 @@ export class ProcessTable {
   private readonly procStarts = new WeakMap<EngineSession, string>();
   private ledgerWritten: string | null = null; // the rows last written, so an unchanged set is not rewritten
   // E10 end
+  // O16 M5 start: each row's reap and gate channel, the gate, the synchronous tree read, a budget release's numbers
+  private readonly reaps = new WeakMap<EngineSession, { reap: Reap; channel: GateChannel }>();
+  private readonly gate: Gate | null;
+  private readonly psSync: () => string;
+  private lastPs = '';
+  private readonly budgetReleases = new WeakMap<EngineSession, { limitKiB: number; totalKiB: number }>();
+  // O16 M5 end
 
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */ } = {}) {
+  // O16 M5: `gate`, the engine host's (absent: no observer, ever); `psSync`, the reap's step's tree read (by default `ps`
+  // itself, or, when a test injects the sampler's `ps`, that sampler's last output: the test's process world)
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */; gate?: Gate; psSync?: () => string /* O16 M5 */ } = {}) {
     this.ps = opts.ps ?? runPs;
+    this.gate = opts.gate ?? null; // O16 M5
+    this.psSync = opts.psSync ?? (opts.ps ? () => this.lastPs : readTreeSync); // O16 M5
     this.procStartOf = opts.procStartOf ?? psProcStart; // E10
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
@@ -129,7 +155,7 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
-    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged() }); // P5 O2 M2
+    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */ }); // P5 O2 M2
   }
 
   private readonly log: (message: string) => void;
@@ -144,8 +170,10 @@ export class ProcessTable {
     }
     const session = create();
     this.rows.set(appSessionId, session);
+    this.attachReap(session); // O16 M5
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
+      if (status.process === 'exited') this.detachReap(session); // O16 M5
       this.idle.track(session, this.rows.get(status.appSessionId) === session ? status : null); // E10; P5 O2 M2
       this.trackLive(session, status); // E10
       for (const listener of this.listeners) listener(status);
@@ -278,6 +306,91 @@ export class ProcessTable {
     }
   }
 
+  // O16 M5 start --------------------------------------------------------------------------------------------------------
+  private reapOf(session: EngineSession): Reap | undefined {
+    return this.reaps.get(session)?.reap;
+  }
+
+  // The row's gate channel (keyed by its lineage, its pid a cross-check) and its reap, from the reservation to the exit.
+  private attachReap(session: EngineSession): void {
+    const channel = this.gate?.channel({ lineage: () => session.engineSessionIds(), pid: () => session.pid, seen: () => session.observerSeen() }) ?? NO_OBSERVER;
+    const id = session.status().appSessionId;
+    const reap = new Reap(id, {
+      gate: channel,
+      current: () => this.currentStatus(session),
+      stateful: () => this.stateful,
+      interest: () => this.idle.held(id),
+      descendants: () => this.descendantsNow(session),
+      reap: (reason: ReapReason) => {
+        if (reason === 'idle') return session.reap('idle');
+        const release = this.budgetReleases.get(session) ?? { limitKiB: this.policy.limitKiB, totalKiB: this.budget.totalKiB };
+        this.lastRelease = { appSessionId: id, at: new Date().toISOString(), totalKiB: release.totalKiB };
+        this.budget = { ...this.budget, lastRelease: this.lastRelease };
+        this.emitBudget(false);
+        return session.reap('budget', release);
+      },
+      now: () => Date.now(),
+      log: (line) => this.log(line),
+      cancelled: (reason) => {
+        if (reason === 'idle') return this.idle.restart(session);
+        if (this.releasing !== session) return;
+        this.releasing = null; // the next evaluation may pick another
+        this.budget = { ...this.budget, releasing: null };
+        this.emitBudget(false);
+      },
+      ignored: () => this.idle.restart(session),
+      changed: (view) => session.noteReap(view),
+    });
+    this.reaps.set(session, { reap, channel });
+    session.noteReap({ state: reap.state, observer: reap.observer }, false);
+  }
+
+  private detachReap(session: EngineSession): void {
+    const held = this.reaps.get(session);
+    if (!held) return;
+    held.reap.dispose();
+    held.channel.close();
+  }
+
+  // The work under the session's engine now (the reap's step): a fresh synchronous read of the tree, kept in the status.
+  private descendantsNow(session: EngineSession): number | 'unreadable' {
+    const pid = session.pid;
+    if (pid === null) return 0;
+    let count: number | 'unreadable';
+    try {
+      count = this.countUnder(session, pid, parseTree(this.psSync()));
+    } catch (error) {
+      this.log(`the process tree under ${session.status().appSessionId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      count = 'unreadable';
+    }
+    session.noteDescendants(count);
+    return count;
+  }
+
+  // Registered infrastructure: the bridge child the row's observer named, and the launch's stdio MCP servers, asked of
+  // the engine once when the tree first shows it a child the row cannot name yet.
+  private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>): number {
+    const childPid = this.reaps.get(session)?.channel.childPid ?? null;
+    const commands = session.mcpCommands();
+    const count = countWork(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] });
+    if (count > 0 && commands === null) void session.readMcpCommands();
+    return count;
+  }
+
+  // The gate's counts over the live rows (the supervisor's status, `release.gate`): rows whose reap holds a fence, and
+  // rows by their observer's state.
+  gateCounts(): { armed: number; observed: number; unhealthy: number; absent: number } {
+    const counts = { armed: 0, observed: 0, unhealthy: 0, absent: 0 };
+    for (const session of this.rows.values()) {
+      const reap = this.reapOf(session);
+      if (!reap || session.lifecycle === 'exited') continue;
+      if (reap.state === 'arming' || reap.state === 'armed' || reap.state === 'signalled') counts.armed += reap.observer === 'absent' ? 0 : 1;
+      counts[reap.observer === 'healthy' ? 'observed' : reap.observer] += 1;
+    }
+    return counts;
+  }
+  // O16 M5 end --------------------------------------------------------------------------------------------------------
+
   private currentStatus(session: EngineSession): EngineSessionStatus | null {
     const status = session.status();
     return this.rows.get(status.appSessionId) === session ? status : null;
@@ -316,16 +429,21 @@ export class ProcessTable {
     const live = this.list().filter((s) => s.pid !== null && s.status().process !== 'exited');
     this.sampling = true;
     try {
-      const tree = live.length > 0 ? parsePsTree(await this.ps()) : null;
+      const output = live.length > 0 ? await this.ps() : null;
+      const tree = output === null ? null : parsePsTree(output);
+      const processes = output === null ? null : parseTree(output); // O16 M5
+      if (output !== null) this.lastPs = output; // O16 M5
       const sampledAt = new Date().toISOString();
       for (const session of live) {
         const sample = tree!.sample(session.pid!);
         session.recordMemory({ rssKiB: sample?.rssKiB ?? null, treeRssKiB: sample?.treeRssKiB ?? null, sampledAt });
+        if (session.pid !== null && session.status().process !== 'exited') session.noteDescendants(this.countUnder(session, session.pid, processes!)); // O16 M5
       }
       this.sampledAt = sampledAt; // C12
       this.evaluateBudget(true); // C12
     } catch (error) {
       this.log(`memory sample failed: ${error instanceof Error ? error.message : String(error)}`);
+      for (const session of live) if (session.status().process !== 'exited') session.noteDescendants('unreadable'); // O16 M5: never zero
     } finally {
       this.sampling = false;
     }
@@ -386,8 +504,9 @@ export class ProcessTable {
     if (verdict.release !== null) {
       const session = sessions[statuses.findIndex((s) => s.appSessionId === verdict.release)]!;
       this.releasing = session;
-      this.lastRelease = { appSessionId: verdict.release, at: new Date().toISOString(), totalKiB: verdict.totalKiB };
-      session.stop('budget', { release: { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB } }).catch((error: unknown) => this.log(`release of ${verdict.release} failed: ${error instanceof Error ? error.message : String(error)}`));
+      // O16 M5: through the row's reap, which signals (and records `lastRelease`) only once verified empty and armed
+      this.budgetReleases.set(session, { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB });
+      this.reapOf(session)?.due('budget');
     }
     this.publishBudget(verdict, verdict.release !== null);
   }

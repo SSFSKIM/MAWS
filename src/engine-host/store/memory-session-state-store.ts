@@ -13,9 +13,10 @@ export class MemorySessionStateStore implements SessionStateStore {
   readonly keeps = new Map<AppSessionId, boolean>(); // P5 O2 M2
   readonly engineSessionIds = new Map<AppSessionId, string[]>(); // P5 O2 M2
   readonly cronRecords = new Map<AppSessionId, CronRecord>(); // P5 O2 M2
+  readonly observerSeen = new Map<AppSessionId, string>(); // O16 M5
 
   async exists(id: AppSessionId): Promise<boolean> {
-    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id);
+    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id) || this.observerSeen.has(id);
   }
   async loadQueue(id: AppSessionId): Promise<StoredQueue> {
     return { ...structuredClone(this.queues.get(id) ?? { entries: [], paused: false }), corrupt: null };
@@ -61,6 +62,12 @@ export class MemorySessionStateStore implements SessionStateStore {
     }
     this.cronRecords.set(id, structuredClone(record));
   }
+  async loadObserverSeen(id: AppSessionId): Promise<string | null> {
+    return this.observerSeen.get(id) ?? null;
+  }
+  async saveObserverSeen(id: AppSessionId, launchId: string): Promise<void> {
+    this.observerSeen.set(id, launchId);
+  }
   // keeps no journal: nothing to delete, but the id is still checked as the file store checks it
   async forgetJournal(id: AppSessionId): Promise<void> {
     assertSafeAppSessionId(id);
@@ -72,5 +79,6 @@ export class MemorySessionStateStore implements SessionStateStore {
     this.keeps.delete(id);
     this.engineSessionIds.delete(id);
     this.cronRecords.delete(id);
+    this.observerSeen.delete(id);
   }
 }
