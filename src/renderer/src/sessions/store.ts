@@ -15,6 +15,7 @@ import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
+import { askUntilAnswered } from '../ipc/until-answered';
 import { toast } from '../stores/notices';
 import { toastHeld } from './holder-words';
 import { returnMessage } from './message-return';
@@ -211,9 +212,12 @@ const nameHolder: HeldNotice = (appSessionId, holder) => toastHeld(holder, [], s
 // failure, the row's Resume, the composer's refusal): a later telling replaces it rather than stacking a second.
 export const startNoticeId = (appSessionId: AppSessionId): string => `start:${appSessionId}`;
 
-// Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves once the intents are known
-// (answered or failed: a page with no answerer starts empty rather than holding hydration forever).
-export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = useSetup, onHeld: HeldNotice = nameHolder): { ready: Promise<void>; disconnect(): void } {
+// Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves at the intent snapshot's
+// first answer (a page with no answerer does not hold hydration forever), saying whether it held the intents.
+// 2026-10-31: a failed read is unknown, never none (an upgrade's mawsd restart answers the page's first reads
+// host_unavailable): both are asked again until answered (../ipc/until-answered.ts), and `known` resolves once the
+// intents are held.
+export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = useSetup, onHeld: HeldNotice = nameHolder): { ready: Promise<boolean>; known: Promise<void>; disconnect(): void } {
   let live = true;
   const offs = [
     client.on('session.intent.changed', (e) => live && store.getState().applyIntentChanged(e)),
@@ -234,27 +238,32 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
       }
     }),
   ];
-  const unavailable = (error: unknown) => {
-    console.warn('[sessions] session.intent.list unavailable; no unstarted sessions', error);
-    if (live) store.getState().applyIntents([]);
-  };
-  const ready = client.invoke('session.intent.list', undefined).then((result) => {
-    if (!live) return;
-    if (result.ok) store.getState().applyIntents(result.value.intents);
-    else unavailable(result.error);
-  }, unavailable);
-  void client.invoke('session.deletions.list', undefined).then(
-    (result) => {
-      if (!live) return;
-      if (result.ok) store.getState().applyDeletions(result.value.manifests);
-      else console.warn('[sessions] session.deletions.list unavailable', result.error);
-    },
-    (error: unknown) => console.warn('[sessions] session.deletions.list unavailable', error),
-  );
+  let first!: (held: boolean) => void;
+  const ready = new Promise<boolean>((resolve) => (first = resolve));
+  let held!: () => void;
+  const known = new Promise<void>((resolve) => (held = resolve));
+  const stops = [
+    askUntilAnswered(client, async () => {
+      const result = await client.invoke('session.intent.list', undefined).catch((error: unknown) => ({ ok: false as const, error }));
+      if (result.ok && live) store.getState().applyIntents(result.value.intents);
+      else if (!result.ok) console.warn('[sessions] session.intent.list unavailable; asked again when the machine is heard', result.error);
+      first(result.ok);
+      if (result.ok) held();
+      return result.ok;
+    }),
+    askUntilAnswered(client, async () => {
+      const result = await client.invoke('session.deletions.list', undefined).catch((error: unknown) => ({ ok: false as const, error }));
+      if (result.ok && live) store.getState().applyDeletions(result.value.manifests);
+      else if (!result.ok) console.warn('[sessions] session.deletions.list unavailable; asked again when the machine is heard', result.error);
+      return result.ok;
+    }),
+  ];
   return {
     ready,
+    known,
     disconnect() {
       live = false;
+      stops.forEach((stop) => stop());
       offs.forEach((off) => off());
     },
   };

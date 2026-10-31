@@ -45,6 +45,8 @@
 | `RENDER_CLIENT_CAPABILITY`, `PEER_CAPABILITIES.renderClient` and `render.client` in `WIRE_CAPABILITIES` (`src/shared/host/socket-protocol.ts`); `render.answer`'s failure arm's optional `ipcError` (`RenderFailureSchema`) and `render.answer` in `routes.ts`'s `PATH_COMMANDS`; `composeRender`'s optional `authors` and `hostGeneration` | capability, schema and route | O5 M3 | `mawsd`'s front; O5 M4 supplies `authors` and `hostGeneration` |
 | `installRenderSeams` (`src/render/e2e-seams.ts`), `createCaptureService`, `answerCaptureRequests`, `createExportService`, `answerExportRequests`; from `src/render-host/`: `connectRenderClient`, `hostCall`, `startRenderHost`, `renderHostProfile`, `RENDER_HOST_FLAG`, `RENDER_HOST_DIR`, `runRenderHost` and its exit codes 2 (no profile), 1 (no `mawsd`) and 70 (its own failure) | render library and host exports | O5 M3 | `mawsd`'s render seam (O5 M4); e2e only for the seams |
 | `MAWS_E2E_DELIVERY_HOLD`, read by main's `delivery.send` only under `MAWS_E2E=1` to hold the export phase | e2e-only environment seam | O4 M2 | O4's e2e cases |
+| `RemoteSession.launching`, `PAGED_READS`, `src/main/lane-b/remote-history.ts` (`readEventsInPages`, `HISTORY_PAGE_EVENTS`); test support `LaneBHost.exit`, `SideJournal.holdAtContextUsage()` and its `between` hook | main's lane B adapter and test support | O7 M2 | O7 M4 (the byte budget and continuation cursor on `session.events`); e2e:remote |
+| `remote.historyTooLarge {appSessionId, window: 'newest' or 'older'}`, a main-owned event outside the wire (its `appSessionId` line in `address-paths.json`) | renderer event | O7 M2 | the renderer's gap bar; retired or kept by O7 M4's paged history |
 
 ## Shared files and who goes first
 
@@ -89,3 +91,4 @@
 - 2026-10-31, the architect: the rule 5 additions of O4 M1, O7 M2, O16 M1 and O5 M2; O5's entry split landed first (#398, master 3239a670f), so O4 and O7 edit `src/main/app.ts` from now on (P5 Decision Log 169).
 - 2026-10-31, the architect: rule 5 additions from O16 M2 and M5 (the holder's status fields, its internals, the stub engine and the fake observer) and O7 M2's second set (the remote schema's constants and the renderer's hub-access store; two e2e supports).
 - 2026-10-31, the architect: rule 5 additions from O5 M3 (the render client capability, the render library's and host's exports, the moved files, `e2e:render-host`) and O4 M2 (its e2e delivery hold, the direct checks reading both formats).
+- 2026-10-31, the architect: rule 5 additions from O7 M2's paged history (`remote-history.ts`, `PAGED_READS`, `remote.historyTooLarge`) and its test support.

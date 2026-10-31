@@ -240,10 +240,13 @@ export function focusedProject(): ProjectId | null {
 // C10's seventh ask of C5: an unstarted session has no record, so without a say from C10 a relaunch would drop its tab
 // (hydration keeps only tabs whose record exists) though its draft persists, and a rollback that removes a provisional
 // record would close the tab before its failure card can offer recovery. C10 registers once: hydration waits for
-// `ready` (its intent snapshot) and keeps a record-less session tab `retains` claims; `session.removed` closes a tab
-// only when `retains` says no. Unregistered, the default rules stand.
+// `ready` (its intent snapshot's first answer) and keeps a record-less session tab `retains` claims; `session.removed`
+// closes a tab only when `retains` says no. Unregistered, the default rules stand. 2026-10-31: `ready` says whether that
+// answer held the intents; a failed read is asked again, never taken as none, and `known` resolves once they are held,
+// until when the local machine's tabs are kept (ipc/events.ts).
 export interface TabRetention {
-  ready: Promise<void>;
+  ready: Promise<boolean>;
+  known: Promise<void>;
   retains(appSessionId: string): boolean;
 }
 

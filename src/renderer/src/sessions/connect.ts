@@ -83,7 +83,7 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 
 export function connectSessions(client: MawsBridge = ipc): () => void {
   const setup = connectSetup(client, useSetup, heldToast);
-  const offs: (() => void)[] = [registerTabRetention({ ready: setup.ready, retains: retainsTab })];
+  const offs: (() => void)[] = [registerTabRetention({ ready: setup.ready, known: setup.known, retains: retainsTab })];
   // 2026-10-31: asked until main answers, so an upgrade's mawsd restart no longer leaves New chat disabled (launch-mode.ts)
   const stopAsking = onLaunchMode((mode) => {
     if (mode !== 'index') return;
