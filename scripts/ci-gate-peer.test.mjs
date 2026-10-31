@@ -2,7 +2,7 @@
 // the PEER_E2E groups, run whole against a repository whose origin's master and branch hold wire manifests.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -35,7 +35,7 @@ function repository(t, { master = {}, branch = {} } = {}) {
   execFileSync('git', ['init', '--quiet', '--bare', join(dir, 'origin.git')], { env });
   execFileSync('git', ['init', '--quiet', '-b', 'branch', tree], { env });
   git('remote', 'add', 'origin', join(dir, 'origin.git'));
-  write({ README: 'master\n', ...master });
+  write({ README: 'master\n', '.github/workflows/gate.yml': 'env:\n  PEER_E2E: cross-build\n', ...master });
   git('commit', '--quiet', '-m', 'master');
   git('push', '--quiet', 'origin', 'HEAD:refs/heads/master');
   write(branch);
@@ -51,7 +51,7 @@ function repository(t, { master = {}, branch = {} } = {}) {
     execFileSync('git', ['clone', '--quiet', ...args, `file://${join(dir, 'origin.git')}`, at], { env });
     return at;
   };
-  return { git, write, base, head, peerAt, clone, peer: (...args) => peerAt(head, args) };
+  return { tree, env, git, write, base, head, peerAt, clone, peer: (...args) => peerAt(head, args) };
 }
 
 test("a branch a minor past master's wire names the merge base, both wires, and says they are a minor apart", (t) => {
@@ -203,4 +203,99 @@ test('a shallow merge cannot silently remap a reachable first-parent peer to the
   assert.deepEqual(result.trailers, []);
   assert.match(result.notes.join('\n'), /shallow.*complete history/);
   assert.deepEqual(peerAt(tip, ['--peer', 'none'], shallow), { status: 0, trailers: [], notes: [] });
+});
+
+
+test('explicit peer groups refuse equal minors and different majors, with the pair and both ways out', (t) => {
+  for (const [major, minor] of [[3, 2], [4, 0]]) {
+    const { peer, base } = repository(t, { master: { [MANIFEST]: manifest(3, 2) }, branch: { [MANIFEST]: manifest(major, minor) } });
+    for (const gates of ['e2e:cross-build', 'static, e2e:cross-build,unit']) {
+      const result = peer('--gates', gates);
+      assert.equal(result.status, 2);
+      assert.deepEqual(result.trailers, []);
+      assert.match(result.notes.join('\n'), new RegExp(`ci-gate:.*e2e:cross-build.*${base.slice(0, 8)}.*3\\.2.*${major}\\.${minor}`));
+      assert.match(result.notes.join('\n'), /--peer.*master commit.*minor apart.*out of --gates/);
+    }
+  }
+});
+
+test('explicit peer groups accept different minors within one major in either direction, including a resolved relaunch peer', (t) => {
+  for (const minor of [0, 2, 4]) {
+    const { peer, base } = repository(t, { master: { [MANIFEST]: manifest(3, 1) }, branch: { [MANIFEST]: manifest(3, minor) } });
+    for (const args of [[], ['--peer', base]]) {
+      const result = peer('--gates', 'unit,e2e:cross-build', ...args);
+      assert.equal(result.status, 0, result.notes.join('\n'));
+      assert.deepEqual(result.trailers, [`Peer: ${base}`, 'Peer-Wire: 3.1', `Wire: 3.${minor}`]);
+    }
+  }
+});
+
+test('an explicit peer group cannot pass vacuously with no peer, no manifest, or itself as peer', (t) => {
+  const repo = repository(t, { master: { [MANIFEST]: manifest(3, 2) } });
+  const none = repo.peer('--gates', 'e2e:cross-build', '--peer', 'none');
+  assert.equal(none.status, 2);
+  assert.match(none.notes.join('\n'), /ci-gate:.*e2e:cross-build.*--peer none.*3\.2.*--peer.*out of --gates/);
+  assert.equal(repo.peerAt(repo.base, ['--gates', 'e2e:cross-build']).status, 2);
+  for (const options of [{}, { branch: { [MANIFEST]: manifest(3, 0) } }]) {
+    const result = repository(t, options).peer('--gates', 'e2e:cross-build');
+    assert.equal(result.status, 2);
+    assert.match(result.notes.join('\n'), /ci-gate:.*e2e:cross-build.*no manifest.*--peer/);
+  }
+});
+
+test('no explicit peer group leaves automatic joins, all, and --peer none unchanged', (t) => {
+  const { peer } = repository(t, { master: { [MANIFEST]: manifest(3, 2) } });
+  for (const gates of ['static,unit,probes', 'e2e:side', 'all']) {
+    assert.deepEqual(peer('--gates', gates), peer());
+    assert.deepEqual(peer('--gates', gates, '--peer', 'none'), { status: 0, trailers: [], notes: [] });
+  }
+});
+
+test('peer groups come from the tested workflow, including folded lists, not the launcher checkout', (t) => {
+  const { peer } = repository(t, {
+    master: { [MANIFEST]: manifest(3, 2) },
+    branch: { '.github/workflows/gate.yml': 'env:\n  PEER_E2E: >-\n    custom-peer\n    second-peer\n' },
+  });
+  assert.equal(peer('--gates', 'e2e:cross-build').status, 0);
+  for (const group of ['custom-peer', 'second-peer']) {
+    const result = peer('--gates', `e2e:${group}`);
+    assert.equal(result.status, 2);
+    assert.match(result.notes.join('\n'), new RegExp(`e2e:${group}`));
+  }
+});
+
+
+test('the launcher refuses an explicit same-minor group before pushing or calling GitHub, even with alerts bypassed', (t) => {
+  const { tree, env, git, head, base } = repository(t, { master: { [MANIFEST]: manifest(3, 2) } });
+  const bin = join(tree, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho UNEXPECTED_GITHUB_CALL >&2\nexit 1\n');
+  chmodSync(join(bin, 'gh'), 0o755);
+  const before = git('ls-remote', 'origin');
+  const run = spawnSync('bash', [join(dirname(script), 'ci-gate.sh'), tree, '--gates', 'static,e2e:cross-build'], {
+    encoding: 'utf8', timeout: 5000, env: { ...env, PATH: `${bin}:${env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1' },
+  });
+  assert.equal(run.status, 2, run.stdout + run.stderr);
+  assert.match(run.stderr, new RegExp(`ci-gate:.*e2e:cross-build.*${base.slice(0, 8)}.*3\\.2`));
+  assert.doesNotMatch(run.stdout + run.stderr, /UNEXPECTED_GITHUB_CALL/);
+  assert.equal(git('ls-remote', 'origin'), before);
+  assert.equal(git('rev-parse', 'HEAD'), head);
+});
+
+test('a peer-group relaunch keeps the original usable peer after master reaches the tested minor', (t) => {
+  const { git, peer, base, head } = repository(t, { master: { [MANIFEST]: manifest(3, 1) }, branch: { [MANIFEST]: manifest(3, 2) } });
+  git('push', '--quiet', 'origin', `${head}:refs/heads/master`);
+  const summary = execFileSync('bash', ['-c', 'source "$0"; refusals "$1" "$2"', join(dirname(script), 'ci-gate-refusals.sh'),
+    'failure\te2e:cross-build\nsuccess\tplan',
+    'e2e:cross-build\tSet up runner\t2026-10-31T00:00:00Z ci-kit: dialog — rerun'], {
+    encoding: 'utf8', env: { ...process.env, sha: head, gates: 'unit', runner: 'macos', class1a: 'pool', lane: '', live: '', default_beside: '', label: 'test', relaunch_peer: base },
+  });
+  const resolved = / --peer (\S+)/.exec(summary)?.[1];
+  const gates = / --gates (\S+)/.exec(summary)?.[1];
+  assert.equal(resolved, base);
+  assert.equal(gates, 'e2e:cross-build');
+  assert.equal(peer('--gates', gates).status, 2, 'the new default is the same wire');
+  const relaunched = peer('--gates', gates, '--peer', resolved);
+  assert.equal(relaunched.status, 0, relaunched.notes.join('\n'));
+  assert.deepEqual(relaunched.trailers, [`Peer: ${base}`, 'Peer-Wire: 3.1', 'Wire: 3.2']);
 });

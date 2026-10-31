@@ -76,7 +76,10 @@
 #                      --affected. No trailer when the tree has no manifest, is its own merge base, or with `none`. Refused
 #                      (exit 2), naming --peer: a --peer that names no commit or one with no manifest, and a checkout that
 #                      cannot find its merge base (shallow, or with none with origin/master). A refused run's relaunch
-#                      line carries the peer as resolved, its sha or `none`
+#                      line carries the peer as resolved, its sha or `none`. Naming a PEER_E2E group in --gates
+#                      requires two wires with different minors within one major; equal minors, different majors and
+#                      --peer none are refused before pushing. Choose --peer at a master commit a minor apart, or leave
+#                      the group out of --gates. This does not change the default set selected by --gates all
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
 #   --label            the ref's name before the short sha, sanitized as before. Without it: auto-<branch-or-gate>-
@@ -221,7 +224,7 @@ ref=ci/$label-$short
 # The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
 # plan they can add a Mac job to; what it decided is said once the transcript starts.
 peer_notes=$(mktemp)
-peer_trailers=$(node "$(dirname "$0")/ci-gate-peer.mjs" --git-dir "$git_dir" --sha "$sha" --peer "$peer" 2>"$peer_notes")
+peer_trailers=$(node "$(dirname "$0")/ci-gate-peer.mjs" --git-dir "$git_dir" --sha "$sha" --peer "$peer" --gates "$gates" 2>"$peer_notes")
 peer_status=$?
 peer_said=$(<"$peer_notes")
 rm -f "$peer_notes"

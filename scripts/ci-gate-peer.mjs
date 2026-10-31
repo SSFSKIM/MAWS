@@ -9,12 +9,14 @@
 // What it decided is said on stderr. Exits 2 when an asked-for peer cannot be used, and when the merge base cannot be
 // found (a shallow checkout, or one with no merge base with origin/master), or a requested peer is outside master
 // ancestry, naming --peer; else 0.
-// Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none]
+// Explicit --gates peer groups require different minors within one major, including when --peer is none.
+// Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none] [--gates <list>]
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { workflowEnv } from './ci-gate-alerts.mjs';
 
 export const MANIFEST = 'src/shared/ipc/wire-manifest.json';
 
@@ -32,12 +34,31 @@ export function wireAt(git, rev) {
 }
 
 // { trailers, notes, status }: the trailer lines, the lines for stderr, and the exit status.
-export function resolvePeer({ git, sha, peer }) {
+export function resolvePeer({ git, sha, peer, gates = '' }) {
   const notes = [];
   const say = (line) => notes.push(`ci-gate: ${line}`);
-  if (peer === 'none') return { trailers: [], notes, status: 0 };
+  // `all` remains the plan's default set, not an explicit request for any one peer group.
+  const asked = gates.split(/[\s,]+/).filter((gate) => gate.startsWith('e2e:'));
+  let groups = [];
+  if (asked.length > 0) {
+    try {
+      const env = workflowEnv(git('show', `${sha}:.github/workflows/gate.yml`));
+      const peers = new Set((env.PEER_E2E ?? '').split(/[\s,]+/).filter(Boolean).map((group) => `e2e:${group}`));
+      groups = asked.filter((gate) => peers.has(gate));
+    } catch (error) {
+      say(`cannot read the tested tree's peer groups: ${error.message}`);
+      return { trailers: [], notes, status: 2 };
+    }
+  }
+  const refuseGroups = (pair) => {
+    say(`${groups.join(', ')} cannot check ${pair}; pass --peer <ref> naming a master commit a minor apart within the same major, or leave ${groups.join(', ')} out of --gates`);
+    return { trailers: [], notes, status: 2 };
+  };
+  if (peer === 'none' && groups.length === 0) return { trailers: [], notes, status: 0 };
   const wire = wireAt(git, sha);
+  if (peer === 'none') return refuseGroups(`peer none (--peer none), wire unavailable; this tree's wire ${wire ?? 'unavailable (no manifest)'}`);
   if (wire === null) {
+    if (groups.length > 0) return refuseGroups("this tree's wire unavailable (no manifest)");
     if (!peer) return { trailers: [], notes, status: 0 };
     say(`--peer ${peer}: the tested tree has no ${MANIFEST}, so no wire to check against another build`);
     return { trailers: [], notes, status: 2 };
@@ -98,30 +119,32 @@ export function resolvePeer({ git, sha, peer }) {
     base = masterStates.findLast((commit) => descendants.has(commit));
     say(`peer ${candidate.slice(0, 8)} is not a master state; using ${base.slice(0, 8)}, the first master commit that contains it`);
   }
-  if (base === sha) {
+  if (base === sha && groups.length === 0) {
     say(`the peer would be the tested commit itself (${how}), so no peer`);
     return { trailers: [], notes, status: 0 };
   }
   const peerWire = wireAt(git, base);
   if (peerWire === null) {
+    if (groups.length > 0) return refuseGroups(`peer ${base.slice(0, 8)}, wire unavailable (no manifest); this tree's wire ${wire}`);
     say(`the peer ${base.slice(0, 8)} (${how}) has no ${MANIFEST}${peer ? '' : ', so no peer'}`);
     return { trailers: [], notes, status: peer ? 2 : 0 };
   }
   const [major, minor] = wire.split('.');
   const [peerMajor, peerMinor] = peerWire.split('.');
   const apart = major === peerMajor && minor !== peerMinor ? ', a minor apart' : '';
+  if (groups.length > 0 && !apart) return refuseGroups(`peer ${base.slice(0, 8)}, wire ${peerWire}; this tree's wire ${wire}`);
   say(`peer ${base.slice(0, 8)} (${how}), wire ${peerWire}; this tree's ${wire}${apart}`);
   return { trailers: [`Peer: ${base}`, `Peer-Wire: ${peerWire}`, `Wire: ${wire}`], notes, status: 0 };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' }, peer: { type: 'string', default: '' } } });
+  const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' }, peer: { type: 'string', default: '' }, gates: { type: 'string', default: '' } } });
   if (!values['git-dir'] || !values.sha) {
     process.stderr.write('ci-gate-peer: --git-dir and --sha are required\n');
     process.exit(2);
   }
   const git = (...args) => execFileSync('git', ['-C', values['git-dir'], ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
-  const { trailers, notes, status } = resolvePeer({ git, sha: values.sha, peer: values.peer });
+  const { trailers, notes, status } = resolvePeer({ git, sha: values.sha, peer: values.peer, gates: values.gates });
   for (const line of notes) process.stderr.write(`${line}\n`);
   for (const line of trailers) process.stdout.write(`${line}\n`);
   process.exit(status);
