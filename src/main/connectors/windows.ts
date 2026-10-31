@@ -15,10 +15,12 @@
 //   windowDidChangeOcclusionState is their one source). Only a change is reported, each after the one before it.
 // - A page is followed from its first lease command until it ends; a reloaded page is a new client, read afresh. No
 //   window showing the page: it is reported hidden, and main says so.
-// - A report the machine did not take (an unreachable host) is made again at the page's next lease command, which goes
-//   on regardless, hidden there. `reportAgain` (at each streaming of the machine host after the first, D28: a restarted
-//   `mawsd` holds no report) marks every followed page unreported, so the rebuilt lease's first command reports first.
+// - A report the machine did not take is made again at once, and at the next re-read; a lease command whose latest
+//   report is still not taken after that is answered `host_unavailable` here, never forwarded under an older report.
+//   `reportAgain` (at each streaming of the machine host after the first, D28: a restarted `mawsd` holds no report)
+//   marks every followed page unreported, so the rebuilt lease's first command reports first.
 import type { ClientRef } from '@shared/ipc/client';
+import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
 import type { ClientWindowShown } from '../client/window-shown';
 import type { BeforeHook } from '../ipc/router';
@@ -80,6 +82,7 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
       const took = await report(entry.client, shown).catch(() => false);
       entry.settled = sequence;
       entry.took = took;
+      if (!took && sequence === entry.queued) entry.sent = null; // unsent: the next re-read sends it again (the re-review's finding 3)
       entry.settledOn = at;
       if (took) entry.untaken = false;
     });
@@ -95,9 +98,10 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
   // Until the machine holds the window's latest report under the current connection (the task review's findings 4 and
   // 5): every report queued is waited for, a change queued behind a late answer included; a report made for a connection
   // a restart ended is made again for the current one, however many restarts overtake it; a report the current
-  // connection did not take is made again once. Then the command goes, taken or not (the machine then reads the page
-  // hidden, or as last taken).
-  const reported = async (entry: Followed) => {
+  // connection did not take is made again once. Answers whether the command may go: false when the latest report is
+  // still not taken, since a failed report is no proof the machine is gone and it may hold an older `shown` (the
+  // re-review's finding 3); true once taken, or when the page or the reporter ended (the command's own answer then).
+  const reported = async (entry: Followed): Promise<boolean> => {
     let failures = 0;
     while (live(entry) && !current(entry)) {
       const caughtUp = entry.settled === entry.queued;
@@ -106,9 +110,10 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
       await entry.chain;
       if (entry.settled === awaited && !entry.took && entry.settledOn === epoch && (failures += 1) >= 2) break;
     }
-    if (current(entry) || !live(entry) || entry.untaken) return;
+    if (current(entry) || !live(entry)) return true;
+    if (!entry.untaken) log(`the window of client ${entry.client.id} was not taken by the machine; its lease commands are refused until it is`);
     entry.untaken = true;
-    log(`the window of client ${entry.client.id} was not taken by the machine; its pages read hidden there until reported`);
+    return false;
   };
 
   const follow = (client: ClientRef): Followed | null => {
@@ -152,10 +157,10 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
     return own;
   };
 
-  const offBefore = before(LEASE_COMMANDS, async (_name, _input, client) => {
+  const offBefore = before(LEASE_COMMANDS, async (name, _input, client) => {
     if (stopped) return undefined;
     const entry = followed.get(client.id) ?? follow(client);
-    if (entry) await reported(entry);
+    if (entry && !(await reported(entry))) return { ok: false, error: ipcError('host_unavailable', `${name}: the machine has not taken the window of client ${client.id}`) };
     return undefined;
   });
 

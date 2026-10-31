@@ -252,16 +252,33 @@ describe('the window reporter', () => {
     expect(reports).toHaveLength(2);
   });
 
-  it('makes a report that did not land again at the page’s next lease command, and lets the command go regardless', async () => {
+  // The re-review's finding 3: a window the machine has not confirmed fails the lease command closed, here
+  it('answers a lease command host_unavailable itself when the window’s report is not taken twice, and reports again at the next', async () => {
     answers = async () => false;
-    await expect(lease()).resolves.toBeUndefined(); // the machine holds no report: the page reads hidden there
-    expect(reports).toHaveLength(2); // asked once more before letting it go
-    await lease(me, 'connectors.declare');
+    await expect(lease()).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(reports).toHaveLength(2); // asked once more before refusing
+    await expect(lease(me, 'connectors.declare')).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     expect(reports).toHaveLength(4);
     answers = null;
-    await lease(me, 'connectors.call');
+    await expect(lease(me, 'connectors.call')).resolves.toBeUndefined();
     expect(reports).toHaveLength(5);
     expect(logged).toEqual([expect.stringContaining('was not taken')]); // said once until a report lands
+  });
+
+  it('refuses work under a shown report the machine took once a hide is not taken, and its re-read sends the hide again', async () => {
+    await lease(); // shown, taken
+    answers = async (_client, shown) => shown;
+    win().hide();
+    await settle();
+    expect(reports).toEqual([[me.id, true], [me.id, false]]);
+    await expect(lease(me, 'connectors.call')).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    const before = reports.length;
+    await vi.advanceTimersByTimeAsync(WINDOW_RECHECK_MS); // the native state has not changed: the hide is still unsent
+    expect(reports.length).toBe(before + 1);
+    expect(reports.at(-1)).toEqual([me.id, false]);
+    answers = null;
+    await vi.advanceTimersByTimeAsync(WINDOW_RECHECK_MS);
+    await expect(lease(me, 'connectors.call')).resolves.toBeUndefined();
   });
 
   // The task review's finding 4: a lease command goes under the window's latest report, not one a later change queued
