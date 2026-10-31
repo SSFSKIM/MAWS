@@ -998,40 +998,63 @@ test('p5 O16 (3) a second initialize retires a pending hook callback (cancelled,
   for(const r of rows)if(r.frame.subtype==='background_tasks_changed')for(const t of r.frame.tasks)assert.ok(!('ambient' in t),sfx);
  }
 });
-test('p5 O16 (4) at rest claude holds its stdio MCP servers (and on 2.1.316 the bridge child) in its own group; each Bash, foreground, background or a Monitor\'s, is a session of its own under claude; get_settings carries no mcpServers, mcp_status each server\'s command and args',()=>{
+test('p5 O16 (4) at rest claude holds its stdio MCP servers (and on 2.1.316 the bridge child) in its own group; each working command, foreground, background, a Monitor\'s or a subagent\'s, runs under its own Bash wrapper, a session of its own under claude; get_settings carries no mcpServers, mcp_status each server\'s launch exactly',()=>{
  for(const [sfx] of O16_ENGINES){
   const after=treeO16(sfx,'rest-after-stop');const claude=after.rows[0];
   const children=after.rows.filter(r=>r.depth===1).map(r=>r.command.replace(/\/tmp\/\S+?\//,'<root>/'));
   assert.deepEqual(children.filter(c=>/o16-mcp/.test(c)).length,2,sfx);
   assert.deepEqual(children.filter(c=>!/o16-mcp|sminos\.py bridge/.test(c)),[],sfx);
   for(const r of after.rows.slice(1))assert.equal(r.pgid,claude.pgid,sfx);
-  for(const label of ['foreground-bash','background-bash','subagent']){
-   const shells=treeOf16(sfx,label);assert.ok(shells.length>=1,sfx+label);for(const s of shells){assert.equal(s.ppid,claude.pid,sfx+label);assert.equal(s.pgid,s.pid,sfx+label);}
+  // each working command found by its own command line, then its own parent: the wrapper that evals exactly it
+  const works=[['foreground-bash','sleep 6'],['background-bash','sleep 600'],['subagent','sleep 8']];
+  const flag=oneO16('main',sfx,'provenance').mcpConfig.mcpServers['o16-flag'];const root=flag.args[0].replace(/\/[^/]+$/,'');
+  if(sfx==='-installed')works.push(['monitor',`tail -f ${root}/monitor.log`]);
+  for(const [label,command] of works){
+   const tree=treeO16(sfx,label);const id=sfx+' '+label;
+   const work=tree.rows.filter(r=>r.command===command);assert.equal(work.length,1,id);
+   const wrapper=tree.rows.find(r=>r.pid===work[0].ppid);assert.ok(wrapper,id);
+   assert.match(wrapper.command,/^\/bin\/bash -c source \S+\/shell-snapshots\/snapshot-bash-/,id);
+   // the recording keeps 400 characters of a command line, so a long wrapper's eval may be cut inside its command
+   const evals=wrapper.command.split("eval '").slice(1).at(-1)??'';assert.ok(evals.startsWith(command+"'")||(wrapper.command.length===400&&evals.length>0&&command.startsWith(evals)),id);
+   assert.deepEqual([wrapper.ppid,wrapper.pgid,wrapper.depth],[claude.pid,wrapper.pid,1],id);assert.match(wrapper.stat,/s/,id);
+   assert.notEqual(work[0].pgid,claude.pgid,id);
   }
   const effective=oneO16('main',sfx,'get_settings').response.response.effective;assert.ok(!('mcpServers' in effective),sfx);
-  const servers=oneO16('main',sfx,'mcp_status').response.response.mcpServers;const prov=oneO16('main',sfx,'provenance');
-  assert.deepEqual(servers.find(s=>s.name==='o16-flag').config.args,prov.mcpConfig.mcpServers['o16-flag'].args,sfx);
-  assert.deepEqual(servers.map(s=>[s.name,s.config.type,s.scope]).sort(),[['o16-flag','stdio','dynamic'],['o16-user','stdio','user']],sfx);
+  // mcp_status against the launch: the flag server as --mcp-config gave it, the user server as the scenario wrote it
+  // (its script and command the flag server's, its role argument `user`), and each as the process claude runs
+  const servers=oneO16('main',sfx,'mcp_status').response.response.mcpServers;
+  const launched={'o16-flag':{type:'stdio',...flag},'o16-user':{type:'stdio',command:flag.command,args:[flag.args[0],'user']}};
+  assert.deepEqual(servers.map(s=>[s.name,s.scope]).sort(),[['o16-flag','dynamic'],['o16-user','user']],sfx);
+  for(const s of servers){
+   assert.deepEqual(s.config,launched[s.name],sfx+s.name);
+   assert.ok(after.rows.some(r=>r.depth===1&&r.command===[s.config.command,...s.config.args].join(' ')),sfx+s.name);
+  }
  }
- const monitor=treeO16('-installed','monitor').rows.find(r=>/^tail -f /.test(r.command));assert.ok(monitor);
  assert.ok(!treeO16('','monitor').rows.some(r=>/^tail -f /.test(r.command))); // 2.1.283 offers no Monitor
 });
-const treeOf16=(sfx,label)=>treeO16(sfx,label).rows.filter(r=>r.depth===1&&/^\/bin\/bash -c /.test(r.command));
 test('p5 O16 (5) --await-initialize is taken by both engines and holds a resumed session\'s cron until initialize; without it the resurrected cron fires before any initialize',()=>{
  for(const [sfx] of O16_ENGINES){
   const held=oneO16('await-resume',sfx,'q5_withheld');assert.equal(held.exited,false,sfx);assert.deepEqual(held.rows.filter(r=>r.dir==='in'),[],sfx);
-  assert.deepEqual(held.requests.filter(q=>q.kind==='main'),[],sfx);
+  assert.deepEqual(held.requests.filter(q=>q.kind==='main'),[],sfx);assert.deepEqual(held.requests.map(q=>[q.method,q.path,q.status]),[['HEAD','/api/hello',404]],sfx); // a reachability probe, no model request
   const after=oneO16('await-resume',sfx,'q5_after_initialize');assert.equal(after.answer.subtype,'success',sfx);assert.ok(after.turnStart&&after.turnResult,sfx);
   assert.deepEqual(after.requests.filter(q=>q.kind==='main').map(q=>q.marker).slice(0,1),['FIRE'],sfx);
   const plain=oneO16('plain-resume',sfx,'q5_withheld');assert.ok(plain.requests.filter(q=>q.kind==='main'&&q.marker==='FIRE').length>=1,sfx);
   assert.ok(plain.rows.some(r=>r.type==='result'),sfx);
  }
 });
-test('p5 O16 (6) the session host\'s relay adds about 0.12 ms at p50 and 0.15 ms at p95 per output line on the VM, twice, under the gate (0.5 / 1.5 ms)',()=>{
+test('p5 O16 (6) the session host\'s relay adds at most 0.33 ms at p50 and 0.45 ms at p95 per output line on the VM (the hosted totals bound it), under the gate (0.5 / 1.5 ms); the live segment, 0.16 to 0.18 ms at p50, is under it too',()=>{
+ const gated=(xs,name)=>{assert.ok(xs.length>1000,name);const p50=pctO16(xs,0.5),p95=pctO16(xs,0.95);assert.ok(p50<=500&&p95<=1500,`${name} ${p50}/${p95}`);return {p50,p95};};
  for(const name of ['p5-o16-holder-relay.json','p5-o16-holder-relay-repeat.json']){
   const r=JSON.parse(readFileSync(new URL(name,dir5),'utf8'));
   assert.equal(r.engineVersion,'2.1.316 (Claude Code)',name);assert.ok(r.trace.lines>1000,name);
-  assert.ok(r.replay.hop.p50<=500&&r.replay.hop.p95<=1500,name);assert.equal(r.verdict,'under the gate',name);
   assert.ok(r.replay.direct.n===r.replay.hosted.n&&r.replay.direct.n===r.trace.lines*r.rounds,name);
+  // the bound: per line the added hop is at most the hosted total (the direct latency is never negative)
+  const hosted=gated(r.raw.replayHostedUs,name+' hosted');assert.deepEqual([hosted.p50,hosted.p95],[r.replay.hosted.p50,r.replay.hosted.p95],name);
+  // the live estimate: the engine's own lines, from the host's read to the manager's arrival
+  assert.equal(r.raw.realHostSegmentUs.length,r.trace.lines,name);
+  const live=gated(r.raw.realHostSegmentUs,name+' live');assert.deepEqual([live.p50,live.p95],[r.real.hostReadToArrival.p50,r.real.hostReadToArrival.p95],name);
+  // the differential is recorded, not gated: an estimate, a difference of independently pooled percentiles
+  assert.ok(Number.isFinite(r.replay.hop.p50)&&Number.isFinite(r.replay.hop.p95),name);
  }
 });
+const pctO16=(xs,q)=>{const s=[...xs].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.max(0,Math.ceil(q*s.length)-1))];};

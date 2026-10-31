@@ -8,8 +8,12 @@
 //             relay, where each line's latency is its arrival at this process's socket less the host's read of it.
 //   replay    the trace replayed by a child that stamps each line just before writing it, sizes and timing as the
 //             engine wrote them: spawned directly (a pipe, as the engine host reads the engine today) and under the
-//             relay, alternating; a line's latency is its arrival here less its stamp, and the hop is hosted less
-//             direct, per percentile. This is the gate's reading: engine write to manager arrival, both ways.
+//             relay, alternating; a line's latency is its arrival here less its stamp. The gate reads the hosted
+//             totals (engine write to manager arrival through the relay): per line the added hop is at most the
+//             hosted total, since the direct latency is never negative, so the hosted percentiles bound the hop's.
+//             `hop` (hosted less direct, per percentile) is an estimate only, recorded and not gated: a difference
+//             of independently pooled percentiles is not the percentile of the per-line difference. The live
+//             engine's host-read-to-arrival segment is gated beside it as the live estimate of the hop.
 //   input     stamped lines written every 5 ms to a child that stamps each on arrival: direct pipe and through the
 //             relay's stdin records (the other half of a round trip; not gated, recorded).
 //
@@ -182,13 +186,14 @@ async function run(args){
    c.send('END\n');await got;c.end();await c.exited;
   }
   summary.input={direct:stats(inp.direct),hosted:stats(inp.hosted),hop:{p50:us(pct(inp.hosted,0.5)-pct(inp.direct,0.5)),p95:us(pct(inp.hosted,0.95)-pct(inp.direct,0.95))}};
-  summary.verdict=summary.replay.hop.p50<=500&&summary.replay.hop.p95<=1500?'under the gate':'over the gate';
+  const under=x=>x.p50<=500&&x.p95<=1500;
+  summary.verdict=under(summary.replay.hosted)&&(!summary.real||under(summary.real.hostReadToArrival))?'under the gate':'over the gate';
   summary.raw={trace,replayDirectUs:rep.direct.map(us),replayHostedUs:rep.hosted.map(us),realHostSegmentUs:hostSeg.map(us)};
   rmSync(dir,{recursive:true,force:true});
  }finally{await stub.close();}
  writeFileSync(out,JSON.stringify(summary,null,1)+'\n');
  const {raw,...brief}=summary;console.log(JSON.stringify(brief,null,1));
- console.log(`Q6 relay p50/p95 ${summary.replay.hop.p50}/${summary.replay.hop.p95} µs (gate 500/1500): ${summary.verdict}`);
+ console.log(`Q6 relay p50/p95 at most ${summary.replay.hosted.p50}/${summary.replay.hosted.p95} µs (hosted totals; live segment ${summary.real?.hostReadToArrival.p50}/${summary.real?.hostReadToArrival.p95}; estimate ${summary.replay.hop.p50}/${summary.replay.hop.p95}) (gate 500/1500): ${summary.verdict}`);
 }
 
 const [cmd,...rest]=process.argv.slice(2);
