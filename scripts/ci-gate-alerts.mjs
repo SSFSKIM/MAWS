@@ -124,7 +124,7 @@ export function decide({ jobs, alerts, runners, guest = null, home = [], ec2 = [
 }
 
 // Repository variables consumed by the planner, distinct from the committed workflow's env lists.
-export const plannerVariables = ['GATE_RUNNER', 'GATE_E2E_RUNNER', 'HOSTED_MAC_ROUTE', 'HOSTED_MAC_CAP'];
+export const plannerVariables = ['GATE_RUNNER', 'GATE_E2E_RUNNER', 'HOSTED_MAC_ROUTE', 'HOSTED_MAC_CAP', 'MAC_EC2'];
 
 // gate.yml's workflow-level `env:` as the plan job gets it, read for the names it holds: plain and quoted scalars on one
 // line, and block scalars (`>-`, `|`) whose lines are joined, which is all the plan's lists need (it splits them on
