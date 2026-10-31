@@ -1,11 +1,12 @@
 // The lane A store (P5 O9 M5): each bridged foreign session's `LaneAState` from `laneA.changed` and `laneA.list`, its
 // catalog's body by fingerprint, and the pending-send strip's entries following the state's deliveries.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { laneACatalog, laneAState } from '../lane-a/test-support/lane-a-state';
+import { hostStatus } from '../test-support/host-status';
 import { useSessions } from './sessions';
 import { applyLaneAList, applyLaneAState, connectLaneA, holdPendingSend, dismissPendingSend, noteLaneASettlement, resetLaneAStore, useLaneA } from './lane-a';
 
@@ -20,7 +21,7 @@ describe('connectLaneA', () => {
   it('subscribes before it lists, and applies a change that raced the list after it', async () => {
     const fake = fakeClient({ 'laneA.catalog': laneACatalog() });
     const off = connectLaneA(fake.client);
-    expect(fake.calls.slice(0, 2)).toEqual(['on laneA.changed', 'invoke laneA.list']);
+    expect(fake.calls.slice(0, 3)).toEqual(['on laneA.changed', 'on host.status', 'invoke laneA.list']);
     fake.event('laneA.changed', { appSessionId: A, state: laneAState(A, { turn: { running: true, unknown: false } }) });
     await fake.reply('laneA.list', { states: [laneAState(A), laneAState(B)] });
     expect(useLaneA.getState().states.get(A)?.turn.running).toBe(true); // the event that raced it wins
@@ -50,6 +51,24 @@ describe('connectLaneA', () => {
     expect(useLaneA.getState().states.has(R)).toBe(false);
     expect(useLaneA.getState().states.has(A)).toBe(true);
     off();
+  });
+
+  // 2026-10-31: an upgrade's mawsd restart answered the local list host_unavailable; it is listed again when the host is heard
+  it('lists this machine again when its host is heard after a refusal, a change that raced the second list applied after it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = fakeClient({ 'laneA.catalog': laneACatalog() });
+    const off = connectLaneA(fake.client);
+    await fake.fail('laneA.list', 'machine is restarting; cannot answer laneA.list', 'host_unavailable');
+    expect(useLaneA.getState().states.size).toBe(0);
+    fake.event('host.status', hostStatus());
+    fake.event('laneA.changed', { appSessionId: A, state: laneAState(A, { turn: { running: true, unknown: false } }) });
+    await fake.reply('laneA.list', { states: [laneAState(A), laneAState(B)] });
+    expect(useLaneA.getState().states.get(A)?.turn.running).toBe(true); // the event that raced it wins
+    expect(useLaneA.getState().states.has(B)).toBe(true);
+    fake.event('host.status', hostStatus());
+    expect(fake.invoked('laneA.list')).toHaveLength(2); // answered: not listed again
+    off();
+    warn.mockRestore();
   });
 
   it('goes live on events when the list is refused', async () => {

@@ -75,6 +75,8 @@ export interface RemoteLink extends MachineLink {
   /** The latest `caps`, null before the first. */
   caps(): DeviceCaps | null;
   onCaps(listener: (caps: DeviceCaps) => void): () => void;
+  /** The current channel's `h2` capabilities (capabilities.ts); null while no channel is current (P5 O7 M2). */
+  peerCapabilities(): readonly string[] | null;
   call(name: string, input: unknown, options?: { timeoutMs?: number }): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
@@ -205,7 +207,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   };
   const ended = (): 'removed' | 'closed' | null => (state === 'closed' ? 'closed' : state === 'refused' ? 'removed' : null);
 
-  const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, timing, now, log });
+  const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
+  const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
   const subs = new SubTable({ send, current: () => current !== null, timing, log });
 
   // The carrier a reported `up` stands on: the last current channel's, so a reconnect within the grace over the same
@@ -678,6 +681,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     carrier: () => (isCurrent() ? current!.carrier : null),
     refusal: () => refusal,
     caps: () => caps,
+    peerCapabilities,
     onCaps(listener) {
       capsListeners.add(listener);
       return () => void capsListeners.delete(listener);

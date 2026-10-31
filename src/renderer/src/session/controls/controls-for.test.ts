@@ -15,6 +15,8 @@ import { applyLaneAState, resetLaneAStore, useLaneA } from '../../stores/lane-a'
 import { resetQueueStore } from '../../stores/queue';
 import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state';
 import { useSessions } from '../../stores/sessions';
+import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
+import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
 
 const APP = 'app-c' as AppSessionId;
@@ -81,6 +83,33 @@ describe('controlsFor', () => {
     expect(controlsFor(null, null, { appSessionId: laneB, client })!.queue(), 'a remote lane B row').not.toBeNull();
     expect(drivenByBridge(remote)).toBe(true);
     expect(drivenByBridge(laneB)).toBe(false);
+  });
+});
+
+// P5 O7 M2: another machine's lane B session (a record main read over its link) takes lane B's port with main's overlay.
+describe('a lane B session on another machine', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const rewindGap = { available: false as const, reason: 'rewinding a session on another machine waits for its files panel' };
+  beforeEach(() => {
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 0, carrier: 'relay' }]);
+    useSessions.setState({ records: new Map([[REMOTE, record(REMOTE)]]), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+
+  it('gets lane B’s port with the overlay main says for it', () => {
+    applyRemoteSession(remoteSessionState(REMOTE, { controls: { ...ALL_OPEN, rewind: rewindGap } }));
+    const port = sessionControls(REMOTE, fakeClient().client)!;
+    expect(port.queue()).not.toBeNull();
+    expect(port.capability('rewind')).toEqual(rewindGap);
+    expect(port.capability('send')).toEqual({ available: true }); // a record is enough: an idle session is resumed by its send
+  });
+
+  it('renders again when main says the session’s state again', () => {
+    applyRemoteSession(remoteSessionState(REMOTE));
+    const { result } = renderHook(() => useSessionControls(REMOTE, { client: fakeClient().client })?.capability('rewind'));
+    expect(result.current).toEqual({ available: true });
+    act(() => applyRemoteSession(remoteSessionState(REMOTE, { controls: { ...ALL_OPEN, rewind: rewindGap } })));
+    expect(result.current).toEqual(rewindGap);
   });
 });
 

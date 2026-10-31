@@ -55,6 +55,26 @@ describe('org projects', () => {
     expect(sessionSetKey(s, TEST_MACHINE, at('new' as AppSessionId), none)).toBeUndefined();
   });
 
+  // P5 O7 M2 (one row per address): another machine's lane B session files where its listing does, before its record
+  // (the tab a click opens) and after (main read the record over the link; its project is unknown here, RL2 machines
+  // sending no projects), so neither its row nor its tab moves when the record arrives. A lane A listing keeps O9's rule.
+  it('files a listed lane B session’s tabs where its listing is filed, with or without its record', () => {
+    const listed = (session: string, lane: 'A' | 'B', orgKey: string | null): [AppSessionId, ListedSession] => {
+      const appId = studio(session) as AppSessionId;
+      return [appId, { ...remoteRow(OTHER_MACHINE, session, { lane, orgKey: orgKey as OrgKey | null }), appId }];
+    };
+    const rows = new Map([listed('b', 'B', 'repo:maws'), listed('n', 'B', null), listed('a', 'A', 'repo:maws')]);
+    const none = () => undefined;
+    const without = { ...state([here]), listed: rows };
+    expect(sessionSetKey(without, TEST_MACHINE, studio('b' as AppSessionId), none)).toBe('repo:maws');
+    expect(sessionSetKey(without, TEST_MACHINE, studio('n' as AppSessionId), none)).toBe(machineKey(OTHER_MACHINE));
+    expect(sessionSetKey(without, TEST_MACHINE, studio('a' as AppSessionId), none)).toBeUndefined(); // lane A: the current set, as before
+    const recorded = { ...state([here], [record(studio('b'), { projectId: studio('maws-b') as ProjectId })]), listed: rows };
+    expect(sessionSetKey(recorded, TEST_MACHINE, studio('b' as AppSessionId), none)).toBe('repo:maws');
+    const hidden = { ...state([{ ...here, hidden: true }]), listed: rows };
+    expect(sessionSetKey(hidden, TEST_MACHINE, studio('b' as AppSessionId), none)).toBe('repo:maws'); // a hidden project's sessions keep its key
+  });
+
   it('a set stands for this machine’s checkout of its org project, none for another machine’s only or a machine’s row', () => {
     expect(localProjectOfSet(state([here, there]), 'repo:maws', TEST_MACHINE)?.id).toBe(here.id);
     expect(localProjectOfSet(state([there]), 'repo:maws', TEST_MACHINE)).toBeUndefined();

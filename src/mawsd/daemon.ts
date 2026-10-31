@@ -371,6 +371,17 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
     reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
     wakeOnEvents: options.spine?.wakeOnEvents ?? false,
+    // P5: a command waits on the engine host (the session service's boot, for its first streaming). The park clock starts
+    // again from the need, and a host that is not streaming is sent a ping, which the supervisor holds while the host
+    // starts or closes and for which it launches a parked one.
+    needEngine: () => {
+      clocks.engineNeeded();
+      if (hosts.streaming('engine-host')) return;
+      log(`[spine] a command waits on the engine host, which is ${hosts.parked('engine-host') ? 'parked' : hosts.snapshot('engine-host').state}: waking it`);
+      void hosts.dispatch('engine-host', 'engine.ping', undefined).then((result) => {
+        if (!result.ok) log(`[spine] the wake's engine.ping failed: ${result.error.message}`);
+      });
+    },
     endLink: async () => {
       const drained = hosts.stop(); // the terminal draining close: what the engine host wrote before it saw the end folds now
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
@@ -948,11 +959,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const answered = await front.intercepted(name, input, client);
         if (answered) return { t: 'res', id: 'endpoint', ...answered } as HostResponse;
       }
-      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+      // P5 O7 M2: the asker goes as a ref, so the endpoint channel's end reaches the host as its clientGone
+      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client }) });
       // the pty host it woke stays up for the request (a spawn), and parks after it if nothing lives and no app is on
       ptyRequests += 1;
       try {
-        return await hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+        return await hosts.forward(host, { name, input: sent, ...(client && { client }) });
       } finally {
         ptyRequests -= 1;
         if (ptyRequests === 0) void settleCredit();

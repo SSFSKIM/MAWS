@@ -34,7 +34,7 @@ esac
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', interrupt = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
@@ -45,7 +45,8 @@ function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
     const tree = join(dir, 'tree');
     git('init', '--quiet', '--bare', origin);
     git('init', '--quiet', '-b', 'gates', tree);
-    git('-C', tree, 'remote', 'add', 'origin', origin);
+    git('-C', tree, 'remote', 'add', 'origin', originUrl || origin);
+    if (originUrl) git('-C', tree, 'config', `url.${origin}.insteadOf`, originUrl);
     // Every launched tree has a workflow: peer preflight reads its PEER_E2E even for a non-peer e2e request.
     mkdirSync(join(tree, '.github/workflows'), { recursive: true });
     writeFileSync(join(tree, '.github/workflows/gate.yml'), 'env:\n  PEER_E2E: cross-build\n');
@@ -64,12 +65,25 @@ function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
     git('-C', tree, 'commit', '--quiet', '--allow-empty', '-m', 'tested tree');
     let gh = fakeGh;
     if (backlog) {
-      gh = gh.replace("'variable list '*) ;;", "'variable list '*) echo direct ;;");
+      gh = gh.replace("'variable list '*) ;;", `
+  'variable list '*HOSTED_MAC_ROUTE*) echo direct ;;
+  'variable list '*HOSTED_MAC_CAP*) echo '${hostedCap}' ;;
+  'variable list '*MAC_EC2*) echo '${macEc2}' ;;
+  'variable list '*HOSTED_MAC_REPOS*) echo '${hostedRepos}' ;;`);
       gh = gh.replace('case "$*" in', `case "$*" in
-  'api repos/SSFSKIM/MAWS/actions/runners?'*) ${backlog === 'failed' ? 'exit 1' : `echo '${JSON.stringify({ total_count: 1, runners: [{ name: 'ci-kit-mac-ec2', status: 'online', busy: false, labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'].map((name) => ({ name })) }] })}'`} ;;
+  'api repos/'*'/actions/runners?'*) ${backlog === 'failed' ? 'exit 1' : `echo '${JSON.stringify({ total_count: 1, runners: [{ name: 'ci-kit-mac-ec2', status: 'online', busy: false, labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'].map((name) => ({ name })) }] })}'`} ;;
   'api repos/'*'/actions/runs?'*) echo '{"total_count":0,"workflow_runs":[]}' ;;`);
     }
+    if (interrupt) gh = gh.replace('*" run list "*) ;;', `
+  *" run list "*) echo 123 ;;
+  *" run watch "*) kill -TERM "$PPID" ;;
+  *" run cancel "*) ;;`);
     writeFileSync(join(dir, 'gh'), gh);
+    writeFileSync(join(dir, 'node'), `#!/usr/bin/env bash
+printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(basename "$1")" "$REPO" "$HOSTED_MAC_REPOS" "$HOSTED_MAC_CAP" "$MAC_EC2" >> '${join(dir, 'node-calls')}'
+exec '${process.execPath}' "$@"
+`);
+    chmodSync(join(dir, 'node'), 0o755);
     writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
@@ -82,6 +96,7 @@ function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
       stdout: run.stdout,
       stderr: run.stderr,
       calls: existsSync(calls) ? readFileSync(calls, 'utf8').trimEnd().split('\n') : [],
+      nodeCalls: existsSync(join(dir, 'node-calls')) ? readFileSync(join(dir, 'node-calls'), 'utf8').trimEnd().split('\n').map((line) => line.split('\t')) : [],
       refs,
       message: refs.length > 0 ? git('--git-dir', origin, 'log', '-1', '--format=%B', refs[0]) : '',
     };
@@ -343,13 +358,13 @@ test('a --peer that names no commit is refused with exit 2 before the alert chec
 });
 
 // The alert check plans the tested tree with the peer's trailers and an iteration run's Selection, as the run's plan
-// will: a bump tree's class 1a gains a Mac job the mini's alert holds, its --affected iteration does not.
+// will: a bump tree's class 1a gains an EC2-only peer job, which needs its own healthy runner; its --affected iteration does not.
 test('the alert check sees the peer group a bump adds, and none for an --affected run, which goes ahead past an alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
   const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/scripts/gate-backlog.mjs': own('.github/scripts/gate-backlog.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
   const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
   assert.equal(held.status, 2, held.stdout + held.stderr);
-  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
+  assert.match(held.stderr, /^ci-gate: not pushing: .* \(e2e:cross-build\), which only a runner labelled ci-kit-mac-ec2 takes,/m);
   assert.deepEqual(held.refs, []);
   const iteration = gate(['--gates', 'unit', '--class1a', 'pool', '--affected'], planned);
   assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
@@ -379,7 +394,6 @@ test('a direct packaged/peer admission push is not held by the mini alert', () =
   assert.match(result.message, /^Peer: [0-9a-f]{40}\nPeer-Wire: 3\.0\nWire: 3\.1$/m);
 });
 
-
 test('the reserved final push ref keeps direct packaged on the Mac in the alert preflight', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
   const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
@@ -389,7 +403,6 @@ test('the reserved final push ref keeps direct packaged on the Mac in the alert 
   assert.match(result.stderr, /this run puts jobs on a Mac \(packaged\)/);
   assert.deepEqual(result.refs, []);
 });
-
 
 test('direct calls put the cached backlog into the pushed commit, and failed counts still push without it', () => {
   const good = gate(['--gates', 'e2e:document', '--peer', 'none'], { backlog: 'good' });
@@ -409,4 +422,35 @@ test('direct calls put the cached backlog into the pushed commit, and failed cou
     assert.doesNotMatch(asked.message, /^Mac-Backlog:/m, lane);
     assert.equal(asked.calls.filter((call) => /actions\/runs\?status=/.test(call)).length, 0, lane);
   }
+});
+
+test('origin identity and hosted variables reach the sampler, identity and pool planner', () => {
+  for (const originUrl of ['https://github.com/neworg/MAWS.git', 'git@github.com:neworg/MAWS.git', 'ssh://git@github.com/neworg/MAWS', 'ssh://git@github.com:22/neworg/MAWS.git', 'ssh://git@ssh.github.com:443/neworg/MAWS.git']) {
+    const result = gate(['--gates', 'e2e:tools', '--peer', 'none'], { originUrl, backlog: 'ok', hostedCap: '50', hostedRepos: 'neworg/MAWS', macEc2: 'off' });
+    assert.equal(result.refs.length, 1, result.stdout + result.stderr);
+    assert.ok(result.calls.some((line) => line.includes('-R neworg/MAWS')));
+    assert.ok(result.calls.every((line) => !line.includes('SSFSKIM/')), result.calls.join('\n'));
+    assert.match(result.message, /^Mac-Backlog: /m);
+    assert.deepEqual(result.nodeCalls.find(([script]) => script === 'ci-gate-backlog.mjs').slice(1, 3), ['neworg/MAWS', 'neworg/MAWS']);
+    for (const script of ['ci-gate-identity.mjs', 'ci-gate-pool-demand.mjs']) {
+      assert.deepEqual(result.nodeCalls.find(([name]) => name === script).slice(3), ['50', 'off'], script);
+    }
+  }
+});
+
+test('interrupt cancellation writes to the origin repository, not its old name', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'interrupt'], { originUrl: 'https://github.com/neworg/MAWS.git', interrupt: true });
+  assert.equal(result.status, 130, result.stdout + result.stderr);
+  assert.ok(result.calls.includes('-R neworg/MAWS run cancel 123'), result.calls.join('\n'));
+});
+
+
+test('malformed quota configuration refuses the launcher before a push', () => {
+  const result = gate(['--gates', 'e2e:tools', '--peer', 'none'], {
+    originUrl: 'https://github.com/neworg/MAWS.git', backlog: 'ok', hostedCap: '50', hostedRepos: 'MAWS',
+  });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.deepEqual(result.refs, []);
+  assert.match(result.stderr, /^ci-gate: HOSTED_MAC_REPOS must list owner\/repository names$/m);
+  assert.ok(!result.calls.some((call) => call.includes('actions/runners') || call.includes(' run list ')));
 });

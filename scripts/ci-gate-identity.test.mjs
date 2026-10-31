@@ -18,7 +18,8 @@ const fakeGh = `#!/usr/bin/env bash
 case "$*" in
   'variable get GATE_RUNNER '*) echo "\${TEST_CLASS1A:-pool}" ;;
   'variable get GATE_E2E_RUNNER '*) echo macos ;;
-  'variable list '*) echo "\${TEST_ROUTE:-mirror}" ;;
+  'variable list '*HOSTED_MAC_ROUTE*) echo "\${TEST_ROUTE:-mirror}" ;;
+  'variable list '*) ;;
   *' run list '*) [[ \${TEST_RESULT:-failure} == no-run ]] || echo "$TEST_RUN" ;;
   *' run watch '*) ;;
   *' run view '*'--json status '*) echo completed ;;
@@ -186,4 +187,10 @@ test('backlog changes neither the default ref hash nor the committed planner out
   assert.equal(placements[0], placements[2]);
   const labels = messages.map((HEAD_MESSAGE) => execFileSync(process.execPath, [join(root, 'scripts/ci-gate-identity.mjs'), '--git-dir', tree, '--sha', sha, '--branch', 'feature/work'], { encoding: 'utf8', env: { ...env, HEAD_MESSAGE }, stdio: ['ignore', 'pipe', 'pipe'] }).trim());
   assert.equal(new Set(labels).size, 1, 'a relaunch supersedes the same work regardless of its sampled placement');
+}));
+
+
+test('unset optional hosted variables preserve a resolved planner and pool hint', () => fixture(({ launch }) => {
+  const result = launch(staticArgs);
+  assert.doesNotMatch(result.text, /default label uses configuration only|could not plan pool demand/);
 }));

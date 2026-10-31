@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { IDENTITY_HEADER } from '../../../apps/desk-hub/local/standin';
 import { genesis, memberId, newDevice, successor, type TestDevice } from '../../../test/endpoint/org-fixtures';
 import { loadDeviceKeys } from '../device/keys';
+import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { createDevOrgSession, STANDIN_HEADER } from './dev-session';
 
 const dirs: string[] = [];
@@ -23,7 +24,7 @@ const scratch = (name: string) => {
 };
 const loadKeys: typeof loadDeviceKeys = (profile) => loadDeviceKeys(profile, { excludeFromBackup: async () => true });
 
-async function setup(options: { listKey?: 'mine' | 'other'; hub?: { url: string; standinUser?: string } | null; pinRecovery?: 'right' | 'wrong' } = {}) {
+async function setup(options: { listKey?: 'mine' | 'other'; hub?: { url: string; standinUser?: string } | null; pinRecovery?: 'right' | 'wrong'; directMap?: unknown } = {}) {
   const userData = scratch('profile');
   const dir = scratch('org');
   const keys = await loadKeys(userData);
@@ -42,6 +43,7 @@ async function setup(options: { listKey?: 'mine' | 'other'; hub?: { url: string;
       device: 'mac1',
       pins: { roots: [await keyId(root.stepUp.pub)], recoveryPub: options.pinRecovery === 'wrong' ? (await generateSigningKey()).pub : recovery.pub },
       hub: options.hub === undefined ? { url: 'http://127.0.0.1:8787', standinUser: 'owner@example.com' } : options.hub,
+      ...(options.directMap === undefined ? {} : { directMap: options.directMap }),
     }),
   );
   writeFileSync(join(dir, 'chain.json'), JSON.stringify({ chain, transitions: [] }));
@@ -73,7 +75,7 @@ describe('the development org session', () => {
     await session.loaded;
     expect(told).toBe(1);
     const signedIn = session.current()!;
-    expect(signedIn.identity).toMatchObject({ org: 'org-dev', member: s.A, device: 'mac1', clientClass: 'native-mac', build: 'dev', capabilities: [] });
+    expect(signedIn.identity).toMatchObject({ org: 'org-dev', member: s.A, device: 'mac1', clientClass: 'native-mac', build: 'dev', capabilities: [...DEVICE_CAPABILITIES] });
     expect(await keyId(signedIn.identity.channelKey.pub)).toBe(await keyId(s.keys.channel.pub));
     expect(signedIn.view.head().state.version).toBe(2);
     expect(signedIn.hub!.url).toBe('http://127.0.0.1:8787');
@@ -102,5 +104,39 @@ describe('the development org session', () => {
     await session.loaded;
     expect(session.current()).toBeNull();
     expect(s.logs.at(-1)).toMatch(/signed out: a stand-in user is named for https:\/\/hub.example.com/);
+  });
+
+  // P5 O7 M2 (Interfaces §Q): an e2e on one Mac dials a machine's advertised tailnet address at its loopback port.
+  describe('directMap', () => {
+    const MAP = { 'ws://100.101.102.103:47830': 'ws://127.0.0.1:51234' };
+
+    it('is exposed once signed in, and empty before and without one', async () => {
+      const s = await setup({ directMap: MAP });
+      const session = s.made();
+      expect(session.directMap()).toEqual({});
+      await session.loaded;
+      expect(session.current()).not.toBeNull();
+      expect(session.directMap()).toEqual(MAP);
+      const plain = (await setup()).made();
+      await plain.loaded;
+      expect(plain.directMap()).toEqual({});
+    });
+
+    it('is not honoured in a packaged build', async () => {
+      const session = (await setup({ directMap: MAP })).made(true);
+      await session.loaded;
+      expect(session.directMap()).toEqual({});
+    });
+
+    it('signs out, saying why, for a map that is not advertised ws:// addresses to loopback ones', async () => {
+      for (const directMap of [[], { 'ws://100.101.102.103:47830': 'ws://10.0.0.2:47830' }, { 'http://100.101.102.103:47830': 'ws://127.0.0.1:1' }, { 'ws://100.101.102.103:47830': 7 }]) {
+        const s = await setup({ directMap });
+        const session = s.made();
+        await session.loaded;
+        expect(session.current()).toBeNull();
+        expect(session.directMap()).toEqual({});
+        expect(s.logs.at(-1)).toMatch(/signed out: session.json has a malformed directMap/);
+      }
+    });
   });
 });

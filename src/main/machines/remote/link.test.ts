@@ -62,14 +62,19 @@ async function advance(ms: number): Promise<void> {
 
 class FakeChannel implements Channel {
   readonly id = randomBytes(8).toString('hex');
-  readonly peer = { protocol: { major: 1, minor: 0 }, build: 'fake', capabilities: [], stateVersion: 1 };
+  readonly peer: Channel['peer'];
   closed = false;
   closedWith: string | null = null;
   readonly sent: ChannelMessage[] = [];
   readonly #listeners = new Set<(m: ChannelMessage) => void>();
   readonly #ends = new Set<(reason: string) => void>();
   readonly #buffered: ChannelMessage[] = [];
-  constructor(readonly carrier: 'direct' | 'relay') {}
+  constructor(
+    readonly carrier: 'direct' | 'relay',
+    capabilities: string[] = [],
+  ) {
+    this.peer = { protocol: { major: 1, minor: 1 }, build: 'fake', capabilities, stateVersion: 1 };
+  }
   send(message: ChannelMessage): Promise<void> {
     if (this.closed) return Promise.reject(new ChannelError('closed'));
     this.sent.push(message);
@@ -167,6 +172,8 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
   const logs: string[] = [];
   const pending: Array<{ carrier: 'direct' | 'relay'; release(): void }> = [];
   let holdHandshakes = false;
+  /** What the next channel's peer lists in its `h2`. */
+  const peer = { capabilities: [] as string[] };
   const link = createRemoteLink({
     machine: { ref: o.ref, name: 'mini' },
     session,
@@ -190,7 +197,7 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
       if (holdHandshakes) await new Promise<void>((release) => pending.push({ carrier, release }));
       const verdict = verdicts[carrier].shift() ?? null;
       if (verdict !== null) throw new ChannelError(verdict);
-      const channel = new FakeChannel(carrier);
+      const channel = new FakeChannel(carrier, [...peer.capabilities]);
       channel.deliver(CAPS);
       channels.push(channel);
       return channel;
@@ -219,6 +226,7 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
     relayTries: () => relayTries,
     hold: (on: boolean) => void (holdHandshakes = on),
     pending,
+    peer,
   };
 }
 
@@ -255,6 +263,25 @@ describe('connecting', () => {
     expect(h.link.carrier()).toBe('direct');
     expect(h.link.caps()).toEqual({ member: 'm', device: 'd1', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: 2 });
     expect(h.relay().opened).toBe(0);
+  });
+
+  // P5 O7 M2: what the endpoint said it reads, for the acts and streams that need a capability.
+  it('reports the current channel’s peer capabilities, and none while no channel is current', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.executor.machine'];
+    expect(h.link.peerCapabilities()).toBeNull();
+    await settle();
+    expect(h.link.peerCapabilities()).toEqual(['rl2.executor.machine']);
+    h.net.direct = false;
+    h.net.relay = false;
+    h.last().end('carrier');
+    await settle();
+    expect(h.link.peerCapabilities()).toBeNull();
+    h.peer.capabilities = [];
+    h.net.direct = true;
+    await advance(1000);
+    expect(h.link.state()).toBe('up');
+    expect(h.link.peerCapabilities()).toEqual([]);
   });
 
   it('takes the relay when no direct address answers', async () => {

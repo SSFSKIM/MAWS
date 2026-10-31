@@ -14,7 +14,13 @@ import { addressingOf, bareOf } from '@shared/machine/address';
 import type { TabSet } from '@shared/ipc/schema/layout'; // E9
 import { digest, humanTurn, item, record, status } from '../../../../test/support/builders'; // C12: digest; E11 F2b: item
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address'; // P5 O7 M2
+import { remoteRow } from '../../../../test/support/builders'; // P5 O7 M2
+import { useMachines } from '../stores/machines'; // P5 O7 M2
+import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
+import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
+import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -1175,6 +1181,84 @@ describe('Send on a session with a record and no ready process', () => {
 
 // P2-F (L116): the seam's state refusal comes before the size pre-check, so an oversized Enter on a session that can
 // neither send nor start (no record; its process ended or starting) keeps the draft quietly, as a normal one does
+// P5 O7 M2: a lane B session on another machine, its commands carried over that machine's RL2 link by main's adapter.
+// A send says "Sending to <machine>…" while on its way (A4's hold can take a minute), clears the draft only once the
+// machine took it, and on an error keeps the text with main's words and Send again; the draft lives in this app's memory
+// (a draft on the machine is per member, O8 M6), so `session.drafts.*` are never asked.
+describe('a lane B session on another machine', () => {
+  const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  let remote: FakeClient;
+  beforeEach(() => {
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    const s = useSessions.getState();
+    useSessions.setState({
+      listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]),
+      listedMachines: new Set([OTHER_MACHINE]),
+      records: new Map(s.records).set(R, addressing.output('session.get').lift(record('app-r'), OTHER_MACHINE)!),
+      engine: new Map(s.engine).set(R, addressing.output('engine.sessions').lift([status('app-r')], OTHER_MACHINE)[0]!),
+      recordsVersion: s.recordsVersion + 1,
+    });
+    resetRemoteDrafts();
+    remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
+    window.maws = preloadOf(remote);
+  });
+
+  it('says “Sending to <machine>…” while a send is on its way, and clears the text once the machine took it', async () => {
+    mount([{ index: 0, id: R }]);
+    await type('over there');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Sending' }).textContent).toBe('Sending to mini…');
+    expect(editorOf().editor.getText()).toBe('over there');
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(within(composerOf(0)).queryByRole('status', { name: 'Sending' })).toBeNull();
+    expect(remote.invoked('session.history.append')).toEqual([]); // the prompt history is the machine's; its link offers no write
+  });
+
+  it('keeps the text on main’s error, with its words and Send again', async () => {
+    mount([{ index: 0, id: R }]);
+    await type('over there');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    await act(() => remote.fail('session.send', 'Not sent: mini is offline', 'host_unavailable'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Not sent: mini is offline', ['Send again']]]));
+    expect(editorOf().editor.getText()).toBe('over there');
+    expect(within(composerOf(0)).queryByRole('status', { name: 'Sending' })).toBeNull();
+  });
+
+  // The overlay rule: a link down closes nothing (A4 holds the act), so a running turn keeps its Stop, and Stop reaches it
+  it('keeps Stop on a running turn while the machine’s link is down', async () => {
+    act(() => {
+      useSessions.setState({ engine: new Map(useSessions.getState().engine).set(R, addressing.output('engine.sessions').lift([status('app-r', { engineState: 'running', turn: humanTurn })], OTHER_MACHINE)[0]!) });
+      applyRemoteSession(remoteSessionState(R, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } }));
+    });
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    await waitFor(() => expect(remote.invoked('session.interrupt')).toHaveLength(1));
+  });
+
+  it('closes the model and mode chips with the overlay’s reason', async () => {
+    const reason = 'mini refused this device (grade)';
+    act(() => applyRemoteSession(remoteSessionState(R, { controls: { ...ALL_OPEN, model: { available: false, reason }, mode: { available: false, reason } } })));
+    mount([{ index: 0, id: R }]);
+    expect(within(composerOf(0)).getByRole('button', { name: /^Model / }).title).toBe(reason);
+    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).toBe(reason);
+  });
+
+  it('keeps the draft in this app’s memory, never asking the machine for it', async () => {
+    const view = mount([{ index: 0, id: R }]);
+    await type('half a thought');
+    view.unmount(); // the draft is written on unmount
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('half a thought'));
+    expect(remote.invoked('session.drafts.get')).toEqual([]);
+    expect(remote.invoked('session.drafts.set')).toEqual([]);
+  });
+});
+
 describe('an oversized draft on a session the seam refuses by state', () => {
   it.each(['exited', 'starting'] as const)('Enter on a session %s with no record keeps the draft, with no warning and nothing dispatched', async (process) => {
     useSessions.setState({ engine: new Map(useSessions.getState().engine).set(A, { ...pageStatus(A), process }) });

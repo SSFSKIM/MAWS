@@ -95,8 +95,9 @@ export async function openSpineData(profile: string, { build, lock: given }: { b
   return { lock, refused: lock.refused, machineSettings, paths };
 }
 
-// P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts)
-export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay };
+// P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts).
+// P5: `need`, a command waits on the engine host (mawsd wakes a parked one for it; main's host is never parked).
+export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void };
 
 export interface SpineDeps {
   profile: string; // <userData>, the daemon's profile (O3 §1)
@@ -310,6 +311,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         onEvent: (name, listener) => hosts.onEvent(name, listener),
         ready: () => engineHostSettled(hosts),
         onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
+        need: () => hosts.need?.(),
       },
       git: createGitRunner(),
       worktrees,

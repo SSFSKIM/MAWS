@@ -94,6 +94,7 @@
     "e2e:daemon-unit": "scripts/e2e-build.sh plain && node e2e/support/daemon-unit-guard.mjs && MAWS_DAEMON_UNIT_E2E=1 playwright test e2e/daemon-unit.spec.ts",
     "e2e:cross-build": "scripts/e2e-build.sh plain && MAWS_CROSS_BUILD_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/cross-build.spec.ts",
     "e2e:machines": "scripts/e2e-build.sh plain && MAWS_MACHINES_E2E=1 playwright test e2e/machines.spec.ts",
+    "e2e:remote": "scripts/e2e-build.sh plain && MAWS_REMOTE_E2E=1 playwright test e2e/remote.spec.ts",
     "verify:fuses": "out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo \"$out\" && echo \"$out\" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }",
     "e2e:side": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/side.spec.ts",
     "e2e:lane-a": "scripts/e2e-build.sh plain && playwright test e2e/lane-a.spec.ts",

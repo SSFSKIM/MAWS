@@ -49,7 +49,8 @@ export interface SessionsState {
   applyStatus(event: EventPayload<'session.status'>, machine: MachineRef): void;
   applyStatuses(statuses: EngineSessionStatus[], machine: MachineRef): void; // C3's process table (`engine.sessions`) at connect
   // E10: the machine's engine host left ready (P5 O6 M4: or its link went down), so no status it sent still holds.
-  forgetStatuses(machine: MachineRef): void;
+  // P5 O7 M2: those `keep` answers true for stay (a lane B session main still holds over that machine's link).
+  forgetStatuses(machine: MachineRef, keep?: (appSessionId: AppSessionId) => boolean): void;
   // P5 O6 M4: the machine's link came up as a new generation, whose counters start afresh. What the store reconciles that
   // machine by is forgotten; its records, projects, digests and statuses stay shown until its next snapshot replaces them.
   resetMachine(machine: MachineRef): void;
@@ -258,12 +259,13 @@ export function createSessionsStore() {
       },
       // E10, as main forgets them (C12, `hostEventSource`): a host that left ready took its processes' statuses along; the
       // next generation's table and burst say again what is live. P5 O6 M4: one machine's statuses, the others' stand.
-      forgetStatuses(machine) {
+      forgetStatuses(machine, keep) {
         const p = partition(machine);
-        if (p.statuses.size === 0) return;
+        const kept = keep === undefined ? new Set<AppSessionId>() : new Set([...p.statuses].filter(keep));
+        if (kept.size === p.statuses.size) return;
         const engine = new Map(get().engine);
-        for (const id of p.statuses) engine.delete(id);
-        p.statuses = new Set();
+        for (const id of p.statuses) if (!kept.has(id)) engine.delete(id);
+        p.statuses = kept;
         set({ engine });
       },
       resetMachine(machine) {

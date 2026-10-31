@@ -8,6 +8,10 @@
 // P5 O8 M2 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The snapshot rule"): the org's rows (`org.rows`,
 // `org.rows.changed`) fill the sessions store's listed partition; a machine they cover takes no record snapshot and loads
 // when they have.
+// P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §K): `remote.session`, main's word on a
+// lane B session it streams from another machine, into that store (lane-b/remote-session.ts). Subscribed here with the
+// events main says alongside it, so a remote pane's opening read (lane-b/remote-connect.ts, mounted after) comes after
+// them all and what main says again for it is heard.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -20,12 +24,14 @@ import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
 import { selectOrgIndex, sessionSetKey, setKeyOfProject } from '../stores/org-projects'; // P5 O6 M5
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
 import type { TabSetKey } from '@shared/ipc/schema/layout';
 import { ipc } from './client';
 import { checkoutKey } from './machine';
+import { askUntilAnswered } from './until-answered';
 // C8a start
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
@@ -194,6 +200,12 @@ export function connectShell(
       rowsFreshness.advance();
       takeRows(rows);
     }),
+    // P5 O7 M2: main's word on a lane B session it streams from another machine; a stream main says idle or ended is one
+    // whose status main forgot, so its status here goes too (kept through a link going down, below)
+    on('remote.session', (state) => {
+      applyRemoteSession(state);
+      if (!holdsRemoteStatus(state)) sessions().forgetStatuses(machineOf(state.address), (appSessionId) => appSessionId !== state.address);
+    }),
   ];
 
   // Replies apply only while this connection and the machine's link generation are live; the stores' own revisions
@@ -229,19 +241,21 @@ export function connectShell(
   };
 
   // One machine's snapshots, under C1's ordering rule (every event is subscribed above, and each store reconciles the
-  // events that raced its snapshot). Whether its record side's snapshot applied, so the machine counts as loaded.
-  const snapshot = (machine: MachineRef): Promise<boolean> => {
+  // events that raced its snapshot). Whether its record side's snapshot applied, so the machine counts as loaded, and
+  // whether its attention's did.
+  const snapshot = (machine: MachineRef): { records: Promise<boolean>; attended: Promise<boolean> } => {
     const link = linkOf(machine);
     const live = stampOf(link);
     const opts = { machine };
     readEngineTable(machine);
     attention().beginSnapshot(machine);
-    void answer('attention.list', live, client.invoke('attention.list', undefined, opts), (items) => attention().applySnapshot(items, machine), () => attention().cancelSnapshot(machine));
-    return Promise.all([
+    const attended = answer('attention.list', live, client.invoke('attention.list', undefined, opts), (items) => attention().applySnapshot(items, machine), () => attention().cancelSnapshot(machine));
+    const records = Promise.all([
       answer('session.list', live, client.invoke('session.list', {}, opts), (value) => sessions().applyList(value, machine)),
       answer('session.projects.list', live, client.invoke('session.projects.list', undefined, opts), (value) => sessions().applyProjects(value, machine)),
       answer('session.digests', live, client.invoke('session.digests', undefined, opts), ({ digests }) => sessions().applyDigests(digests, machine)),
     ]).then((applied) => applied.every(Boolean));
+    return { records, attended };
   };
 
   // Another machine's link, as the roster says: down keeps its records and attention as last known and forgets its
@@ -259,7 +273,7 @@ export function connectShell(
         link.hostState = null;
         link.departures++;
         link.freshness.advance();
-        sessions().forgetStatuses(m.ref);
+        sessions().forgetStatuses(m.ref, keepsRemoteStatus); // P5 O7 M2: but a lane B session main still holds there
         continue;
       }
       if (link.up && link.generation === m.generation) continue;
@@ -274,7 +288,7 @@ export function connectShell(
       link.generation = m.generation;
       // P5 O8 M2: a machine the rows cover answers none of the five reads; it loads with its rows (`takeRows`)
       if (sessions().listedMachines.has(m.ref)) continue;
-      void snapshot(m.ref).then((applied) => {
+      void snapshot(m.ref).records.then((applied) => {
         if (!applied) return;
         stores.machines.getState().setLoaded(m.ref);
         stores.layout.getState().settleMachine(m.ref);
@@ -296,6 +310,26 @@ export function connectShell(
     }
     covered = now;
   };
+  // The local machine's link is the app's own, up for its life: its snapshot is taken now. 2026-10-31: but its daemon
+  // restarts under it (an upgrade's mawsd restart answers the page's first reads host_unavailable), and a failed snapshot
+  // is unknown, never empty: it is taken again until answered (until-answered.ts, whose `host.status` is subscribed here,
+  // before any read), and until its record side is in and the retention's intents are known the local machine is not
+  // loaded, so hydration keeps its tabs (and saves none trimmed), as it keeps an unloaded machine's, and they settle
+  // when it loads (below).
+  let firstLocal!: (applied: boolean) => void;
+  const localFirst = new Promise<boolean>((resolve) => (firstLocal = resolve));
+  let recordsIn!: () => void;
+  const localRecords = new Promise<void>((resolve) => (recordsIn = resolve));
+  const stopLocal = askUntilAnswered(client, async () => {
+    const { records, attended } = snapshot(local);
+    void records.then((applied) => {
+      firstLocal(applied);
+      if (applied) recordsIn();
+    });
+    const [applied, heard] = await Promise.all([records, attended]);
+    return applied && heard;
+  });
+
   const rowsLive = rowsFreshness.stamp();
   void client.invoke('org.rows', undefined).then((result) => {
     if (!connected) return;
@@ -360,26 +394,32 @@ export function connectShell(
   const knownTab = (id: AppSessionId): boolean => {
     if (sessions().records.has(id) || sessions().listed.has(id) || (currentTabRetention()?.retains(id) ?? false)) return true;
     const machine = machineOf(id);
-    if (machine === local) return false;
     const { roster: state, machines, loaded } = stores.machines.getState();
+    if (machine === local) return !loaded.has(local); // 2026-10-31: unknown, not gone (below)
     return state !== 'answered' || (machines.has(machine) && !loaded.has(machine));
   };
 
-  // The local machine's link is the app's own, up for its life: its snapshot is taken now, and the layout hydrates once
-  // it is in and the roster has answered or failed.
-  const localSnapshot = snapshot(local);
-  void Promise.all([localSnapshot, roster]).then(async ([applied]) => {
+  // The local machine's link is the app's own, up for its life (its snapshot, taken first, is below), and the layout
+  // hydrates once its first answer is in and the roster has answered or failed.
+  const loadLocal = () => {
+    if (!connected || stores.machines.getState().loaded.has(local)) return;
+    stores.machines.getState().setLoaded(local);
+    stores.layout.getState().settleMachine(local); // nothing before hydration, which then finds it loaded
+  };
+  void localRecords.then(() => currentTabRetention()?.known).then(loadLocal);
+  void Promise.all([localFirst, roster]).then(async ([applied]) => {
     if (!connected) return;
     sessions().setLoaded();
-    if (applied) stores.machines.getState().setLoaded(local);
     const retention = currentTabRetention();
-    if (retention) await retention.ready;
+    const intents = retention ? await retention.ready : true;
     if (!connected) return;
+    if (applied && intents) loadLocal();
     await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf, titleOf });
   });
 
   return () => {
     connected = false;
+    stopLocal();
     offRefile();
     offRekey();
     if (timer) clearTimeout(timer);

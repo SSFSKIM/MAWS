@@ -13,7 +13,8 @@
 // drains the link into a loaded spine the same way before its parts stop. Any state →
 // `yielded` while an older app's pid lives (§L): a loaded spine settles, stops and gives the lock up, or, when its
 // writers have not settled within a minute, the process ends instead, which ends every writer and frees the lock by the
-// exit path (D27); → `cold` once the pid is gone.
+// exit path (D27); → `cold` once the pid is gone. A load that only the engine host's events caused wakes no engine host
+// until a need reaches it (`wanted`, below).
 //
 // P5 O3-D M5 (Interfaces §L, D21): `yieldCandidate`, read at each load attempt, names a pid to yield to before the load
 // (the second signal, the profile's `SingletonLock`, daemon.ts); `yieldedTo` says whom the spine yields to now.
@@ -63,6 +64,7 @@ export interface LazySpineOptions {
   quietMs(): number; // the daemon's idle time, or MAWS_SPINE_QUIET_MS under a measured scene (D6)
   reexecute: boolean; // exit 75 after a release: a unit daemon with the switch on (D38, daemon.ts); otherwise the link stays open and the hold starts
   wakeOnEvents: boolean; // a session.eventBatch while cold loads the spine (M2: off in the product until main stops composing its own; daemon.ts)
+  needEngine?(): void; // a command of a wanted load waits on the engine host (the session service's boot): the daemon wakes it
   endLink(): Promise<void>; // re-execution's and the exit's first step: the engine host's link ended by its terminal draining close
   restart(reason: string): void; // re-execution's last: the daemon's exit order with EXIT_RESTART
   exitForYield(): void; // a yield whose writers did not settle: the daemon's exit order (75 for a unit, 0 for a private one)
@@ -146,6 +148,18 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   let quietFact = false;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+  // The invariant (P5 O16 M2b found its race with the exit when idle; a handover of the engine host keeps it): a load
+  // that only the engine host's events caused never wakes or respawns an engine host nobody wants. Such a load is not
+  // `wanted` until a need reaches it (`ensure` for a command or the endpoint); until then its adapter sends the engine
+  // host nothing unless it is ready, so no request is held for a host that is exiting, nor launches a parked one. Nothing
+  // is lost: every part that talks to the engine host at a load does so again at each welcome (its `ready`, then its
+  // streaming), so the next host that is wanted is configured then. A command that waits on the engine host (the session
+  // service's boot waits for its first streaming) is the need that wakes it: a wanted load's adapter tells the daemon
+  // (`needEngine`); a command that never waits on it wakes nothing.
+  let wanted = false;
+  const need = (reason: SpineTrigger) => {
+    if (reason !== 'event') wanted = true;
+  };
 
   const events = new SpineEvents(options.hosts, {
     log,
@@ -171,8 +185,8 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     for (;;) {
       if (stopped) throw new SpineUnavailable('the daemon is exiting', 'exiting');
       if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid}, an app that runs its own`, 'yielded');
-      if (loaded && state === 'loaded') return loaded.root;
-      if (loading) return loading;
+      if (loaded && state === 'loaded') return need(reason), loaded.root;
+      if (loading) return need(reason), loading;
       if (releasing) {
         await releasing;
         continue;
@@ -192,6 +206,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
 
   async function load(reason: SpineTrigger): Promise<SpineRoot> {
     const started = now();
+    wanted = reason !== 'event';
     events.beginHold();
     set('loading', reason);
     log(`[spine] loading (${reason})`);
@@ -212,7 +227,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       throwIfExiting();
       const data = await entry.openSpineData(options.profileDir, { build: options.build, lock });
       throwIfExiting(); // no composition once the exit began
-      adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, log });
+      adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, wanted: () => wanted, need: () => options.needEngine?.(), log });
       root = entry.startSpine({ ...options.deps(), data, hosts: adapter });
       await adapter.load();
       throwIfYielded();

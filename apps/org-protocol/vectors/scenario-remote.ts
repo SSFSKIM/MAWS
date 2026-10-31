@@ -41,6 +41,12 @@ import { duplexPair } from '../test-support/tamper-relay.ts';
 import type { Arg, Case, KeyName, Keys } from './scenario.ts';
 
 export const ORG_REMOTE = 'org-remote';
+/**
+ * The RL2 version the handshake vectors were recorded at. Its bytes are in every recorded message and so in the key
+ * schedule, so both ends announce it when the vectors are written or replayed, whatever RL2_PROTOCOL the build is at: a
+ * minor's move adds a capability, which changes nothing the handshake computes.
+ */
+export const VECTOR_PROTOCOL = { major: 1, minor: 0 } as const;
 const PROJECT = 'proj-1';
 const ALICE = '1a1b2c3d4e5f60718293a4b5c6d7e8f9';
 const BOB = '2b1b2c3d4e5f60718293a4b5c6d7e8f9';
@@ -215,6 +221,7 @@ async function recordConnection(k: Keys, machine: MachineIdentity, device: Devic
     pageBytes: endpointSide.pageBytes,
     ephemeral: await importEphemeral(await jwkOf(k, endpointSide.ephemeral)),
     nonce: bytes(endpointSide.nonce, 32),
+    protocol: VECTOR_PROTOCOL,
   }).then(
     async ({ channel, peer }) => {
       endpointSettled = log.endpoint.length;
@@ -232,6 +239,7 @@ async function recordConnection(k: Keys, machine: MachineIdentity, device: Devic
     pageBytes: deviceSide.pageBytes,
     ephemeral: await importEphemeral(await jwkOf(k, deviceSide.ephemeral)),
     nonce: bytes(deviceSide.nonce, 32),
+    protocol: VECTOR_PROTOCOL,
   }).then(
     (channel) => {
       deviceSettled = log.device.length;

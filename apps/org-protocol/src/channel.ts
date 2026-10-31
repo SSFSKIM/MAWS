@@ -39,7 +39,8 @@ import { machineKeys } from './records.ts';
 import { CHANNEL_HEADER_BYTES, RL1_MESSAGE_LIMIT } from './relay.ts';
 import { SIGNING_DOMAINS, type DeviceClass, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
 
-export const RL2_PROTOCOL = { major: 1, minor: 0 } as const;
+/** Each landing that adds a capability moves the minor (P5 O7, Constraints); a peer checks the capability, never the minor. */
+export const RL2_PROTOCOL = { major: 1, minor: 1 } as const;
 /** The most an `h2` or `h3` message is, on both carriers: an RL1 message less the multiplex header. */
 export const HANDSHAKE_PAGE_BYTES = RL1_MESSAGE_LIMIT - CHANNEL_HEADER_BYTES;
 /** The most an `h1` is. */
@@ -98,6 +99,8 @@ export type HandshakeOptions = {
   pageBytes?: number;
   ephemeral?: Ephemeral;
   nonce?: B64;
+  /** The version this side announces: RL2_PROTOCOL, or the one the vectors were recorded at (their bytes carry it). */
+  protocol?: { major: number; minor: number };
 };
 
 /**
@@ -620,7 +623,7 @@ export async function openChannel(io: ByteDuplex, me: DeviceIdentity, org: OrgVi
     const before = org.head().state.version;
     const h1: H1 = {
       t: 'h1',
-      protocol: { ...RL2_PROTOCOL },
+      protocol: { ...(options.protocol ?? RL2_PROTOCOL) },
       build: me.build,
       capabilities: me.capabilities,
       org: me.org,
@@ -696,7 +699,7 @@ export async function acceptChannel(io: ByteDuplex, me: MachineIdentity, org: Or
     const ephemeral = options.ephemeral ?? (await generateEphemeral());
     const base: Fields = {
       t: 'h2',
-      protocol: { ...RL2_PROTOCOL },
+      protocol: { ...(options.protocol ?? RL2_PROTOCOL) },
       build: me.build,
       capabilities: me.capabilities,
       stateVersion: start.version,

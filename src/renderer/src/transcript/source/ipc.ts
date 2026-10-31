@@ -4,7 +4,7 @@
 // `…Over(client)` form so tests drive it with a fake X2 client; the plain forms use the app's validated client.
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { bareOf, machineOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
@@ -14,7 +14,9 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HistoryPager, withoutOlderThanWindow } from './older';
+import { HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2
+import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
+import { HistoryPager, withHistoryGap, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
 // How much of a spilled result is read into the detail (residue *Spilled results*): past it, the head and Open full log.
@@ -195,9 +197,41 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // client's interest while the source stayed mounted, as a side thread off screen), so the transcript's later writes
   // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
   let stale = false;
+  let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
+  // P5 O7 M2 (the milestone review): the windows main last said were too large for the channel (`remote.historyTooLarge`),
+  // each said just before the read it answers `historyUnavailable`; that read's bar takes their words, once
+  // (heard while subscribed: the source's reads, its snapshot's and its older pages', run while it is)
+  const tooLarge = new Set<'newest' | 'older'>();
+  const tooLargeWords = (window: 'newest' | 'older'): string | undefined => {
+    if (!tooLarge.delete(window)) return undefined;
+    return HISTORY_TOO_LARGE[window](remoteMachineName(appSessionId));
+  };
+  const gapPlaces = new WeakMap<SessionEvent, GapPlace>(); // P5 O7 M2: a gap told during a read, by where it goes
+  // P5 O7 M2 (M2's reviews): a gap told while the history was being read is held behind it, and so would land after the
+  // events the read already holds of the launch it names. It goes before the first of them at or after its `at` instead
+  // (a lost range's end), or before the launch's first event without one (a relaunch's `snapshot`), by the live journal's
+  // ids, `<app>:<launchId>:<seq>:<i>`; one the read holds no such event for stays held, after the history and before what
+  // came after it. The pager is started from what this answers, so an older page's rebuild keeps it.
+  const placeHeldGaps = (events: SessionEvent[], subscription: { held: SessionEvent[][] | null }, bareApp: string): SessionEvent[] => {
+    if (subscription.held === null) return events;
+    let placed = events;
+    subscription.held = subscription.held.filter((batch) => {
+      const where = batch.length === 1 ? gapPlaces.get(batch[0]) : undefined;
+      if (where === undefined) return true;
+      const index = placed.findIndex((event) => atOrAfter(event, bareApp, where));
+      if (index < 0) return true;
+      placed = [...placed.slice(0, index), batch[0], ...placed.slice(index)];
+      return false;
+    });
+    return placed;
+  };
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
-    async (before, seek) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })),
+    async (before, seek) => {
+      tooLarge.delete('older');
+      const page = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) }));
+      return withHistoryGap(page, bareOf(appSessionId), tooLargeWords('older')); // P5 O7 M2
+    },
     (page, last) => {
       const from = page[0] === undefined ? Infinity : atOf(page[0]);
       const placed = last ? appAside : appAside.filter((event) => atOf(event) >= from);
@@ -264,11 +298,27 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push([exit]);
         else subscription.pass([exit]);
       });
+      // P5 O7 M2: a remote lane B stream that went on past events it could not deliver says so in order with its batches;
+      // the gap bar goes in here, where they would have been (model/gap.ts)
+      const offGap = client.on('remote.gap', ({ appSessionId: gapped, launchId, at }) => {
+        if (gapped !== appSessionId) return;
+        const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
+        const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
+        if (subscription.held) {
+          gapPlaces.set(gap, { launchId, at: at ?? null }); // placed by the snapshot when the history it reads holds its place
+          subscription.held.push([gap]);
+        } else subscription.pass([gap]);
+      });
+      const offTooLarge = client.on('remote.historyTooLarge', ({ appSessionId: said, window }) => {
+        if (said === appSessionId) tooLarge.add(window);
+      });
       return () => {
         off();
         offChanged();
         offReleased();
         offLoss();
+        offGap();
+        offTooLarge();
         subscription.held = null;
         subscription.pass = () => {};
         subscription.ended.abort();
@@ -283,12 +333,17 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       let events = pager.takeRebuilt();
       if (events === null) {
         stale = false; // this read follows the transcript again
-        const answer = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        tooLarge.delete('newest');
+        const read = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        const answer = withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')); // P5 O7 M2: the gap bar at a page partly gone
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;
         const first = answer.events[0];
         const placed = earlier === null || first === undefined ? app : app.filter((event) => atOf(event) >= atOf(first));
         events = withAppEvents(placed, answer.events);
+        // P5 O7 M2: a gap told while this was read takes its place in it before the pager keeps it as the history its
+        // older pages rebuild from
+        if (subscription) events = placeHeldGaps(events, subscription, bareOf(appSessionId));
         // The pager and the app events set aside are the source's, not the subscription's: a snapshot whose
         // subscription has ended or been superseded (a close and reopen with two reads in flight) answers only its own
         // hydration, which discards it. Were it to finish last and start the pager over, the pager's log and cursor
@@ -609,6 +664,20 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
 // One source per key and client: C5's agent tab and C8's drill-in mount the same source, hence one attachment and one
 // state in the store.
 const sources = new WeakMap<MawsBridge, Map<string, TranscriptSource>>();
+
+// P5 O7 M2: where a held gap goes, and whether an event of the history is at or after it: an event of the gap's launch
+// (by its live journal id, `<app>:<launchId>:<seq>:<i>`) at or after `at`, or any of the launch's without one.
+interface GapPlace {
+  launchId: string;
+  at: { seq: number; idx?: number } | null;
+}
+function atOrAfter(event: SessionEvent, bareApp: string, { launchId, at }: GapPlace): boolean {
+  const prefix = `${bareApp}:${launchId}:`;
+  if (!event.id.startsWith(prefix)) return false;
+  if (at === null) return true;
+  const [seq, idx] = event.id.slice(prefix.length).split(':').map(Number);
+  return seq > at.seq || (seq === at.seq && idx >= (at.idx ?? 0));
+}
 
 export function ipcSourceOver(client: MawsBridge, appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource {
   const key = agentId === undefined ? appSessionId : `${appSessionId}:${agentId}`;

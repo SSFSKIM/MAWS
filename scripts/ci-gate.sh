@@ -134,7 +134,6 @@ print_paths() {
 }
 trap print_paths EXIT
 
-REPO=SSFSKIM/MAWS
 # refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
 # shellcheck source=scripts/ci-gate-refusals.sh
 source "$(dirname "$0")/ci-gate-refusals.sh" || exit 2
@@ -215,6 +214,14 @@ else
   branch=''
 fi
 
+# The target's origin is also the API target: writes (notably cancellation) must not depend on transfer redirects.
+# Read the configured URL, before local insteadOf transport rewrites. Non-GitHub origins retain today's fallback.
+REPO=SSFSKIM/MAWS
+origin_url=$(git -C "$git_dir" config --get remote.origin.url || true)
+if [[ $origin_url =~ ^(https://github\.com/|git@github\.com:|ssh://git@(github\.com|ssh\.github\.com)(:[0-9]+)?/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/?$ ]]; then
+  REPO=${BASH_REMATCH[4]%.git}
+fi
+
 # Explicit labels preserve their routing (reserved final refs stay on the self-hosted Mac).
 # The default is derived after peer, affected paths and repository variables are resolved.
 short=${sha:0:8}
@@ -284,6 +291,9 @@ variables_ok=true
 gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
 gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
 gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
+gate_mac_ec2=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "MAC_EC2") | .value') || variables_ok=false
+gate_hosted_cap=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_CAP") | .value') || variables_ok=false
+gate_hosted_repos=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_REPOS") | .value') || variables_ok=false
 # Sample only when the direct route could host e2e work (unit may add the peer group) and the caller named no hosted
 # lane: --lane hosted asks for GitHub's hosted Macs themselves (a trial or an admission), so nothing of it may move to
 # EC2, and no-hosted puts nothing there. The caller's token sees the account-wide queue and EC2 state. Missing/failed
@@ -291,12 +301,17 @@ gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | se
 backlog_trailer=''
 if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && $lane != hosted && -z $live ]]; then
   case $gates in
-    all|*e2e:*|*unit*) backlog_trailer=$(node "$(dirname "$0")/ci-gate-backlog.mjs") || backlog_trailer='' ;;
+    all|*e2e:*|*unit*)
+      backlog_trailer=$(REPO="$REPO" HOSTED_MAC_REPOS="$gate_hosted_repos" node "$(dirname "$0")/ci-gate-backlog.mjs") || {
+        backlog_status=$?
+        [[ $backlog_status != 2 ]] || exit 2
+        backlog_trailer=''
+      } ;;
   esac
   [[ -z $backlog_trailer ]] || trailers+=$'\n'"$backlog_trailer"
 fi
 if [[ -z $label ]]; then
-  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
+  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" \
     node "$(dirname "$0")/ci-gate-identity.mjs" --git-dir "$git_dir" --sha "$sha" --branch "$branch") || exit 2
   label=${label//[^A-Za-z0-9._-]/-}
   ref=ci/$label-$short
@@ -336,7 +351,7 @@ exec > >(tee "$log") 2>&1
 [[ -z $backlog_trailer ]] || printf 'ci-gate: %s\n' "$backlog_trailer"
 
 if [[ $variables_ok == true ]] &&
-   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
+   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
 else

@@ -213,6 +213,39 @@ describe('the engine host’s park clock', () => {
     expect(actions.armEnginePark).toHaveBeenCalledOnce(); // only c's
   });
 
+  it('a need (a command waits on the host) restarts the clock: the host it wakes is asked to park only after the idle time', () => {
+    const c = clocks();
+    c.configure(MIN);
+    vi.advanceTimersByTime(10 * MIN); // long idle, no app: the ask would be overdue at the woken host's ready
+    c.engineNeeded();
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    vi.advanceTimersByTime(MIN - 1);
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('idle');
+  });
+
+  it('a need during a discovery wake leaves its park to the clock; a wake with none parks at its pass', () => {
+    const c = clocks();
+    c.configure(MIN);
+    vi.advanceTimersByTime(10 * MIN);
+    c.discoveryWaking();
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    c.engineNeeded(); // a command waits on the host the read woke
+    c.parkNow();
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MIN);
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('idle');
+    c.hosts({ engine: true, pty: true }); // it parked
+    c.discoveryWaking(); // the next read's wake: no need this time
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4002);
+    c.parkNow();
+    expect(actions.armEnginePark).toHaveBeenLastCalledWith('discovery');
+  });
+
   it('the idle clock’s ask that was not sent is asked again at the same host’s reconnect', () => {
     const c = clocks();
     c.configure(MIN);

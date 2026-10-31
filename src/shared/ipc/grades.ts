@@ -32,6 +32,7 @@ import { grades as laneA } from './grades/lane-a'; // P5 O9 M2
 import { grades as machineSettings } from './grades/machine-settings'; // P5 O3-D
 import { grades as clientPort } from './grades/client-port'; // P5 O3-D
 import { grades as render } from './grades/render'; // P5 O5 M3
+import { grades as remote } from './grades/remote'; // P5 O7 M2
 import { grades as library } from './grades/library';
 import { grades as marketplaces } from './grades/marketplaces';
 import { grades as maws } from './grades/maws';
@@ -76,6 +77,7 @@ export const NAMESPACE_GRADES = {
   customization, catalog, daemon, machine, machines, org, laneA, // P5 O2 M5: daemon; P5 O8 M1: org; P5 O9 M2: laneA
   machineSettings, clientPort, // P5 O3-D
   render, // P5 O5 M3
+  remote, // P5 O7 M2
 } as const satisfies { readonly [N in Namespace]: NamespaceGrades<CommandsOf<N>> };
 
 const isSpec = (declared: NamespaceGrades<string>): declared is GradeSpec =>

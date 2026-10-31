@@ -9,10 +9,16 @@
 // when the chain doesn't verify, when the head doesn't list `member`'s `device` with this profile's channel key, or when a
 // stand-in user is named for a hub that isn't `http://127.0.0.1:<port>` (the stand-in header means something only to the
 // local hub). Its step-up signer is main's real one: there is no bypass.
+//
+// P5 O7 M2 (Interfaces §Q): `session.json` may carry `directMap`, each advertised `ws://` address of a machine's endpoint
+// record to the loopback one to dial instead, so an e2e on one Mac reaches the direct carrier of a `mawsd` whose listener
+// advertises a fake tailnet address. It is read once, at the load, and exposed on the session (`directMap()`), from which
+// main builds the link's `dialDirect`; it changes only which address a dial goes to, never what the link checks.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isCertificates, keyId, memoryOrgView, NO_CERTIFICATES, verifyPinnedChain, type OrgView } from '../../../apps/org-protocol/src/index.ts';
 import { loadDeviceKeys, type DeviceKeys } from '../device/keys';
+import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { watchedView, type OrgSession, type SignedIn } from './session';
 
 /** The local hub's stand-in for Access (desk-hub's `local/standin.ts` `IDENTITY_HEADER`; dev-session.test.ts pins it). */
@@ -25,9 +31,12 @@ type SessionFile = {
   device: string;
   pins: { roots: string[]; recoveryPub: string };
   hub: { url: string; standinUser?: string } | null;
+  directMap?: Record<string, string>;
 };
 
 const LOOPBACK_HUB = /^http:\/\/127\.0\.0\.1:\d{1,5}\/?$/;
+const WS_ADDRESS = /^ws:\/\/[^/?#\s]+\/?$/;
+const LOOPBACK_WS = /^ws:\/\/127\.0\.0\.1:\d{1,5}\/?$/;
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
 
@@ -38,6 +47,10 @@ function readSessionFile(value: unknown): SessionFile | string {
   if (!isObject(pins) || !Array.isArray(pins.roots) || !pins.roots.every(isText) || !isText(pins.recoveryPub)) return 'session.json lacks its pins';
   const hub = value.hub;
   if (hub !== null && (!isObject(hub) || !isText(hub.url) || (hub.standinUser !== undefined && !isText(hub.standinUser)))) return 'session.json has a malformed hub';
+  const map = value.directMap;
+  if (map !== undefined && (!isObject(map) || !Object.entries(map).every(([from, to]) => WS_ADDRESS.test(from) && typeof to === 'string' && LOOPBACK_WS.test(to)))) {
+    return 'session.json has a malformed directMap (each an advertised ws:// address to a ws://127.0.0.1:<port> one)';
+  }
   return value as SessionFile;
 }
 
@@ -49,16 +62,19 @@ export function createDevOrgSession(input: {
   stepUp: (keys: DeviceKeys, device: { org: string; device: string }) => SignedIn['stepUp'];
   loadKeys?: typeof loadDeviceKeys;
   log(line: string): void;
-}): OrgSession & { loaded: Promise<void> } {
+}): OrgSession & { loaded: Promise<void>; directMap(): Readonly<Record<string, string>> } {
   const log = (line: string) => input.log(`[dev-org] ${line}`);
   const listeners = new Set<() => void>();
   let held: SignedIn | null = null;
   let listed = false;
+  /** session.json's `directMap`, once the session signed in from it; empty before, and without one. */
+  let directMap: Readonly<Record<string, string>> = {};
   const changed = () => {
     for (const listener of [...listeners]) listener();
   };
   const session = {
     current: () => (listed ? held : null),
+    directMap: () => directMap,
     onChanged(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -104,7 +120,7 @@ export function createDevOrgSession(input: {
     if (!(await isListed(view))) return log(`signed out: the head doesn't list device ${file.device} of member ${file.member} with this profile's channel key`);
     const hub = file.hub;
     held = {
-      identity: { org: file.org, member: file.member, device: file.device, clientClass: 'native-mac', channelKey: keys.channel, build: input.build, capabilities: [] },
+      identity: { org: file.org, member: file.member, device: file.device, clientClass: 'native-mac', channelKey: keys.channel, build: input.build, capabilities: [...DEVICE_CAPABILITIES] },
       view,
       stepUp: input.stepUp(keys, { org: file.org, device: file.device }),
       hub:
@@ -112,6 +128,7 @@ export function createDevOrgSession(input: {
           ? null
           : { url: hub.url.replace(/\/+$/, ''), headers: () => Promise.resolve<Record<string, string>>(hub.standinUser === undefined ? {} : { [STANDIN_HEADER]: hub.standinUser }) },
     };
+    directMap = { ...file.directMap };
     listed = true;
     log(`signed in to org ${file.org} as device ${file.device}, at state ${verified.head.state.version}`);
     changed();

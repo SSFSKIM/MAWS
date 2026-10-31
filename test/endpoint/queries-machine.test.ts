@@ -37,6 +37,7 @@ function lab() {
     dispatch: async (owner, name, input) => {
       dispatched.push(`${owner} ${name}`);
       if (owner === 'machine' && name === 'machine.opQuery') return ok(ops.opQuery(input as CommandInput<'machine.opQuery'>));
+      if (owner === 'machine' && name === 'session.get') return ok(null); // no record in the index: the engine host places it (P5 O7 M2)
       if (owner === 'engine-host' && name === 'session.status') return ok({ appSessionId: 'app-own', launchId: 'launch-1', engineSessionId: 'eng-own' });
       return { t: 'res', id: 'x', ok: false, error: { code: 'unknown_command', message: name } };
     },

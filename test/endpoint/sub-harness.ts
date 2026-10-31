@@ -5,6 +5,11 @@
 // `<appSessionId>:<launchId>:<seq>:<i>`, `session.events` answers whole rows after `afterSeq`, and its live events reach
 // the endpoint only while an app is attached (O2's seam until O3) and its link to mawsd is up (`onUpstream`).
 //
+// P5 O7 M2: a fake spine beside the engine host (`FakeSpine`), answering `dispatch('machine', …)`'s `session.get` from the
+// records a suite injects and running `session.acquire` under the services' own ledger (`machine.op`, `machine.opQuery`),
+// so a session the engine host holds no row for (released, or the host parked) is placed by its record as on a machine.
+// Every dispatch is recorded with the `ClientRef` it carried.
+//
 // The org: A, an admin who owns the machine (device a1); B, a member (b1); C, a member with a phone (c1, web-cards).
 import * as fs from 'node:fs';
 import type { Server } from 'node:http';
@@ -14,12 +19,13 @@ import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICA
 import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import type { SessionEvent } from '@shared/graph/events';
-import type { HandlerContext } from '@shared/ipc/client';
+import type { ClientRef, HandlerContext } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
+import { machineOps } from '../../src/services/machine-ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import type { EndpointOptions } from '../../src/endpoint/endpoint';
 import { waitingCount } from '../../src/endpoint/lane-b-pending';
@@ -89,8 +95,14 @@ const no = (code: 'unknown_command' | 'internal' | 'host_unavailable'): HostResp
 export class FakeEngineHost {
   readonly sessions = new Map<string, HostSession>();
   attached = false;
-  /** Every dispatched command's name, in order. */
-  readonly calls: Array<{ name: string; input: unknown }> = [];
+  /** Every dispatched command's name, in order, with its owner and the client it carried (P5 O7 M2: the channel's). */
+  readonly calls: Array<{ owner: string; name: string; input: unknown; client?: ClientRef }> = [];
+  /**
+   * The machine's services (P5 O7 M2), asked first for every `machine` command; one it doesn't serve falls to `answer`.
+   * Every fake host has one, its index empty until a test records a session (the engine host then places each), since a
+   * spine that can't answer `session.get` refuses lane B placement `unavailable`.
+   */
+  spine: FakeSpine | null = new FakeSpine(this);
   /** Answers held before they go (a read a test races): resolved by `release`. */
   readonly #held = new Map<string, Array<() => void>>();
   readonly #holding = new Set<string>();
@@ -107,6 +119,8 @@ export class FakeEngineHost {
   readonly answered: string[] = [];
   /** Each `session.send` the engine host ran under its op ledger, in order (P5 O7 M1): what a run-once proof reads. */
   readonly runs: Array<{ appSessionId: string; content: unknown; launchId: string }> = [];
+  /** `host.op` handlers a suite serves beside `session.send` and `session.answer` (P5 O7 M2b: an interrupt), by name. */
+  readonly handlers = new Map<string, (input: unknown) => unknown>();
 
   /** Wires the fake into `services`' dispatch, onEvent, onAttachment and onUpstream, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
@@ -117,14 +131,16 @@ export class FakeEngineHost {
           ? (input) => Promise.resolve(this.#answer(input as { appSessionId: string; requestId: string }))
           : name === 'session.send'
             ? (input) => Promise.resolve(this.#send(input as { appSessionId: string; content: unknown }))
-            : undefined,
+            : this.handlers.has(name)
+              ? (input) => Promise.resolve(this.handlers.get(name)!(input))
+              : undefined,
       status: (id) => {
         const s = this.sessions.get(id);
         return s === undefined || s.engineSessionId === null ? null : { launchId: s.launchId, engineSessionId: s.engineSessionId };
       },
       pending: (id, requestId) => this.#pending(this.sessions.get(id), requestId),
     });
-    services.dispatch = (owner, name, input) => this.dispatch(owner, name, input);
+    services.dispatch = (owner, name, input, client) => this.dispatch(owner, name, input, client);
     services.onEvent = (listener) => {
       this.#events.add(listener);
       return () => this.#events.delete(listener);
@@ -260,8 +276,12 @@ export class FakeEngineHost {
   }
 
   /** The answer is made when the command arrives; one held (`hold`) reaches the endpoint only at its `release`. */
-  async dispatch(owner: string, name: string, input: unknown): Promise<HostResponse> {
-    this.calls.push({ name, input });
+  async dispatch(owner: string, name: string, input: unknown, client?: ClientRef): Promise<HostResponse> {
+    this.calls.push({ owner, name, input, ...(client === undefined ? {} : { client }) });
+    if (owner === 'machine' && this.spine !== null && !this.#failing.has(name)) {
+      const served = await this.spine.dispatch(name, input, client);
+      if (served !== null) return served;
+    }
     if (owner === 'engine-host' && name === 'host.op' && this.#ops !== null) {
       // The runtime checks every input against the registry before a handler sees it.
       const checked = validateCommandInput(name, input);
@@ -364,6 +384,63 @@ export class FakeEngineHost {
   }
 }
 
+/**
+ * `mawsd`'s spine as the endpoint's `dispatch('machine', …)` reaches it (P5 O7 M2): `session.get` answers the record a
+ * suite set for the session (null for none, so placement falls back to the engine host as before), and `session.acquire`
+ * runs under the services' ledger (`machine.op`, `machine.opQuery`, `src/services/machine-ops.ts` over its own
+ * `spine-ops.jsonl`), resuming the session onto the engine host from its record (a new launch) unless the host already
+ * holds it. Any other name is not the spine's here (null): the engine host fake answers it.
+ */
+export class FakeSpine {
+  /** The index's records by appSessionId: what `session.get` answers. */
+  readonly records = new Map<string, Record<string, unknown>>();
+  /** Each `session.acquire` the ledger ran, in order. */
+  readonly acquired: string[] = [];
+  #ops: ReturnType<typeof machineOps> | null = null;
+
+  constructor(private readonly host: FakeEngineHost) {}
+
+  /** The services' ledger in the machine's state directory. */
+  serve(services: FakeServices): void {
+    this.#ops = machineOps({
+      ledger: OpLedger.open(services.machine.stateDir, 'spine-ops.jsonl'),
+      invoke: async (name, input) => (name === 'session.acquire' ? { ok: true, value: this.#acquire(input as { appSessionId: string }) } : { ok: false, error: { code: 'unknown_command', message: name } }) as never,
+    });
+  }
+
+  /** A record of the session: a released one when the engine host holds no row for it. */
+  set(appSessionId: string, engineSessionId: string | null, fields: Record<string, unknown> = {}): Record<string, unknown> {
+    const record = { appSessionId, engineSessionId, ...fields };
+    this.records.set(appSessionId, record);
+    return record;
+  }
+
+  async dispatch(name: string, input: unknown, client?: ClientRef): Promise<HostResponse | null> {
+    const appSessionId = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
+    if (name === 'session.get') return ok(typeof appSessionId === 'string' ? (this.records.get(appSessionId) ?? null) : null);
+    if (name === 'machine.op' && this.#ops !== null) {
+      const checked = validateCommandInput(name, input);
+      return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'machine.op'>, { client: client ?? {} } as HandlerContext)) : no('internal');
+    }
+    if (name === 'machine.opQuery' && this.#ops !== null) {
+      const checked = validateCommandInput(name, input);
+      return checked.ok ? ok(this.#ops.opQuery(checked.value as CommandInput<'machine.opQuery'>)) : no('internal');
+    }
+    return null;
+  }
+
+  /** The resume: the session on the engine host again, as a new launch under its record's engine session (or its exited row's). */
+  #acquire({ appSessionId }: { appSessionId: string }): { status: 'ready'; appSessionId: string; launched: boolean; joined: boolean } {
+    this.acquired.push(appSessionId);
+    const row = this.host.sessions.get(appSessionId);
+    // P5 O7 M2b: a row the host kept for a launch that ended (`exited`) is resumed as a new launch, as the spine does
+    const launched = row === undefined || this.host.status(row).process === 'exited';
+    if (row === undefined) this.host.add(appSessionId, (this.records.get(appSessionId)?.engineSessionId as string | null | undefined) ?? `eng-${appSessionId}`);
+    else if (launched) this.host.relaunch(appSessionId);
+    return { status: 'ready', appSessionId, launched, joined: !launched };
+  }
+}
+
 export function item(s: HostSession, requestId: string, kind: 'question' | 'permission'): Record<string, unknown> {
   return {
     id: `att-${requestId}`,
@@ -420,6 +497,8 @@ export type Fixture = {
   endpoint: Endpoint;
   services: FakeServices;
   host: FakeEngineHost;
+  /** The machine's services beside the engine host (P5 O7 M2). */
+  spine: FakeSpine;
   records: Records;
   ref: string;
   key: SigningKey;
@@ -444,6 +523,9 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   const host = options.host ?? new FakeEngineHost();
   const services = options.services ?? fakeServices();
   host.serve(services);
+  const spine = host.spine ?? new FakeSpine(host);
+  spine.serve(services);
+  host.spine = spine;
   const interest: Fixture['interest'] = [];
   services.interest = { report: (viewer, sessions) => void interest.push(['report', viewer, [...sessions]]), drop: (viewer) => void interest.push(['drop', viewer]) };
   const ref = services.machine.ref;
@@ -483,7 +565,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   });
   records.bindLaneA(endpoint.rl10.members);
   await endpoint.start(services);
-  const f: Fixture = { endpoint, services, host, records, ref, key, chain, port: () => port, interest };
+  const f: Fixture = { endpoint, services, host, spine, records, ref, key, chain, port: () => port, interest };
   started.push(f);
   await until(() => port !== 0, 'the direct listener bound');
   return f;

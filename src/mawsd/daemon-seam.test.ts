@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 import type { AppSessionId } from '@shared/graph/ids';
+import { endableClientRef } from '@shared/ipc/client';
 import type { DaemonServices, EndpointModule } from './endpoint-seam';
 
 let scene: MawsdScene;
@@ -85,6 +86,19 @@ describe('the seam’s life', () => {
     await expect(endpoint.s.dispatch('machine', 'daemon.endpoint', { command: 'enroll', args: ['--hub', 'h'], secret: 's3cret' })).resolves.toMatchObject({ ok: true, value: { code: 0, out: 'enroll --hub h' } });
     expect(endpoint.cliCalls).toEqual([['enroll', ['--hub', 'h'], 's3cret']]);
     expect(scene.logs.join('\n')).not.toContain('s3cret');
+  });
+
+  it('a request names its asker to the engine host, and the asker’s end reaches it: a remote channel’s close ends its clone there (P5 O7 M2)', async () => {
+    const { endpoint } = await started();
+    const channel = endableClientRef('device-1/channel-1');
+    await expect(endpoint.s.dispatch('engine-host', 'engine.ping', undefined, channel)).resolves.toMatchObject({ ok: true });
+    const clone = scene.engines.at(-1)!.clients.at(-1)!;
+    expect(clone.id).toMatch(/\/device-1\/channel-1$/);
+    let gone = false;
+    clone.onGone(() => void (gone = true));
+    expect(gone).toBe(false);
+    channel.end();
+    await until(() => gone, 2_000, 'the engine host’s clone of the channel’s ref ends');
   });
 
   it('stop is first in the exit order, awaited, and at most 2.5 s', async () => {

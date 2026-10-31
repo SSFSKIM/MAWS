@@ -123,6 +123,9 @@ export function decide({ jobs, alerts, runners, guest = null, home = [], ec2 = [
   };
 }
 
+// Repository variables consumed by the planner, distinct from the committed workflow's env lists.
+export const plannerVariables = ['GATE_RUNNER', 'GATE_E2E_RUNNER', 'HOSTED_MAC_ROUTE', 'HOSTED_MAC_CAP', 'MAC_EC2'];
+
 // gate.yml's workflow-level `env:` as the plan job gets it, read for the names it holds: plain and quoted scalars on one
 // line, and block scalars (`>-`, `|`) whose lines are joined, which is all the plan's lists need (it splits them on
 // whitespace). It throws on anything else, a flow list, an anchor, a nested map, a double-quoted escape, so that a workflow
@@ -197,9 +200,7 @@ export function macPlan({ gitDir, sha, ref = '', gates = '', runner = '', class1
         GITHUB_REF: ref ? `refs/heads/${ref}` : '',
         GITHUB_REF_NAME: ref,
         HEAD_MESSAGE: `ci-gate: alert check\n\n${trailers.join('\n')}`,
-        GATE_RUNNER: variables.GATE_RUNNER ?? '',
-        GATE_E2E_RUNNER: variables.GATE_E2E_RUNNER ?? '',
-        HOSTED_MAC_ROUTE: variables.HOSTED_MAC_ROUTE ?? '',
+        ...Object.fromEntries(plannerVariables.map((key) => [key, variables[key] ?? ''])),
         GITHUB_OUTPUT: output,
         GITHUB_STEP_SUMMARY: join(dir, 'github-summary'),
       },

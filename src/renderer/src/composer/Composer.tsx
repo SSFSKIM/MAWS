@@ -47,6 +47,9 @@ import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
+import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
+import { isRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
+import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode
@@ -97,7 +100,7 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
   const current = useRef(hook);
   useLayoutEffect(() => void (current.current = hook));
   return useMemo(() => {
-    const drafts = ipcDrafts(client, appSessionId);
+    const drafts = rememberingRemoteDrafts(ipcDrafts(client, appSessionId), appSessionId, () => isRemoteLaneB(appSessionId)); // P5 O7 M2
     return {
       // While C10 holds an accepted first message its intent's draft may still be the sent text: nothing to restore.
       load: async () => (current.current ? (current.current.intent.message !== null ? null : current.current.intent.draft) : drafts.load()),
@@ -191,6 +194,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
   const messageHeld = setup !== null && setup.intent.message !== null;
+  // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
+  const sendingRemote = useRemoteSending(appSessionId);
+  const machineName = useMachineMark(appSessionId).name;
   // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
   // availability decides the control, and a terminal or job holding it is named
   const holder = record?.holder ?? null;
@@ -390,6 +396,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
           {phase}
+        </p>
+      )}
+      {/* P5 O7 M2: a send on its way to a session on another machine */}
+      {sendingRemote && (
+        <p role="status" aria-label="Sending" className="m-0 text-ui-sm text-fg-muted">
+          Sending to {machineName}…
         </p>
       )}
       {/* W3 (C5): Claude Desktop's notice when the engine refused auto and MAWS set the fallback, or an unstarted tab's

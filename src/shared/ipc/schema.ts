@@ -69,6 +69,7 @@ import * as laneA from './schema/lane-a'; // P5 O9 M2
 import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
+import * as remote from './schema/remote'; // P5 O7 M2
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -176,6 +177,7 @@ export const commands = {
   ...machineSettings.commands, // P5 O3-D
   ...clientPort.commands, // P5 O3-D
   ...render.commands, // P5 O5 M3
+  ...remote.commands, // P5 O7 M2
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -231,6 +233,7 @@ export const events = {
   ...machineSettings.events, // P5 O3-D
   ...clientPort.events, // P5 O3-D
   ...render.events, // P5 O5 M3
+  ...remote.events, // P5 O7 M2
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

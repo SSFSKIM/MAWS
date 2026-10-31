@@ -13,7 +13,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { acquireSession, acquisitionWords, cardWords } from '../../sessions/acquire';
-import { readSessionQueue } from '../../stores/queue';
+import { readSessionQueue, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { ENDED, STARTING, isBusy } from './submit-state';
 
@@ -79,6 +79,21 @@ export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendC
   const how = isBusy(status, queue.entries) ? 'steer' : 'send';
   const result = await dispatchHumanPrompt(client, appSessionId, content, how);
   if (!result.ok) throw new Error(result.error.message); // the composer shows the host error with its existing Retry
+  return hostAnswer(result.value, how, false);
+}
+
+// P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Acts"): a lane B session on another machine is sent
+// to with one invocation, whatever its process. Main's remote adapter resumes a released session itself under the send's
+// one bound (A4's hold, a minute from the Send), so an acquisition here would spend a bound of its own first, and a status
+// or queue read would cross the link; the status this page holds, if any, chooses a steer while a turn runs.
+export async function sendWithoutAcquiring(appSessionId: AppSessionId, content: SendContent, options: HumanPromptOptions, client: MawsBridge = ipc): Promise<HumanPromptResult> {
+  const refusal = declined(options);
+  if (refusal !== null) return refusal;
+  const status = useSessions.getState().engine.get(appSessionId) ?? null;
+  const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
+  const how = status?.process === 'ready' && isBusy(status, entries) ? 'steer' : 'send';
+  const result = await dispatchHumanPrompt(client, appSessionId, content, how);
+  if (!result.ok) throw new Error(result.error.message); // main's words (A4's, the pending bound's), shown with Send again
   return hostAnswer(result.value, how, false);
 }
 
