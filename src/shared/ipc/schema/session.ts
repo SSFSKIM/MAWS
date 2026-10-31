@@ -82,8 +82,10 @@ export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 // setting it false too, and seqs skip, so a reader can't tell a gap from the events alone.
 // `earlier` (present only when older history remains) is the cursor a disk-backed answer gives for the page before its
 // first event, asked as `before` (docs/doperpowers/plans/2026-10-30-long-transcript-window.md). `sought` answers a
-// disk read's `seek`: where the page stands to the message a jump looks for (HistorySoughtSchema).
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional() });
+// disk read's `seek`: where the page stands to the message a jump looks for (HistorySoughtSchema). `cronHistory`, on a
+// disk-backed newest window with older history, is the cron calls before it that a whole-history read counts, with their
+// results and their turns' starts (history-window.ts `cronHistoryOf`), so the Scheduled section lists every job.
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.

@@ -7,7 +7,7 @@
 // pages in with one rebuild and lands on it; one in none of the history ends at once, visibly; the reader can give up.
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, historyWindowStart, soughtIn, type WindowBudget } from '@shared/graph/history-window';
+import { cronHistoryOf, eventBytes, FOLLOW_RELEASED, historyWindowStart, soughtIn, type WindowBudget } from '@shared/graph/history-window';
 import type { AppSessionId, EventId, MessageUuid, ParentToolUseId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
@@ -56,7 +56,7 @@ function history(): { events: SessionEvent[]; notice: SessionEvent } {
 // `before` (or the newest), cut by the same rule, with its `earlier` cursor, and where it stands to a message `seek`
 // names (`sought`, unless `seekless`: a host from before jumps into history); `paged: false` answers the whole history.
 // `gate`, when set, holds each paged answer until the test releases it.
-function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean, options: { seekless?: boolean; gate?: () => Promise<void> } = {}) {
+function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean, options: { seekless?: boolean; gate?: () => Promise<void>; failing?: () => boolean } = {}) {
   const sizeOf = (i: number) => eventBytes(events[i]!);
   const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const asked: unknown[] = [];
@@ -64,11 +64,13 @@ function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean, 
     if (name === 'session.appEvents') return { ok: true, value: { events: [notice] } } as never;
     if (name !== 'session.events') throw new Error(`unexpected ${name}`);
     asked.push(input);
+    if (options.failing?.()) return { ok: false, error: { code: 'internal', message: 'the host is gone' } } as never;
     if (!paged) return { ok: true, value: { events, lastSeq: 0, complete: true } } as never;
     const end = input.before === undefined ? events.length : events.findIndex((event) => event.id === input.before);
     const start = historyWindowStart(events, end, sizeOf, BUDGET);
     const sought = input.seek !== undefined && !options.seekless ? soughtIn(events, input.seek as MessageUuid, start, end) : null;
-    return { ok: true, value: { events: events.slice(start, end), lastSeq: 0, complete: true, ...(start > 0 && { earlier: events[start]!.id }), ...(sought && { sought }) } } as never;
+    const crons = input.before === undefined ? cronHistoryOf(events, start) : [];
+    return { ok: true, value: { events: events.slice(start, end), lastSeq: 0, complete: true, ...(start > 0 && { earlier: events[start]!.id }), ...(sought && { sought }), ...(crons.length > 0 && { cronHistory: crons }) } } as never;
   };
   const client: MawsBridge = {
     localMachine: TEST_MACHINE,
@@ -84,7 +86,10 @@ function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean, 
     }) as MawsBridge['on'],
     pathForFile: () => '',
   };
-  return { client, asked };
+  const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
+  };
+  return { client, asked, emit };
 }
 
 describe('a disk-backed session paged in from its newest window', () => {
@@ -309,5 +314,35 @@ describe('a jump to a message older than the window', () => {
     });
     expect(useTranscriptStore.getState().entries[APP]!.state.ui.view).toBe('report');
     useTranscriptStore.getState().drop(APP);
+  });
+});
+
+// The Scheduled section's carry (`cronHistory`): what the newest window's answer said of its older history's cron calls
+// goes onto the key with the history it answered, so a fresh read that fails keeps the carry of the history it keeps.
+describe('the cron calls a newest window carries', () => {
+  function withCron(): { events: SessionEvent[]; notice: SessionEvent } {
+    const { events, notice } = history();
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.toolUse('cron1', 'CronCreate', { cron: '0 3 * * *', prompt: 'nightly' });
+    b.result('cron1', 'Scheduled recurring job abcd1234 (Every day at 3:00 AM). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days.');
+    const at = events.findIndex((event) => event.kind === 'turn.ended'); // inside turn 1, many pages back
+    const call = b.events.map((event) => ({ ...event, seq: null, at: events[at]!.at }) as SessionEvent);
+    return { events: [...events.slice(0, at), ...call, ...events.slice(at)], notice };
+  }
+
+  it('lands on the key with the open, and stays through a fresh read that failed', async () => {
+    const { events, notice } = withCron();
+    let failing = false;
+    const host = fakeHost(events, notice, true, { failing: () => failing });
+    const store = createTranscriptStore();
+    await store.getState().attach(APP, ipcSourceOver(host.client, APP));
+    const carried = store.getState().entries[APP]!.cronHistory!;
+    expect(carried.filter((event) => event.kind === 'tool.use').map((event) => (event as { toolName: string }).toolName)).toEqual(['CronCreate']);
+    // the follow released while the source stayed mounted, then the session's record changed: a fresh read, which fails
+    failing = true;
+    host.emit('fs.followState', { appSessionId: APP, agentId: null, state: 'stopped', chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message: FOLLOW_RELEASED });
+    host.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    await vi.waitFor(() => expect(store.getState().entries[APP]!.phase).toBe('failed'));
+    expect(store.getState().entries[APP]!.cronHistory).toBe(carried);
   });
 });

@@ -162,6 +162,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.session.engineStatuses.output.statuses[].modelOverrides': MODEL_OVERRIDES,
   'commands.session.events.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.events.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
+  'commands.session.events.output.cronHistory[]<kind=question.answered>.answers': ANSWERS,
+  'commands.session.events.output.cronHistory[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.session.getSettings.output.effective': ENGINE_JSON,
   'commands.session.getSettings.output.applied': ENGINE_JSON,
   'commands.session.getUsage.output.session.model_usage': MODEL_USAGE,
