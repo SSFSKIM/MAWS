@@ -40,14 +40,23 @@ run() {
 run r1-shell-windowless 120 "$electron" "$probe/main.cjs"
 # R3: the Dock icon hidden before ready (the render host's own line; the probe's --accessory switch)
 run r3-shell-accessory 120 "$electron" "$probe/main.cjs" --accessory
-# R2: under launchd in the GUI domain, as a child of a LaunchAgent-run mawsd is: a transient job, its environment launchd's
-out=$results/r2-launchd-gui-domain; rm -rf "$out"; mkdir -p "$out"
-label=dev.maws.u4probe.$$
-log "run r2: launchctl submit -l $label into gui/$(id -u)"
-launchctl submit -l "$label" -o "$out/stdout.txt" -e "$out/stderr.txt" -- "$electron" "$probe/main.cjs" --accessory --out "$out" --fixture "$probe" 2>"$out/submit.txt"
-for i in $(seq 1 120); do [[ -s $out/result.json ]] && grep -q 'memory idle 10 s' "$out/result.json" && break; sleep 1; done
-sleep 2; launchctl remove "$label" 2>/dev/null || true
-[[ -s $out/result.json ]] && log "run r2: result.json written" || log "run r2: no result.json (see $out/stderr.txt and submit.txt)"
+# R2: the production tree under launchd in the GUI domain: a plain-Node parent (the app binary run as Node, what a
+# LaunchAgent-run mawsd is) submitted as a transient job, spawning the Electron probe as its windowless child
+# (parent.cjs). R2b: the fallback the execution document names if R2 fails to reach ready: Electron itself submitted
+# as the job. Each waits for its result.json's last step, then removes the job.
+cp "$here/parent.cjs" "$probe/"
+submit() {
+  local name=$1; shift
+  local out=$results/$name; rm -rf "$out"; mkdir -p "$out"
+  local label=dev.maws.u4probe.$name.$$
+  log "run $name: launchctl submit -l $label into gui/$(id -u): $*"
+  launchctl submit -l "$label" -o "$out/stdout.txt" -e "$out/stderr.txt" -- "$@" --accessory --out "$out" --fixture "$probe" 2>"$out/submit.txt"
+  for i in $(seq 1 120); do [[ -s $out/result.json ]] && grep -q 'memory idle 10 s' "$out/result.json" && break; sleep 1; done
+  sleep 2; launchctl remove "$label" 2>/dev/null || true
+  [[ -s $out/result.json ]] && log "run $name: result.json written ($(node -e "const r=require('$out/result.json');console.log(r.steps.length+' steps, '+r.errors.length+' errors')"))" || log "run $name: no result.json (see $out/stderr.txt and submit.txt)"
+}
+submit r2-launchd-node-parent /usr/bin/env ELECTRON_RUN_AS_NODE=1 "$electron" "$probe/parent.cjs" "$electron" "$probe/main.cjs"
+submit r2b-launchd-electron-direct "$electron" "$probe/main.cjs"
 
 # The idle cost of a windowless Electron that has only reached ready (what a single-process mawsd would pay at all times)
 cat >"$probe/idle.cjs" <<'EOF'
@@ -67,7 +76,7 @@ sleep 15
 kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
 # Which PDF fonts were embedded, where poppler is present (brew install poppler); otherwise the result.json's counts stand
-for r in r1-shell-windowless r2-launchd-gui-domain r3-shell-accessory; do
+for r in r1-shell-windowless r2-launchd-node-parent r2b-launchd-electron-direct r3-shell-accessory; do
   for f in offscreen hidden; do pdf=$results/$r/$f.pdf; [[ -s $pdf ]] && command -v pdffonts >/dev/null && { pdfinfo "$pdf"; pdffonts "$pdf"; } >"$results/pdf-$r-$f.txt" 2>&1; done
 done
 log "done; results under $results"
