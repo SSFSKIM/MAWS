@@ -193,6 +193,8 @@ export class EngineSession {
 
   private transport: EngineTransport | null = null;
   private hostMap: HostMap | null = null; // P5 O16 M2: a hosted launch's map of host sequences to journal rows
+  // P5 O16 M2 (D12): the newest interrupt's number, and its request id once it timed out (its late answer clears the mark)
+  private readonly owedInterrupt: { generation: number; lateRequestId: string | null } = { generation: 0, lateRequestId: null };
   private client: ControlClient | null = null;
   private writer: OutboundWriter | null = null;
   private readonly held: TransportItem[] = []; // inbound frames read while an out write was in flight (M3 re-review)
@@ -397,20 +399,30 @@ export class EngineSession {
   async interrupt(opts: { cancelEngineQueued: boolean; holdEngineQueued?: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
     this.markUsed(); // C12
-    await this.queue.pause('interrupt');
-    if (opts.holdEngineQueued) await this.queue.holdAll();
     // P5 O16 M2 (D12): under a session host the interrupt is owed from before its write until its answer (or a failed
-    // write), so an adopter after a crash in between sends it first; a request left unanswered keeps the mark
+    // write), so an adopter after a crash in between sends it first. The mark is on disk before anything moves, or the
+    // command fails with nothing written (fail closed). The newest interrupt owns it: a request left unanswered keeps it
+    // until that request's own late answer, and an older request's answer never clears a newer one's.
     const owed = this.transport?.holder !== undefined;
-    if (owed) await this.store.saveOwedInterrupt(this.spec.appSessionId, true).catch((error: unknown) => this.log(`owed interrupt not marked: ${messageOf(error)}`));
+    const generation = ++this.owedInterrupt.generation;
+    if (owed) {
+      this.owedInterrupt.lateRequestId = null;
+      await this.store.saveOwedInterrupt(this.spec.appSessionId, true);
+    }
+    const settleOwed = () => {
+      if (owed && generation === this.owedInterrupt.generation) this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+    };
     let response: InterruptResponse;
     try {
+      await this.queue.pause('interrupt');
+      if (opts.holdEngineQueued) await this.queue.holdAll();
       response = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
     } catch (error) {
-      if (owed && !(error instanceof ControlTimeout)) this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+      if (!(error instanceof ControlTimeout)) settleOwed();
+      else if (owed && generation === this.owedInterrupt.generation) this.owedInterrupt.lateRequestId = error.requestId;
       throw error;
     }
-    if (owed) this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+    settleOwed();
     return { stillQueued: [...response.still_queued], cancelled: [...(response.cancelled ?? [])] };
   }
 
@@ -728,6 +740,11 @@ export class EngineSession {
     // gets a notice that it may have applied after the reported failure.
     let thinkingDisplayRequestId: RequestId | null = null;
     client.onLateResponse((late) => {
+      // P5 O16 M2 (D12): the owed interrupt's own late answer settles its mark
+      if (late.requestId === this.owedInterrupt.lateRequestId) {
+        this.owedInterrupt.lateRequestId = null;
+        this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+      }
       if (requestClassOf(late.subtype) === 'read' || late.requestId === thinkingDisplayRequestId) return;
       this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` });
     });

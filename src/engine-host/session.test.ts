@@ -1704,6 +1704,63 @@ describe('P5 O16: the owed interrupt', () => {
     });
   });
 
+  // fix wave 1: a timed-out interrupt keeps its mark until that request's own answer arrives, late included; a newer
+  // interrupt owns the mark from its start, so an older one's late answer leaves it
+  it('clears the mark at a timed-out interrupt\'s late answer, but never a newer interrupt\'s', async () => {
+    vi.useFakeTimers();
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    const starting = t.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    const late = (index: number) => {
+      const request = t.transport.requestsOf('interrupt')[index]!;
+      t.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { still_queued: [] } } });
+    };
+    // one interrupt, timed out, answered late: cleared
+    const first = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    expect(await first).toMatchObject({ name: 'ControlTimeout' });
+    expect(marks).toEqual([true]);
+    late(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false]);
+    // a second times out, a third starts; the second's late answer leaves the third's mark
+    const second = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    await second;
+    const third = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false, true, true]);
+    late(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false, true, true]);
+    late(2);
+    await vi.advanceTimersByTimeAsync(0);
+    await third;
+    expect(marks).toEqual([true, false, true, true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
+  // fix wave 1 (fail closed): no interrupt is written without its mark on disk
+  it('writes no interrupt when its mark cannot be saved, and answers the command with the failure', async () => {
+    const store = new MemorySessionStateStore();
+    store.saveOwedInterrupt = async () => {
+      throw new Error('EROFS: read-only file system');
+    };
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [] } }) }) });
+    await t.session.start();
+    await expect(t.session.interrupt({ cancelEngineQueued: false })).rejects.toThrow('EROFS');
+    await flush();
+    expect(t.transport.requestsOf('interrupt')).toEqual([]);
+    expect(t.session.queue.isPaused).toBe(false);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
   it('is cleared when the engine answers the interrupt with an error', async () => {
     const store = new MemorySessionStateStore();
     const marks: boolean[] = [];
