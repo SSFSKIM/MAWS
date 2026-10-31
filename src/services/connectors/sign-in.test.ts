@@ -36,6 +36,8 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
+      sessions: async () => [],
+      onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
     });
@@ -475,6 +477,8 @@ describe('the sign-in service', () => {
       host,
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
+      sessions: async () => [],
+      onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
     });
@@ -485,5 +489,71 @@ describe('the sign-in service', () => {
     expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ reason: 'other_entry', message: `that session uses the local entry in ${GLOBAL}` });
     expect(reads).toEqual([{ cwd: '/p' }]);
     expect(host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D30): the service loads with the spine, which may load
+// long after a session became ready; the engine host's listing tells it the sessions no status announced
+describe('the sign-in service loaded after its sessions', () => {
+  type Status = { appSessionId: string; status: { process: string; cwd: string } };
+  function serve(sessions: () => Promise<{ appSessionId: string; process: string; cwd: string }[]>) {
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    const events: ConnectorSignInChanged[] = [];
+    const statuses = new Set<(payload: Status) => void>();
+    const streaming = new Set<() => void>();
+    const host = fakeHost();
+    const call = host.call.bind(host);
+    host.call = (async (name: string, input: unknown) => {
+      if (name === 'customization.serverEndpoints') return { ok: true, value: { servers: [{ name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: null }] } };
+      if (name === 'session.mcpStatus') return (host.asked.push({ name, input }), { ok: true, value: { mcpServers: [{ name: 'linear', status: 'needs-auth', scope: 'user', transport: 'http' }] } });
+      return call(name as never, input as never);
+    }) as never;
+    const service = startSignIn({
+      bus: { register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never, emit: ((_name: string, event: ConnectorSignInChanged) => events.push(event)) as never },
+      host,
+      onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
+      onHostLost: () => () => {},
+      sessions,
+      onHostStreaming: (listener) => (streaming.add(listener), () => streaming.delete(listener)),
+      port: { openExternal: async () => ({ opened: true }) },
+      listen: listenLoopback,
+    });
+    stop = () => service.stop();
+    const start = () => (handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, { client: null }) as { opId: string }).opId;
+    const reasonOf = async (opId: string) => {
+      await vi.waitFor(() => expect(events.filter((e) => e.opId === opId).at(-1)?.state).not.toBe('starting'));
+      return events.filter((e) => e.opId === opId).at(-1);
+    };
+    return { host, start, reasonOf, status: (payload: Status) => statuses.forEach((l) => l(payload)), streamed: () => streaming.forEach((l) => l()) };
+  }
+
+  it('signs in a session the engine host lists ready, with no status heard', async () => {
+    const t = serve(async () => [{ appSessionId: SESSION, process: 'ready', cwd: '/p' }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const opId = t.start();
+    await vi.waitFor(() => expect(t.host.asked.map((a) => a.name)).toContain('session.mcpAuthenticate'));
+    expect((await t.reasonOf(opId))?.reason).not.toBe('no_session');
+  });
+
+  it('never revives a session whose status said it left while the listing was answering', async () => {
+    let answer!: (sessions: { appSessionId: string; process: string; cwd: string }[]) => void;
+    const t = serve(() => new Promise((resolve) => (answer = resolve)));
+    t.status({ appSessionId: SESSION, status: { process: 'exited', cwd: '/p' } });
+    answer([{ appSessionId: SESSION, process: 'ready', cwd: '/p' }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await t.reasonOf(t.start())).toMatchObject({ state: 'failed', reason: 'no_session' });
+  });
+
+  it('reads the listing again when the engine host streams again', async () => {
+    let listed: { appSessionId: string; process: string; cwd: string }[] = [];
+    const t = serve(async () => listed);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await t.reasonOf(t.start())).toMatchObject({ state: 'failed', reason: 'no_session' });
+    listed = [{ appSessionId: SESSION, process: 'ready', cwd: '/p' }];
+    t.streamed();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const opId = t.start();
+    await vi.waitFor(() => expect(t.host.asked.map((a) => a.name)).toContain('session.mcpAuthenticate'));
+    expect((await t.reasonOf(opId))?.reason).not.toBe('no_session');
   });
 });

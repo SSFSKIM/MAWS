@@ -338,6 +338,10 @@ export interface SignInServiceDeps {
   host: SignInHost;
   onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
+  // P5 O4 M2 (D30): the engine host's sessions as it lists them now, read at the start and each time it streams again,
+  // since the spine may load long after a session became ready (its status then announced to no one here)
+  sessions(): Promise<readonly { appSessionId: string; process: string; cwd: string }[]>;
+  onHostStreaming(listener: () => void): () => void;
   port: Pick<ClientPort, 'openExternal'>;
   listen: ListenLoopback;
 }
@@ -350,11 +354,30 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
     ready.delete(appSessionId);
     for (const listener of goneListeners) listener(appSessionId);
   };
+  const listings = new Set<Set<string>>(); // per listing in flight, the sessions a status was heard for since it began
   const offStatus = deps.onSessionStatus(({ appSessionId, status }) => {
+    for (const heard of listings) heard.add(appSessionId);
     if (status.process === 'ready') ready.set(appSessionId, status.cwd);
     else if (ready.has(appSessionId)) gone(appSessionId);
   });
   const offHost = deps.onHostLost(() => [...ready.keys()].forEach(gone));
+  // a session the listing names ready is ready, unless a status heard meanwhile said otherwise (it is the newer word)
+  let stopped = false;
+  const learn = async () => {
+    const heard = new Set<string>();
+    listings.add(heard);
+    try {
+      const sessions = await deps.sessions();
+      if (stopped) return;
+      for (const { appSessionId, process, cwd } of sessions) if (process === 'ready' && !heard.has(appSessionId) && !ready.has(appSessionId)) ready.set(appSessionId, cwd);
+    } catch {
+      // the host is not answering: its next streaming notice reads again
+    } finally {
+      listings.delete(heard);
+    }
+  };
+  void learn();
+  const offStreaming = deps.onHostStreaming(() => void learn());
   // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1), and the
   // server it holds, as its mcp_status reports it (fix-D#4)
   const check: SignInDeps['check'] = async ({ appSessionId, ...requested }) => {
@@ -380,8 +403,10 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
     busy: () => signIn.busy(),
     settled: () => signIn.settled(),
     stop() {
+      stopped = true;
       offStatus();
       offHost();
+      offStreaming();
       signIn.stop();
     },
   };
