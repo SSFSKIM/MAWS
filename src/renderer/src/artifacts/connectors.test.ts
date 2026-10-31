@@ -21,7 +21,7 @@ interface Sent {
   name: CommandName;
   input: unknown;
   answer(value: unknown): void;
-  fail(message?: string): void;
+  fail(message?: string, code?: string): void;
 }
 
 // A bridge whose every command waits for the test to answer it, in the order sent; `auto` answers some at once.
@@ -33,7 +33,7 @@ function bridge(auto: Partial<Record<CommandName, (input: never) => unknown>> = 
       const handler = auto[name];
       if (handler) return Promise.resolve({ ok: true, value: handler(input as never) } as Answer);
       return new Promise<Answer>((resolve) => {
-        sent.push({ name, input, answer: (value) => resolve({ ok: true, value }), fail: (message = 'no') => resolve({ ok: false, error: { code: 'internal', message } }) });
+        sent.push({ name, input, answer: (value) => resolve({ ok: true, value }), fail: (message = 'no', code = 'internal') => resolve({ ok: false, error: { code, message } }) });
       });
     }),
     on: vi.fn((name: string, listener: (payload: unknown, from: { machine: typeof TEST_MACHINE }) => void) => {
@@ -251,6 +251,172 @@ describe('a surface’s close, and early refreshes', () => {
     for (const [k, id] of ids.entries()) b.sent[k]!.answer({ ok: true, watchId: id, intervalMs: 60_000 });
     await Promise.all(starts);
     for (const [k, id] of ids.entries()) expect(heard.get(id), id).toEqual([{ ...RESULT, fetchedAt: k }]);
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D28): the leases live in mawsd and end with its
+// connection; at each streaming of the machine host after the first main tells every window `connectors.reset`, and
+// each surface rebuilds its lease under new ids it keeps to itself.
+describe('a surface’s rebuild on connectors.reset', () => {
+  const NEW_LEASE = '55555555-5555-4555-8555-555555555555';
+  const NEW_WATCH = '66666666-6666-4666-8666-666666666666';
+  const SERIES = { ...TOOL, intervalMs: 60_000 };
+
+  // main as a restarted mawsd answers it: each open a new lease, each watch a new id
+  function restarting() {
+    const leases = [LEASE, NEW_LEASE];
+    const watches = [WATCH, NEW_WATCH];
+    return bridge({
+      'connectors.open': () => ({ leaseId: leases.shift() }),
+      'connectors.declare': (input: { tools: unknown[] }) => ({ ok: true, declared: input.tools }),
+      'connectors.visibility': () => ({ ok: true }),
+      'connectors.watch': () => ({ ok: true, watchId: watches.shift(), intervalMs: 60_000 }),
+      'connectors.refresh': () => ({ refreshing: true }),
+      'connectors.unwatch': () => ({ stopped: true }),
+      'connectors.call': () => RESULT,
+    });
+  }
+
+  it('opens a new lease, declares, sends its visibility and re-installs each watch, whose listener hears it under the new ids', async () => {
+    const b = restarting();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const heard: ConnectorCallOutcome[] = [];
+    surface.setVisible(true);
+    await surface.declareTools([TOOL]);
+    await expect(surface.watchTool(SERIES, (update) => heard.push(update))).resolves.toEqual({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT });
+    const before = b.invoke.mock.calls.length;
+    b.emit('connectors.reset', {});
+    await settle();
+    expect(b.invoke.mock.calls.slice(before)).toEqual([
+      ['connectors.open', { artifactId: ARTIFACT }],
+      ['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }],
+      ['connectors.visibility', { leaseId: NEW_LEASE, visible: true }],
+      ['connectors.watch', { leaseId: NEW_LEASE, request: SERIES }],
+    ]);
+    const paused = { ok: false, state: 'paused', reason: 'noRoute' } as const;
+    b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: NEW_WATCH, update: paused });
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT }); // the dead lease's: never routed
+    expect(heard).toEqual([RESULT, paused]);
+    // the page keeps the id it was given; main hears the new ones
+    await expect(surface.refreshWatch(WATCH)).resolves.toBe(true);
+    await expect(surface.callTool(TOOL)).resolves.toEqual(RESULT);
+    await expect(surface.unwatchTool(WATCH)).resolves.toBe(true);
+    expect(b.invoke.mock.calls.slice(before + 4)).toEqual([
+      ['connectors.refresh', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
+      ['connectors.call', { leaseId: NEW_LEASE, request: TOOL }],
+      ['connectors.unwatch', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
+    ]);
+    b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: NEW_WATCH, update: RESULT });
+    expect(heard).toEqual([RESULT, paused]);
+  });
+
+  it('answers a call in flight at the reset as the host did, and sends what is asked meanwhile under the rebuilt lease', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const inFlight = surface.callTool(TOOL);
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    expect(b.names()).toEqual(['connectors.open', 'connectors.call']);
+    b.emit('connectors.reset', {});
+    const asked = surface.callTool(TOOL); // during the rebuild
+    b.sent[1]!.fail('mawsd went away', 'host_unavailable');
+    await expect(inFlight).rejects.toMatchObject({ error: { code: 'host_unavailable' } });
+    await settle();
+    expect(b.sent.slice(2).map(({ name, input }) => [name, input])).toEqual([['connectors.open', { artifactId: ARTIFACT }]]);
+    b.sent[2]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    expect(b.sent.slice(3).map(({ name, input }) => [name, input])).toEqual([['connectors.call', { leaseId: NEW_LEASE, request: TOOL }]]);
+    b.sent[3]!.answer(RESULT);
+    await expect(asked).resolves.toEqual(RESULT);
+  });
+
+  it('closes a lease that answers after a reset overtook its open, and keeps the rebuilt one', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const called = surface.callTool(TOOL);
+    b.emit('connectors.reset', {}); // before the first open answered
+    await settle();
+    expect(b.names()).toEqual(['connectors.open', 'connectors.open']);
+    b.sent[0]!.answer({ leaseId: LEASE }); // held by the supervisor across the restart, answered by the new mawsd
+    b.sent[1]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    expect(b.sent.slice(2).map(({ name, input }) => [name, input])).toEqual([
+      ['connectors.close', { leaseId: LEASE }],
+      ['connectors.call', { leaseId: NEW_LEASE, request: TOOL }],
+    ]);
+    b.sent[3]!.answer(RESULT);
+    await expect(called).resolves.toEqual(RESULT);
+  });
+
+  it('stops under the new lease a watch the page unwatched while its re-install was in flight', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const heard = vi.fn();
+    const started = surface.watchTool(SERIES, heard);
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    b.sent[1]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    await started;
+    b.emit('connectors.reset', {});
+    await settle();
+    b.sent[2]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    expect(b.sent[3]!.input).toEqual({ leaseId: NEW_LEASE, request: SERIES });
+    const stopped = surface.unwatchTool(WATCH);
+    b.sent[3]!.answer({ ok: true, watchId: NEW_WATCH, intervalMs: 60_000 });
+    await settle();
+    expect(b.sent.slice(4).map(({ name, input }) => [name, input])).toEqual([['connectors.unwatch', { leaseId: NEW_LEASE, watchId: NEW_WATCH }]]);
+    b.sent[4]!.answer({ stopped: true });
+    await expect(stopped).resolves.toBe(false); // nothing of the page's was left to stop: the rebuild stopped it
+    b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: NEW_WATCH, update: RESULT });
+    expect(heard).not.toHaveBeenCalled();
+  });
+
+  it('installs a watch asked during the rebuild once, on the rebuilt lease; one started on the old lease is started again', async () => {
+    const b = restarting();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    await settle();
+    const heard: ConnectorCallOutcome[] = [];
+    b.emit('connectors.reset', {});
+    await expect(surface.watchTool(SERIES, (update) => heard.push(update))).resolves.toEqual({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    await settle();
+    expect(b.names().filter((name) => name === 'connectors.watch')).toHaveLength(1);
+    expect(b.invoke.mock.calls.at(-1)).toEqual(['connectors.watch', { leaseId: NEW_LEASE, request: SERIES }]);
+    b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: WATCH, update: RESULT });
+    expect(heard).toEqual([RESULT]);
+
+    const c = bridge();
+    const other = createConnectorHost(c.ipc).openConnectors(ARTIFACT);
+    const started = other.watchTool(SERIES, (update) => heard.push(update));
+    c.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    c.emit('connectors.reset', {}); // the start is in flight on the old lease
+    c.sent[1]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 }); // the old mawsd answered before it went
+    await expect(started).resolves.toEqual({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    c.sent[2]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    expect(c.sent.slice(3).map(({ name, input }) => [name, input])).toEqual([['connectors.watch', { leaseId: NEW_LEASE, request: SERIES }]]);
+    c.sent[3]!.answer({ ok: true, watchId: NEW_WATCH, intervalMs: 60_000 });
+    await settle();
+    c.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: NEW_WATCH, update: RESULT });
+    expect(heard).toEqual([RESULT, RESULT]);
+  });
+
+  it('rebuilds nothing for a closed surface, and listens for the reset only while a surface is open', async () => {
+    const b = restarting();
+    const host = createConnectorHost(b.ipc);
+    const surface = host.openConnectors(ARTIFACT);
+    await settle();
+    expect(b.ipc.on).toHaveBeenCalledWith('connectors.reset', expect.any(Function));
+    surface.close();
+    await settle();
+    const count = b.invoke.mock.calls.length;
+    b.emit('connectors.reset', {});
+    await settle();
+    expect(b.invoke.mock.calls.length).toBe(count);
+    const offs = (b.ipc.on as ReturnType<typeof vi.fn>).mock.results.map((result) => result.value as () => boolean);
+    expect(offs.map((off) => off())).toEqual(offs.map(() => false)); // every subscription already ended
   });
 });
 
