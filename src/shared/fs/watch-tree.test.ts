@@ -355,6 +355,29 @@ describe('the watch tree reconciles', () => {
     handle.close();
   });
 
+  // Re-review of M1: a root back under its name that cannot be watched again tells why, as its first watch would.
+  it.each([
+    ['found back by a pass after it went', false],
+    ['replaced under its name', true],
+  ])('tells, on a later tick, an error other than ENOENT on watching the root again once %s', async (_label, replaced) => {
+    const fake = new FakeWatchFs();
+    const { handle, errors } = open(fake);
+    await drain();
+    fake.rm('');
+    if (!replaced) {
+      fake.fire('', 'rename', 'r');
+      await drain();
+    }
+    fake.mkdir('');
+    fake.failWatch = (path) => (path === fake.root ? errno('EACCES', path) : null);
+    if (replaced) fake.fire('', 'rename', 'r');
+    else await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain(); // told through fail()'s microtask, as the root's first watch tells (pinned above)
+    expect(errors.map((error) => [error.code, error.path])).toEqual([['EACCES', fake.root]]);
+    expect(fake.watched()).toEqual([]);
+    handle.close();
+  });
+
   // Review of M1 (finding 3): a directory beneath the root that a watch error other than exhaustion left unwatched is
   // tried again by the next whole-tree pass, the slow timer's or a burst's.
   it('tries again, at the next pass, a directory whose watch call failed for a reason of its own', async () => {

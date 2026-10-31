@@ -137,13 +137,16 @@ class WatchTree implements WatchHandle {
   }
 
   // Whether the directory is watched now. A directory that vanished since its listing (ENOENT, ENOTDIR) or that this
-  // user may not read stays unwatched, silently (a reconcile tries it again); exhaustion closes the tree.
+  // user may not read stays unwatched, silently (a reconcile tries it again); exhaustion closes the tree. The root
+  // watched again (back after it went, or replaced) is quiet only while it is still missing: any other error closes the
+  // tree and is told, as the root's first watch tells it.
   private place(rel: string): boolean {
     try {
       this.open(rel);
       return true;
     } catch (error) {
-      if (isExhaustion(error)) this.fail(error, this.abs(rel));
+      const code = (error as NodeJS.ErrnoException).code;
+      if (isExhaustion(error) || (rel === '' && code !== 'ENOENT')) this.fail(error as NodeJS.ErrnoException, this.abs(rel));
       return false;
     }
   }
