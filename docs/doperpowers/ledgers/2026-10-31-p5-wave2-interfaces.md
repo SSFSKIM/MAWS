@@ -31,6 +31,9 @@
 | `gate.sock` protocol (OX10 as adopted, O16 Interfaces §E) | engine host to observer bridge | O16 M5 | O12 M4 (sminos), its fixture `spikes/protocol-probe/fixtures/p5/p5-o16-gate.jsonl` |
 | `session.spawn`, `files.upload` `part`, `pty.op`, `pty.opQuery`, `pty.listFor`, `pty.replay`, `machine.op.action`, `remote.*`, `launchedBy` | commands and fields | O7 M3, M4 | O12's observer reads `launchedBy` (P5 item 7) |
 | `rl2.executor.machine`, `rl2.call-session`, `rl2.feeds`, `rl2.executor.pty-host`, `rl2.streams`, `rl2.pong-clock`, `rl2.client-port` | RL2 capabilities | O7 | the endpoint (desk track's O10 code, edited by O7 with the desk track told) |
+| `connectors.reset` | main-owned event to the app's windows, off the wire manifest | O4 M2 | the renderer's connectors client rebuilds its leases on it |
+| router `before(names, hook)` seam | src/main/ipc/router.ts | O4 M2 | O4's window report and its delivery cancel |
+| `remote.session`, `remote.gap` | main-owned, `src/shared/ipc/schema/remote.ts` | O7 M2 | the renderer |
 
 ## Shared files and who goes first
 
@@ -50,6 +53,10 @@
 | `src/pty-host/` | O7 M3 (a ledger) | O7 only |
 | `apps/org-protocol/`, `src/endpoint/` | O7 | O7 only; O10's placement change goes to the desk track's ledger |
 | `devenv/setup.sh`, `scripts/mawsd-pack.mjs`, `packaging/` | O5 (Linux render runtime, `--render`), O16 (session-host prebuilds) | separate steps; the later lander reconciles |
+| `src/shared/connectors/sealer.ts`, `src/shared/connectors/oauth-types.ts` (moved from `src/main/connectors/`), `src/shared/fs/backup-exclusion.ts` (moved from `src/main/device/`, importers repointed), `src/shared/catalog/engine-view.ts` | O4 M1, M3 | new shared modules; others import them from their new paths |
+| `eslint.config.js` (the Electron-adapter allowlist entry moves from `oauth-root.ts` to `legacy-custody.ts`), `src/services/command-budgets.ts`, `test/support/spine-lists.ts` | O4 M2, M3 | the later lander reconciles |
+| `src/endpoint/capabilities.ts`, `src/main/machines/remote/capabilities.ts` (the two RL2 capability constants) | O7 M2 | O7 only |
+| the e2e group `e2e:remote` (package.json, gate.yml CLASS1_E2E, the e2e-default-specs pin); the harness env `MAWS_E2E_STEP_UP=accept`; `session.json`'s `directMap` for `MAWS_DEV_ORG` (unpackaged only) | O7 M2 | CI-opt reviews the gate.yml hunk |
 
 ## Start order
 
@@ -59,3 +66,4 @@
 ## Changes
 
 - 2026-10-31, the architect: written from the four documents' shared-surface sections, before any executor starts.
+- 2026-10-31, the architect: O4's and O7's additions at their starts (ledger rule 5).

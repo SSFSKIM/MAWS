@@ -90,7 +90,7 @@ describe('main setup-intent and shell-environment wiring', () => {
       on: (name, listener) => { events.on(name, listener); return () => { events.off(name, listener); }; },
       emit: (name, ...args) => events.emit(name, ...args),
     };
-    await import('../index');
+    await import('../app');
     await state.ready!();
     await state.deps!.intents.load();
   });

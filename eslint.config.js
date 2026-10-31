@@ -46,7 +46,8 @@ const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:elec
 // (the spine O3-D moves into mawsd and the checkouts O3-E moves), is composed by its roots from injected dependencies.
 // Rule A: it imports nothing from main, mawsd, the renderer or the preload, nor Electron. Rule B: nothing under
 // src/main/ but its root imports from it; staying code reads the spine through the view. Tests are exempt from rule B
-// (a suite may drive both halves); src/main/index.ts, the root, imports the services entry alone (M4).
+// (a suite may drive both halves); src/main/app.ts, the root (src/main/index.ts until P5 O5's entry split), imports the
+// services entry alone (M4).
 const SERVICES_BOUNDARY = {
   regex: '^(\\.\\./)+(main|mawsd|renderer|preload)(/|$)',
   message: 'The services library (src/services/, P5 O3-C rule A) imports nothing from main, mawsd, the renderer or the preload: it takes its commands, intercepts and events through the injected ServicesBus (@shared/spine/bus), and staying code reads it through SpineView (@shared/spine/view).',
@@ -177,12 +178,13 @@ module.exports = defineConfig(
   // P5 O3-C: rule B over the client, its root and suites aside; the machine-bound block below restates it.
   {
     files: ['src/main/**/*.{ts,tsx}'],
-    ignores: ['src/main/**/*.test.{ts,tsx}', 'src/main/index.ts'],
+    ignores: ['src/main/**/*.test.{ts,tsx}', 'src/main/app.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, READ_THROUGH_VIEW] }] },
   },
-  // P5 O3-C (M4): rule B over main's root, narrowed to the services entry
+  // P5 O3-C (M4): rule B over main's root, narrowed to the services entry (P5 O5: the root is app.ts, the entry index.ts
+  // imports nothing of the library)
   {
-    files: ['src/main/index.ts'],
+    files: ['src/main/app.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, ROOT_THROUGH_ENTRY] }] },
   },
   {
