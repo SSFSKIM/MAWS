@@ -1,8 +1,13 @@
 import { mkdir } from 'node:fs/promises';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { CHECK_IGNORE_BATCH_MS, gitIgnored } from './ignored';
 import { createGitRunner, GitCommandError, type GitRun, type GitRunOptions } from './runner';
+
+setFlagsFromString('--expose_gc');
+const gc = runInNewContext('gc') as () => void;
 
 // A runner answering the two listings and recording each check-ignore it is asked.
 function fakeRun(listings: { ignored: string[]; listed: string[] }, checkIgnore: (paths: string[]) => string[] | Error = () => []) {
@@ -80,8 +85,10 @@ describe("the repository's ignore rules as a prune", () => {
 // whole before its chunked read began; the tree's walk runs meanwhile, and its lag is bounded (§G).
 describe("the repository's ignore rules, read from a listing of a million paths", () => {
   it('never holds the loop for the whole listing', async () => {
-    const listed = Array.from({ length: 1_000_000 }, (_, i) => `d${i % 5_000}/s${i % 37}/f${i}.c\0`).join('');
+    // A kernel's shape: some 6,000 directories, the paths beneath them many.
+    const listed = Array.from({ length: 1_000_000 }, (_, i) => `d${i % 2_000}/s${i % 3}/f${i}.c\0`).join('');
     const run: GitRun = async (_directory, args) => (args.includes('-i') ? 'build/\0' : listed);
+    gc(); // the listing's making left a million strings: their collection is no turn of the read's
     let worst = 0;
     let last = performance.now();
     let ticking = true;
@@ -94,8 +101,8 @@ describe("the repository's ignore rules, read from a listing of a million paths"
     setImmediate(tick);
     const prune = await gitIgnored(run, '/repo');
     ticking = false;
-    expect(await Promise.all([prune('d7/s7'), prune('build'), prune('build/x')])).toEqual([false, true, true]);
-    expect(worst).toBeLessThan(30); // a whole split of it takes about 80 ms on an M-series Mac
+    expect(await Promise.all([prune('d7/s1'), prune('build'), prune('build/x')])).toEqual([false, true, true]);
+    expect(worst).toBeLessThan(30); // split whole, the listing held the loop 95 ms on an M-series Mac, 120 to 180 ms on the VM
   });
 });
 
