@@ -1003,6 +1003,9 @@ const LIVENESS_BOUNDS = {
   'e2e/sessions.spec.ts': {
     'expect(failedAfterMs).toBeLessThan(110_000);': 'two of the product\'s first-output bounds (58 s or more), read before the long class\'s 120 s',
   },
+  'e2e/supervisor.spec.ts': {
+    "expect(Date.now() - started, 'within the host’s launch and the boot').toBeLessThan(DISCOVERY_WAKE_BOUND_MS);": 'a parked engine host woken by a command that waits on the session service\'s boot (P5, case (n)): the host\'s launch and the boot, against the 8 s a discovery read keeps for the same callers (the tightest caller deadline, 10 s, less the answer\'s way back)',
+  },
   'e2e/smoke.spec.ts': {
     "expect(Date.now() - launchedAt, 'the window shows its regions within ten seconds').toBeLessThan(10_000);": 'a launch\'s liveness: the regions visible within 10 s',
   },

@@ -17,6 +17,7 @@ import { ev } from '../../test/support/events';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile } from '../../test/support/fake-supervisor';
 import { createServicesFront, type ServicesFront } from './front';
+import { DISCOVERY_WAKE_BOUND_MS } from './discovery-wake';
 import { createLazySpine, type LazySpine, type SpineEntry } from './spine-seam';
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
@@ -36,17 +37,21 @@ let answers: FakeSpineHost;
 let hosts: FakeSupervisor[];
 let received: Map<number, string[]>;
 let exiting: Set<number>;
+let stallNext: Set<string> | null; // what the next engine host spawned never answers
 let spawn: ReturnType<typeof vi.fn>;
 let supervisor: HostSupervisor;
 let spine: LazySpine;
 let front: ServicesFront;
 let logs: string[];
+let needs: number;
 
 // An engine host process mawsd spawned: it records each command it is sent, and one that is exiting when idle exits as
 // the next command reaches it, leaving it unanswered
 async function engineHost(pid: number): Promise<FakeSupervisor> {
   const names: string[] = [];
   received.set(pid, names);
+  const stall = stallNext;
+  stallNext = null;
   const host: FakeSupervisor = new FakeSupervisor(profile, processes, {
     pid,
     register: (on) => {
@@ -57,6 +62,7 @@ async function engineHost(pid: number): Promise<FakeSupervisor> {
             void host.die();
             return new Promise(() => {});
           }
+          if (stall?.has(name)) return new Promise(() => {}); // never answered while it lives
           const result = await answers.dispatch('engine-host', name, input);
           if (!result.ok) throw new Error(result.error.message);
           return result.value;
@@ -77,7 +83,9 @@ beforeEach(async () => {
   hosts = [];
   received = new Map();
   exiting = new Set();
+  stallNext = null;
   logs = [];
+  needs = 0;
   spawn = vi.fn(() => {
     const child = Object.assign(new EventEmitter(), { pid: processes.newPid(), unref: () => {} });
     queueMicrotask(() => void engineHost(child.pid));
@@ -119,6 +127,12 @@ beforeEach(async () => {
     quietMs: () => 50,
     reexecute: false,
     wakeOnEvents: true,
+    // mawsd's (daemon.ts), less its park clock: a host that is not streaming is sent a ping, which the supervisor holds
+    // while the host starts or closes and for which it launches a parked one
+    needEngine: () => {
+      needs += 1;
+      if (!supervisor.streaming('engine-host')) void supervisor.dispatch('engine-host', 'engine.ping', undefined);
+    },
     endLink: async () => {},
     restart: () => {},
     exitForYield: () => {},
@@ -198,5 +212,73 @@ describe('a spine loaded by the engine host’s events, as the host exits when i
     await vi.waitFor(() => expect(received.get(next.pid)).toEqual(expect.arrayContaining(CONFIGURATION)), { timeout: 10_000 });
     expect(spine.state()).toBe('loaded');
     expect(logs.filter((line) => line.startsWith('[spine] loading'))).toEqual(['[spine] loading (command)', '[spine] loading (event)']);
+  }, 30_000);
+});
+
+// The session service's boot waits for the engine host's first streaming in its load, and its commands wait for the boot
+// (src/services/sessions/service.ts): with the host parked and no app to wake it, such a command is the need that wakes
+// it. Each answers within the host's launch and the boot; the bound is the one a discovery read keeps for the same
+// callers (discovery-wake.ts: the tightest caller deadline, 10 s, less the answer's way back).
+describe('a command that waits on the engine host, with the spine cold and the host parked', () => {
+  // the answer, or a refusal naming the bound once it has passed with none
+  const within = <T>(answer: Promise<T>) => Promise.race([answer, sleep(DISCOVERY_WAKE_BOUND_MS).then(() => ({ ok: false, error: `no answer within ${DISCOVERY_WAKE_BOUND_MS} ms` }))]);
+  const BOOT_WAITERS: [string, unknown][] = [
+    ['session.intent.list', undefined],
+    ['session.create', { projectId: null, location: null }],
+    ['session.acquire', { appSessionId: 'app-unknown', reason: 'read' }],
+  ];
+
+  it('wakes the host, and each command that waits on the session service’s boot answers within the bound', async () => {
+    await supervisor.start();
+    expect(supervisor.parked('engine-host')).toBe(true);
+    const started = Date.now();
+    const answered = await Promise.all(BOOT_WAITERS.map(([name, input]) => within(front.dispatch(name, input))));
+    expect(Date.now() - started).toBeLessThan(DISCOVERY_WAKE_BOUND_MS);
+    expect(answered.map((answer) => answer.ok)).toEqual([true, true, true]);
+    expect(answered[2]).toMatchObject({ value: { status: 'refused', reason: 'unknown_session' } }); // answered after the boot
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot('engine-host').state).toBe('ready');
+    expect(logs.filter((line) => line.startsWith('[spine] loading'))).toEqual(['[spine] loading (command)']);
+  }, 30_000);
+
+  it('a command that never waits on the boot wakes nothing', async () => {
+    await supervisor.start();
+    expect(await front.dispatch('attention.list', undefined)).toMatchObject({ ok: true });
+    expect(spine.state()).toBe('loaded');
+    await sleep(TIMING.pidPollMs * 10);
+    expect(needs).toBe(0);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.parked('engine-host')).toBe(true);
+  }, 30_000);
+
+  // The need told while the link streams but before this load's barrier has passed (its resync unanswered) asks nothing
+  // of the supervisor; a host already asked to exit when idle then goes, and the need is told again for its successor
+  it('a need told while the host streams but the load has not, that host then exiting when idle: its successor is woken', async () => {
+    await supervisor.start();
+    await spine.ensure('command');
+    stallNext = new Set(['engine.sessions']); // its barrier's resync never answers
+    supervisor.wake('engine-host');
+    await vi.waitFor(() => expect(hosts).toHaveLength(1));
+    const first = hosts[0]!;
+    await vi.waitFor(() => expect(received.get(first.pid)).toContain('engine.sessions'));
+    expect(supervisor.exitSupervisor('idle', 'engine-host')).toBe(true);
+    await vi.waitFor(() => expect(first.exits).toEqual(['idle']));
+    const answer = within(front.dispatch('session.intent.list', undefined));
+    await vi.waitFor(() => expect(needs).toBe(1));
+    expect(supervisor.streaming('engine-host')).toBe(true); // nothing asked of the supervisor for it
+    await first.die(); // its idle exit
+    expect(await answer).toMatchObject({ ok: true, value: { intents: [] } });
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(needs).toBe(2);
+  }, 30_000);
+
+  it('after an event’s load parked the host, a command that waits on the boot wakes it and answers', async () => {
+    await raceTheIdleExit();
+    await vi.waitFor(() => expect(supervisor.parked('engine-host')).toBe(true), { timeout: 5_000 });
+    expect(spawn).toHaveBeenCalledOnce();
+    const started = Date.now();
+    expect(await within(front.dispatch('session.intent.list', undefined))).toMatchObject({ ok: true, value: { intents: [] } });
+    expect(Date.now() - started).toBeLessThan(DISCOVERY_WAKE_BOUND_MS);
+    expect(spawn).toHaveBeenCalledTimes(2);
   }, 30_000);
 });

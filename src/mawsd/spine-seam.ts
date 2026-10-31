@@ -64,6 +64,7 @@ export interface LazySpineOptions {
   quietMs(): number; // the daemon's idle time, or MAWS_SPINE_QUIET_MS under a measured scene (D6)
   reexecute: boolean; // exit 75 after a release: a unit daemon with the switch on (D38, daemon.ts); otherwise the link stays open and the hold starts
   wakeOnEvents: boolean; // a session.eventBatch while cold loads the spine (M2: off in the product until main stops composing its own; daemon.ts)
+  needEngine?(): void; // a command of a wanted load waits on the engine host (the session service's boot): the daemon wakes it
   endLink(): Promise<void>; // re-execution's and the exit's first step: the engine host's link ended by its terminal draining close
   restart(reason: string): void; // re-execution's last: the daemon's exit order with EXIT_RESTART
   exitForYield(): void; // a yield whose writers did not settle: the daemon's exit order (75 for a unit, 0 for a private one)
@@ -152,7 +153,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // `wanted` until a need reaches it (`ensure` for a command or the endpoint); until then its adapter sends the engine
   // host nothing unless it is ready, so no request is held for a host that is exiting, nor launches a parked one. Nothing
   // is lost: every part that talks to the engine host at a load does so again at each welcome (its `ready`, then its
-  // streaming), so the next host that is wanted is configured then.
+  // streaming), so the next host that is wanted is configured then. A command that waits on the engine host (the session
+  // service's boot waits for its first streaming) is the need that wakes it: a wanted load's adapter tells the daemon
+  // (`needEngine`); a command that never waits on it wakes nothing.
   let wanted = false;
   const need = (reason: SpineTrigger) => {
     if (reason !== 'event') wanted = true;
@@ -224,7 +227,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       throwIfExiting();
       const data = await entry.openSpineData(options.profileDir, { build: options.build, lock });
       throwIfExiting(); // no composition once the exit began
-      adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, wanted: () => wanted, log });
+      adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, wanted: () => wanted, need: () => options.needEngine?.(), log });
       root = entry.startSpine({ ...options.deps(), data, hosts: adapter });
       await adapter.load();
       throwIfYielded();
