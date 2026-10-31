@@ -222,7 +222,7 @@ describe('createdCrons over a window and its cronHistory (e7-cron and its resume
     expect(whole.map((job) => job.id)).toEqual(['8d1a2582', '598b1690', '1040f3a5']);
     expect(turnStarts.length).toBeGreaterThan(4);
     for (const start of turnStarts) expect(folded(start, start), `a window from event ${start}`).toEqual(whole);
-    // the newest window alone (the resume's turn) lists none of them: what #377 drew
+    // the newest window alone (the resume's turn) lists none of them, as the window alone drew it before this carry
     expect(createdCrons(activityOf(all.slice(turnStarts.at(-1)!)))).toEqual([]);
   });
 
