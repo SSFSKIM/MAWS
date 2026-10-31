@@ -311,7 +311,13 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.invoke('git.lsFiles', { directory: repository, query: 'not', limit: 10 })).toMatchObject({ ok: true, value: { paths: ['notes.md'], source: 'git' } });
     expect(await bus.invoke('files.list', { appSessionId, path: repository })).toMatchObject({ ok: true, value: { root: repository, entries: expect.arrayContaining([expect.objectContaining({ name: 'notes.md', kind: 'file' })]) } });
     expect(await bus.invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: repository, repository: true, trusted: false } });
-    expect(await bus.invoke('files.upload', { appSessionId, files: [{ name: 'a.txt', bytes: 'YQ==' }] })).toEqual({ ok: true, value: { status: 'refused', reason: 'uploads are not available this run' } }); // M3's write
+    // M3 (acceptance 5): an upload lands in the session's attachments directory, excluded from git, its root recorded
+    const uploaded = await bus.invoke('files.upload', { appSessionId, files: [{ name: 'a.txt', bytes: 'YQ==' }] });
+    expect(uploaded).toMatchObject({ ok: true, value: { status: 'ok', paths: [expect.stringMatching(new RegExp(`^${repository}/\\.claude/desk-uploads/${appSessionId}/[A-Za-z0-9_-]{22}\\.0\\.txt$`))] } });
+    const [stored] = uploaded.ok && uploaded.value.status === 'ok' ? uploaded.value.paths : [];
+    expect(readFileSync(stored!, 'utf8')).toBe('a');
+    expect(execFileSync('git', ['-C', repository, 'status', '--porcelain', '--untracked-files=all'], { encoding: 'utf8' })).toBe('?? notes.md\n');
+    expect(JSON.parse(readFileSync(join(profile, 'sessions', 'uploads.json'), 'utf8')).roots).toEqual([expect.objectContaining({ path: join(repository, '.claude', 'desk-uploads', appSessionId), session: appSessionId })]);
 
     const linked = vi.spyOn(spine.view, 'fileLinkedPaths');
     expect(await bus.invoke('files.read', { appSessionId, path: outside })).toMatchObject({ ok: false }); // linked to nothing: refused
@@ -341,6 +347,28 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(first).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { refused: 'untrusted' } } } }); // the engine trusts no scratch checkout
     expect(await bus.main('machine.op', op)).toEqual(first);
     expect(stage).toHaveBeenCalledOnce();
+
+    // M3 (acceptance 4's upload half): an upload claimed once writes once, and its replay answers the stored paths
+    const upload = { ...op, opId: '9b8f3a52-0000-4000-8000-0000000000a2', name: 'files.upload', input: { appSessionId, files: [{ name: 'a.png', bytes: 'iVBORw0KGgo=' }] } };
+    const uploaded = await bus.main('machine.op', upload);
+    expect(uploaded).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'ok', paths: [expect.stringMatching(/\.0\.png$/)] } } } });
+    expect(await bus.main('machine.op', upload)).toEqual(uploaded);
+    expect(readdirSync(join(repository, '.claude', 'desk-uploads', appSessionId))).toHaveLength(1); // a second run would mint a second id
+  });
+
+  // M3 (Interfaces §F): the upload roots are swept when the checkouts start (then hourly), of a root a day after its
+  // last upload, its lane B files alone
+  it('sweeps the upload roots a day after their last upload when the checkouts start', async () => {
+    const root = join(realpathSync(dir.path), 'checkout', '.claude', 'desk-uploads', '11111111-1111-4111-8111-111111111111');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'up1.0.txt'), 'old');
+    writeFileSync(join(root, 'notes.md'), 'not an upload');
+    mkdirSync(join(profile, 'sessions'), { recursive: true });
+    writeFileSync(join(profile, 'sessions', 'uploads.json'), JSON.stringify({ version: 1, roots: [{ path: root, session: '11111111-1111-4111-8111-111111111111', at: new Date(Date.now() - 25 * 3600_000).toISOString() }] }));
+    captureConsole('warn', /^\[files\] swept 1 upload root /);
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), fakeBus());
+    await vi.waitFor(() => expect(readdirSync(root)).toEqual(['notes.md']));
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(join(profile, 'sessions', 'uploads.json'), 'utf8')).roots).toEqual([]));
   });
 
   it('composes the checkouts in a run refused the spine too: git.status answers, the rest are registered', async () => {
@@ -359,7 +387,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.invoke('files.list', { appSessionId: unknown })).toMatchObject({ ok: false, error: { message: `unknown app session: ${unknown}` } });
     expect(await bus.invoke('scm.status', { appSessionId: unknown })).toMatchObject({ ok: false, error: { message: `unknown app session: ${unknown}` } });
     expect(await bus.invoke('git.lsFiles', { directory: repository, query: '', limit: 10 })).toMatchObject({ ok: false, error: { message: expect.stringContaining('is not a directory of any session or project') } });
-    expect(await bus.invoke('files.upload', { appSessionId: unknown, files: [{ name: 'a.txt', bytes: 'YQ==' }] })).toMatchObject({ ok: true, value: { status: 'refused' } });
+    expect(await bus.invoke('files.upload', { appSessionId: unknown, files: [{ name: 'a.txt', bytes: 'YQ==' }] })).toEqual({ ok: true, value: { status: 'refused', reason: 'uploads are not available this run' } }); // M3: no record of the roots
   });
 
   // P5 O3-E M2 (D14): a push or a pull request outlives its command's answer; the root's release waits for it

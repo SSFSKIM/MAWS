@@ -30,6 +30,7 @@ import type { MachineSettingsService } from '@shared/spine/machine-settings';
 import type { SpineView } from '@shared/spine/view';
 import { startArtifactDefaults } from './artifacts/defaults';
 import { startCheckouts } from './checkouts-root';
+import { uploadRootsOf } from './files/upload';
 import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
@@ -419,9 +420,12 @@ export function startSpine(deps: SpineDeps): SpineRoot {
 
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D; D4): the checkouts (git's read
   // service and watcher, `git.lsFiles`, files and scm) over the in-process view and the counting bus, composed in a run
-  // refused the spine too (they write no spine file) and stopped last, as main's shutdown stopped them after the spine;
+  // refused the spine too (they write no spine file but the upload roots' record, which a refused run does not give
+  // them) and stopped last, as main's shutdown stopped them after the spine;
   // their acts are claimable by machine.op above, and a release or a yield waits for scm's runs in flight (D14)
-  const checkouts = startCheckouts({ view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots: null });
+  // M3 (Interfaces §F): files.upload's root record, a spine file under the lock beside the intents, none in a refused run
+  const uploadRoots = spineRuns ? uploadRootsOf(join(sessionsDir, 'uploads.json'), { log: (line) => console.warn(`[files] ${line}`) }) : null;
+  const checkouts = startCheckouts({ view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);
 

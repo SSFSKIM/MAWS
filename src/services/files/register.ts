@@ -6,10 +6,11 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientPort } from '@shared/client/port';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
-import type { FilesChanged } from '@shared/ipc/schema/files';
+import type { FilesChanged, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
 import { createFilesService, type FilesService } from './service';
+import { UPLOADS_UNAVAILABLE } from './upload';
 
 export interface FilesHandlerDeps {
   bus: Pick<ServicesBus, 'register'>; // P5 O3-C: where files.* are answered
@@ -17,6 +18,7 @@ export interface FilesHandlerDeps {
   port: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): files.openExternal, E1's files.reveal
   env?: NodeJS.ProcessEnv;
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>; // E2: the deliverable reader's admission (Design §3)
+  upload?: (input: FilesUploadInput) => Promise<FilesUploadOutput>; // P5 O3-E M3 (./upload.ts); none: every upload refused
 }
 
 // The service, plus the live clients it follows (for tests and diagnostics: an ended client leaves no entry behind).
@@ -24,7 +26,7 @@ export type FilesHandlers = FilesService & { readonly followed: ReadonlySet<Clie
 
 // `records`: whose directories a session may read (`allowlistOf`: its record, else its setup intent's location).
 export function registerFilesHandlers(records: (appSessionId: AppSessionId) => AllowlistRecord | null, deps: FilesHandlerDeps): FilesHandlers {
-  const { bus: { register }, ...service } = deps;
+  const { bus: { register }, upload, ...service } = deps;
   const files = createFilesService({ records, ...service });
   // A client is followed from its first watch until it ends. A watch in flight when its client ended is dropped when it
   // completes, rather than held by a page that can no longer unwatch it: a client no longer followed has ended.
@@ -51,5 +53,8 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   register('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
   // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach, main-only, a path main resolved read with files.read's rules
   register('files.readResolved', (input) => files.readResolved(input));
+  // P5 O3-E M3 (Interfaces §F): bytes written into the session's attachments directory; refused, with nothing written,
+  // in a run that keeps no record of the upload roots (refused the spine)
+  register('files.upload', (input) => (upload ? upload({ ...input, appSessionId: session(input.appSessionId) }) : Promise.resolve(UPLOADS_UNAVAILABLE)));
   return Object.assign(files, { followed: followed as ReadonlySet<ClientId> });
 }

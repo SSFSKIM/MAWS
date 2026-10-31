@@ -7,12 +7,12 @@
 // embedded one); a release or a yield also waits for scm's runs in flight (D14).
 import type { ClientPort } from '@shared/client/port';
 import type { ServicesBus } from '@shared/spine/bus';
-import type { FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
 import { fileAdmission } from './files/admission';
 import { allowlistOf } from './files/allowlist';
 import { registerFilesHandlers } from './files/register';
 import type { FilesService } from './files/service';
+import { createUpload, scheduleUploadSweep } from './files/upload';
 import { FileLister, followSpineRoots, spineRoots } from './git/ls-files';
 import { createMutatingRunner } from './git/mutate';
 import { registerGitHandlers } from './git/register';
@@ -20,7 +20,7 @@ import { createGitRunner } from './git/runner';
 import { GitService } from './git/service';
 import { registerScmHandlers } from './scm/register';
 import { ScmService } from './scm/service';
-import type { UploadRecords } from './lane-a/media';
+import type { UploadRecords } from './fs/upload-roots';
 import { stopParts } from './stop-parts';
 import type { Settling } from './work';
 
@@ -30,7 +30,7 @@ export interface CheckoutsDeps {
   clientPort: ClientPort;
   engineEnv: Promise<Record<string, string>>; // the login-shell capture: scm's trust reader's environment, its runners' base
   env: NodeJS.ProcessEnv;
-  uploadRoots: UploadRecords | null; // P5 O3-E (Interfaces §F): files.upload's root record; null (refused) until M3 and in a run refused the spine
+  uploadRoots: UploadRecords | null; // P5 O3-E (Interfaces §F): files.upload's root record (<profile>/sessions/uploads.json); null in a run refused the spine, where every upload is refused
 }
 
 export interface CheckoutsRoot extends Settling {
@@ -38,11 +38,7 @@ export interface CheckoutsRoot extends Settling {
   stop(): void;
 }
 
-// P5 O3-E M2 (Interfaces §C): the upload is declared with the wire's other changes, its write M3's; until then, and in
-// a run refused the spine, every call is refused with nothing written
-export const UPLOADS_UNAVAILABLE: FilesUploadOutput = { status: 'refused', reason: 'uploads are not available this run' };
-
-export function startCheckouts({ view, bus, clientPort, engineEnv, env }: CheckoutsDeps): CheckoutsRoot {
+export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots }: CheckoutsDeps): CheckoutsRoot {
   // The read-only git service (C4 M6): git.* for any directory in a repository, and git.changed for watched roots
   const git = new GitService({ emit: (change) => void bus.emit('git.changed', change), log: (line) => console.log(line) }); // P5 O3-E: [git] lines in mawsd's log
   registerGitHandlers(git, bus);
@@ -54,12 +50,17 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env }: Checko
   // C8c: files.* over each session's own directories (the allowlist through the view, reader R12: the record, else an
   // unstarted session's setup intent); watches are released per client inside the handlers. E2, P3-L M6b: a File
   // artifact's file outside the roots, admitted by the library's index through the view (reader R14).
+  // P5 O3-E M3 (Interfaces §F): files.upload into the session's attachments directory, its roots recorded under the
+  // spine's lock and swept at the start and hourly while the checkouts run
+  const uploadLog = (line: string) => console.warn(`[files] ${line}`);
   const files = registerFilesHandlers(allowlistOf(view), {
     bus,
     emit: (payload) => void bus.emit('files.changed', payload),
     port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(view),
+    upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: uploadLog }) : undefined,
   });
+  const stopUploadSweep = uploadRoots ? scheduleUploadSweep(uploadRoots, { log: uploadLog }) : () => {};
   // E6: source control over the session's checkout (reader R15); mutations through the mutating runner under the
   // login-shell capture, which is also the environment its trust gate reads (the engine's); after each mutation git's
   // watcher re-reads the root, so git.changed tells every surface. Push and gh stream as scm.remote.output; the stop ends
@@ -75,7 +76,6 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env }: Checko
     emit: (event) => void bus.emit('scm.remote.output', event),
   });
   registerScmHandlers(scm, bus);
-  bus.register('files.upload', async () => UPLOADS_UNAVAILABLE);
   return {
     files,
     busy: () => scm.runs.busy(),
@@ -86,6 +86,7 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env }: Checko
         ['git', () => git.dispose()],
         ['git.lsFiles roots', unfollowRoots],
         ['files', () => files.dispose()],
+        ['upload sweep', stopUploadSweep],
         ['scm', () => scm.dispose()],
       ]),
   };

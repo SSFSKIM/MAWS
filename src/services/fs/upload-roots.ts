@@ -41,8 +41,8 @@ export type OwnedFiles = RegExp;
 export class Unsafe extends Error {}
 // The name a file of the upload was to take is there already (a link included): nothing is written over it.
 export class AlreadyThere extends Unsafe {
-  constructor(readonly name: string) {
-    super(`${name} is already there: nothing is written over it`);
+  constructor(readonly file: string) {
+    super(`${file} is already there: nothing is written over it`);
   }
 }
 

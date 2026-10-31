@@ -3,8 +3,9 @@
 // every command from P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): `mawsd` serves
 // them with the spine on the daemon shape. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
 // and `worktree.path`) by the open-first boundary in `src/main/files/service.ts`; refusals answer `internal` with
-// `path outside the session's directories`. The one write is E5's `files.write`, the hash-checked save of a file that
-// already exists; nothing here creates, renames or deletes a file.
+// `path outside the session's directories`. One write is E5's `files.write`, the hash-checked save of a file that
+// already exists; the other, P5 O3-E's `files.upload`, creates new files in the session's attachments directory alone;
+// nothing here renames a file, or deletes one but the upload's own.
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
