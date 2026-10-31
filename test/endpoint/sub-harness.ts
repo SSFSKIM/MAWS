@@ -97,8 +97,12 @@ export class FakeEngineHost {
   attached = false;
   /** Every dispatched command's name, in order, with its owner and the client it carried (P5 O7 M2: the channel's). */
   readonly calls: Array<{ owner: string; name: string; input: unknown; client?: ClientRef }> = [];
-  /** The machine's services (P5 O7 M2), asked first for every `machine` command; one it doesn't serve falls to `answer`. */
-  spine: FakeSpine | null = null;
+  /**
+   * The machine's services (P5 O7 M2), asked first for every `machine` command; one it doesn't serve falls to `answer`.
+   * Every fake host has one, its index empty until a test records a session (the engine host then places each), since a
+   * spine that can't answer `session.get` refuses lane B placement `unavailable`.
+   */
+  spine: FakeSpine | null = new FakeSpine(this);
   /** Answers held before they go (a read a test races): resolved by `release`. */
   readonly #held = new Map<string, Array<() => void>>();
   readonly #holding = new Set<string>();
