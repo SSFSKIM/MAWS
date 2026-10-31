@@ -71,6 +71,7 @@ export async function startLocalOrg(scratch: string, options: { heartbeatMs?: nu
     target: 'node22',
     logLevel: 'error',
     define: { 'import.meta.dirname': JSON.stringify(join(REPO_ROOT, 'test/endpoint')) },
+    alias: { '@shared': join(REPO_ROOT, 'src/shared') },
   });
   const { startLocalHub, LOCAL_ADMIN, endorseDevice } = createRequire(__filename)(outfile) as LocalHubModule;
   const hub = await startLocalHub(options);

@@ -427,10 +427,11 @@ export class RawApp {
   }
 }
 
-export const until = (check: () => boolean, timeout = 5_000, what = 'the condition') =>
+// `what` names the awaited condition; a function is read at the timeout, so a message can carry the state it timed out in
+export const until = (check: () => boolean, timeout = 5_000, what: string | (() => string) = 'the condition') =>
   vi.waitFor(
     () => {
-      if (!check()) throw new Error(`timed out waiting for ${what}`);
+      if (!check()) throw new Error(`timed out waiting for ${typeof what === 'function' ? what() : what}`);
     },
     { timeout, interval: 5 },
   );
