@@ -158,9 +158,11 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // (`needEngine`); a command that never waits on it wakes nothing.
   //
   // P5 O4 D43: an agent's request announced through the engine host's events (NEED_EVENTS: its dataset refresh, which runs
-  // through the asking session's engine) is a need, not an event: the load it wakes from cold is wanted, and one it reaches
-  // that an event started (loading, loaded or releasing) becomes wanted.
+  // through the asking session's engine) is a need, not an event: the load it wakes from cold is wanted, one it reaches
+  // that an event started (loading, loaded or releasing) becomes wanted, and one a provisional yield holds makes the load
+  // its lift resumes wanted.
   let wanted = false;
+  let heldNeed = false; // a need a provisional yield's hold took: the load its lift resumes is wanted; its discard forgets it
   const wantsOf = (reason: SpineTrigger) => reason !== 'event';
 
   const events = new SpineEvents(options.hosts, {
@@ -171,7 +173,8 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       return true;
     },
     need: () => {
-      if (loading || loaded) wanted = true; // a cold seam's is the wake's, above
+      if (loading || loaded) wanted = true;
+      else if (yieldTo?.provisional) heldNeed = true; // held with the announcement; a cold seam's is the wake's, above
     },
   });
 
@@ -397,8 +400,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     if (state === 'yielded') {
       if (!provisional) events.cold();
       set('cold', 'the yield lifted');
-      if (provisional) void ensure('event').catch(() => {}); // the hold resumes in a load: coalesced parts, resync, then the hold
+      if (provisional) void ensure('event', heldNeed).catch(() => {}); // the hold resumes in a load: coalesced parts, resync, then the hold
     }
+    heldNeed = false;
   }
 
   // A provisional yield confirmed (the app's hello lists no machine.spine, the app is gone, or no hello came in time):
@@ -408,6 +412,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     clearTimeout(yieldTo.provisional);
     yieldTo.provisional = null;
     log(`[spine] the yield to pid ${yieldTo.pid} confirmed: ${why}`);
+    heldNeed = false;
     if (state === 'yielded') events.discard('the yield was confirmed', 'off');
   }
 

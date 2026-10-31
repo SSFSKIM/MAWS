@@ -755,6 +755,37 @@ describe('the yield', () => {
     expect(spine.status().heldDropped).toBe(0);
   });
 
+  // P5 O4 D43, the task review: an agent's dataset refresh held across a provisional yield is a need the lift's load keeps
+  // (wanted: an engine host that is not ready is sent its requests); a batch held across the same lift wakes none.
+  it.each([
+    ['an agent’s dataset refresh is a need', () => link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }), 1],
+    ['a batch alone is none', () => link.emit('session.eventBatch', failed(2)), 0],
+  ])('held across a provisional yield, %s of the load its lift resumes', async (_what, announce, sent) => {
+    let candidate: number | null = 777;
+    const spine = await provisionally(() => candidate);
+    announce(); // held
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    const answer = await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+    expect(link.calls.filter((call) => call.name === 'engine.ping')).toHaveLength(sent);
+    if (sent === 0) expect(answer).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  // ...and a hold discarded takes its need with it: once confirmed, the next event's load is no longer wanted
+  it('a provisional yield confirmed forgets the dataset refresh it held: a batch’s load after it stays unwanted', async () => {
+    const spine = await provisionally(() => (live.has(777) ? 777 : null));
+    link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }); // held
+    spine.yield(777); // its hello lists no machine.spine
+    live.delete(777);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    link.batch('s1', 3);
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    expect(await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
   // Confirmed, the yield is a yield as before: its hold discarded, counted; the coalesced parts kept for the load after it
   // lifts (the latest while yielded included).
   it.each([
