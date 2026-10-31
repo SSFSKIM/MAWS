@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os'; // P5 O16 M2
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
-import { scheduleJournalPruning } from './journal';
+import { JOURNAL_MAX_AGE_DAYS, scheduleJournalPruning } from './journal';
 import { replayRowDelayMs } from './replay-transport'; // E10
 import { replayTranscriptProjects } from './replay-transcript'; // P3-F L242
 // C3 end
@@ -26,9 +26,14 @@ import { runDetached } from './detached';
 import { Supervision } from './supervision';
 import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
-import { signalOrphan } from './live-ledger'; // P5 O16 M2
-import { gateSocketPath, hostsDirOf, sessionHostBinary } from './holder/files'; // P5 O16 M2
-import { startSessionHost } from './holder/transport'; // P5 O16 M2
+import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: LiveRow
+import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
+import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
+import { liveHosts, pruneHostLogs, readRoster, removeHostFiles } from './holder/roster'; // P5 O16 M3
+import { adoptable, adoptAll } from './holder/adopt'; // P5 O16 M3
+import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
+import { readFileSync } from 'node:fs'; // P5 O16 M3
+import type { AppSessionId } from '@shared/graph/ids'; // P5 O16 M3
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 // P3-A start
@@ -81,6 +86,12 @@ let ipc: EngineIpc | null = null; // the detached entry reaches the table throug
 let supervision: Supervision | null = null; // the host.* commands and the supervisor's clocks
 // E10 end
 let documents: Documents | null = null; // P3-A: the artifact store (M4's IPC and document ports; M5 and M6 serve it too)
+let startJournalPruning: ((alsoKeep: () => readonly string[]) => void) | null = null; // P5 O16 M3: set by the register
+
+// P5 O16 M2: what every session host of this engine host is started and reached with
+const sessionHostDeps = (dir: string) => ({ hostsDir: hostsDirOf(dir), binary: sessionHostBinary(entryFile), userData: userData!, tmpdir: tmpdir(), log: (line: string) => console.log(`[session-host] ${line}`), child: { isAlive, procStartOf, signal: signalOrphan } });
+// P5 O16 M3: a session host's token, written beside it by the launch that started it
+const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionHostPaths(hostsDirOf(dir), holderId, { userData: userData!, tmpdir: tmpdir() }).token, 'utf8').trim();
 
 const register: HostRegister = (untimedOn, emit, client) => {
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
@@ -161,8 +172,14 @@ const register: HostRegister = (untimedOn, emit, client) => {
       supervisorDir === undefined
         ? undefined
         : {
-            start: (launchId) => startSessionHost(launchId, { hostsDir: hostsDirOf(supervisorDir), binary: sessionHostBinary(entryFile), userData, tmpdir: tmpdir(), log: (line) => console.log(`[session-host] ${line}`), child: { isAlive, procStartOf, signal: signalOrphan } }),
+            start: (launchId) => startSessionHost(launchId, sessionHostDeps(supervisorDir)),
             gateSocket: gatePath,
+            // P5 O16 M3: the token the launch that started the host wrote beside it
+            adopt: async (entry, checkpoint, startMs) => {
+              const { transport, fence } = await adoptHosted({ ...entry, appSessionId: entry.appSessionId ?? '' }, { ...sessionHostDeps(supervisorDir), startMs, token: tokenOf(supervisorDir, entry.holderId), checkpoint, maxLineChars: MAX_LINE_CHARS });
+              return { transport, fence };
+            },
+            release: (entry, startMs) => releaseHost(entry, { log: (line) => console.log(`[session-host] ${line}`), startMs, token: tokenOf(supervisorDir, entry.holderId) }),
           },
   });
   ({ table } = ipc);
@@ -175,11 +192,16 @@ const register: HostRegister = (untimedOn, emit, client) => {
   connectors = registerConnectors(on, emit, client.presence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
+  // P5 O16 M3 (D25): a detached host's starts once its adoptions have ended (`adoptAtStart`), keeping every launch a
+  // roster entry names as well, adopted or not, so a hosted launch older than the age limit is never pruned under its host
   const rows = table;
-  scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
-    keep: () => new Set(rows.list().map((session) => session.status().launchId)),
-    log: (line) => console.warn(`[engine-host] ${line}`),
-  });
+  startJournalPruning = (alsoKeep) => {
+    scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
+      keep: () => new Set([...rows.list().map((session) => session.status().launchId), ...alsoKeep()]),
+      log: (line) => console.warn(`[engine-host] ${line}`),
+    });
+  };
+  if (supervisorDir === undefined) startJournalPruning(() => []);
   // E10: registered after the engine ipc, so the status ends the connect burst
   supervision = new Supervision({
     mode,
@@ -229,6 +251,37 @@ if (mode === 'utility') {
         supervision.orphansSwept(killed);
       },
     },
+    adopt: () => adoptAtStart(dir),
   });
+}
+
+// P5 O16 M3 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D10, D25, D46): the start's adoption, run in the
+// detached entry's `listening` step. Synchronously: the roster read; the session host logs no entry names pruned once
+// past the journals' age (D46); each dead host's files removed and its live child handed to the sweep; a row held for
+// each live host adopted. Then the adoptions, in the background; once they have ended, the holds of the failed ones
+// released, the failures counted in the status and journal pruning scheduled.
+function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] } {
+  const engine = ipc!; // the register ran before the listen (the detached entry's order)
+  const life = supervision!;
+  const hostsDir = hostsDirOf(dir);
+  const log = (line: string) => console.log(`[supervisor] ${line}`);
+  const roster = readRoster(hostsDir, log);
+  const prunedLogs = pruneHostLogs(hostsDir, new Set(roster.map((entry) => entry.holderId)), { maxAgeDays: JOURNAL_MAX_AGE_DAYS });
+  if (prunedLogs > 0) log(`${prunedLogs} session host log(s) past ${JOURNAL_MAX_AGE_DAYS} days pruned`);
+  const { live, dead } = liveHosts(roster, { isAlive, procStartOf });
+  const deadHostChildren: LiveRow[] = dead.flatMap((entry) => (entry.child !== null && entry.exit === null ? [{ appSessionId: entry.appSessionId ?? '', pid: entry.child.pid, procStart: entry.child.procStart, launchId: entry.holderId, holderId: entry.holderId }] : []));
+  for (const entry of dead) {
+    log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
+    removeHostFiles(hostsDir, entry);
+  }
+  const held = adoptable(live).take.flatMap((entry) => (entry.appSessionId !== null && entry.child !== null ? [entry.appSessionId as AppSessionId] : []));
+  engine.table.holdForAdoption(held);
+  void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
+    for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
+    if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
+    life.adoptionsEnded(outcome.failed.length);
+    startJournalPruning?.(() => readRoster(hostsDir, () => {}).map((entry) => entry.holderId));
+  });
+  return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
 }
 // E10 end

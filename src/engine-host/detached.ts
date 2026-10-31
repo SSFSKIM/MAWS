@@ -18,6 +18,10 @@
 // P5 O3-D M3: a client that declared `host.attachment` (`mawsd`, whose connection outlives every app) drops it at its
 // {attached: true} instead (attachment.ts), since its welcome is no owner coming back.
 //
+// P5 O16 M3 (D10): before the sweep, in the same synchronous step, the session hosts' roster is read and a row held for
+// each live host the start adopts (`adopt`), so the first welcome counts them; the sweep skips every row a live host
+// holds and stops the live children of dead ones.
+//
 // P5 O2 M3 (RL §5.11): the directory and the socket's directory are created 0700 when missing and checked before the
 // lock, the token and the listen (@shared/host/private-path): a symlink, another owner or a mode wider than 0700 stops
 // the start (exit 1, the log naming the path). One that exists is no longer corrected to 0700. Before the listen, the
@@ -48,6 +52,10 @@ export interface DetachedOptions {
   counts(): { liveSessions: number; rows: number };
   shutdown(graceMs: number): Promise<unknown>; // engine.shutdown's body: every live row's ladder and the plugin runner
   life: SupervisorLife;
+  // P5 O16 M3 (D10): called in `listening`, synchronously before the sweep and before any client is answered: reads the
+  // session hosts' roster, holds a row for each live host it adopts and starts the adoptions; answers what the sweep must
+  // leave (the live hosts' rows) and take (the dead hosts' live children)
+  adopt?(): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] };
 }
 
 // The supervisor's own life as the engine host decides it (supervision.ts), told what only this entry knows.
@@ -105,7 +113,8 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
       // background (up to the sweep's grace) while this supervisor already serves
       listening: (host) => {
-        const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log });
+        const held = opts.adopt?.() ?? {}; // P5 O16 M3: the roster first, so the sweep never stops what a live host holds
+        const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log }, held);
         const { pid } = host.owner;
         opts.life.started({ pid, startedAt: host.startedAt, buildId: host.buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: host.socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void host.stop(reason));
         void sweep.then((killed) => {

@@ -166,6 +166,22 @@ export async function adoptHosted(
   }
 }
 
+// P5 O16 M3: a session host an adopter finds holding no engine (its launch never committed, or its spawn failed): taken
+// as writer and released, so it exits and removes its files, as the launch that started it would have.
+export async function releaseHost(entry: { holderId: string; pid: number; socket: string }, deps: Pick<SessionHostDeps, 'log' | 'startMs'> & { token: string }): Promise<void> {
+  const deadline = Date.now() + (deps.startMs ?? HOST_START_MS);
+  const { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: () => (isAlive(entry.pid) ? null : 'its process is gone'), log: deps.log });
+  try {
+    connection.send({ t: 'attach', role: 'writer', fence: hello.fence + 1 });
+    await connection.expect('attached', deadline);
+    connection.send({ t: 'release' });
+    connection.end();
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+}
+
 interface InFlight {
   offset: number;
   end: number;
@@ -334,10 +350,12 @@ class HostedTransport {
       case 'caughtUp':
         // a loss no surviving record showed (the ring kept none of what was asked for): reported here instead
         if (message.gap !== null && message.gap > this.lastDelivered + 1) this.lostBefore(message.gap);
-        // P5 O16 M3: an adoption's replay is over: the session disposes of what the old manager left (its barrier)
+        // P5 O16 M3: an adoption's replay is over: the session disposes of what the old manager left (its barrier). An
+        // engine that exited while no manager was attached has nothing left to dispose of or re-initialize: its exit
+        // follows the replay alone.
         if (this.catchingUp) {
           this.catchingUp = false;
-          this.frames.push({ frame: null, raw: '', error: { kind: 'host_caught_up', message: `the session host's ring replayed through ${message.lastSeq}`, length: 0, typeGuess: null } });
+          if (this.pendingExit === null) this.frames.push({ frame: null, raw: '', error: { kind: 'host_caught_up', message: `the session host's ring replayed through ${message.lastSeq}`, length: 0, typeGuess: null } });
         }
         if (this.pendingExit) {
           const exit = this.pendingExit;

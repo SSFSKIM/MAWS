@@ -107,24 +107,30 @@ export function signalOrphan(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
 // pid is still the recorded engine (its start time recorded and unchanged) gets SIGTERM; those still the same process
 // after the grace get SIGKILL. Answers how many orphans were stopped. Skipped (0) when there is no ledger, when it is
 // unreadable (with a log line), and when its owner is alive: that supervisor's engines are its own.
-export function sweepOrphans(dir: string, deps: SweepDeps): Promise<number> {
+// P5 O16 M3 (D10): a row whose session host lives (`liveHolders`, the roster's live hosts, adopted or not) is that
+// host's, never swept; the children of the roster's dead hosts (`deadHostChildren`, each named by the child's pid and
+// start time) are orphans whoever wrote the ledger, swept by the same rule.
+export function sweepOrphans(dir: string, deps: SweepDeps, held: { liveHolders?: ReadonlySet<string>; deadHostChildren?: readonly LiveRow[] } = {}): Promise<number> {
   const ledger = readLedger(dir);
-  if (ledger === 'absent') return Promise.resolve(0);
-  if (ledger === 'unreadable') {
-    deps.log(`orphan sweep skipped: ${SUPERVISOR_FILES.live} is unreadable`);
-    return Promise.resolve(0);
+  const orphans: { row: LiveRow; of: string }[] = [];
+  if (ledger === 'unreadable') deps.log(`orphan sweep skipped: ${SUPERVISOR_FILES.live} is unreadable`);
+  else if (ledger !== 'absent' && isSameProcess(ledger.owner, deps)) deps.log(`orphan sweep skipped: the ledger's owner (pid ${ledger.owner.pid}) is alive, so its engines are its own`);
+  else if (ledger !== 'absent') {
+    for (const row of ledger.rows) {
+      if (row.holderId !== null && held.liveHolders?.has(row.holderId)) deps.log(`orphan sweep skips ${row.appSessionId} (pid ${row.pid}): its session host ${row.holderId} is alive`);
+      else orphans.push({ row, of: `the dead supervisor pid ${ledger.owner.pid}` });
+    }
   }
-  if (isSameProcess(ledger.owner, deps)) {
-    deps.log(`orphan sweep skipped: the ledger's owner (pid ${ledger.owner.pid}) is alive, so its engines are its own`);
-    return Promise.resolve(0);
+  for (const row of held.deadHostChildren ?? []) {
+    if (!orphans.some((o) => o.row.pid === row.pid)) orphans.push({ row, of: `the dead session host ${row.holderId ?? row.launchId}` });
   }
-  return stopOrphans(ledger, deps);
+  return orphans.length === 0 ? Promise.resolve(0) : stopOrphans(orphans, deps);
 }
 
-async function stopOrphans(ledger: Ledger, deps: SweepDeps): Promise<number> {
+async function stopOrphans(rows: readonly { row: LiveRow; of: string }[], deps: SweepDeps): Promise<number> {
   // strict where isSameProcess is lenient: a start time that cannot be compared never gets a process signalled
   const isOrphan = (row: LiveRow) => row.procStart !== '' && deps.isAlive(row.pid) && deps.procStartOf(row.pid) === row.procStart;
-  for (const row of ledger.rows) {
+  for (const { row } of rows) {
     if (row.procStart === '' && deps.isAlive(row.pid)) deps.log(`orphan sweep skips ${row.appSessionId} (pid ${row.pid}): no start time was recorded, so it cannot be told from a reused pid`);
   }
   const signal = (row: LiveRow, name: 'SIGTERM' | 'SIGKILL'): boolean => {
@@ -136,10 +142,10 @@ async function stopOrphans(ledger: Ledger, deps: SweepDeps): Promise<number> {
       return false;
     }
   };
-  const orphans = ledger.rows.filter(isOrphan).filter((row) => {
-    deps.log(`orphan ${row.appSessionId} (pid ${row.pid}, launch ${row.launchId}) of the dead supervisor pid ${ledger.owner.pid}: SIGTERM`);
+  const orphans = rows.filter(({ row }) => isOrphan(row)).filter(({ row, of }) => {
+    deps.log(`orphan ${row.appSessionId} (pid ${row.pid}, launch ${row.launchId}) of ${of}: SIGTERM`);
     return signal(row, 'SIGTERM');
-  });
+  }).map(({ row }) => row);
   const graceMs = deps.graceMs ?? SWEEP_GRACE_MS;
   // polled with isAlive alone: a synchronous `ps` per orphan per poll would block this supervisor's event loop while it
   // answers its first client; the start time is read once more, just before the SIGKILL, against a reused pid
@@ -152,6 +158,6 @@ async function stopOrphans(ledger: Ledger, deps: SweepDeps): Promise<number> {
     deps.log(`orphan ${row.appSessionId} (pid ${row.pid}) still running after ${graceMs} ms: SIGKILL`);
     signal(row, 'SIGKILL');
   }
-  if (orphans.length > 0) deps.log(`orphan sweep: ${orphans.length} engine(s) of the dead supervisor pid ${ledger.owner.pid} stopped`);
+  if (orphans.length > 0) deps.log(`orphan sweep: ${orphans.length} engine(s) stopped`);
   return orphans.length;
 }

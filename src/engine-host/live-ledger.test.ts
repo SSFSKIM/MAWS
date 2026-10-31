@@ -105,6 +105,22 @@ describe('sweepOrphans', () => {
     expect(unreadable.signals).toEqual([]);
   });
 
+  // P5 O16 M3 (D10): a row whose session host lives is that host's (an adoption takes it); a dead host's child that
+  // lives is an orphan whoever wrote the ledger, named by the roster's child identity
+  it('skips the rows of live session hosts and sweeps the live children of dead ones, the ledger or no ledger', async () => {
+    const { signals, deps, lines } = world({ 603: { start: 'T603', endsOn: 'SIGTERM' }, 604: { start: 'T604', endsOn: 'SIGTERM' }, 605: { start: 'T605', endsOn: 'SIGTERM' } });
+    writeLive(dir, OWNER, [{ ...row(603, 'T603'), holderId: 'L603' }, { ...row(604, 'T604'), holderId: 'L604' }]);
+    const deadChild = { ...row(605, 'T605'), holderId: 'L605' };
+    expect(await sweepOrphans(dir, deps, { liveHolders: new Set(['L603']), deadHostChildren: [deadChild, { ...row(604, 'T604'), holderId: 'L604' }] })).toBe(2);
+    expect(signals).toEqual([[604, 'SIGTERM'], [605, 'SIGTERM']]); // 604 once, though both name it
+    expect(lines).toContain('orphan sweep skips app-603 (pid 603): its session host L603 is alive');
+    expect(lines).toContain('orphan app-605 (pid 605, launch L605) of the dead session host L605: SIGTERM');
+
+    rmSync(join(dir, 'live.json'));
+    const fresh = world({ 605: { start: 'T605', endsOn: 'SIGTERM' } });
+    expect(await sweepOrphans(dir, fresh.deps, { deadHostChildren: [deadChild] })).toBe(1);
+  });
+
   it('with the owner alive, sweeps nothing: its engines are its own', async () => {
     const { signals, deps, lines } = world({ 500: { start: 'T500', endsOn: 'SIGTERM' }, 603: { start: 'T603', endsOn: 'SIGTERM' } });
     writeLive(dir, OWNER, [row(603, 'T603')]);

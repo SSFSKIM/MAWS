@@ -49,7 +49,7 @@ export type SupervisorIdentity = Pick<SupervisorStatus, 'pid' | 'startedAt' | 'b
 export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
-  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'launching' | 'onHoldChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[] };
+  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'launching' | 'onHoldChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[]; readonly adoptingCount?: number /* P5 O16 M3 */ };
   role: MachineRole; // P5 O2 M2: read once at the engine host's start (role.ts)
   plugins: Pick<PluginsRunner, 'busy' | 'onIdle' | 'onBusy'>;
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>; // engine.shutdown's body
@@ -79,6 +79,7 @@ export class Supervision {
   private release: { idleMs: number | null; active: boolean; ignoreInterest: boolean } | null = null; // the idle release's policy as last set
   private published = '';
   private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
+  private adoptionsFailed = 0; // P5 O16 M3: the session hosts the start found live and did not adopt
   private serving: boolean; // a utility host serves from its register, a detached one from `started`
   private settled: boolean; // the startup gate resolved or rejected
   private live = 0; // the live rows as last counted
@@ -151,6 +152,12 @@ export class Supervision {
     this.refresh();
   }
 
+  // P5 O16 M3: the start's adoptions ended; how many session hosts were not adopted (another protocol major, a failure)
+  adoptionsEnded(failed: number): void {
+    this.adoptionsFailed = failed;
+    this.refresh();
+  }
+
   // The start-up sweep ended (a detached host's, after it serves; detached.ts): how many orphans it stopped.
   orphansSwept(killed: number): void {
     this.orphansKilled = killed;
@@ -167,13 +174,13 @@ export class Supervision {
     const rows = this.deps.table.list();
     return {
       mode: this.deps.mode, ...this.identity,
-      liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length,
+      liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length + (this.deps.table.adoptingCount ?? 0) /* P5 O16 M3 */, rows: rows.length,
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
       release: { role: this.deps.role, idleMs: this.releaseIdleMs(), ...(this.deps.gate && { gate: this.deps.gate.counts() }) }, // P5 O2 M2; O16 M5: the gate
       // P5 O16 M2: the live rows' session hosts (the detached mode's; a utility host spawns directly, so it counts none);
       // O16 M5: the gate's path, on either shape that serves one (null before it listens or once its listen failed)
-      ...((this.deps.mode === 'detached' || this.deps.gate) && { holder: { hosts: this.deps.mode === 'detached' ? rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length : 0, adopted: 0, failed: 0, gate: this.deps.gate?.path() ?? null, handover: 'none' as const } }),
+      ...((this.deps.mode === 'detached' || this.deps.gate) && { holder: { hosts: this.deps.mode === 'detached' ? rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length : 0, adopted: rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder?.adopted === true).length, failed: this.adoptionsFailed, /* P5 O16 M3 */ gate: this.deps.gate?.path() ?? null, handover: 'none' as const } }),
     };
   }
 
@@ -181,7 +188,7 @@ export class Supervision {
   // client, a configuration, the startup gate settling, the table's holds (interest, a launch preparing). Cheap: it reads
   // the table's rows and compares.
   private refresh(): void {
-    const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
+    const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited') || (this.deps.table.adoptingCount ?? 0) > 0; // P5 O16 M3: a held row is live
     this.tellQuiet();
     const active = RELEASE_WHILE_CONNECTED || (this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle));
     const idleMs = this.releaseIdleMs();
@@ -245,7 +252,7 @@ export class Supervision {
     this.idleTimer = null;
     const due = this.idleDue;
     this.idleDue = null; // so refresh re-arms if the conditions still hold but the time has not come
-    const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
+    const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited') || (this.deps.table.adoptingCount ?? 0) > 0; // P5 O16 M3: a held row is live
     if (due !== null && Date.now() >= due && !this.connected && !live && !this.deps.plugins.busy() && this.idleExitMs !== null && this.leaving === null) {
       return this.leave('idle');
     }

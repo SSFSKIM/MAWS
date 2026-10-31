@@ -326,9 +326,9 @@ describe('an adopted process seeded from its records', () => {
     work.adoptedWith({ sessionCrons: [cron('a')], toolSinceStop: false }, []);
     work.tasksChanged();
     work.gap();
-    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: 'adopted_gap' });
+    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: 'host_gap' });
     work.tasksChanged();
-    expect(work.snapshot().unknown).toBe('adopted_gap');
+    expect(work.snapshot().unknown).toBe('host_gap');
     work.stopped([], []);
     expect(work.snapshot()).toEqual({ crons: [], unknown: null });
   });

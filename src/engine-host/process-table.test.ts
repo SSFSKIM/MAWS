@@ -167,6 +167,27 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(() => table.reserve('after' as AppSessionId, create)).toThrow(/shutting down/);
   });
 
+  // P5 O16 M3 (D10): a row held for an adoption from before the first client is answered: live, holding the host as a
+  // launch does, refusing a launch of its id; the adoption's own reservation takes it, a failed one releases it
+  it('holds a row for an adoption: a launch of its id is refused, only the adoption reserves it, and its end releases the hold', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    let rowsChanged = 0;
+    table.onRowsChanged(() => void (rowsChanged += 1));
+    table.holdForAdoption(['app-s' as AppSessionId, 'app-t' as AppSessionId]);
+    expect([table.adoptingCount, table.launching(), table.isAdopting('app-s' as AppSessionId), rowsChanged]).toEqual([2, true, true, 1]);
+    const create = vi.fn(() => scriptedSession().session);
+    expect(table.reserve('app-s' as AppSessionId, create)).toEqual({ status: 'refused', reason: 'already_live', message: 'process is being adopted' });
+    expect(create).not.toHaveBeenCalled();
+    const s = scriptedSession();
+    expect(table.reserve('app-s' as AppSessionId, () => s.session, { adoption: true })).toMatchObject({ status: 'launching' });
+    expect(table.adoptingCount).toBe(1);
+    table.adoptionEnded('app-s' as AppSessionId); // reserved already: nothing to release
+    table.adoptionEnded('app-t' as AppSessionId); // failed: released
+    expect([table.adoptingCount, table.launching()]).toEqual([0, false]);
+    s.transport.exit(0);
+    await s.session.exited;
+  });
+
   it('release frees an exited row only: a live one stays reserved, an exited one leaves the table (archive, whole-branch review)', async () => {
     const table = new ProcessTable({ ps: async () => '' });
     const s = scriptedSession();

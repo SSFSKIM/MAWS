@@ -23,7 +23,8 @@ import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
-import { createLauncher, type LauncherDeps } from './launcher';
+import { createAdopter, createLauncher, type LauncherDeps } from './launcher';
+import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import type { Gate } from './holder/gate'; // O16 M5
 import { registerOps } from './ops'; // P5 O10 M7
 import { pendingCounts } from './pending-counts'; // P5 O10
@@ -196,6 +197,7 @@ export interface EngineIpc {
   // E10: engine.shutdown's body (every live row's ladder, and the plugin runner stopped), shared with the detached
   // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>;
+  adopt(entry: RosterEntry): Promise<AppSessionId>; // P5 O16 M3: the launcher's adoption of a running session host
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
@@ -276,7 +278,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P2-A (X17): the observed facts, written by each launch's recorder and recovered from the journal on a read
   const observed = new ObservedFactsService({ store: deps.observedStore ?? new FileObservedFactsStore(deps.userData), journalRoot: join(deps.userData, 'engine-host', 'journal'), log });
 
-  const launch = createLauncher({
+  const launcherDeps: LauncherDeps = {
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
     replayRowMs: deps.replayRowMs, // E10
@@ -315,7 +317,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request)); // E2: the capture requests main answers
       session.on('artifactExport', (request) => emit('maws.artifact.export', request)); // P3-A M7: main's export service answers
     },
-  });
+  };
+  const launch = createLauncher(launcherDeps);
+  const adopt = createAdopter(launcherDeps); // P5 O16 M3: the same wiring for an adopted row
 
   // Registration with the input's appSessionId narrowed to the branded id the host's maps use.
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
@@ -941,7 +945,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     log,
   });
 
-  return { table, plugins, shutdown };
+  return { table, plugins, shutdown, adopt };
 }
 
 function throwing(error: Error): never {

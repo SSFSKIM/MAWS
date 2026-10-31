@@ -127,6 +127,7 @@ export class ProcessTable {
   private readonly rowsListeners = new Set<() => void>();
   private readonly holdListeners = new Set<() => void>(); // P5 Decision Log 124
   private launches = 0; // P5 Decision Log 124: launches from their entry until they have reserved their row or refused
+  private readonly adopting = new Set<AppSessionId>(); // P5 O16 M3: rows held for an adoption under way
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -163,8 +164,10 @@ export class ProcessTable {
   private readonly log: (message: string) => void;
 
   // Creates and starts a session unless the id holds one that has not exited. `create` runs only when accepted.
-  reserve(appSessionId: AppSessionId, create: () => EngineSession): ReserveOutcome {
+  // P5 O16 M3: an id held for an adoption is live: only the adoption itself (`adoption`) reserves it.
+  reserve(appSessionId: AppSessionId, create: () => EngineSession, opts: { adoption?: boolean } = {}): ReserveOutcome {
     if (this.shuttingDown) throw new Error('engine host is shutting down');
+    if (this.adopting.has(appSessionId) && opts.adoption !== true) return { status: 'refused', reason: 'already_live', message: 'process is being adopted' };
     const existing = this.rows.get(appSessionId);
     if (existing) {
       const state = existing.status().process;
@@ -172,6 +175,7 @@ export class ProcessTable {
     }
     const session = create();
     this.rows.set(appSessionId, session);
+    this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
     this.attachReap(session); // O16 M5
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
@@ -279,7 +283,30 @@ export class ProcessTable {
   }
 
   launching(): boolean {
-    return this.launches > 0;
+    return this.launches > 0 || this.adopting.size > 0; // P5 O16 M3: an adoption under way holds the host as a launch does
+  }
+
+  // P5 O16 M3 (D10): the rows of the session hosts an engine host found live at its start, held from before its first
+  // client is answered until each adoption reserves its row or fails (`adoptionEnded`): each counts as a live session,
+  // and a launch of its id is refused.
+  holdForAdoption(appSessionIds: readonly AppSessionId[]): void {
+    for (const id of appSessionIds) this.adopting.add(id);
+    this.rowsChanged();
+    this.holdChanged();
+  }
+
+  adoptionEnded(appSessionId: AppSessionId): void {
+    if (!this.adopting.delete(appSessionId)) return;
+    this.rowsChanged();
+    this.holdChanged();
+  }
+
+  isAdopting(appSessionId: AppSessionId): boolean {
+    return this.adopting.has(appSessionId);
+  }
+
+  get adoptingCount(): number {
+    return this.adopting.size;
   }
 
   async preparing<T>(launch: () => Promise<T>): Promise<T> {
@@ -315,7 +342,7 @@ export class ProcessTable {
 
   // The row's gate channel (keyed by its lineage, its pid a cross-check) and its reap, from the reservation to the exit.
   private attachReap(session: EngineSession): void {
-    const channel = this.gate?.channel({ lineage: () => session.engineSessionIds(), pid: () => session.pid, seen: () => session.observerSeen() }) ?? NO_OBSERVER;
+    const channel = this.gate?.channel({ lineage: () => session.engineSessionIds(), pid: () => session.pid, seen: () => session.observerSeen(), seenBefore: session.observerSeenBefore /* P5 O16 M3 */ }) ?? NO_OBSERVER;
     const id = session.status().appSessionId;
     const reap = new Reap(id, {
       gate: channel,
