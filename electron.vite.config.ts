@@ -82,9 +82,12 @@ export default defineConfig(({ command }) => {
       // files main's do and one build has one build id; src/engine-host/bundle-guard.test.ts holds its graph to Node's
       // builtins and the hosts' externals (no `electron`). P5 O3-C (D13): the services entry (out/main/services.js), the
       // library's one door, is the third, held by the same guard to mawsd's rule; O3-D's mawsd composes the spine from it.
+      // P5 O5: the app's root (out/main/app.js), which the entry (index.js) loads by a deferred import, is an input of its
+      // own so it lands beside index.js rather than under chunks/: its modules read `__dirname` for the preloads, the
+      // renderer's page and mawsd.js.
       build: {
         rollupOptions: {
-          input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },
+          input: { index: resolve(__dirname, 'src/main/index.ts'), app: resolve(__dirname, 'src/main/app.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },
           // Every main-process file as Latin-1 text, so V8 holds its source at a byte a character (scripts/latin1-bundles.ts).
           // The `?modulePath` hosts' builds take this config's output options too, so their files are re-printed there;
           // here they arrive as assets, which the plugin's check reads with the rest.
