@@ -128,6 +128,7 @@ const PASTED = "a paste placeholder's number, as a string (the terminal's key)";
 const SURFACE_PROPS = "an engine surface's prop names";
 const PINS = 'an engine session id → the account uuid it is pinned to';
 const BRIDGE_CONTROLS = "a control's key in the bridge's capabilities.controls (desk-hub/protocol's CONTROL_KEYS)"; // P5 O9 M2
+const RENDER_AUTHOR_SESSIONS = "a document comment actor's appSessionId → that session's title (the export's comment authors)";
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
   'commands.artifacts.setDefaults.input.spaces': SPACE_SYSTEMS,
@@ -187,6 +188,10 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'events.plugins.operation.outcome.result': ENGINE_JSON,
+  // P5 O5 M4: a Word comment's author session, by the appSessionId its actor carries in the document → that session's title;
+  // mawsd posts render.request to its own machine's render host alone, so the keys are the store's, never addressed
+  'events.render.request<kind=export>.authors.sessions': RENDER_AUTHOR_SESSIONS,
+  'events.render.request<kind=libraryExport>.authors.sessions': RENDER_AUTHOR_SESSIONS,
   'events.plugins.operation.outcome.error.shownCommand': ENGINE_JSON,
   'events.session.eventBatch.events[]<kind=question.answered>.answers': ANSWERS,
   'events.session.eventBatch.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,

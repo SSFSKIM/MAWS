@@ -88,6 +88,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput } from '@shared/ipc/schema';
+import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
+import type { IpcError } from '@shared/ipc/errors';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -211,6 +213,9 @@ const INPUTS: Record<string, unknown> = {
   'session.drafts.set': { appSessionId: 'x', draft: null },
   'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
   'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
+  // P5 O5 M4: on the wire as `machine`; an id no artifact has, one id for both probes so the two answers compare. Its
+  // handler answers an unknown artifact `invalid_input` with its named refusal (`notFound`), which a parsed input alone reaches.
+  'artifacts.export': { artifactId: '00000000-0000-4000-8000-00000000c0b5', format: 'pdf' },
 };
 
 // A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under
@@ -225,8 +230,13 @@ function inputsOf(s: Scratch): Record<string, unknown> {
 
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
-type Answer = { ok: true } | { ok: false; code: string; message: string };
-const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }): Answer => (result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: result.error!.message });
+// `refusal`: an artifact command's named refusal (ArtifactRefusalSchema's reason), which its handler gives a parsed input
+type Answer = { ok: true } | { ok: false; code: string; message: string; refusal?: string };
+const answerOf = (result: { ok: boolean; error?: IpcError }): Answer => {
+  if (result.ok) return { ok: true };
+  const refusal = artifactRefusalOf(result.error!)?.reason;
+  return { ok: false, code: result.error!.code, message: result.error!.message, ...(refusal && { refusal }) };
+};
 
 // Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
 async function probe(page: Page, newer: Build, older: Build, inputs: Record<string, unknown>): Promise<Map<string, Answer>> {
@@ -437,7 +447,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
     for (const [name, onOlder] of before) {
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
-      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
+      expect(onOwn.ok || onOwn.code !== 'invalid_input' || onOwn.refusal !== undefined, `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
       if (!servedByAttacher(owner)) {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });

@@ -122,7 +122,7 @@ describe('the daemon shape’s root in main', () => {
   });
 
   it('binds `machine` as `host` and reads the spine and the machine half through their mirrors', () => {
-    expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host' } })]);
+    expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host', daemonRenders: expect.any(Function) /* P5 O5 M4: router.test drives it */ } })]);
     expect(mirrors.spine).toEqual([expect.objectContaining({ hosts: fake.hosts, daemon: daemonWatch })]);
     expect(mirrors.settings).toEqual([expect.objectContaining({ file: '/tmp/maws-lifecycle-test/machine-settings.json', hosts: fake.hosts })]);
   });
