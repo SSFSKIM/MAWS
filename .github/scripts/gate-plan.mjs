@@ -79,9 +79,12 @@
 // Mac on both), `Lane: no-hosted` keeping it on the Mac. Unsigned packaged can also take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except
 // on reserved final refs. Hosted packaged runs two bare-suite shards, each building its app; self-hosted stays one
 // unsharded job. Lane moves e2e groups only, not packaged.
-// A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone.
+// A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone when
+// its speed-weighted queue starts sooner than the hosted queue (fractional rounds at five slots); ties stay hosted.
 // HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy, uses the exclusive timeout
 // and self-hosted setup, and carries overflow: true (the job name and ci-gate tail identify it). No sample: no change.
+// The old full-round rule runs in shadow with independent queues. The entry point emits its count as the plan check's
+// `EC2 overflow shadow` notice, `old_rule_count=<n>`, readable through the Checks annotations API for EC2 release accounting.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
 // build's supervisor on one profile, and the reverse. The other build is the commit of the `Peer:` trailer (a push only),
 // which scripts/ci-gate.sh resolves (the merge base with master, unless its --peer names another) beside each tree's
@@ -316,24 +319,30 @@ export function planOf(env, scripts, now) {
   // Lane: hosted asks for the hosted Macs themselves (a trial or an admission): nothing of it moves, whatever a sample says.
   const backlog = !dispatched && direct && laneAsked !== 'hosted' ? backlogOf(trailer('Mac-Backlog'), now) : null;
   const hostedOnly = new Set(words(env.HOSTED_MAC_ONLY_E2E));
-  let sentHosted = 0;
-  let sentEc2 = 0;
-  const overflowOf = (group) => {
+  // CI-opt's 2026-10-31 analysis of MAWS jobs, 2026-10-28 to 10-31: median self-hosted/hosted runtime ratio
+  // over 29 groups with 3+ runs on each side (self-hosted: mini or EC2; hosted: macos-26).
+  const EC2_HOSTED_RUNTIME_RATIO = 0.46;
+  const sent = { hosted: 0, ec2: 0 };
+  const shadowSent = { hosted: 0, ec2: 0 };
+  const overflowOf = (group, queue, shadow = false) => {
     if (!backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
-    // Greedy in gate order: EC2 jobs ahead versus full hosted rounds ahead at the account's cap of five.
-    // A tie stays hosted; charge each choice to that queue before placing the next group.
-    return (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + sentEc2 <
-      Math.max(0, Math.floor((backlog.hostedRunning + backlog.hostedQueued + sentHosted - 5) / 5));
+    const ec2Ahead = (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + queue.ec2;
+    const hostedAhead = (backlog.hostedRunning + backlog.hostedQueued + queue.hosted - 5) / 5;
+    // Greedy expected start in hosted-runtime units, without rounding; a tie stays hosted.
+    // The shadow preserves the old predicate, charging only its own hypothetical placements.
+    return shadow ? ec2Ahead < Math.max(0, Math.floor(hostedAhead)) : ec2Ahead * EC2_HOSTED_RUNTIME_RATIO < hostedAhead;
   };
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
       const group = gate.slice(4);
       const eligible = hostedOf(group);
-      const overflow = eligible && direct && overflowOf(group);
+      const overflow = eligible && direct && overflowOf(group, sent);
       const hosted = eligible && !overflow;
-      if (overflow) sentEc2++;
-      else if (hosted && direct) sentHosted++;
+      if (eligible && direct) {
+        sent[overflow ? 'ec2' : 'hosted']++;
+        shadowSent[overflowOf(group, shadowSent, true) ? 'ec2' : 'hosted']++;
+      }
       const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
@@ -448,16 +457,17 @@ export function planOf(env, scripts, now) {
       stdout += `${line}\n`;
     }
   }
-  return { outputs, summary, stdout, peerCheck };
+  return { outputs, summary, stdout, peerCheck, overflowShadowCount: shadowSent.ec2 };
 }
 
 // Importing the planner does no I/O. The workflow entry point alone reads its checkout and appends its artifacts.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const { outputs, summary, stdout } = planOf(process.env, scripts, Date.now());
+    const { outputs, summary, stdout, overflowShadowCount } = planOf(process.env, scripts, Date.now());
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+    process.stdout.write(`::notice title=EC2 overflow shadow::old_rule_count=${overflowShadowCount}\n`);
     process.stdout.write(stdout);
   } catch (error) {
     process.stderr.write(`gate-plan: ${error.message}\n`);
