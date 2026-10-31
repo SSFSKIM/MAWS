@@ -169,6 +169,9 @@ export class SpineEvents {
 
   // A load that ends refused or yielded: no spine of this daemon's will fold the hold. Counted and logged; then `next`.
   discard(why: string, next: Mode): void {
+    // Whole-state parts that reached only the hold stay the latest kept for the next load, as cold or off keeps them (a
+    // confirmed provisional yield, a refused or failed load); the last resort mid-load keeps none, its barrier going on
+    if (next !== 'holding') for (const { name, payload } of this.held) if (COALESCED_EVENTS.has(name)) this.coalesced.set(coalescedKey(name, payload), { name, payload });
     if (this.held.length > 0) {
       this.dropped += this.held.length;
       this.options.log(`[spine] the hold's ${this.held.length} events (${this.heldBytes} bytes) discarded: ${why}`);

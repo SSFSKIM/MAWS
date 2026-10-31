@@ -680,6 +680,18 @@ describe('the yield', () => {
     expect(root.seen).toEqual(['coalesced status s1 ready', 'coalesced brokerItems s1 Bash: git status', 'resync', 'resync paged (ok)']); // nothing held
   });
 
+  // Review of (B): a burst's later sessions' whole-state parts reach only the hold; confirmed, they stay the latest kept.
+  it('a confirmed provisional yield keeps the whole-state parts that reached only its hold', async () => {
+    const spine = await provisionally(() => (live.has(777) ? 777 : null));
+    link.emit('session.status', working('s2')); // the burst goes on after its trigger: held
+    link.emit('session.brokerItems', { appSessionId: 's2', items: [{ summary: 'Bash: ls' }] });
+    spine.yield(777); // its hello lists no machine.spine
+    live.delete(777);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    const root = (await spine.ensure('command')) as FakeRoot;
+    expect(root.seen.filter((line) => line.startsWith('coalesced'))).toEqual(['coalesced status s1 ready', 'coalesced brokerItems s1 Bash: git log', 'coalesced status s2 ready', 'coalesced brokerItems s2 Bash: ls']);
+  });
+
   it('a provisional yield whose app is gone before its hello is confirmed: its hold discarded, the spine cold', async () => {
     const spine = await provisionally(() => (live.has(777) ? 777 : null));
     live.delete(777);
