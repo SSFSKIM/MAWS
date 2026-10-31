@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { app, safeStorage } from 'electron';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
-import type { ConnectorOAuthSealer, E2ECustodyFacts } from '@shared/connectors/sealer';
+import type { E2ECustodyFacts, ConnectorOAuthSealer } from '@shared/connectors/sealer';
 import type { ClientRef } from '@shared/ipc/client';
 import { listenLoopback } from './oauth-callback';
 import { createConnectorOAuthFlow } from './oauth-flow';
