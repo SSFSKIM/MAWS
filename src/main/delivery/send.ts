@@ -6,7 +6,9 @@
 // - Before anything is exported, the machine's `delivery.status` for the target is read and a state that cannot send is
 //   answered with no export (D38: a machine without gws reads Drive `absent`); `delivery.deliver` checks again, the
 //   machine staying the authority. Notion takes Markdown alone, in Notion's dialect.
-// - A run is held here for its export phase (by `runId`, one per artifact and target at a time). A cancel meanwhile is
+// - A run id is one send's until the machine answered its delivery: another send under it meanwhile is `busy`, so a
+//   cancel never marks a second run while the first is delivered (the task review's finding 1). A run is held here for
+//   its export phase (one per artifact and target at a time). A cancel meanwhile is
 //   answered here through the router's seam before `delivery.cancel` (D15): the run is marked, the export is let finish
 //   (the export service takes no signal and runs under its own budget; O5's to change), then its file is removed and
 //   nothing is handed off (D29). Once handed off the run is the machine's, and so is its cancel (a tombstone, if the
@@ -60,7 +62,8 @@ function refusalOf(status: DeliveryStatus, named: boolean): DeliverySendAnswer |
 }
 
 export function registerDeliverySend({ register, before, exportArtifact, call, invoke, log = (line) => console.warn(`[delivery] ${line}`) }: DeliverySendDeps): () => void {
-  const runs = new Map<string, Run>(); // by run id, in their export phase
+  const runs = new Map<string, Run>(); // by run id, in their export phase: the cancels main answers
+  const inFlight = new Set<string>(); // run ids under way, until the machine answered their delivery: another send under one is busy
   const active = new Set<string>(); // artifact and target with a run in its export phase
   const asMain = { client: mainClient };
 
@@ -68,8 +71,9 @@ export function registerDeliverySend({ register, before, exportArtifact, call, i
     const { runId, target, artifactId, format, versionId, board } = input;
     if (target === 'notion' && format !== 'md') return failure('invalid');
     const slot = `${artifactId}\0${target}`;
-    if (runs.has(runId) || active.has(slot)) return failure('busy');
+    if (inFlight.has(runId) || active.has(slot)) return failure('busy');
     const run: Run = { cancelled: false };
+    inFlight.add(runId);
     runs.set(runId, run);
     active.add(slot);
     let path: string | null = null;
@@ -109,6 +113,7 @@ export function registerDeliverySend({ register, before, exportArtifact, call, i
       log(`the ${target} delivery of ${artifactId} failed: ${words(error)}`);
       return failure('failed', { maybeSent: handed });
     } finally {
+      inFlight.delete(runId);
       if (!handed) {
         runs.delete(runId);
         active.delete(slot);

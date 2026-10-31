@@ -261,6 +261,30 @@ describe('the cancel through the router’s seam', () => {
     expect(await cancel(runId)).toBeUndefined();
   });
 
+  // The task review's finding 1: a run id is one operation's until the machine answered it, so a second send under it
+  // never becomes the run a cancel marks while the first one is being delivered
+  it('answers busy for a send reusing a run id still being delivered, and leaves that run’s cancel to the machine', async () => {
+    let deliver!: () => void;
+    const delivering = new Promise<void>((resolve) => (deliver = resolve));
+    start({
+      invoke: (async (name: CommandName, input: unknown) => {
+        invoked.push({ name, input: input as never, client: 'main' });
+        if (name === 'delivery.deliver') await delivering;
+        return name === 'delivery.status' ? { ok: true, value: status } : delivered;
+      }) as never,
+    });
+    const runId = RUN();
+    const sending = send(drive(runId));
+    await vi.waitFor(() => expect(names()).toContain('delivery.deliver'));
+    expect(await send(drive(runId))).toEqual({ ok: false, why: 'busy' });
+    expect(exported).toHaveLength(1);
+    expect(await cancel(runId)).toBeUndefined(); // the machine's, the run being delivered
+    deliver();
+    expect(await sending).toEqual({ ok: true, receipt: RECEIPT });
+    await send(drive(runId)); // once answered, the id is free again
+    expect(exported).toHaveLength(2);
+  });
+
   it('at the dispose, takes its hook away', () => {
     dispose();
     expect(hook).toBeNull();
