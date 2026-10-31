@@ -13,6 +13,7 @@ const LEASE = '22222222-2222-4222-8222-222222222222';
 const OTHER_LEASE = '33333333-3333-4333-8333-333333333333';
 const WATCH = '44444444-4444-4444-8444-444444444444';
 const TOOL = { server: 'fixture', tool: 'read_series' };
+const OTHER_TOOL = { server: 'fixture', tool: 'read_totals' };
 const NO_LEASE_ANSWER = { ok: false, state: 'invalid', reason: 'lease' };
 const RESULT: ConnectorCallOutcome = { ok: true, result: { rows: [1, 2] }, fetchedAt: 5, via: { route: 'engine', sessionId: 's1' } };
 
@@ -401,6 +402,50 @@ describe('a surface’s rebuild on connectors.reset', () => {
     await settle();
     c.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: NEW_WATCH, update: RESULT });
     expect(heard).toEqual([RESULT, RESULT]);
+  });
+
+  // The task review's finding 2: main adds each declaration to the lease's, so the rebuilt lease is declared all of them
+  it('declares the rebuilt lease every tool the old one was declared, not only the last declaration’s', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    const first = surface.declareTools([TOOL]);
+    await settle();
+    b.sent[1]!.answer({ ok: true, declared: [TOOL] });
+    await first;
+    const second = surface.declareTools([OTHER_TOOL]);
+    await settle();
+    b.sent[2]!.answer({ ok: true, declared: [TOOL, OTHER_TOOL] });
+    await second;
+    b.emit('connectors.reset', {});
+    b.sent[3]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    expect(b.sent[4]).toMatchObject({ name: 'connectors.declare', input: { leaseId: NEW_LEASE, tools: [TOOL, OTHER_TOOL] } });
+  });
+
+  // The task review's finding 3: the watch's start overtaken by the reset answers before the rebuilt lease opens, so the
+  // rebuild and the overtaken start's own re-install both know it; it is started once on the rebuilt lease
+  it('starts an overtaken watch once on the rebuilt lease, and its unwatch stops that one', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const watched = surface.watchTool(SERIES, () => {});
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    b.emit('connectors.reset', {});
+    b.sent[1]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 }); // the old lease's start, after the reset
+    await expect(watched).resolves.toMatchObject({ ok: true, watchId: WATCH });
+    b.sent[2]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    b.sent[3]!.answer({ ok: true, watchId: NEW_WATCH, intervalMs: 60_000 });
+    await settle();
+    await settle();
+    expect(b.sent.filter(({ name, input }) => name === 'connectors.watch' && (input as { leaseId: string }).leaseId === NEW_LEASE)).toHaveLength(1);
+    const stopped = surface.unwatchTool(WATCH);
+    await settle();
+    expect(b.sent.at(-1)).toMatchObject({ name: 'connectors.unwatch', input: { leaseId: NEW_LEASE, watchId: NEW_WATCH } });
+    b.sent.at(-1)!.answer({ stopped: true });
+    await expect(stopped).resolves.toBe(true);
   });
 
   it('rebuilds nothing for a closed surface, and listens for the reset only while a surface is open', async () => {

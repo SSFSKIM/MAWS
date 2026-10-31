@@ -17,8 +17,9 @@
 //   start is unanswered. Nothing is heard after an unwatch or the close, a close by the listener itself included.
 // - P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D28): the leases live in `mawsd`, with the spine, and
 //   end with its connection. At each streaming of the machine host after the first main tells every window
-//   `connectors.reset`, and each open surface rebuilds its lease: a new open, then its declaration and its visibility as
-//   last asked, then each of its watches started again with its listener, before anything asked meanwhile is sent. The
+//   `connectors.reset`, and each open surface rebuilds its lease: a new open, then every tool main answered declared
+//   (declarations add up) and its visibility as last asked, then each of its watches started again with its listener
+//   (once per lease, whichever path asks first), before anything asked meanwhile is sent. The
 //   page keeps the watch ids it was given; the surface maps them to the ones main runs now. A command in flight at the
 //   reset answers as the host answered it. A lease that answers after a reset overtook its open is closed.
 import type { ConnectorSurface } from '@artifacts/host';
@@ -28,6 +29,7 @@ import {
   type ConnectorGrant,
   type ConnectorGrantGesture,
   type ConnectorGrantOutcome,
+  type ConnectorDeclareOutcome,
   type ConnectorInvalid,
   type ConnectorToolRef,
 } from '@shared/artifacts/connectors';
@@ -90,16 +92,19 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
   function openConnectors(artifactId: string): ConnectorSurface {
     let closed = false;
     let unroute: (() => void) | null = null;
-    // P5 O4 D28: what the surface asked of its lease, to ask again of a rebuilt one: its declaration and visibility as
-    // last asked, and its watches by the id the page holds (its first start's), each with the id main runs it under now
-    // (null while it is not installed on the current lease)
-    let declared: CommandInput<'connectors.declare'>['tools'] | null = null;
+    // P5 O4 D28: what the surface asked of its lease, to ask again of a rebuilt one: every tool main answered declared
+    // (its declarations add up, as the broker's do: the review's finding 2), its visibility as last asked, and its
+    // watches by the id the page holds (its first start's), each with the id main runs it under now (null while it is not
+    // installed on the current lease) and the lease generation its last start went to (one start per generation: the
+    // review's finding 3)
+    const declared = new Map<string, ConnectorToolRef>(); // by server and tool, in the order main first answered them
     let visible: boolean | null = null;
     interface Watch {
       readonly request: CommandInput<'connectors.watch'>['request'];
       readonly dataset: CommandInput<'connectors.watch'>['dataset'];
       readonly listener: Listener;
       current: string | null;
+      startedOn: number;
     }
     const watches = new Map<string, Watch>(); // by the page's watch id
     const pageIdOf = new Map<string, string>(); // main's watch id on the current lease → the page's
@@ -130,6 +135,11 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
         watch.listener(update);
       }
       held.delete(watchId);
+    };
+    const declare = async (leaseId: string, tools: unknown): Promise<ConnectorDeclareOutcome> => {
+      const answer = await call('connectors.declare', { leaseId, tools });
+      if (answer.ok) for (const tool of answer.declared) declared.set(JSON.stringify([tool.server, tool.tool]), { server: tool.server, tool: tool.tool });
+      return answer;
     };
     const starts = async <T>(work: () => Promise<T>): Promise<T> => {
       starting += 1;
@@ -177,12 +187,12 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
         const leaseId = await open(opened);
         if (leaseId === null) return null;
         try {
-          if (declared !== null && live()) await call('connectors.declare', { leaseId, tools: declared });
+          if (declared.size > 0 && live()) await declare(leaseId, [...declared.values()]);
           if (visible !== null && live()) await call('connectors.visibility', { leaseId, visible });
           for (const [own, watch] of [...watches]) {
             if (!live()) break;
             if (watches.get(own) !== watch) continue; // unwatched meanwhile
-            await reinstall(own, watch, leaseId, live);
+            await reinstall(own, watch, leaseId, opened);
           }
         } catch {
           // the host went again: what was rebuilt stands, the next reset rebuilds
@@ -191,10 +201,14 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
       })();
     };
     const offRebuild = onReset(rebuild);
-    // A watch the page holds, started again on `leaseId`; not installed when main refuses it (its listener hears nothing
-    // until a later rebuild installs it), stopped again when the page unwatched it or the lease ended while it started.
-    const reinstall = (own: string, watch: Watch, leaseId: string, live: () => boolean) =>
+    // A watch the page holds, started again on `leaseId` of generation `on`, once whichever path asks first (the rebuild,
+    // or the start a reset overtook); not installed when main refuses it (its listener hears nothing until a later
+    // rebuild installs it), stopped again when the page unwatched it or the lease ended while it started.
+    const reinstall = (own: string, watch: Watch, leaseId: string, on: number) =>
       starts(async () => {
+        if (watch.startedOn === on) return;
+        watch.startedOn = on;
+        const live = () => !closed && on === generation;
         const start = await call('connectors.watch', { leaseId, request: watch.request, ...(watch.dataset && { dataset: watch.dataset }) });
         if (!start.ok) return;
         if (live() && watches.get(own) === watch) install(own, watch, start.watchId);
@@ -212,10 +226,7 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
     };
 
     return {
-      declareTools: (tools) => {
-        if (!closed) declared = tools;
-        return under(NO_LEASE, NO_LEASE, (leaseId) => call('connectors.declare', { leaseId, tools }));
-      },
+      declareTools: (tools) => under(NO_LEASE, NO_LEASE, (leaseId) => declare(leaseId, tools)),
       // E3: the owner's dataset sink rides beside the request, never inside it
       callTool: (request, options) => under<ConnectorCallOutcome>(NO_LEASE, CLOSED, (leaseId) => call('connectors.call', { leaseId, request, ...(options && { dataset: options.dataset }) })),
       watchTool: async (request, listener, options) => {
@@ -227,14 +238,14 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
             return call('connectors.watch', { leaseId, request, ...(options && { dataset: options.dataset }) /* E3 */ });
           });
           if (!start.ok) return start; // a close before the answer: `under` answered the lease refusal
-          const watch: Watch = { request, dataset: options?.dataset, listener, current: null };
+          const watch: Watch = { request, dataset: options?.dataset, listener, current: null, startedOn: sentOn };
           watches.set(start.watchId, watch);
           if (sentOn === generation) install(start.watchId, watch, start.watchId);
           else {
             // started on a lease a reset ended meanwhile (the rebuild did not know it): started again on the rebuilt one
             const rebuilt = generation;
             void current()
-              .then((leaseId) => (leaseId === null ? undefined : reinstall(start.watchId, watch, leaseId, () => !closed && rebuilt === generation)))
+              .then((leaseId) => (leaseId === null ? undefined : reinstall(start.watchId, watch, leaseId, rebuilt)))
               .catch(() => {});
           }
           // a listener that closed the page while its held refreshes were handed over: no watch was started for it
