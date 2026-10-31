@@ -16,19 +16,12 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { app, safeStorage } from 'electron';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import type { E2ECustodyFacts, ConnectorOAuthSealer } from '@shared/connectors/sealer';
 import type { ClientRef } from '@shared/ipc/client';
 import { listenLoopback } from './oauth-callback';
 import { createConnectorOAuthFlow } from './oauth-flow';
 import { createConnectorOAuthProvider, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
-import { createConnectorOAuthStore, electronOAuthSealer, type ConnectorOAuthSealer } from './oauth-store';
-
-export interface E2ECustodyFacts {
-  e2e: boolean; // the MAWS_E2E launch (the one that appends the mock keychain switch)
-  mockKeychain(): boolean;
-  userData(): string;
-  scratch(): string | undefined; // the profile the harness named
-  tmp(): string;
-}
+import { createConnectorOAuthStore, electronOAuthSealer } from './oauth-store';
 
 const canonical = (path: string): string | null => {
   try {
@@ -52,14 +45,15 @@ export function guardE2ECustody(sealer: ConnectorOAuthSealer, facts: E2ECustodyF
   };
   const refuse = () => new Error('E2E custody unproven: safeStorage was not asked');
   return {
+    format: sealer.format,
     available: async () => safe() && sealer.available(),
-    seal: async (text) => {
+    seal: async (text, id) => {
       if (!safe()) throw refuse();
-      return sealer.seal(text);
+      return sealer.seal(text, id);
     },
-    open: async (sealed) => {
+    open: async (sealed, id) => {
       if (!safe()) throw refuse();
-      return sealer.open(sealed);
+      return sealer.open(sealed, id);
     },
   };
 }

@@ -9,6 +9,7 @@
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Location } from '@shared/sessions/intent';
+import { onLaunchMode } from '../app/launch-mode';
 import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
@@ -83,9 +84,9 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 export function connectSessions(client: MawsBridge = ipc): () => void {
   const setup = connectSetup(client, useSetup, heldToast);
   const offs: (() => void)[] = [registerTabRetention({ ready: setup.ready, retains: retainsTab })];
-  let live = true;
-  void client.invoke('session.launchMode', undefined).then((result) => {
-    if (!live || !result.ok || result.value.mode !== 'index') return;
+  // 2026-10-31: asked until main answers, so an upgrade's mawsd restart no longer leaves New chat disabled (launch-mode.ts)
+  const stopAsking = onLaunchMode((mode) => {
+    if (mode !== 'index') return;
     registerSlot('newSession', NewSessionEmptyState);
     offs.push(
       registerSessionCreator((projectId, location) => createUnstartedSession(projectId, client, location ?? null)),
@@ -99,9 +100,9 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
       registerResubmitProvider(resubmitProvider),
       // P2-A: C12's send-to-resume registration is retired; the human send seam acquires every eligible record itself
     );
-  });
+  }, client);
   return () => {
-    live = false;
+    stopAsking();
     setup.disconnect();
     offs.forEach((off) => off());
   };

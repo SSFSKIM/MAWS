@@ -602,6 +602,27 @@ test('(downgrade, daemon) this build’s app keeps a session under its mawsd; th
   await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
 });
 
+// The upgrade's restart of `mawsd` (2026-10-31: after an upgrade New chat stayed disabled until the app was reopened). The
+// older peer's app on the daemon shape leaves its private `mawsd` running; this build's app attaches to it, finds another
+// build and asks it to restart (src/main/hosts/daemon.ts, the build check), and its own `mawsd` serves on. The page's
+// first `session.launchMode` may fall in that window; whether it does or not, once this build's `mawsd` serves, the
+// sidebar's New chat is enabled (src/renderer/src/app/launch-mode.ts asks again when the machine is heard).
+test('(update, mawsd restart) this build’s app meets the older peer’s mawsd, has it restart onto this build, and New chat is enabled once it serves', async () => {
+  const { here, peer, newer } = builds();
+  test.skip(here !== newer || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not an older build whose mawsd runs the spine`);
+  await withScratch('xb-mawsd-restart', async (s) => {
+    const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+    const theirs = (await s.ready(old.page, onShape('daemon'))).daemon!;
+    await s.quit(old);
+    expect(isAlive(theirs.pid), 'the peer’s mawsd outlives its app').toBe(true);
+    const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+    const ours = (await s.ready(run.page, (st) => st.daemon !== null && st.daemon.pid !== theirs.pid, 60_000)).daemon!;
+    expect(run.output(), 'this build’s main asks the peer’s mawsd to restart').toContain(`[hosts] mawsd pid ${theirs.pid} runs build ${theirs.build.buildId}, this app's is ${ours.build.buildId}; asking it to restart`);
+    await expect(run.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }), 'New chat, once this build’s mawsd serves').toBeEnabled({ timeout: 30_000 });
+    record([`${peer.label}'s mawsd pid ${theirs.pid} (build ${theirs.build.buildId}) restarted onto ${here.label}'s, pid ${ours.pid} (build ${ours.build.buildId}); New chat enabled`]);
+  });
+});
+
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
 // architect's rulings D29 and D32). This build's app on the daemon shape leaves its private `mawsd` running the spine
 // over a post-D profile (the index at 14, the settings split); an O2-era app (the peer, before O3-A: it takes no

@@ -5,9 +5,9 @@
 //
 // - Rows bind the source each tool actually uses: a tool's own selection (route D's ranking, the grant's source first),
 //   else, while no listing knows the tool yet, the server's source alone (`toolMissing`'s fallback, which lets the owner's
-//   Connect list the tools). An HTTP row is one saved identity (./oauth-types.ts) with every selected source as a member;
-//   a stdio row is one source, since its directory is part of what it launches. A server no tool reaches is a
-//   session's alone, with the closed reason. A row crosses to the window as safe fields and an opaque handle.
+//   Connect list the tools). An HTTP row is one saved identity (@shared/connectors/oauth-types.ts) with every selected
+//   source as a member; a stdio row is one source, since its directory is part of what it launches. A server no tool
+//   reaches is a session's alone, with the closed reason. A row crosses to the window as safe fields and an opaque handle.
 // - The handle is revalidated at the action: each tool of the row is selected again and only the sources still giving
 //   the row's identity are used, never a first-directory substitute; none left is `stale`.
 // - Connect makes MAWS's own connection usable and lists the tools on every member (initialize and tools/list, never a
@@ -42,7 +42,7 @@ import { pageOf } from '../ipc/clients';
 import type { DirectRoute } from './direct-route';
 import type { ConnectorOAuthConnectFailure, ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
-import { oauthIdentityOf, type ConnectorOAuthIdentity } from './oauth-types';
+import { oauthIdentityOf, type ConnectorOAuthIdentity } from '@shared/connectors/oauth-types';
 
 // Every provider and host word an action can end with is a word the window's schema knows.
 type Covered<T extends ConnectorOwnerFailure> = T;

@@ -1,5 +1,5 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
@@ -9,9 +9,10 @@ import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
-import { useUnstartedTitle } from '../keymap/actions-runtime';
+import { isSessionCreatorRegistered, useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { hostStatus } from '../test-support/host-status';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions';
@@ -461,6 +462,27 @@ describe('the unstarted title and the creator', () => {
     } finally {
       act(() => disconnect());
     }
+  });
+
+  // 2026-10-31: an upgrade's mawsd restart answered the page's one ask host_unavailable, and New chat stayed disabled
+  it('registers the creator once main answers the launch mode, asked again after a failure when the local machine’s host is heard', async () => {
+    withMain({ 'session.launchMode': undefined, 'session.intent.list': { intents: [] }, 'session.deletions.list': { manifests: [] } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let disconnect!: () => void;
+    await act(async () => { disconnect = connectSessions(ipc); });
+    try {
+      await act(() => fake.fail('session.launchMode', 'machine is restarting; cannot answer session.launchMode', 'host_unavailable'));
+      expect(isSessionCreatorRegistered()).toBe(false);
+      act(() => fake.event('host.status', hostStatus()));
+      await act(() => fake.reply('session.launchMode', { mode: 'index' }));
+      expect(isSessionCreatorRegistered()).toBe(true);
+      act(() => fake.event('host.status', hostStatus()));
+      expect(fake.invoked('session.launchMode')).toHaveLength(2);
+    } finally {
+      act(() => disconnect());
+      warn.mockRestore();
+    }
+    expect(isSessionCreatorRegistered()).toBe(false);
   });
 
   it("titles the tab 'New chat' with its project once one is chosen, and the creator opens with main's intent", async () => {
