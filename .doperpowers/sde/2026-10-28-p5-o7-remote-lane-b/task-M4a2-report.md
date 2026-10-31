@@ -395,3 +395,37 @@ Branch `p5-o7-m4`, worktree `/Users/new/.local/share/maws-worktrees/p5-o7`, from
     - The finding-3 fix keeps its scope: with the host up and the live engine session not the recorded one, it is
       still the deferred flag, answered after the rank on the recorded engine session.
     - Cost: one more `session.status` read per engine-host act. `actions.ts` reads it again for the context check.
+
+### Fix wave 2, the Important as ruled: the engine host's absence is uniform
+
+- **What changed** (`b098456d4`, `src/endpoint/targets.ts` `laneB`):
+  - Placement now reads the engine host's live row (`session.status`) on every path, including an engine-host act's
+    (`live: false`). For those acts `live` now governs only the consistency flag; `actions.ts`' context check is
+    unchanged.
+  - When that read fails with `host_unavailable` or `timeout`, the request is `unavailable` for every lane B id,
+    recorded or not, before anyone's rank. A failing spine already answers the same way. Both are machine-wide.
+  - With the host answering:
+    - A recorded session whose live engine session differs is still flagged, and the flag is answered only after the
+      rank on the recorded engine session.
+    - With no recorded engine session the live row places the session, else `unknown` (`grade`).
+  - `laneB`'s doc comment and the `Resolved.unavailable` comment say so.
+  - Cost: one more `session.status` read per engine-host act.
+- **What this narrows, against fix wave 1:**
+  - Fix wave 1 had made host-away a post-rank flag for recorded sessions. It is pre-rank and uniform again, as before
+    the wave.
+  - A held subscription's re-check during an outage still retries; it does not end.
+- **Regression:** `targets.test.ts`, "answers a caller below view alike for an indexed session and an absent id while
+  the engine host can't answer".
+  - Setup: host away, and B holds nothing.
+  - B's call, subscription and engine-host act on the indexed `app-1` and on the absent `app-absent` give identical
+    answers (`unavailable` ×3, with the subscription `ended`). Nothing runs.
+  - Fail-first: at the prior head it answered `[grade, ended, grade, grade]` against the expected `unavailable`s.
+- **Local runs:**
+  - The endpoint suites, 12 files (`targets`, `checkout-rule`, `feeds`, `checkout-rows`, `lane-b-rows`, `grades`,
+    `subscriptions-b`, `actions`, `queries-machine`, `calls`, `subscription-table`, `lane-b-notify`): **174/174**.
+  - `test/lane-b/remote.test.ts` with `test/machines/remote-link.test.ts`: 37/37.
+  - `pnpm typecheck` is clean; eslint is clean on both files.
+- **Gate:** run **41249214073** on `b098456d4`, passed by sha (M4b's uncommitted work stays out): **success**.
+  - Jobs: static, unit 1–4/4, probes, e2e:cross-build against peer 3adf9c97 (wire 3.12 against 3.13).
+  - The run's commit `988c82f17` is the gate's empty commit over `b098456d4`. Its tree is
+    `7ce626f07040f6b93a68a9da16789194570eda3a`, equal to `b098456d4`'s.
