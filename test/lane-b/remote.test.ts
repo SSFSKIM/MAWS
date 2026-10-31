@@ -336,6 +336,30 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await until(() => eventsOf(l.a, 'app-r').some((e) => e.id.startsWith(`app-r:${resumed}:1:`)), 'the new launch’s first row');
   });
 
+  it('hydrates a launch whose history is over the channel’s 4 MiB in pages, a row too large to cross left out with a gap at its place', async () => {
+    const l = await lab();
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    const small = l.host.row('app-1', 2);
+    await opened(l.a, 'app-1', s.launchId);
+    // Rows the stream hasn't carried: three of 1.5 MiB (4.5 MiB together), then one of 5 MiB that no answer can hold.
+    const big = (bytes: number) => {
+      const seq = s.rows.length + 1;
+      const row = [l.host.event(s, seq, 0, { kind: 'note', text: 'x'.repeat(bytes) })];
+      s.rows.push(row);
+      return row;
+    };
+    const fits = [big(1.5 * 1024 * 1024), big(1.5 * 1024 * 1024), big(1.5 * 1024 * 1024)];
+    const huge = big(5 * 1024 * 1024);
+    const answer = (await l.a.cmd('session.events', { appSessionId: 'app-1', afterSeq: null, limit: null })) as { events: SessionEvent[]; lastSeq: number; complete: boolean; historyUnavailable?: true };
+    expect(ids(answer.events)).toEqual(ids([...small, ...fits.flat()]));
+    expect(answer).toMatchObject({ lastSeq: huge[0].seq, complete: true });
+    expect(answer.historyUnavailable).toBeUndefined();
+    expect(gapsOf(l.a, 'app-1')).toEqual([{ appSessionId: 'app-1', launchId: s.launchId, at: { seq: huge[0].seq } }]);
+    // More than one page crossed: the host was asked again with a limit after the whole read was refused.
+    expect(l.host.calls.filter((c) => c.name === 'session.events' && (c.input as { limit: number | null }).limit !== null).length).toBeGreaterThan(1);
+  });
+
   it('resumes a session whose launch exited with the host’s row kept, rather than sealing a send to the exited launch', async () => {
     const l = await lab();
     const s = l.host.add('app-1');

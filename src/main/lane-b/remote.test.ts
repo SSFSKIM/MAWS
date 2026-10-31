@@ -91,13 +91,14 @@ describe('routeLaneB', () => {
   it('takes the acts and substitutes for a machine an RL2 link reaches; everything else, and any name for another machine, goes on', async () => {
     const l = lab();
     expect(await l.cmd('session.status', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
-    expect(await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: 10 })).toEqual({ ok: true, value: 'base' });
+    expect(await l.cmd('session.queue.list', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
     expect(await l.cmd('session.interrupt', { appSessionId: APP, cancelEngineQueued: false }, OTHER)).toEqual({ ok: true, value: 'base' });
-    expect(l.base).toEqual(['session.status', 'session.events', 'session.interrupt']);
+    expect(l.base).toEqual(['session.status', 'session.queue.list', 'session.interrupt']);
     for (const name of ['session.send', 'session.steer', 'session.interrupt', 'session.answer', 'session.queue.edit', 'session.setModel', 'session.acquire', 'attention.request', 'engine.models'] as CommandName[]) {
       expect(l.adapter.handles(name), name).toBe(true);
     }
-    for (const name of ['session.status', 'session.events', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+    expect(l.adapter.handles('session.events')).toBe(true); // read in pages the channel carries
+    for (const name of ['session.status', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
   });
 });
 
@@ -338,6 +339,23 @@ describe('the substitutes', () => {
     l.link.answers.set('session.listModels', () => ({ ok: true, output: { models } }));
     expect(await l.cmd('engine.models', { refresh: false, gateway: 'gateway', cwd: '/work/app-2' })).toEqual({ ok: true, value: { models, source: 'live', at: expect.any(String) } });
     expect(l.link.calls.at(-1)).toEqual({ name: 'session.listModels', input: { appSessionId: 'app-2' } });
+  });
+});
+
+describe('session.events', () => {
+  it('reads a launch too large for one answer in pages over the link, a row that can’t cross told as a gap at its place in the held launch', async () => {
+    const l = lab();
+    await live(l);
+    const row = (seq: number) => [{ ...permission, id: `${APP}:L1:${seq}:0`, seq, requestId: `req-${seq}` }];
+    l.link.answers.set('session.events', (input) => {
+      if (input.limit === null) return { ok: false, error: { code: 'too-large' } };
+      const after = (input.afterSeq as number | null) ?? 0;
+      if (after === 1) return { ok: false, error: { code: 'too-large' } }; // row 2, alone
+      return { ok: true, output: { events: row(after + 1), lastSeq: after + 1, complete: after + 1 === 3 } };
+    });
+    expect(await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null })).toEqual({ ok: true, value: { events: [...row(1), ...row(3)], lastSeq: 3, complete: true } });
+    expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1', at: { seq: 2 } }]);
+    expect(l.base).toEqual([]); // not the manager's one call
   });
 });
 

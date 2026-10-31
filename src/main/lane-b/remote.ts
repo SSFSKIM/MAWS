@@ -30,6 +30,8 @@
 // - Substitutes for two reads the pane makes that no offer row carries: `attention.request` from `session.pendingRequest`;
 //   `engine.models` (machine-wide, graded `spawn`) from `session.listModels` of a live session there, the one in the asked
 //   directory first, else the built-in list.
+// - `session.events`, offered as a call, read in pages the channel carries when one answer would be too large
+//   (./remote-history.ts): the pane's hydration of a long launch, or one holding large inline images.
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -41,6 +43,7 @@ import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
+import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
@@ -111,6 +114,8 @@ export const ENGINE_HOST_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
 export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>(['session.acquire']);
 /** Reads the pane makes that no row offers, answered here from one that is. */
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
+/** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
+export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events']);
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
 export const NOT_OPEN = 'open the session to drive it';
 
@@ -331,6 +336,14 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const deadline = now() + timing.sendPendingMs;
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
+    if (name === 'session.events') {
+      const app = String(fields.appSessionId);
+      return readEventsInPages(link, fields, {
+        launch: () => lanesOf(link).get(app)?.session.state.launch ?? null,
+        gap: (launchId, at) => deps.emit(link.machine, 'remote.gap', { appSessionId: app as EventPayload<'remote.gap'>['appSessionId'], launchId, at }),
+        log: deps.log,
+      });
+    }
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
     if (lane === undefined || !lane.open) return failure('internal', `${name}: ${NOT_OPEN}`, { refusal: 'not-open' });
@@ -339,7 +352,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name),
     async dispatch(link, name, input) {
       try {
         return await run(link, name, record(input) ?? {});
