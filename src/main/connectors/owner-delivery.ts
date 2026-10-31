@@ -23,7 +23,7 @@ import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectRoute, DirectSendAnswer } from './direct-route';
 import type { ConnectorOAuthConnectFailure, ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
-import { oauthIdentityOf } from './oauth-types';
+import { oauthIdentityOf } from '@shared/connectors/oauth-types';
 import { within } from './owner';
 
 type HostCommand = 'engine.sessions' | 'library.entry' | 'connectors.observe';

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientPort } from '@shared/client/port';
-import type { ConnectorOAuthSealer } from './oauth-store';
+import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
 
 const electron = vi.hoisted(() => ({
   userData: '',
@@ -34,12 +34,14 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+const ID = '44444444-4444-4444-8444-444444444444';
 function spySealer() {
   const calls: string[] = [];
   const sealer: ConnectorOAuthSealer = {
+    format: 'maws-connector-oauth/spy',
     available: async () => (calls.push('available'), true),
-    seal: async (text) => (calls.push('seal'), Buffer.from(text)),
-    open: async (sealed) => (calls.push('open'), { text: sealed.toString(), reseal: false }),
+    seal: async (text, id) => (calls.push(`seal:${id}`), Buffer.from(text)),
+    open: async (sealed, id) => (calls.push(`open:${id}`), { text: sealed.toString(), reseal: false }),
   };
   return { sealer, calls };
 }
@@ -59,9 +61,10 @@ describe('the E2E custody guard', () => {
     symlinkSync(join(root, 'profile'), join(root, 'link'));
     const { sealer, calls } = spySealer();
     const guarded = guardE2ECustody(sealer, facts({ scratch: () => join(root, 'link') }));
+    expect(guarded.format).toBe('maws-connector-oauth/spy'); // the guarded sealer's files keep its format
     expect(await guarded.available()).toBe(true);
-    expect((await guarded.open(await guarded.seal('x'))).text).toBe('x');
-    expect(calls).toEqual(['available', 'seal', 'open']);
+    expect((await guarded.open(await guarded.seal('x', ID), ID)).text).toBe('x');
+    expect(calls).toEqual(['available', `seal:${ID}`, `open:${ID}`]);
   });
 
   it.each([
@@ -74,8 +77,8 @@ describe('the E2E custody guard', () => {
     const { sealer, calls } = spySealer();
     const guarded = guardE2ECustody(sealer, facts(over));
     expect(await guarded.available()).toBe(false);
-    await expect(guarded.seal('x')).rejects.toThrow();
-    await expect(guarded.open(Buffer.from('x'))).rejects.toThrow();
+    await expect(guarded.seal('x', ID)).rejects.toThrow();
+    await expect(guarded.open(Buffer.from('x'), ID)).rejects.toThrow();
     expect(calls).toEqual([]);
   });
 
@@ -85,7 +88,7 @@ describe('the E2E custody guard', () => {
     const guarded = guardE2ECustody(sealer, facts({ mockKeychain: () => mock }));
     expect(await guarded.available()).toBe(true);
     mock = false;
-    await expect(guarded.open(Buffer.from('x'))).rejects.toThrow();
+    await expect(guarded.open(Buffer.from('x'), ID)).rejects.toThrow();
     expect(calls).toEqual(['available']);
   });
 });
@@ -105,7 +108,7 @@ describe('the production root', () => {
     electron.userData = join(root, 'userData');
     mkdirSync(join(electron.userData, 'connectors', 'oauth'), { recursive: true });
     const { writeFileSync } = await import('node:fs');
-    writeFileSync(join(electron.userData, 'connectors', 'oauth', '33333333-3333-4333-8333-333333333333.sealed'), 'maws-connector-oauth/1\nAAAA\n');
+    writeFileSync(join(electron.userData, 'connectors', 'oauth', '33333333-3333-4333-8333-333333333333.sealed'), `${SEALED_FORMAT_V1}\nAAAA\n`);
     const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {}, port: { openExternal: vi.fn() } });
     expect(await provider.saved()).toEqual([{ state: 'unreadable', connectionId: '33333333-3333-4333-8333-333333333333' }]); // ids only: forgettable
     for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
