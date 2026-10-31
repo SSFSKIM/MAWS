@@ -3,7 +3,7 @@
 // turn, and a window never starting inside a rewind it carries.
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from './events';
-import { historyWindowStart, soughtIn, type WindowBudget } from './history-window';
+import { cronHistoryOf, historyWindowStart, soughtIn, type WindowBudget } from './history-window';
 import type { MessageUuid } from './ids';
 
 // A history of `kinds`, each event weighing its `size` (sizes are given, not measured, so the budgets read plainly).
@@ -70,5 +70,46 @@ describe('soughtIn', () => {
 
   it('says a message in none of the history is absent', () => {
     expect(soughtIn(events, m('gone'), 0, events.length)).toEqual({ at: 'absent', behind: 0 });
+  });
+});
+
+describe('cronHistoryOf', () => {
+  // Turns u1..u4: u1 creates a job and runs a Read; a child agent of u1 creates one of its own; u2's create was retracted;
+  // u3 deletes and creates; a later rewind to u3 abandons u3 and u4 (u4 creates); the window starts at u4.
+  const call = (toolUseId: string, toolName: string, messageUuid: string, extra: Record<string, unknown> = {}) => [
+    ['tool.use', 5, { toolUseId, toolName, messageUuid, input: {}, ...extra }] as const,
+    ['tool.result', 5, { toolUseId, ...extra }] as const,
+  ];
+  const child = { parentToolUseId: 'agent-1', agentId: 'a1' };
+  const { events } = history([
+    ['turn.started', 1, { userMessageUuid: 'u1' }], ...call('c1', 'CronCreate', 'm1'), ...call('r1', 'Read', 'm1'), ...call('c1x', 'CronCreate', 'mx', child), ['turn.ended', 1],
+    ['turn.started', 1, { userMessageUuid: 'u2' }], ...call('c2', 'CronCreate', 'm2'), ['boundary.retraction', 1, { retractedMessageUuids: ['m2'] }], ['turn.ended', 1],
+    ['turn.started', 1, { userMessageUuid: 'u3' }], ...call('d3', 'CronDelete', 'm3'), ['turn.ended', 1],
+    ['turn.started', 1, { userMessageUuid: 'u4' }], ...call('c4', 'CronCreate', 'm4'), ['turn.ended', 1],
+    ['boundary.rewind', 1, { targetMessageUuid: 'u3' }],
+    ['turn.started', 1, { userMessageUuid: 'u5' }], ['turn.ended', 1],
+  ]);
+  const ids = (out: readonly { id: string }[]) => out.map((e) => e.id);
+  const at = (kind: string, field: string, value: string) => events.findIndex((e) => e.kind === kind && (e as unknown as Record<string, unknown>)[field] === value);
+
+  it('carries the session lane\u2019s cron calls before the window, each with its result and its turn\u2019s start, as the activity reads them', () => {
+    const start = at('turn.started', 'userMessageUuid', 'u5');
+    const out = cronHistoryOf(events, start);
+    // u1's own create (not the Read, not its child's), nothing of u2 (retracted), nothing of u3 or u4 (a rewind abandoned them)
+    expect(ids(out)).toEqual([events[at('turn.started', 'userMessageUuid', 'u1')]!.id, events[at('tool.use', 'toolUseId', 'c1')]!.id, events[at('tool.result', 'toolUseId', 'c1')]!.id]);
+  });
+
+  it('counts a rewind after the window too, and nothing from the window or after it', () => {
+    const start = at('turn.started', 'userMessageUuid', 'u4'); // u3 before the window: the rewind (in the window) still abandons it
+    expect(cronHistoryOf(events, start).filter((e) => e.kind === 'tool.use').map((e) => (e as { toolUseId: string }).toolUseId)).toEqual(['c1']);
+    expect(cronHistoryOf(events, 0)).toEqual([]);
+  });
+
+  it('keeps the newest calls within its byte budget', () => {
+    const { events: many } = history(Array.from({ length: 6 }, (_, n) => [['turn.started', 1, { userMessageUuid: `u${n}` }], ...call(`c${n}`, 'CronCreate', `m${n}`), ['turn.ended', 1]] as const).flat());
+    const all = cronHistoryOf(many, many.length);
+    const one = JSON.stringify(all.slice(0, 3)).length;
+    const kept = cronHistoryOf(many, many.length, one * 2 + 10).filter((e) => e.kind === 'tool.use').map((e) => (e as { toolUseId: string }).toolUseId);
+    expect(kept).toEqual(['c4', 'c5']);
   });
 });

@@ -28,7 +28,7 @@ export function turnLines(n: number, parent: string | null, at: number): { lines
 
 // `turns` turns in one chain; with `rewindTo`, a last prompt parented on that turn's end (a terminal /rewind's shape) and
 // one more turn after it.
-export function longTranscript(turns: number, options: { rewindTo?: number; compactAt?: number } = {}): string[] {
+export function longTranscript(turns: number, options: { rewindTo?: number; compactAt?: number; cronAt?: number } = {}): string[] {
   const lines: string[] = [];
   let parent: string | null = null;
   for (let n = 1; n <= turns; n++) {
@@ -37,7 +37,7 @@ export function longTranscript(turns: number, options: { rewindTo?: number; comp
       lines.push(JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: `c${n}`, parentUuid: null, logicalParentUuid: parent, sessionId: LONG_SESSION, cwd: LONG_DIR, timestamp: ts, compactMetadata: { trigger: 'auto', preTokens: 1000 } }));
       parent = `c${n}`;
     }
-    const turn = turnLines(n, parent, n);
+    const turn: { lines: string[]; last: string } = n === options.cronAt ? cronTurnLines(n, parent, n, { id: 'cron0001', cron: '0 3 * * *', prompt: 'nightly check' }) : turnLines(n, parent, n);
     lines.push(...turn.lines);
     parent = turn.last;
   }
@@ -49,3 +49,21 @@ export function longTranscript(turns: number, options: { rewindTo?: number; comp
   return lines;
 }
 
+
+// One turn whose reply schedules a session-only job (a `CronCreate` and its result, the engine's wording), then
+// answers: for the Scheduled section's whole-history read. Returns the lines and the turn's last uuid.
+export function cronTurnLines(n: number, parent: string | null, at: number, job: { id: string; cron: string; prompt: string }): { lines: string[]; last: string } {
+  const ts = new Date(Date.parse('2026-09-01T00:00:00.000Z') + at * 1000).toISOString();
+  const base = { sessionId: LONG_SESSION, cwd: LONG_DIR, version: '2.1.312', isSidechain: false, userType: 'external', timestamp: ts };
+  const use = `toolu_cron_${n}`;
+  return {
+    lines: [
+      JSON.stringify({ ...base, type: 'user', uuid: `u${n}`, parentUuid: parent, message: { role: 'user', content: `prompt ${n} ${PAD}` } }),
+      JSON.stringify({ ...base, type: 'assistant', uuid: `t${n}`, parentUuid: `u${n}`, message: { id: `msg_t${n}`, role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: use, name: 'CronCreate', input: { cron: job.cron, prompt: job.prompt, recurring: true } }] } }),
+      JSON.stringify({ ...base, type: 'user', uuid: `r${n}`, parentUuid: `t${n}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: use, content: `Scheduled recurring job ${job.id} (Every day at 3:00 AM). Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days.` }] } }),
+      JSON.stringify({ ...base, type: 'assistant', uuid: `a${n}`, parentUuid: `r${n}`, message: { id: `msg_${n}`, role: 'assistant', model: 'm', content: [{ type: 'text', text: `reply ${n} ${PAD}` }] } }),
+      JSON.stringify({ ...base, type: 'system', subtype: 'turn_duration', uuid: `d${n}`, parentUuid: `a${n}`, durationMs: 1000 }),
+    ],
+    last: `d${n}`,
+  };
+}

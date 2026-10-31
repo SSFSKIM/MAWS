@@ -12,7 +12,7 @@
 // change at the next poke.
 import { open, type FileHandle } from 'node:fs/promises';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
+import { cronHistoryOf, eventBytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { HostCommandError, type HostEmit } from '@shared/host/runtime';
 import type { SubagentLookup } from './backfill';
@@ -113,6 +113,7 @@ export interface HistoryPage {
   complete: boolean; // the follow has read its transcript through (its backfill is done)
   earlier?: EventId; // older history remains: the cursor that asks for the page before this one
   sought?: HistorySought; // where the page stands to the message `seek` named
+  cronHistory?: SessionEvent[]; // the newest window's: the cron calls before it a whole-history read counts (cronHistoryOf)
 }
 
 // A cursor the log does not hold: the follow was started again since the page that named it (a rebind, a release).
@@ -223,7 +224,10 @@ export class Follow {
     if (end === undefined) throw new HostCommandError({ code: 'invalid_input', message: `${UNKNOWN_CURSOR}: ${before}` });
     const start = this.windowStart(end);
     const sought = request.seek ? soughtIn(this.delivered, request.seek, start, end) : null;
-    return { events: this.delivered.slice(start, end), complete, ...(start > 0 && { earlier: this.delivered[start]!.id }), ...(sought && { sought }) };
+    // The newest window carries what its older history holds of the session's crons, which the Scheduled section lists
+    // whatever is loaded; a page before a cursor needs none (the window it extends carried them).
+    const crons = before === null ? cronHistoryOf(this.delivered, start) : [];
+    return { events: this.delivered.slice(start, end), complete, ...(start > 0 && { earlier: this.delivered[start]!.id }), ...(sought && { sought }), ...(crons.length > 0 && { cronHistory: crons }) };
   }
 
   get backfillDone(): boolean {

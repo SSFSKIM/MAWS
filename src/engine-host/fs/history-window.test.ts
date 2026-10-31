@@ -4,7 +4,7 @@
 // a follow outlives its session's interest by the release time only; and the silent request records are never parsed.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
+import { CRON_HISTORY_BYTES, eventBytes, FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId, TaskId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -113,6 +113,24 @@ describe('a long transcript is read in windows', () => {
     expect((await fs.eventsSnapshot(APP, null, { before: first.earlier!, seek: 'gone' as MessageUuid })).sought).toEqual({ at: 'absent', behind: 0 });
     // At or after the cursor: in what the reader already holds
     expect((await fs.eventsSnapshot(APP, null, { before: first.earlier!, seek: 'a40' as MessageUuid })).sought).toEqual({ at: 'newer', behind: 0 });
+  });
+
+  it('carries on the newest window the cron calls before it, small and only there, the window itself one window within its budget', async () => {
+    await fixture.addTranscript(DIR, SESSION, transcript(40, { cronAt: 3 })); // turn 3 schedules a job, many pages back
+    const fs = await start();
+    const first = await fs.eventsSnapshot(APP, null);
+    expect(first.events.reduce((bytes, event) => bytes + eventBytes(event), 0)).toBeLessThanOrEqual(SMALL.soft); // the open: one window
+    expect(userTexts(first.events)).not.toContain('prompt 3');
+    const crons = first.cronHistory!;
+    expect(crons.map((e) => e.kind)).toEqual(['turn.started', 'tool.use', 'tool.result']);
+    expect(crons[0]).toMatchObject({ userMessageUuid: 'u3' });
+    expect(crons[1]).toMatchObject({ toolName: 'CronCreate', input: { cron: '0 3 * * *', prompt: 'nightly check' } });
+    expect(crons.reduce((bytes, event) => bytes + eventBytes(event), 0)).toBeLessThanOrEqual(CRON_HISTORY_BYTES);
+    // the events are the follow's own, which the page that holds them brings again (deduplicated by id)
+    const { whole } = await allPages(fs);
+    expect(crons.every((event) => whole.some((e) => e.id === event.id))).toBe(true);
+    // a page before a cursor carries none, nor a window with nothing older
+    expect((await fs.eventsSnapshot(APP, null, { before: first.earlier! })).cronHistory).toBeUndefined();
   });
 
   it('answers the first N events for a limit, one agent\'s slice for an agent id, and refuses a cursor it never gave', async () => {

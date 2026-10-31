@@ -26,6 +26,9 @@ export interface OlderPagesState {
   loadingOlder: boolean;
   olderFailed: string | null;
   revision: number;
+  // Additive: the cron calls older history holds, as the newest window's answer carried them (`cronHistory`), which the
+  // Scheduled section folds before the loaded turns' own
+  cronHistory?: readonly SessionEvent[];
 }
 
 export interface OlderPages {

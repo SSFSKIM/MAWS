@@ -25,6 +25,7 @@ export interface Page {
 const UNKNOWN_CURSOR = 'unknown history cursor';
 export const PAGE_RETRY_MS = 1_000; // a page asked while the host still reads the transcript through
 export const PAGE_RETRIES = 30;
+const NO_EVENTS: readonly SessionEvent[] = [];
 
 // Batches a source held while its snapshot was on its way can carry history older than the window the snapshot
 // answered: the host sends its window as a batch once it has read the transcript through, and when appends then move
@@ -62,11 +63,12 @@ export class HistoryPager implements OlderPages {
   ) {}
 
   // The source's snapshot answered from the host: the store starts over from `events`.
-  started(events: SessionEvent[], earlier: EventId | null): void {
+  // `cronHistory`: what the snapshot's newest window carried of its older history's cron calls (none once whole).
+  started(events: SessionEvent[], earlier: EventId | null, cronHistory: readonly SessionEvent[] = NO_EVENTS): void {
     this.generation += 1;
     this.earlier = earlier;
     this.held = earlier === null ? [] : [...events];
-    this.state.setState({ more: earlier !== null, loadingOlder: false, olderFailed: null });
+    this.state.setState({ more: earlier !== null, loadingOlder: false, olderFailed: null, cronHistory: earlier === null ? NO_EVENTS : cronHistory });
   }
 
   // Events the source handed the store after its snapshot.
