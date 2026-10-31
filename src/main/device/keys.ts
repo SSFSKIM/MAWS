@@ -27,7 +27,7 @@ import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { generateSigningKey, importSigningKey, keyId, type B64, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
-import { excludeFromBackup } from './backup-exclusion';
+import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 
 export type DeviceKeys = {
   keyStorage: 'software';
