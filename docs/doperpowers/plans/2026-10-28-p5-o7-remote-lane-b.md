@@ -1404,6 +1404,10 @@ Added at the re-plan of 2026-10-31. Each is built as recommended unless answered
   Rationale: (1) is a permission boundary; (2) keeps availability for fresh launches without hiding a spine fault as `grade`; (3) and (4) are cheap and close what the per-channel ref and the row rule promise.
   Date/Author: 2026-10-31, the controller.
 
+- Decision: M2a's fix wave (deb886f12, 0ec981cc4; re-review approved). The live check sits in placement (`targets.ts`): a read, a subscription's opening, a `machine` act and a query's binding each read the live row once; an engine-host act skips it there, and `actions.ts` compares the status it already reads for the context with the placed engine session. A live row whose `engineSessionId` is null counts as different (`unavailable`). `AuthorizeContext` gains `log` for the spine-fault line. `src/shared/host/host-supervisor.ts`'s `forward` takes a `ClientRef` as well as an id and carries it into the link's `clientGoneRelay` (never on a protocol-2 link); `mawsd`'s seam passes the ref on its engine-host and pty-host forwards. A status read through `mawsd` wakes a parked engine host, so the live check wakes it for a spine read placed by a record; the pane's subscription and `session.events` wake it anyway.
+  Rationale: one status read per request, none extra for an act; the relay was the existing mechanism for a forwarded client's end.
+  Date/Author: 2026-10-31, O7 M2a's executor, folded by the controller.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
