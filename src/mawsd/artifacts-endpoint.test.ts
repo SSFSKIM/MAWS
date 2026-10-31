@@ -26,6 +26,7 @@ let lines: string[];
 let loads: number;
 let gate: Promise<void> | null;
 let failNext: Error | null;
+let entered: (() => void) | null; // told when the loader is entered
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-artifacts-endpoint-')));
@@ -37,6 +38,7 @@ beforeEach(() => {
   loads = 0;
   gate = null;
   failNext = null;
+  entered = null;
   endpoint = null;
   server = null;
 });
@@ -54,9 +56,10 @@ const content = async (input: CommandInput<'artifacts.content'>): Promise<Comman
   return { ok: true, value: { revision: 1, kind: 'html', name: input.path!.split('/').at(-1)!, size: 0, sha256: 'x', path: join(root, file) } };
 };
 
-// The real chunk, counted, held at `gate` and failed once with `failNext`
+// The real chunk, counted, told to `entered`, held at `gate` and failed once with `failNext`
 const load = async (): Promise<EndpointChunk> => {
   loads += 1;
+  entered?.();
   if (gate) await gate;
   if (failNext) {
     const error = failNext;
@@ -92,9 +95,10 @@ describe('the artifact endpoint (artifacts.sock)', () => {
   it('answers a connection made while the library loads, its request sent before the load ended', async () => {
     let release!: () => void;
     gate = new Promise((resolve) => (release = resolve));
+    const loading = new Promise<void>((resolve) => (entered = resolve));
     await serve();
     const answered = get('index.html');
-    await new Promise((resolve) => setTimeout(resolve, 50)); // the request is written and waits, unread
+    await loading; // the connection was accepted and the load began; the request waits, unread
     expect(loads).toBe(1);
     release();
     expect((await answered).status).toBe(200);
