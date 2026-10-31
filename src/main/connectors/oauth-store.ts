@@ -2,14 +2,15 @@
 // Decision Log 13/18; P3 co-work Decision Log 98 (5), its per-connection refinement by the architect, 2026-10-17).
 //
 // One file per saved connection, `<directory>/<connectionId>.sealed`: a plain format line, then the base64 of the
-// sealer's ciphertext of one version-1 JSON record. The format line is the sealer's own (P5 O4 M1,
-// docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §A and D21): Electron's safeStorage writes
-// `maws-connector-oauth/1`, the machine's key file `/2`, and a file whose line is not this store's sealer's is
-// unreadable, read without asking the sealer, listed by id and forgotten by `remove`, as a record that no longer
-// decrypts is. The name is the opaque, stable `connectionId`; the identity
-// (exact request URL and configured entry) and every token live only inside the ciphertext, since a request URL's query
-// can itself be a secret. Deleting a connection is an unlink, so a record that no longer decrypts (a rotated or denied
-// key, a damaged file) is still listed by id and can be forgotten.
+// sealer's ciphertext of one version-1 JSON record. The name is the opaque, stable `connectionId`; the identity (exact
+// request URL and configured entry) and every token live only inside the ciphertext, since a request URL's query can
+// itself be a secret. Deleting a connection is an unlink, so a record that no longer decrypts (a rotated or denied key,
+// a damaged file) is still listed by id and can be forgotten.
+//
+// The format line is the sealer's own (P5 O4 M1, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §A
+// and D21): Electron's safeStorage writes `maws-connector-oauth/1`, the machine's key file `/2`. A file whose line is
+// not this store's sealer's is unreadable in the same sense, read without asking the sealer: listed by id, failed
+// closed on by the provider, forgotten by `remove`.
 //
 // - Fails closed: without the sealer, nothing is read or written and nothing is ever stored plain. A store with no record
 //   of its own sealer's format (empty, or only other sealers' files) is listed without touching the sealer.

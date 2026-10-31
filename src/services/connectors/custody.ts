@@ -39,7 +39,7 @@ const ALGORITHM = 'aes-256-gcm';
 // The part of node:fs/promises the custody uses: a test hands a double of it.
 export type CustodyFs = Pick<typeof fsp, 'chmod' | 'link' | 'lstat' | 'mkdir' | 'open' | 'rm'>;
 
-export type ConnectorCustodyRefusal = 'directory' | 'symlink' | 'owner' | 'not-a-file' | 'mode' | 'length';
+export type ConnectorCustodyRefusal = 'directory' | 'symlink' | 'owner' | 'not-a-file' | 'mode' | 'length' | 'missing';
 // Fixed words: no path, no key material.
 export class ConnectorCustodyError extends Error {
   constructor(readonly reason: ConnectorCustodyRefusal) {
@@ -79,7 +79,7 @@ export function fileKeyCustody(directory: string, options: FileKeyCustodyOptions
     });
     if ((await createKey()) && excluded) await markExcluded();
     const created = await readKey(); // whichever first use linked its key, every use reads that one
-    if (created === null) throw new ConnectorCustodyError('length');
+    if (created === null) throw new ConnectorCustodyError('missing'); // removed the moment it was linked
     return created;
   }
 
