@@ -580,6 +580,19 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
   });
 });
 
+// P5 O2 M7: on the daemon shape an idle release is followed by the engine host, parked by `mawsd` once no app and no
+// interest have held it for the idle time, then by the private `mawsd` itself once idle. A failed reading carries the
+// logs (O16 M2b: they tell a lock left behind from a successor's).
+const logsOf = (s: Scratch) => `\nhost.lock: ${JSON.stringify(s.lock())}\nhost.log:\n${s.log().split('\n').slice(-60).join('\n')}\nmawsd.log:\n${s.daemonLog().split('\n').slice(-60).join('\n')}`;
+async function parkedThenGone(s: Scratch, idleMs: number, enginePid: number, daemonPid: number): Promise<void> {
+  await expect.poll(() => isAlive(enginePid), { timeout: idleMs + 15_000, message: 'mawsd parks the engine host' }).toBe(false);
+  expect(existsSync(s.file('host.lock')), `the engine host’s lock is unlinked${existsSync(s.file('host.lock')) ? logsOf(s) : ''}`).toBe(false);
+  expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
+  await expect.poll(() => isAlive(daemonPid), { timeout: idleMs + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
+  expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
+  expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
+}
+
 test('(e) G3: an idle kept session is released as idle and the supervisor exits by itself, after a keep-quit and after a kill -9 of the app', async () => {
   const IDLE_MS = 10_000;
   const env = { MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_E2E_REPLAY_ROW_MS: '1500' };
@@ -609,33 +622,11 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     return waited;
   };
 
-  // P5 O2 M7: on the daemon shape the release is the same, and what goes after it is the engine host, parked by `mawsd`
-  // once no app and no interest have held it for the idle time, then the private `mawsd` itself once idle
-  // the logs a failed reading carries (O16 M2b: a lock left behind is told from a successor's by them)
-  const logsOf = (s: Scratch) => `\nhost.lock: ${JSON.stringify(s.lock())}\nhost.log:\n${s.log().split('\n').slice(-60).join('\n')}\nmawsd.log:\n${s.daemonLog().split('\n').slice(-60).join('\n')}`;
-  const parkedThenGone = async (s: Scratch, enginePid: number, daemonPid: number): Promise<void> => {
-    await expect.poll(() => isAlive(enginePid), { timeout: IDLE_MS + 15_000, message: 'mawsd parks the engine host' }).toBe(false);
-    expect(existsSync(s.file('host.lock')), `the engine host’s lock is unlinked${existsSync(s.file('host.lock')) ? logsOf(s) : ''}`).toBe(false);
-    expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
-    await expect.poll(() => isAlive(daemonPid), { timeout: IDLE_MS + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
-    expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
-    expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
-  };
-  // O16 M2b: on the daemon shape mawsd's spine is kept loaded through the release (MAWS_SPINE_QUIET_MS, D6's measured
-  // seam). With the product's quiet, the idle time, the spine's quiet clock and the row's idle clock both run 10 s from
-  // the turn's end. When the spine releases first, the release's own events load it again, and that load's pushes start a
-  // fresh engine host in place of the one exiting when idle, whose lock the scene then reads (hosted run 41217185059).
-  // The race is mawsd's, and is not what this scene proves. The bounds still hold with the spine loaded: mawsd's exit
-  // waits on no spine (clocks.ts: no client for the idle time, both hosts parked, no hold); its exit is due 10 s after the
-  // app went, before the park, which comes at least 10 s after the turn's end. So mawsd exits at the park's evaluation, and
-  // its spine's stop is bounded by SPINE_TIMING.stopSettleMs (5 s). That is within the IDLE_MS + 15 s poll that
-  // `parkedThenGone` gives mawsd after the park. 60 s outlasts every scratch: mawsd exits before its spine's quiet ends.
-  const daemonEnv = { ...env, MAWS_SPINE_QUIET_MS: '60000' };
   if (DAEMON) {
     await withScratch('idle-keep', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
       s.useStub({ rowMs: 1500 }); // O16 M2b
-      const first = await s.launch({ ...daemonEnv, MAWS_E2E_QUIT_ANSWER: 'keep' });
+      const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
       const status = await s.ready(first.page);
       const id = await s.record(first.page);
       await startTurn(first.page, s, id, fixture, 'turn 1');
@@ -644,13 +635,13 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
       await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn ends while the app is closed' }).toBe(true);
       await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
       lines.push('', 'keep-quit (daemon shape):', `  ${at()} the row was released: journal ${JSON.stringify(released(s, id)!.frame)}`);
-      await parkedThenGone(s, status.supervisor!.pid, status.daemon!.pid);
+      await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
       lines.push(`  ${at()} the engine host parked and mawsd exited by itself`, '  mawsd.log:', ...s.daemonLog().split('\n').filter(Boolean).map((l) => `    ${l}`));
     });
     await withScratch('idle-kill', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
       s.useStub({ rowMs: 1500 }); // O16 M2b
-      const run = await s.launch(daemonEnv);
+      const run = await s.launch(env);
       const status = await s.ready(run.page);
       const id = await s.record(run.page);
       await startTurn(run.page, s, id, fixture, 'turn 1');
@@ -658,7 +649,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
       expect(ended(s, id), 'the kill landed mid-turn').toBe(false);
       await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn goes on and ends with no app' }).toBe(true);
       await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000 }).toBe('idle');
-      await parkedThenGone(s, status.supervisor!.pid, status.daemon!.pid);
+      await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
     });
     return;
   }
@@ -1171,6 +1162,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
       const armed = await watched('armed', true);
       const turned = await watched('turned', true);
       const silent = await watched('silent', false);
+      const acknowledged = await watched('acknowledged', true); // kept until its own scene, below
       for (const { id } of [armed, turned, silent]) value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: false }));
       // armed: the arm comes before any signal; the release follows the scene's armed
       const arm = await armed.observer.next('arm', IDLE_MS + 15_000);
@@ -1190,9 +1182,69 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
       await new Promise((r) => setTimeout(r, 2 * IDLE_MS + 1_000));
       expect(released(s, silent.id), 'the session whose observer went silent is not released').toBeUndefined();
       expect((await statusOf(page, silent.id)).process).toBe('ready');
+      // acknowledged: a turn after the observer's armed, before any signal, is answered proceed and the reap is
+      // cancelled. A healthy observer's armed within the lease less its margin is signalled in the same step, so the
+      // window the design makes real is the renewal (D53, the gate fixture's `armed-renewing-turn-proceed`). An armed
+      // after the lease less its margin and before the lease ends is renewed with the same fence, and the turn lands
+      // while the host awaits the renewal's armed. The renewal is what shows the host took the armed.
+      value(await invoke(page, 'session.setKeep', { appSessionId: acknowledged.id, keep: false }));
+      const ackArm = await acknowledged.observer.next('arm', IDLE_MS + 15_000);
+      const armSeen = Date.now(); // the host's lease runs from its send, a little earlier
+      const leaseMs = ackArm.leaseMs as number;
+      // armed 600 ms before the lease ends: past the lease less reap.ts's LEASE_MARGIN_MS (1 s), 400 ms into the window
+      await new Promise((r) => setTimeout(r, armSeen + leaseMs - 600 - Date.now()));
+      expect(released(s, acknowledged.id), 'no signal before armed').toBeUndefined();
+      acknowledged.observer.send({ t: 'armed', fence: ackArm.fence as number });
+      expect(await acknowledged.observer.next('arm', 2_000), 'the late armed is taken and the arm renewed').toEqual({ t: 'arm', fence: ackArm.fence, leaseMs });
+      acknowledged.observer.send({ t: 'turn', fence: ackArm.fence as number, origin: 'query' });
+      expect(await acknowledged.observer.next('proceed', 5_000)).toEqual({ t: 'proceed', fence: ackArm.fence });
+      expect(await acknowledged.observer.next('disarm', 5_000), 'the reap is cancelled').toEqual({ t: 'disarm', fence: ackArm.fence });
+      await new Promise((r) => setTimeout(r, IDLE_MS));
+      expect(released(s, acknowledged.id), 'the session whose turn proceeded after its armed is not released').toBeUndefined();
+      expect((await statusOf(page, acknowledged.id)).process).toBe('ready');
     } finally {
       for (const observer of observers) if (!observer.isClosed) await observer.close();
     }
     expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+test('(n) O16 M2b: the spine released just before an idle release: the release’s events load it again, and no engine host starts in place of the one that parks', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  // The race behind case (e)'s flake (hosted run 41217185059), run on purpose. Two clocks start at about the turn's end:
+  // the row's idle release (the idle time) and mawsd's spine release (its quiet period, the idle time unless
+  // MAWS_SPINE_QUIET_MS sets it). Here the spine's is 2 s shorter, so the spine is cold when the release's events reach
+  // mawsd while the engine host, asked to exit when idle, exits. Those events load the spine again. Before #409 that
+  // load's pushes (engine.configure, host.configure, fs.bind and the rest) were held by the link for the exiting host
+  // and started a successor at its park. Since #409 a load the engine host's events alone caused sends a host that is
+  // not ready nothing (spine-seam.ts `wanted`, spine-hosts.ts).
+  const IDLE_MS = 10_000;
+  const SPINE_QUIET_MS = IDLE_MS - 2_000;
+  const released = (s: Scratch, id: string) => s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'exit');
+  const ended = (s: Scratch, id: string) => s.journal(id).some((r) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'completed');
+  const spawns = (s: Scratch) => s.daemonLog().split('\n').filter((l) => l.includes('[hosts] spawned a supervisor'));
+  const at = (line: string) => Date.parse(line.slice(0, line.indexOf(' ')));
+  await withScratch('spine-race', async (s) => {
+    const fixture = turnsJournal(s.root, 'spine-race', 1);
+    s.useStub({ rowMs: 1500 });
+    const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_SPINE_QUIET_MS: String(SPINE_QUIET_MS) });
+    const status = await s.ready(run.page);
+    const id = await s.record(run.page);
+    await startTurn(run.page, s, id, fixture, 'turn 1');
+    const hostsBefore = spawns(s); // both hosts up
+    await s.killApp(run);
+    expect(ended(s, id), 'the kill landed mid-turn').toBe(false);
+    await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn goes on and ends with no app' }).toBe(true);
+    await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
+    await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
+    expect(spawns(s), `no host was started after the turn began${logsOf(s)}`).toEqual(hostsBefore);
+
+    // the scene ran the race: the spine released before the row did, and the release's events loaded it again
+    const release = s.log().split('\n').find((l) => l.includes('idle release of '));
+    expect(release, 'host.log: the idle release').toBeDefined();
+    const spine = s.daemonLog().split('\n').filter((l) => l.includes('[spine] '));
+    const quiet = spine.findLast((l) => l.includes('[spine] releasing (quiet)') && at(l) < at(release!));
+    expect(quiet, `the spine released on its quiet before the row's release${logsOf(s)}`).toBeDefined();
+    expect(spine.some((l) => l.includes('[spine] loading (event)') && at(l) >= at(release!)), `the release's events loaded the cold spine${logsOf(s)}`).toBe(true);
   });
 });
