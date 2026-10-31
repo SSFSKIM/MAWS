@@ -188,7 +188,8 @@ describe.skipIf(!existsSync(BINARY))('a live launch under a session host', () =>
     process.kill(hosts[0]!.pid, 'SIGKILL');
     await until(() => host.events(id).some((e) => e.kind === 'process.exited'), 'process.exited');
     expect(host.events(id).find((e) => e.kind === 'process.exited')).toMatchObject({ reason: 'crash', signal: 'SIGKILL' });
-    expect(host.events(id).find((e) => e.kind === 'error.raised')).toMatchObject({ code: 'host_lost' });
+    // (a write in flight at the loss may raise its own `write_failed` first)
+    expect(host.events(id).filter((e) => e.kind === 'error.raised')).toContainEqual(expect.objectContaining({ code: 'host_lost' }));
     await until(() => !isAliveNow(engine), 'the engine ended', 8_000);
   });
 });

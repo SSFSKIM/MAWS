@@ -59,6 +59,9 @@ func (h *Host) commit(c *conn) {
 	if h.opt.beforeSpawn != nil {
 		h.opt.beforeSpawn()
 	}
+	if h.opt.SpawnDelay > 0 {
+		time.Sleep(h.opt.SpawnDelay)
+	}
 	cmd, stdinW, outR, errR, err := startChild(spec)
 	if err != nil {
 		h.mu.Lock()

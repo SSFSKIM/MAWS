@@ -196,6 +196,43 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     expect(await t.exited).toEqual({ code: 0, signal: null });
   });
 
+  // fix wave 2: a spawn still under way when the reconnect asks; the host's --spawn-delay-ms holds the fork open
+  it('waits out a spawn under way across a reconnect and takes its child once it shows', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, hostArgs: ['--spawn-delay-ms', '600'], onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/sh', '-c', 'echo "{\\"pid\\":$$}"; exec cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await sleep(100); // committed: the fork is held open
+    first!.close();
+    const frames = reader(t.frames);
+    await t.write({ type: 'n', k: 1 } as never);
+    expect(t.pid).toBe((frameOf(await frames.next()) as { pid: number }).pid);
+    expect(frameOf(await frames.next())).toEqual({ type: 'n', k: 1 });
+    t.endInput();
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+  });
+
+  it('a spawn still under way when the reconnect\'s bound passes ends the host through its own shutdown, and no child survives', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, startMs: 400, hostArgs: ['--spawn-delay-ms', '1500'], onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/sleep', '600']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await sleep(100);
+    first!.close();
+    const items = drain(t.frames);
+    await expect(t.write({ type: 'n', k: 1 } as never)).rejects.toThrow();
+    // the session ends as a failed spawn, or as a lost host when the bound passed inside the reconnect's own connect
+    expect((await items).map((i) => i.error?.kind)).toEqual([expect.stringMatching(/^(spawn_error|host_lost)$/)]);
+    expect(t.pid).toBeNull();
+    await expectGone(host.pid, 10_000); // SIGTERM: the host waited for its fork (1.5 s), then ended the child's group
+    // the fork completed after the SIGTERM (the host waited for it), and its child was ended with the host
+    const spawned = /spawned (\d+)/.exec(readFileSync(host.paths.log, 'utf8'));
+    expect(spawned).not.toBeNull();
+    const child = Number(spawned![1]);
+    pids.push(child);
+    await expectGone(child, 5_000);
+  });
+
   it('a reconnect whose replay starts past the ring\'s loss reports the gap before the survivors, and the frontier passes it to the release (D45)', { timeout: LONG }, async () => {
     const { deps } = profile();
     let first: HostConnection | null = null;

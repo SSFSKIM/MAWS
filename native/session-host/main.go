@@ -7,7 +7,8 @@
 // id, the launch's id. The host listens first, then reads the token; it serves the protocol of Interfaces §A over the
 // socket and writes its roster entry and log under <hostsDir>. `--version` prints the version and protocol and exits.
 //
-// Test seams, which the engine host never passes: --ring-cap-bytes, --no-child-ms, --linger-ms, --socket-check-ms.
+// Test seams, which the engine host never passes: --ring-cap-bytes, --no-child-ms, --linger-ms, --socket-check-ms,
+// --spawn-delay-ms.
 package main
 
 import (
@@ -89,6 +90,8 @@ func parse(args []string) (host.Options, error) {
 			opt.Limits.Linger, err = duration(value)
 		case "--socket-check-ms":
 			opt.Limits.SocketCheck, err = duration(value)
+		case "--spawn-delay-ms":
+			opt.SpawnDelay, err = duration(value)
 		default:
 			return opt, fmt.Errorf("unknown option %s", arg)
 		}

@@ -490,6 +490,7 @@ class HostedTransport {
         return;
       }
       if (Date.now() >= deadline) {
+        this.endHost(); // the fork may still complete: no engine is left running unmanaged
         this.onControl({ t: 'spawnFailed', message: 'the spawn\'s outcome was lost with the session host\'s connection' });
         return;
       }
@@ -501,9 +502,25 @@ class HostedTransport {
   // successor's sweep.
   private hostLost(why: string): void {
     this.o.deps.log(`session host ${this.o.holderId} (pid ${this.o.hostPid}) is lost: ${why}`);
+    if (!this.spawnSettled) this.endHost(); // a live host may still be forking the child this writer never learned of
     this.frames.push({ frame: null, raw: '', error: { kind: 'host_lost', message: `The session host (pid ${this.o.hostPid}) stopped: ${why}.`, length: 0, typeGuess: null } });
     this.finish({ code: null, signal: 'SIGKILL' });
     void this.endChild();
+  }
+
+  // A host this writer gives up on while its committed spawn is unresolved (the recovery's bound passed, or the
+  // reconnect failed) is ended through its own shutdown, SIGTERM, if it is still the process `hello` named: it closes
+  // admission, waits for a fork under way to record its outcome and then ends the child's group (M1, D47), so the
+  // spawn's outcome no longer matters. Its child's pid is never known here, so the host is the only one who can.
+  private endHost(): void {
+    const pid = this.o.hostPid;
+    if (this.o.hostProcStart === '' || !isAlive(pid) || procStartOf(pid) !== this.o.hostProcStart) return;
+    this.o.deps.log(`session host ${this.o.holderId}: ending it (pid ${pid}), its spawn unresolved`);
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (error) {
+      this.o.deps.log(`session host ${this.o.holderId} (pid ${pid}) could not be signalled: ${(error as Error).message}`);
+    }
   }
 
   private async endChild(): Promise<void> {
