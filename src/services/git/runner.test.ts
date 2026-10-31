@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { createGitReader, createGitRunner, execGit, GitCommandError, gitEnv, GitTimeoutError, NotARepositoryError, spawnGit, type ExecFileFn } from './runner';
@@ -217,10 +217,11 @@ describe('the streamed git read', () => {
   };
 
   it("hands over git's stdout in the pipe's chunks, the same bytes a run answers", async () => {
-    const listing = repo.path('listing');
+    mkdirSync(repo.path("it's")); // a quote in the path: the fixture's script interpolates no path
+    const listing = repo.path("it's/listing");
     writeFileSync(listing, Array.from({ length: 50_000 }, (_, i) => `d${i % 30}/f${i}.txt\0`).join('')); // 900 KB
-    const git = repo.path('git.sh');
-    writeFileSync(git, `#!/bin/sh\ncat '${listing}'\n`, { mode: 0o755 });
+    const git = repo.path("it's/git.sh");
+    writeFileSync(git, '#!/bin/sh\ncat "$(dirname "$0")/listing"\n', { mode: 0o755 }); // found through $0: no path is written into the script
     const env = { ...repo.serviceEnv(), MAWS_GIT: git };
     const args = ['ls-files', '-z'];
     const chunks = await all(createGitReader({ env })(repo.root, args));

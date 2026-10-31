@@ -121,7 +121,7 @@ describe("the repository's ignore rules, read as git writes them", () => {
 
   describe('through the runner, from a git that writes a multi-megabyte listing', () => {
     let dir: string;
-    beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), 'maws-ignored-'))));
+    beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), "maws-ignored-'-")))); // a quote in the path: the fixture's script interpolates no path
     afterEach(() => {
       vi.restoreAllMocks();
       rmSync(dir, { recursive: true, force: true });
@@ -131,7 +131,8 @@ describe("the repository's ignore rules, read as git writes them", () => {
       const listing = join(dir, 'listing');
       writeFileSync(listing, listingBytes());
       const git = join(dir, 'git');
-      writeFileSync(git, `#!/bin/sh\ncase " $* " in\n  *" -i "*) printf 'build/\\0' ;;\n  *" -c "*) cat '${listing}' ;;\nesac\n`, { mode: 0o755 });
+      // the listing beside the script, found through $0: no path is written into the script
+      writeFileSync(git, `#!/bin/sh\ncase " $* " in\n  *" -i "*) printf 'build/\\0' ;;\n  *" -c "*) cat "$(dirname "$0")/listing" ;;\nesac\n`, { mode: 0o755 });
       const env = { PATH: process.env.PATH, HOME: process.env.HOME, MAWS_GIT: git };
       const whole = 256 * 1024; // the listing is 5 MB; a pipe's chunk at most 64 KiB
       const held: string[] = []; // what took more than `whole` bytes of it at once
