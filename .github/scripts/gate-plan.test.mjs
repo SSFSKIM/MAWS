@@ -2177,7 +2177,6 @@ test('listed hosted and overflow entries retain their placement and carry the sw
       assert.deepEqual(JSON.parse(entry.runner), overflow ? ec2Mac : 'macos-26');
       assert.equal(entry.retry, true);
     }
-    if (overflow) assert.throws(() => launchdPlan({ ...env, MAC_EC2: 'off' }), /LAUNCHD_E2E.*MAC_EC2/);
   }
   const mirror = launchdPlan({ HEAD_MESSAGE: 'Gates: e2e:daemon-unit\nRunner: macos' }).outputs;
   assert.equal(JSON.parse(mirror.e2e_hosted)[0].launchd, true);
@@ -2201,4 +2200,22 @@ test('gate.yml wires the launchd rule and sweeps every flagged job before stoppi
     assert.match(condition, /always\(\)/);
     assert.ok(body.indexOf('launchd-sweep.sh') < body.indexOf('gate-peer.sh stop'), job);
   }
+});
+
+
+test('MAC_EC2 off keeps every optional overflow hosted, including LAUNCHD_E2E, without changing the shadow count', () => {
+  const result = launchdPlan({
+    MAC_EC2: 'off', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'daemon-unit library',
+    HEAD_MESSAGE: `Gates: e2e:cross-build,e2e:daemon-unit,e2e:library\nRunner: macos\nMac-Backlog: ${overflowSample()}`,
+  });
+  const entries = JSON.parse(result.outputs.e2e_host);
+  assert.equal(entries.length, 3);
+  for (const entry of entries) {
+    assert.equal(entry.runner, '"macos-26"', entry.group);
+    assert.equal(entry.hosted, true, entry.group);
+    assert.equal(entry.overflow, undefined, entry.group);
+    assert.equal(entry.retry, true, entry.group);
+    assert.equal(entry.launchd === true, entry.group !== 'library');
+  }
+  assert.equal(result.overflowShadowCount, 3);
 });

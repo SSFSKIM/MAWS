@@ -195,6 +195,7 @@ export function planOf(env, scripts, now) {
   const hostedRoute = ((dispatched ? env.INPUT_HOSTED_ROUTE : trailer('Hosted-Route')) || env.HOSTED_MAC_ROUTE || 'mirror').toLowerCase();
   if (!['mirror', 'direct'].includes(hostedRoute)) refuse(`no such hosted route: ${hostedRoute} (mirror or direct)`);
   const direct = hostedRoute === 'direct';
+  const ec2Off = env.MAC_EC2?.toLowerCase() === 'off';
 
   const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
   const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
@@ -342,7 +343,8 @@ export function planOf(env, scripts, now) {
   const sent = { hosted: 0, ec2: 0 };
   const shadowSent = { hosted: 0, ec2: 0 };
   const overflowOf = (group, queue, shadow = false) => {
-    if (!backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
+    // EC2's release disables optional moves for every group; keep the old-rule shadow for accounting.
+    if ((!shadow && ec2Off) || !backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
     const ec2Ahead = (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + queue.ec2;
     const hostedAhead = (backlog.hostedRunning + backlog.hostedQueued + queue.hosted - hostedCap) / hostedCap;
     // Greedy expected start in hosted-runtime units, without rounding; a tie stays hosted.
@@ -361,7 +363,7 @@ export function planOf(env, scripts, now) {
         shadowSent[overflowOf(group, shadowSent, true) ? 'ec2' : 'hosted']++;
       }
       const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
-      if (launchd.has(group) && where === RUNNERS.macEc2 && env.MAC_EC2?.toLowerCase() === 'off') refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
+      if (launchd.has(group) && where === RUNNERS.macEc2 && ec2Off) refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
