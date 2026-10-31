@@ -611,9 +611,11 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
 
   // P5 O2 M7: on the daemon shape the release is the same, and what goes after it is the engine host, parked by `mawsd`
   // once no app and no interest have held it for the idle time, then the private `mawsd` itself once idle
+  // the logs a failed reading carries (O16 M2b: a lock left behind is told from a successor's by them)
+  const logsOf = (s: Scratch) => `\nhost.lock: ${JSON.stringify(s.lock())}\nhost.log:\n${s.log().split('\n').slice(-60).join('\n')}\nmawsd.log:\n${s.daemonLog().split('\n').slice(-60).join('\n')}`;
   const parkedThenGone = async (s: Scratch, enginePid: number, daemonPid: number): Promise<void> => {
     await expect.poll(() => isAlive(enginePid), { timeout: IDLE_MS + 15_000, message: 'mawsd parks the engine host' }).toBe(false);
-    expect(existsSync(s.file('host.lock')), 'the engine host’s lock is unlinked').toBe(false);
+    expect(existsSync(s.file('host.lock')), `the engine host’s lock is unlinked${existsSync(s.file('host.lock')) ? logsOf(s) : ''}`).toBe(false);
     expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
     await expect.poll(() => isAlive(daemonPid), { timeout: IDLE_MS + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
     expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
