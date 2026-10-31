@@ -34,9 +34,10 @@ class Queue<T> implements AsyncIterable<T> {
 export interface ScriptedTransport extends EngineTransport {
   readonly writes: StdinFrame[];
   readonly calls: string[]; // 'endInput', 'kill:SIGTERM', 'kill:SIGKILL', in order
-  push(frame: unknown): void;
-  pushProblem(problem: TransportItem['error']): void;
-  pushStderr(line: string): void;
+  readonly journaledSeqs: number[]; // P5 O16 M2: what the session reported journaled, under a `holder`
+  push(frame: unknown, hseq?: number): void;
+  pushProblem(problem: TransportItem['error'], hseq?: number): void;
+  pushStderr(line: string, hseq?: number): void;
   endStdout(): void; // stdout and stderr close; the process has not exited yet
   exit(code: number | null, signal?: NodeJS.Signals | null): void;
   // Answers the latest written control_request of `subtype` with a success payload (or an error).
@@ -56,7 +57,8 @@ export function scriptedTransport(
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
   const t: ScriptedTransport = {
     pid: opts.pid ?? 4242,
-    ...(opts.holder && { holder: opts.holder }),
+    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq) }), // P5 O16 M2
+    journaledSeqs: [],
     frames,
     stderr,
     writes: [],
@@ -75,14 +77,14 @@ export function scriptedTransport(
     kill(signal) {
       t.calls.push(`kill:${signal}`);
     },
-    push(frame) {
-      frames.push({ frame, raw: JSON.stringify(frame), error: null });
+    push(frame, hseq) {
+      frames.push({ frame, raw: JSON.stringify(frame), error: null, ...(hseq !== undefined && { hseq }) });
     },
-    pushProblem(problem) {
-      frames.push({ frame: null, raw: '', error: problem! });
+    pushProblem(problem, hseq) {
+      frames.push({ frame: null, raw: '', error: problem!, ...(hseq !== undefined && { hseq }) });
     },
-    pushStderr(line) {
-      stderr.push({ text: line });
+    pushStderr(line, hseq) {
+      stderr.push({ text: line, ...(hseq !== undefined && { hseq }) });
     },
     endStdout() {
       frames.end();

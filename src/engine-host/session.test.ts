@@ -17,6 +17,11 @@ import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, SESSION_START_HOOK_MS
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+import { mkdtempSync, rmSync } from 'node:fs'; // P5 O16 M2
+import { tmpdir } from 'node:os'; // P5 O16 M2
+import { JOURNAL_MAX_BYTES, JournalWriter } from './journal'; // P5 O16 M2
+import { mapFileOf } from './holder/checkpoint'; // P5 O16 M2
+import type { SessionJournal } from './session'; // P5 O16 M2
 // C7 start
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1612,6 +1617,91 @@ describe('P5 O16: the owed interrupt', () => {
     expect(directMarks).toEqual([]);
     d.transport.exit(0);
     await d.session.exited;
+  });
+
+  // Interfaces §C (D23, D39): a hosted record's map line goes before its row and the ack after it; a row that failed is
+  // retracted and never acked; a gap is a lost range the frontier passes, with its notice
+  describe('the host map', () => {
+    const dirs: string[] = [];
+    afterEach(() => {
+      for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+    function hosted() {
+      const dir = mkdtempSync(join(tmpdir(), 'maws-hosted-'));
+      dirs.push(dir);
+      const writer = new JournalWriter(dir, 'L1', { maxBytes: JOURNAL_MAX_BYTES });
+      let failNext: ((direction: string) => boolean) | null = null;
+      const journal: SessionJournal = {
+        get path() {
+          return writer.path;
+        },
+        get currentPath() {
+          return writer.currentPath;
+        },
+        get lastSeq() {
+          return writer.lastSeq;
+        },
+        row(direction, frame) {
+          if (failNext?.(direction)) {
+            failNext = null;
+            throw new Error('ENOSPC: no space left on device');
+          }
+          return writer.row(direction, frame);
+        },
+        close: () => writer.close(),
+      };
+      const t = setup({ transport: { holder: HOLDER }, session: { journal } });
+      const map = () => readFileSync(mapFileOf(writer.currentPath), 'utf8').trim().split('\n');
+      const rows = () => readFileSync(writer.currentPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { seq: number; direction: string; frame: Record<string, unknown> });
+      return { ...t, map, rows, failOn: (check: (direction: string) => boolean) => (failNext = check) };
+    }
+
+    it('names each hosted row by its journal seq before it is acked, stderr and problems among them', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.transport.push({ type: 'system', subtype: 'status', status: null, uuid: 'u-1', session_id: 's' }, 3);
+      t.transport.pushStderr('a warning', 4);
+      t.transport.pushProblem({ kind: 'parse_error', message: 'not JSON', length: 7, typeGuess: null }, 5);
+      await flush();
+      const rows = t.rows();
+      const seqOf = (match: (r: { direction: string; frame: Record<string, unknown> }) => boolean) => rows.find(match)!.seq;
+      expect(t.map()).toEqual([
+        `3 ${seqOf((r) => r.direction === 'in' && r.frame.uuid === 'u-1')}`,
+        `4 ${seqOf((r) => r.direction === 'stderr')}`,
+        `5 ${seqOf((r) => r.frame.event === 'parse_error')}`,
+      ]);
+      expect(t.transport.journaledSeqs).toEqual([3, 4, 5]);
+      t.transport.exit(0);
+      await t.session.exited;
+    });
+
+    it('retracts the line of a row whose append failed, acks nothing for it, and ends the process', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.failOn((direction) => direction === 'in');
+      t.transport.push({ type: 'system', subtype: 'status', status: null, uuid: 'u-2', session_id: 's' }, 7);
+      await flush();
+      expect(t.map()).toEqual([expect.stringMatching(/^7 \d+$/), '7 -']);
+      expect(t.transport.journaledSeqs).toEqual([]);
+      expect(t.rows().some((r) => r.frame.code === 'journal_failed')).toBe(true);
+      expect(t.transport.calls).toContain('kill:SIGTERM');
+      t.transport.exit(null, 'SIGTERM');
+      await t.session.exited;
+    });
+
+    it('journals a gap with its notice, marks the lost range in the map, and passes the frontier over it', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.transport.pushProblem({ kind: 'host_gap', message: 'records lost', length: 0, typeGuess: null, gap: { holderId: 'L-host', fence: 2, frontier: 5, firstSeq: 9, lostFrom: 6 } });
+      await flush();
+      const metas = t.rows().filter((r) => r.direction === 'meta').map((r) => r.frame);
+      expect(metas).toContainEqual({ event: 'host_attach', holderId: 'L-host', fence: 2, frontier: 5, replayed: 'gap', firstSeq: 9 });
+      expect(metas).toContainEqual(expect.objectContaining({ event: 'notice', key: 'holder:gap' }));
+      expect(t.map()).toEqual(['8 *']);
+      expect(t.transport.journaledSeqs).toEqual([6, 7, 8]);
+      t.transport.exit(0);
+      await t.session.exited;
+    });
   });
 
   it('is cleared when the engine answers the interrupt with an error', async () => {

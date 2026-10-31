@@ -999,7 +999,11 @@ export class EngineSession {
         const gap = problem.gap!;
         this.record('meta', { event: 'host_attach', holderId: gap.holderId, fence: gap.fence, frontier: gap.frontier, replayed: 'gap', firstSeq: gap.firstSeq });
         this.notice('holder:gap', 'Some output was lost while the engine host reconnected to the session host; the conversation may be missing part of it.');
-        this.hostMap?.lost(gap.firstSeq - 1, this.journalFile());
+        try {
+          this.hostMap?.lost(gap.firstSeq - 1, this.journalFile());
+        } catch (error) {
+          throw new JournalWriteFailed(error); // D39: the map's failure is the journal's (processItem ends the process)
+        }
         for (let seq = gap.lostFrom; seq < gap.firstSeq; seq += 1) this.transport?.journaled?.(seq);
         return;
       }
