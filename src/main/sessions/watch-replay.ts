@@ -20,7 +20,9 @@
 // files: a files watch installs and lists nothing, so a re-sent `files.watch` would leave a pane stale for what changed
 // while disconnected. Main only observes `files.watch` and `files.unwatch` on their way through, and at each streaming
 // emits `files.changed {kind: 'invalidated'}` once per distinct live (session, directory), on which the renderer's
-// files store re-lists and re-watches under the page's ref (src/renderer/src/tools/code/files/store.ts).
+// files store re-lists and re-watches under the page's ref (src/renderer/src/tools/code/files/store.ts). That reinstall
+// is a `files.watch` with no `files.unwatch` for the connection before it, so the counts start over at each streaming
+// once its invalidations are out: each connection counts only what was watched on it.
 //
 // The O6 link's watches of another machine's session are not given back here (O7's, with the link's reconnect).
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -198,6 +200,7 @@ export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchRep
       const pairs = new Map<string, FilesChanged>();
       for (const page of pages.values()) {
         for (const [key, { appSessionId, path }] of page.files) pairs.set(key, { appSessionId, path, kind: 'invalidated' });
+        page.files.clear(); // each holder's reinstall (a files.watch, no unwatch before it) is what this connection counts
         for (const entry of page.git.values()) {
           for (const unit of entry.units) if (unit !== entry.sending) unit.state = 'queued';
           drive(entry);

@@ -259,10 +259,36 @@ describe('the watch replay', () => {
       { appSessionId: 's1', path: '/r/src', kind: 'invalidated' },
       { appSessionId: 's2', path: '/q', kind: 'invalidated' },
     ]);
+    // each holder's files store re-watches what the invalidation dropped (files/store.ts's reinstall)
+    replay.forwarded('files.watch', { appSessionId: 's1', path: '/r/src' }, page);
+    replay.forwarded('files.watch', { appSessionId: 's1', path: '/r/src' }, other);
+    replay.forwarded('files.watch', { appSessionId: 's2', path: '/q' }, other);
     other.end();
     host.detach();
     host.stream();
     expect(emitted.slice(2)).toEqual([{ appSessionId: 's1', path: '/r/src', kind: 'invalidated' }]);
+  });
+
+  // The review's lifecycle (fix round 1): the invalidation's reinstall is a files.watch with no unwatch of the
+  // connection before it, so each streaming's counts start over and the reinstall alone holds the pair
+  it('invalidates nothing a page closed after a reconnect’s reinstall: watch, reconnect, reinstall, unwatch, reconnect', async () => {
+    const { host, replay, page, emitted } = lab();
+    replay.forwarded('files.watch', { appSessionId: 's1', path: '/r/src' }, page);
+    host.detach();
+    host.stream();
+    expect(emitted).toEqual([{ appSessionId: 's1', path: '/r/src', kind: 'invalidated' }]);
+    replay.forwarded('files.watch', { appSessionId: 's1', path: '/r/src' }, page); // the reinstall
+    replay.forwarded('files.unwatch', { appSessionId: 's1', path: '/r/src' }, page); // the pane closed: its last holder
+    host.detach();
+    host.stream();
+    expect(emitted).toHaveLength(1);
+    // a pair the page never re-watched after an invalidation is not given back again either
+    replay.forwarded('files.watch', { appSessionId: 's1', path: '/r/docs' }, page);
+    host.detach();
+    host.stream();
+    host.detach();
+    host.stream();
+    expect(emitted.slice(1)).toEqual([{ appSessionId: 's1', path: '/r/docs', kind: 'invalidated' }]);
   });
 
   it('ends every unit’s ref at stop', async () => {
