@@ -97,7 +97,7 @@ export class Queries {
     // The stored target is the lane B session's stable id; its record is read through the engine session it has now.
     let target: SessionTarget | null = null;
     if (value.target !== null && value.target !== undefined) {
-      const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, dispatch) : null;
+      const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, { dispatch, log: (line) => this.ctx.log(line) }) : null;
       if (resolved?.kind === 'refused' && resolved.reason === 'unavailable') return { state: value.state as string, binding: 'unplaceable' };
       if (resolved?.kind !== 'session') return { state: value.state as string, binding: null };
       target = resolved.target;

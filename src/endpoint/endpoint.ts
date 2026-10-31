@@ -294,6 +294,7 @@ export class Endpoint implements EndpointModule {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(...request);
       },
+      log: (line) => log(line),
       webauthn: {
         origin: () => this.#webOrigin(),
         counter: (credentialId) => this.#state?.webauthn[credentialId] ?? 0,

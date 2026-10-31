@@ -1,7 +1,8 @@
 // The offer rows of lane B's conversation (P5 O7 M2, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, §L's M2
 // rows; Constraints: "the offer table is the only door, and each row is tested"). Each name a remote pane reads or acts
 // with is admitted for a caller who holds its grade on the session (A, an owner of the machine, so of its sessions) and
-// reaches its executor; a caller who holds nothing on it (B) is refused `grade` and reaches nothing. Reads cross as calls,
+// reaches its row's executor by its own name; a caller who holds nothing on it (B) is refused `grade` and reaches
+// nothing past the session's placement. Reads cross as calls,
 // effects as acts: each act row refuses a call (`act-required`).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
@@ -85,6 +86,14 @@ async function setup(): Promise<{ f: Fixture; s: HostSession; a: Remote; b: Remo
   return { f, s, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
 }
 
+/** What the machine was asked about the session from `from` on, as `[owner, name]`. */
+const asked = (f: Fixture, from: number) => f.host.calls.slice(from).filter((c) => (c.input as { appSessionId?: string } | undefined)?.appSessionId === APP).map((c) => [c.owner, c.name]);
+/** A lane B request's placement: the spine's record, then the engine host's live row it is checked against. */
+const PLACEMENT = [
+  ['machine', 'session.get'],
+  ['engine-host', 'session.status'],
+];
+
 /** Whether an act named `name` was handed to its executor's ledger (`host.op`, `machine.op`). */
 const ran = (f: Fixture, name: string) => f.host.calls.some((c) => (c.name === 'host.op' || c.name === 'machine.op') && (c.input as { name?: string }).name === name);
 /** Refusals that say a request never reached its executor. */
@@ -101,13 +110,18 @@ describe('lane B’s offer rows (M2)', () => {
   });
 
   it('admit each read for a caller who views the session, and refuse it for one who doesn’t', async () => {
-    const { a, b } = await setup();
+    const { f, a, b } = await setup();
     for (const [name, input] of Object.entries(CALLS)) {
+      let from = f.host.calls.length;
       const refused = await call(b, name, input);
       expect([name, refused.ok, (refused.error as { code?: string } | undefined)?.code]).toEqual([name, false, 'grade']);
-      // Admitted: its executor answered (the fakes answer some reads `unknown_command`, which passes through).
+      expect([name, asked(f, from)]).toEqual([name, PLACEMENT]);
+      // Admitted: placed, then run by its row's executor under its own name, once (the fakes answer some reads
+      // `unknown_command`, which passes through).
+      from = f.host.calls.length;
       const answered = await call(a, name, input);
       expect([name, answered.ok === true || !AUTHORIZATION.includes((answered.error as { code: string }).code)]).toEqual([name, true]);
+      expect([name, asked(f, from)]).toEqual([name, [...PLACEMENT, [OFFERS.commands[name].executor, name]]]);
     }
   });
 

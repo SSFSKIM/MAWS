@@ -5,10 +5,11 @@
 // The endpoint's checks, in order, the first refusal answering `ack {state: 'refused', reason}`:
 //   1. freshness and replay (freshness.ts: `stale`, `malformed`, `expired`, `replayed`), before anything is read;
 //   2. authorization (M5's gate, which calls `execute` with what it decided);
-//   3. the lane's shape and context: a lane B action carries a lane B context, and its `launchId` and `engineSessionId`
-//      are the session's now (`context`; the engine host rechecks both at its claim); a lane A action's launch is its
-//      member's bridge now (`context`), a member with no bridge has nothing to fence it (`unavailable`), its own fields
-//      must agree with its args (`malformed`) (rl10's `rpc`);
+//   3. the lane's shape and context: a lane B action carries a lane B context, the engine session it was authorized
+//      against is the one the session runs now (`unavailable`: the machine's index lags it, P5 O7 M2), and its
+//      `launchId` and `engineSessionId` are the session's now (`context`; the engine host rechecks both at its claim);
+//      a lane A action's launch is its member's bridge now (`context`), a member with no bridge has nothing to fence it
+//      (`unavailable`), its own fields must agree with its args (`malformed`) (rl10's `rpc`);
 //   4. an executor that keeps a ledger: the engine host (lane B, `host.op`), sminos (lane A, RL10's `rpc`), the endpoint
 //      itself (endpoint-actions.ts) or the machine's services (P5 O3-D M4: `machine.op`, `mawsd`'s spine, whose ledger
 //      claims no launch, so a session's context is not read for it); any other is `no-ledger` (a pty-host command, or
@@ -185,6 +186,8 @@ export class Actions {
     const status = await dispatch('engine-host', 'session.status', { appSessionId });
     if (!status.ok) return refuse(status.error.code === 'host_unavailable' || status.error.code === 'timeout' ? 'unavailable' : 'context');
     const now = isObject(status.value) ? status.value : {};
+    // The engine session authorization placed (the index's) must be the one running, else the index lags a change of it.
+    if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
     if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
     if (channel.closed) return;
     accept();

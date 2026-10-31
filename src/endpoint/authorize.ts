@@ -31,7 +31,9 @@
 // device only for what its class may do on a session its member owns.
 //
 // P5 O7 M2: the reads a decision makes on the machine (a lane B session's placement, a pending request's kind) carry the
-// asking channel's `ClientRef` (`Who.client`), as its executors' do.
+// asking channel's `ClientRef` (`Who.client`), as its executors' do. A lane B session is placed by the machine's index and
+// bound to the engine session the engine host runs for it now (targets.ts): a request the index's engine session would
+// authorize while the host runs another is `unavailable`.
 import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec } from '@shared/ipc/grades';
@@ -65,6 +67,8 @@ export type AuthorizeContext = {
   records: RecordSource;
   checkouts: CheckoutSource;
   dispatch: EndpointServices['dispatch'];
+  /** What a decision can't be taken on and why, beyond its refusal (a lane B session the spine failed to place). */
+  log(line: string): void;
   /** The origin the web-cards code is served from (the hub's), and the counters kept per credential. */
   webauthn: { origin(): string | null; counter(credentialId: string): number; setCounter(credentialId: string, counter: number): void };
   /** What else a decision rests on that can change under it (the grant ledger), compared by identity. */
@@ -215,7 +219,8 @@ export class Authorizer {
     if (webCards && !WEB_CARDS.has(name)) return no('class');
 
     // 4. The caller's standing at the floor, before anything of the session is read.
-    const resolved = await resolveTarget(row.target, input, action, reads.dispatch);
+    // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
+    const resolved = await resolveTarget(row.target, input, action, { dispatch: reads.dispatch, log: (line) => this.ctx.log(line), live: !(kind === 'act' && row.executor === 'engine-host') });
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
@@ -320,7 +325,7 @@ export class Authorizer {
     const cards = message.view === 'cards';
     const webCards = who.clientClass === 'web-cards';
     if (webCards && !cards) return refuse('class');
-    const resolved: Resolved = await resolveSubscription(message.session, reads.dispatch);
+    const resolved: Resolved = await resolveSubscription(message.session, { dispatch: reads.dispatch, log: (line) => this.ctx.log(line) });
     if (resolved.kind === 'refused') return refuse(resolved.reason);
     if (resolved.kind !== 'session') return refuse('grade');
     const record = reads.record(resolved.target);
