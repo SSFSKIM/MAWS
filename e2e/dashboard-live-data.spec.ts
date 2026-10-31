@@ -49,7 +49,7 @@ import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, SERVER, TOOL, TOOL_NAME, value, wait, withScene, type ConnectorScene, type Run } from './support/connector-scene';
-import { durable, ok, openInMain, openInPanel, refusalOf } from './support/dashboards';
+import { durable, ok, openInMain, openInPanel, refusalOf, toggleDatasets } from './support/dashboards';
 import {
   agentDataset,
   agentOf,
@@ -390,8 +390,7 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await drawsRows(previewed, FIRST, 'the retained version');
         await expect(labelOf(previewed)).toHaveText(`${HEAD} · updated ${utcTime(firstAt)} by You`);
         // the header's Datasets inspects the version shown: its rows, and no live controls
-        await page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'More actions' }).click();
-        await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
+        await toggleDatasets(page.locator('[data-region="main"] [data-editor-header]')); // inline, or folded under More actions when narrow (UX2-L)
         const sheet = page.getByRole('dialog', { name: new RegExp(`^(Source of ${TITLE}|Datasets)$`) });
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(FIRST.length + 1));
         await expect(liveBlock(sheet)).toHaveCount(0);
