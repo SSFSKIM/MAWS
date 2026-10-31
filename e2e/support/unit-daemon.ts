@@ -7,7 +7,9 @@
 // under that build's Electron as Node), with the scene's environment added to the plist (the e2e mark, the scratch
 // engine store) and the job loaded again, then waits for its `mawsd` to answer `daemon.status` as a unit.
 //
-// It loads a LaunchAgent, so it runs in CI alone (./daemon-unit-guard.mjs's refusal) and on a Mac; `remove` boots the job
+// It loads a LaunchAgent, so it runs in CI alone (./daemon-unit-guard.mjs's refusal) and on a Mac, and never on the
+// mini's home instance, where the owner's own unit lives (homeInstanceRefusal: thrown before anything is installed, a
+// failure, never a skip); `remove` boots the job
 // out and deletes its plist, and the gate job's sweep (.github/scripts/launchd-sweep.sh) removes whatever a failed run
 // left under the label prefix.
 import { spawnSync } from 'node:child_process';
@@ -18,6 +20,7 @@ import { expect } from '@playwright/test';
 import { daemonPaths } from '@shared/daemon/files';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { reachMachine } from '../../src/mawsd/machine-client';
+import { homeInstanceRefusal, OWNER_UNIT_LABEL } from './daemon-unit-guard.mjs';
 
 const UID = process.getuid?.() ?? -1;
 const SERVE_WITHIN_MS = 45_000; // launchd's start, and a restart past its ThrottleInterval (10 s)
@@ -41,6 +44,8 @@ function jobPid(label: string): number | null {
 
 // `root`: the build's checkout, its out/ built; `env`: what the plist adds to the unit's own environment
 export async function installUnitDaemon(o: { root: string; userData: string; label: string; env: Record<string, string> }): Promise<UnitDaemon> {
+  const refused = homeInstanceRefusal(process.env, spawnSync('launchctl', ['print', `gui/${UID}/${OWNER_UNIT_LABEL}`], { encoding: 'utf8' }).status === 0);
+  if (refused !== null) throw new Error(`a unit mawsd for ${o.label}: ${refused}`);
   const mawsd = join(o.root, 'out', 'main', 'mawsd.js');
   expect(existsSync(mawsd), `${o.root} has out/main/mawsd.js`).toBe(true);
   const plist = join(homedir(), 'Library', 'LaunchAgents', `${o.label}.plist`);

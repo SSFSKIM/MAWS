@@ -880,8 +880,7 @@ jobs:
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
       # e2e:daemon-unit (P5 O2 M7) loads LaunchAgents into this Mac's account, so whatever the run did, every
       # `dev.maws.mawsd.e2e-*` agent and plist in the account is booted out and removed, this job's and any earlier one's.
-      # P5 O5 M4: e2e:cross-build's render scenes load one too (a unit mawsd of the other build).
-      - if: always() && (matrix.group == 'daemon-unit' || matrix.group == 'cross-build') && steps.checkout.outcome == 'success'
+      - if: always() && matrix.group == 'daemon-unit' && steps.checkout.outcome == 'success'
         run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
