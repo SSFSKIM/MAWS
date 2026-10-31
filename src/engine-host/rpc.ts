@@ -166,6 +166,7 @@ export class ControlClient {
       };
       entry.arm(timeoutMs);
     }
+    opts.onIssued?.(requestId); // P5 O16 M3a fix wave 2: before any answer to it can be read
     // The deadline covers the write queue and backpressure, not just the response.
     const written = this.writer.write(frame, { signal: writeAbort.signal }).then(() => {
       // onIdle may already have correlated a held response and removed the pending entry.

@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
+import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { autoResponder, scriptedTransport, type Responder, type ScriptedTransport } from '../conformance/scripted-transport';
 import { handshakeResponder, INIT_RESPONSE, launchSpec } from '../conformance/session-harness';
@@ -67,8 +68,17 @@ function predecessor(plan: LaunchPlan, write: (w: JournalWriter) => void, maxByt
   return last;
 }
 
-function adopter(plan: LaunchPlan, adopted: Partial<AdoptedLaunch> = {}, store = new MemorySessionStateStore(), opts: { responder?: Responder; session?: Partial<EngineSessionOptions> } = {}) {
-  const transport = scriptedTransport({ holder: { pid: 4100, holderId: plan.launchId, fence: 2 }, pid: 4101, onWrite: autoResponder(handshakeResponder({ interrupt: () => ({ response: { still_queued: [] } }), ...opts.responder })) });
+// `transport.onWrite` runs after the responder, as the write is recorded (before it resolves); `transport.holdWrite`
+// holds a write as backpressure would
+function adopter(plan: LaunchPlan, adopted: Partial<AdoptedLaunch> = {}, store = new MemorySessionStateStore(), opts: { responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; holdWrite?: (frame: StdinFrame) => Promise<void> | null } } = {}) {
+  const respond = autoResponder(handshakeResponder({ interrupt: () => ({ response: { still_queued: [] } }), ...opts.responder }));
+  const transport = scriptedTransport({
+    holder: { pid: 4100, holderId: plan.launchId, fence: 2 }, pid: 4101, holdWrite: opts.transport?.holdWrite,
+    onWrite: (frame, t) => {
+      respond(frame, t);
+      opts.transport?.onWrite?.(frame, t);
+    },
+  });
   const journal = JournalWriter.resume(dir, plan.launchId, { maxBytes: 1_000_000 });
   const logs: string[] = [];
   const session = new EngineSession({
@@ -483,5 +493,79 @@ describe('an adopted session, fix wave 1', () => {
     expect(a.session.mcpCommands()).toEqual([['/bin/sh', '-c', 'true']]);
     a.transport.exit(0);
     await a.session.exited;
+  });
+
+  // M3a fix wave 2 (the re-review's three ordering residuals)
+  describe('fix wave 2', () => {
+    it('D49 holds when the re-initialize is answered at once, before its write has resolved', async () => {
+      const plan = planOf();
+      predecessor(plan, (w) => {
+        w.row('in', permission('e-stale'));
+        w.row('in', permission('e-held'));
+      });
+      const a = adopter(plan, {}, undefined, {
+        responder: { initialize: () => null },
+        transport: {
+          // the engine's answer read while the write is still in flight: the session holds it, then drains it at once
+          onWrite: (frame, t) => {
+            if (frame.type === 'control_request' && frame.request.subtype === 'initialize') t.push({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: INIT_RESPONSE, pending_permission_requests: [permission('e-held')] } }, 1);
+          },
+        },
+      });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.session.lifecycle === 'ready', 'ready');
+      const state = (id: string) => a.session.brokerItems().find((item) => item.request.requestId === id)?.state ?? null;
+      expect(await a.session.answer('e-stale' as never, { kind: 'permission', decision: 'allow', scope: 'once' } as never)).toBe('delivered');
+      expect(state('e-stale')).toBeNull();
+      expect(await a.session.answer('e-held' as never, { kind: 'permission', decision: 'allow', scope: 'once' } as never)).toBe('delivered');
+      expect(state('e-held')).toBe('delivered');
+      a.transport.exit(0);
+      await a.session.exited;
+    });
+
+    it('a call withdrawn while the gate holds it, by notifications/cancelled or control_cancel_request, is never dispatched', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => null } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+      a.transport.push(call('e-ask', 3, 'ask', { questions: [question] }, 'toolu_ask'), 1);
+      a.transport.push(call('e-publish', 4, 'artifact_publish', { artifactId: 'x' }, 'toolu_publish'), 2);
+      a.transport.push(call('e-keep', 5, 'ask', { questions: [question] }, 'toolu_keep'), 3);
+      a.transport.push(mcp('e-cancel-ask', { method: 'notifications/cancelled', params: { requestId: 3 } }), 4);
+      a.transport.push({ type: 'control_cancel_request', request_id: 'e-publish' }, 5);
+      a.transport.push(mcp('e-cancel-other', { method: 'notifications/cancelled', params: { requestId: '5' } }), 6); // "5" is not 5
+      await until(() => a.transport.journaledSeqs.length === 6, 'the frames journaled');
+      a.transport.answer('initialize', INIT_RESPONSE);
+      await until(() => a.session.lifecycle === 'ready', 'ready');
+      await until(() => a.session.asks().length === 1, 'the kept ask');
+      expect(a.session.asks().map((ask) => ask.askId)).toEqual(['toolu_keep']);
+      await sleep(20);
+      expect(responses(a.transport).map((r) => r.response.request_id).filter((id) => id === 'e-ask' || id === 'e-publish')).toEqual([]);
+      a.transport.exit(0);
+      await a.session.exited;
+    });
+
+    it('a re-initialize whose write is held past the bound is still waited for, never a failure', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      let release!: () => void;
+      const blocked = new Promise<void>((done) => (release = done));
+      const a = adopter(plan, {}, undefined, { session: { reinitializeMs: 20 }, transport: { holdWrite: (frame) => (frame.type === 'control_request' && frame.request.subtype === 'initialize' ? blocked : null) } });
+      await a.session.start();
+      a.caughtUp();
+      await sleep(150);
+      expect(a.session.lifecycle).toBe('initializing');
+      expect(initFailed(a.rows())).toEqual([]);
+      expect(a.transport.calls).toEqual([]);
+      expect(a.logs.some((line) => line.includes('still waiting'))).toBe(true);
+      release();
+      await until(() => a.session.lifecycle === 'ready', 'ready');
+      expect(a.outcome.settled).toBe('ready');
+      a.transport.exit(0);
+      await a.session.exited;
+    });
   });
 });

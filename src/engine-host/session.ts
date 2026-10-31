@@ -40,7 +40,7 @@ import { HostMap } from './holder/checkpoint'; // P5 O16 M2
 import { launchRows, OutstandingSet, type Outstanding } from './holder/restore'; // P5 O16 M3
 import { UnsettledFold } from './prompt-history'; // P5 O16 M3
 import { resolveStorePaths, slugOf } from './fs/paths'; // P5 O16 M3: the reseed's transcript
-import { readMcpMessage, toolCallOf } from '@shared/maws/rpc'; // P5 O16 M3: the barrier and the disposal
+import { cancelledCallOf, readMcpMessage, toolCallOf } from '@shared/maws/rpc'; // P5 O16 M3: the barrier and the disposal
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
 import { MessageQueue, type SteerPriority } from './queue';
@@ -172,6 +172,11 @@ export class AdoptionFailed extends Error {
     this.name = 'AdoptionFailed';
   }
 }
+
+// P5 O16 M3a fix wave 2: a test seam, null in production. `beforeFold` runs synchronously as an adoption's fold begins,
+// while the fold holds the event loop, so a test can make the session host's ring overflow under a reader that reads
+// nothing, deterministically (holder/adoption.test.ts); a throw is a failed fold.
+export const adoptionTestSeams: { beforeFold: ((launchId: string) => void) | null } = { beforeFold: null };
 
 export interface AdoptedLaunch {
   fence: number;
@@ -999,13 +1004,18 @@ export class EngineSession {
     try {
       const reinitializeMs = this.opts.reinitializeMs ?? ADOPTED_REINITIALIZE_MS;
       init = await initialize(client, request, {
+        // fix wave 2: an adopted re-initialize is known from its issue, before its write is queued: its answer can be
+        // read and drained before the write resolves (D49's registration), and its non-destructive wait covers the
+        // whole pending exchange, the write's backpressure included (D58)
+        onIssued: (requestId) => {
+          if (!adopted) return;
+          this.initializeId = requestId;
+          this.broker.awaitRedelivery(requestId); // D49: what its answer lists the engine still holds
+          this.awaitReinitialize(client, requestId, reinitializeMs);
+        },
         onWritten: (requestId) => {
           this.initializeId = requestId;
           this.extendInitialize(); // hook frames read while the write was in flight
-          if (adopted) {
-            this.broker.awaitRedelivery(requestId); // D49: what its answer lists the engine still holds
-            this.awaitReinitialize(client, requestId, reinitializeMs);
-          }
         },
         ...(adopted && { timeoutMs: 2 * reinitializeMs }), // renewed by awaitReinitialize before it can expire
       });
@@ -1063,6 +1073,20 @@ export class EngineSession {
       this.settleAdoption(null);
       await this.releaseAfterAdoption();
     }
+  }
+
+  // fix wave 2 (D42): a `notifications/cancelled` naming the JSON-RPC id of a `tools/call` the same server was sent, held
+  // by the handshake's gate: the engine's MCP client dropped it, so it is never dispatched (an ask never raised, an
+  // effectful call never run), as the fold's outstanding set drops one.
+  private withdrawHeldCall(req: ControlRequestFrame): void {
+    if (this.handshakeHeld === null || req.request.subtype !== 'mcp_message') return;
+    const rpcId = cancelledCallOf(readMcpMessage(req.request));
+    if (rpcId === null) return;
+    const server = (req.request as { server_name?: unknown }).server_name;
+    this.handshakeHeld = this.handshakeHeld.filter((held) => {
+      const sent = held.request as { subtype: string; server_name?: unknown; message?: { id?: unknown; method?: unknown } };
+      return !(sent.subtype === 'mcp_message' && sent.server_name === server && sent.message?.method === 'tools/call' && sent.message.id === rpcId);
+    });
   }
 
   // fix wave 1 (D58): the adopted re-initialize's wait. At each `ms` with the request still unanswered and the process
@@ -1127,6 +1151,7 @@ export class EngineSession {
     this.folding = true;
     this.tracker.restoring = true;
     try {
+      adoptionTestSeams.beforeFold?.(this.plan.launchId);
       for (const row of launchRows(dirname(this.journal.path), this.plan.launchId)) {
         outstanding.observe(row);
         unsettled.push(row);
@@ -1605,10 +1630,14 @@ export class EngineSession {
       if (EngineSession.protocolService(req)) this.maws.accept(req);
       return;
     }
-    // fix wave 1: from the catch-up until the re-initialize is answered, the rest wait in order (responses correlate)
-    if (this.handshakeHeld !== null && !EngineSession.protocolService(req)) {
-      this.handshakeHeld.push(req);
-      return;
+    // fix wave 1: from the catch-up until the re-initialize is answered, the rest wait in order (responses correlate);
+    // fix wave 2: the protocol service's `notifications/cancelled` withdraws a call the gate holds (D42's correlation)
+    if (this.handshakeHeld !== null) {
+      if (!EngineSession.protocolService(req)) {
+        this.handshakeHeld.push(req);
+        return;
+      }
+      this.withdrawHeldCall(req);
     }
     switch (req.request.subtype) {
       case 'hook_callback':

@@ -21,9 +21,9 @@ import { buildHostedManager, startHostedManager, type HostedManager } from '../.
 import { buildStubEngine, writeStubEngine } from '../../../test/support/stub-engine-bin';
 import { TESTED_ENGINE_VERSION } from '../engine-compat';
 import { slugOf } from '../fs/paths';
-import { JournalWriter } from '../journal';
 import { registerEngineIpc, type EngineIpcDeps } from '../ipc';
 import { RELAY_URL } from '../launch';
+import { adoptionTestSeams } from '../session';
 import { MAX_LINE_CHARS } from '../transport';
 import { isAlive, procStartOf } from '../supervisor-files';
 import { adoptAll } from './adopt';
@@ -64,6 +64,7 @@ beforeEach(() => {
   userData = mkdtempSync(join(tmpdir(), 'msh-au-'));
 });
 afterEach(async () => {
+  adoptionTestSeams.beforeFold = null;
   for (const manager of managers.splice(0)) await manager.kill('SIGKILL').catch(() => {});
   for (const entry of readRoster(hostsDirOf(join(userData, 'supervisor')), () => {})) {
     for (const pid of [entry.pid, entry.child?.pid]) {
@@ -88,9 +89,9 @@ function spec(appSessionId: string): LaunchSpec {
 const hostsDir = () => hostsDirOf(join(userData, 'supervisor'));
 const tokenOf = (holderId: string) => readFileSync(sessionHostPaths(hostsDir(), holderId, { userData, tmpdir: tmpdir() }).token, 'utf8');
 
-// The successor: the engine host's handlers in this process, adopting as index.ts's start does. `onAttach` runs as each
-// adoption's connection is made, before its attach; `env` is captured beside PATH.
-function successor(stub: string, opts: { onAttach?: () => void; env?: Record<string, string> } = {}) {
+// The successor: the engine host's handlers in this process, adopting as index.ts's start does; `env` is captured beside
+// PATH.
+function successor(stub: string, opts: { env?: Record<string, string> } = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: { name: string; payload: unknown }[] = [];
   const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
@@ -103,7 +104,7 @@ function successor(stub: string, opts: { onAttach?: () => void; env?: Record<str
     gateSocket: join(userData, 'supervisor', 'gate.sock'),
     start: () => Promise.reject(new Error('the successor launches nothing here')),
     adopt: async (entry, checkpoint, startMs) => {
-      const { transport, fence } = await adoptHosted({ ...entry, appSessionId: entry.appSessionId ?? '' }, { ...deps, startMs, token: tokenOf(entry.holderId), checkpoint, maxLineChars: MAX_LINE_CHARS, onConnection: () => opts.onAttach?.() });
+      const { transport, fence } = await adoptHosted({ ...entry, appSessionId: entry.appSessionId ?? '' }, { ...deps, startMs, token: tokenOf(entry.holderId), checkpoint, maxLineChars: MAX_LINE_CHARS });
       return { transport, fence };
     },
     release: (entry, startMs) => releaseHost(entry, { log: () => {}, startMs, token: tokenOf(entry.holderId) }),
@@ -212,16 +213,17 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
     connection.close();
   });
 
-  // M3a fix wave 1 (D58's condition on the synchronous fold): the engine bursts while the successor folds a long journal,
-  // reading nothing, and the session host's small ring overflows under it. The host closes the lagging reader (its next
-  // record left the ring); the transport reconnects at the next fence and its read finds the head gone: the D45 gap is
-  // journaled, the conversation reseeded from the transcript, the lost range passed by the map (so the frontier advances
-  // past it), and the adoption still becomes ready and completes the turn with the same engine. The burst starts only
-  // once the successor has attached, so no other reader's lag can explain the gap. The first read's catch-up (what the
-  // ring held at the attach) comes before the burst, so it is the exact one and the gap follows it.
+  // M3a fix waves 1 and 2 (D58's condition on the synchronous fold): the engine bursts while the successor's fold holds
+  // the event loop, and the session host's small ring overflows under a reader that reads nothing. A rendezvous at the
+  // fold's entry (the session's test seam) starts the burst and lets the fold go on only once the host has logged closing
+  // the lagging reader (its next record left the ring), so the overflow happens during the fold, whatever the timing.
+  // The transport reconnects at the next fence and its read finds the head gone: the D45 gap is journaled, the
+  // conversation reseeded from the transcript, the lost range passed by the map (so the frontier advances past it), and
+  // the adoption still becomes ready and completes the turn with the same engine. The first read's catch-up may have
+  // reached the socket before the burst (an exact `host_attach`, then the gap's) or not (the gap's only).
   it('the ring overflowing while the adoption folds: the D45 gap, the reseed, the frontier passed, then ready', { timeout: LONG }, async () => {
     const trigger = join(userData, 'burst-now');
-    const stub = writeStubEngine(join(scratch, 'claude-burst'), stubBundle, { fixture: PERMISSION, burst: { file: trigger, delayMs: 150, lines: 400 } });
+    const stub = writeStubEngine(join(scratch, 'claude-burst'), stubBundle, { fixture: PERMISSION, burst: { file: trigger, lines: 400 } });
     const id = 'app-burst';
     const configDir = join(userData, 'config');
     mkdirSync(configDir);
@@ -252,19 +254,27 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
       { type: 'assistant', uuid: 'a-gap', parentUuid: message.uuid, timestamp: '2026-10-31T10:00:01.000Z', sessionId: before.engineSessionId, message: { id: 'msg_gap', model: 'claude-sonnet-5', role: 'assistant', content: [{ type: 'text', text: 'restored from the transcript' }] } },
     ];
     writeFileSync(join(project, `${before.engineSessionId}.jsonl`), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-    // a journal long enough that its fold outlasts the burst (rows an old manager could have left: meta notes)
-    const pad = JournalWriter.resume(dir, before.launchId, { maxBytes: 1_000_000_000 });
-    for (let n = 0; n < 300_000; n += 1) pad.row('meta', { event: 'pad', n });
-    await pad.close();
-
-    const next = successor(stub, { env, onAttach: () => writeFileSync(trigger, '') });
+    // the rendezvous: the fold waits, holding the event loop, until the host has closed its reader for lagging
+    const hostLog = sessionHostPaths(hostsDir(), before.launchId, { userData, tmpdir: tmpdir() }).log;
+    const closings = () => (existsSync(hostLog) ? readFileSync(hostLog, 'utf8').split('fell behind the ring').length - 1 : 0);
+    adoptionTestSeams.beforeFold = (launchId) => {
+      if (launchId !== before.launchId) return;
+      const seen = closings();
+      writeFileSync(trigger, '');
+      const deadline = Date.now() + 30_000;
+      while (closings() === seen) {
+        if (Date.now() > deadline) throw new Error('the session host never closed the lagging reader');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    };
+    const next = successor(stub, { env });
     expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [] });
     expect(next.status(id)).toMatchObject({ process: 'ready', pid: before.pid });
 
     const rows = [...launchRows(dir, before.launchId)];
     const attaches = rows.filter((r) => (r.frame as { event?: string }).event === 'host_attach');
-    expect(attaches.map((r) => (r.frame as { replayed: string }).replayed)).toEqual(['exact', 'gap']);
-    const attach = attaches[1]!;
+    expect([['exact', 'gap'], ['gap']]).toContainEqual(attaches.map((r) => (r.frame as { replayed: string }).replayed));
+    const attach = attaches.at(-1)!;
     const gap = attach.frame as { replayed: string; firstSeq: number; frontier: number; fence: number };
     expect(gap.fence).toBe(3); // the reconnect after the host closed the lagging reader
     expect(gap.firstSeq).toBeGreaterThan(gap.frontier + 1);

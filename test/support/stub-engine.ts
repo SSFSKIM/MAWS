@@ -14,9 +14,9 @@
 // names each launch's journal after the app has started); `--stub-row-ms <n>` paces each `in` row; the directives `--stub-spawn-child` (a `sleep` it
 // parents, its pid printed as the stderr line `stub-engine child <pid>`, ended with the stub), `--stub-count-stdin`
 // (the stderr line `stub-engine stdin <frames> frames, <user> user` at its exit) and `--stub-print-env <K1,K2>` (each
-// as the stderr line `stub-engine env K=V` at its start); `--stub-burst <file>,<delay ms>,<lines>` (once `<file>`
-// exists, after `<delay ms>`, that many padded `system/status` lines of about 1 KB at once: output nobody asked for, a
-// session host's ring overflow under a reader that stopped reading). `--version` alone answers the tested version. A write the
+// as the stderr line `stub-engine env K=V` at its start); `--stub-burst <file>,<lines>` (once `<file>` exists, that
+// many padded `system/status` lines of about 1 KB at once: output nobody asked for, a session host's ring overflow
+// under a reader that stopped reading). `--version` alone answers the tested version. A write the
 // fixture never recorded ends the replay as a mismatch: the reason on stderr and exit 1. An `end_session` and the end of
 // stdin end it with 0, SIGTERM with the signal, as the engine does.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -81,14 +81,12 @@ for (const key of (option('--stub-print-env') ?? '').split(',').filter(Boolean))
 
 const burst = option('--stub-burst');
 if (burst !== undefined) {
-  const [file, delayMs, lines] = burst.split(',');
+  const [file, lines] = burst.split(',');
   const poll = setInterval(() => {
     if (!existsSync(file!)) return;
     clearInterval(poll);
-    setTimeout(() => {
-      const line = `${JSON.stringify({ type: 'system', subtype: 'status', status: null, pad: 'x'.repeat(1_000) })}\n`;
-      for (let i = 0; i < Number(lines); i += 1) process.stdout.write(line);
-    }, Number(delayMs));
+    const line = `${JSON.stringify({ type: 'system', subtype: 'status', status: null, pad: 'x'.repeat(1_000) })}\n`;
+    for (let i = 0; i < Number(lines); i += 1) process.stdout.write(line);
   }, 5);
 }
 
