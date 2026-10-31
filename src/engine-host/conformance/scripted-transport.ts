@@ -4,7 +4,7 @@
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import type { SessionJournal } from '../session';
-import { TransportClosed, type EngineTransport, type TransportItem } from '../transport';
+import { TransportClosed, type EngineTransport, type StderrItem, type TransportItem } from '../transport';
 
 class Queue<T> implements AsyncIterable<T> {
   private readonly items: T[] = [];
@@ -50,7 +50,7 @@ export function scriptedTransport(
   opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number } = {},
 ): ScriptedTransport {
   const frames = new Queue<TransportItem>();
-  const stderr = new Queue<string>();
+  const stderr = new Queue<StderrItem>();
   let exited = false;
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
@@ -81,7 +81,7 @@ export function scriptedTransport(
       frames.push({ frame: null, raw: '', error: problem! });
     },
     pushStderr(line) {
-      stderr.push(line);
+      stderr.push({ text: line });
     },
     endStdout() {
       frames.end();

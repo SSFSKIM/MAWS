@@ -922,7 +922,7 @@ export class EngineSession {
   }
 
   private async stderrLoop(transport: EngineTransport): Promise<void> {
-    for await (const line of transport.stderr) {
+    for await (const { text: line } of transport.stderr) {
       this.heard();
       this.stderrTail.push(line);
       if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift();

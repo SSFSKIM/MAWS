@@ -282,7 +282,7 @@ export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p:
     }
   })();
   const readingStderr = (async () => {
-    for await (const line of transport.stderr) {
+    for await (const { text: line } of transport.stderr) {
       stderr.push(line);
       log('stderr', { text: line });
     }
