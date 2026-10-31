@@ -5,6 +5,8 @@
 //   product's own guard, src/main/connectors/legacy-custody.ts, stands before every real safeStorage call);
 // - `addedListeners` / `loopbackPort`: the callback listener a Connect binds, exactly 127.0.0.1;
 // - `readSealedText` / `plaintextHits`: a sealed OAuth record's format and that no known value is readable in it;
+// - `openMachineSealed` (P5 O4): a format 2 record opened with the scratch profile's own custody key, as the adoption
+//   scene reads the grant this build made to seal the same record the way a pre-O4 build kept it;
 // - `journalTurns`: launches, and that no model turn ran, from a session's journal rows;
 // - `journalFrameShapes` / `blankResumeStartupRejection`: the frames of a journal as safe shapes, and the one inbound
 //   error result (no turn, cost or usage) the transition scene lets the old session's refused resume have (Decision Log 42);
@@ -12,17 +14,19 @@
 // - `scrubDiagnostic` / `boundedAcquire` / `boundedMetaRows`: a failed launch's evidence, an acquire's answer and a
 //   journal's meta rows reduced to allowlisted, scrubbed, size-bounded fields (never args, environment or raw frames);
 // - `isRetainedScratch`: which scratch files a scene scans for secrets (never the host token, the raw open log, a
-//   fixture's secrets inventory or a sealed record, which is scanned apart);
+//   fixture's secrets inventory, a sealed record, which is scanned apart, or the machine's custody key);
 // - `bearerCrossings`: a bearer presented to a server that did not issue it;
 // - `pageVariant` / `oncePageHtml`: H's page re-pointed at another server, and a page that calls once per click;
 // - `heldFate`: whether one held call was answered late by its instance, or its instance was torn down first;
 // - `attachIfClean`: a screenshot captured and attached only after the live documents scanned clean;
 // - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure;
 // - `shellQuoted` (P3-HD panel correction): a value as one literal /bin/sh word, for a generated launcher script.
+import { createDecipheriv } from 'node:crypto';
 import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { JournalReader } from '../../src/engine-host/journal';
+import { SEALED_FORMAT_V1, SEALED_FORMAT_V2 } from '../../src/shared/connectors/sealer';
 
 export interface CustodyFacts {
   mockKeychain: boolean; // main's `use-mock-keychain` switch
@@ -59,17 +63,35 @@ export function loopbackPort(address: string): number | null {
   return port <= 65_535 ? port : null;
 }
 
-export const SEALED_FORMAT = 'maws-connector-oauth/1'; // src/shared/connectors/sealer.ts SEALED_FORMAT_V1
+// P5 O4: format 1 is Electron safeStorage's (only the one-time adoption still reads it), format 2 the machine's key file
+export { SEALED_FORMAT_V1, SEALED_FORMAT_V2 };
+const SEALED_FORMATS: Readonly<Record<string, 1 | 2>> = { [SEALED_FORMAT_V1]: 1, [SEALED_FORMAT_V2]: 2 };
 
 // A sealed record's text: its format line, then one canonical base64 line of ciphertext, then nothing.
-export function readSealedText(text: string): { ok: true; ciphertext: Buffer } | { ok: false; why: 'format' | 'body' } {
+export function readSealedText(text: string): { ok: true; format: 1 | 2; ciphertext: Buffer } | { ok: false; why: 'format' | 'body' } {
   const lines = text.split('\n');
-  if (lines[0] !== SEALED_FORMAT) return { ok: false, why: 'format' };
+  const format = SEALED_FORMATS[lines[0] ?? ''];
+  if (format === undefined) return { ok: false, why: 'format' };
   const body = lines[1] ?? '';
   if (lines.length !== 3 || lines[2] !== '' || body === '' || !/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return { ok: false, why: 'body' };
   const ciphertext = Buffer.from(body, 'base64');
   if (ciphertext.toString('base64') !== body) return { ok: false, why: 'body' };
-  return { ok: true, ciphertext };
+  return { ok: true, format, ciphertext };
+}
+
+// P5 O4: a format 2 record's text (`<directory>/<id>.sealed`'s content) opened with `<directory>/key`, the machine's
+// custody (src/services/connectors/custody.ts, Interfaces §A): AES-256-GCM, nonce ‖ ciphertext ‖ tag (12, n, 16), the
+// connection id as associated data. Throws on any other format, key, id or tampered byte. Never writes.
+export function openMachineSealed(directory: string, connectionId: string, text: string): string {
+  const read = readSealedText(text);
+  if (!read.ok || read.format !== 2) throw new Error(`not a format 2 sealed record (${read.ok ? `format ${read.format}` : read.why})`);
+  const key = readFileSync(join(directory, 'key'));
+  const bytes = read.ciphertext;
+  if (key.length !== 32 || bytes.length < 12 + 16) throw new Error('a format 2 record needs a 32-byte key and a nonce and a tag');
+  const decipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12));
+  decipher.setAAD(Buffer.from(connectionId, 'utf8'));
+  decipher.setAuthTag(bytes.subarray(bytes.length - 16));
+  return Buffer.concat([decipher.update(bytes.subarray(12, bytes.length - 16)), decipher.final()]).toString('utf8');
 }
 
 // The indexes of the non-empty `needles` readable in `bytes`, as UTF-8 or as Latin-1: never the values themselves.
@@ -359,6 +381,7 @@ export function isRetainedScratch(relative: string): boolean {
   if (relative === 'ud/supervisor/host.token' || relative === 'open.log') return false;
   if (/^oauth-[^/]+-secrets\.jsonl$/.test(relative)) return false;
   if (/^ud\/connectors\/oauth\/[^/]+\.sealed$/.test(relative)) return false;
+  if (relative === 'ud/connectors/oauth/key') return false; // P5 O4: the machine's custody key, a credential
   return true;
 }
 
