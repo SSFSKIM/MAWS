@@ -621,11 +621,21 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
     expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
   };
+  // O16 M2b: on the daemon shape mawsd's spine is kept loaded through the release (MAWS_SPINE_QUIET_MS, D6's measured
+  // seam). With the product's quiet, the idle time, the spine's quiet clock and the row's idle clock both run 10 s from
+  // the turn's end. When the spine releases first, the release's own events load it again, and that load's pushes start a
+  // fresh engine host in place of the one exiting when idle, whose lock the scene then reads (hosted run 41217185059).
+  // The race is mawsd's, and is not what this scene proves. The bounds still hold with the spine loaded: mawsd's exit
+  // waits on no spine (clocks.ts: no client for the idle time, both hosts parked, no hold); its exit is due 10 s after the
+  // app went, before the park, which comes at least 10 s after the turn's end. So mawsd exits at the park's evaluation, and
+  // its spine's stop is bounded by SPINE_TIMING.stopSettleMs (5 s). That is within the IDLE_MS + 15 s poll that
+  // `parkedThenGone` gives mawsd after the park. 60 s outlasts every scratch: mawsd exits before its spine's quiet ends.
+  const daemonEnv = { ...env, MAWS_SPINE_QUIET_MS: '60000' };
   if (DAEMON) {
     await withScratch('idle-keep', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
       s.useStub({ rowMs: 1500 }); // O16 M2b
-      const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
+      const first = await s.launch({ ...daemonEnv, MAWS_E2E_QUIT_ANSWER: 'keep' });
       const status = await s.ready(first.page);
       const id = await s.record(first.page);
       await startTurn(first.page, s, id, fixture, 'turn 1');
@@ -640,7 +650,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     await withScratch('idle-kill', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
       s.useStub({ rowMs: 1500 }); // O16 M2b
-      const run = await s.launch(env);
+      const run = await s.launch(daemonEnv);
       const status = await s.ready(run.page);
       const id = await s.record(run.page);
       await startTurn(run.page, s, id, fixture, 'turn 1');
