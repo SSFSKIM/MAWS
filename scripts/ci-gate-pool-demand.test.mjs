@@ -287,3 +287,15 @@ test('direct groups consume no pool waiter, from the variable or the override; m
   assert.equal(demand(tree, sha, `${trailers}\nHosted-Route: direct`).stdout, 'none\n');
   assert.equal(demand(tree, sha, `${trailers}\nHosted-Route: mirror`, { ...variables, HOSTED_MAC_ROUTE: 'direct' }).stdout, '2x2\n');
 }));
+
+
+test('targetOutputs passes the configured hosted quota to the committed planner', () => fixture(({ tree, sha }) => {
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [] };
+  const outputs = (cap) => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', `
+    import { targetOutputs } from ${JSON.stringify(new URL('./ci-gate-pool-demand.mjs', import.meta.url).href)};
+    console.log(JSON.stringify(targetOutputs(process.argv[1], process.argv[2])));
+  `, tree, sha], { encoding: 'utf8', env: { ...process.env, ...variables, HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_CAP: cap,
+    HEAD_MESSAGE: `Gates: e2e:tools\nMac-Backlog: ${JSON.stringify(sample)}` } }));
+  assert.equal(JSON.parse(outputs('5').e2e)[0].overflow, true);
+  assert.equal(JSON.parse(outputs('50').e2e)[0].runner, '"macos-26"');
+}));

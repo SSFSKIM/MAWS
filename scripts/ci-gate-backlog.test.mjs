@@ -1,5 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -135,4 +138,66 @@ test('every MAWS page, including a short final page, must match the count before
     if (path.includes('/jobs?')) return { total_count: 101, jobs: path.includes('page=2') ? [] : Array.from({ length: 100 }, (_, i) => job(i + 1, ['ci-kit-mac-solo'])) };
     return { total_count: 1, workflow_runs: [{ id: 1 }] };
   } }), /incomplete/);
+});
+
+test('the destination repo owns the runner read, completeness guard and EC2 queue', async () => {
+  const fixture = apiFixture({ runs: { MAWS: [{ id: 1 }] }, jobs: { MAWS: [job(1, ['ci-kit-mac-solo']), job(2, ['macos-26'])] } });
+  const env = { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: 'neworg/MAWS' };
+  const result = await sampleBacklog({ ...fixture, now: () => now, env });
+  assert.equal(result.ec2Queued, 1);
+  assert.equal(result.hostedQueued, 1);
+  assert.match(fixture.calls[0], /^repos\/neworg\/MAWS\/actions\/runners\?/);
+  assert.ok(fixture.calls.every((path) => path.startsWith('repos/neworg/MAWS/')));
+  for (const endpoint of ['/runners?', '/runs?status=queued', '/runs?status=in_progress', '/jobs?']) {
+    await assert.rejects(sampleBacklog({ env, now: () => now, api: (path) => {
+      const data = fixture.api(path);
+      return path.includes(endpoint) ? { ...data, total_count: 4 } : data;
+    } }), /incomplete/, endpoint);
+  }
+});
+
+test('MAWS is counted first and in full even when omitted or repeated in the quota list', async () => {
+  for (const list of ['neworg/other', 'neworg/other, neworg/MAWS neworg/MAWS']) {
+    const fixture = apiFixture({ runs: { MAWS: [{ id: 1 }] }, jobs: { MAWS: [job(1, ['ci-kit-mac-solo'])] } });
+    const result = await sampleBacklog({ ...fixture, now: () => now, maxCalls: 4, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } });
+    assert.equal(result.ec2Queued, 1);
+    assert.deepEqual(result.partial, ['neworg/other']);
+    await assert.rejects(sampleBacklog({ ...fixture, maxCalls: 1, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } }), /cap/);
+  }
+});
+
+test('malformed quota repositories are refused before any API read', async () => {
+  for (const list of ['MAWS', 'https://github.com/neworg/MAWS', 'neworg/MAWS/extra', 'neworg/MAWS ../bad', ', ,']) {
+    const fixture = apiFixture();
+    await assert.rejects(sampleBacklog({ ...fixture, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } }), /HOSTED_MAC_REPOS/);
+    assert.deepEqual(fixture.calls, []);
+  }
+});
+
+test('the CLI cache separates repo moves and quota-list changes while sharing identical calls', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-backlog-config-'));
+  try {
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh
+printf '%s\\n' "$*" >> '${join(dir, 'calls')}'
+case "$*" in
+  *'/runners?'*) echo '${JSON.stringify({ total_count: 1, runners: [runner] })}' ;;
+  *'/jobs?'*) echo '${JSON.stringify({ total_count: 1, jobs: [job(1, ['macos-26'])] })}' ;;
+  *'status=queued'*) echo '{"total_count":1,"workflow_runs":[{"id":1}]}' ;;
+  *) echo '{"total_count":0,"workflow_runs":[]}' ;;
+esac
+`);
+    chmodSync(join(dir, 'gh'), 0o755);
+    const sample = (repo, repos) => {
+      const output = execFileSync(process.execPath, [fileURLToPath(new URL('./ci-gate-backlog.mjs', import.meta.url))], {
+        encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: dir, REPO: repo, HOSTED_MAC_REPOS: repos },
+      });
+      return JSON.parse(output.slice('Mac-Backlog: '.length));
+    };
+    assert.equal(sample('', '').hostedQueued, 5);
+    assert.equal(sample('neworg/MAWS', 'neworg/MAWS').hostedQueued, 1);
+    assert.equal(sample('neworg/MAWS', 'neworg/MAWS,neworg/other').hostedQueued, 2);
+    const calls = readFileSync(join(dir, 'calls'), 'utf8');
+    assert.equal(sample('neworg/MAWS', 'neworg/MAWS,neworg/other').hostedQueued, 2);
+    assert.equal(readFileSync(join(dir, 'calls'), 'utf8'), calls);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
