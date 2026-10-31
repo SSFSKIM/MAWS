@@ -424,7 +424,7 @@ describe('queue submission survives a crash around delivery', () => {
     ], paused: false });
     const t = await harness({ store, recovered: false });
     t.h.turn = true;
-    await t.queue.adopt({ written: new Set([SUBMITTED, WRITTEN]), unended: [] });
+    await t.queue.adopt({ written: new Set([SUBMITTED, WRITTEN]), unended: [], ended: new Set() });
     expect(t.queue.state.entries.map((e) => [e.queueId, e.state])).toEqual([['q-rel', 'released'], ['q-wr', 'submitting'], ['q-next', 'queued']]);
     expect(t.rows.filter((r) => r.event === 'queue' && r.action === 'recovered')).toEqual([]); // the launch's own recovery wrote it
     expect(notices(t.rows)).toEqual([]);
@@ -436,7 +436,7 @@ describe('queue submission survives a crash around delivery', () => {
     const lost = new MemorySessionStateStore();
     await lost.saveQueue(ID, { entries: [entry({ queueId: 'q-lost', state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
     const u = await harness({ store: lost, recovered: false });
-    await u.queue.adopt({ written: new Set(), unended: [] });
+    await u.queue.adopt({ written: new Set(), unended: [], ended: new Set() });
     expect(u.queue.state).toMatchObject({ paused: true, pauseReason: 'uncertain', entries: [{ queueId: 'q-lost', state: 'queued', uncertain: true }] });
     expect(notices(u.rows)).toEqual(['queue:uncertain:q-lost']);
   });

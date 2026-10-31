@@ -71,6 +71,9 @@ export interface LaunchPlan {
   sessionId: SessionId;
   gateway: 'gateway' | 'direct'; // additive to the X6 shape: the spawn meta row and the status read it without re-deriving it from env
   engineVersion: string; // the binary's `--version` at this launch (W13); the spawn meta row records it per session
+  // P5 O16 M3a fix wave 1 (D58): an adopter's plan, whose `env` was rebuilt as this build would build it now (the spawn
+  // row names only its keys): never the engine's real environment, so nothing attests or resolves against it
+  environmentRebuilt?: true;
 }
 
 // An `extraSettings` (or spec field) that would displace something X6 guarantees. `session.launch` answers

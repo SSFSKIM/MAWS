@@ -24,6 +24,8 @@ export interface HostedManagerConfig {
   stub: string; // the engine binary the probe answers
   binary: string; // the session host binary
   version: string; // the engine version the probe answers
+  hostArgs?: string[]; // the session host binary's test seams (`--ring-cap-bytes`)
+  env?: Record<string, string>; // captured beside PATH (a test's CLAUDE_CONFIG_DIR)
 }
 
 const config = JSON.parse(process.argv[2] ?? '{}') as HostedManagerConfig;
@@ -38,11 +40,11 @@ const ipc = registerEngineIpc(on, emit, {
   userData: config.userData, replayEnabled: false, log: () => {},
   holder: {
     gateSocket: join(config.userData, 'supervisor', 'gate.sock'),
-    start: (launchId) => startSessionHost(launchId, { hostsDir: hostsDirOf(join(config.userData, 'supervisor')), binary: config.binary, userData: config.userData, tmpdir: tmpdir(), log: () => {} }),
+    start: (launchId) => startSessionHost(launchId, { hostsDir: hostsDirOf(join(config.userData, 'supervisor')), binary: config.binary, userData: config.userData, tmpdir: tmpdir(), log: () => {}, hostArgs: config.hostArgs }),
   },
   binaryProbe: async () => ({ path: config.stub, testedVersion: config.version, version: config.version, ok: true, error: null }),
   checkRelay: async () => ({ url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: new Date().toISOString(), error: null }),
-  captureEnv: async () => ({ PATH: '/usr/bin:/bin' }),
+  captureEnv: async () => ({ PATH: '/usr/bin:/bin', ...config.env }),
 });
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {

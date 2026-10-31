@@ -154,6 +154,23 @@ export interface EngineSessionOptions {
   // Nothing is spawned; the journal is the launch's own, resumed; whether an interrupt was owed and the observer seen
   // come from the state file.
   adopted?: AdoptedLaunch;
+  reinitializeMs?: number; // P5 O16 M3a fix wave 1: the adopted re-initialize's wait before it logs and waits on (tests)
+}
+
+// P5 O16 M3a fix wave 1 (D58): how long an adopted engine's re-initialize is waited for before the wait is logged and
+// renewed. Never a failure: the engine answers control requests between the steps of its turn, so an engine the
+// handover found mid-turn can sit on the answer for as long as one step runs (a Bash call up to its 600 s ceiling)
+// under the load of the handover itself, well above a fresh initialize's 120 s long class. Expiry with the process alive
+// only logs and keeps waiting; a definite failure (an error answer, the output closed, the process gone) ends it.
+export const ADOPTED_REINITIALIZE_MS = 600_000;
+
+// P5 O16 M3a fix wave 1: why an adoption did not become a served session. `abandoned`: it failed before its first
+// write (the fold or the queue's restore), so its session host and engine were left running for the next start.
+export class AdoptionFailed extends Error {
+  constructor(message: string, readonly abandoned: boolean) {
+    super(message);
+    this.name = 'AdoptionFailed';
+  }
 }
 
 export interface AdoptedLaunch {
@@ -269,6 +286,12 @@ export class EngineSession {
   private releaseDeferred: boolean; // an adopted process's queue releases nothing until its re-initialize is done
   private lastMessageUuid: string | null = null;
   private thinkingDisplayRequestId: RequestId | null = null; // the startup display preference's request, whose late answer warns nobody
+  // fix wave 1: the dispatch gate from the catch-up until the re-initialize is answered (the requests it holds, in order;
+  // null when open); the re-initialize's renewing wait; the adoption's outcome
+  private handshakeHeld: ControlRequestFrame[] | null = null;
+  private reinitializeWait: ReturnType<typeof setTimeout> | null = null;
+  readonly adoption: Promise<void>;
+  private settleAdoption: (error: AdoptionFailed | null) => void = () => {};
   // P5 O16 M3 end
 
   constructor(private readonly opts: EngineSessionOptions) {
@@ -286,6 +309,17 @@ export class EngineSession {
     this.lastUsedAt = this.launchedAt; // C12
     this.observerSaved = opts.adopted?.observerSeen ?? false; // P5 O16 M3 (D53): already in the state file
     this.releaseDeferred = opts.adopted !== undefined; // P5 O16 M3
+    // fix wave 1: settled once, at ready or at the failure; a launch that adopts nothing has nothing to wait for
+    this.adoption = opts.adopted === undefined ? Promise.resolve() : new Promise<void>((resolve, reject) => {
+      let settled = false;
+      this.settleAdoption = (error) => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error);
+        else resolve();
+      };
+    });
+    this.adoption.catch(() => {}); // the launcher observes it; never an unhandled rejection here
     // P5 O2 M2: the durable crons, in the scheduled-tasks file of the spawn directory or the engine's current one
     this.durableCrons = new DurableCronSource({
       engineSessionId: opts.plan.sessionId, dirs: () => [this.plan.cwd, this.tracker.engineCwd ?? this.spec.cwd], read: opts.scheduledTasksFile, log: this.log,
@@ -657,6 +691,9 @@ export class EngineSession {
         this.mcpServerCommands = answer.mcpServers.flatMap((server) => {
           const config = (server as { config?: { type?: unknown; command?: unknown; args?: unknown } }).config;
           if (config?.type !== 'stdio' || typeof config.command !== 'string') return [];
+          // P5 O16 M3a fix wave 1: a rebuilt environment's PATH is not the engine's, so a bare command resolved through
+          // it could match the wrong process; it is left unmatched instead, and its process counts as work
+          if (this.plan.environmentRebuilt === true && !config.command.includes('/')) return [];
           const argv = [config.command, ...(Array.isArray(config.args) ? config.args.filter((a): a is string => typeof a === 'string') : [])];
           return [expectedArgv(argv, { path: this.plan.env.PATH, cwd: this.plan.cwd })]; // D52: as the kernel runs it, through the launch's PATH
         });
@@ -773,7 +810,10 @@ export class EngineSession {
   // P3-HD start: the launch facts route D's observations are tied to (connectors/provenance.ts): this launch's id, its
   // spawn cwd, the environment its plan handed the engine, the flag settings MAWS passed it and the local-scope key
   // captured before it spawned. Host-only: never part of `status()`, a journal row or an IPC answer.
-  connectorLaunchContext(): ConnectorLaunchContext {
+  // P5 O16 M3a fix wave 1 (D58): an adopted launch's environment was rebuilt, never the one the engine runs with, so it
+  // attests nothing: its launch identity is unknown (null)
+  connectorLaunchContext(): ConnectorLaunchContext | null {
+    if (this.plan.environmentRebuilt === true) return null;
     this.launchContext ??= connectorLaunchContext({ appSessionId: this.spec.appSessionId, launchId: this.plan.launchId, cwd: this.plan.cwd, environment: this.plan.env, flagSettings: this.plan.flagSettings, localKey: this.opts.connectorLocalKey });
     return this.launchContext;
   }
@@ -924,7 +964,11 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer, fence });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
-    client.onInboundCancel((requestId) => this.maws.cancel(requestId)); // E1: the engine withdrew a tool call
+    client.onInboundCancel((requestId) => {
+      this.maws.cancel(requestId); // E1: the engine withdrew a tool call
+      // fix wave 1: a request the handshake's gate holds, withdrawn before it was dispatched, is never dispatched
+      if (this.handshakeHeld !== null) this.handshakeHeld = this.handshakeHeld.filter((req) => req.request_id !== requestId);
+    });
     // Host-issued reads and the startup display preference showed no error to anyone; only a human's late mutation
     // gets a notice that it may have applied after the reported failure.
     client.onLateResponse((late) => {
@@ -953,15 +997,24 @@ export class EngineSession {
     if (hooks) request.hooks = hooks;
     let init;
     try {
+      const reinitializeMs = this.opts.reinitializeMs ?? ADOPTED_REINITIALIZE_MS;
       init = await initialize(client, request, {
         onWritten: (requestId) => {
           this.initializeId = requestId;
           this.extendInitialize(); // hook frames read while the write was in flight
+          if (adopted) {
+            this.broker.awaitRedelivery(requestId); // D49: what its answer lists the engine still holds
+            this.awaitReinitialize(client, requestId, reinitializeMs);
+          }
         },
+        ...(adopted && { timeoutMs: 2 * reinitializeMs }), // renewed by awaitReinitialize before it can expire
       });
     } catch (error) {
       this.initializeFailed(error);
       return;
+    } finally {
+      if (this.reinitializeWait !== null) clearTimeout(this.reinitializeWait);
+      this.reinitializeWait = null;
     }
     if (this.processState !== 'initializing') return;
     this.handshakeDone = true;
@@ -1002,7 +1055,31 @@ export class EngineSession {
     }
     this.setProcess('ready');
     void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
-    if (adopted) await this.releaseAfterAdoption();
+    if (adopted) {
+      // fix wave 1: the gate opens; what it held is dispatched in order, as if it had arrived now
+      const held = this.handshakeHeld ?? [];
+      this.handshakeHeld = null;
+      for (const req of held) this.inbound(req);
+      this.settleAdoption(null);
+      await this.releaseAfterAdoption();
+    }
+  }
+
+  // fix wave 1 (D58): the adopted re-initialize's wait. At each `ms` with the request still unanswered and the process
+  // alive, the wait is logged and its deadline renewed: a slow engine is never a failed one.
+  private awaitReinitialize(client: ControlClient, requestId: RequestId, ms: number): void {
+    const started = Date.now();
+    const renew = () => {
+      this.reinitializeWait = setTimeout(() => {
+        this.reinitializeWait = null;
+        if (this.handshakeDone || this.processState !== 'initializing') return;
+        this.log(`re-initialize after the handover unanswered after ${Math.round((Date.now() - started) / 1000)} s; the engine is alive, still waiting`);
+        client.extendDeadline(requestId, 2 * ms, 'the last renewal of the adopted re-initialize');
+        renew();
+      }, ms);
+      this.reinitializeWait.unref?.();
+    };
+    renew();
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -1013,20 +1090,20 @@ export class EngineSession {
   // replay has caught up (`caughtUp`).
   private async adopt(adopted: AdoptedLaunch): Promise<void> {
     const transport = this.transport!;
-    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[] };
+    // fix wave 1: partial reader state is never trusted; a fold or a queue restore that fails is a failed adoption
+    let evidence: { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> };
     try {
       evidence = this.fold();
     } catch (error) {
-      // a journal the fold cannot read: the session is served without its restored state rather than not at all
-      this.log(`the adopted journal could not be folded: ${messageOf(error)}`);
-      this.outstanding ??= new OutstandingSet();
-      evidence = { written: new Set(), unended: [] };
+      this.abandonAdoption(`the journal could not be folded: ${messageOf(error)}`);
+      return;
     }
     try {
       await this.queue.adopt(evidence);
       this.queueAdopted = true;
     } catch (error) {
-      this.log(`the adopted queue could not be loaded: ${messageOf(error)}`);
+      this.abandonAdoption(`the queue could not be restored: ${messageOf(error)}`);
+      return;
     }
     this.sideQuestions.adopted(new Date().toISOString());
     this.emit('brokerItems', this.brokerItems()); // the fold told nothing: the restored list, once
@@ -1040,11 +1117,13 @@ export class EngineSession {
   // dispatched (D24): the normaliser's state (its events dropped), the status tracker and the work state's evidence (the
   // turn edges, the Stops, the cron tools and the task snapshots in journal order, D32), the broker, `!` mode, the
   // side-question log, the observed facts and the engine session ids. The outstanding set becomes the barrier. Answers
-  // the queue's evidence: the user frames written, and the steers no row ended.
-  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[] } {
+  // the queue's evidence: the user frames written, the steers no row ended, and the submissions a main-lane turn end
+  // names (fix wave 1). A gap an earlier adoption journaled leaves the work unknown until a later Stop (fix wave 1).
+  private fold(): { written: ReadonlySet<string>; unended: MessageUuid[]; ended: ReadonlySet<string> } {
     const outstanding = new OutstandingSet();
     const unsettled = new UnsettledFold();
     const written = new Set<string>();
+    const ended = new Set<string>();
     this.folding = true;
     this.tracker.restoring = true;
     try {
@@ -1062,10 +1141,14 @@ export class EngineSession {
           this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
           this.observeStop(frame);
         } else if (row.direction === 'out' && frame.type === 'user' && typeof frame.uuid === 'string') written.add(frame.uuid);
+        else if (row.direction === 'meta' && frame.event === 'host_attach' && frame.replayed === 'gap') this.tracker.gap();
         for (const event of events) {
           if (event.parentToolUseId !== null) continue;
           if (event.kind === 'turn.started') this.tracker.turnStarted(event.id);
-          else if (event.kind === 'turn.ended' && !event.isEchoReceipt) this.tracker.turnEnded();
+          else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
+            this.tracker.turnEnded();
+            for (const uuid of event.userMessageUuids) ended.add(uuid);
+          }
         }
         this.broker.restore(row);
         this.bashMode.restore(row);
@@ -1076,7 +1159,24 @@ export class EngineSession {
       this.tracker.restoring = false;
     }
     this.outstanding = outstanding;
-    return { written, unended: unsettled.unsettled() };
+    return { written, unended: unsettled.unsettled(), ended };
+  }
+
+  // fix wave 1: an adoption that failed before its first write: logged with its cause, never served, and its session host
+  // and engine left running (the transport detached, nothing killed or released), so the next start adopts them again.
+  // The journal stays the old manager's: no row of this engine host's is written.
+  private abandonAdoption(cause: string): void {
+    this.log(`the adoption failed: ${cause}; its session host and engine are left running`);
+    this.transport?.detach?.();
+    this.tracker.dispose();
+    this.journalClosed = true;
+    void this.journal.close().catch((error: unknown) => this.log(`journal not closed: ${messageOf(error)}`));
+    const summary: ExitSummary = { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 };
+    this.exitInfo = { code: null, signal: null, reason: 'unknown', at: new Date().toISOString(), release: null };
+    this.setProcess('exited');
+    this.settleAdoption(new AdoptionFailed(`the adoption failed: ${cause}`, true));
+    this.resolveExited(summary);
+    this.emit('exited', summary);
   }
 
   // A Stop the engine asked of the old manager's callback, or of one the barrier holds: the work state's evidence, applied
@@ -1108,6 +1208,7 @@ export class EngineSession {
       this.record('meta', { event: 'host_attach', holderId: this.transport?.holder?.holderId ?? null, fence: adopted.fence, frontier: adopted.frontier, replayed: 'exact', firstSeq: null });
     }
     const left = outstanding.result();
+    this.handshakeHeld = []; // fix wave 1: the gate stays closed through the owed interrupt and the re-initialize
     this.dispose(left);
     if (left.outbound.length > 0) this.log(`${left.outbound.length} request(s) of the previous engine host were never answered; a late answer to one is dropped`);
     const client = this.client;
@@ -1174,9 +1275,14 @@ export class EngineSession {
   }
 
   // The last conversation message the journal holds (an engine `user` or `assistant` frame of the main lane, or a `user`
-  // frame written to it): where a gap's reseed reads the transcript from.
+  // frame written to it, or the last record a reseed restored, fix wave 1): where a gap's reseed reads the transcript from.
   private noteMessage(row: JournalRow): void {
-    const f = row.frame as Frame & { uuid?: unknown; parent_tool_use_id?: unknown };
+    const f = row.frame as Frame & { uuid?: unknown; parent_tool_use_id?: unknown; event?: unknown; rows?: unknown };
+    if (row.direction === 'meta' && f?.event === 'transcript_reseed' && Array.isArray(f.rows)) {
+      const lastRow = (f.rows as { uuid?: unknown }[]).at(-1);
+      if (typeof lastRow?.uuid === 'string') this.lastMessageUuid = lastRow.uuid;
+      return;
+    }
     if (typeof f?.uuid !== 'string' || (f.type !== 'user' && f.type !== 'assistant')) return;
     if (row.direction === 'out' || (row.direction === 'in' && (f.parent_tool_use_id === null || f.parent_tool_use_id === undefined))) this.lastMessageUuid = f.uuid;
   }
@@ -1219,10 +1325,7 @@ export class EngineSession {
       return false;
     }
     const rows = records.slice(from + 1).filter((r) => (r.type === 'user' || r.type === 'assistant') && r.isSidechain !== true && typeof r.uuid === 'string');
-    if (rows.length > 0) {
-      this.record('meta', { event: 'transcript_reseed', rows });
-      this.lastMessageUuid = rows.at(-1)!.uuid as string;
-    }
+    if (rows.length > 0) this.record('meta', { event: 'transcript_reseed', rows }); // its row moves lastMessageUuid (noteMessage)
     return true;
   }
   // P5 O16 M3 end
@@ -1329,6 +1432,8 @@ export class EngineSession {
     // EOF also wins when an aborted write releases the gate: no more frames can
     // report its stalled_write problem, and a live child still needs the ladder.
     await Promise.resolve(); // an exit can close stdout and settle exited in the same turn
+    // fix wave 1 (D58): an adopted engine's output closed with its re-initialize unanswered is a definite failure
+    if (!processExited && this.opts.adopted && this.initializeId !== null && !this.handshakeDone && this.processState === 'initializing') this.reinitializeFailed('the engine\'s output closed before it answered', 'closed');
     if (!processExited) void this.terminate(false);
   }
 
@@ -1500,6 +1605,11 @@ export class EngineSession {
       if (EngineSession.protocolService(req)) this.maws.accept(req);
       return;
     }
+    // fix wave 1: from the catch-up until the re-initialize is answered, the rest wait in order (responses correlate)
+    if (this.handshakeHeld !== null && !EngineSession.protocolService(req)) {
+      this.handshakeHeld.push(req);
+      return;
+    }
     switch (req.request.subtype) {
       case 'hook_callback':
         void this.runHook(req);
@@ -1656,7 +1766,7 @@ export class EngineSession {
   }
 
   private extendInitialize(): void {
-    if (this.hooksBeforeAnswer === null || this.initializeId === null) return;
+    if (this.hooksBeforeAnswer === null || this.initializeId === null || this.opts.adopted) return; // fix wave 1: an adopted one's wait is awaitReinitialize's
     const running = this.hooksBeforeAnswer.size > 0 ? this.hookBoundMs : 0;
     this.client?.extendDeadline(this.initializeId, running + REQUEST_TIMEOUT_MS.long, 'the last SessionStart hook frame');
   }
@@ -1670,10 +1780,20 @@ export class EngineSession {
 
   // A failed initialize (error response, ControlTimeout, transport error before the response): `init_failed` with the
   // stderr seen so far, then the ladder without its end_session rung; `exited { crash }` only at the real exit.
+  // P5 O16 M3a fix wave 1 (D58): an adopted engine's failed re-initialize ends it the same way, its cause named.
   private initializeFailed(error: unknown): void {
     if (this.processState !== 'initializing') return; // exited before the response (handled at the exit) or stopped
-    this.writeInitFailed(messageOf(error), error instanceof ControlError ? error.code : null);
+    const code = error instanceof ControlError ? error.code : null;
+    if (this.opts.adopted) this.reinitializeFailed(messageOf(error), code);
+    else this.writeInitFailed(messageOf(error), code);
     void this.terminate(false);
+  }
+
+  private reinitializeFailed(cause: string, code: string | null): void {
+    const message = `re-initialize after the handover failed: ${cause}`;
+    this.log(message);
+    this.writeInitFailed(message, code);
+    this.settleAdoption(new AdoptionFailed(message, false));
   }
 
   private writeInitFailed(message: string, code: string | null): void {
@@ -1700,6 +1820,8 @@ export class EngineSession {
     this.heard(); // C3 corrective: the bound ends with the process
     // P5 O16 M3: an adopted process answered its first initialize long ago; an exit before the re-initialize is no init failure
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null && !this.opts.adopted) this.writeInitFailed('the process exited before answering initialize', 'exited');
+    // fix wave 1 (D58): an adopted engine gone with its re-initialize unanswered is that re-initialize's failure
+    if (this.opts.adopted && this.initializeId !== null && !this.handshakeDone && !this.initFailed && this.stopReason === null) this.reinitializeFailed('the process exited before it answered', 'exited');
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
     const { lost: lostApprovals } = this.broker.processExited();
     // E1 M5 fix: a blocking ask still published is attention lost like a pending AskUserQuestion (the architect's ruling
@@ -1723,6 +1845,7 @@ export class EngineSession {
       this.log(`exit not journaled: ${messageOf(error)}`);
     }
     this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release };
+    this.settleAdoption(new AdoptionFailed(`the adopted process exited (${reason}) before it was ready`, false)); // fix wave 1: no-op once ready
     if (this.observed) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status
     this.setProcess('exited');
     this.journalClosed = true;

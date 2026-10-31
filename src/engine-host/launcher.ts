@@ -26,7 +26,7 @@ import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './l
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
-import { EngineSession } from './session';
+import { AdoptionFailed, EngineSession } from './session';
 import { MAX_LINE_CHARS, type EngineTransport } from './transport';
 import { HostAdoptFailed, HostStartFailed, type StartedHost } from './holder/transport'; // P5 O16 M2; M3: HostAdoptFailed
 import { readCheckpoint } from './holder/checkpoint'; // P5 O16 M3
@@ -207,16 +207,19 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
 // spawn's binary, arguments, directory, ids and route; the environment as this build would build it now, cut to the
 // keys the spawn row names, since its values were never journaled and the host keeps them in memory only); the journal
 // resumed (a torn tail truncated) and the checkpoint read against its last row; the host attached at its fence + 1 and
-// read from the frontier; then the row, an EngineSession that spawns nothing (`adopted`), reserved and started. A host
-// that holds no engine is released instead. Every failure throws and leaves the host running for the next start.
+// read from the frontier; then the row, an EngineSession that spawns nothing (`adopted`), reserved and started, and its
+// outcome awaited (fix wave 1: the fold, the catch-up, the queue's restore and the re-initialize, until ready). A host
+// that holds no engine is released instead. Every failure throws and leaves the host running for the next start: one the
+// session gave up before its first write releases its exited row; one past `ADOPT_MS` is counted failed and left as it
+// is, its session still adopting, never killed for it.
 export const ADOPT_MS = 60_000;
 
-export function createAdopter(deps: LauncherDeps): (entry: RosterEntry) => Promise<AppSessionId> {
+export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId> {
   return async (entry) => {
-    const deadline = Date.now() + ADOPT_MS;
+    const deadline = Date.now() + adoptMs;
     const left = () => {
       const ms = deadline - Date.now();
-      if (ms <= 0) throw new HostAdoptFailed(`not adopted within ${ADOPT_MS / 1000} s`);
+      if (ms <= 0) throw new HostAdoptFailed(`not adopted within ${adoptMs / 1000} s`);
       return ms;
     };
     const hosting = deps.holder;
@@ -244,6 +247,7 @@ export function createAdopter(deps: LauncherDeps): (entry: RosterEntry) => Promi
     const plan: LaunchPlan = {
       ...built, bin: spawned.bin, args: spawned.args, cwd: spawned.cwd, launchId, sessionId: spawned.sessionId as SessionId, gateway: spawned.gateway, engineVersion: spawned.engineVersion,
       env: Object.fromEntries(Object.entries({ ...built.env, SMNS_MEMBER: String(entry.pid) }).filter(([key]) => keys.has(key))),
+      environmentRebuilt: true, // fix wave 1 (D58): never the engine's real environment
     };
     ownerOnlyJournalDirectory(dirname(dir));
     const journal = JournalWriter.resume(dir, launchId, { maxBytes: JOURNAL_MAX_BYTES });
@@ -277,7 +281,24 @@ export function createAdopter(deps: LauncherDeps): (entry: RosterEntry) => Promi
       throw error;
     }
     if (outcome.status === 'refused') throw new HostAdoptFailed(`its row was refused: ${outcome.message}`); // never: the row was held
-    deps.log(`${appSessionId}: adopted the session host of launch ${launchId} (pid ${entry.pid}, engine pid ${entry.child.pid}) at fence ${fence}, replaying from ${checkpoint.frontier + 1}`);
+    deps.log(`${appSessionId}: attached the session host of launch ${launchId} (pid ${entry.pid}, engine pid ${entry.child.pid}) at fence ${fence}, replaying from ${checkpoint.frontier + 1}`);
+    const session = outcome.session;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        session.adoption,
+        new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new HostAdoptFailed(`not ready within ${adoptMs / 1000} s; its session goes on adopting`)), Math.max(0, deadline - Date.now())))),
+      ]);
+    } catch (error) {
+      if (error instanceof AdoptionFailed && error.abandoned) {
+        await session.exited;
+        deps.table.release(appSessionId); // its exited row: nothing of it was served
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    deps.log(`${appSessionId}: adopted the session host of launch ${launchId}`);
     return appSessionId;
   };
 }

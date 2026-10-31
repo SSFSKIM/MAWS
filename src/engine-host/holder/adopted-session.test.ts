@@ -8,18 +8,18 @@
 // alone, a hook callback answered `{}`, a permission pending once), send the owed interrupt first and re-initialize under
 // request ids named apart from the old manager's, whose late answer is dropped; and a gap's conversation reseeded from
 // the engine's transcript. The real session host and a SIGKILLed manager are adoption.test.ts's.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { autoResponder, scriptedTransport, type ScriptedTransport } from '../conformance/scripted-transport';
-import { handshakeResponder, launchSpec } from '../conformance/session-harness';
+import { autoResponder, scriptedTransport, type Responder, type ScriptedTransport } from '../conformance/scripted-transport';
+import { handshakeResponder, INIT_RESPONSE, launchSpec } from '../conformance/session-harness';
 import { JournalWriter } from '../journal';
 import { buildLaunch, RELAY_URL, spawnMeta, type LaunchPlan } from '../launch';
-import { EngineSession, type AdoptedLaunch } from '../session';
+import { EngineSession, type AdoptedLaunch, type EngineSessionOptions } from '../session';
 import { MemorySessionStateStore } from '../store/memory-session-state-store';
 import { ORPHANED_CALL_TEXT } from '../tool-server/server';
 import { launchRows } from './restore';
@@ -67,8 +67,8 @@ function predecessor(plan: LaunchPlan, write: (w: JournalWriter) => void, maxByt
   return last;
 }
 
-function adopter(plan: LaunchPlan, adopted: Partial<AdoptedLaunch> = {}, store = new MemorySessionStateStore()) {
-  const transport = scriptedTransport({ holder: { pid: 4100, holderId: plan.launchId, fence: 2 }, pid: 4101, onWrite: autoResponder(handshakeResponder({ interrupt: () => ({ response: { still_queued: [] } }) })) });
+function adopter(plan: LaunchPlan, adopted: Partial<AdoptedLaunch> = {}, store = new MemorySessionStateStore(), opts: { responder?: Responder; session?: Partial<EngineSessionOptions> } = {}) {
+  const transport = scriptedTransport({ holder: { pid: 4100, holderId: plan.launchId, fence: 2 }, pid: 4101, onWrite: autoResponder(handshakeResponder({ interrupt: () => ({ response: { still_queued: [] } }), ...opts.responder })) });
   const journal = JournalWriter.resume(dir, plan.launchId, { maxBytes: 1_000_000 });
   const logs: string[] = [];
   const session = new EngineSession({
@@ -76,13 +76,17 @@ function adopter(plan: LaunchPlan, adopted: Partial<AdoptedLaunch> = {}, store =
     reconnect: true, reconnectTrigger: 'host_restart', launchKind: 'adopted',
     holder: { pid: 4100, holderId: plan.launchId, binary: '/x/maws-session-host' },
     adopted: { fence: 2, frontier: 0, owedInterrupt: false, observerSeen: false, ...adopted },
+    ...opts.session,
   });
+  const outcome: { settled: 'ready' | Error | null } = { settled: null };
+  session.adoption.then(() => void (outcome.settled = 'ready'), (error: Error) => void (outcome.settled = error));
   const events: SessionEvent[] = [];
   let attention = 0;
   session.on('events', (batch) => events.push(...batch));
   session.on('brokerItems', () => void (attention += 1));
   const rows = (): JournalRow[] => [...launchRows(dir, plan.launchId)];
-  return { session, transport, journal, events, logs, rows, attention: () => attention };
+  const caughtUp = () => transport.pushProblem({ kind: 'host_caught_up', message: 'caught up', length: 0, typeGuess: null });
+  return { session, transport, journal, events, logs, rows, attention: () => attention, outcome, caughtUp };
 }
 
 const responses = (t: ScriptedTransport) => t.writes.filter((w) => w.type === 'control_response') as { response: { request_id: string; response?: { mcp_response?: { result?: { isError?: boolean; content?: { text?: string }[] } } } } }[];
@@ -238,6 +242,245 @@ describe('an adopted session', () => {
     expect(a.session.queue.isPaused).toBe(true);
     expect(a.events.some((e) => e.kind === 'notice.posted' && e.key === 'queue:uncertain:q-1')).toBe(true);
     expect(a.transport.writes.filter((w) => w.type === 'user')).toEqual([]);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+});
+
+// M3a fix wave 1 (the task review's findings 1 to 6 and 8; D49, D58)
+const stopRows = (w: JournalWriter, id = 'e-stop') => {
+  w.row('in', { type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_crons: [], background_tasks: [] } } });
+  w.row('out', { type: 'control_response', response: { subtype: 'success', request_id: id, response: {} } });
+};
+const permission = (id: string) => ({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'ls' }, tool_use_id: `toolu_${id}` } });
+const initFailed = (rows: JournalRow[]) => rows.filter((row) => (row.frame as { event?: string }).event === 'init_failed').map((row) => (row.frame as { message: string }).message);
+const ended = (a: ReturnType<typeof adopter>) => a.transport.calls.some((c) => c.startsWith('kill:'));
+
+describe('an adopted session, fix wave 1', () => {
+  it('a journal the fold cannot read is a failed adoption: never served, nothing written, its host and engine left running', async () => {
+    const plan = planOf();
+    const last = predecessor(plan, (w) => w.row('in', call('e-ask', 8, 'ask', { questions: [question] }, 'toolu_ask')));
+    appendFileSync(join(dir, `${plan.launchId}.jsonl`), `{broken\n${JSON.stringify({ seq: last + 2, at: new Date().toISOString(), direction: 'meta', frame: { event: 'tail' } })}\n`);
+    const a = adopter(plan);
+    await a.session.start();
+    const summary = await a.session.exited;
+    expect(a.outcome.settled).toBeInstanceOf(Error);
+    expect((a.outcome.settled as Error).message).toMatch(/could not be folded/);
+    expect(a.logs.some((line) => line.includes('the adoption failed') && line.includes('could not be folded') && line.includes('left running'))).toBe(true);
+    expect(summary.reason).toBe('unknown');
+    expect(a.session.lifecycle).not.toBe('ready');
+    expect(a.transport.writes).toEqual([]);
+    expect(a.transport.calls).toEqual(['detach']); // never endInput or a kill
+    expect(readFileSync(join(dir, `${plan.launchId}.jsonl`), 'utf8').trim().split('\n').at(-1)).toContain('"event":"tail"'); // the journal is the old manager's still
+  });
+
+  it('a queue the adoption cannot restore is a failed adoption too', async () => {
+    const plan = planOf();
+    predecessor(plan, () => {});
+    const store = new MemorySessionStateStore();
+    store.loadQueue = () => Promise.reject(new Error('EIO: the state file could not be read'));
+    const a = adopter(plan, {}, store);
+    await a.session.start();
+    await a.session.exited;
+    expect((a.outcome.settled as Error).message).toMatch(/queue.*EIO/);
+    expect(a.transport.writes).toEqual([]);
+    expect(a.transport.calls).toEqual(['detach']);
+  });
+
+  it('a submission the journal already shows completed is settled at the adoption, never left live or resent', async () => {
+    const plan = planOf();
+    const uuid = '66666666-6666-4666-8666-666666666666' as MessageUuid;
+    // the fixture's first turn's result, naming the prompt by the uuid this launch wrote it under
+    const fixture = readFileSync(resolve(__dirname, '..', '..', '..', 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as JournalRow);
+    const recorded = (fixture.find((row) => row.direction === 'out' && (row.frame as { type?: string }).type === 'user')!.frame as { uuid: string }).uuid;
+    const result = JSON.parse(JSON.stringify(fixture.find((row) => (row.frame as { type?: string }).type === 'result')!.frame).replaceAll(recorded, uuid)) as Record<string, unknown>;
+    predecessor(plan, (w) => {
+      w.row('out', { type: 'user', uuid, message: { role: 'user', content: 'go' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+      w.row('in', { ...result, session_id: plan.sessionId });
+    });
+    const store = new MemorySessionStateStore();
+    await store.saveQueue(spec.appSessionId, { paused: false, entries: [{ queueId: 'q-done', appSessionId: spec.appSessionId, content: 'go', createdAt: '2026-10-31T10:00:00.000Z', state: 'released', messageUuid: uuid, submittedAt: '2026-10-31T10:00:01.000Z', uncertain: false, steer: false }] });
+    const a = adopter(plan, {}, store);
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    expect(a.session.queue.state.entries).toEqual([]);
+    expect((await store.loadQueue(spec.appSessionId)).entries).toEqual([]);
+    expect(a.transport.writes.filter((w) => w.type === 'user')).toEqual([]);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
+  it('a gap an earlier adoption journaled keeps the work unknown until a later Stop', async () => {
+    const plan = planOf();
+    predecessor(plan, (w) => {
+      stopRows(w);
+      w.row('meta', { event: 'host_attach', holderId: plan.launchId, fence: 2, frontier: 2, replayed: 'gap', firstSeq: 3 });
+    });
+    const a = adopter(plan);
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    expect(a.session.status().work!.unknown).toBe('host_gap');
+    a.transport.push({ type: 'control_request', request_id: 'e-stop-2', request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_crons: [], background_tasks: [] } } }, 1);
+    await until(() => a.session.status().work!.unknown === null, 'the later Stop');
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
+  it('a reseed an earlier adoption journaled is where the next gap reads the transcript from', async () => {
+    const plan = planOf();
+    const assistant = (uuid: string, text: string) => ({ type: 'assistant', uuid, parentUuid: 'u-1', timestamp: '2026-10-31T10:00:02.000Z', sessionId: plan.sessionId, message: { id: `msg_${uuid}`, model: 'claude-sonnet-5', role: 'assistant', content: [{ type: 'text', text }] } });
+    predecessor(plan, (w) => {
+      w.row('out', { type: 'user', uuid: 'u-1', message: { role: 'user', content: 'go' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+      w.row('meta', { event: 'transcript_reseed', rows: [assistant('a-1', 'first part')] });
+    });
+    const project = join(configDir, 'projects', '-tmp-maws-session');
+    mkdirSync(project, { recursive: true });
+    const records = [{ type: 'user', uuid: 'u-1', parentUuid: null, timestamp: '2026-10-31T10:00:00.000Z', sessionId: plan.sessionId, message: { role: 'user', content: 'go' } }, assistant('a-1', 'first part'), assistant('a-2', 'second part')];
+    writeFileSync(join(project, `${plan.sessionId}.jsonl`), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
+    const a = adopter(plan);
+    await a.session.start();
+    a.transport.pushProblem({ kind: 'host_gap', message: 'lost', length: 0, typeGuess: null, gap: { holderId: plan.launchId, fence: 2, frontier: 0, firstSeq: 3, lostFrom: 1 } });
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    const reseeds = a.rows().filter((row) => (row.frame as { event?: string }).event === 'transcript_reseed');
+    expect(reseeds.map((row) => (row.frame as { rows: { uuid: string }[] }).rows.map((r) => r.uuid))).toEqual([['a-1'], ['a-2']]);
+    expect(a.events.filter((e) => e.kind === 'assistant.block.complete').map((e) => (e as Extract<SessionEvent, { kind: 'assistant.block.complete' }>).block)).toEqual([expect.objectContaining({ text: 'second part' })]);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
+  it('dispatch stays held through the resume handshake; the protocol service and the answers pass, the held requests follow ready in order', async () => {
+    const plan = planOf();
+    predecessor(plan, () => {});
+    const a = adopter(plan, {}, undefined, { responder: { initialize: () => null } });
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+    a.transport.push(call('e-new', 3, 'ask', { questions: [question] }, 'toolu_new'), 1);
+    a.transport.push({ type: 'control_request', request_id: 'e-hook', request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_crons: [], background_tasks: [] } } }, 2);
+    a.transport.push(mcp('e-list', { id: 4, method: 'tools/list' }), 3);
+    await until(() => a.transport.journaledSeqs.length === 3, 'the frames journaled');
+    await sleep(20);
+    expect(a.session.lifecycle).toBe('initializing');
+    expect(a.session.asks()).toEqual([]);
+    expect(responses(a.transport).map((r) => r.response.request_id)).toEqual(['e-list']);
+    a.transport.answer('initialize', INIT_RESPONSE);
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    await until(() => responses(a.transport).some((r) => r.response.request_id === 'e-hook'), 'the held hook answered');
+    expect(a.session.asks().map((ask) => ask.askId)).toEqual(['toolu_new']);
+    expect(a.outcome.settled).toBe('ready');
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
+  it('D49: a restored card the re-initialize no longer lists clears on its answer; one it lists waits for the engine as any card does', async () => {
+    const plan = planOf();
+    predecessor(plan, (w) => {
+      w.row('in', permission('e-stale'));
+      w.row('in', permission('e-held'));
+    });
+    const a = adopter(plan, {}, undefined, { responder: { initialize: () => null } });
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+    const initializeId = a.transport.requestsOf('initialize')[0]!.request_id;
+    a.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: initializeId, response: INIT_RESPONSE, pending_permission_requests: [permission('e-held')] } }, 1);
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    a.transport.push(permission('e-current'), 2);
+    await until(() => a.session.brokerItems().length === 3, 'the live card');
+    const state = (id: string) => a.session.brokerItems().find((item) => item.request.requestId === id)?.state ?? null;
+    expect(await a.session.answer('e-stale' as never, { kind: 'permission', decision: 'allow', scope: 'once' } as never)).toBe('delivered');
+    expect(responses(a.transport).at(-1)!.response.request_id).toBe('e-stale');
+    expect(state('e-stale')).toBeNull(); // settled on the write: the engine drops an unknown id silently (D48 Q3)
+    expect(state('e-current')).toBe('pending');
+    expect(await a.session.answer('e-held' as never, { kind: 'permission', decision: 'allow', scope: 'once' } as never)).toBe('delivered');
+    expect(responses(a.transport).at(-1)!.response.request_id).toBe('e-held');
+    expect(state('e-held')).toBe('delivered'); // the engine's confirmation settles it
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
+  describe('D58: the re-initialize after the handover', () => {
+    it('an error answer ends the session through the ladder, naming its cause', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => ({ error: 'no session to resume' }) } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => ended(a), 'the ladder');
+      a.transport.exit(null, 'SIGTERM');
+      await a.session.exited;
+      expect(initFailed(a.rows())).toEqual([expect.stringMatching(/^re-initialize after the handover failed: .*no session to resume/)]);
+      expect(a.logs.some((line) => line.startsWith('re-initialize after the handover failed: '))).toBe(true);
+      expect((a.outcome.settled as Error).message).toMatch(/re-initialize after the handover failed/);
+    });
+
+    it('a closed stream ends it the same way', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => null } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+      a.transport.endStdout();
+      await until(() => ended(a), 'the ladder');
+      a.transport.exit(null, 'SIGTERM');
+      await a.session.exited;
+      expect(initFailed(a.rows())).toEqual([expect.stringMatching(/^re-initialize after the handover failed: .*output closed/)]);
+      expect(a.outcome.settled).toBeInstanceOf(Error);
+    });
+
+    it('the process gone before the answer is the failure, named', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => null } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+      a.transport.exit(null, 'SIGKILL');
+      const summary = await a.session.exited;
+      expect(summary.reason).toBe('crash');
+      expect(initFailed(a.rows())).toEqual([expect.stringMatching(/^re-initialize after the handover failed: .*exited/)]);
+      expect(a.outcome.settled).toBeInstanceOf(Error);
+    });
+
+    it('a slow answer is waited for past the bound with the process alive, never killed or cancelled', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => null }, session: { reinitializeMs: 20 } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+      await sleep(120);
+      expect(a.session.lifecycle).toBe('initializing');
+      expect(a.transport.calls).toEqual([]);
+      expect(a.transport.writes.filter((w) => w.type === 'control_cancel_request')).toEqual([]);
+      expect(a.logs.some((line) => line.includes('re-initialize') && line.includes('still waiting'))).toBe(true);
+      expect(a.outcome.settled).toBeNull();
+      a.transport.answer('initialize', INIT_RESPONSE);
+      await until(() => a.session.lifecycle === 'ready', 'ready');
+      expect(initFailed(a.rows())).toEqual([]);
+      expect(a.outcome.settled).toBe('ready');
+      a.transport.exit(0);
+      await a.session.exited;
+    });
+  });
+
+  it('an environment rebuilt for the adoption is never attested: no connector launch context, and a bare MCP command is not matched through it', async () => {
+    const plan = { ...planOf(), environmentRebuilt: true as const };
+    predecessor(plan, () => {});
+    const a = adopter(plan, {}, undefined, { responder: { mcp_status: () => ({ response: { mcpServers: [
+      { name: 'bare', status: 'connected', config: { type: 'stdio', command: 'sh', args: ['-c', 'true'] } },
+      { name: 'absolute', status: 'connected', config: { type: 'stdio', command: '/bin/sh', args: ['-c', 'true'] } },
+    ] } }) } });
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    expect(a.session.connectorLaunchContext()).toBeNull();
+    await a.session.readMcpCommands();
+    expect(a.session.mcpCommands()).toEqual([['/bin/sh', '-c', 'true']]);
     a.transport.exit(0);
     await a.session.exited;
   });

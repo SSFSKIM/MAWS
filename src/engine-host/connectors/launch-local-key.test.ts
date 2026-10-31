@@ -53,7 +53,7 @@ describe('the launch captures its local-scope key for route D only', () => {
     const { ipc, launch } = host();
     await launch(spec({ cwd: join(repo, 'sub') }));
     const session = ipc.table.get('app-key' as AppSessionId)!;
-    expect(session.connectorLaunchContext().localKey).toEqual({ kind: 'repository', key: repo });
+    expect(session.connectorLaunchContext()!.localKey).toEqual({ kind: 'repository', key: repo });
     // never in what the host reports, stores or journals
     expect(JSON.stringify(session.status())).not.toContain('"repository"');
     expect(readFileSync(session.status().journalPath, 'utf8')).not.toContain('"repository"');
@@ -65,9 +65,9 @@ describe('the launch captures its local-scope key for route D only', () => {
     mkdirSync(plain);
     const { ipc, launch } = host();
     await launch(spec({ cwd: plain }));
-    expect(ipc.table.get('app-key' as AppSessionId)!.connectorLaunchContext().localKey).toEqual({ kind: 'directory', key: plain });
+    expect(ipc.table.get('app-key' as AppSessionId)!.connectorLaunchContext()!.localKey).toEqual({ kind: 'directory', key: plain });
     await launch(spec({ appSessionId: 'app-replay' as AppSessionId, cwd: plain, replay: 'test/fixtures/engine/replay-handshake.jsonl' }));
-    expect(ipc.table.get('app-replay' as AppSessionId)!.connectorLaunchContext().localKey).toEqual({ kind: 'unidentified', why: 'notCaptured' });
+    expect(ipc.table.get('app-replay' as AppSessionId)!.connectorLaunchContext()!.localKey).toEqual({ kind: 'unidentified', why: 'notCaptured' });
     await ipc.shutdown(1_000);
   });
 });

@@ -53,6 +53,9 @@ export interface EngineTransport {
   // row, D44), which advances the acknowledged frontier
   readonly holder?: { pid: number; holderId: string; fence: number };
   journaled?(seq: number): void;
+  // P5 O16 M3a fix wave 1: an adoption given up before its first write lets the session host go without releasing it
+  // or touching its engine, so the next start adopts both again; the stream ends here
+  detach?(): void;
 }
 
 export class TransportClosed extends Error {

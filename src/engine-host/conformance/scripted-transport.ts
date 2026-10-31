@@ -33,7 +33,7 @@ class Queue<T> implements AsyncIterable<T> {
 
 export interface ScriptedTransport extends EngineTransport {
   readonly writes: StdinFrame[];
-  readonly calls: string[]; // 'endInput', 'kill:SIGTERM', 'kill:SIGKILL', in order
+  readonly calls: string[]; // 'endInput', 'kill:SIGTERM', 'kill:SIGKILL', 'detach' (a hosted one), in order
   readonly journaledSeqs: number[]; // P5 O16 M2: what the session reported journaled, under a `holder`
   push(frame: unknown, hseq?: number): void;
   pushProblem(problem: TransportItem['error'], hseq?: number): void;
@@ -57,7 +57,12 @@ export function scriptedTransport(
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
   const t: ScriptedTransport = {
     pid: opts.pid ?? 4242,
-    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq) }), // P5 O16 M2
+    // P5 O16 M2; `detach`, M3a fix wave 1: the stream ends, the process does not
+    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq), detach: () => {
+      t.calls.push('detach');
+      frames.end();
+      stderr.end();
+    } }),
     journaledSeqs: [],
     frames,
     stderr,

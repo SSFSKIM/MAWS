@@ -19,6 +19,7 @@ export interface StubEngineOptions {
   spawnChild?: boolean; // a `sleep` the stub parents, its pid on stderr
   countStdin?: boolean; // the frames it read, on stderr at its exit
   printEnv?: string[]; // these variables of its environment, on stderr at its start
+  burst?: { file: string; delayMs: number; lines: number }; // padded status lines once `file` exists (P5 O16 M3a fix wave 1)
 }
 
 // The bundle, written once into `dir`.
@@ -51,6 +52,7 @@ export function writeStubEngine(path: string, bundle: string, opts: StubEngineOp
   if (opts.spawnChild) args.push('--stub-spawn-child');
   if (opts.countStdin) args.push('--stub-count-stdin');
   if (opts.printEnv?.length) args.push('--stub-print-env', opts.printEnv.join(','));
+  if (opts.burst) args.push('--stub-burst', `${opts.burst.file},${opts.burst.delayMs},${opts.burst.lines}`);
   writeFileSync(path, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(bundle)} ${args.map(quote).join(' ')} -- "$@"\n`, { mode: 0o755 });
   return path;
 }

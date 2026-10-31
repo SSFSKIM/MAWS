@@ -93,6 +93,9 @@ export interface NormalizerState {
   // P5 O16 M3 (D23): the transcript records a gap's reseed showed (`meta transcript_reseed`), by uuid; the same message
   // read later from the stream is shown already, so it yields nothing again
   reseeded: Set<string>;
+  // P5 O16 M3 fix wave 1: the API message ids of the records a reseed showed; a surviving stream event of the same
+  // message (its start before the gap or after it) streams nothing again
+  reseededMessages: Set<string>;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -134,6 +137,7 @@ export class Normalizer {
       subagentMawsUses: new Set(), // P2-C3
       lastMessage: { text: null, final: false }, // P4-R7z
       reseeded: new Set(), // P5 O16 M3
+      reseededMessages: new Set(), // P5 O16 M3 fix wave 1
     };
   }
 
@@ -300,6 +304,7 @@ export class Normalizer {
         // P4-R7z: a response a hook made up streams no partials, since whether it is a reply is known only once it is
         // whole (the to-human plugin's answer after a final message is none; `assistant` decides)
         if (isHookMadeMessageId(current?.apiMessageId)) return;
+        if (current?.apiMessageId != null && this.state.reseededMessages.has(current.apiMessageId)) return; // P5 O16 M3: shown whole by a reseed
         const index = Number(event.index);
         const started = current?.started.find((s) => s.index === index);
         const blockType = started?.type ?? (delta.type === 'text_delta' ? 'text' : delta.type === 'thinking_delta' ? 'thinking' : delta.type === 'input_json_delta' ? 'tool_use' : String(delta.type));
@@ -642,21 +647,24 @@ export class Normalizer {
       // P2-C end
       // P5 O16 M3 (D23; holder design §3.3): output a session host's ring lost before an engine host read it, restored from
       // the engine's own transcript: each record's events as the disk reader maps them (fs/backfill.ts), ids and seq this
-      // row's, marked `reseeded`; stream events and tool progress inside the gap are not in a transcript. The lanes'
-      // streaming state is reset, so the next message start re-anchors it.
+      // row's, marked `reseeded`; stream events and tool progress inside the gap are not in a transcript. A record an
+      // earlier reseed showed yields nothing again. The lanes' streaming state is reset, but for a lane streaming a
+      // message the reseed showed, whose surviving deltas are dropped by its id; the next message start re-anchors it.
       case 'transcript_reseed': {
         const ctx = createBackfillContext({ sessionId: this.state.sessionId ?? ('unknown' as SessionId), agent: null });
         for (const raw of Array.isArray(meta.rows) ? meta.rows : []) {
           const parsed = TranscriptRecordSchema.safeParse(raw);
-          if (!parsed.success || typeof parsed.data.uuid !== 'string') continue;
+          if (!parsed.success || typeof parsed.data.uuid !== 'string' || this.state.reseeded.has(parsed.data.uuid)) continue;
           this.state.reseeded.add(parsed.data.uuid);
+          const messageId = (parsed.data as { message?: { id?: unknown } }).message?.id;
+          if (parsed.data.type === 'assistant' && typeof messageId === 'string') this.state.reseededMessages.add(messageId);
           for (const event of recordToEvents(parsed.data, ctx)) {
             const payload: Partial<SessionEvent> = { ...event };
             for (const key of ['id', 'sessionId', 'seq', 'at', 'agentId', 'parentToolUseId'] as const) delete payload[key]; // the base this row restamps
             out.emit(payload as EventPayload, { agentId: event.agentId, parentToolUseId: event.parentToolUseId }, { at: event.at, reseeded: true });
           }
         }
-        this.state.streaming.clear();
+        for (const [lane, current] of this.state.streaming) if (current.apiMessageId === null || !this.state.reseededMessages.has(current.apiMessageId)) this.state.streaming.delete(lane);
         return;
       }
       default:

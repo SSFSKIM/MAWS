@@ -267,6 +267,7 @@ class HostedTransport {
         return { pid: o.hostPid, holderId: o.holderId, fence: fence() };
       },
       journaled: (seq) => this.journaled(seq),
+      detach: () => this.detach(),
     };
     this.attachListeners(connection);
     if (adopt) {
@@ -497,6 +498,22 @@ class HostedTransport {
   private kill(name: 'SIGTERM' | 'SIGKILL'): void {
     if (this.ended || this.child === null) return;
     this.connection?.send({ t: 'signal', name, group: name === 'SIGKILL' });
+  }
+
+  // P5 O16 M3a fix wave 1: an adoption given up: the connection closed without `release` (the host keeps its engine and
+  // its ring for the next writer), nothing acknowledged further, no reconnect, the streams ended. The process has not
+  // exited, so `exited` stays pending.
+  private detach(): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.released = true; // nothing more is owed to this host by this transport: lost() reconnects nothing
+    this.frontier.dispose();
+    const connection = this.connection;
+    this.connection = null;
+    connection?.close();
+    this.frames.end();
+    this.stderr.end();
+    this.answered(() => true, new TransportClosed('the adoption was given up'));
   }
 
   // ---- the connection's loss -----------------------------------------------------------------------------------------

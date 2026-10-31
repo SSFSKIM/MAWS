@@ -1049,4 +1049,26 @@ describe('a gap reseeded from the transcript', () => {
     const rebuilt = feed(make(), [metaRow({ event: 'transcript_reseed', rows })], 7);
     expect(rebuilt).toEqual(events);
   });
+
+  // M3a fix wave 1 (review finding 6): a message the reseed restored whole streams nothing more; the stream events of
+  // it that survived the gap (by its API message id, whether its start came before the gap or after) are dropped, and
+  // a record a second reseed carries again yields nothing twice
+  it('drops the surviving stream events of a message the reseed restored whole, and never emits a reseeded record twice', () => {
+    const stream = (event: unknown) => inRow({ type: 'stream_event', uuid: `s-${JSON.stringify(event).length}`, session_id: 'sess-1', parent_tool_use_id: null, event });
+    const start = stream({ type: 'message_start', message: { id: 'msg_9', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } });
+    const block = stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+    const delta = stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'carried on' } });
+    const after = make();
+    feed(after, [metaRow({ event: 'transcript_reseed', rows })], 7);
+    expect(feed(after, [start, block, delta], 8)).toEqual([]);
+    const before = make();
+    feed(before, [start, block], 1);
+    feed(before, [metaRow({ event: 'transcript_reseed', rows })], 3);
+    expect(feed(before, [delta], 4)).toEqual([]);
+    expect(feed(before, [metaRow({ event: 'transcript_reseed', rows })], 5)).toEqual([]);
+    const other = make(); // another message's deltas still stream
+    feed(other, [metaRow({ event: 'transcript_reseed', rows })], 1);
+    const otherStart = stream({ type: 'message_start', message: { id: 'msg_10', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } });
+    expect(only(feed(other, [otherStart, block, delta], 2), 'assistant.block.delta')).toHaveLength(1);
+  });
 });

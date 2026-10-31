@@ -167,8 +167,9 @@ export class MessageQueue {
   // steers wait in the same engine queue); `unended`, the steers this launch wrote that its journal does not end, so its
   // exit still abandons them; a `submitting` entry whose frame the journal never shows written (`written`, the user
   // frames' uuids it holds) is the uncertain head of a paused queue, as at a recovery, since its write never happened.
-  // No `recovered` row: this launch's own first recovery wrote it.
-  async adopt(evidence: { written: ReadonlySet<string>; unended: readonly MessageUuid[] }): Promise<void> {
+  // No `recovered` row: this launch's own first recovery wrote it. A submission a main-lane turn end in the journal names
+  // (`ended`, fix wave 1) completed under the old manager after its last save: settled here, never left live or resent.
+  async adopt(evidence: { written: ReadonlySet<string>; unended: readonly MessageUuid[]; ended: ReadonlySet<string> }): Promise<void> {
     await queueTransaction(this.deps.store, this.deps.appSessionId, async () => {
       const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
       if (this.exitedUnloaded) return;
@@ -181,6 +182,10 @@ export class MessageQueue {
       const uncertain: QueueEntry[] = [];
       const kept: QueueEntry[] = [];
       for (const entry of loaded.entries) {
+        if (entry.state !== 'queued' && entry.messageUuid !== null && evidence.ended.has(entry.messageUuid)) {
+          this.clearAck(entry.queueId);
+          continue;
+        }
         if (entry.state === 'submitting' && (entry.messageUuid === null || !evidence.written.has(entry.messageUuid))) {
           this.transition('uncertain', { queueId: entry.queueId, messageUuid: entry.messageUuid });
           uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false });

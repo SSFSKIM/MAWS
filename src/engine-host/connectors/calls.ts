@@ -54,7 +54,7 @@ export interface ConnectorSessionView {
   readonly lifecycle: string;
   readonly control: ControlClient | null;
   status(): { launchId: string; cwd: string };
-  connectorLaunchContext?(): ConnectorLaunchContext; // P3-HD: the launch's facts, for route D's observations
+  connectorLaunchContext?(): ConnectorLaunchContext | null; // P3-HD: the launch's facts, for route D's observations; null when unknown (an adopted launch, P5 O16 M3a)
 }
 
 // The store's grant authority as the host's last check uses it (an ArtifactStore is one).
