@@ -58,8 +58,7 @@
 //                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
-import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -71,6 +70,7 @@ import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { REPO_ROOT } from './support/launch';
+import { fitTo, isSchema, sampleOf, samplesFor } from './support/cross-build-samples';
 import { isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
@@ -134,70 +134,9 @@ function builds(): { older: Build; newer: Build; here: Build; peer: Build } {
   return { older, newer, here, peer };
 }
 
-// ---- JSON Schema, as the manifest renders the wire (z.toJSONSchema) ---------------------------------------------------
+// ---- the samples (./support/cross-build-samples.ts) ------------------------------------------------------------------
 
-type Schema = Record<string, unknown>;
-const isSchema = (value: unknown): value is Schema => typeof value === 'object' && value !== null && !Array.isArray(value);
-function deref(schema: unknown, root: unknown): unknown {
-  if (!isSchema(schema) || typeof schema.$ref !== 'string' || !schema.$ref.startsWith('#/')) return schema;
-  return deref(schema.$ref.slice(2).split('/').reduce<unknown>((at, key) => (isSchema(at) ? at[key] : undefined), root), root);
-}
-
-// A value `schema` accepts, for a command's input: the first of every choice, each required property, the least of
-// every bound. A pattern or a format it does not know may defeat it; INPUTS then names that command's input.
-function sampleOf(schema: unknown, root: unknown = schema): unknown {
-  const s = deref(schema, root);
-  if (!isSchema(s)) return undefined;
-  if ('const' in s) return s.const;
-  if (Array.isArray(s.enum)) return s.enum[0];
-  for (const choice of [s.anyOf, s.oneOf, s.allOf]) if (Array.isArray(choice)) return sampleOf(choice[0], root);
-  const type = Array.isArray(s.type) ? (s.type.includes('null') ? 'null' : s.type[0]) : s.type;
-  if (type === 'object') {
-    const properties = isSchema(s.properties) ? s.properties : {};
-    return Object.fromEntries((Array.isArray(s.required) ? (s.required as string[]) : []).map((key) => [key, sampleOf(properties[key], root)]));
-  }
-  if (type === 'array') return Array.from({ length: Number(s.minItems ?? 0) }, () => sampleOf(s.items, root));
-  if (type === 'string') return s.format === 'uuid' ? randomUUID() : s.format === 'date-time' ? new Date().toISOString() : 'x'.repeat(Math.max(1, Number(s.minLength ?? 1)));
-  if (type === 'integer' || type === 'number') return typeof s.minimum === 'number' ? s.minimum : typeof s.exclusiveMinimum === 'number' ? s.exclusiveMinimum + 1 : 0;
-  if (type === 'boolean') return false;
-  if (type === 'null') return null;
-  return undefined; // no constraint: z.void(), z.unknown()
-}
-
-// `value` less every object key `schema` has no property for, through plain nested objects: what that build's own window
-// would send, so this checkout's launch defaults reach the other build's app as its renderer would build them.
-function fitTo(schema: unknown, value: unknown, root: unknown = schema): unknown {
-  const s = deref(schema, root);
-  if (!isSchema(s) || !isSchema(s.properties) || !isSchema(value)) return value;
-  const properties = s.properties;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => key in properties).map(([key, v]) => [key, fitTo(properties[key], v, root)]));
-}
-
-// A command the sampler cannot give an input to, named here with one its schema accepts. P5 O3-D M1: the spine's commands,
-// retagged `machine`, joined the manifest and so the probe; those whose sampled input their schema's own refinement
-// refuses are named here, each with an input that changes nothing on the scratch profile (an id no session has, a
-// journal that does not exist).
-const INPUTS: Record<string, unknown> = {
-  // P5 O3-E M2: the checkouts' two whose sample their pattern refuses (a hash's hex, the bytes' base64); an unknown
-  // session's, so nothing is written (the upload is refused as a value until M3, and after it for an unknown session)
-  'files.upload': { appSessionId: 'x', files: [{ name: 'x', bytes: '' }] },
-  'files.write': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64) },
-  'laneA.answer': { appSessionId: 'x', request: 'x', answer: { kind: 'permission', decision: 'deny' } }, // `allow` needs a scope
-  'laneA.model': { appSessionId: 'x', model: 'x' }, // a model, an effort or both
-  'session.drafts.set': { appSessionId: 'x', draft: null },
-  'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
-  'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
-};
-
-// A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under
-// `<userData>/` (an unknown session's only root) and answers `invalid_input` for anything else, so the scratch profile
-// holds a one-pixel PNG for it to read.
-const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-function inputsOf(s: Scratch): Record<string, unknown> {
-  const png = join(s.userData, 'cross-build-probe.png');
-  writeFileSync(png, Buffer.from(PIXEL_PNG, 'base64'));
-  return { ...INPUTS, 'side.screenshot.preview': { appSessionId: 'x', screenshot: { path: png, width: 1, height: 1 } } };
-}
+const inputsOf = (s: Scratch) => samplesFor(s.userData);
 
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
@@ -417,7 +356,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
     for (const [name, onOlder] of before) {
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
-      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
+      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in e2e/support/cross-build-samples.ts (INPUTS, or samplesFor for one naming a scratch path)`).toBe(true);
       if (!servedByAttacher(owner)) {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });
