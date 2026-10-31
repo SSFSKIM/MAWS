@@ -28,7 +28,7 @@ import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schem
 import { FIXTURE_SERVER, type CallLogEntry } from './connector-engine';
 import { launchMaws, type MawsLaunch } from './launch';
 import { installedEngine } from './p1-live';
-import { isAlive, killScratchProcesses } from './processes';
+import { endProfileProcesses, isAlive, killScratchProcesses } from './processes';
 import { tmpSocketDirOf } from './supervisor-socket';
 
 export const SERVER = 'fixture';
@@ -369,6 +369,17 @@ export class ConnectorScene {
     await run.maws.app.evaluate(({ app }) => app.quit());
     await Promise.race([run.exited, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('MAWS did not quit')), 30_000))]);
     this.note('app quit');
+  }
+
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D10): on the daemon shape the connectors run in the
+  // profile's `mawsd`, and the engine host keys their host leg on `mawsd`'s connection, not the app's attachment, so an
+  // app's quit no longer ends their state: the host's verified sources and route D's connections, the OAuth provider's
+  // held grants, the sign-in. A scene whose claim is a fresh owner after a relaunch (what a quit gave when the connectors
+  // were main's) ends the profile's machine after the quit: `mawsd`, its engine host and pty host, and their engines, as
+  // a machine's restart would. On the embedded shape they ended with the app; nothing is left to end.
+  async endMachine(): Promise<void> {
+    await endProfileProcesses(this.userData);
+    this.note('machine ended');
   }
 
   pidAlive(pid: number): boolean {

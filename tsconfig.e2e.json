@@ -84,6 +84,7 @@
     "src/services/index/sessions.ts",
     "src/services/index/side-threads.ts",
     "src/services/library/store.ts",
+    "src/services/connectors/deadlines.ts", // P5 O4 M2: the OAuth scene bounds a pending Connect's listener by the flow's own deadline
     "src/services/owner/answers.ts",
     "src/services/owner/prompt-state.ts",
     "src/services/owner/store.ts",
