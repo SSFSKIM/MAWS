@@ -75,4 +75,13 @@ describe('the probe’s reading of an answer', () => {
     expect(refusedSample(answerOf(registry as { ok: false; error: { code: string; message: string } }, { artifactId: 'x' }))).toBe(true);
     expect(refusedSample(answerOf({ ok: false, error: ipcError('invalid_input', 'the screenshot is not under userData') }, sample))).toBe(true);
   });
+
+  // (the re-review) only the unknown id's own answer is exempt: a handler that found the id and refused it otherwise
+  // never ran the command's work
+  it('counts a refusal that names the sampled id but is not the unknown id’s answer as a refused sample', () => {
+    const otherKind = answerOf({ ok: false, error: ipcError('invalid_input', `artifact ${sample.artifactId} is not a file artifact`) }, sample);
+    expect(otherKind).toEqual({ ok: false, code: 'invalid_input', message: 'artifact <sampled id> is not a file artifact' });
+    expect(refusedSample(otherKind)).toBe(true);
+    expect(refusedSample(answerOf({ ok: false, error: ipcError('invalid_input', `no artifact ${sample.artifactId} at revision 3`) }, sample))).toBe(true);
+  });
 });

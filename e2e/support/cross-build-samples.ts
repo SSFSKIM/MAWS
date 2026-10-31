@@ -60,10 +60,12 @@ export const answerOf = (result: { ok: boolean; error?: { code: string; message:
   result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: mintedIds(input).reduce((message, id) => message.replaceAll(id, SAMPLED_ID), result.error!.message) };
 
 // Whether an answer says the command was never reached with its sample: refused as input (`invalid_input`), by the
-// registry or by a handler's own check, unless the refusal is about the id the sample minted. That one (the engine host's
-// `no artifact <id>`, `invalid_input` by its store's convention) is the sample doing its job: an id nothing has, so it
-// changes nothing, answered by the command's own handler (P5 O4 M3: the library's reads, retagged `machine`).
-export const refusedSample = (answer: ProbeAnswer): boolean => !answer.ok && answer.code === 'invalid_input' && !answer.message.includes(SAMPLED_ID);
+// registry or by a handler's own check, unless it is the answer for an id nothing has. That one (the engine host's
+// `no artifact <id>`, `invalid_input` by its store's convention, for the id the sample minted) is the sample doing its
+// job: it changes nothing, answered by the command's own handler (P5 O4 M3: the library's reads, retagged `machine`).
+// Any other refusal, one naming the sampled id included (`artifact <id> is not a file artifact`), is a refused sample.
+const UNKNOWN_ID_ANSWERS = new Set([`no artifact ${SAMPLED_ID}`]);
+export const refusedSample = (answer: ProbeAnswer): boolean => !answer.ok && answer.code === 'invalid_input' && !UNKNOWN_ID_ANSWERS.has(answer.message);
 
 // A command the sampler cannot give an input to, named here with one its schema accepts. P5 O3-D M1: the spine's commands,
 // retagged `machine`, joined the manifest and so the probe; those whose sampled input their schema's own refinement
