@@ -773,6 +773,22 @@ describe('the yield', () => {
     if (sent === 0) expect(answer).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
   });
 
+  // (the re-review) the announcement itself the first trigger: its own load attempt meets the candidate, and the yield it
+  // makes holds its need for the lift
+  it('a dataset refresh that wakes a cold seam into a provisional yield is a need of the load its lift resumes', async () => {
+    let candidate: number | null = 777;
+    link.stream();
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }); // the trigger, met by the candidate
+    await vi.waitFor(() => expect(spine.state()).toBe('yielded'));
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+    expect(link.calls.filter((call) => call.name === 'engine.ping')).toHaveLength(1);
+  });
+
   // ...and a hold discarded takes its need with it: once confirmed, the next event's load is no longer wanted
   it('a provisional yield confirmed forgets the dataset refresh it held: a batch’s load after it stays unwanted', async () => {
     const spine = await provisionally(() => (live.has(777) ? 777 : null));

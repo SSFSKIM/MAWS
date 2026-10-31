@@ -163,6 +163,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // its lift resumes wanted.
   let wanted = false;
   let heldNeed = false; // a need a provisional yield's hold took: the load its lift resumes is wanted; its discard forgets it
+  const provisionallyYielded = () => yieldTo?.provisional != null; // read through a call: `ensure` yields as it runs
   const wantsOf = (reason: SpineTrigger) => reason !== 'event';
 
   const events = new SpineEvents(options.hosts, {
@@ -204,6 +205,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       const candidate = options.yieldCandidate?.() ?? null; // P5 O3-D M5 (D21): read at each load attempt
       if (candidate !== null) {
         yieldSpine(candidate, true);
+        if (reason === 'event' && provisionallyYielded()) heldNeed ||= wants; // an announced need that is the yield's trigger is held with it
         continue;
       }
       loading = load(reason, wants).finally(() => {
