@@ -28,7 +28,7 @@ import type { SpineLock } from '../services/settings/spine-lock';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { isAlive, procStartOf } from '../engine-host/supervisor-files';
 import { HELLO_HOLD_MS } from './relay';
-import { SpineEvents, SpineHostsAdapter, type EngineIntercept, type EngineLink } from './spine-hosts';
+import { NEED_EVENTS, SpineEvents, SpineHostsAdapter, type EngineIntercept, type EngineLink } from './spine-hosts';
 
 export type SpineState = 'cold' | 'loading' | 'loaded' | 'refused' | 'releasing' | 'yielded';
 export type SpineTrigger = 'command' | 'event' | 'endpoint';
@@ -156,17 +156,22 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // streaming), so the next host that is wanted is configured then. A command that waits on the engine host (the session
   // service's boot waits for its first streaming) is the need that wakes it: a wanted load's adapter tells the daemon
   // (`needEngine`); a command that never waits on it wakes nothing.
+  //
+  // P5 O4 D43: an agent's request announced through the engine host's events (NEED_EVENTS: its dataset refresh, which runs
+  // through the asking session's engine) is a need, not an event: the load it wakes from cold is wanted, and one it reaches
+  // that an event started (loading, loaded or releasing) becomes wanted.
   let wanted = false;
-  const need = (reason: SpineTrigger) => {
-    if (reason !== 'event') wanted = true;
-  };
+  const wantsOf = (reason: SpineTrigger) => reason !== 'event';
 
   const events = new SpineEvents(options.hosts, {
     log,
-    wake: () => {
+    wake: (name) => {
       if (!options.wakeOnEvents || stopped || !loadable()) return false;
-      void ensure('event').catch(() => {}); // a refusal is logged and kept by the load
+      void ensure('event', NEED_EVENTS.has(name)).catch(() => {}); // a refusal is logged and kept by the load
       return true;
+    },
+    need: () => {
+      if (loading || loaded) wanted = true; // a cold seam's is the wake's, above
     },
   });
 
@@ -181,12 +186,13 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     return state === 'refused' && refusal !== null && now() - refusal.at >= timing.refusalRetryMs;
   }
 
-  async function ensure(reason: SpineTrigger): Promise<SpineRoot> {
+  // `wants`: whether the load this trigger reaches may wake the engine host (`wanted`, above)
+  async function ensure(reason: SpineTrigger, wants = wantsOf(reason)): Promise<SpineRoot> {
     for (;;) {
       if (stopped) throw new SpineUnavailable('the daemon is exiting', 'exiting');
       if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid}, an app that runs its own`, 'yielded');
-      if (loaded && state === 'loaded') return need(reason), loaded.root;
-      if (loading) return need(reason), loading;
+      if (loaded && state === 'loaded') return (wanted ||= wants), loaded.root;
+      if (loading) return (wanted ||= wants), loading;
       if (releasing) {
         await releasing;
         continue;
@@ -197,16 +203,16 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
         yieldSpine(candidate, true);
         continue;
       }
-      loading = load(reason).finally(() => {
+      loading = load(reason, wants).finally(() => {
         loading = null;
       });
       return loading;
     }
   }
 
-  async function load(reason: SpineTrigger): Promise<SpineRoot> {
+  async function load(reason: SpineTrigger, wants: boolean): Promise<SpineRoot> {
     const started = now();
-    wanted = reason !== 'event';
+    wanted = wants;
     events.beginHold();
     set('loading', reason);
     log(`[spine] loading (${reason})`);
@@ -466,7 +472,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   return {
     state: () => state,
     status: () => ({ state, refused: state === 'refused' ? (refusal?.reason ?? null) : null, loadedAt, heldDropped: events.dropped }),
-    ensure,
+    ensure: (reason) => ensure(reason),
     root: () => (state === 'loaded' ? (loaded?.root ?? null) : null),
     quiet(quiet) {
       quietFact = quiet;

@@ -396,6 +396,55 @@ describe('the hold and the barrier', () => {
     await ping();
     expect(link.calls.map((call) => call.name)).toEqual(['engine.ping', 'engine.ping', 'engine.ping']);
   });
+
+  // P5 O4 D43 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md): an agent's dataset refresh is a need, not an event.
+  // The agent asked for it and it runs through the asking session's engine, so the load it wakes or reaches is wanted:
+  // its requests to an engine host that is not ready are sent (the supervisor holds them), never refused.
+  describe('an agent’s dataset refresh is a need', () => {
+    const REQUEST = '00000000-0000-4000-8000-000000000001';
+    const pinged = () => link.calls.filter((call) => call.name === 'engine.ping').length;
+
+    it('a cold seam woken by the announcement loads wanted: an engine host that is not ready is sent its requests', async () => {
+      const spine = seam();
+      link.leave();
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const answer = await roots.at(-1)!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(answer).not.toMatchObject({ error: { message: expect.stringContaining('not sent') } });
+      expect(pinged()).toBe(1);
+      expect(logs).toContain('[spine] loading (event)');
+    });
+
+    it('a batch’s load stays unwanted until the announcement reaches it, then is wanted', async () => {
+      const spine = seam();
+      link.leave();
+      link.batch('s1', 1);
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const ping = () => roots.at(-1)!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(await ping()).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('engine.ping not sent') } });
+      expect(pinged()).toBe(0); // a batch alone wakes no engine host
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+      await ping();
+      expect(pinged()).toBe(1);
+    });
+
+    it('an announcement reaching a batch’s load while it loads marks it wanted', async () => {
+      link.stream();
+      const release = link.gate('engine.sessions'); // the load's resync waits: the seam is loading
+      const spine = seam();
+      link.batch('s1', 1);
+      await vi.waitFor(() => expect(roots).toHaveLength(1));
+      expect(spine.state()).toBe('loading');
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST }); // held
+      release();
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const root = roots[0]!;
+      expect(root.seen).toContain(`held datasetRefresh ${REQUEST}`);
+      link.leave();
+      await root.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(pinged()).toBe(1);
+    });
+  });
 });
 
 describe('the release', () => {

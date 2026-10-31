@@ -171,8 +171,9 @@ afterEach(async () => {
 // mawsd's timeline in case (e): an app's spine command loads the spine and its attachment wakes the engine host, which
 // the load's parts configure; the app gone, the spine releases on its quiet clock and the host is asked to exit when idle;
 // then a session's idle release sends its events, which load the spine again, and the host exits (its last row released)
-// as the first of that load's requests reaches it. Answers the host, gone.
-async function raceTheIdleExit(): Promise<FakeSupervisor> {
+// as the first of that load's requests reaches it. Answers the host, gone. `announce` is what the host sends as it goes: by
+// default the release's batch; P5 O4 D43's case sends an agent's dataset refresh instead.
+async function raceTheIdleExit(announce: (host: FakeSupervisor) => boolean = (host) => host.emit('session.eventBatch', { appSessionId: 'app-released' as never, events: [ev('turn.ended', { id: 'app-released:L1:9:0', seq: 9 })] })): Promise<FakeSupervisor> {
   await supervisor.start();
   await spine.ensure('command');
   supervisor.wake('engine-host');
@@ -186,7 +187,7 @@ async function raceTheIdleExit(): Promise<FakeSupervisor> {
   await vi.waitFor(() => expect(first.exits).toEqual(['idle']));
   exiting.add(first.pid);
   const sent = received.get(first.pid)!.length;
-  expect(first.emit('session.eventBatch', { appSessionId: 'app-released' as never, events: [ev('turn.ended', { id: 'app-released:L1:9:0', seq: 9 })] })).toBe(true);
+  expect(announce(first)).toBe(true);
   await vi.waitFor(() => expect(spine.state()).toBe('loaded'), { timeout: 10_000 });
   await vi.waitFor(() => expect(processes.alive.has(first.pid)).toBe(false));
   expect(received.get(first.pid)!.length).toBeGreaterThan(sent); // the load did reach it as it exited
@@ -212,6 +213,15 @@ describe('a spine loaded by the engine host’s events, as the host exits when i
     await vi.waitFor(() => expect(received.get(next.pid)).toEqual(expect.arrayContaining(CONFIGURATION)), { timeout: 10_000 });
     expect(spine.state()).toBe('loaded');
     expect(logs.filter((line) => line.startsWith('[spine] loading'))).toEqual(['[spine] loading (command)', '[spine] loading (event)']);
+  }, 30_000);
+
+  // P5 O4 D43: an agent's dataset refresh is a need. Its load is wanted, so what that load sends the exiting host is held
+  // by the supervisor, which launches the host's successor for it, rather than refused while nobody is ready
+  it('an agent’s dataset refresh is a need: the load it wakes launches the exiting host’s successor', async () => {
+    await raceTheIdleExit((host) => host.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }));
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(supervisor.snapshot('engine-host').state).toBe('ready'), { timeout: 10_000 });
+    expect(logs.some((line) => line.includes('wakes no engine host'))).toBe(false);
   }, 30_000);
 });
 
