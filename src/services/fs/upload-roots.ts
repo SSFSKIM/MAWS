@@ -24,7 +24,7 @@
 // mkdir, an unlink, an rmdir) first reopens what it touches the same way and checks it is still that directory, or a
 // regular file (`mutate`, below).
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { NotARepositoryError, type GitRun } from '../git/runner';
@@ -285,38 +285,69 @@ export function stagePart(base: string, session: string, upload: string, offset:
   }
 }
 
-// Upload `upload`'s staging moved into the root under `nameOf(its first bytes)`, exclusively (a name already there is
-// AlreadyThere, the staging kept), and the staging directory removed once empty: the name. Throws Unsafe for a link on
-// the way or a staging that is not a regular file.
+// Upload `upload`'s staging published into the root under `nameOf(its first bytes)`: the name. The staging is opened with
+// no link on its way and checked a regular file, and that descriptor alone is read from then on, so a leaf or an
+// ancestor swapped after the check changes nothing published; the destination is created exclusively with no link on
+// its way under the root still pinned (`writeNew`'s rule: a name already there is AlreadyThere, nothing written over
+// it), filled from the descriptor and checked whole, and removed when anything fails. Once the file is published the
+// staging's removal is best effort: a staging that cannot be removed now is the sweep's, and the upload stands. Throws
+// Unsafe for a link on the way, a staging that is not a regular file, or a root that is no longer the one walked.
 export function promoteStaged(base: string, session: string, upload: string, nameOf: (head: Buffer) => string): string {
   const [root, staging] = walk(base, [...UPLOADS, session, STAGING]).slice(-2) as [Pinned, Pinned];
-  const from = join(staging.path, upload);
-  const fd = openNoLink(from, constants.O_RDONLY | constants.O_NONBLOCK);
-  let head: Buffer;
+  const from = openNoLink(join(staging.path, upload), constants.O_RDONLY | constants.O_NONBLOCK);
+  const name = ((): string => {
+    try {
+      const stat = fstatSync(from);
+      if (!stat.isFile()) throw new Unsafe(`${join(staging.path, upload)} is not a regular file`);
+      const head = Buffer.alloc(Math.min(16, stat.size));
+      const named = nameOf(head.subarray(0, readSync(from, head, 0, head.length, 0)));
+      publishFrom(root, named, from, stat.size);
+      return named;
+    } finally {
+      closeSync(from);
+    }
+  })();
   try {
-    if (!fstatSync(fd).isFile()) throw new Unsafe(`${from} is not a regular file`);
-    head = Buffer.alloc(16);
-    head = head.subarray(0, readSync(fd, head, 0, head.length, 0));
-  } finally {
-    closeSync(fd);
+    mutate(staging, { unlink: upload });
+    still(staging);
+    if (readdirSync(staging.path).length === 0) mutate(root, { rmdir: staging });
+  } catch {
+    // the staging moved, or another upload's is beside it: the sweep takes it later
   }
-  const name = nameOf(head);
-  still(staging);
-  still(root);
+  return name;
+}
+
+// `name` under the pinned `dir`, created exclusively, 0600, and filled with the `size` bytes the open descriptor `from`
+// holds, read by position; removed again when the copy fails or comes out short.
+function publishFrom(dir: Pinned, name: string, from: number, size: number): void {
+  still(dir);
+  const path = join(dir.path, name);
+  let to: number;
   try {
-    linkSync(from, join(root.path, name)); // exclusive: link(2) never replaces a name
+    to = openNoLink(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
   } catch (error) {
     if (code(error) === 'EEXIST') throw new AlreadyThere(name);
     throw error;
   }
-  mutate(staging, { unlink: upload });
   try {
-    still(staging);
-    if (readdirSync(staging.path).length === 0) mutate(root, { rmdir: staging });
-  } catch {
-    // another upload's staging is there, or the directory moved: the sweep takes it later
+    const chunk = Buffer.alloc(Math.min(size, 1024 * 1024));
+    let at = 0;
+    while (at < size) {
+      const read = readSync(from, chunk, 0, Math.min(chunk.length, size - at), at);
+      if (read === 0) throw new Error(`the staging ended at ${at} of ${size} bytes`);
+      for (let written = 0; written < read; ) written += writeSync(to, chunk, written, read - written);
+      at += read;
+    }
+  } catch (error) {
+    closeSync(to);
+    try {
+      mutate(dir, { unlink: name }); // created by this promotion: never left half written
+    } catch {
+      // the root moved since: nothing more is done through it
+    }
+    throw error;
   }
-  return name;
+  closeSync(to);
 }
 
 // The staged files under `root` that `staged` names, each older than `cutoff` (every one, for null), removed, and the

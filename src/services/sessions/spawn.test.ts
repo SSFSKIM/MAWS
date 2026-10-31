@@ -3,11 +3,12 @@
 // fake bus: a session created on the project of its checkout, patched with the mode as sent and started on the
 // machine's own settings, with and without a brief; `launchedBy` with the sealed action on the record when
 // `machine.op` claimed it; an untrusted checkout and an existing branch refused with nothing left behind; a replayed
-// `machine.op` answering the first spawn's id.
+// `machine.op` answering the first spawn's id; a parked engine host woken by the spawn's need (#411); a new worktree on a
+// branch of exactly its name from HEAD.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientPort } from '@shared/client/port';
 import { NO_CLIENT } from '@shared/client/port';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -56,8 +57,9 @@ describe('session.spawn on the spine', () => {
   const trust = (directory: string) => writeFileSync(join(config, '.claude.json'), JSON.stringify({ projects: { [directory]: { hasTrustDialogAccepted: true } } }));
 
   // The spine with a project on the checkout and the direct route as the machine's setting; its engine host answers a
-  // launch with the session ready, and a first message as sent
-  const composed = async () => {
+  // launch with the session ready, and a first message as sent. `parked`: the host is not up until a command's need
+  // wakes it (mawsd's parked engine host; #411), and `need` counts those wakes.
+  const composed = async ({ parked = false } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
     seeded.close();
@@ -79,6 +81,13 @@ describe('session.spawn on the spine', () => {
       sent.push(content);
       return { messageUuid: null, disposition: 'sent', queueId: 'q-1' };
     });
+    let woken = false;
+    const need = vi.fn(() => {
+      if (woken) return;
+      woken = true;
+      void host.ready();
+    });
+    if (parked) Object.assign(host, { need });
     const bus = fakeBus();
     const spine = startSpine({
       profile, machine: MACHINE, data, hosts: host, bus, clientPort: noClientPort, interest: () => new Set(), browserSocket: () => null,
@@ -86,8 +95,8 @@ describe('session.spawn on the spine', () => {
       packaged: false, appPath: dir.path, devRoot: dir.path, home: join(dir.path, 'home'),
     });
     held.push({ data, spine });
-    await host.ready();
-    return { bus, host, launched, sent, index: () => new Index(join(profile, 'index.sqlite')) };
+    if (!parked) await host.ready();
+    return { bus, host, launched, sent, need };
   };
 
   const record = async (bus: FakeBus, appSessionId: string) => {
@@ -131,6 +140,34 @@ describe('session.spawn on the spine', () => {
     expect((await record(bus, appSessionId))?.launchedBy).toEqual({ member: 'mem-a', device: 'dev-1', opId: op.opId, action: ACTION });
     expect(await bus.main('machine.op', op)).toEqual(first);
     await expect.poll(() => launched.map((spec) => spec.appSessionId)).toEqual([appSessionId]); // one session, launched once
+  });
+
+  // #411's rule: the spawn's create waits on the session service's boot, which is a need for a parked engine host, and
+  // nothing before the command wakes it
+  it('wakes a parked engine host through its need, and spawns once the host is up', async () => {
+    trust(checkout);
+    const { bus, launched, need } = await composed({ parked: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(need).not.toHaveBeenCalled(); // composing and its events load nothing that wakes the host
+    const spawned = await bus.invoke('session.spawn', { checkout, permission_mode: 'default' });
+    expect(spawned).toMatchObject({ ok: true, value: { status: 'ok' } });
+    expect(need).toHaveBeenCalled();
+    await expect.poll(() => launched).toEqual([expect.objectContaining({ cwd: checkout, permissionMode: 'default' })]);
+  });
+
+  it('spawns in a new worktree of the requested name, on a new branch of exactly that name from HEAD', async () => {
+    trust(checkout);
+    const { bus, launched } = await composed();
+    const head = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const spawned = await bus.invoke('session.spawn', { checkout, worktree: 'feature-x', permission_mode: 'default' });
+    expect(spawned).toMatchObject({ ok: true, value: { status: 'ok' } });
+    const appSessionId = (spawned as { value: { appSessionId: string } }).value.appSessionId;
+    const created = await record(bus, appSessionId);
+    expect(created?.worktree).toEqual({ path: expect.stringContaining(join(checkout, '.claude', 'worktrees')), branch: 'feature-x' });
+    const path = created!.worktree!.path;
+    expect(execFileSync('git', ['-C', checkout, 'rev-parse', 'refs/heads/feature-x'], { encoding: 'utf8' }).trim()).toBe(head);
+    expect(execFileSync('git', ['-C', path, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('feature-x');
+    await expect.poll(() => launched).toEqual([expect.objectContaining({ appSessionId, cwd: path })]);
   });
 
   it('refuses an untrusted checkout, an unknown one, an existing branch and a mode that is none, leaving no intent', async () => {

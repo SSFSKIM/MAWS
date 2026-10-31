@@ -2,7 +2,7 @@
 // bounded bytes written into a session's attachments directory with lane A's rules, refusals as values with nothing
 // written, the root recorded before the first byte and swept a day after its last upload. Scratch directories only
 // (realpath'd: the system temp root is itself a link on macOS), never a real repository or `~`.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { EXCLUDE_LINE, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, EXCLUDE_LINE, promoteStaged, stagePart, Unsafe, type UploadRecords } from '../fs/upload-roots';
 import { createGitRunner } from '../git/runner';
 import { createUpload, scheduleUploadSweep, UPLOAD_SWEEP_MS, uploadRootsOf, type UploadDeps } from './upload';
 
@@ -358,6 +358,97 @@ describe('files.upload in parts', () => {
     expect(validateCommandInput('files.upload', long)).toMatchObject({ ok: false });
     expect(validateCommandInput('files.upload', { ...short, part: { upload: 'short', index: 0, last: true } })).toMatchObject({ ok: false }); // the id's pattern
     expect(validateCommandInput('files.upload', { ...short, part: { upload: UPLOAD, index: 0, last: true } })).toMatchObject({ ok: true });
+  });
+
+  // Fix wave 1 (the task review's Important): the promotion reads only the staging it opened and checked, and publishes
+  // through an exclusive, no-link destination under the root it pinned, so a swap of the leaf or of an ancestor, just
+  // before the promotion (the handler's mint, between the last part's staging and the move) or during it (`nameOf`,
+  // after the staging is open), publishes nothing it did not check and writes nothing outside the root.
+  describe('a staging swapped around its promotion', () => {
+    const outside = () => {
+      const d = dir('o7-outside-');
+      writeFileSync(join(d, 'secret'), 'not the upload');
+      writeFileSync(join(d, UPLOAD), 'planted');
+      return d;
+    };
+    const stagedTwoParts = async (base: string, mint: () => string) => {
+      const { run } = upload({ directory: base, mint });
+      const bytes = whole(3 * 1024 * 1024);
+      expect(await run(partOf(bytes, 0, false))).toEqual({ status: 'ok', paths: [] });
+      return { run, bytes };
+    };
+
+    it('refuses a leaf swapped for a link just before the promotion, and publishes nothing', async () => {
+      const base = dir();
+      const away = outside();
+      const staged = join(stagingIn(base), UPLOAD);
+      const { run, bytes } = await stagedTwoParts(base, () => {
+        rmSync(staged);
+        symlinkSync(join(away, 'secret'), staged);
+        return 'up1';
+      });
+      expect(await run(partOf(bytes, 1, true))).toMatchObject({ status: 'refused' });
+      expect(readdirSync(rootIn(base))).toEqual(['.staging']);
+      expect(readFileSync(join(away, 'secret'), 'utf8')).toBe('not the upload');
+    });
+
+    it('refuses an ancestor swapped for a link just before the promotion, and publishes nothing', async () => {
+      const base = dir();
+      const away = outside();
+      const { run, bytes } = await stagedTwoParts(base, () => {
+        rmSync(stagingIn(base), { recursive: true });
+        symlinkSync(away, stagingIn(base)); // `.staging` now leads to a directory holding a planted file of the upload's name
+        return 'up1';
+      });
+      expect(await run(partOf(bytes, 1, true))).toMatchObject({ status: 'refused' });
+      expect(readdirSync(rootIn(base))).toEqual(['.staging']);
+      expect(readdirSync(away).sort()).toEqual([UPLOAD, 'secret']);
+      expect(readFileSync(join(away, UPLOAD), 'utf8')).toBe('planted');
+    });
+
+    it('publishes the bytes it checked when the leaf is swapped during the promotion, and leaves the swapped leaf to the sweep', async () => {
+      const base = dir();
+      const away = outside();
+      const bytes = whole(3 * 1024 * 1024);
+      expect(stagePart(base, ID, UPLOAD, 0, bytes, UPLOAD_FILE_MAX_BYTES)).toBe('staged');
+      const staged = join(stagingIn(base), UPLOAD);
+      const name = promoteStaged(base, ID, UPLOAD, () => {
+        rmSync(staged);
+        symlinkSync(join(away, 'secret'), staged);
+        return 'up1.0.pdf';
+      });
+      expect(name).toBe('up1.0.pdf');
+      expect(readFileSync(join(rootIn(base), 'up1.0.pdf')).equals(bytes)).toBe(true); // what was opened, never the link's target
+      expect(readFileSync(join(away, 'secret'), 'utf8')).toBe('not the upload');
+      expect(readdirSync(stagingIn(base))).toEqual([UPLOAD]); // the link is not removed through: the sweep's, the upload stands
+    });
+
+    it('writes nothing when the root is swapped for a link during the promotion', () => {
+      const base = dir();
+      const away = outside();
+      const bytes = whole(1024);
+      expect(stagePart(base, ID, UPLOAD, 0, bytes, UPLOAD_FILE_MAX_BYTES)).toBe('staged');
+      const moved = `${rootIn(base)}-moved`;
+      expect(() =>
+        promoteStaged(base, ID, UPLOAD, () => {
+          renameSync(rootIn(base), moved);
+          symlinkSync(away, rootIn(base));
+          return 'up1.0.pdf';
+        }),
+      ).toThrow(Unsafe);
+      expect(readdirSync(away).sort()).toEqual([UPLOAD, 'secret']);
+      expect(readdirSync(moved)).toEqual(['.staging']); // nothing published in the real root either
+    });
+
+    it('answers AlreadyThere for a name already in the root, writing nothing over it and keeping the staging', () => {
+      const base = dir();
+      const bytes = whole(1024);
+      expect(stagePart(base, ID, UPLOAD, 0, bytes, UPLOAD_FILE_MAX_BYTES)).toBe('staged');
+      writeFileSync(join(rootIn(base), 'up1.0.pdf'), 'first');
+      expect(() => promoteStaged(base, ID, UPLOAD, () => 'up1.0.pdf')).toThrow(AlreadyThere);
+      expect(readFileSync(join(rootIn(base), 'up1.0.pdf'), 'utf8')).toBe('first');
+      expect(statSync(join(stagingIn(base), UPLOAD)).size).toBe(1024);
+    });
   });
 
   it('sweeps a staging left over a day: in a root no upload went to since, with the root; in a root still in use, by its own age', async () => {
