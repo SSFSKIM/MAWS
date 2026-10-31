@@ -226,8 +226,10 @@ export interface DetachedTransport {
   // the successor instead.
   expectExit(kind?: 'now' | 'replace'): boolean;
   // P5 O16 M3b: the served host asked to hand its sessions over (`host.handover {graceMs}`), its connection marked for a
-  // replacement first; deferred, asked again every WAIT_RETRY_MS while it is served. A failed ask unmarks it.
-  handover(graceMs: number): Promise<HandoverAnswer>;
+  // replacement first; deferred, asked again every WAIT_RETRY_MS while it is served. A failed ask unmarks it. `sent`:
+  // what the caller waits for before the ask goes (the requests it sent on the link answered), the link marked meanwhile;
+  // a link that closes before the ask, or under it unanswered, was the replacement's close: `detaching`.
+  handover(graceMs: number, sent?: () => Promise<void>): Promise<HandoverAnswer>;
   // The quit: from here nothing reconnects or spawns. A served connection stays open for the quit's stop-all and its
   // close ends the transport; with none served the transport stops at once (false), and a supervisor whose connection
   // closed quietly, still alive and named by the lock, is sent SIGTERM so its exit order stops every row.
@@ -781,7 +783,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   }
 
   function closed(connection: Served): void {
-    failHandoverAsks(connection.handovers); // P5 O16 M3b
+    failHandoverAsks(connection.handovers, connection.exitAsked === 'replace'); // P5 O16 M3b
     if (served !== connection) return;
     served = null;
     if (stopped) return;
@@ -943,13 +945,17 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return true;
     },
     // P5 O16 M3b
-    handover(graceMs) {
+    handover(graceMs, sent = () => Promise.resolve()) {
       if (!served || stopped || quitting) return Promise.resolve({ state: 'failed', why: 'nothing is served' });
       const connection = served;
       const before = connection.exitAsked;
       if (connection.exitAsked !== 'now') connection.exitAsked = 'replace';
-      log(`asking supervisor pid ${connection.proc.pid} to hand its sessions over`);
-      return askHandover(connection.port, connection.handovers, graceMs).then((answer) => {
+      const ask = (): Promise<HandoverAnswer> => {
+        if (served !== connection) return Promise.resolve({ state: 'detaching' }); // it closed meanwhile: its successor follows
+        log(`asking supervisor pid ${connection.proc.pid} to hand its sessions over`);
+        return askHandover(connection.port, connection.handovers, graceMs);
+      };
+      return sent().then(ask).then((answer) => {
         if (answer.state === 'failed') {
           if (connection.exitAsked === 'replace') connection.exitAsked = before;
           log(`supervisor pid ${connection.proc.pid} did not hand over: ${answer.why}`);
@@ -1048,8 +1054,11 @@ function routeHandoverAnswer(answers: Map<string, (data: unknown) => void>, data
   return true;
 }
 
-function failHandoverAsks(answers: Map<string, (data: unknown) => void>): void {
-  for (const take of [...answers.values()]) take({ t: 'res', ok: false, error: { message: 'the connection closed before it answered' } });
+// A link's close with asks unanswered: under a replacement's mark (`replaced`), the close is the replacement's, and the
+// successor follows it whatever the host did first (a park's idle exit, a crash), so each ask reads `detaching`.
+function failHandoverAsks(answers: Map<string, (data: unknown) => void>, replaced = false): void {
+  const answer = replaced ? { t: 'res', ok: true, value: { state: 'detaching' } } : { t: 'res', ok: false, error: { message: 'the connection closed before it answered' } };
+  for (const take of [...answers.values()]) take(answer);
 }
 
 // `host.handover`'s answer, read loosely: its two states, else what failed.

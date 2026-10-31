@@ -6,7 +6,7 @@
 // park. A parked host, or one that does not hand over, is refused.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY } from '@shared/host/socket-protocol';
-import { MawsdScene, until } from '../../test/support/mawsd-scene';
+import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
 
@@ -84,5 +84,132 @@ describe('daemon.restartEngineHost', () => {
     expect(await app.request('daemon.restartEngineHost')).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('does not hand its sessions over') } });
     expect(daemon.hosts.snapshot('engine-host').state).toBe('ready');
     expect(scene.lastEngine().named('host.handover')).toEqual([]);
+  });
+});
+
+// The handover beside the park's guard on clients' engine-host requests (P5 O5 landing 1, engine-requests.ts; D40, D56):
+// a handover is never a park ask, so nothing waits on the park's exit bound for it and no ask is taken back from it; a
+// request the old host was sent is answered by it before it is asked to hand over; one sent once the handover began is
+// held for the successor; a park ask and a handover, in either order, end in one successor or one park.
+describe('the handover and the park', () => {
+  const PING = { pid: 1, uptimeMs: 1, hostVersion: 'stand-in' };
+  const ASKED_TO_PARK = 'no app and no interest for the idle time: asking the engine host to exit when idle';
+  const TAKEN_BACK = 'taking back the engine host’s exit when idle';
+  const WAITED = (name: string) => `[hosts] ${name} arrived after the engine host was asked to park: waiting for its exit`;
+  const status = { 'host.supervisorStatus': () => holder(0) };
+
+  // the park clock at 200 ms, set as an app sets it; the app gone
+  async function parkClockAt200() {
+    const daemon = await scene.start();
+    const app = await scene.app();
+    await app.request('host.configure', { idleExitMs: 200 });
+    app.leave();
+    return daemon;
+  }
+
+  it('a request the old host was sent before the handover is answered by it; the handover is asked once it is', async () => {
+    scene.engineSpawn = {
+      answers: {
+        ...status,
+        'engine.ping': () => sleep(300).then(() => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` })),
+        'host.handover': () => {
+          const old = scene.lastEngine();
+          setImmediate(() => void old.supervisor.die());
+          return { state: 'detaching' };
+        },
+      },
+    };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine();
+    const cli = await scene.app('machine', { capabilities: [] });
+    const ping = cli.request('engine.ping', undefined, 20_000);
+    await until(() => old.named('engine.ping').length === 1);
+    const restarted = await cli.request('daemon.restartEngineHost', undefined, 20_000);
+    expect(await ping).toMatchObject({ ok: true, value: { hostVersion: `pid ${old.supervisor.pid}` } }); // the old host's answer
+    expect(old.calls.map((call) => call.name).filter((name) => name === 'engine.ping' || name === 'host.handover')).toEqual(['engine.ping', 'host.handover']);
+    expect(restarted).toMatchObject({ ok: true, value: { state: 'detaching', pid: scene.lastEngine().supervisor.pid } });
+  });
+
+  it('a deferred handover, the caller gone: the park clock asks nothing of the draining host, a request sent meanwhile reaches the successor at once, and the successor parks once', async () => {
+    const drain = { inFlight: 1 };
+    scene.engineSpawn = {
+      onExitIdle: (host) => void host.die(),
+      answers: { ...status, 'engine.ping': () => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` }), 'host.handover': () => (drain.inFlight > 0 ? { state: 'deferred', inFlight: drain.inFlight } : { state: 'detaching' }) },
+    };
+    const daemon = await parkClockAt200();
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine();
+    const cli = await scene.app('machine', { capabilities: [] });
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready'); // past the app's departure's recycle
+    expect(await cli.request('daemon.restartEngineHost')).toMatchObject({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    const ping = cli.request('engine.ping', undefined, 20_000); // held for the successor (D56: a draining host is not ready)
+    await sleep(600); // three of the park clock's idle times
+    expect(scene.logs).not.toContain(ASKED_TO_PARK);
+    expect(old.supervisor.exits).toEqual([]);
+    drain.inFlight = 0;
+    const drained = Date.now();
+    await old.supervisor.die(); // its drain settled: it exits
+    expect(await ping).toMatchObject({ ok: true, value: { hostVersion: `pid ${scene.lastEngine().supervisor.pid}` } });
+    expect(Date.now() - drained).toBeLessThan(2_000); // no exit bound waited (EXIT_SETTLE_MS, 5 s)
+    expect(old.named('engine.ping')).toEqual([]);
+    cli.destroy();
+    await until(() => daemon.hosts.parked('engine-host'), 5_000, 'the successor’s park');
+    await sleep(500);
+    expect(scene.spawn).toHaveBeenCalledTimes(2); // the wake's and the successor's: no relaunch
+    expect(scene.logs.filter((line) => line === ASKED_TO_PARK)).toHaveLength(1);
+    expect(scene.logs.some((line) => line.startsWith('[hosts] engine.ping arrived after'))).toBe(false);
+    expect(scene.logs).not.toContain(TAKEN_BACK);
+  });
+
+  it('a park asked of a host that stays (it holds rows), then the handover: one successor, no park, nothing taken back; a request waiting on the park goes to the successor', async () => {
+    scene.engineSpawn = {
+      answers: { ...status, 'engine.ping': () => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` }), 'host.handover': () => {
+        const old = scene.lastEngine();
+        setTimeout(() => void old.supervisor.die(), 100);
+        return { state: 'detaching' };
+      } },
+    };
+    const daemon = await parkClockAt200();
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine();
+    await until(() => old.supervisor.exits.includes('idle'), 3_000, 'the park clock’s ask'); // armed; it stays
+    const cli = await scene.app('machine', { capabilities: [] });
+    const ping = cli.request('engine.ping', undefined, 20_000);
+    await until(() => scene.logs.includes(WAITED('engine.ping')));
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const asked = Date.now();
+    const restarted = await cli.request('daemon.restartEngineHost', undefined, 20_000);
+    expect(restarted).toMatchObject({ ok: true, value: { state: 'detaching', pid: scene.lastEngine().supervisor.pid } });
+    expect(await ping).toMatchObject({ ok: true, value: { hostVersion: `pid ${scene.lastEngine().supervisor.pid}` } });
+    expect(Date.now() - asked).toBeLessThan(3_000);
+    expect(old.named('engine.ping')).toEqual([]);
+    expect(scene.spawn).toHaveBeenCalledTimes(2);
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+    expect(scene.logs).not.toContain(TAKEN_BACK);
+    expect(old.named('host.exitWhenIdle')).toEqual([]);
+  });
+
+  it('a park asked of an idle host that exits under the handover’s ask: its successor follows, and the restart is answered', async () => {
+    scene.engineSpawn = {
+      answers: { ...status, 'host.handover': () => {
+        void scene.lastEngine().supervisor.die(); // the idle exit, before any answer
+        return new Promise(() => {});
+      } },
+    };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine();
+    expect(daemon.hosts.exitSupervisor('idle')).toBe(true); // the park clock's ask, out before the restart
+    const cli = await scene.app('machine', { capabilities: [] });
+    const restarted = await cli.request('daemon.restartEngineHost', undefined, 20_000);
+    expect(restarted).toMatchObject({ ok: true, value: { state: 'detaching', pid: scene.lastEngine().supervisor.pid } });
+    expect(scene.lastEngine()).not.toBe(old);
+    await sleep(300);
+    expect(scene.spawn).toHaveBeenCalledTimes(2);
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+    expect(daemon.hosts.snapshot('engine-host').state).toBe('ready');
   });
 });

@@ -196,7 +196,8 @@ export interface HostSupervisor {
   // P5 O2 M5 end
   // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40, D56): the served host asked to hand
   // its sessions over. It leaves `ready` first (a draining host is not ready: the spine sees it go, and every request
-  // from here is held for the successor), then `host.handover {graceMs}`; its close, now or after a deferral, starts
+  // from here is held for the successor), then, once what was sent on its link is answered (HANDOVER_SENT_WAIT_MS at
+  // most, so the old host answers it before its freeze), `host.handover {graceMs}`; its close, now or after a deferral, starts
   // the successor that adopts the sessions, never a park. A host that is not served and ready, or does not list
   // `host.holder`, is refused `host_unavailable`; a failed ask reconnects to it (a recycle).
   handover(owner: HostOwner, graceMs: number): Promise<CommandResult<'host.handover'>>;
@@ -212,6 +213,10 @@ export const CRASH_WINDOW_MS = 60_000;
 export const RESYNC_BOUND_MS = 30_000;
 // E10: the grace host.restart's stop-all gives each session (the quit's, as the quit guard asks it)
 export const STOP_ALL_GRACE_MS = 5_000;
+// P5 O16 M3b: how long a handover waits for the requests sent on the old host's link to be answered before it asks; one
+// still unanswered after it is answered by the old host if it can before its exit, else fails `host_unavailable`
+export const HANDOVER_SENT_WAIT_MS = 5_000;
+const HANDOVER_SENT_POLL_MS = 10;
 
 interface Pending {
   name: string;
@@ -489,6 +494,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     host.gone = null;
     host.peer = null; // P5 O1 M6
     host.welcome = null; // P5 O2 M5
+  }
+
+  // P5 O16 M3b: once no request sent on the host's link waits for its answer, or `ms` has passed
+  async function sentAnswered(host: Host, ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    while ([...host.pending.values()].some((pending) => pending.sent) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, HANDOVER_SENT_POLL_MS));
   }
 
   function failSent(host: Host, reason: string): void {
@@ -1042,7 +1053,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       unlink(host);
       host.port = null;
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
-      const answer: HandoverAnswer = await transport.handover(graceMs);
+      const answer: HandoverAnswer = await transport.handover(graceMs, () => sentAnswered(host, HANDOVER_SENT_WAIT_MS));
       if (answer.state === 'failed') {
         // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
         transport.recycle(() => failSent(host, 'was recycled'));
