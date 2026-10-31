@@ -166,6 +166,17 @@ describe('the crash toast (supervisor.crashed)', () => {
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The session supervisor stopped unexpectedly; no session was interrupted.');
   });
 
+  // P5 O16 M3b (D21): a successor that adopted the sessions; the toast keeps its id, its copy names the engine host
+  it('names the sessions the successor re-adopted, and those it did not', async () => {
+    const t = await setup();
+    t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: 137, signal: null, at: AT, interrupted: 0, adopted: 2 } }));
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The engine host stopped unexpectedly (exit 137); its 2 sessions were re-adopted.');
+    t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: null, signal: 'SIGKILL', at: LATER, interrupted: 1, adopted: 1 } }));
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe(
+      'The engine host stopped unexpectedly (SIGKILL); 1 session was re-adopted, 1 was interrupted. Their transcripts are on disk; open one to resume.',
+    );
+  });
+
   it('does not repeat an exit the page already knew at its first word (a reload after the crash)', async () => {
     const t = await setup(crashed(AT, 1, null, 2));
     expect(t.shown()).toEqual([]);

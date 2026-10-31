@@ -180,6 +180,54 @@ describe('host.status', () => {
     expect(h.emitted.at(-1)?.lastExit).toEqual({ ...second, interrupted: 0 });
   });
 
+  // P5 O16 M3b (D21): a crashed host that hosted sessions is succeeded by one that adopts them, so the exit is told once
+  // the successor's adoptions have ended, with how many it adopted; until then the status keeps the exit before it
+  const holder = (hosts: number, adopted: number, adopting: boolean) => ({ hosts, adopted, failed: 0, gate: null, handover: 'none' as const, adopting });
+  it('an exit of a host that hosted sessions is told once its successor’s adoptions end, counting the sessions it adopted', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 3, holder: holder(2, 0, false) }));
+    const exit = { code: 137, signal: null, at: '2026-10-06T10:05:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: exit });
+    expect(h.emitted.at(-1)?.lastExit).toBeNull(); // the adoption's count is awaited
+    h.move({ state: 'ready', pid: 5151 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 2, holder: holder(2, 2, true) }));
+    expect(h.emitted.at(-1)?.lastExit).toBeNull(); // still adopting
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 2, holder: holder(2, 2, false) }));
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 1, adopted: 2 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 2, holder: holder(2, 2, false) }));
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 1, adopted: 2 }); // once
+    for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
+  });
+
+  it('an exit of a host that hosted none is told at once, as before; one whose successor never comes is told when the host gives up', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 1, holder: holder(0, 0, false) }));
+    const exit = { code: 1, signal: null, at: '2026-10-06T10:05:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: exit });
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 1 });
+
+    const g = harness();
+    g.move({ state: 'ready', pid: 4242 });
+    g.status(supervisorStatus({ liveSessions: 2, holder: holder(2, 0, false) }));
+    g.move({ state: 'restarting', pid: null }, { lastExit: exit });
+    expect(g.emitted.at(-1)?.lastExit).toBeNull();
+    g.move({ state: 'crashed', pid: null });
+    expect(g.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 2 });
+  });
+
+  it('a successor that lists no holder counts nothing adopted', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 2, holder: holder(1, 0, false) }));
+    const exit = { code: null, signal: 'SIGKILL', at: '2026-10-06T10:05:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: exit });
+    h.move({ state: 'ready', pid: 5151 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 0 }));
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 2 });
+  });
+
   it('a utility host reports its own transport', async () => {
     const h = harness('utility');
     h.move({ state: 'ready', pid: 9 });

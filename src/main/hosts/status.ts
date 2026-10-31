@@ -38,6 +38,12 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
   let supervisor: SupervisorStatus | null = null; // the connected supervisor's last status; none while the host is not ready
   let liveAtLastStatus = 0; // what a crash interrupted: the rows live at the last status any supervisor sent
   let lastExit: HostStatus['lastExit'] = null;
+  // P5 O16 M3b (D21): a crashed host's rows under session hosts are adopted by its successor, so an exit of a host that
+  // hosted any is held until the successor's start-up adoptions end (its `holder.adopting` false), then told with how
+  // many it adopted; until then the status keeps the exit before it. A successor that never comes (the host crashed for
+  // good), or lists no holder, tells it as counted.
+  let hostedAtLastStatus = 0;
+  let adopting: NonNullable<HostStatus['lastExit']> | null = null;
 
   // P5 O1 M6 (OX1): a supervisor that sends its status was welcomed, so it shares the wire's major or (the protocol-2
   // window) the fingerprint, and differs at most by build; what an incompatible one refused comes from the transport
@@ -52,10 +58,13 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     const facts = deps.hosts.facts('engine-host');
     // an exit is counted against the status before it, once: a successor's status does not rewrite it, and a successor
     // that dies before sending one interrupted nothing
-    if (facts.lastExit && facts.lastExit.at !== lastExit?.at) {
-      lastExit = { ...facts.lastExit, interrupted: liveAtLastStatus };
-      liveAtLastStatus = 0;
+    if (facts.lastExit && facts.lastExit.at !== (adopting ?? lastExit)?.at) {
+      if (adopting) lastExit = adopting; // superseded before its successor's count: told as counted
+      const exit = { ...facts.lastExit, interrupted: liveAtLastStatus };
+      [adopting, lastExit] = hostedAtLastStatus > 0 ? [exit, lastExit] : [null, exit];
+      liveAtLastStatus = hostedAtLastStatus = 0;
     }
+    if (adopting && deps.hosts.snapshot('engine-host').state === 'crashed') [lastExit, adopting] = [adopting, null];
     return {
       transport: deps.daemon ? 'daemon' : facts.transport, // P5 O2 M7
       state: deps.hosts.snapshot('engine-host').state,
@@ -77,7 +86,13 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
 
   const take = (next: SupervisorStatus) => {
     supervisor = next;
+    if (adopting && next.holder?.adopting !== true) {
+      const adopted = Math.min(next.holder?.adopted ?? 0, adopting.interrupted);
+      lastExit = adopted > 0 ? { ...adopting, interrupted: adopting.interrupted - adopted, adopted } : adopting;
+      adopting = null;
+    }
     liveAtLastStatus = next.liveSessions;
+    hostedAtLastStatus = next.holder?.hosts ?? 0;
     deps.emit(status());
   };
   // M5b fix round 2: on the daemon shape `mawsd`'s link to the engine host is permanent, so an app that attaches to a host

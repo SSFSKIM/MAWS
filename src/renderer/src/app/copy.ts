@@ -68,8 +68,15 @@ export const SUPERVISOR_NOTICES = {
     `MAWS was updated and cannot talk to the previous supervisor, which still runs ${sessions(live)}. No session can start until it exits, which it does by itself once they go idle.`,
   restartNow: 'Restart now',
   wait: 'Wait',
-  crashed: (code: number | null, signal: string | null, interrupted: number) => {
+  // P5 O16 M3b (D21): `adopted`, the sessions the successor re-adopted; with none, E10's copy as it was
+  crashed: (code: number | null, signal: string | null, interrupted: number, adopted = 0) => {
     const cause = exitCause(code, signal);
+    if (adopted > 0) {
+      const head = `The engine host stopped unexpectedly${cause ? ` (${cause})` : ''}`;
+      const were = (n: number) => (n === 1 ? 'was' : 'were');
+      if (interrupted === 0) return `${head}; its ${sessions(adopted)} ${were(adopted)} re-adopted.`;
+      return `${head}; ${sessions(adopted)} ${were(adopted)} re-adopted, ${interrupted} ${were(interrupted)} interrupted. Their transcripts are on disk; open one to resume.`;
+    }
     const head = `The session supervisor stopped unexpectedly${cause ? ` (${cause})` : ''}`;
     if (interrupted === 0) return `${head}; no session was interrupted.`;
     return `${head}; ${sessions(interrupted)} ${interrupted === 1 ? 'was' : 'were'} interrupted. Their transcripts are on disk; open one to resume.`;
