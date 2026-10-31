@@ -1,0 +1,600 @@
+{
+  "runs": {
+    "y1-xvfb-headless-sandbox": {
+      "exit": "0",
+      "wallMs": "14914",
+      "stderrTail": [
+        ""
+      ],
+      "steps": [
+        {
+          "name": "ready",
+          "atMs": 91,
+          "platform": "linux",
+          "arch": "x64",
+          "headless": true,
+          "noSandbox": false,
+          "ozone": "x11",
+          "accessory": false,
+          "dockVisible": null
+        },
+        {
+          "name": "memory after ready, before any window",
+          "atMs": 125,
+          "rssKiB": 136684,
+          "sumWorkingSetKiB": 136976,
+          "sumProcRssKiB": 136984
+        },
+        {
+          "name": "offscreen capture",
+          "atMs": 1348,
+          "ms": 1208,
+          "settledBy": "settle-timeout",
+          "consoleErrors": [],
+          "fonts": {
+            "status": "loaded",
+            "loaded": [
+              "Noto Serif KR:loaded"
+            ]
+          },
+          "metrics": {
+            "textWidths": {
+              "sans": 546,
+              "serif": 556,
+              "mono": 588,
+              "kr": 757,
+              "krSystem": 735,
+              "emoji": 559
+            },
+            "h1Width": 1232,
+            "scrollHeight": 2348,
+            "devicePixelRatio": 1,
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "pngBytes": 122589,
+          "width": 1280,
+          "height": 800,
+          "bytes": 4096000,
+          "nonBackgroundFraction": 0.1134931640625
+        },
+        {
+          "name": "offscreen whole-page capture",
+          "atMs": 2018,
+          "ms": 645,
+          "pageHeight": 2348,
+          "pngBytes": 152219,
+          "width": 1280,
+          "height": 2348,
+          "bytes": 12021760,
+          "nonBackgroundFraction": 0.28907714011925045
+        },
+        {
+          "name": "offscreen printToPDF",
+          "atMs": 2314,
+          "ms": 293,
+          "pdfBytes": 165739,
+          "header": "%PDF-1.4",
+          "pages": 4,
+          "fontFiles": 5,
+          "outline": false
+        },
+        {
+          "name": "hidden-window capture",
+          "atMs": 3413,
+          "ms": 1090,
+          "settledBy": "settle-timeout",
+          "pngBytes": 122128,
+          "width": 1279,
+          "height": 799,
+          "bytes": 4087684,
+          "nonBackgroundFraction": 0.113583143902513
+        },
+        {
+          "name": "hidden-window printToPDF (no JS)",
+          "atMs": 4653,
+          "ms": 1238,
+          "pdfBytes": 163431,
+          "fontFiles": 5
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "atMs": 4657,
+          "rssKiB": 219400,
+          "sumWorkingSetKiB": 714284,
+          "sumProcRssKiB": 714292
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "atMs": 14660,
+          "rssKiB": 218364,
+          "sumWorkingSetKiB": 449792,
+          "sumProcRssKiB": 449792
+        }
+      ],
+      "idle": [
+        {
+          "name": "memory after ready, before any window",
+          "rssKiB": 136684,
+          "sumWorkingSetKiB": 136976,
+          "sumProcRssKiB": 136984,
+          "processes": [
+            "Browser=136976"
+          ]
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "rssKiB": 219400,
+          "sumWorkingSetKiB": 714284,
+          "sumProcRssKiB": 714292,
+          "processes": [
+            "Browser=219556",
+            "GPU:GPU=148472",
+            "Utility:network.mojom.NetworkService=83124",
+            "Tab=162300",
+            "Utility:printing.mojom.PrintCompositor=100832"
+          ]
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "rssKiB": 218364,
+          "sumWorkingSetKiB": 449792,
+          "sumProcRssKiB": 449792,
+          "processes": [
+            "Browser=218408",
+            "GPU:GPU=148192",
+            "Utility:network.mojom.NetworkService=83192"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    "y2-unit-xvfb-headless-sandbox": {
+      "exit": "0",
+      "wallMs": "14917",
+      "stderrTail": [
+        ""
+      ],
+      "steps": [
+        {
+          "name": "ready",
+          "atMs": 91,
+          "platform": "linux",
+          "arch": "x64",
+          "headless": true,
+          "noSandbox": false,
+          "ozone": "x11",
+          "accessory": false,
+          "dockVisible": null
+        },
+        {
+          "name": "memory after ready, before any window",
+          "atMs": 125,
+          "rssKiB": 137252,
+          "sumWorkingSetKiB": 137668,
+          "sumProcRssKiB": 137744
+        },
+        {
+          "name": "offscreen capture",
+          "atMs": 1307,
+          "ms": 1168,
+          "settledBy": "settle-timeout",
+          "consoleErrors": [],
+          "fonts": {
+            "status": "loaded",
+            "loaded": [
+              "Noto Serif KR:loaded"
+            ]
+          },
+          "metrics": {
+            "textWidths": {
+              "sans": 546,
+              "serif": 556,
+              "mono": 588,
+              "kr": 757,
+              "krSystem": 735,
+              "emoji": 559
+            },
+            "h1Width": 1232,
+            "scrollHeight": 2348,
+            "devicePixelRatio": 1,
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "pngBytes": 122589,
+          "width": 1280,
+          "height": 800,
+          "bytes": 4096000,
+          "nonBackgroundFraction": 0.1134931640625
+        },
+        {
+          "name": "offscreen whole-page capture",
+          "atMs": 1973,
+          "ms": 642,
+          "pageHeight": 2348,
+          "pngBytes": 152219,
+          "width": 1280,
+          "height": 2348,
+          "bytes": 12021760,
+          "nonBackgroundFraction": 0.28907714011925045
+        },
+        {
+          "name": "offscreen printToPDF",
+          "atMs": 2252,
+          "ms": 277,
+          "pdfBytes": 165739,
+          "header": "%PDF-1.4",
+          "pages": 4,
+          "fontFiles": 5,
+          "outline": false
+        },
+        {
+          "name": "hidden-window capture",
+          "atMs": 3353,
+          "ms": 1091,
+          "settledBy": "settle-timeout",
+          "pngBytes": 122128,
+          "width": 1279,
+          "height": 799,
+          "bytes": 4087684,
+          "nonBackgroundFraction": 0.113583143902513
+        },
+        {
+          "name": "hidden-window printToPDF (no JS)",
+          "atMs": 4590,
+          "ms": 1236,
+          "pdfBytes": 163431,
+          "fontFiles": 5
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "atMs": 4594,
+          "rssKiB": 220200,
+          "sumWorkingSetKiB": 714608,
+          "sumProcRssKiB": 714616
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "atMs": 14602,
+          "rssKiB": 219536,
+          "sumWorkingSetKiB": 451928,
+          "sumProcRssKiB": 451928
+        }
+      ],
+      "idle": [
+        {
+          "name": "memory after ready, before any window",
+          "rssKiB": 137252,
+          "sumWorkingSetKiB": 137668,
+          "sumProcRssKiB": 137744,
+          "processes": [
+            "Browser=137668"
+          ]
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "rssKiB": 220200,
+          "sumWorkingSetKiB": 714608,
+          "sumProcRssKiB": 714616,
+          "processes": [
+            "Browser=220644",
+            "GPU:GPU=149228",
+            "Utility:network.mojom.NetworkService=83292",
+            "Tab=161560",
+            "Utility:printing.mojom.PrintCompositor=99884"
+          ]
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "rssKiB": 219536,
+          "sumWorkingSetKiB": 451928,
+          "sumProcRssKiB": 451928,
+          "processes": [
+            "Browser=219592",
+            "GPU:GPU=148976",
+            "Utility:network.mojom.NetworkService=83360"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    "y3-xvfb-swiftshader-sandbox": {
+      "exit": "0",
+      "wallMs": "15379",
+      "stderrTail": [
+        ""
+      ],
+      "steps": [
+        {
+          "name": "ready",
+          "atMs": 87,
+          "platform": "linux",
+          "arch": "x64",
+          "headless": false,
+          "noSandbox": false,
+          "ozone": "x11",
+          "accessory": false,
+          "dockVisible": null
+        },
+        {
+          "name": "memory after ready, before any window",
+          "atMs": 117,
+          "rssKiB": 136748,
+          "sumWorkingSetKiB": 137040,
+          "sumProcRssKiB": 137116
+        },
+        {
+          "name": "offscreen capture",
+          "atMs": 1367,
+          "ms": 1238,
+          "settledBy": "paint",
+          "consoleErrors": [],
+          "fonts": {
+            "status": "loaded",
+            "loaded": [
+              "Noto Serif KR:loaded"
+            ]
+          },
+          "metrics": {
+            "textWidths": {
+              "sans": 546,
+              "serif": 556,
+              "mono": 588,
+              "kr": 757,
+              "krSystem": 735,
+              "emoji": 559
+            },
+            "h1Width": 1217,
+            "scrollHeight": 2348,
+            "devicePixelRatio": 1,
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "pngBytes": 119632,
+          "width": 1280,
+          "height": 800,
+          "bytes": 4096000,
+          "nonBackgroundFraction": 0.1151904296875
+        },
+        {
+          "name": "offscreen whole-page capture",
+          "atMs": 2044,
+          "ms": 646,
+          "pageHeight": 2348,
+          "pngBytes": 150504,
+          "width": 1280,
+          "height": 2348,
+          "bytes": 12021760,
+          "nonBackgroundFraction": 0.28832816492759794
+        },
+        {
+          "name": "offscreen printToPDF",
+          "atMs": 2452,
+          "ms": 406,
+          "pdfBytes": 165575,
+          "header": "%PDF-1.4",
+          "pages": 4,
+          "fontFiles": 5,
+          "outline": false
+        },
+        {
+          "name": "hidden-window capture",
+          "atMs": 3688,
+          "ms": 1179,
+          "settledBy": "settle-timeout",
+          "pngBytes": 118366,
+          "width": 1279,
+          "height": 799,
+          "bytes": 4087684,
+          "nonBackgroundFraction": 0.11534844669989168
+        },
+        {
+          "name": "hidden-window printToPDF (no JS)",
+          "atMs": 4949,
+          "ms": 1256,
+          "pdfBytes": 163431,
+          "fontFiles": 5
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "atMs": 5112,
+          "rssKiB": 196632,
+          "sumWorkingSetKiB": 628608,
+          "sumProcRssKiB": 628572
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "atMs": 15123,
+          "rssKiB": 195464,
+          "sumWorkingSetKiB": 440836,
+          "sumProcRssKiB": 440836
+        }
+      ],
+      "idle": [
+        {
+          "name": "memory after ready, before any window",
+          "rssKiB": 136748,
+          "sumWorkingSetKiB": 137040,
+          "sumProcRssKiB": 137116,
+          "processes": [
+            "Browser=137040"
+          ]
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "rssKiB": 196632,
+          "sumWorkingSetKiB": 628608,
+          "sumProcRssKiB": 628572,
+          "processes": [
+            "Browser=196728",
+            "GPU:GPU=201852",
+            "Utility:network.mojom.NetworkService=76120",
+            "Tab=153908",
+            "Utility:printing.mojom.PrintCompositor=0"
+          ]
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "rssKiB": 195464,
+          "sumWorkingSetKiB": 440836,
+          "sumProcRssKiB": 440836,
+          "processes": [
+            "Browser=195544",
+            "GPU:GPU=169104",
+            "Utility:network.mojom.NetworkService=76188"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    "y4-xvfb-headless-sandbox-again": {
+      "exit": "0",
+      "wallMs": "14928",
+      "stderrTail": [
+        ""
+      ],
+      "steps": [
+        {
+          "name": "ready",
+          "atMs": 81,
+          "platform": "linux",
+          "arch": "x64",
+          "headless": true,
+          "noSandbox": false,
+          "ozone": "x11",
+          "accessory": false,
+          "dockVisible": null
+        },
+        {
+          "name": "memory after ready, before any window",
+          "atMs": 117,
+          "rssKiB": 137460,
+          "sumWorkingSetKiB": 137880,
+          "sumProcRssKiB": 137984
+        },
+        {
+          "name": "offscreen capture",
+          "atMs": 1293,
+          "ms": 1162,
+          "settledBy": "settle-timeout",
+          "consoleErrors": [],
+          "fonts": {
+            "status": "loaded",
+            "loaded": [
+              "Noto Serif KR:loaded"
+            ]
+          },
+          "metrics": {
+            "textWidths": {
+              "sans": 546,
+              "serif": 556,
+              "mono": 588,
+              "kr": 757,
+              "krSystem": 735,
+              "emoji": 559
+            },
+            "h1Width": 1232,
+            "scrollHeight": 2348,
+            "devicePixelRatio": 1,
+            "innerWidth": 1280,
+            "innerHeight": 800
+          },
+          "pngBytes": 122589,
+          "width": 1280,
+          "height": 800,
+          "bytes": 4096000,
+          "nonBackgroundFraction": 0.1134931640625
+        },
+        {
+          "name": "offscreen whole-page capture",
+          "atMs": 1973,
+          "ms": 656,
+          "pageHeight": 2348,
+          "pngBytes": 152219,
+          "width": 1280,
+          "height": 2348,
+          "bytes": 12021760,
+          "nonBackgroundFraction": 0.28907714011925045
+        },
+        {
+          "name": "offscreen printToPDF",
+          "atMs": 2250,
+          "ms": 276,
+          "pdfBytes": 165739,
+          "header": "%PDF-1.4",
+          "pages": 4,
+          "fontFiles": 5,
+          "outline": false
+        },
+        {
+          "name": "hidden-window capture",
+          "atMs": 3351,
+          "ms": 1091,
+          "settledBy": "settle-timeout",
+          "pngBytes": 122128,
+          "width": 1279,
+          "height": 799,
+          "bytes": 4087684,
+          "nonBackgroundFraction": 0.113583143902513
+        },
+        {
+          "name": "hidden-window printToPDF (no JS)",
+          "atMs": 4583,
+          "ms": 1231,
+          "pdfBytes": 163431,
+          "fontFiles": 5
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "atMs": 4586,
+          "rssKiB": 220840,
+          "sumWorkingSetKiB": 704068,
+          "sumProcRssKiB": 704076
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "atMs": 14591,
+          "rssKiB": 219732,
+          "sumWorkingSetKiB": 443728,
+          "sumProcRssKiB": 443732
+        }
+      ],
+      "idle": [
+        {
+          "name": "memory after ready, before any window",
+          "rssKiB": 137460,
+          "sumWorkingSetKiB": 137880,
+          "sumProcRssKiB": 137984,
+          "processes": [
+            "Browser=137880"
+          ]
+        },
+        {
+          "name": "memory right after the renders (windows destroyed)",
+          "rssKiB": 220840,
+          "sumWorkingSetKiB": 704068,
+          "sumProcRssKiB": 704076,
+          "processes": [
+            "Browser=220808",
+            "GPU:GPU=148376",
+            "Utility:network.mojom.NetworkService=75956",
+            "Tab=159956",
+            "Utility:printing.mojom.PrintCompositor=98972"
+          ]
+        },
+        {
+          "name": "memory idle 10 s after the renders",
+          "rssKiB": 219732,
+          "sumWorkingSetKiB": 443728,
+          "sumProcRssKiB": 443732,
+          "processes": [
+            "Browser=219552",
+            "GPU:GPU=148152",
+            "Utility:network.mojom.NetworkService=76024"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  }
+}
