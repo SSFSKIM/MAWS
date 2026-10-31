@@ -4,11 +4,14 @@
 // the composer's disabled-state reason; the card a start waits on docks in the composer's place (`SetupCard.tsx`). The
 // one addition is a failed attempt's checkout the intent still holds once its card is dismissed
 // (`RetainedWorktreeNote`), whose resolutions would otherwise be unreachable. A restored tab whose id has neither a
-// record nor an intent closes itself.
+// record nor an intent closes itself, once its machine's records are in (2026-10-31: while they are unknown, as after an
+// upgrade's mawsd restart, a started session's restored tab has no record and is not gone).
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import { NEW_CHAT } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { RetainedWorktreeNote } from './RetainedWorktreeNote';
 import { useSetup } from './store';
@@ -20,7 +23,8 @@ export function NewSessionEmptyState({ appSessionId }: { appSessionId: AppSessio
   const hasRecord = useSessions((s) => s.records.has(appSessionId));
   const openedHere = useSessions((s) => s.unstarted.has(appSessionId)); // created in this window: its intent is on its way
   const project = useSessions((s) => (intent?.projectId ? s.projects.get(intent.projectId) : undefined));
-  const gone = loaded && intent === null && !hasRecord && !openedHere;
+  const unclaimed = loaded && intent === null && !hasRecord && !openedHere;
+  const gone = useMachines((s) => unclaimed && s.loaded.has(machineOf(appSessionId)));
 
   useEffect(() => {
     if (!gone) return;

@@ -381,6 +381,33 @@ describe('tab retention', () => {
     connection.disconnect();
   });
 
+  // 2026-10-31: an upgrade's mawsd restart answered the page's first reads host_unavailable: unknown, never none
+  it('a failed intent list settles ready unknown, is asked again when the local host is heard, and is known once answered; so are the deletions', async () => {
+    withMain({ 'session.intent.list': undefined, 'session.deletions.list': undefined });
+    useSetup.setState({ loaded: false });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const connection = connectSetup(ipc);
+    let known = false;
+    void connection.known.then(() => (known = true));
+    await act(() => fake.fail('session.intent.list', 'machine is restarting; cannot answer session.intent.list', 'host_unavailable'));
+    await act(() => fake.fail('session.deletions.list', 'machine is restarting; cannot answer session.deletions.list', 'host_unavailable'));
+    expect(await connection.ready).toBe(false);
+    expect(useSetup.getState().loaded).toBe(false); // not taken as none
+    expect(known).toBe(false);
+    act(() => fake.event('host.status', hostStatus()));
+    await act(() => fake.reply('session.intent.list', { intents: [intent()] }));
+    await act(() => fake.reply('session.deletions.list', { manifests: [{ appSessionId: ID, engineSessionId: null, paths: ['/a.cast'], trashed: [], createdAt: '2026-09-29T10:00:00.000Z' }] }));
+    expect(known).toBe(true);
+    expect(useSetup.getState().loaded).toBe(true);
+    expect(retainsTab(A)).toBe(true);
+    expect(useSetup.getState().deletions.has(A)).toBe(true);
+    act(() => fake.event('host.status', hostStatus()));
+    expect(fake.invoked('session.intent.list')).toHaveLength(2); // answered: not asked again
+    expect(fake.invoked('session.deletions.list')).toHaveLength(2);
+    connection.disconnect();
+    warn.mockRestore();
+  });
+
   it('an older snapshot does not bring back an intent main dropped', async () => {
     withMain({ 'session.intent.list': undefined, 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(ipc); // P5 O6 M2: through the client, so main's bare events arrive lifted
