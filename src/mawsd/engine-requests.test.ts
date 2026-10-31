@@ -2,7 +2,7 @@
 // so no park is asked under it; one that arrives after the ask was sent goes only once that host has exited, or once
 // the ask is taken back from a host that stays; another owner's goes straight on.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostState } from '@shared/host/host-supervisor';
+import type { HostState } from '@shared/ipc/schema';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { engineRequests, EXIT_SETTLE_MS } from './engine-requests';
 
