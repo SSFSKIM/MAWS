@@ -32,7 +32,8 @@ export interface LocalOrg {
   enroll(name: string, run: (code: string) => Promise<Ran>): Promise<Ran>;
   /** The admin's member id and the email the hub's stand-in for Access signs it in by. */
   admin: { member: string; email: string };
-  /** Lists `device` among the admin member's devices, a `native-mac` with software keys, in a successor the admin signs. */
+  /** Lists `device` among the admin member's devices, a `native-mac` with software keys endorsed by the admin's device,
+   * in a successor the admin signs. */
   listDevice(device: { id: string; channelPub: string; stepUpPub: string }): Promise<void>;
   /** The org's chain from its genesis as the hub serves it now (its transitions and certificates beside it), and the
    * genesis's root as an app pins it. */
@@ -45,19 +46,24 @@ type IssuedCode = { code: string; k: Uint8Array; enrollment: string };
 type OrgStateLike = { org: string; root: { keys: string[]; recoveryPub: string }; members: { id: string; devices: Record<string, unknown>[] }[] };
 type Member = {
   readonly id: string;
+  readonly admin: { org: string };
+  readonly device: { stepUp: { privateKey: CryptoKey; pub: string } };
   readonly person: { json<T>(path: string): Promise<T> };
   code(): Promise<IssuedCode>;
   awaitPosted(enrollment: string, waitMs?: number): Promise<{ machine: string } | null>;
   list(enrollment: string, k: Uint8Array): Promise<unknown>;
   amend(what: string, edit: (state: OrgStateLike) => boolean | void): Promise<unknown>;
 };
-type LocalHubModule = { LOCAL_ADMIN: string; startLocalHub(options?: { heartbeatMs?: number }): Promise<{ url: string; admin(): Promise<Member>; stop(): Promise<void> }> };
+type LocalHubModule = {
+  LOCAL_ADMIN: string;
+  endorseDevice(org: string, member: string, device: Record<string, unknown>, key: CryptoKey, pub: string): Promise<unknown>; startLocalHub(options?: { heartbeatMs?: number }): Promise<{ url: string; admin(): Promise<Member>; stop(): Promise<void> }> };
 
 /** The org, its hub on a free port; the bundle is written under `scratch`. `heartbeatMs` as local-hub.ts takes it. */
 export async function startLocalOrg(scratch: string, options: { heartbeatMs?: number } = {}): Promise<LocalOrg> {
   const outfile = join(scratch, 'local-hub.cjs');
   await build({
-    entryPoints: [LOCAL_HUB],
+    // local-hub.ts, and org-protocol's device endorsement for listDevice (the admin's device signs the new one in)
+    stdin: { contents: `export * from ${JSON.stringify(LOCAL_HUB)};\nexport { endorseDevice } from 'org-protocol';`, resolveDir: REPO_ROOT, sourcefile: 'local-org-entry.ts', loader: 'ts' },
     outfile,
     bundle: true,
     format: 'cjs',
@@ -66,7 +72,7 @@ export async function startLocalOrg(scratch: string, options: { heartbeatMs?: nu
     logLevel: 'error',
     define: { 'import.meta.dirname': JSON.stringify(join(REPO_ROOT, 'test/endpoint')) },
   });
-  const { startLocalHub, LOCAL_ADMIN } = createRequire(__filename)(outfile) as LocalHubModule;
+  const { startLocalHub, LOCAL_ADMIN, endorseDevice } = createRequire(__filename)(outfile) as LocalHubModule;
   const hub = await startLocalHub(options);
   try {
     const member = await hub.admin(); // the org's genesis, signed by the admin's device
@@ -87,10 +93,13 @@ export async function startLocalOrg(scratch: string, options: { heartbeatMs?: nu
       },
       admin: { member: member.id, email: LOCAL_ADMIN },
       async listDevice(device) {
+        // A device new to a member who has devices carries an endorsement by one of theirs (org-state.ts, `endorsed`)
+        const entry = { id: device.id, class: 'native-mac', keyStorage: 'software', channelPub: device.channelPub, stepUpPub: device.stepUpPub };
+        const endorsement = await endorseDevice(member.admin.org, member.id, entry, member.device.stepUp.privateKey, member.device.stepUp.pub);
         await member.amend(`device ${device.id} listed`, (state) => {
           const own = state.members.find((m) => m.id === member.id);
           if (own === undefined) throw new Error(`the head lists no member ${member.id}`);
-          own.devices.push({ id: device.id, class: 'native-mac', keyStorage: 'software', channelPub: device.channelPub, stepUpPub: device.stepUpPub });
+          own.devices.push({ ...entry, endorsement });
         });
       },
       async chain() {
