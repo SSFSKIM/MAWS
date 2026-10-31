@@ -87,7 +87,8 @@ bootstrap() {
   launchctl print "gui/$uid/$label" >"$out/launchctl-print.txt" 2>&1 || true
   launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
   echo "$(( $(date +%s) - started )) s" >"$out/wall-s.txt"
-  log "run $name: after $(cat "$out/wall-s.txt"); $(summary "$out"); ready lines in stderr: $(grep -c 'ready' "$out/stderr.txt" 2>/dev/null || echo 0)"
+  local runs; runs=$(grep -E '^[[:space:]]*runs = ' "$out/launchctl-print.txt" 2>/dev/null | head -1 | tr -d '\t')
+  log "run $name: after $(cat "$out/wall-s.txt"); $(summary "$out"); launchd says ${runs:-runs = ?}"
 }
 # R2: the production tree: the Node parent is the job, the Electron probe its child
 bootstrap r2-launchd-node-parent node "$electron" "$probe/parent.cjs" "$electron" "$probe/main.cjs"
