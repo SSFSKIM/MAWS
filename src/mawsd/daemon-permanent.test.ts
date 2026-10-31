@@ -4,8 +4,10 @@
 // by its own resync, and tells the host each app's attachment; with the option off, or to a host that lists it not,
 // O2's recycle per attachment stays, as master's daemon.test.ts pins it. The endpoint seam's `onAttachment` says whether
 // events are available. Over the daemon in this process and stand-in hosts on real sockets (test/support/mawsd-scene.ts).
+// P5 O5 M4: the stand-in engine host is one of O3-D's build (its welcome lists no `host.render`), which mawsd tells only
+// the attachment; a render-reading host's `render: true` and its tell at each streaming are daemon-render.test.ts's.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResync } from '@shared/host/host-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -15,8 +17,11 @@ import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
 
+const O3D_ENGINE = PEER_CAPABILITIES.engineHost.filter((name) => name !== HOST_RENDER_CAPABILITY); // P5 O5 M4 (above)
+
 beforeEach(() => {
   scene = new MawsdScene('maws-mp-');
+  scene.engineSpawn = { capabilities: O3D_ENGINE };
   onTestFailed(() => void process.stdout.write(`--- mawsd's log\n${scene.logs.join('\n')}\n--- the hosts' logs\n${scene.supervisors.flatMap((s) => s.logs).join('\n')}\n`));
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -151,6 +156,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
 
   it('the departure drains through {attached: false}: what the host wrote before it saw that reaches the departing app', async () => {
     scene.engineSpawn = {
+      capabilities: O3D_ENGINE,
       answers: {
         'host.attachment': (input) => {
           if ((input as { attached: boolean }).attached === false) scene.lastEngine().send({ n: 'last' }); // written before the answer
@@ -306,7 +312,7 @@ describe('O2’s recycle per attachment stays', () => {
     first.ready();
     await first.request('engine.ping');
     expect(scene.lastEngine().named('host.attachment')).toEqual([]);
-    scene.engineSpawn = {}; // the next engine host is this build's: it lists host.attachment
+    scene.engineSpawn = { capabilities: O3D_ENGINE }; // the next engine host is O3-D's build: it lists host.attachment
     first.exit('now'); // the older host exits and parks, as at its idle exit
     await until(() => daemon.hosts.parked('engine-host'), 3_000, 'the park');
     await until(() => first.closed, 3_000, 'the app dropped with its host');

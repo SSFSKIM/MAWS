@@ -207,6 +207,38 @@ describe('main ipc router', () => {
     });
   });
 
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, "One answerer, both directions"): on the host binding,
+  // artifacts.export is answered by the root's own registration while the attached daemon does not render, and forwarded
+  // once it does; no other machine command moves
+  describe('artifacts.export’s local fallback on an older daemon', () => {
+    const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
+    const exported = { path: '/p/artifacts/x/exports/2.pdf', revision: 2 };
+    const listed = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain', hash: null, utf8: null } as const;
+
+    it('answers it in main while the daemon does not render, forwards it once it does, and forwards every other machine command throughout', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async (_owner, name) => ({ ok: true, value: name === 'artifacts.export' ? { ...exported, revision: 3 } : listed }));
+      let renders = false;
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host', daemonRenders: () => renders } });
+      const local = vi.fn(() => exported);
+      router.registerMachineHandler('artifacts.export', local);
+      const { mainClient } = await import('./clients');
+      const ctx = { client: mainClient, target: LOCAL };
+      await expect(router.invokeOwn('artifacts.export', { artifactId: ARTIFACT, format: 'pdf', dialect: 'notion' }, ctx)).resolves.toEqual({ ok: true, value: exported });
+      expect(local).toHaveBeenCalledWith({ artifactId: ARTIFACT, format: 'pdf', dialect: 'notion' }, ctx);
+      await expect(router.invokeOwn('files.readResolved', { path: '/a/b.txt' }, ctx)).resolves.toEqual({ ok: true, value: listed });
+      expect(dispatchToHost).toHaveBeenCalledOnce();
+      expect(dispatchToHost).toHaveBeenCalledWith('machine', 'files.readResolved', { path: '/a/b.txt' }, mainClient);
+
+      renders = true;
+      await expect(router.invokeOwn('artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, ctx)).resolves.toEqual({ ok: true, value: { ...exported, revision: 3 } });
+      expect(dispatchToHost).toHaveBeenLastCalledWith('machine', 'artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, mainClient);
+      expect(local).toHaveBeenCalledOnce();
+    });
+  });
+
   it('hands a handler the asking page instance’s ClientRef: the same one per page, a new one after a reload', async () => {
     const { pageOf } = await import('./clients');
     const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);

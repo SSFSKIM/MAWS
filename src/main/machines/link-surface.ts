@@ -23,8 +23,9 @@ const LINK_RULES = {
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
-  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */],
-  // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app
+  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'render', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */],
+  // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app.
+  // P5 O5 M3: `render.*` go from a profile's `mawsd` to its own render host alone, never over a machine link
   names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request'],
 };
 

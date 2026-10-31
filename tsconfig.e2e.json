@@ -124,6 +124,13 @@
     "test/support/cua-fake-host.ts",
     "test/support/engine-pin/index.ts",
     "test/support/fake-bridge.ts", // P5 O9 M5: e2e:lane-a's terminal sessions are served by the fake bridge
+    "test/support/fake-front.ts", // P5 O5 M3: e2e:render-host's fake mawsd, its machine.sock
+    "test/support/fake-artifacts-endpoint.ts", // and its artifacts.sock, over the artifact scheme's own handler
+    "src/services/artifacts/scheme/artifact-handler.ts",
+    "src/services/artifacts/scheme/bridge-script.ts",
+    "src/services/artifacts/scheme/http.ts",
+    "src/services/artifacts/scheme/page-connectors.ts",
+    "src/services/artifacts/scheme/scheme-handler.ts",
     "test/support/file-lock.ts",
     "test/support/fixture-session-id.ts",
     "test/support/git-env.ts",

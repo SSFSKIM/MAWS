@@ -22,6 +22,7 @@ describe('daemonPaths', () => {
     expect(paths.dir).toBe('/tmp/p/mawsd');
     expect(paths.socketDir).toBe('/tmp/p/mawsd');
     expect(paths.sockets).toEqual({ 'engine-host': '/tmp/p/mawsd/engine-host.sock', 'pty-host': '/tmp/p/mawsd/pty-host.sock', machine: '/tmp/p/mawsd/machine.sock' });
+    expect(paths.artifactsSocket).toBe('/tmp/p/mawsd/artifacts.sock'); // P5 O5 M2
     expect(paths.endpoint).toBe('/tmp/p/mawsd/endpoint');
     expect(paths.ptyHost).toBe('/tmp/p/mawsd/pty-host');
     expect(paths.log).toBe('/tmp/p/mawsd/mawsd.log');
@@ -33,7 +34,7 @@ describe('daemonPaths', () => {
     expect(Buffer.byteLength(join(profile, 'mawsd', 'machine.sock'))).toBeLessThanOrEqual(103);
     const paths = daemonPaths(profile, '/var/tmp');
     expect(paths.socketDir).toMatch(/^\/var\/tmp\/maws-mawsd-[0-9a-f]{12}$/);
-    for (const socket of Object.values(paths.sockets)) expect(socket.startsWith(`${paths.socketDir}/`)).toBe(true);
+    for (const socket of [...Object.values(paths.sockets), paths.artifactsSocket]) expect(socket.startsWith(`${paths.socketDir}/`)).toBe(true); // P5 O5 M2: artifacts.sock with them
     expect(daemonPaths(profile, '/var/tmp').socketDir).toBe(paths.socketDir); // stable per profile
     expect(daemonPaths(`${profile}y`, '/var/tmp').socketDir).not.toBe(paths.socketDir);
     expect(paths.dir).toBe(join(profile, 'mawsd')); // only the sockets move

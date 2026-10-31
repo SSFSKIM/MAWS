@@ -11,7 +11,7 @@ export const commands = [
   'artifacts.readDataset', // P3-E (E2 M2)
   'artifacts.datasetFiles', 'artifacts.rereadDatasetFile', // WR 67
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
-  'artifacts.export', // P3-A M7: main's
+  'artifacts.export', // P3-A M7: main's; P5 O5 M4: the machine's
   'artifacts.downloadAsset', // P3-E (E2 M3): main's
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', // P3-H H3b: main's
   'artifacts.holdDatasets', 'artifacts.releaseDatasets', // E3: main's, a window's holds
