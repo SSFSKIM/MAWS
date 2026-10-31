@@ -222,6 +222,7 @@ export interface SpineHostsAdapterOptions {
   events: SpineEvents;
   intercept: EngineIntercept;
   wanted(): boolean; // the seam's: whether this load may wake the engine host (spine-seam.ts, `wanted`)
+  need(): void; // the seam's: a command waits on the engine host; the daemon wakes it
   log(line: string): void;
   resyncBoundMs?: number;
 }
@@ -239,6 +240,7 @@ export class SpineHostsAdapter implements SpineHosts {
   private again = false; // the link streamed while a barrier ran: another follows it
   private running: Promise<void> | null = null;
   private loadPassed = false; // the load's barrier began: a later streaming runs its own
+  private needed = false; // a command waits on the engine host and this load has not streamed since: told again as the host goes
   private closed = false;
 
   readonly replay = {
@@ -255,6 +257,7 @@ export class SpineHostsAdapter implements SpineHosts {
         if (state.state !== 'ready') {
           this.streamed = false;
           this.cancel('transition');
+          if (this.needed) this.options.need(); // the host told of the need went before this load streamed: wake its successor
         }
       }),
       link.onStreaming('engine-host', () => {
@@ -276,6 +279,15 @@ export class SpineHostsAdapter implements SpineHosts {
     }
     return this.options.link.dispatch(owner, name, input, client);
   };
+
+  // A command waits on the engine host (the session service's boot, for its first streaming): the daemon wakes it, for a
+  // load that is wanted only (an event's load still wakes nothing). The need holds until this load streams, so a host that
+  // goes first (one asked to exit when idle) has its successor woken for it.
+  need(): void {
+    if (this.closed || this.streamed || !this.options.wanted()) return;
+    this.needed = true;
+    this.options.need();
+  }
 
   onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void {
     const off = this.options.events.listen(name, listener as Listener);
@@ -337,6 +349,7 @@ export class SpineHostsAdapter implements SpineHosts {
         for (const listener of [...this.drainedListeners]) listener();
         if (streams && this.options.link.streaming('engine-host')) {
           this.streamed = true;
+          this.needed = false;
           for (const listener of [...this.streamingListeners]) listener();
         }
       } while (this.again && !this.closed);
