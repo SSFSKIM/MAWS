@@ -15,16 +15,16 @@ import { item, project, record } from '../../../test/support/builders';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { zipFiles } from '../design-systems/zip';
 import { createAssetDownload } from '../dashboard/download';
-import { startDelivery, type GwsDriver } from '../delivery';
-import { gwsLogin } from '../delivery/gws';
+import { startDelivery, type GwsDriver } from '../../services/delivery';
+import { gwsLogin } from '../../services/delivery/gws';
 import { createFilesService } from '../../services/files/service';
 import { pickFiles } from '../files/pick';
 import { saveTextFile } from '../files/save-text';
 import { createLibraryFiles, type LibraryFilesDeps } from '../library/files';
 import { revealPath } from '../settings/reveal';
-import { openOwnerBrowser } from '../connectors/oauth-root';
-import { listenLoopback } from '../connectors/oauth-callback';
-import { createSignIn } from '../connectors/sign-in';
+import { openOwnerBrowser } from '../../services/connectors/root';
+import { listenLoopback } from '../../services/connectors/oauth-callback';
+import { createSignIn } from '../../services/connectors/sign-in';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { startNotifier } from '../attention/notifier';
 
@@ -193,11 +193,10 @@ describe('browser hand-offs take their flow’s could-not-open path', () => {
     const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => unknown>();
     const gws: GwsDriver = { find: async () => bin, state: async () => ({ state: 'signedOut' }), login: gwsLogin, upload: vi.fn() };
     const delivery = startDelivery({
-      register: ((name: string, handler: (input: unknown, ctx: { client: ClientRef }) => unknown) => void handlers.set(name, handler)) as never,
-      emit: () => true,
-      exportArtifact: vi.fn(),
-      call: vi.fn(),
+      bus: { register: ((name: string, handler: (input: unknown, ctx: { client: ClientRef }) => unknown) => void handlers.set(name, handler)) as never, emit: () => true },
+      hosts: { dispatch: vi.fn() },
       connectors: null,
+      artifactsRoot: join(dir, 'artifacts'),
       shellEnv: async () => ({ PATH: '/usr/bin:/bin', HOME: dir }),
       port,
       gws,

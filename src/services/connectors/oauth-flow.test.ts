@@ -1,4 +1,4 @@
-// P3-HD M3a: MAWS's own OAuth flow, refresh and revocation (src/main/connectors/oauth-flow.ts), over the pinned SDK's
+// P3-HD M3a: MAWS's own OAuth flow, refresh and revocation (./oauth-flow.ts), over the pinned SDK's
 // lower-level helpers. An injected fetch plays the protected MCP server and its authorization server (shaped like the
 // spike's toy servers, spikes/p3-connectors/auth-server.mjs and e2e/support/connector-direct-server.mjs); an injected
 // listener and browser stand in for the 127.0.0.1 socket and the system browser. Nothing is sent or bound.

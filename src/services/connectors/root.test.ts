@@ -1,117 +1,50 @@
-// P3-HD M3c2: the production composition of MAWS's own OAuth (./oauth-root.ts; docs/doperpowers/plans/2026-10-17-p3-hd-
-// direct-route.md, M3 and Decision Log 14, 20, 25 and 28). The E2E custody guard stands before every real safeStorage
-// operation: under MAWS_E2E, the mock keychain switch and the scratch profile under the OS temporary directory are
-// proven at each call, or the sealer is unavailable without asking safeStorage. Outside E2E it is the real sealer.
-// The root itself is lazy (nothing touches safeStorage until a demand) and opens the browser through the one
-// scheme-checked `openExternalUrl`. Electron is doubled; no real crypto, keychain or browser is reached.
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+// P3-HD M3c2: the production composition of MAWS's own OAuth (./root.ts; docs/doperpowers/plans/2026-10-17-p3-hd-
+// direct-route.md, M3 and Decision Log 14, 20, 25 and 28). P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-
+// services.md, Interfaces §A and §F; D20, D21): over the machine's key file, the directory and the loopback listener
+// the spine gives it, with no Electron; the MAWS_E2E custody guard went with Electron's sealer to main's legacy reader
+// (src/main/connectors/legacy-custody.test.ts). The root is lazy and opens the browser through the client port.
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ClientPort } from '@shared/client/port';
-import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
-
-const electron = vi.hoisted(() => ({
-  userData: '',
-  safeStorage: { isAsyncEncryptionAvailable: vi.fn(async () => true), encryptStringAsync: vi.fn(async (text: string) => Buffer.from(text)), decryptStringAsync: vi.fn(async (sealed: Buffer) => ({ result: sealed.toString(), shouldReEncrypt: false })) },
-  hasSwitch: vi.fn(() => true),
-}));
-vi.mock('electron', () => ({
-  app: { getPath: () => electron.userData, whenReady: async () => {}, commandLine: { hasSwitch: electron.hasSwitch } },
-  safeStorage: electron.safeStorage,
-}));
-
-const { guardE2ECustody, openOwnerBrowser, productionConnectorOAuth } = await import('./oauth-root');
+import { NO_CLIENT, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import { SEALED_FORMAT_V1 } from '@shared/connectors/sealer';
+import { CUSTODY_KEY_FILE, fileKeyCustody } from './custody';
+import { openOwnerBrowser, productionConnectorOAuth } from './root';
 
 let root: string;
+let directory: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'maws-oauth-root-'));
-  electron.hasSwitch.mockReturnValue(true);
-  for (const fn of Object.values(electron.safeStorage)) fn.mockClear();
+  directory = join(root, 'connectors', 'oauth');
 });
-afterEach(() => {
-  vi.unstubAllEnvs();
-  rmSync(root, { recursive: true, force: true });
-});
+afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-const ID = '44444444-4444-4444-8444-444444444444';
-function spySealer() {
-  const calls: string[] = [];
-  const sealer: ConnectorOAuthSealer = {
-    format: 'maws-connector-oauth/spy',
-    available: async () => (calls.push('available'), true),
-    seal: async (text, id) => (calls.push(`seal:${id}`), Buffer.from(text)),
-    open: async (sealed, id) => (calls.push(`open:${id}`), { text: sealed.toString(), reseal: false }),
-  };
-  return { sealer, calls };
-}
-const facts = (over: Partial<Parameters<typeof guardE2ECustody>[1]> = {}): Parameters<typeof guardE2ECustody>[1] => ({
-  e2e: true, mockKeychain: () => true, userData: () => join(root, 'profile'), scratch: () => join(root, 'profile'), tmp: () => tmpdir(), ...over,
-});
-
-describe('the E2E custody guard', () => {
-  beforeEach(() => mkdirSync(join(root, 'profile')));
-
-  it('outside E2E is the real sealer itself', () => {
-    const { sealer } = spySealer();
-    expect(guardE2ECustody(sealer, facts({ e2e: false }))).toBe(sealer);
-  });
-
-  it('passes through on the mock keychain with the scratch profile, compared canonically', async () => {
-    symlinkSync(join(root, 'profile'), join(root, 'link'));
-    const { sealer, calls } = spySealer();
-    const guarded = guardE2ECustody(sealer, facts({ scratch: () => join(root, 'link') }));
-    expect(guarded.format).toBe('maws-connector-oauth/spy'); // the guarded sealer's files keep its format
-    expect(await guarded.available()).toBe(true);
-    expect((await guarded.open(await guarded.seal('x', ID), ID)).text).toBe('x');
-    expect(calls).toEqual(['available', `seal:${ID}`, `open:${ID}`]);
-  });
-
-  it.each([
-    ['the mock keychain switch is absent', { mockKeychain: () => false }],
-    ['no scratch profile was named', { scratch: () => undefined }],
-    ['the profile is not the scratch one', { scratch: () => root }],
-    ['the profile is outside the OS temporary directory', { tmp: () => join(root, 'profile', 'elsewhere') }],
-    ['the profile cannot be resolved', { userData: () => join(root, 'missing'), scratch: () => join(root, 'missing') }],
-  ])('fails closed, never reaching safeStorage, when %s', async (_why, over) => {
-    const { sealer, calls } = spySealer();
-    const guarded = guardE2ECustody(sealer, facts(over));
-    expect(await guarded.available()).toBe(false);
-    await expect(guarded.seal('x', ID)).rejects.toThrow();
-    await expect(guarded.open(Buffer.from('x'), ID)).rejects.toThrow();
-    expect(calls).toEqual([]);
-  });
-
-  it('proves custody at every call, not once', async () => {
-    let mock = true;
-    const { sealer, calls } = spySealer();
-    const guarded = guardE2ECustody(sealer, facts({ mockKeychain: () => mock }));
-    expect(await guarded.available()).toBe(true);
-    mock = false;
-    await expect(guarded.open(Buffer.from('x'), ID)).rejects.toThrow();
-    expect(calls).toEqual(['available']);
-  });
+const compose = (listen = vi.fn()) => productionConnectorOAuth({
+  closeHost: async () => true,
+  log: () => {},
+  port: { openExternal: vi.fn() },
+  custody: fileKeyCustody(directory, { excludeFromBackup: async () => true }),
+  directory,
+  listen,
 });
 
 describe('the production root', () => {
-  it('composes lazily: a provider whose listing of an empty store touches no safeStorage', async () => {
-    electron.userData = join(root, 'userData');
-    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {}, port: { openExternal: vi.fn() } });
+  it('composes lazily: listing an empty store makes no key, no directory and no listener', async () => {
+    const listen = vi.fn();
+    const provider = compose(listen);
     expect(await provider.saved()).toEqual([]);
-    for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
+    expect(existsSync(directory)).toBe(false);
+    expect(listen).not.toHaveBeenCalled();
     provider.stop();
   });
 
-  it('under MAWS_E2E with a non-scratch profile, the real safeStorage is never asked', async () => {
-    vi.stubEnv('MAWS_E2E', '1');
-    vi.stubEnv('MAWS_USER_DATA', join(root, 'other'));
-    electron.userData = join(root, 'userData');
-    mkdirSync(join(electron.userData, 'connectors', 'oauth'), { recursive: true });
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(join(electron.userData, 'connectors', 'oauth', '33333333-3333-4333-8333-333333333333.sealed'), `${SEALED_FORMAT_V1}\nAAAA\n`);
-    const provider = productionConnectorOAuth({ closeHost: async () => true, log: () => {}, port: { openExternal: vi.fn() } });
-    expect(await provider.saved()).toEqual([{ state: 'unreadable', connectionId: '33333333-3333-4333-8333-333333333333' }]); // ids only: forgettable
-    for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
+  it("lists a profile's format 1 records as forgettable unreadable rows, without making a key", async () => {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(directory, '33333333-3333-4333-8333-333333333333.sealed'), `${SEALED_FORMAT_V1}\nAAAA\n`, { mode: 0o600 });
+    const provider = compose();
+    expect(await provider.saved()).toEqual([{ state: 'unreadable', connectionId: '33333333-3333-4333-8333-333333333333' }]); // ids only
+    expect(readdirSync(directory)).not.toContain(CUSTODY_KEY_FILE);
     provider.stop();
   });
 
@@ -122,5 +55,10 @@ describe('the production root', () => {
     expect(openExternal).toHaveBeenCalledExactlyOnceWith(asker, { url: 'http://127.0.0.1:4000/authorize?state=s' });
     openExternal.mockResolvedValueOnce({ opened: false, reason: 'only http, https and mailto links open outside MAWS' });
     await expect(openOwnerBrowser({ openExternal }, 'file:///etc/passwd', asker)).rejects.toThrow('the authorization URL was not opened: only http, https and mailto links open outside MAWS');
+  });
+
+  it('fails as not opened when no client can take the hand-off', async () => {
+    const openExternal = vi.fn<ClientPort['openExternal']>(async () => NO_CLIENT);
+    await expect(openOwnerBrowser({ openExternal }, 'https://auth.example.com/authorize', null)).rejects.toThrow(`the authorization URL was not opened: ${NO_CLIENT_REASON}`);
   });
 });

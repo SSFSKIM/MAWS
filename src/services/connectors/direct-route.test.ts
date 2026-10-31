@@ -1,4 +1,4 @@
-// P3-HD M2c: route D, main's half (src/main/connectors/direct-route.ts; docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md
+// P3-HD M2c: route D, main's half (./direct-route.ts; docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md
 // M2). A scripted engine host stands in for the direct operation commands (immediate acknowledgments, the id-only
 // `connectors.directOperation` end, `directTake`, `directCancel`, `directClose`); no engine, server, client or model is
 // started. What main dispatched is the evidence that no session was ever listed, acquired or resumed.

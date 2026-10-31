@@ -1,4 +1,4 @@
-// P3-HD M3c1: MAWS's own OAuth provider (src/main/connectors/oauth-provider.ts): the grant lifecycle behind route D's
+// P3-HD M3c1: MAWS's own OAuth provider (./oauth-provider.ts): the grant lifecycle behind route D's
 // credential preparation and the owner's Connect, Reconnect and Disconnect. The real sealed store runs over a scratch
 // directory with a reversible stand-in sealer (no keychain); a scripted flow stands for the SDK requests and the
 // browser, a scripted `closeHost` for the engine host's `connectors.directClose`. A second store over the same
@@ -12,7 +12,7 @@ import type { DirectCredentialPrepared } from './direct-route';
 import type { ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthError } from './oauth-flow';
 import { createConnectorOAuthProvider, OAUTH_FORGET_READ_TIMEOUT_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
-import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
 import { createConnectorOAuthStore, type ConnectorOAuthStore } from './oauth-store';
 import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults'; // P5 O3-A
@@ -1200,7 +1200,7 @@ describe('an app-scope grant saved before the settings split', () => {
     const profile = join(root, 'profile');
     mkdirSync(profile);
     writeFileSync(join(profile, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: [{ name: 'metrics', type: 'http', url: URL }] } }));
-    // the record the O2-era build sealed at Connect (src/main/connectors/oauth-store.test.ts builds one the same way)
+    // the record the O2-era build sealed at Connect (./oauth-store.test.ts builds one the same way)
     await seed(tokens(1), { requestUrl: URL, server: 'metrics', scope: 'app', configPath: join(profile, 'settings.json'), entryPath: ['engine', 'mcpServers', 'name=metrics'] });
     expect(credentialOf(await provider.prepare({ source: await appSource(profile), purpose: 'call', signal: new AbortController().signal }))).toMatchObject({ connectionId: SAVED, accessToken: 'at-1' });
 
@@ -1213,5 +1213,135 @@ describe('an app-scope grant saved before the settings split', () => {
     expect(credentialOf(await provider.prepare({ source: after, purpose: 'call', signal: new AbortController().signal }))).toMatchObject({ connectionId: SAVED, accessToken: 'at-1' });
     expect(await provider.connect(after)).toEqual({ ok: true, connectionId: SAVED, reused: true });
     expect(flow.connects).toEqual([]); // no browser, no new sign-in
+  });
+});
+
+// P5 O4 M2 (Interfaces §B, D23): `connectors.adoptGrant`'s machine half. The legacy record is planted by the
+// format 1 stand-in (what Electron's safeStorage wrote); the provider adopting it runs over a format 2 sealer (the
+// machine's key file's format) whose seal the test can hold, over the same directory.
+describe('the adoption of a format 1 record', () => {
+  class FormatTwo implements ConnectorOAuthSealer {
+    readonly format = SEALED_FORMAT_V2;
+    hold: Deferred<void> | null = null;
+    sealing = false;
+    async available() { return true; }
+    async seal(text: string) {
+      const gate = this.hold;
+      this.hold = null;
+      if (gate) { this.sealing = true; await gate.promise; }
+      return Buffer.from(text, 'utf8').reverse();
+    }
+    async open(sealed: Buffer) { return { text: Buffer.from(sealed).reverse().toString('utf8'), reseal: false }; }
+  }
+  let two: FormatTwo;
+  const opened = async (id = SAVED) => JSON.parse(JSON.stringify(await reread(id))) as unknown; // as main hands it over
+  const headOf = (id = SAVED) => readFileSync(join(dir, `${id}.sealed`), 'utf8').split('\n')[0];
+  const adopting = (store = createConnectorOAuthStore({ directory: dir, sealer: two, now: () => clock })) => {
+    provider.stop();
+    provider = makeProvider(store);
+    return provider;
+  };
+  beforeEach(() => { two = new FormatTwo(); });
+
+  it('re-seals the record under its own format in place of the file; the identity then reads connected and is served', async () => {
+    await seed();
+    const record = await opened();
+    adopting();
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'unavailable', why: 'unknown' }); // format 1 is unreadable here
+    const heard = vi.fn();
+    provider.onChange(heard);
+    expect(await provider.adopt(SAVED, record)).toEqual({ adopted: true });
+    expect(headOf()).toBe(SEALED_FORMAT_V2);
+    expect(heard).toHaveBeenCalled();
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'connected', connectionId: SAVED, refreshable: true, expiresAt: NOW + HOUR });
+    expect(credentialOf(await prepare())).toMatchObject({ connectionId: SAVED, accessToken: 'at-1' });
+  });
+
+  it('answers invalid for a record the store would not keep, and absent for an id with no file', async () => {
+    await seed();
+    const record = await opened();
+    adopting();
+    expect(await provider.adopt(SAVED, { ...(record as object), connectionId: OTHER })).toEqual({ adopted: false, reason: 'invalid' });
+    expect(await provider.adopt(SAVED, 'not a record')).toEqual({ adopted: false, reason: 'invalid' });
+    expect(await provider.adopt(OTHER, { ...(record as object), connectionId: OTHER })).toEqual({ adopted: false, reason: 'absent' });
+    expect(headOf()).toBe(SEALED_FORMAT_V1);
+  });
+
+  it('answers stale when a Forget lands during a slow seal, and never resurrects the record', async () => {
+    await seed();
+    const record = await opened();
+    adopting();
+    const gate = deferred<void>();
+    two.hold = gate;
+    const adoption = provider.adopt(SAVED, record);
+    await vi.waitFor(() => expect(two.sealing).toBe(true));
+    expect((await provider.disconnect(SAVED)).local).toBe('forgotten');
+    gate.resolve();
+    expect(await adoption).toEqual({ adopted: false, reason: 'stale' });
+    expect(onDisk()).toEqual([]);
+    expect(await provider.adopt(SAVED, record)).toEqual({ adopted: false, reason: 'stale' }); // forgotten stays forgotten
+  });
+
+  it('answers present when a format 2 record of the same identity is saved under another id, and leaves both', async () => {
+    await seed();
+    const record = await opened();
+    const store = createConnectorOAuthStore({ directory: dir, sealer: two, now: () => clock });
+    await store.save(store.claim(OTHER), IDENTITY, grant(tokens(9)));
+    adopting(store);
+    expect(await provider.adopt(SAVED, record)).toEqual({ adopted: false, reason: 'present' });
+    expect(headOf()).toBe(SEALED_FORMAT_V1);
+    expect(headOf(OTHER)).toBe(SEALED_FORMAT_V2);
+  });
+
+  it('answers present while a Connect for the identity is in flight', async () => {
+    await seed();
+    const record = await opened();
+    const parked = readFileSync(join(dir, `${SAVED}.sealed`));
+    rmSync(join(dir, `${SAVED}.sealed`)); // set aside: with no unreadable record, Connect runs its flow
+    adopting();
+    const connecting = provider.connect(source());
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    writeFileSync(join(dir, `${SAVED}.sealed`), parked, { mode: 0o600 });
+    expect(await provider.adopt(SAVED, record)).toEqual({ adopted: false, reason: 'present' });
+    expect(headOf()).toBe(SEALED_FORMAT_V1);
+    flow.connects[0]!.answer.reject(new ConnectorOAuthError('cancelled'));
+    await connecting;
+  });
+
+  it('answers unavailable once stopped', async () => {
+    await seed();
+    const record = await opened();
+    adopting().stop();
+    expect(await provider.adopt(SAVED, record)).toEqual({ adopted: false, reason: 'unavailable' });
+    expect(headOf()).toBe(SEALED_FORMAT_V1);
+  });
+});
+
+// P5 O4 D10: the engine host outlives a spine load, and its floors per connection with it.
+describe('epochs across loads', () => {
+  it('a later provider of the process issues epochs above every earlier one', async () => {
+    await seed();
+    const first = credentialOf(await prepare());
+    provider.stop();
+    provider = makeProvider();
+    const second = credentialOf(await prepare());
+    expect(first).not.toBe('refused');
+    expect(second).not.toBe('refused');
+    expect((second as { credentialEpoch: number }).credentialEpoch).toBeGreaterThan((first as { credentialEpoch: number }).credentialEpoch);
+  });
+
+  it('the stop closes every connection issued a credential, at its highest epoch, in the host', async () => {
+    await seed();
+    const delivered = credentialOf(await prepare()) as { credentialEpoch: number };
+    closes = [];
+    provider.stop();
+    await vi.waitFor(() => expect(closes).toEqual([{ connectionId: SAVED, credentialEpoch: delivered.credentialEpoch }]));
+  });
+
+  it('a provider that issued nothing closes nothing at its stop', async () => {
+    provider.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(closes).toEqual([]);
   });
 });

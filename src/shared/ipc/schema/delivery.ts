@@ -43,7 +43,7 @@ export const NotionStatusSchema = z
     why: z.enum(['noSession', 'notFound']).optional(),
   })
   .refine((status) => (status.state === 'ready') === (status.connection !== undefined) && ['ready', 'signIn', 'reconnect', 'busy'].includes(status.state) === (status.source !== undefined) && (status.state === 'none') === (status.why !== undefined), 'the fields of the Notion state');
-// gws's own state as `gws auth status` reports it (src/main/delivery/gws.ts)
+// gws's own state as `gws auth status` reports it (src/services/delivery/gws.ts)
 export const DriveStatusSchema = z.strictObject({
   target: z.literal('drive'),
   state: z.enum(['absent', 'needsSetup', 'signedOut', 'expired', 'noDrive', 'ready', 'failed']),

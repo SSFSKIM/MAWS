@@ -191,7 +191,7 @@ describe('cold owner delivery sources', () => {
     const adopted = await after.sources.resolveSource(split!.cwd, split!.server);
     if (!adopted.ok) throw new Error('no source');
     // what main's OAuth custody keys a grant on (oauthIdentityOf: url, server, scope, path, entryPath), as a sealed record
-    // saved before the upgrade names it (src/main/connectors/oauth-store.test.ts builds one)
+    // saved before the upgrade names it (src/services/connectors/oauth-store.test.ts builds one)
     const identity = ({ source }: { source: typeof saved.source }) => ({ requestUrl: source.url, server: source.server, scope: source.scope, configPath: source.path, entryPath: source.entryPath });
     expect(identity(saved)).toEqual({ requestUrl: URL, server: 'notion', scope: 'app', configPath: '/app/settings.json', entryPath: ['engine', 'mcpServers', 'name=notion'] });
     expect(identity(adopted)).toEqual(identity(saved));

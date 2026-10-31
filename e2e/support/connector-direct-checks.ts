@@ -2,7 +2,7 @@
 // so test/support/connector-direct-checks.test.ts runs them under vitest. docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
 // acceptance 1-6 and Decision Log 23, 25 and 28:
 // - `custodyProblems`: the launch's mock keychain and canonical scratch profile, checked before any owner action (the
-//   product's own guard, src/main/connectors/oauth-root.ts, stands before every real safeStorage call);
+//   product's own guard, src/main/connectors/legacy-custody.ts, stands before every real safeStorage call);
 // - `addedListeners` / `loopbackPort`: the callback listener a Connect binds, exactly 127.0.0.1;
 // - `readSealedText` / `plaintextHits`: a sealed OAuth record's format and that no known value is readable in it;
 // - `journalTurns`: launches, and that no model turn ran, from a session's journal rows;
@@ -59,7 +59,7 @@ export function loopbackPort(address: string): number | null {
   return port <= 65_535 ? port : null;
 }
 
-export const SEALED_FORMAT = 'maws-connector-oauth/1'; // src/main/connectors/oauth-store.ts FORMAT
+export const SEALED_FORMAT = 'maws-connector-oauth/1'; // src/shared/connectors/sealer.ts SEALED_FORMAT_V1
 
 // A sealed record's text: its format line, then one canonical base64 line of ciphertext, then nothing.
 export function readSealedText(text: string): { ok: true; ciphertext: Buffer } | { ok: false; why: 'format' | 'body' } {

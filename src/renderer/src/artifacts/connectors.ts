@@ -1,6 +1,6 @@
 // P3-H H4: the renderer's half of the ArtifactHost's connector family (src/artifacts/host.ts, `ConnectorSurface`; the X9
 // amendment, docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H and Decision Log 80, 84 and 85): a page's surface over
-// main's lease commands (`connectors.*`, src/main/connectors) and the owner's grants over main's `artifacts.*` grant
+// main's lease commands (`connectors.*`, src/services/connectors) and the owner's grants over main's `artifacts.*` grant
 // commands. Main checks everything a page sends; this adapter only keeps a surface's commands under its lease, in order.
 //
 // - A surface opens its lease at once; what is asked before the lease answers is sent after it, in the order asked

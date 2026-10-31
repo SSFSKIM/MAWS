@@ -171,7 +171,7 @@ function driveStatusOf(state: GwsState): DriveStatus {
 }
 
 export function startDelivery(deps: DeliveryDeps): { stop(): void } {
-  const { register, emit } = deps.bus;
+  const { bus } = deps;
   const gws: GwsDriver = deps.gws ?? { find: findGws, state: readGwsState, login: gwsLogin, upload: gwsUpload };
   const now = deps.now ?? (() => Date.now());
   const log = deps.log ?? ((line: string) => console.warn(`[delivery] ${line}`));
@@ -387,11 +387,11 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     receipts.delete(key);
     receipts.set(key, receipt);
     if (receipts.size > DELIVERY_RECEIPT_LIMIT) receipts.delete(receipts.keys().next().value as string);
-    emit('delivery.receipt', receipt);
+    bus.emit('delivery.receipt', receipt);
     return { ok: true, receipt };
   }
 
-  register('delivery.status', async ({ target, artifactId }): Promise<DeliveryStatus> => {
+  bus.register('delivery.status', async ({ target, artifactId }): Promise<DeliveryStatus> => {
     if (target === 'notion') return notionStatus(artifactId);
     try {
       return driveStatusOf((await driveState(deadline(DELIVERY_STATUS_DEADLINE_MS))).state);
@@ -399,9 +399,9 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       return { target: 'drive', state: 'failed', message: words(error) };
     }
   });
-  register('delivery.connect', (input, { client }) => connect(input, client));
-  register('delivery.deliver', (input) => deliver(input));
-  register('delivery.cancel', ({ runId }) => {
+  bus.register('delivery.connect', (input, { client }) => connect(input, client));
+  bus.register('delivery.deliver', (input) => deliver(input));
+  bus.register('delivery.cancel', ({ runId }) => {
     const run = runs.get(runId);
     if (run) {
       if (run.written) return { cancelled: false };
@@ -412,7 +412,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     bounded(tombstones, runId); // P5 O4 D15: main's hand-off is under way; the run's start answers `cancelled`
     return { cancelled: true };
   });
-  register('delivery.receipts', () => ({ receipts: [...receipts.values()] }));
+  bus.register('delivery.receipts', () => ({ receipts: [...receipts.values()] }));
 
   return {
     stop: () => {

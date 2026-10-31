@@ -1,4 +1,4 @@
-// P3-HD M3a: the bounded fetch every OAuth request of main's goes through (src/main/connectors/oauth-http.ts). An
+// P3-HD M3a: the bounded fetch every OAuth request of main's goes through (./oauth-http.ts). An
 // injected fetch stands in for the network; nothing is sent.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError } from './oauth-http';

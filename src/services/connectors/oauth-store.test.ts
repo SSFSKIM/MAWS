@@ -1,4 +1,4 @@
-// P3-HD M3a: the sealed OAuth store (src/main/connectors/oauth-store.ts). Scratch directories and an injected sealer
+// P3-HD M3a: the sealed OAuth store (./oauth-store.ts). Scratch directories and an injected sealer
 // stand in for userData and Electron's safeStorage; no keychain is touched. A second store over the same directory is
 // the relaunch.
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorOAuthGrant, ConnectorOAuthIdentity } from '@shared/connectors/oauth-types';
 import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
-import { fileKeyCustody } from '../../services/connectors/custody';
-import { createConnectorOAuthStore, electronOAuthSealer } from './oauth-store';
+import { fileKeyCustody } from './custody';
+import { createConnectorOAuthStore } from './oauth-store';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -342,49 +342,7 @@ describe('ConnectorOAuthStore', () => {
   });
 });
 
-describe('electronOAuthSealer', () => {
-  it("names the Keychain's format, version 1", () => {
-    const adapter = electronOAuthSealer({
-      isAsyncEncryptionAvailable: async () => true,
-      encryptStringAsync: async () => Buffer.alloc(0),
-      decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
-    }, async () => {});
-    expect(adapter.format).toBe(SEALED_FORMAT_V1);
-    expect(adapter.format).toBe('maws-connector-oauth/1');
-  });
-
-  it('uses only the asynchronous safeStorage API, after app readiness', async () => {
-    const order: string[] = [];
-    let ready!: () => void;
-    const readiness = new Promise<void>((resolve) => { ready = resolve; });
-    // only the asynchronous methods exist: a synchronous call would throw
-    const safeStorage = {
-      isAsyncEncryptionAvailable: async () => { order.push('available'); return true; },
-      encryptStringAsync: async (text: string) => { order.push('encrypt'); return Buffer.from(`enc:${text}`); },
-      decryptStringAsync: async (data: Buffer) => { order.push('decrypt'); return { result: data.toString().slice(4), shouldReEncrypt: true }; },
-    };
-    const adapter = electronOAuthSealer(safeStorage, async () => { order.push('wait'); await readiness; order.push('ready'); });
-    const availability = adapter.available();
-    await Promise.resolve();
-    expect(order).toEqual(['wait']);
-    ready();
-    expect(await availability).toBe(true);
-    expect(await adapter.open(await adapter.seal('hello', A), A)).toEqual({ text: 'hello', reseal: true });
-    expect(order).toEqual(['wait', 'ready', 'available', 'wait', 'ready', 'encrypt', 'wait', 'ready', 'decrypt']);
-  });
-
-  it('a rejected availability check reads as unavailable', async () => {
-    const adapter = electronOAuthSealer({
-      isAsyncEncryptionAvailable: async () => { throw new Error('no'); },
-      encryptStringAsync: async () => Buffer.alloc(0),
-      decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
-    }, async () => {});
-    expect(await adapter.available()).toBe(false);
-  });
-});
-
-// P5 O4 M1: the store over the machine's file key (src/services/connectors/custody.ts, Interfaces §A); the backup
-// exclusion is a fake. Here until M2 moves the store beside the custody.
+// P5 O4 M1: the store over the machine's file key (./custody.ts, Interfaces §A); the backup exclusion is a fake.
 describe('the store over the file key', () => {
   const fileKeyStore = () => createConnectorOAuthStore({ directory: dir, sealer: fileKeyCustody(dir, { excludeFromBackup: async () => true }), now: () => 1_700_000_100_000 });
 
@@ -408,5 +366,77 @@ describe('the store over the file key', () => {
     await legacy.save(legacy.claim(A), identity(), grant());
     expect(await fileKeyStore().list()).toEqual([{ state: 'unreadable', connectionId: A }]);
     expect(readdirSync(dir)).toEqual([`${A}.sealed`]); // no key was made for a listing with no record of its own
+  });
+});
+
+// P5 O4 M2 (Interfaces §B, D23): the adoption's commit. A format 1 file the Electron-shaped fake wrote is re-sealed
+// under the file key and replaces the file only while it is still that format 1 file nobody forgot or saved over.
+describe('the adoption of a format 1 record', () => {
+  const fileKeyStore = () => createConnectorOAuthStore({ directory: dir, sealer: fileKeyCustody(dir, { excludeFromBackup: async () => true }), now: () => 1_700_000_200_000 });
+  const opened = { ...grant(), connectionId: A, identity: identity(), savedAt: 1_700_000_100_000 };
+  const plantLegacy = async () => {
+    const legacy = store(); // format 1
+    await legacy.save(legacy.claim(A), identity(), grant());
+  };
+  const headOf = () => readFileSync(join(dir, `${A}.sealed`), 'utf8').split('\n')[0];
+
+  it('re-seals the record under the file key and replaces the format 1 file, which then reads back after a relaunch', async () => {
+    await plantLegacy();
+    const s = fileKeyStore();
+    const record = s.recordOf(JSON.parse(JSON.stringify(opened)), A)!;
+    expect(record).toEqual(opened);
+    expect(await s.adoptSealed(s.claim(A), await s.sealText(record), SEALED_FORMAT_V1)).toBe('adopted');
+    expect(headOf()).toBe(SEALED_FORMAT_V2);
+    expect(await fileKeyStore().read(A)).toEqual(opened); // the record's own savedAt, not the adoption's
+    expect(await fileKeyStore().list()).toEqual([expect.objectContaining({ state: 'sealed', connectionId: A, savedAt: 1_700_000_100_000 })]);
+  });
+
+  it('recordOf refuses what the store would not keep: another id, a malformed record, a non-object', () => {
+    const s = fileKeyStore();
+    expect(s.recordOf(opened, B)).toBeNull();
+    expect(s.recordOf({ ...opened, tokens: { ...opened.tokens, tokenType: 'MAC' } }, A)).toBeNull();
+    expect(s.recordOf({ ...opened, authorizationServer: { issuer: 'https://auth.example.com' } }, A)).toBeNull();
+    expect(s.recordOf([opened], A)).toBeNull();
+    expect(s.recordOf(null, A)).toBeNull();
+  });
+
+  it('answers absent when there is no file, and writes none', async () => {
+    const s = fileKeyStore();
+    expect(await s.adoptSealed(s.claim(A), await s.sealText(opened), SEALED_FORMAT_V1)).toBe('absent');
+    expect(sealedFiles()).toEqual([]);
+  });
+
+  it('answers present when the file is no longer format 1, and leaves it', async () => {
+    const s = fileKeyStore();
+    await s.save(s.claim(A), identity(), grant({ issuer: 'https://newer.example.com' }));
+    const fresh = fileKeyStore(); // another process's save: no commit in this one
+    expect(await fresh.adoptSealed(fresh.claim(A), await fresh.sealText(opened), SEALED_FORMAT_V1)).toBe('present');
+    expect((await fileKeyStore().read(A))?.issuer).toBe('https://newer.example.com');
+  });
+
+  it('answers stale after a Forget during the seal, and never resurrects the record', async () => {
+    await plantLegacy();
+    const s = fileKeyStore();
+    const claim = s.claim(A);
+    const text = await s.sealText(opened);
+    expect(await s.remove(A)).toBe(true);
+    expect(await s.adoptSealed(claim, text, SEALED_FORMAT_V1)).toBe('stale');
+    expect(sealedFiles()).toEqual([]);
+  });
+
+  it('answers stale after a save in this process since the claim, and keeps the save', async () => {
+    await plantLegacy();
+    const s = fileKeyStore();
+    const claim = s.claim(A);
+    await s.save(s.claim(A), identity(), grant({ issuer: 'https://newer.example.com' }));
+    expect(await s.adoptSealed(claim, await s.sealText(opened), SEALED_FORMAT_V1)).toBe('stale');
+    expect((await s.read(A))?.issuer).toBe('https://newer.example.com');
+  });
+
+  it('commits once per id in a process: a second adoption is stale', async () => {
+    await plantLegacy();
+    const s = fileKeyStore();
+    expect(await s.adoptSealed(s.claim(A), await s.sealText(opened), SEALED_FORMAT_V1)).toBe('adopted');
+    expect(await s.adoptSealed(s.claim(A), await s.sealText(opened), SEALED_FORMAT_V1)).toBe('stale');
   });
 });
