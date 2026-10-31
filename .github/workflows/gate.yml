@@ -385,6 +385,7 @@ jobs:
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
+          HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/gate-peer-held.mjs
       - id: plan
@@ -398,6 +399,7 @@ jobs:
           INPUT_LANE: ${{ inputs.lane }}
           INPUT_HOSTED_ROUTE: ${{ inputs.hosted_route }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
+          HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}

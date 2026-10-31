@@ -1,5 +1,5 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
@@ -9,9 +9,10 @@ import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
-import { useUnstartedTitle } from '../keymap/actions-runtime';
+import { isSessionCreatorRegistered, useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { hostStatus } from '../test-support/host-status';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions';
@@ -380,6 +381,33 @@ describe('tab retention', () => {
     connection.disconnect();
   });
 
+  // 2026-10-31: an upgrade's mawsd restart answered the page's first reads host_unavailable: unknown, never none
+  it('a failed intent list settles ready unknown, is asked again when the local host is heard, and is known once answered; so are the deletions', async () => {
+    withMain({ 'session.intent.list': undefined, 'session.deletions.list': undefined });
+    useSetup.setState({ loaded: false });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const connection = connectSetup(ipc);
+    let known = false;
+    void connection.known.then(() => (known = true));
+    await act(() => fake.fail('session.intent.list', 'machine is restarting; cannot answer session.intent.list', 'host_unavailable'));
+    await act(() => fake.fail('session.deletions.list', 'machine is restarting; cannot answer session.deletions.list', 'host_unavailable'));
+    expect(await connection.ready).toBe(false);
+    expect(useSetup.getState().loaded).toBe(false); // not taken as none
+    expect(known).toBe(false);
+    act(() => fake.event('host.status', hostStatus()));
+    await act(() => fake.reply('session.intent.list', { intents: [intent()] }));
+    await act(() => fake.reply('session.deletions.list', { manifests: [{ appSessionId: ID, engineSessionId: null, paths: ['/a.cast'], trashed: [], createdAt: '2026-09-29T10:00:00.000Z' }] }));
+    expect(known).toBe(true);
+    expect(useSetup.getState().loaded).toBe(true);
+    expect(retainsTab(A)).toBe(true);
+    expect(useSetup.getState().deletions.has(A)).toBe(true);
+    act(() => fake.event('host.status', hostStatus()));
+    expect(fake.invoked('session.intent.list')).toHaveLength(2); // answered: not asked again
+    expect(fake.invoked('session.deletions.list')).toHaveLength(2);
+    connection.disconnect();
+    warn.mockRestore();
+  });
+
   it('an older snapshot does not bring back an intent main dropped', async () => {
     withMain({ 'session.intent.list': undefined, 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(ipc); // P5 O6 M2: through the client, so main's bare events arrive lifted
@@ -461,6 +489,27 @@ describe('the unstarted title and the creator', () => {
     } finally {
       act(() => disconnect());
     }
+  });
+
+  // 2026-10-31: an upgrade's mawsd restart answered the page's one ask host_unavailable, and New chat stayed disabled
+  it('registers the creator once main answers the launch mode, asked again after a failure when the local machine’s host is heard', async () => {
+    withMain({ 'session.launchMode': undefined, 'session.intent.list': { intents: [] }, 'session.deletions.list': { manifests: [] } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let disconnect!: () => void;
+    await act(async () => { disconnect = connectSessions(ipc); });
+    try {
+      await act(() => fake.fail('session.launchMode', 'machine is restarting; cannot answer session.launchMode', 'host_unavailable'));
+      expect(isSessionCreatorRegistered()).toBe(false);
+      act(() => fake.event('host.status', hostStatus()));
+      await act(() => fake.reply('session.launchMode', { mode: 'index' }));
+      expect(isSessionCreatorRegistered()).toBe(true);
+      act(() => fake.event('host.status', hostStatus()));
+      expect(fake.invoked('session.launchMode')).toHaveLength(2);
+    } finally {
+      act(() => disconnect());
+      warn.mockRestore();
+    }
+    expect(isSessionCreatorRegistered()).toBe(false);
   });
 
   it("titles the tab 'New chat' with its project once one is chosen, and the creator opens with main's intent", async () => {
