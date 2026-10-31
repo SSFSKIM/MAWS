@@ -378,6 +378,24 @@ describe('the watch tree reconciles', () => {
     handle.close();
   });
 
+  // Re-review of M1: a pass whose reopen of the root fails closes the tree; no timer outlives it.
+  it("arms no timer again once a periodic reopen of the root failed and closed the tree", async () => {
+    const fake = new FakeWatchFs();
+    const { handle, errors } = open(fake);
+    await drain();
+    fake.rm('');
+    fake.fire('', 'rename', 'r');
+    await drain();
+    fake.mkdir('');
+    fake.failWatch = (path) => (path === fake.root ? errno('EACCES', path) : null);
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(errors.map((error) => error.code)).toEqual(['EACCES']);
+    expect(vi.getTimerCount()).toBe(0);
+    handle.close();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   // Review of M1 (finding 3): a directory beneath the root that a watch error other than exhaustion left unwatched is
   // tried again by the next whole-tree pass, the slow timer's or a burst's.
   it('tries again, at the next pass, a directory whose watch call failed for a reason of its own', async () => {

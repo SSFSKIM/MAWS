@@ -377,7 +377,10 @@ class WatchTree implements WatchHandle {
     }, report);
   }
 
+  // Every arming is guarded on the tree being open: a pass can close it (a failed reopen of the root), and a timer
+  // armed after that would escape shut(), which has already run.
   private armReconcile(): void {
+    if (this.closed) return;
     this.reconcileTimer = setTimeout(() => {
       this.reconcile();
       this.armReconcile();
@@ -398,6 +401,7 @@ class WatchTree implements WatchHandle {
   }
 
   private settle(ms: number): void {
+    if (this.closed) return;
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
       const quiet = Date.now() - this.lastEventAt;
