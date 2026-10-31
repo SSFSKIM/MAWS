@@ -154,7 +154,8 @@ export function remoteMessage(s: Serialized, inline: readonly Attachment[], path
   const text = join(s.text);
   const blocks = inline.map(imageBlock);
   const content: string | ContentBlock[] = blocks.length === 0 ? text : text.trim() === '' ? blocks : [...blocks, { type: 'text', text }];
-  const { attachmentNames: _names, ...rest } = s;
+  const rest: Serialized = { ...s };
+  delete rest.attachmentNames; // the inline images' own names, below
   return {
     ...rest,
     text,
