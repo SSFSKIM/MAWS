@@ -13,7 +13,7 @@
 // transcript. The journal root and session directories are 0700 and every file the writer opens, base and rotations, is
 // 0600: created so whatever the umask, and tightened at open when an earlier build left them wider. Directories above
 // the journal root keep the modes they have; launch files the writer does not open sit behind the 0700 directories.
-import { chmodSync, closeSync, createReadStream, existsSync, fchmodSync, mkdirSync, openSync, readdirSync, readSync, rmdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, createReadStream, existsSync, fchmodSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmdirSync, statSync, truncateSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseJournalRow, type JournalDirection, type JournalRow } from '@shared/wire/journal';
@@ -65,12 +65,40 @@ export class JournalWriter {
     readonly dir: string,
     readonly launchId: string,
     private readonly opts: { maxBytes: number; redact?: (line: string) => string },
+    at: { index: number; seq: number; bytes: number } = { index: 0, seq: 0, bytes: 0 }, // P5 O16: where resume() continues
   ) {
     this.redact = opts.redact ?? identity;
     ownerOnlyJournalDirectory(dir); // P3-HD
     this.path = join(dir, `${launchId}.jsonl`);
-    this.current = this.path;
-    this.fd = openOwnerOnly(this.path); // P3-HD
+    this.index = at.index;
+    this.seq = at.seq;
+    this.bytes = at.bytes;
+    this.current = at.index === 0 ? this.path : join(dir, `${launchId}.${at.index}.jsonl`);
+    this.fd = openOwnerOnly(this.current); // P3-HD
+  }
+
+  // P5 O16 (Interfaces §C): a writer that continues a launch's journal, as an adopter does: the latest file opened for
+  // append with `seq` and the rotation index continued from its tail, the file first cut back to its last newline so a
+  // torn last row (a crash mid-writeSync) never stays as an interior line `JournalReader.rows` would throw on. A launch
+  // with no file starts at seq 0, as a new writer does.
+  static resume(dir: string, launchId: string, opts: { maxBytes: number; redact?: (line: string) => string }): JournalWriter {
+    const latest = existsSync(dir) ? launchesIn(dir).find((launch) => launch.launchId === launchId)?.files.at(-1) : undefined;
+    if (latest === undefined) return new JournalWriter(dir, launchId, opts);
+    const text = readFileSync(latest, 'utf8');
+    const whole = text.slice(0, text.lastIndexOf('\n') + 1);
+    if (whole.length !== text.length) truncateSync(latest, Buffer.byteLength(whole));
+    const lines = whole.split('\n').filter((line) => line.length > 0);
+    // a rotation's first row may be the one that rotated: an empty latest file keeps the previous file's last seq
+    let seq = 0;
+    for (const file of [...launchesIn(dir).find((launch) => launch.launchId === launchId)!.files].reverse()) {
+      const rows = file === latest ? lines : readFileSync(file, 'utf8').split('\n').filter((line) => line.length > 0);
+      if (rows.length > 0) {
+        seq = parseJournalRow(JSON.parse(rows.at(-1)!)).seq;
+        break;
+      }
+    }
+    const index = Number(/\.(\d+)\.jsonl$/.exec(latest)?.[1] ?? 0);
+    return new JournalWriter(dir, launchId, opts, { index, seq, bytes: Buffer.byteLength(whole) });
   }
 
   // The file rows go to now (`path`, or the rotation `<launchId>.<n>.jsonl`).
@@ -192,6 +220,12 @@ export class JournalReader {
 // Pruning at host start: keep the most recent launches per session and nothing older than the age limit; a session
 // directory left empty goes too. Counts launches removed. E10: `keep` names launches never removed whatever their age
 // or rank (the rows the host holds, once pruning also runs in a host that has been up for days).
+// P5 O16 M2 (Interfaces §C): a hosted launch's host map files, `<launchId>.hseq` and its rotations (holder/checkpoint.ts).
+const HOST_MAP_FILE = /^([A-Za-z0-9_-]+?)(?:\.(\d+))?\.hseq$/;
+function hostMapsOf(dir: string, launchId: string): string[] {
+  return readdirSync(dir).filter((name) => HOST_MAP_FILE.exec(name)?.[1] === launchId).map((name) => join(dir, name));
+}
+
 export async function pruneJournals(root: string, opts: { keepPerSession: number; maxAgeDays: number; now?: Date; keep?: ReadonlySet<string> }): Promise<{ removed: number }> {
   if (!existsSync(root) || !statSync(root).isDirectory()) return { removed: 0 };
   const cutoff = (opts.now ?? new Date()).getTime() - opts.maxAgeDays * 86_400_000;
@@ -203,6 +237,7 @@ export async function pruneJournals(root: string, opts: { keepPerSession: number
     launches.forEach((launch, index) => {
       if ((index < opts.keepPerSession && launch.startedAt >= cutoff) || opts.keep?.has(launch.launchId)) return;
       for (const file of launch.files) unlinkSync(file);
+      for (const file of hostMapsOf(dir, launch.launchId)) unlinkSync(file); // P5 O16 M2: a hosted launch's map goes with it
       removed += 1;
     });
     if (readdirSync(dir).length === 0) rmdirSync(dir);
