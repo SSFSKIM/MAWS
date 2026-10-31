@@ -10,12 +10,18 @@
 // MAWS_WATCH_TREE_STORE the synthetic store (seeded when empty: 5,000 transcripts in one project, 200 in another) is
 // watched through the store watcher's tree. MAWS_WATCH_TREE_EXHAUST=watches (after `sysctl` lowered
 // max_user_watches to 600) or =instances (max_user_instances at the user's count) runs the exhaustion arm instead.
-// Prints one line per arm and merges its numbers into test-results/watch-tree-vm.json. A missed bound fails the case
-// (each read softly, so every line prints); it is a finding for the architect, never a widened bound.
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+// Each arm runs in a fresh process of its own (this file again, under vitest, with MAWS_WATCH_TREE_ARM naming the arm),
+// as O3-G's measure ran each in its own node: an arm after another in one process inherits the heap V8 grew for it.
+// Prints one line per arm and merges its numbers into test-results/watch-tree-vm.json. RSS growth is printed with its
+// retained part beside it (RSS less the V8 heap committed but free after a full GC: the heap used, the external
+// memory and the rest, native), so a miss can be told apart from pages V8 keeps. A slower write than §G's latency bound
+// is recorded with the collections, child spawns and loop stalls that overlapped it. A missed bound fails the case (each
+// read softly, so every line prints); it is a finding for the architect, never a widened bound.
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { performance } from 'node:perf_hooks';
+import { constants as perfConstants, performance, PerformanceObserver } from 'node:perf_hooks';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -30,7 +36,9 @@ import { recursiveWatch, watchTree, type WatchFn } from './watch-tree';
 const ROOTS = (process.env.MAWS_WATCH_TREE_ROOTS ?? '').split(',').map((root) => root.trim()).filter((root) => root !== '');
 const STORE = process.env.MAWS_WATCH_TREE_STORE?.trim() || null;
 const EXHAUST = process.env.MAWS_WATCH_TREE_EXHAUST?.trim() || null; // 'watches' | 'instances'
+const ARM = process.env.MAWS_WATCH_TREE_ARM?.trim() || null; // set by this file for the process it runs one arm in
 const RESULTS = join('test-results', 'watch-tree-vm.json');
+const LINES = join('test-results', 'watch-tree-vm.lines'); // every line printed, appended: vitest may print no console (not on a terminal)
 
 // From O3-G's directory-tree rows, with a fifth of room (§G).
 const BOUND = {
@@ -57,7 +65,7 @@ const gc = runInNewContext('gc') as () => void;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const MiB = 2 ** 20;
 
-describe.runIf(process.platform === 'linux' && ROOTS.length > 0)('the watch tree on a devcloud VM (P5 O3-E, Interfaces §G)', () => {
+describe.runIf(process.platform === 'linux' && (ROOTS.length > 0 || ARM !== null))('the watch tree on a devcloud VM (P5 O3-E, Interfaces §G)', () => {
   const results: Record<string, unknown> = {};
   afterAll(() => {
     mkdirSync('test-results', { recursive: true });
@@ -65,55 +73,17 @@ describe.runIf(process.platform === 'linux' && ROOTS.length > 0)('the watch tree
     writeFileSync(RESULTS, `${JSON.stringify({ ...earlier, ...results, host: hostFacts() }, null, 2)}\n`);
   });
 
-  if (EXHAUST === null) {
-    for (const given of ROOTS) {
-      it(`measures ${given}`, async () => {
-        const root = realpathSync(given);
-        const kind = kindOf(root);
-        if (kind === 'maws') {
-          // O3-G's workload is the checkout with node_modules installed: a bare one cannot stand in for it.
-          expect(existsSync(join(root, 'node_modules')), `${root}/node_modules (devenv/setup.sh installs it)`).toBe(true);
-          const unpruned = await unprunedArm(root);
-          results[`${root} (prune off)`] = unpruned;
-          line(`${root} (prune off)`, `watches ${unpruned.watches} (bound ${BOUND.mawsUnprunedWatches}) · rss +${unpruned.rssMiB} MiB · walk lag ${unpruned.walkLagMs} ms`);
-          expect.soft(unpruned.watches, 'MAWS with the prune off').toBeLessThanOrEqual(BOUND.mawsUnprunedWatches);
-          expect.soft(unpruned.rssMiB, 'RSS growth with the prune off').toBeLessThanOrEqual(BOUND.rssMiB);
-          expect.soft(unpruned.walkLagMs, "the initial walk's worst lag with the prune off").toBeLessThanOrEqual(BOUND.walkLagMs);
-        }
-        const worktree = kind === 'maws' ? addWorktree(root) : null;
-        try {
-          const arm = await repositoryArm(root);
-          const bound = kind === 'maws' ? BOUND.mawsWatches : kind === 'linux' ? BOUND.linuxWatches : null;
-          results[root] = { kind, worktree, ...arm };
-          line(root, `watches ${arm.watches} (bound ${bound ?? 'none'}) · rss +${arm.rssMiB} MiB · walk lag ${arm.walkLagMs} ms · burst ${BURST_FILES}: lag ${arm.burst.createLagMs}/${arm.burst.removeLagMs} ms, named in ${arm.burst.namedMs} ms · latency p50/p95 ${latencyText(arm.latency)}`);
-          if (bound !== null) expect.soft(arm.watches, `${kind}'s watches`).toBeLessThanOrEqual(bound);
-          expect.soft(arm.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
-          expect.soft(arm.walkLagMs, "the initial walk's worst lag").toBeLessThanOrEqual(BOUND.walkLagMs);
-          expect.soft(arm.burst.createLagMs, "the burst's worst lag (created)").toBeLessThanOrEqual(BOUND.burstLagMs);
-          expect.soft(arm.burst.removeLagMs, "the burst's worst lag (removed)").toBeLessThanOrEqual(BOUND.burstLagMs);
-          expect.soft(arm.burst.namedMs, 'every burst file named').not.toBeNull();
-          expect.soft(arm.burst.namedMs ?? Infinity, 'every burst file named').toBeLessThanOrEqual(BOUND.burstNamedMs);
-          for (const [site, figures] of Object.entries(arm.latency)) {
-            for (const [op, stats] of [['create', figures.create], ['modify', figures.modify]] as const) {
-              expect.soft(stats.missed, `${site} ${op}: missed writes`).toBe(0);
-              expect.soft(stats.p95 ?? Infinity, `${site} ${op}: latency p95`).toBeLessThanOrEqual(BOUND.latencyP95Ms);
-            }
-          }
-        } finally {
-          if (worktree !== null) removeWorktree(root, worktree);
-        }
+  if (ARM !== null) {
+    it(`measures ${ARM}`, () => measure(parseArm(ARM), results), 1_800_000);
+  } else if (EXHAUST === null) {
+    for (const arm of arms()) {
+      it(`measures ${arm.kind} ${arm.path} in a fresh process`, async () => {
+        const { code, lines, tail } = await fresh(arm);
+        for (const text of lines) console.log(text); // the parent's own console, where vitest prints one
+        expect(lines.length, `the arm printed its line\n${tail}`).toBeGreaterThan(0);
+        expect(code, `a bound missed or the arm failed (its own soft reads above)\n${tail}`).toBe(0);
       }, 1_800_000);
     }
-
-    it.runIf(STORE !== null)('measures the synthetic store through the store watcher', async () => {
-      const arm = await storeArm(STORE!);
-      results[`store ${STORE}`] = arm;
-      line(`store ${STORE}`, `watches ${arm.watches} (expected ${arm.expectedWatches}) · rss +${arm.rssMiB} MiB · latency p50/p95 ${arm.latency.p50}/${arm.latency.p95} ms · rescan of projects/ ${arm.rescanCpuMs} ms CPU (${arm.rescanListed} transcripts)`);
-      expect.soft(arm.watches, "the store's watches").toBe(arm.expectedWatches);
-      expect.soft(arm.latency.missed, 'missed appends').toBe(0);
-      expect.soft(arm.latency.p50 ?? Infinity, "an append's latency p50").toBeLessThanOrEqual(BOUND.storeLatencyP50Ms);
-      expect.soft(arm.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
-    }, 600_000);
   } else {
     it(`surfaces inotify's ${EXHAUST} exhausted and keeps git.changed arriving by the poll`, async () => {
       expect(['watches', 'instances']).toContain(EXHAUST);
@@ -131,8 +101,103 @@ describe.runIf(process.platform === 'linux' && ROOTS.length > 0)('the watch tree
   }
 });
 
+// One arm: MAWS's checkout with the prune off, a repository through the product's path, or the synthetic store.
+interface Arm {
+  kind: 'unpruned' | 'repository' | 'store';
+  path: string;
+}
+
+function arms(): Arm[] {
+  const list: Arm[] = [];
+  for (const given of ROOTS) {
+    const root = realpathSync(given);
+    if (kindOf(root) === 'maws') list.push({ kind: 'unpruned', path: root });
+    list.push({ kind: 'repository', path: root });
+  }
+  if (STORE !== null) list.push({ kind: 'store', path: STORE });
+  return list;
+}
+
+function parseArm(text: string): Arm {
+  const colon = text.indexOf(':');
+  const kind = text.slice(0, colon);
+  if (kind !== 'unpruned' && kind !== 'repository' && kind !== 'store') throw new Error(`MAWS_WATCH_TREE_ARM names no arm: ${text}`);
+  return { kind, path: text.slice(colon + 1) };
+}
+
+// This file again, in a new vitest process, measuring the one arm; answers its exit code, the lines it printed and its
+// output's tail.
+function fresh(arm: Arm): Promise<{ code: number | null; lines: string[]; tail: string }> {
+  const from = existsSync(LINES) ? statSync(LINES).size : 0;
+  return new Promise((resolve, reject) => {
+    const vitest = join(process.cwd(), 'node_modules', 'vitest', 'vitest.mjs');
+    const env = { ...process.env, MAWS_WATCH_TREE_ARM: `${arm.kind}:${arm.path}` };
+    const child = spawn(process.execPath, [vitest, 'run', 'src/shared/fs/watch-tree.vm.test.ts'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (chunk: Buffer) => void (out += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => void (out += chunk.toString()));
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      const printed = existsSync(LINES) ? readFileSync(LINES).subarray(from).toString().split('\n').filter((text) => text !== '') : [];
+      resolve({ code, lines: printed, tail: out.split('\n').slice(-60).join('\n') });
+    });
+  });
+}
+
+async function measure(arm: Arm, results: Record<string, unknown>): Promise<void> {
+  if (arm.kind === 'store') {
+    const store = await storeArm(arm.path);
+    results[`store ${arm.path}`] = store;
+    line(`store ${arm.path}`, `watches ${store.watches} (expected ${store.expectedWatches}) · ${memoryText(store.memory)} · latency p50/p95 ${store.latency.p50}/${store.latency.p95} ms · rescan of projects/ ${store.rescanCpuMs} ms CPU (${store.rescanListed} transcripts)`);
+    expect.soft(store.watches, "the store's watches").toBe(store.expectedWatches);
+    expect.soft(store.latency.missed, 'missed appends').toBe(0);
+    expect.soft(store.latency.p50 ?? Infinity, "an append's latency p50").toBeLessThanOrEqual(BOUND.storeLatencyP50Ms);
+    expect.soft(store.memory.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
+    return;
+  }
+  const root = arm.path;
+  const kind = kindOf(root);
+  if (arm.kind === 'unpruned') {
+    // O3-G's workload is the checkout with node_modules installed: a bare one cannot stand in for it.
+    expect(existsSync(join(root, 'node_modules')), `${root}/node_modules (devenv/setup.sh installs it)`).toBe(true);
+    const unpruned = await unprunedArm(root);
+    results[`${root} (prune off)`] = unpruned;
+    line(`${root} (prune off)`, `watches ${unpruned.watches} (bound ${BOUND.mawsUnprunedWatches}) · ${memoryText(unpruned.memory)} · walk lag ${unpruned.walkLagMs} ms`);
+    expect.soft(unpruned.watches, 'MAWS with the prune off').toBeLessThanOrEqual(BOUND.mawsUnprunedWatches);
+    expect.soft(unpruned.memory.rssMiB, 'RSS growth with the prune off').toBeLessThanOrEqual(BOUND.rssMiB);
+    expect.soft(unpruned.walkLagMs, "the initial walk's worst lag with the prune off").toBeLessThanOrEqual(BOUND.walkLagMs);
+    return;
+  }
+  const worktree = kind === 'maws' ? addWorktree(root) : null;
+  try {
+    const measured = await repositoryArm(root);
+    const bound = kind === 'maws' ? BOUND.mawsWatches : kind === 'linux' ? BOUND.linuxWatches : null;
+    results[root] = { kind, worktree, ...measured };
+    line(root, `watches ${measured.watches} (bound ${bound ?? 'none'}) · ${memoryText(measured.memory)} · walk lag ${measured.walkLagMs} ms · burst ${BURST_FILES}: lag ${measured.burst.createLagMs}/${measured.burst.removeLagMs} ms, named in ${measured.burst.namedMs} ms · latency p50/p95 ${latencyText(measured.latency)}`);
+    for (const [site, figures] of Object.entries(measured.latency)) for (const slow of [...figures.create.slow, ...figures.modify.slow]) line(root, `slow write at ${site}: ${JSON.stringify(slow)}`);
+    if (bound !== null) expect.soft(measured.watches, `${kind}'s watches`).toBeLessThanOrEqual(bound);
+    expect.soft(measured.memory.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
+    expect.soft(measured.walkLagMs, "the initial walk's worst lag").toBeLessThanOrEqual(BOUND.walkLagMs);
+    expect.soft(measured.burst.createLagMs, "the burst's worst lag (created)").toBeLessThanOrEqual(BOUND.burstLagMs);
+    expect.soft(measured.burst.removeLagMs, "the burst's worst lag (removed)").toBeLessThanOrEqual(BOUND.burstLagMs);
+    expect.soft(measured.burst.namedMs, 'every burst file named').not.toBeNull();
+    expect.soft(measured.burst.namedMs ?? Infinity, 'every burst file named').toBeLessThanOrEqual(BOUND.burstNamedMs);
+    for (const [site, figures] of Object.entries(measured.latency)) {
+      for (const [op, stats] of [['create', figures.create], ['modify', figures.modify]] as const) {
+        expect.soft(stats.missed, `${site} ${op}: missed writes`).toBe(0);
+        expect.soft(stats.p95 ?? Infinity, `${site} ${op}: latency p95`).toBeLessThanOrEqual(BOUND.latencyP95Ms);
+      }
+    }
+  } finally {
+    if (worktree !== null) removeWorktree(root, worktree);
+  }
+}
+
 function line(label: string, text: string): void {
-  console.log(`[watch-tree] ${label}: ${text.replace(/\+-/g, '-')}`);
+  const printed = `[watch-tree] ${label}: ${text.replace(/\+-/g, '-')}`;
+  console.log(printed);
+  mkdirSync('test-results', { recursive: true });
+  appendFileSync(LINES, `${printed}\n`);
 }
 
 function kindOf(root: string): 'maws' | 'linux' | 'other' {
@@ -211,10 +276,86 @@ function lagMonitor(periodMs = 10): { stop(): number } {
   };
 }
 
-function memory(): number {
+interface Memory {
+  rss: number;
+  heapTotal: number;
+  heapUsed: number;
+  external: number;
+}
+
+function memory(): Memory {
   gc();
   gc();
-  return process.memoryUsage().rss;
+  const { rss, heapTotal, heapUsed, external } = process.memoryUsage();
+  return { rss, heapTotal, heapUsed, external };
+}
+
+// RSS growth and its retained part: RSS less the V8 heap committed but free after a full GC, which is the heap used,
+// the external memory (array buffers) and the rest, native (the watch handles, libuv's watcher lists, malloc's arenas).
+function growth(before: Memory, after: Memory) {
+  const mib = (key: keyof Memory) => (after[key] - before[key]) / MiB;
+  const committedFree = mib('heapTotal') - mib('heapUsed');
+  return {
+    rssMiB: round1(mib('rss')),
+    retainedMiB: round1(mib('rss') - committedFree),
+    heapUsedMiB: round1(mib('heapUsed')),
+    externalMiB: round1(mib('external')),
+    nativeMiB: round1(mib('rss') - mib('heapTotal') - mib('external')),
+    heapCommittedFreeMiB: round1(committedFree),
+  };
+}
+
+function memoryText(memory: ReturnType<typeof growth>): string {
+  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB})`;
+}
+
+const GC_KINDS: Record<number, string> = {
+  [perfConstants.NODE_PERFORMANCE_GC_MINOR]: 'scavenge',
+  [perfConstants.NODE_PERFORMANCE_GC_MAJOR]: 'mark-compact',
+  [perfConstants.NODE_PERFORMANCE_GC_INCREMENTAL]: 'incremental marking',
+  [perfConstants.NODE_PERFORMANCE_GC_WEAKCB]: 'weak callbacks',
+};
+
+// What overlapped a write: V8's collections, the child processes spawned (a spawn forks this process from its loop), and
+// the loop's own stalls over 20 ms.
+class Overlaps {
+  private readonly gcs: { start: number; end: number; kind: string }[] = [];
+  private readonly spawns: { at: number; what: string }[] = [];
+  private readonly stalls: { start: number; end: number }[] = [];
+  private readonly observer = new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) this.gcs.push({ start: entry.startTime, end: entry.startTime + entry.duration, kind: GC_KINDS[(entry as unknown as { detail?: { kind?: number } }).detail?.kind ?? -1] ?? 'other' });
+  });
+  private readonly onSpawn = (message: unknown) => {
+    const spawned = (message as { process?: ChildProcess }).process;
+    this.spawns.push({ at: performance.now(), what: (spawned?.spawnargs ?? []).slice(0, 6).join(' ') });
+  };
+  private readonly ticker: ReturnType<typeof setInterval>;
+
+  constructor() {
+    this.observer.observe({ entryTypes: ['gc'] });
+    subscribe('child_process', this.onSpawn);
+    let last = performance.now();
+    this.ticker = setInterval(() => {
+      const now = performance.now();
+      if (now - last > 20) this.stalls.push({ start: last, end: now });
+      last = now;
+    }, 5);
+  }
+
+  around(start: number, end: number) {
+    const overlaps = (from: number, to: number) => from < end && to > start;
+    return {
+      gc: this.gcs.filter((gc) => overlaps(gc.start, gc.end)).map((gc) => `${gc.kind} ${round2(gc.end - gc.start)} ms`),
+      spawns: this.spawns.filter((spawned) => spawned.at >= start && spawned.at <= end).map((spawned) => spawned.what),
+      stalls: this.stalls.filter((stall) => overlaps(stall.start, stall.end)).map((stall) => round2(stall.end - stall.start)),
+    };
+  }
+
+  stop(): void {
+    this.observer.disconnect();
+    unsubscribe('child_process', this.onSpawn);
+    clearInterval(this.ticker);
+  }
 }
 
 async function repositoryArm(root: string) {
@@ -223,7 +364,7 @@ async function repositoryArm(root: string) {
   const service = new GitService({ emit: (change) => changed.push(change), env: process.env, watch: tap.wrap(recursiveWatch()) });
   try {
     const walked = tap.next((filename) => filename === null, 300_000); // the initial walk ends in one null event
-    const rssBefore = memory();
+    const before = memory();
     const watchesBefore = inotifyOf().watches;
     const lag = lagMonitor();
     const start = performance.now();
@@ -232,7 +373,7 @@ async function repositoryArm(root: string) {
     const walkLagMs = lag.stop();
     expect(walkedAt, 'the initial walk ended').not.toBeNull();
     const watches = inotifyOf().watches - watchesBefore;
-    const rssMiB = round1((memory() - rssBefore) / MiB);
+    const grown = growth(before, memory());
     await sleep(1_000);
     const { deepest, largest } = trackedSites(root);
     const latency = {
@@ -241,7 +382,7 @@ async function repositoryArm(root: string) {
       [`largest ${relative(root, largest)}`]: await latencyAt(root, largest, tap),
     };
     const burst = await burstAt(root, tap);
-    return { watches, rssMiB, walkLagMs, walkMs: walkedAt === null ? null : Math.round(walkedAt - start), latency, burst, changes: changed.length };
+    return { watches, memory: grown, walkLagMs, walkMs: walkedAt === null ? null : Math.round(walkedAt - start), latency, burst, changes: changed.length };
   } finally {
     service.dispose();
   }
@@ -251,14 +392,14 @@ async function repositoryArm(root: string) {
 async function unprunedArm(root: string) {
   let resolveWalk!: () => void;
   const walked = new Promise<void>((resolve) => (resolveWalk = resolve));
-  const rssBefore = memory();
+  const before = memory();
   const watchesBefore = inotifyOf().watches;
   const lag = lagMonitor();
   const handle = watchTree(root, {}, (_event, filename) => filename === null && resolveWalk());
   try {
     await walked;
     const walkLagMs = lag.stop();
-    return { watches: inotifyOf().watches - watchesBefore, rssMiB: round1((memory() - rssBefore) / MiB), walkLagMs };
+    return { watches: inotifyOf().watches - watchesBefore, memory: growth(before, memory()), walkLagMs };
   } finally {
     handle.close();
   }
@@ -285,17 +426,18 @@ function trackedSites(root: string): { deepest: string; largest: string } {
 
 async function latencyAt(root: string, dir: string, tap: Tap) {
   const probe = `.o3e-probe-${process.pid}`;
-  const timed = async (name: string, content: string) => {
+  const overlaps = new Overlaps();
+  const timed = async (name: string, content: string): Promise<Sample> => {
     const rel = relative(root, join(dir, name));
     const heard = tap.next((filename) => filename === rel, 2_000);
     const start = performance.now();
     writeFileSync(join(dir, name), content);
     const at = await heard;
     await sleep(20);
-    return at === null ? null : at - start;
+    return { start, at };
   };
-  const create: (number | null)[] = [];
-  const modify: (number | null)[] = [];
+  const create: Sample[] = [];
+  const modify: Sample[] = [];
   try {
     for (let i = 0; i < LATENCY_WRITES; i++) create.push(await timed(`${probe}-${i}`, 'x'));
     for (let i = 0; i < LATENCY_WRITES; i++) modify.push(await timed(`${probe}-0`, String(i)));
@@ -303,7 +445,17 @@ async function latencyAt(root: string, dir: string, tap: Tap) {
     for (let i = 0; i < LATENCY_WRITES; i++) rmSync(join(dir, `${probe}-${i}`), { force: true });
   }
   await sleep(300);
-  return { entries: readdirSync(dir).length, create: stats(create), modify: stats(modify) };
+  overlaps.stop();
+  // A write slower than §G's bound, with what overlapped it.
+  const slowOf = (samples: Sample[]) =>
+    samples.flatMap(({ start, at }, i) => (at !== null && at - start > BOUND.latencyP95Ms ? [{ write: i, ms: round2(at - start), ...overlaps.around(start, at) }] : []));
+  const timings = (samples: Sample[]) => samples.map(({ start, at }) => (at === null ? null : at - start));
+  return { entries: readdirSync(dir).length, create: { ...stats(timings(create)), slow: slowOf(create) }, modify: { ...stats(timings(modify)), slow: slowOf(modify) } };
+}
+
+interface Sample {
+  start: number;
+  at: number | null; // when the tree named it; null: never within 2 s
 }
 
 function stats(samples: (number | null)[]) {
@@ -387,7 +539,7 @@ async function storeArm(storeDir: string) {
   const expectedWatches = storeDirectories(paths);
   const tap = new Tap(paths.projects);
   const heard: unknown[] = [];
-  const rssBefore = memory();
+  const before = memory();
   const watchesBefore = inotifyOf().watches;
   const walked = tap.next((filename) => filename === null, 120_000);
   const watcher = new StoreWatcher(paths, (change) => heard.push(change), { watch: tap.wrap(recursiveWatch(process.platform, { reconcileMs: STORE_RECONCILE_MS })) });
@@ -396,7 +548,7 @@ async function storeArm(storeDir: string) {
     expect(await walked, "the projects/ tree's initial walk ended").not.toBeNull();
     await sleep(500);
     const watches = inotifyOf().watches - watchesBefore;
-    const rssMiB = round1((memory() - rssBefore) / MiB);
+    const grown = growth(before, memory());
     const [slug, count] = STORE_LAYOUT[0];
     const appends: (number | null)[] = [];
     for (let i = 0; i < LATENCY_WRITES; i++) {
@@ -412,7 +564,7 @@ async function storeArm(storeDir: string) {
     const cpu = process.cpuUsage();
     const listed = await new Discovery(paths).list();
     const used = process.cpuUsage(cpu);
-    return { expectedWatches, watches, rssMiB, latency: stats(appends), rescanCpuMs: Math.round((used.user + used.system) / 1000), rescanListed: listed.length, changes: heard.length };
+    return { expectedWatches, watches, memory: grown, latency: stats(appends), rescanCpuMs: Math.round((used.user + used.system) / 1000), rescanListed: listed.length, changes: heard.length };
   } finally {
     watcher.stop();
   }
