@@ -143,29 +143,44 @@ describe('the checkout rule', () => {
   });
 
   // Fix wave 1: the bounds follow the roots as they resolve now, not as they resolved when first read.
-  it('follows a root that is a symlink retargeted since, and a root that didn’t resolve until later', async () => {
+  it('follows a root that is a symlink retargeted since its bounds were kept', async () => {
     const one = await repo();
     const two = await repo();
-    const three = await repo();
     const current = `${one.root}-current`;
     symlinkSync(one.root, current);
+    const f = await machine(one.serviceEnv());
+    session(f, 'app-1', { directory: current });
+    const a = await openRemote(f, org.a1, org.A);
+    const boundsReads = () => f.host.calls.filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === one.root).length;
+    try {
+      // Warm: every root resolves and its repository answers, so the bounds are kept; the second read asks git nothing more.
+      expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('ok');
+      const warmed = boundsReads();
+      expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('ok');
+      expect(boundsReads()).toBe(warmed);
+      // `current` now points at another repository: the kept bounds are the old target's, and no longer the session's.
+      rmSync(current);
+      symlinkSync(two.root, current);
+      expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.worktree.list', { repoRoot: two.root }, B('app-1')))).toBe('ok');
+    } finally {
+      rmSync(current, { force: true });
+    }
+  });
+
+  it('admits a root that didn’t resolve until later', async () => {
+    const one = await repo();
+    const three = await repo();
     const later = `${three.root}-later`; // not there yet
     const f = await machine(one.serviceEnv());
-    session(f, 'app-1', { directory: current, additionalDirectories: [later] });
+    session(f, 'app-1', { directory: one.root, additionalDirectories: [later] });
     const a = await openRemote(f, org.a1, org.A);
     try {
       expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('ok');
       expect(code(await call(a, 'git.status', { directory: three.root }, B('app-1')))).toBe('no-target');
-      // `current` now points at another repository: the first is no longer the session's.
-      rmSync(current);
-      symlinkSync(two.root, current);
-      expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('no-target');
-      expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('ok');
-      // The root that didn't resolve does now.
       symlinkSync(three.root, later);
       expect(code(await call(a, 'git.status', { directory: three.root }, B('app-1')))).toBe('ok');
     } finally {
-      rmSync(current, { force: true });
       rmSync(later, { force: true });
     }
   });
