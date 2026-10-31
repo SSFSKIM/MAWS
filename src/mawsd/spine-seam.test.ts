@@ -97,6 +97,7 @@ class FakeRoot implements SpineRoot {
       if (phase() === 'held') this.later.push(hosts.replay!.later().length);
       this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}`);
     });
+    hosts.onEvent('session.brokerItems', ({ appSessionId, items }) => void this.seen.push(`${phase()} brokerItems ${appSessionId} ${items.map((i) => i.summary).join(',') || 'none'}`));
     hosts.onEvent('session.status', ({ status }) => {
       this.seen.push(`${phase()} status ${status.appSessionId} ${status.process}`);
       this.statuses.set(status.appSessionId, status);
@@ -611,6 +612,65 @@ describe('the yield', () => {
     spine.yield(null); // a post-D hello announced the pid (daemon.ts)
     expect(spine.yieldedTo()).toBeNull();
     await expect(spine.ensure('command')).resolves.toBeDefined();
+  });
+
+  // The cross-build check's `(update, daemon)` scene (run 41156614454): a fresh mawsd's connect burst from a kept engine
+  // host arrives before the launching app's hello; its batch wakes a load, D21's second signal names that app (it holds
+  // no spine.lock) and the seam yields; the hello lists machine.spine and lifts the yield; a command then loads. The
+  // burst's whole-state parts (a permission raised while no app ran is only its `session.brokerItems`) reach that load.
+  it('a yield and its lift keep the coalesced parts, the latest while yielded included, for the next load', async () => {
+    let candidate: number | null = 777;
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    const asked = (summary: string) => ({ appSessionId: 's1', items: [{ summary }] });
+    link.emit('session.status', working('s1')); // the burst: coalesced while cold
+    link.emit('session.brokerItems', asked('Bash: git log'));
+    link.batch('s1', 1); // the trigger, met by the candidate
+    await vi.waitFor(() => expect(spine.state()).toBe('yielded'));
+    link.emit('session.brokerItems', asked('Bash: git status')); // while yielded: kept as the latest
+    link.batch('s1', 2); // while yielded: dropped
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    const root = (await spine.ensure('command')) as FakeRoot;
+    expect(root.seen.filter((line) => line.startsWith('coalesced'))).toEqual(['coalesced status s1 ready', 'coalesced brokerItems s1 Bash: git status']);
+    expect(root.seen).not.toContain('held batch s1 2');
+  });
+
+  // Review round 1: the parts are one link's state; a host that leaves `ready` while yielded takes them with it.
+  it('a link that leaves ready while yielded voids the coalesced parts; the next host’s burst is what the next load replays', async () => {
+    let candidate: number | null = 777;
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    link.emit('session.status', working('s1'));
+    link.emit('session.brokerItems', { appSessionId: 's1', items: [{ summary: 'Bash: git log' }] });
+    link.batch('s1', 1);
+    await vi.waitFor(() => expect(spine.state()).toBe('yielded'));
+    link.leave(); // the engine host is gone, and with it s1's launch
+    link.emit('session.status', working('s2')); // its successor's burst
+    candidate = null;
+    spine.yield(null);
+    const root = (await spine.ensure('command')) as FakeRoot;
+    expect(root.seen.filter((line) => line.startsWith('coalesced'))).toEqual(['coalesced status s2 ready']);
+  });
+
+  // Review round 1: a load that yields once its barrier replayed, and resumes when the yield lifts, takes what the yield
+  // coalesced through its hold, so nothing of it is left to replay, stale, into a later load.
+  it('a load resumed by a lift takes the parts coalesced while yielded through its hold, leaving none for a later load', async () => {
+    link.stream();
+    const release = link.gate('engine.sessions');
+    const spine = seam({ processes });
+    const loaded = spine.ensure('command');
+    await vi.waitFor(() => expect(roots).toHaveLength(1)); // past the replay, in the resync
+    spine.yield(777);
+    link.emit('session.brokerItems', { appSessionId: 's1', items: [{ summary: 'Bash: git log' }] }); // while yielded
+    live.delete(777);
+    await vi.waitFor(() => expect(logs).toContain('[spine] the yield to pid 777 lifted'));
+    release();
+    const root = (await loaded) as FakeRoot;
+    link.emit('session.brokerItems', { appSessionId: 's1', items: [] }); // answered
+    expect(root.seen).toEqual(['resync', 'resync paged (ok)', 'held brokerItems s1 Bash: git log', 'live brokerItems s1 none']);
+    spine.quiet(true);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    const next = (await spine.ensure('command')) as FakeRoot;
+    expect(next.seen.filter((line) => line.startsWith('coalesced'))).toEqual([]);
   });
 
   it('a yield during a load discards its hold, counted, and a cold seam just refuses until the pid is gone', async () => {
