@@ -207,12 +207,15 @@ type ExitMsg struct {
 	Exit
 }
 
-// Problem reports a line over the cap, dropped; `stream` ("out" or "err") is an additive field.
+// Problem reports what the host could not do and went on without: `line_budget`, a line over the cap, dropped (with
+// its `length` and its `stream`, "out" or "err"), or `roster`, an entry write that failed (with a `message`; the next
+// state change writes it again). `stream` and the `roster` kind are additive.
 type Problem struct {
-	T      string `json:"t"`
-	Kind   string `json:"kind"`
-	Length int    `json:"length"`
-	Stream string `json:"stream"`
+	T       string `json:"t"`
+	Kind    string `json:"kind"`
+	Length  int    `json:"length,omitempty"`
+	Stream  string `json:"stream,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type Error struct {

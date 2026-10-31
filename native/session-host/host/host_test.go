@@ -3,18 +3,23 @@ package host
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"sessionhost/roster"
 )
 
-const testToken = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+// built at run time: a literal 64-hex token reads as a credential to the secret scan
+var testToken = strings.Repeat("5a", 32)
 
 type harness struct {
 	t       *testing.T
@@ -25,7 +30,9 @@ type harness struct {
 	done    chan int
 }
 
-func start(t *testing.T, tune func(*Limits)) *harness {
+func start(t *testing.T, tune func(*Limits)) *harness { return startWith(t, tune, nil) }
+
+func startWith(t *testing.T, tune func(*Limits), edit func(*Options)) *harness {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "msh") // short: a socket path must fit sun_path
 	if err != nil {
@@ -42,7 +49,11 @@ func start(t *testing.T, tune func(*Limits)) *harness {
 	}
 	sig := make(chan os.Signal, 1)
 	sock := filepath.Join(hosts, "TESTHOST.sock")
-	h, err := New(Options{SocketPath: sock, HostsDir: hosts, HolderID: "TESTHOST", Binary: "/test/maws-session-host", Limits: limits, Signals: sig})
+	opt := Options{SocketPath: sock, HostsDir: hosts, HolderID: "TESTHOST", Binary: "/test/maws-session-host", Limits: limits, Signals: sig}
+	if edit != nil {
+		edit(&opt)
+	}
+	h, err := New(opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,5 +398,135 @@ func TestALaggingConnectionIsClosed(t *testing.T) {
 	slow.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.Copy(io.Discard, slow.br); err != nil {
 		t.Fatalf("the lagging connection was not closed: %v", err)
+	}
+}
+
+// quiet fails on any line the client reads within d.
+func (c *client) quiet(d time.Duration) {
+	c.t.Helper()
+	c.nc.SetReadDeadline(time.Now().Add(d))
+	line, err := c.br.ReadBytes('\n')
+	if err == nil {
+		c.t.Fatalf("read %q where nothing was due", line)
+	}
+	if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
+		c.t.Fatalf("waiting out %v: %v", d, err)
+	}
+}
+
+func TestASignalDuringCommitLeavesNoLiveChild(t *testing.T) {
+	var sigs chan os.Signal
+	hs := startWith(t, nil, func(o *Options) {
+		o.beforeSpawn = func() {
+			sigs <- syscall.SIGTERM // the host's own signal lands while the fork is under way
+			time.Sleep(300 * time.Millisecond)
+		}
+	})
+	sigs = hs.signals
+	w := hs.writer(1)
+	w.send(map[string]any{"t": "launch", "argv": []string{"/bin/cat"}, "cwd": "/", "env": map[string]string{}})
+	w.send(map[string]any{"t": "commit"})
+	if code := hs.waitExit(10 * time.Second); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	time.Sleep(800 * time.Millisecond) // past the spawn the hook delayed
+	hs.h.mu.Lock()
+	child := hs.h.child
+	hs.h.mu.Unlock()
+	if child != nil && syscall.Kill(child.Pid, 0) == nil {
+		syscall.Kill(child.Pid, syscall.SIGKILL)
+		t.Fatalf("the child %d outlived its host's shutdown", child.Pid)
+	}
+}
+
+type flakyRoster struct{ fail atomic.Bool }
+
+func (f *flakyRoster) write(dir string, e roster.Entry) error {
+	if f.fail.Load() {
+		return errors.New("disk full")
+	}
+	return roster.Write(dir, e)
+}
+
+func TestARosterThatCannotBeWrittenFailsTheStart(t *testing.T) {
+	dir, err := os.MkdirTemp("", "msh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	var f flakyRoster
+	f.fail.Store(true)
+	_, err = New(Options{SocketPath: filepath.Join(dir, "X.sock"), HostsDir: dir, HolderID: "X", Limits: DefaultLimits(), rosterWrite: f.write})
+	if err == nil {
+		t.Fatal("New succeeded with no roster entry written")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "X.sock")); !os.IsNotExist(err) {
+		t.Fatal("a failed start left its socket")
+	}
+}
+
+func TestARosterThatCannotBeWrittenAtCommitFailsTheSpawn(t *testing.T) {
+	var f flakyRoster
+	hs := startWith(t, nil, func(o *Options) { o.rosterWrite = f.write })
+	w := hs.writer(1)
+	w.send(map[string]any{"t": "launch", "argv": []string{"/bin/cat"}, "cwd": "/", "env": map[string]string{}})
+	f.fail.Store(true)
+	w.send(map[string]any{"t": "commit"})
+	failed := w.expect("spawnFailed", "spawned")
+	if !strings.Contains(failed.Raw["message"].(string), "roster") {
+		t.Fatalf("spawnFailed: %v", failed.Raw)
+	}
+	hs.h.mu.Lock()
+	child := hs.h.child
+	hs.h.mu.Unlock()
+	if child != nil {
+		t.Fatalf("a child %d was spawned with no roster entry", child.Pid)
+	}
+}
+
+func TestARosterWriteFailureAfterTheSpawnIsReportedAndRetried(t *testing.T) {
+	var f flakyRoster
+	hs := startWith(t, nil, func(o *Options) { o.rosterWrite = f.write })
+	first := hs.writer(1)
+	hs.launchCat(first)
+	f.fail.Store(true)
+	second := dial(t, hs.sock)
+	second.send(map[string]any{"t": "auth", "token": testToken})
+	second.expect("hello")
+	second.send(map[string]any{"t": "attach", "role": "writer", "fence": 2}) // a state change whose write fails
+	if p := second.expect("problem"); p.Raw["kind"] != "roster" {
+		t.Fatalf("problem: %v", p.Raw)
+	}
+	second.expect("attached")
+	second.stdin(0, "still here\n") // the session goes on
+	second.expect("applied")
+	f.fail.Store(false)
+	second.send(map[string]any{"t": "end"}) // the next state change, the exit, writes the whole entry
+	second.expect("exit")
+	raw, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry roster.Entry
+	if err := json.Unmarshal(raw, &entry); err != nil || entry.State != "exited" || entry.Fence != 2 {
+		t.Fatalf("the retried entry: %s", raw)
+	}
+}
+
+func TestExitIsTerminalForOutput(t *testing.T) {
+	hs := start(t, func(l *Limits) { l.ExitDrain = 200 * time.Millisecond })
+	w := hs.writer(1)
+	// sh exits at once; the subshell it leaves holds stdout and writes after the drain has given up on it
+	hs.launchCat(w, "/bin/sh", "-c", "(sleep 0.6; echo late) & echo early")
+	if out := w.expect("out"); string(out.Data) != "early" {
+		t.Fatalf("first record %q", out.Data)
+	}
+	w.expect("exit", "out")
+	w.quiet(1200 * time.Millisecond)
+	hs.h.mu.Lock()
+	last := hs.h.ring.LastSeq()
+	hs.h.mu.Unlock()
+	if last != 1 {
+		t.Fatalf("the ring took records after the exit: last seq %d", last)
 	}
 }

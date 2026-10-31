@@ -18,15 +18,21 @@ type Record struct {
 	Data []byte
 }
 
+// RecordOverhead is what each record costs against the cap besides its bytes (the Record itself and its slice's
+// allocation, rounded up), so a stream of empty or very short lines is bounded as surely as a stream of long ones.
+const RecordOverhead = 48
+
 // Ring holds the records from FirstSeq to LastSeq, oldest first.
 type Ring struct {
-	cap   int
-	recs  []Record
-	next  uint64 // the sequence the next record takes
-	bytes int
+	cap     int
+	recs    []Record
+	next    uint64 // the sequence the next record takes
+	bytes   int    // the records' bytes, as hello reports them
+	charged int    // bytes plus RecordOverhead per record, what the cap bounds
 }
 
-// New returns an empty ring whose records' bytes stay at or under cap, except that the newest record is always kept.
+// New returns an empty ring whose records' cost (bytes plus RecordOverhead each) stays at or under cap, except that the
+// newest record is always kept.
 func New(cap int) *Ring { return &Ring{cap: cap, next: 1} }
 
 // Append adds a record and returns its sequence, and whether older records were pushed out to make room.
@@ -35,7 +41,8 @@ func (r *Ring) Append(kind Kind, data []byte) (seq uint64, evicted bool) {
 	r.next++
 	r.recs = append(r.recs, Record{Seq: seq, Kind: kind, Data: data})
 	r.bytes += len(data)
-	for r.bytes > r.cap && len(r.recs) > 1 {
+	r.charged += len(data) + RecordOverhead
+	for r.charged > r.cap && len(r.recs) > 1 {
 		r.dropOldest()
 		evicted = true
 	}
@@ -73,6 +80,7 @@ func (r *Ring) Bytes() int { return r.bytes }
 
 func (r *Ring) dropOldest() {
 	r.bytes -= len(r.recs[0].Data)
+	r.charged -= len(r.recs[0].Data) + RecordOverhead
 	r.recs[0].Data = nil // the backing array outlives the slice head; let the line go
 	r.recs = r.recs[1:]
 }

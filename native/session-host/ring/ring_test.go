@@ -53,23 +53,47 @@ func TestAckDropsEverythingAtOrBelow(t *testing.T) {
 }
 
 func TestCapEvictsOldestAndMovesFirstSeq(t *testing.T) {
-	r := New(100)
+	per := 10 + RecordOverhead // what one 10-byte record costs against the cap
+	r := New(10 * per)
 	for i := 0; i < 10; i++ {
 		_, evicted := r.Append(Out, line(10, 'a'))
 		if evicted {
 			t.Fatalf("record %d evicted under the cap", i+1)
 		}
 	}
-	_, evicted := r.Append(Out, line(25, 'b'))
+	_, evicted := r.Append(Out, line(2*per+5, 'b'))
 	if !evicted {
 		t.Fatal("a record past the cap evicted nothing")
 	}
-	// 100 + 25 = 125 bytes; three 10-byte records must go to get back under 100
-	if r.FirstSeq() != 4 || r.LastSeq() != 11 || r.Bytes() != 95 {
+	// three 10-byte records must go to make room for one costing 3*per+5-10
+	if r.FirstSeq() != 4 || r.LastSeq() != 11 || r.Bytes() != 7*10+2*per+5 {
 		t.Fatalf("first %d last %d bytes %d", r.FirstSeq(), r.LastSeq(), r.Bytes())
 	}
 	if _, ok := r.Get(3); ok {
 		t.Fatal("an evicted record is still served")
+	}
+}
+
+func TestEmptyAndShortLinesAreBoundedToo(t *testing.T) {
+	r := New(100 * RecordOverhead)
+	for i := 0; i < 100_000; i++ {
+		r.Append(Out, nil) // a blank line: no bytes, still a record the ring holds
+	}
+	if held := r.LastSeq() - r.FirstSeq() + 1; held > 100 {
+		t.Fatalf("the ring holds %d empty records under a cap of 100 records' overhead", held)
+	}
+	if r.LastSeq() != 100_000 || r.Bytes() != 0 {
+		t.Fatalf("last %d bytes %d", r.LastSeq(), r.Bytes())
+	}
+	r = New(100 * (1 + RecordOverhead))
+	for i := 0; i < 10_000; i++ {
+		r.Append(Err, []byte("x"))
+	}
+	if held := r.LastSeq() - r.FirstSeq() + 1; held != 100 {
+		t.Fatalf("the ring holds %d one-byte records, want 100", held)
+	}
+	if _, ok := r.Get(r.FirstSeq() - 1); ok {
+		t.Fatal("an evicted short record is still served")
 	}
 }
 

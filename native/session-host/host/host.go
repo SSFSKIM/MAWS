@@ -37,6 +37,9 @@ type Options struct {
 	Binary     string
 	Limits     Limits
 	Signals    <-chan os.Signal // the host's own SIGTERM, SIGINT and SIGHUP
+
+	rosterWrite func(dir string, e roster.Entry) error // tests: a roster that cannot be written; roster.Write otherwise
+	beforeSpawn func()                                 // tests: what happens while the fork is under way
 }
 
 const (
@@ -88,6 +91,7 @@ type Host struct {
 	stdinW      *os.File
 	exit        *proto.Exit
 	exited      chan struct{} // closed at the child's exit, once it is recorded
+	spawning    chan struct{} // non-nil while a commit's fork is under way; closed once its outcome is recorded
 	spawnFailed bool
 	in          Offsets
 	queue       []queued
@@ -125,8 +129,14 @@ func New(opt Options) (*Host, error) {
 	h.procStart = procStartOf(h.pid)
 	h.startedAt = isoNow()
 	h.mu.Lock()
-	h.writeRoster()
+	err = h.writeRoster()
 	h.mu.Unlock()
+	if err != nil { // a host no roster names could never be adopted: it does not start
+		ln.Close()
+		os.Remove(opt.SocketPath)
+		log.close()
+		return nil, err
+	}
 	log.printf("ready: pid %d, socket %s", h.pid, opt.SocketPath)
 	return h, nil
 }
@@ -168,8 +178,10 @@ func (h *Host) requestQuit(code int) {
 }
 
 // onSignal relays the host's own signal to the child's process group as SIGTERM and gives the child the grace to
-// exit: a host that died leaving its engine would leave an engine nothing can reach (D7).
+// exit: a host that died leaving its engine would leave an engine nothing can reach (D7). A fork under way is let
+// finish first, so its child is known and signalled rather than left behind untracked.
 func (h *Host) onSignal(sig os.Signal) int {
+	h.awaitSpawn()
 	h.mu.Lock()
 	alive := h.child != nil && h.exit == nil
 	pgid, exited := 0, h.exited
@@ -192,9 +204,22 @@ func (h *Host) onSignal(sig os.Signal) int {
 	return 0
 }
 
+// awaitSpawn closes admission (no commit starts a fork after it) and waits for a fork already under way to record its
+// outcome.
+func (h *Host) awaitSpawn() {
+	h.mu.Lock()
+	h.closing = true
+	spawning := h.spawning
+	h.mu.Unlock()
+	if spawning != nil {
+		<-spawning
+	}
+}
+
 // finish closes everything and removes the socket, the token and, unless the child outlives the host, the roster
 // entry: an entry whose host is dead and whose child lives is how the next engine host's sweep finds that child.
 func (h *Host) finish() {
+	h.awaitSpawn()
 	h.mu.Lock()
 	h.closing = true
 	childAlive := h.child != nil && h.exit == nil
@@ -226,15 +251,36 @@ func (h *Host) finish() {
 	h.log.close()
 }
 
-// writeRoster writes the entry from the current state; the caller holds mu.
-func (h *Host) writeRoster() {
-	err := roster.Write(h.opt.HostsDir, roster.Entry{
+// writeRoster writes the entry from the current state; the caller holds mu. Each write is the whole entry, so a write
+// that failed is retried by the next state change's.
+func (h *Host) writeRoster() error {
+	write := h.opt.rosterWrite
+	if write == nil {
+		write = roster.Write
+	}
+	err := write(h.opt.HostsDir, roster.Entry{
 		Protocol: proto.Protocol, HolderID: h.opt.HolderID, Pid: h.pid, ProcStart: h.procStart, StartedAt: h.startedAt,
 		Socket: h.opt.SocketPath, Binary: h.opt.Binary, AppSessionID: h.appID, EngineSessionID: h.engineID,
 		State: h.state, Child: h.child, Fence: h.fence.Value(), Exit: h.exit,
 	})
 	if err != nil {
 		h.log.printf("writing the roster entry: %v", err)
+	}
+	return err
+}
+
+// persist writes the entry at a state change where the session must go on whatever the disk does (a running child is
+// never ended over its roster entry): a failure is logged and told to the writer, `problem {kind: 'roster'}`, and the
+// next state change writes the whole entry again. The caller holds mu.
+func (h *Host) persist() {
+	err := h.writeRoster()
+	if err == nil {
+		return
+	}
+	for _, c := range []*conn{h.writer, h.pending} {
+		if c != nil {
+			c.send(proto.Problem{T: "problem", Kind: "roster", Message: "the roster entry could not be written: " + err.Error()})
+		}
 	}
 }
 
@@ -485,7 +531,7 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 		sort.Strings(env)
 		h.launch = &launchSpec{argv: m.Argv, cwd: m.Cwd, env: env}
 		h.appID, h.engineID = m.AppSessionID, m.EngineSessionID
-		h.writeRoster()
+		h.persist()
 		h.log.printf("launch: %s", m.Argv[0])
 	case "read":
 		if c.role == "" {
@@ -578,7 +624,7 @@ func (h *Host) attach(c *conn, m proto.ClientMsg) {
 		}
 		h.writer, h.pending = nil, c
 		c.role = "pending"
-		h.writeRoster()
+		h.persist()
 		h.settleAttach()
 	case "observer":
 		if c == h.writer || c == h.pending {

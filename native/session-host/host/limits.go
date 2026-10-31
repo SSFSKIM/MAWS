@@ -5,7 +5,7 @@ import "time"
 // The session host's constants (O16 Interfaces §A and M1's decisions), mirrored in src/engine-host/holder/protocol.ts.
 const (
 	LineCap       = 64 << 20         // LINE_CAP: an output line past it is dropped with a `problem` record
-	RingCap       = 8 << 20          // RING_CAP: unacknowledged output kept for a writer
+	RingCap       = 8 << 20          // RING_CAP: unacknowledged output kept for a writer, each record charged ring.RecordOverhead besides its bytes
 	StdinQueueCap = 64 << 20         // STDIN_QUEUE_CAP: queued stdin bytes; one record of any valid size into an empty queue
 	Linger        = 10 * time.Minute // LINGER: how long an exited child's host keeps serving
 	HostExitGrace = 5 * time.Second  // HOST_EXIT_GRACE: the child's time to exit after the host's own SIGTERM relay

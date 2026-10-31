@@ -34,28 +34,49 @@ func (h *Host) commit(c *conn) {
 		h.mu.Unlock()
 		return
 	}
+	if h.closing {
+		c.send(proto.Error{T: "error", Message: "the host is exiting"})
+		h.mu.Unlock()
+		return
+	}
 	spec := *h.launch
 	h.state = stateCommitted
-	h.writeRoster()
-	h.mu.Unlock()
-
-	cmd, stdinW, outR, errR, err := startChild(spec)
-	if err != nil {
-		h.mu.Lock()
+	failSpawn := func(err error) { // the caller holds mu
 		h.spawnFailed, h.inClosed = true, true
 		h.log.printf("spawn failed: %v", err)
 		c.send(proto.SpawnFailed{T: "spawnFailed", Message: err.Error()})
 		h.reviewNoChild()
+	}
+	if err := h.writeRoster(); err != nil { // a child no roster entry names could never be adopted or swept
+		failSpawn(fmt.Errorf("the roster entry could not be written: %w", err))
+		h.mu.Unlock()
+		return
+	}
+	spawning := make(chan struct{})
+	h.spawning = spawning
+	h.mu.Unlock()
+
+	if h.opt.beforeSpawn != nil {
+		h.opt.beforeSpawn()
+	}
+	cmd, stdinW, outR, errR, err := startChild(spec)
+	if err != nil {
+		h.mu.Lock()
+		failSpawn(err)
+		h.spawning = nil
+		close(spawning)
 		h.mu.Unlock()
 		return
 	}
 	pid := cmd.Process.Pid
 	start := procStartOf(pid)
 	h.mu.Lock()
+	h.spawning = nil
+	close(spawning)
 	h.child = &proto.Child{Pid: pid, ProcStart: start}
 	h.stdinW, h.exited = stdinW, make(chan struct{})
 	h.state = stateRunning
-	h.writeRoster()
+	h.persist()
 	h.log.printf("spawned %d", pid)
 	c.send(proto.Spawned{T: "spawned", Pid: pid, ProcStart: start})
 	h.reviewNoChild()
@@ -66,7 +87,7 @@ func (h *Host) commit(c *conn) {
 	go h.readLines(outR, ring.Out, &readers)
 	go h.readLines(errR, ring.Err, &readers)
 	go h.writeStdin(stdinW)
-	go h.wait(cmd, &readers)
+	go h.wait(cmd, &readers, outR, errR)
 }
 
 func startChild(spec launchSpec) (cmd *exec.Cmd, stdinW, outR, errR *os.File, err error) {
@@ -243,9 +264,10 @@ func (h *Host) writeStdin(w *os.File) {
 	h.settleAttach()
 }
 
-// wait records the child's exit once its output has reached end of file (or after ExitDrain, when a descendant holds
-// the pipes), tells every client, and starts the linger.
-func (h *Host) wait(cmd *exec.Cmd, readers *sync.WaitGroup) {
+// wait records the child's exit once its output has reached end of file, tells every client, and starts the linger.
+// When a descendant still holds the pipes after ExitDrain, the host closes its read ends and waits for its readers to
+// stop, so `exit` is the last thing the stream says: nothing is recorded after it.
+func (h *Host) wait(cmd *exec.Cmd, readers *sync.WaitGroup, outR, errR *os.File) {
 	cmd.Wait()
 	drained := make(chan struct{})
 	go func() {
@@ -255,7 +277,10 @@ func (h *Host) wait(cmd *exec.Cmd, readers *sync.WaitGroup) {
 	select {
 	case <-drained:
 	case <-time.After(h.lim.ExitDrain):
-		h.log.printf("the output pipes are still open after the child's exit (a descendant holds them)")
+		h.log.printf("the output pipes are still open %v after the child's exit (a descendant holds them); closed", h.lim.ExitDrain)
+		outR.Close()
+		errR.Close()
+		<-drained
 	}
 	exit := exitOf(cmd.ProcessState)
 	h.mu.Lock()
@@ -264,7 +289,7 @@ func (h *Host) wait(cmd *exec.Cmd, readers *sync.WaitGroup) {
 	h.inClosed = true
 	h.inCond.Broadcast()
 	h.stdinW.Close() // a write blocked on a pipe no one reads returns now
-	h.writeRoster()
+	h.persist()
 	for c := range h.conns {
 		c.send(proto.ExitMsg{T: "exit", Exit: exit})
 	}
