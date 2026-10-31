@@ -5,7 +5,10 @@
 //   the spine is cold it keeps the coalesced parts (the latest per session and name, `engine.budget` once), so a
 //   periodic status wakes nothing, and offers a `session.eventBatch` to the seam as a trigger; from a trigger until a
 //   load's barrier has passed it holds every event in arrival order; once a load's barrier passed it delivers each event
-//   to the loaded spine's listeners; once the seam is off (refused or yielded) it drops what arrives.
+//   to the loaded spine's listeners; once the seam is off (yielded) it drops every other event and keeps the coalesced
+//   parts as cold does, since a yield lifts (the app it yielded to departs, or its hello lists `machine.spine`) and the
+//   next load's barrier replays them: a permission raised while no app ran reaches attention only as the coalesced
+//   `session.brokerItems` of the connect burst, which may arrive in the yield before the app's hello lifts it.
 // - `SpineHostsAdapter`, one per load: the `SpineHosts` the spine's root is given. Its `onEvent` listens on the core, its
 //   `dispatch` reaches the engine host through the daemon's intercepts first (so `host.configure`, `host.stopAll` and
 //   `host.exitWhenIdle` from the spine reach the clocks as the app's do), its `setResync` is run by the adapter itself at
@@ -67,9 +70,9 @@ export class SpineEvents {
       case 'holding':
         return this.hold(name, payload);
       case 'off':
-        return;
       case 'cold':
         if (COALESCED_EVENTS.has(name)) return void this.coalesced.set(coalescedKey(name, payload), { name, payload });
+        if (this.mode === 'off') return;
         if (name === 'session.eventBatch' && this.options.wake()) this.hold(name, payload); // the wake moved the mode to holding
     }
   }
@@ -150,13 +153,12 @@ export class SpineEvents {
   }
 
   // The parts stopped (an adapter's close removes the root's listeners): cold, where the next batch is a trigger and
-  // starts the next hold, or off (a yield), where nothing is kept.
+  // starts the next hold, or off (a yield), where only the coalesced parts are kept, for the load after the yield lifts.
   cold(): void {
     this.mode = 'cold';
   }
   off(): void {
     this.discard('the spine yielded', 'off');
-    this.coalesced.clear();
   }
 
   listenerCount(): number {

@@ -97,6 +97,7 @@ class FakeRoot implements SpineRoot {
       if (phase() === 'held') this.later.push(hosts.replay!.later().length);
       this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}`);
     });
+    hosts.onEvent('session.brokerItems', ({ appSessionId, items }) => void this.seen.push(`${phase()} brokerItems ${appSessionId} ${items.map((i) => i.summary).join(',') || 'none'}`));
     hosts.onEvent('session.status', ({ status }) => {
       this.seen.push(`${phase()} status ${status.appSessionId} ${status.process}`);
       this.statuses.set(status.appSessionId, status);
@@ -611,6 +612,27 @@ describe('the yield', () => {
     spine.yield(null); // a post-D hello announced the pid (daemon.ts)
     expect(spine.yieldedTo()).toBeNull();
     await expect(spine.ensure('command')).resolves.toBeDefined();
+  });
+
+  // The cross-build check's `(update, daemon)` scene (run 41156614454): a fresh mawsd's connect burst from a kept engine
+  // host arrives before the launching app's hello; its batch wakes a load, D21's second signal names that app (it holds
+  // no spine.lock) and the seam yields; the hello lists machine.spine and lifts the yield; a command then loads. The
+  // burst's whole-state parts (a permission raised while no app ran is only its `session.brokerItems`) reach that load.
+  it('a yield and its lift keep the coalesced parts, the latest while yielded included, for the next load', async () => {
+    let candidate: number | null = 777;
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    const asked = (summary: string) => ({ appSessionId: 's1', items: [{ summary }] });
+    link.emit('session.status', working('s1')); // the burst: coalesced while cold
+    link.emit('session.brokerItems', asked('Bash: git log'));
+    link.batch('s1', 1); // the trigger, met by the candidate
+    await vi.waitFor(() => expect(spine.state()).toBe('yielded'));
+    link.emit('session.brokerItems', asked('Bash: git status')); // while yielded: kept as the latest
+    link.batch('s1', 2); // while yielded: dropped
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    const root = (await spine.ensure('command')) as FakeRoot;
+    expect(root.seen.filter((line) => line.startsWith('coalesced'))).toEqual(['coalesced status s1 ready', 'coalesced brokerItems s1 Bash: git status']);
+    expect(root.seen).not.toContain('held batch s1 2');
   });
 
   it('a yield during a load discards its hold, counted, and a cold seam just refuses until the pid is gone', async () => {
