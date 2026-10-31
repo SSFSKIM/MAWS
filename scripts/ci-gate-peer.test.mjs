@@ -299,3 +299,29 @@ test('a peer-group relaunch keeps the original usable peer after master reaches 
   assert.equal(relaunched.status, 0, relaunched.notes.join('\n'));
   assert.deepEqual(relaunched.trailers, [`Peer: ${base}`, 'Peer-Wire: 3.1', 'Wire: 3.2']);
 });
+
+test('an alert refusal pins its override command to the already resolved peer', (t) => {
+  const { tree, env, base } = repository(t, { master: { [MANIFEST]: manifest(3, 1) }, branch: { [MANIFEST]: manifest(3, 2) } });
+  const bin = join(tree, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+case "$*" in
+  "variable get GATE_RUNNER "*) echo pool ;;
+  "variable get GATE_E2E_RUNNER "*) echo macos ;;
+  "variable list "*) ;;
+  *actions/variables*) printf '%s\\n' '["GATE_RUNNER","pool"]' '["GATE_E2E_RUNNER","macos"]' ;;
+  *issues?*) echo '{"number":1,"title":"ci-kit alert: mini: SecurityAgent since 2026-10-31T00:00Z"}' ;;
+  *actions/runners*) echo '{"name":"ci-kit-mac-mini","status":"online","labels":["self-hosted","macOS","ARM64"]}' ;;
+  *) echo UNEXPECTED_GITHUB_CALL >&2; exit 1 ;;
+esac
+`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const run = spawnSync('bash', [join(dirname(script), 'ci-gate.sh'), tree, '--gates', 'e2e:cross-build', '--label', 'alert-test'], {
+    encoding: 'utf8', timeout: 10000, env: { ...env, PATH: `${bin}:${env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '', MAWS_GATE_RUNNER: '' },
+  });
+  assert.equal(run.status, 2, run.stdout + run.stderr);
+  assert.doesNotMatch(run.stdout + run.stderr, /UNEXPECTED_GITHUB_CALL/);
+  const override = run.stderr.split('\n').find((line) => line.includes('to push anyway'));
+  assert.ok(override, run.stderr);
+  assert.match(override, new RegExp(` --peer ${base}$`));
+});
