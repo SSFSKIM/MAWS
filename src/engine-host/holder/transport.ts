@@ -34,6 +34,7 @@ import { stdinRecord, type Hello, type HostMessage } from './protocol';
 
 export const HOST_START_MS = 5_000; // a session host's time to answer `hello` after its spawn, and a reconnect's
 const BUSY_RETRY_MS = 100;
+const SPAWN_POLL_MS = 50; // a reconnect's ask for a spawn under way
 
 export class HostStartFailed extends Error {
   constructor(message: string, readonly logPath: string) {
@@ -52,6 +53,7 @@ export interface SessionHostDeps {
   // what the transport signals a lost host's child with (the orphan sweep's own in production)
   child?: { isAlive(pid: number): boolean; procStartOf(pid: number): string | null; signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void; graceMs?: number };
   onConnection?(connection: HostConnection): void; // tests: each writer connection as it is made
+  hostArgs?: string[]; // tests: the binary's test seams (`--ring-cap-bytes`), after its own arguments
 }
 
 export interface StartedHost {
@@ -78,7 +80,7 @@ export async function startSessionHost(launchId: string, deps: SessionHostDeps):
     writeFileSync(paths.token, token, { mode: 0o600, flag: 'wx' });
     const logFd = openSync(paths.log, 'a', 0o600);
     try {
-      child = spawn(deps.binary, [paths.socket, '--hosts', deps.hostsDir], { detached: true, stdio: ['pipe', logFd, logFd] });
+      child = spawn(deps.binary, [paths.socket, '--hosts', deps.hostsDir, ...(deps.hostArgs ?? [])], { detached: true, stdio: ['pipe', logFd, logFd] });
     } finally {
       closeSync(logFd);
     }
@@ -132,6 +134,7 @@ interface InFlight {
   resolve(): void;
   reject(error: Error): void;
   retry: ReturnType<typeof setTimeout> | null;
+  sent: boolean; // written to a connection: from then on only the host's answer settles it
 }
 
 type Exit = { code: number | null; signal: NodeJS.Signals | null };
@@ -147,6 +150,7 @@ class HostedTransport {
   private child: { pid: number; procStart: string } | null = null;
   private spawnOutcome: Promise<void>;
   private settleSpawn!: (error: Error | null) => void;
+  private spawnSettled = false;
   private chain: Promise<void> = Promise.resolve();
   private inFlight: InFlight | null = null;
   private nextOffset = 0;
@@ -165,7 +169,11 @@ class HostedTransport {
     this.connection = connection;
     this.frontier = new Frontier({ ack: (seq) => this.connection?.send({ t: 'ack', seq }) });
     this.spawnOutcome = new Promise<void>((resolve, reject) => {
-      this.settleSpawn = (error) => (error ? reject(error) : resolve());
+      this.settleSpawn = (error) => {
+        this.spawnSettled = true;
+        if (error) reject(error);
+        else resolve();
+      };
     });
     this.spawnOutcome.catch(() => {});
     const exited = new Promise<Exit>((resolve) => (this.resolveExited = resolve));
@@ -205,6 +213,8 @@ class HostedTransport {
   private onEvent(event: HostEvent): void {
     if (event.kind === 'record') {
       if (event.seq <= this.lastDelivered) return; // a reconnect's replay of what was already handed on
+      // one read's records are contiguous: a first record past the head means the ring lost those before it (D45)
+      if (event.seq > this.lastDelivered + 1) this.lostBefore(event.seq);
       this.lastDelivered = event.seq;
       const line = cleanLine(event.data.toString('utf8'));
       if (line === null) this.journaled(event.seq); // D44: no row, and the frontier passes it
@@ -257,11 +267,8 @@ class HostedTransport {
         return;
       }
       case 'caughtUp':
-        if (message.gap !== null && message.gap > this.lastDelivered + 1) {
-          const lostFrom = this.lastDelivered + 1;
-          this.lastDelivered = message.gap - 1;
-          this.frames.push({ frame: null, raw: '', error: { kind: 'host_gap', message: `output ${lostFrom} to ${message.gap - 1} left the session host's ring before it was read`, length: 0, typeGuess: null, gap: { holderId: this.o.holderId, fence: this.fence, frontier: this.frontier.value, firstSeq: message.gap, lostFrom } } });
-        }
+        // a loss no surviving record showed (the ring kept none of what was asked for): reported here instead
+        if (message.gap !== null && message.gap > this.lastDelivered + 1) this.lostBefore(message.gap);
         if (this.pendingExit) {
           const exit = this.pendingExit;
           this.pendingExit = null;
@@ -283,6 +290,15 @@ class HostedTransport {
       default:
         return; // hello, attached, refused: a handshake's
     }
+  }
+
+  // The records from the delivered head + 1 to `firstSeq` - 1 left the ring before this read reached them: one
+  // `host_gap` item ahead of the survivors, whose range the session journals as lost and reports journaled, so the
+  // frontier passes it. The head only moves forward.
+  private lostBefore(firstSeq: number): void {
+    const lostFrom = this.lastDelivered + 1;
+    this.lastDelivered = firstSeq - 1;
+    this.frames.push({ frame: null, raw: '', error: { kind: 'host_gap', message: `output ${lostFrom} to ${firstSeq - 1} left the session host's ring before it was read`, length: 0, typeGuess: null, gap: { holderId: this.o.holderId, fence: this.fence, frontier: this.frontier.value, firstSeq, lostFrom } } });
   }
 
   private recordExit(exit: Exit): void {
@@ -326,9 +342,12 @@ class HostedTransport {
   private write(frame: StdinFrame, signal?: AbortSignal): Promise<void> {
     const data = Buffer.from(`${JSON.stringify(frame)}\n`, 'utf8');
     return new Promise<void>((resolve, reject) => {
-      let handed = false;
+      let record: InFlight | null = null;
+      // A record not yet written to a connection (waiting for the spawn, its turn or a reconnect) is dropped; one
+      // written settles on the host's answer.
       const onAbort = () => {
-        if (!handed) reject(new TransportClosed('write aborted')); // a record handed to the socket settles on the host's answer
+        if (record === null) reject(new TransportClosed('write aborted'));
+        else if (!record.sent) this.answered((w) => w === record, new TransportClosed('write aborted'));
       };
       if (signal?.aborted) {
         onAbort();
@@ -339,10 +358,10 @@ class HostedTransport {
         await this.spawnOutcome;
         if (signal?.aborted) throw new TransportClosed('write aborted');
         if (this.ended || (this.connection === null && !this.reconnecting)) throw new TransportClosed('the session host is gone');
-        handed = true;
         await new Promise<void>((done, fail) => {
-          this.inFlight = { offset: this.nextOffset, end: this.nextOffset + data.length, data, resolve: done, reject: fail, retry: null };
-          this.hand(this.inFlight);
+          record = { offset: this.nextOffset, end: this.nextOffset + data.length, data, resolve: done, reject: fail, retry: null, sent: false };
+          this.inFlight = record;
+          this.hand(record);
         });
       });
       this.chain = turn.catch(() => {});
@@ -361,7 +380,9 @@ class HostedTransport {
   }
 
   private hand(w: InFlight): void {
-    if (this.connection !== null && !this.reconnecting) this.connection.write(stdinRecord(w.offset, w.data)); // else the reconnect resends it
+    if (this.connection === null || this.reconnecting) return; // the reconnect writes it, unless it is aborted first
+    this.connection.write(stdinRecord(w.offset, w.data));
+    w.sent = true;
   }
 
   private resend(w: InFlight): void {
@@ -405,6 +426,9 @@ class HostedTransport {
         return;
       } catch (error) {
         this.o.deps.log(`session host ${this.o.holderId}: the reconnect after "${why}" failed: ${(error as Error).message}`);
+        const half = this.connection as HostConnection | null; // set by the reconnect: attached, then failed (the spawn's outcome unreadable)
+        this.connection = null;
+        half?.close();
       } finally {
         this.reconnecting = false;
       }
@@ -430,6 +454,7 @@ class HostedTransport {
     if (hello.exit) this.pendingExit = { code: hello.exit.code, signal: hello.exit.signal as NodeJS.Signals | null };
     this.attachListeners(connection);
     connection.send({ t: 'read', fromSeq: this.lastDelivered + 1 });
+    if (!this.spawnSettled) await this.recoverSpawn(connection, deadline);
     const w = this.inFlight;
     this.nextOffset = attached.stdinAccepted;
     if (w) {
@@ -438,7 +463,37 @@ class HostedTransport {
         w.offset = attached.stdinAccepted;
         w.end = w.offset + w.data.length;
         connection.write(stdinRecord(w.offset, w.data));
+        w.sent = true;
       } else this.answered(() => true, new TransportClosed('the session host lost track of a record across the reconnect'));
+    }
+  }
+
+  // The launch's `spawned` (or `spawnFailed`) went only to the connection that sent `commit`; a reconnect before it
+  // arrived reads the outcome from the host's state, taken after this writer's attach (no older writer moves it then):
+  // `ready`, nothing committed, so this writer sends what is missing and the answer comes here; `running` or `exited`,
+  // the child's identity; `committed`, the spawn under way, asked again until the child shows or the bound passes, when
+  // the outcome counts as a failed spawn (a `spawnFailed` leaves the host `committed` with no child).
+  private async recoverSpawn(connection: HostConnection, deadline: number): Promise<void> {
+    for (;;) {
+      const { connection: observer, hello } = await HostConnection.open(this.o.paths.socket, this.o.token, { deadline, gone: () => this.o.hostGone(), log: this.o.deps.log });
+      observer.close();
+      if (this.spawnSettled) return;
+      if (hello.child !== null) {
+        this.child = { pid: hello.child.pid, procStart: hello.child.procStart };
+        this.settleSpawn(null);
+        return;
+      }
+      if (hello.state === 'ready') {
+        const { plan } = this.o;
+        if (hello.appSessionId === null) connection.send({ t: 'launch', appSessionId: this.o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env });
+        connection.send({ t: 'commit' });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        this.onControl({ t: 'spawnFailed', message: 'the spawn\'s outcome was lost with the session host\'s connection' });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, SPAWN_POLL_MS));
     }
   }
 

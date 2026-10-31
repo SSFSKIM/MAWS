@@ -142,7 +142,7 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     expect(await t.exited).toEqual({ code: 0, signal: null });
   });
 
-  it('honours an abort only before the record is handed to the socket', { timeout: LONG }, async () => {
+  it('honours an abort only before the record is written to a connection; after, the write settles on the host\'s answer', { timeout: LONG }, async () => {
     const { deps } = profile();
     const host = await start(deps);
     const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
@@ -150,14 +150,83 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     const early = t.write({ type: 'user', marker: 'never' } as never, controller.signal); // waits for the spawn
     controller.abort();
     await expect(early).rejects.toThrow('write aborted');
+    await t.write({ type: 'user', marker: 'first' } as never); // the spawn has settled: the next write goes at once
     const late = new AbortController();
     const sent = t.write({ type: 'user', marker: 'sent' } as never, late.signal);
-    await Promise.resolve();
-    late.abort(); // handed already, or handed next: it settles on the host's answer either way
-    await sent.then(() => 'applied', () => 'aborted');
+    await new Promise((done) => setImmediate(done)); // written to the socket, its answer not back
+    late.abort();
+    await expect(sent).resolves.toBeUndefined();
     t.endInput();
     const items = await drain(t.frames);
-    expect(items.map((i) => (i.frame as { marker?: string }).marker)).not.toContain('never');
+    expect(items.map((i) => (i.frame as { marker?: string }).marker)).toEqual(['first', 'sent']);
+  });
+
+  it('drops a record aborted while it waits for a reconnect: it is never written, and the next one takes its offset', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'n', k: 1 } as never);
+    first!.close();
+    await new Promise((done) => setImmediate(done)); // the close is seen: the transport is reconnecting
+    const controller = new AbortController();
+    const waiting = t.write({ type: 'n', k: 'never' } as never, controller.signal);
+    for (let i = 0; i < 20; i += 1) await Promise.resolve(); // queued behind the reconnect, not written
+    controller.abort();
+    await expect(waiting).rejects.toThrow('write aborted');
+    await t.write({ type: 'n', k: 3 } as never);
+    t.endInput();
+    const items = await drain(t.frames);
+    expect(items.map((i) => (i.frame as { k?: unknown }).k)).toEqual([1, 3]);
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+  });
+
+  it('recovers a spawned reply lost with its connection from the reconnect\'s view of the host', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/sh', '-c', 'echo "{\\"pid\\":$$}"; exec cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    first!.close(); // launch and commit are on the wire; their `spawned` goes to a closed connection
+    const frames = reader(t.frames);
+    await t.write({ type: 'n', k: 1 } as never); // waits for the spawn's outcome, recovered after the reconnect
+    const announced = frameOf(await frames.next()) as { pid: number };
+    expect(t.pid).toBe(announced.pid);
+    expect(frameOf(await frames.next())).toEqual({ type: 'n', k: 1 });
+    t.endInput();
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+  });
+
+  it('a reconnect whose replay starts past the ring\'s loss reports the gap before the survivors, and the frontier passes it to the release (D45)', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, hostArgs: ['--ring-cap-bytes', '65536'], onConnection: (c) => (first ??= c) });
+    const lines = 40_000;
+    const t = host.transport(plan(['/bin/sh', '-c', `read go; i=0; while [ $i -lt ${lines} ]; do echo "{\\"n\\":$i,\\"pad\\":\\"${'x'.repeat(100)}\\"}"; i=$((i+1)); done; read done; exit 0`]), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'go' } as never);
+    const socket = (first as unknown as { socket: import('node:net').Socket }).socket;
+    socket.pause(); // the writer stops reading: the burst (about 5 MB, past any socket buffer) outruns the ring, and the host closes the lagging connection
+    await sleep(1_500);
+    socket.resume();
+    const items: TransportItem[] = [];
+    const all = (async () => {
+      for await (const item of t.frames) {
+        items.push(item);
+        if (item.error?.kind === 'host_gap') for (let seq = item.error.gap!.lostFrom; seq < item.error.gap!.firstSeq; seq += 1) t.journaled!(seq);
+        else if (item.hseq !== undefined) t.journaled!(item.hseq);
+        if ((item.frame as { n?: number } | null)?.n === lines - 1) t.endInput();
+      }
+    })();
+    await all;
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+    const gaps = items.filter((i) => i.error?.kind === 'host_gap');
+    expect(gaps).toHaveLength(1);
+    const { lostFrom, firstSeq } = gaps[0]!.error!.gap!;
+    const at = items.indexOf(gaps[0]!);
+    expect(items[at - 1]?.hseq).toBe(lostFrom - 1); // the last record read before the loss
+    expect(items[at + 1]?.hseq).toBe(firstSeq); // the first survivor, after the gap
+    expect(items.slice(at + 1).map((i) => i.hseq)).toEqual(Array.from({ length: items.length - at - 1 }, (_, i) => firstSeq + i));
+    expect(t.holder!.fence).toBe(2);
+    await expectGone(host.pid); // every record journaled or lost: the frontier reached the end and the host was released
   });
 
   it('reconnects as writer at the next fence when its connection closes while the host lives, losing nothing (D45)', { timeout: LONG }, async () => {
