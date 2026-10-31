@@ -39,6 +39,10 @@
 //       fake observer on the engine host's gate.sock, the release's `arm` arrives, the scene answers `armed` and the
 //       session is released; a `turn` after the arm is answered `proceed` and the session stays live another period;
 //       an observer gone silent holds its session past two periods.
+// P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M2; D28, D31): cases (a), (b), (e) and (m) run their
+// sessions on the stub engine (e2e/support/stub-engine.ts), a real process playing the same fixtures under a real session
+// host, rather than the in-process replay, which spawns nothing; (a) adds a live session whose engine, session host and
+// roster entry it checks and sees end with the session. Every other case keeps the replay.
 import { addressed } from './support/address';
 import { openSurface, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
@@ -147,6 +151,7 @@ test.beforeEach(() => test.setTimeout(180_000));
 test('(a) the supervisor starts in its own group with its files; an unbusy quit stops it; it outlives a killed app; a stale lock is replaced', async () => {
   if (DAEMON) return startOnTheDaemon();
   await withScratch('start', async (s) => {
+    s.useStub(); // O16 M2b
     const first = await s.launch();
     const status = await s.ready(first.page);
     expect(status).toMatchObject({ transport: 'detached', state: 'ready', matches: 'same', supervisor: { mode: 'detached' } });
@@ -159,10 +164,13 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
     for (const name of ['host.lock', 'host.token', 'host.sock']) expect(statSync(s.file(name)).mode & 0o777, name).toBe(0o600);
     expect(existsSync(s.file('host.log'))).toBe(true);
     expect(lock.socketPath).toBe(s.file('host.sock'));
+    const hosted = await hostedSession(s, first.page); // O16 M2b
 
-    // an unbusy quit stops every session and the supervisor with them (residue 23)
+    // an unbusy quit stops every session and the supervisor with them (residue 23), the session host with its session
     await s.quit(first);
     await expect.poll(() => isAlive(lock.pid), { timeout: 10_000 }).toBe(false);
+    await expect.poll(() => [isAlive(hosted.engine), isAlive(hosted.host)], { timeout: 10_000, message: 'the engine and its session host end with the session' }).toEqual([false, false]);
+    expect(existsSync(hosted.roster), 'the session host removed its roster entry').toBe(false);
     expect(existsSync(s.file('host.lock')), 'the lock is unlinked').toBe(false);
     expect(existsSync(s.file('host.sock')), 'the socket is unlinked').toBe(false);
 
@@ -198,6 +206,7 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
 async function startOnTheDaemon(): Promise<void> {
   const IDLE_MS = 4_000; // `mawsd`'s idle exit, each idle-reading launch's host.configure (its spine's, MAWS_E2E_SUPERVISOR_IDLE_MS)
   await withScratch('start', async (s) => {
+    s.useStub(); // O16 M2b
     const first = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) });
     const status = await s.ready(first.page);
     expect(status).toMatchObject({ transport: 'daemon', state: 'ready', matches: 'same', supervisor: { mode: 'detached' }, daemon: { kind: 'private' }, daemonUnavailable: null });
@@ -218,6 +227,11 @@ async function startOnTheDaemon(): Promise<void> {
     expect(ps(engine.pid, 'command')).toMatch(/^maws-supervisor .* --detached /);
     expect(statSync(s.dir).mode & 0o777).toBe(0o700);
     for (const name of ['host.lock', 'host.token', 'host.sock']) expect(statSync(s.file(name)).mode & 0o777, name).toBe(0o600);
+    // O16 M2b: a live session runs under a session host; stopped, it ends with its host, and the quit below stays unbusy
+    const hosted = await hostedSession(s, first.page);
+    expect(value(await invoke(first.page, 'session.stop', { appSessionId: hosted.id, reason: 'stop' }))).toMatchObject({ exited: true });
+    await expect.poll(() => [isAlive(hosted.engine), isAlive(hosted.host)], { timeout: 10_000, message: 'the engine and its session host end with the session' }).toEqual([false, false]);
+    expect(existsSync(hosted.roster), 'the session host removed its roster entry').toBe(false);
 
     // an unbusy quit leaves the engine host to `mawsd`'s idle clock, which parks it; `mawsd` exits once idle
     await s.quit(first);
@@ -255,6 +269,29 @@ async function startOnTheDaemon(): Promise<void> {
   });
 }
 
+// O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M2): a live session on the stub engine, ready: its engine
+// runs under a session host, the engine's parent in a process group of its own, with its roster entry in the supervisor's
+// `hosts/` (0700, the entry 0600); the spawn row names the stub as `bin` and the host as `holder`.
+async function hostedSession(s: Scratch, page: Page): Promise<{ id: AppSessionId; engine: number; host: number; roster: string }> {
+  const id = `a-hosted-${Date.now()}` as AppSessionId;
+  await s.launchSession(page, id, PERMISSION, { cwd: s.repo });
+  const status = await statusOf(page, id);
+  const engine = status.pid!;
+  const host = status.holder!.pid;
+  expect(status.holder).toMatchObject({ adopted: false });
+  expect(host).not.toBe(engine);
+  expect(Number(ps(engine, 'ppid')), 'the session host is the engine’s parent').toBe(host);
+  expect(Number(ps(host, 'pgid')), 'the session host leads its own process group').toBe(host);
+  expect(ps(host, 'command')).toMatch(/maws-session-host /);
+  const hosts = join(s.dir, 'hosts');
+  expect(statSync(hosts).mode & 0o777).toBe(0o700);
+  const roster = join(hosts, `${status.launchId}.json`);
+  expect(statSync(roster).mode & 0o777).toBe(0o600);
+  const spawn = s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn')!.frame;
+  expect(spawn).toMatchObject({ bin: s.stub!.bin, holder: { pid: host, holderId: status.holder!.holderId } });
+  return { id, engine, host, roster };
+}
+
 test('(b) G2: a kept session streams on while the app is closed; the relaunch reconnects, its undelivered tail reaches main, and it ends as a control run does', async () => {
   const pace = { MAWS_E2E_REPLAY_ROW_MS: ROW_MS };
   const dd = (scope: Locator, term: string) => scope.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
@@ -278,6 +315,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
   // the control: the same fixture at the same pace, the app open throughout
   const control = { order: [] as string[], suffixes: [] as string[], rows: [] as string[], journal: 0 };
   await withScratch('control', async (s) => {
+    s.useStub({ rowMs: Number(ROW_MS) }); // O16 M2b: the session on the stub engine under a session host
     const run = await s.launch(pace);
     await s.ready(run.page);
     const id = await s.record(run.page);
@@ -300,6 +338,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
   });
 
   await withScratch('keep', async (s) => {
+    s.useStub({ rowMs: Number(ROW_MS) }); // O16 M2b
     const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION} with one background task failure inserted before its request, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
     const first = await s.launch({ ...pace, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const firstStatus = await s.ready(first.page);
@@ -583,6 +622,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
   if (DAEMON) {
     await withScratch('idle-keep', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
+      s.useStub({ rowMs: 1500 }); // O16 M2b
       const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
       const status = await s.ready(first.page);
       const id = await s.record(first.page);
@@ -597,6 +637,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     });
     await withScratch('idle-kill', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
+      s.useStub({ rowMs: 1500 }); // O16 M2b
       const run = await s.launch(env);
       const status = await s.ready(run.page);
       const id = await s.record(run.page);
@@ -612,6 +653,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
 
   await withScratch('idle-keep', async (s) => {
     const fixture = turnsJournal(s.root, 'idle', 1);
+    s.useStub({ rowMs: 1500 }); // O16 M2b
     const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const pid = (await s.ready(first.page)).supervisor!.pid;
     const id = await s.record(first.page);
@@ -644,6 +686,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
 
   await withScratch('idle-kill', async (s) => {
     const fixture = turnsJournal(s.root, 'idle', 1);
+    s.useStub({ rowMs: 1500 }); // O16 M2b
     const run = await s.launch(env);
     const pid = (await s.ready(run.page)).supervisor!.pid;
     const id = await s.record(run.page);
@@ -1054,6 +1097,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
   await withScratch('interest', async (s) => {
     mkdirSync(join(s.repo, '.claude'), { recursive: true });
     writeFileSync(join(s.repo, '.claude', 'scheduled_tasks.json'), `${JSON.stringify(recorded, null, 2)}\n`);
+    s.useStub(); // O16 M2b: every session of the case on the stub engine under a session host
     const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) });
     const { page } = run;
     await s.ready(page);
@@ -1061,7 +1105,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     const stamp = Date.now();
     // a launch of the replay and its prompt, played to its turn's end (unpaced, a turn may open and end between reads)
     const played = async (id: AppSessionId, replay: string, prompt: string) => {
-      await launchReady(page, id, replay, { cwd: s.repo });
+      await s.launchSession(page, id, replay, { cwd: s.repo });
       value(await invoke(page, 'session.send', { appSessionId: id, content: prompt }));
       await expect.poll(async () => (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 30_000, message: `${id}'s turn ends` }).toBe(true);
     };
@@ -1071,13 +1115,13 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     const untabbed = `m7-untabbed-${stamp}` as AppSessionId;
     await played(untabbed, fixture, 'turn 1');
     const kept = `m7-kept-${stamp}` as AppSessionId;
-    await launchReady(page, kept, fixture, { cwd: s.repo });
+    await s.launchSession(page, kept, fixture, { cwd: s.repo });
     value(await invoke(page, 'session.setKeep', { appSessionId: kept, keep: true })); // before its turn can make it eligible
     value(await invoke(page, 'session.send', { appSessionId: kept, content: 'turn 1' }));
     const durable = `m7-durable-${stamp}` as AppSessionId;
     await played(durable, DURABLE, firstPrompt(DURABLE));
     const resumed = `m7-resumed-${stamp}` as AppSessionId;
-    await launchReady(page, resumed, RESUMED, { cwd: s.repo, resume: { sessionId: engineSessionId as never, fork: false }, sessionId: null });
+    await s.launchSession(page, resumed, RESUMED, { cwd: s.repo, resume: { sessionId: engineSessionId as never, fork: false }, sessionId: null });
     const all = [tabbed, untabbed, kept, durable, resumed];
     await expect.poll(async () => (await Promise.all(all.map((id) => statusOf(page, id)))).every((st) => st.turn === null), { timeout: 30_000, message: 'every turn has ended' }).toBe(true);
 
@@ -1102,7 +1146,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     try {
       const watched = async (name: string, beat: boolean) => {
         const id = `m7-${name}-${stamp}` as AppSessionId;
-        await launchReady(page, id, fixture, { cwd: s.repo });
+        await s.launchSession(page, id, fixture, { cwd: s.repo });
         value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: true }));
         const observer = await FakeObserver.connect(gatePath);
         observers.push(observer);

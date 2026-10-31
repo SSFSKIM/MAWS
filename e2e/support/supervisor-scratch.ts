@@ -8,6 +8,10 @@
 // every launch runs on the daemon shape: main reaches the engine host through a private `mawsd` on the profile, whose
 // lock and sockets are under `<profile>/mawsd/`; the engine host keeps the supervisor's files. `ready` then waits for
 // main to know the daemon too, and every `mawsd` the case saw is killed with the supervisors.
+// P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md; D28, D31): a case that calls `useStub` runs its
+// sessions on the stub engine, a real process each under a real session host, instead of the in-process replay:
+// every launch of the app names the stub (MAWS_E2E_ENGINE_BIN), and `launchSession` (and so `startTurn`) launches live
+// sessions that play their fixture on it. Every other case keeps the replay.
 import { type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,12 +21,14 @@ import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { DAEMON_FILES, daemonPaths } from '@shared/daemon/files';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './launch';
 import { killScratchProcesses } from './processes';
 import { tmpSocketDirOf } from './supervisor-socket';
+import { stubLaunchReady, writeStubEngine, type StubEngine } from './stub-engine'; // P5 O16 M2b
 
 // C3's permission round trip: a prompt, ~44 `in` rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
@@ -86,6 +92,7 @@ export class Scratch {
   readonly engineId = randomUUID();
   readonly supervisors = new Set<number>(); // every supervisor pid this case saw
   readonly daemons = new Set<number>(); // every `mawsd` pid this case saw (the daemon shape)
+  stub: StubEngine | null = null; // P5 O16 M2b: the case's engine, once `useStub` wrote it
   private readonly runs: Run[] = [];
   private readonly sockets = new Set<string>();
 
@@ -145,6 +152,19 @@ export class Scratch {
     return existsSync(this.daemonFile(DAEMON_FILES.log)) ? readFileSync(this.daemonFile(DAEMON_FILES.log), 'utf8') : '';
   }
 
+  // P5 O16 M2b: the case's sessions on the stub engine from here on, `rowMs` the pace of its `in` rows (the value the
+  // case gives MAWS_E2E_REPLAY_ROW_MS); call before the first launch that should name it
+  useStub(opts: { rowMs?: number } = {}): StubEngine {
+    this.stub = writeStubEngine(this.root, opts);
+    return this.stub;
+  }
+
+  // A session of `fixture` launched and ready: live on the stub engine under `useStub`, else the in-process replay.
+  async launchSession(page: Page, id: string, fixture: string, over: Partial<LaunchSpec> = {}): Promise<void> {
+    if (this.stub !== null) await stubLaunchReady(page, this.stub, id, fixture, over);
+    else await launchReady(page, id, fixture, over);
+  }
+
   // `root`: another checkout whose built app runs on this profile instead of this one's (launch.ts). The app's output is
   // read from the moment the launch resolves (`onLaunched`), so main's lines from its start (its first connect) are kept.
   async launch(env: Record<string, string> = {}, root?: string): Promise<Run> {
@@ -153,7 +173,7 @@ export class Scratch {
       app.process().stdout?.on('data', (chunk) => (text += String(chunk)));
       app.process().stderr?.on('data', (chunk) => (text += String(chunk)));
     };
-    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...env } }));
+    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...(this.stub && { MAWS_E2E_ENGINE_BIN: this.stub.bin }), ...env } }));
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
     const run: Run = { maws, page: maws.page, child, output: () => text, quitLines: () => text.split('\n').filter((l) => l.startsWith('quit-guard:')), exited };
@@ -265,9 +285,9 @@ export const attentionOf = async (page: Page, id: AppSessionId, kind: AttentionI
   value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && i.kind === kind);
 export const pendingPermissions = (page: Page, id: AppSessionId) => attentionOf(page, id, 'permission');
 
-// A replayed launch of the record and its prompt, written once the launch is ready.
+// A launch of the record (replayed, or on the stub under `useStub`) and its prompt, written once the launch is ready.
 export async function startTurn(page: Page, s: Scratch, id: AppSessionId, fixture = PERMISSION, prompt = PROMPT): Promise<void> {
-  await launchReady(page, id, fixture, { cwd: s.repo });
+  await s.launchSession(page, id, fixture, { cwd: s.repo });
   value(await invoke(page, 'session.send', { appSessionId: id, content: prompt }));
   await expect.poll(async () => (await statusOf(page, id)).turn !== null, { message: 'the turn is open' }).toBe(true);
 }

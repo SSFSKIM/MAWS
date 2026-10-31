@@ -10,14 +10,16 @@
 //   stub-engine.mjs --stub-fixture <journal> --stub-prelude <journal> [options] -- [engine arguments…]
 //
 // Options: `--stub-fixture-for <engine session id>=<journal>` plays that journal for a launch whose `--session-id` or
-// `--resume` names the id; `--stub-row-ms <n>` paces each `in` row; the directives `--stub-spawn-child` (a `sleep` it
+// `--resume` names the id, as does `--stub-fixture-dir <dir>` with `<dir>/<id>.jsonl` (read at the spawn, so a scene
+// names each launch's journal after the app has started); `--stub-row-ms <n>` paces each `in` row; the directives `--stub-spawn-child` (a `sleep` it
 // parents, its pid printed as the stderr line `stub-engine child <pid>`, ended with the stub), `--stub-count-stdin`
 // (the stderr line `stub-engine stdin <frames> frames, <user> user` at its exit) and `--stub-print-env <K1,K2>` (each
 // as the stderr line `stub-engine env K=V` at its start). `--version` alone answers the tested version. A write the
 // fixture never recorded ends the replay as a mismatch: the reason on stderr and exit 1. An `end_session` and the end of
 // stdin end it with 0, SIGTERM with the signal, as the engine does.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
@@ -57,6 +59,8 @@ function fixtureOf(): string {
     const [key, path] = (own[i + 1] ?? '').split(/=(.*)/s);
     if (key === id && path) return path;
   }
+  const dir = option('--stub-fixture-dir');
+  if (dir && id && existsSync(join(dir, `${id}.jsonl`))) return join(dir, `${id}.jsonl`);
   const fixture = option('--stub-fixture');
   if (!fixture) {
     process.stderr.write('stub-engine: no --stub-fixture\n');

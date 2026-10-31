@@ -14,6 +14,7 @@ export const STUB_PRELUDE = join(REPO_ROOT, 'test/fixtures/engine/replay-handsha
 export interface StubEngineOptions {
   fixture: string; // the journal played by default (absolute, or relative to the repository)
   fixtureFor?: Record<string, string>; // by the engine session id a launch's `--session-id` or `--resume` names
+  fixtureDir?: string; // `<dir>/<that id>.jsonl`, looked up at each spawn (e2e/support/stub-engine.ts)
   rowMs?: number; // each `in` row's pace (the scenes' MAWS_E2E_REPLAY_ROW_MS, read by the harness that writes this)
   spawnChild?: boolean; // a `sleep` the stub parents, its pid on stderr
   countStdin?: boolean; // the frames it read, on stderr at its exit
@@ -45,6 +46,7 @@ export function writeStubEngine(path: string, bundle: string, opts: StubEngineOp
   const abs = (fixture: string) => resolve(REPO_ROOT, fixture);
   const args = ['--stub-fixture', abs(opts.fixture), '--stub-prelude', STUB_PRELUDE];
   for (const [id, fixture] of Object.entries(opts.fixtureFor ?? {})) args.push('--stub-fixture-for', `${id}=${abs(fixture)}`);
+  if (opts.fixtureDir) args.push('--stub-fixture-dir', opts.fixtureDir);
   if (opts.rowMs) args.push('--stub-row-ms', String(opts.rowMs));
   if (opts.spawnChild) args.push('--stub-spawn-child');
   if (opts.countStdin) args.push('--stub-count-stdin');

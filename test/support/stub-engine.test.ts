@@ -2,9 +2,9 @@
 // bundled and wrapped, it answers --version, plays a fixture over real stdio with the replay transport's rules, and
 // honours its directives.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TESTED_ENGINE_VERSION } from '../../src/engine-host/engine-compat';
 import { buildStubEngine, writeStubEngine } from './stub-engine-bin';
@@ -42,5 +42,21 @@ describe('the stub engine', () => {
     expect(err).toContain('stub-engine env STUB_TEST_VAR=here');
     expect(err).toMatch(/stub-engine child \d+/);
     expect(err).toContain('stub-engine stdin 1 frames, 0 user');
+  });
+
+  // O16 M2b: a scene names each launch's journal after the app has started, under the launch's engine session id
+  it('plays the journal its fixture directory holds under the launch\'s --session-id, read at the spawn', { timeout: 30_000 }, async () => {
+    const fixtures = join(dir, 'by-id');
+    mkdirSync(fixtures, { recursive: true });
+    const bin = writeStubEngine(join(dir, 'd'), bundle, { fixture: join(dir, 'no-such-journal.jsonl'), fixtureDir: fixtures });
+    copyFileSync(resolve(__dirname, '../..', PERMISSION), join(fixtures, 'abc.jsonl'));
+    const proc = spawn(bin, ['-p', '--session-id', 'abc'], { env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    proc.stdout.on('data', (chunk) => (out += String(chunk)));
+    proc.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'L-1', request: { subtype: 'initialize' } })}\n`);
+    for (let i = 0; i < 100 && !out.includes('"L-1"'); i += 1) await new Promise((done) => setTimeout(done, 50));
+    expect(out).toContain('"L-1"');
+    proc.stdin.end();
+    expect(await new Promise<number | null>((done) => proc.on('exit', (c) => done(c)))).toBe(0);
   });
 });
