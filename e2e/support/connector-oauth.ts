@@ -399,3 +399,24 @@ export function writeLegacySealed(directory: string, connectionId: string, base6
 
 // The base64 body of a format 1 file no safeStorage sealed: random bytes, so no sealer opens them to a record.
 export const unopenableLegacy = (): string => randomBytes(96).toString('base64');
+
+// P5 O4 M4: a version 1 record's JSON with no server behind it, for a scene that needs a grant to adopt but signs
+// nothing in (e2e/cross-build.spec.ts): the shape the adoption validates (src/services/connectors/oauth-store.ts, the
+// SDK's metadata and registration schemas), on example.org's names, its tokens random placeholders no server minted.
+export function placeholderGrantText(connectionId: string, server = 'xb-grant'): string {
+  const at = Date.now();
+  const issuer = 'https://auth.example.org';
+  const redirectUri = 'http://127.0.0.1:53100/callback';
+  return JSON.stringify({
+    version: 1,
+    connectionId,
+    identity: { requestUrl: 'https://mcp.example.org/mcp', server, scope: 'user', configPath: '/nonexistent/.claude.json', entryPath: ['mcpServers', server] },
+    issuer,
+    resource: 'https://mcp.example.org',
+    redirectUri,
+    authorizationServer: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, response_types_supported: ['code'] },
+    client: { client_id: `xb-${connectionId}`, redirect_uris: [redirectUri] },
+    tokens: { accessToken: randomBytes(24).toString('hex'), refreshToken: randomBytes(24).toString('hex'), tokenType: 'Bearer', obtainedAt: at },
+    savedAt: at,
+  });
+}

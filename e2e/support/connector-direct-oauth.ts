@@ -44,11 +44,18 @@ const canonical = (path: string | null): string | null => {
 
 // Main's own facts, compared before the owner touches anything that could reach safeStorage.
 export async function expectScratchCustody(run: Run, scene: ConnectorScene): Promise<{ mockKeychain: boolean; profile: 'scene' }> {
-  const facts = await run.maws.app.evaluate(({ app }) => ({ mockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), userData: app.getPath('userData'), scratch: process.env.MAWS_USER_DATA ?? null }));
-  const problems = custodyProblems({ mockKeychain: facts.mockKeychain, userData: canonical(facts.userData), scratch: canonical(facts.scratch), expected: canonical(scene.userData), tmp: canonical(tmpdir()) });
+  const { mockKeychain } = await expectMockCustody(run.maws.app, scene.userData);
+  scene.note('custody', { mockKeychain, profile: 'scene' });
+  return { mockKeychain, profile: 'scene' };
+}
+
+// The same check for any launch on the scratch profile `userData` (P5 O4 M4: cross-build's scenes seal a grant with no
+// connector scene around them).
+export async function expectMockCustody(app: ElectronApplication, userData: string): Promise<{ mockKeychain: boolean }> {
+  const facts = await app.evaluate(({ app }) => ({ mockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), userData: app.getPath('userData'), scratch: process.env.MAWS_USER_DATA ?? null }));
+  const problems = custodyProblems({ mockKeychain: facts.mockKeychain, userData: canonical(facts.userData), scratch: canonical(facts.scratch), expected: canonical(userData), tmp: canonical(tmpdir()) });
   expect(problems, 'main runs on the mock keychain with the scene’s own scratch profile').toEqual([]);
-  scene.note('custody', { mockKeychain: facts.mockKeychain, profile: 'scene' });
-  return { mockKeychain: facts.mockKeychain, profile: 'scene' };
+  return { mockKeychain: facts.mockKeychain };
 }
 
 // Main's stdout and stderr from each launch (Playwright pipes both), kept across relaunches.
