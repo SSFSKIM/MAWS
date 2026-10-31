@@ -424,6 +424,51 @@ describe('a surface’s rebuild on connectors.reset', () => {
     expect(b.sent[4]).toMatchObject({ name: 'connectors.declare', input: { leaseId: NEW_LEASE, tools: [TOOL, OTHER_TOOL] } });
   });
 
+  // The re-review's finding 1: a declaration answered on the old lease after the rebuild declared the new one is
+  // declared on the new lease before anything more is sent
+  it('declares on the rebuilt lease a declaration the old lease answered after the rebuild, before the next call', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    const declaring = surface.declareTools([TOOL]);
+    await settle();
+    b.emit('connectors.reset', {});
+    b.sent[2]!.answer({ leaseId: NEW_LEASE }); // rebuilt with nothing declared yet
+    await settle();
+    b.sent[1]!.answer({ ok: true, declared: [TOOL] }); // the old lease's answer, late
+    await declaring;
+    const called = surface.callTool(TOOL);
+    await settle();
+    expect(b.sent.slice(3).map(({ name, input }) => [name, input])).toEqual([['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }]]);
+    b.sent[3]!.answer({ ok: true, declared: [TOOL] });
+    await settle();
+    expect(b.sent.slice(4).map(({ name, input }) => [name, input])).toEqual([['connectors.call', { leaseId: NEW_LEASE, request: TOOL }]]);
+    b.sent[4]!.answer(RESULT);
+    await expect(called).resolves.toEqual(RESULT);
+  });
+
+  // The re-review's finding 2: a start overtaken by one reset, answered before a second, is started once on the latest lease
+  it('starts a watch once on the latest lease when two resets overtake its start', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const watched = surface.watchTool(SERIES, () => {});
+    b.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    b.emit('connectors.reset', {});
+    b.sent[1]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    await watched;
+    b.emit('connectors.reset', {});
+    b.sent[2]!.answer({ leaseId: OTHER_LEASE }); // the first rebuild's, closed
+    b.sent[3]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    const starts = () => b.sent.filter(({ name, input }) => name === 'connectors.watch' && (input as { leaseId: string }).leaseId === NEW_LEASE);
+    starts()[0]!.answer({ ok: true, watchId: NEW_WATCH, intervalMs: 60_000 });
+    await settle();
+    await settle();
+    expect(starts()).toHaveLength(1);
+  });
+
   // The task review's finding 3: the watch's start overtaken by the reset answers before the rebuilt lease opens, so the
   // rebuild and the overtaken start's own re-install both know it; it is started once on the rebuilt lease
   it('starts an overtaken watch once on the rebuilt lease, and its unwatch stops that one', async () => {
