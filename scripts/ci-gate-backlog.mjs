@@ -128,11 +128,17 @@ export async function cachedBacklog({ cache, collect = sampleBacklog, now = Date
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    // A move (or a different quota list) must not reuse the old owner's still-fresh counts or lock.
-    const quota = quotaRepos(process.env);
+  // Invalid configuration is a refusal, not an unavailable advisory sample.
+  let quota;
+  try { quota = quotaRepos(process.env); } catch (error) {
+    process.stderr.write(`ci-gate: ${error.message}\n`);
+    process.exitCode = 2;
+  }
+  if (quota) try {
+    // Default callers keep sharing the sample and lock with older launchers; changed quotas are isolated.
     const key = createHash('sha256').update(JSON.stringify(quota)).digest('hex').slice(0, 16);
-    const cache = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'maws-ci', `mac-backlog-v1-${key}.json`);
+    const defaults = quota.repo === DEFAULT_REPOS[0] && JSON.stringify(quota.repos) === JSON.stringify(DEFAULT_REPOS);
+    const cache = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'maws-ci', defaults ? 'mac-backlog-v1.json' : `mac-backlog-v1-${key}.json`);
     const sample = await cachedBacklog({ cache });
     if (sample) process.stdout.write(`Mac-Backlog: ${JSON.stringify(sample)}\n`);
     else process.stderr.write('ci-gate: Mac backlog unavailable; keeping normal placement\n');

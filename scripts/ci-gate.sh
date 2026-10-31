@@ -218,8 +218,8 @@ fi
 # Read the configured URL, before local insteadOf transport rewrites. Non-GitHub origins retain today's fallback.
 REPO=SSFSKIM/MAWS
 origin_url=$(git -C "$git_dir" config --get remote.origin.url || true)
-if [[ $origin_url =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/?$ ]]; then
-  REPO=${BASH_REMATCH[2]%.git}
+if [[ $origin_url =~ ^(https://github\.com/|git@github\.com:|ssh://git@(github\.com|ssh\.github\.com)(:[0-9]+)?/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/?$ ]]; then
+  REPO=${BASH_REMATCH[4]%.git}
 fi
 
 # Explicit labels preserve their routing (reserved final refs stay on the self-hosted Mac).
@@ -300,7 +300,12 @@ gate_hosted_repos=$(gh variable list -R "$REPO" --json name,value --jq '.[] | se
 backlog_trailer=''
 if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && $lane != hosted && -z $live ]]; then
   case $gates in
-    all|*e2e:*|*unit*) backlog_trailer=$(REPO="$REPO" HOSTED_MAC_REPOS="$gate_hosted_repos" node "$(dirname "$0")/ci-gate-backlog.mjs") || backlog_trailer='' ;;
+    all|*e2e:*|*unit*)
+      backlog_trailer=$(REPO="$REPO" HOSTED_MAC_REPOS="$gate_hosted_repos" node "$(dirname "$0")/ci-gate-backlog.mjs") || {
+        backlog_status=$?
+        [[ $backlog_status != 2 ]] || exit 2
+        backlog_trailer=''
+      } ;;
   esac
   [[ -z $backlog_trailer ]] || trailers+=$'\n'"$backlog_trailer"
 fi

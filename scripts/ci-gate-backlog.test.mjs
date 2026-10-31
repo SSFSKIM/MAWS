@@ -1,8 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { URL, fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -199,5 +199,48 @@ esac
     const calls = readFileSync(join(dir, 'calls'), 'utf8');
     assert.equal(sample('neworg/MAWS', 'neworg/MAWS,neworg/other').hostedQueued, 2);
     assert.equal(readFileSync(join(dir, 'calls'), 'utf8'), calls);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('the sampler CLI refuses malformed configuration with its diagnostic and no API reads', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-backlog-invalid-'));
+  try {
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh\ntouch '${join(dir, 'called')}'\nexit 1\n`);
+    chmodSync(join(dir, 'gh'), 0o755);
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./ci-gate-backlog.mjs', import.meta.url))], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: dir, REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: 'MAWS' },
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /^ci-gate: HOSTED_MAC_REPOS must list owner\/repository names\n$/);
+    assert.equal(existsSync(join(dir, 'called')), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('default quota callers share the legacy fresh sample and sampling lock', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-backlog-legacy-'));
+  const cache = join(dir, 'maws-ci', 'mac-backlog-v1.json');
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 17, hostedRunning: 5, ec2: 'idle', ec2Queued: 2, partial: [] };
+  try {
+    mkdirSync(join(dir, 'maws-ci'));
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh\ntouch '${join(dir, 'called')}'\nexit 1\n`);
+    chmodSync(join(dir, 'gh'), 0o755);
+    const run = () => spawnSync(process.execPath, [fileURLToPath(new URL('./ci-gate-backlog.mjs', import.meta.url))], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: dir, REPO: '', HOSTED_MAC_REPOS: '' },
+    });
+    writeFileSync(cache, JSON.stringify({ at: Date.now(), sample }));
+    const cached = run();
+    assert.equal(cached.status, 0, cached.stderr);
+    assert.deepEqual(JSON.parse(cached.stdout.slice('Mac-Backlog: '.length)), sample);
+    assert.equal(existsSync(join(dir, 'called')), false);
+    rmSync(cache);
+    mkdirSync(`${cache}.lock`);
+    writeFileSync(join(`${cache}.lock`, 'at'), String(Date.now()));
+    const locked = run();
+    assert.equal(locked.status, 0);
+    assert.equal(locked.stdout, '');
+    assert.match(locked.stderr, /backlog unavailable/);
+    assert.equal(existsSync(join(dir, 'called')), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

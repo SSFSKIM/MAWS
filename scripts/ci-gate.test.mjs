@@ -424,7 +424,7 @@ test('direct calls put the cached backlog into the pushed commit, and failed cou
 });
 
 test('origin identity and hosted variables reach the sampler, identity and pool planner', () => {
-  for (const originUrl of ['https://github.com/neworg/MAWS.git', 'git@github.com:neworg/MAWS.git', 'ssh://git@github.com/neworg/MAWS']) {
+  for (const originUrl of ['https://github.com/neworg/MAWS.git', 'git@github.com:neworg/MAWS.git', 'ssh://git@github.com/neworg/MAWS', 'ssh://git@github.com:22/neworg/MAWS.git', 'ssh://git@ssh.github.com:443/neworg/MAWS.git']) {
     const result = gate(['--gates', 'e2e:tools', '--peer', 'none'], { originUrl, backlog: 'ok', hostedCap: '50', hostedRepos: 'neworg/MAWS' });
     assert.equal(result.refs.length, 1, result.stdout + result.stderr);
     assert.ok(result.calls.some((line) => line.includes('-R neworg/MAWS')));
@@ -441,4 +441,15 @@ test('interrupt cancellation writes to the origin repository, not its old name',
   const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'interrupt'], { originUrl: 'https://github.com/neworg/MAWS.git', interrupt: true });
   assert.equal(result.status, 130, result.stdout + result.stderr);
   assert.ok(result.calls.includes('-R neworg/MAWS run cancel 123'), result.calls.join('\n'));
+});
+
+
+test('malformed quota configuration refuses the launcher before a push', () => {
+  const result = gate(['--gates', 'e2e:tools', '--peer', 'none'], {
+    originUrl: 'https://github.com/neworg/MAWS.git', backlog: 'ok', hostedCap: '50', hostedRepos: 'MAWS',
+  });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.deepEqual(result.refs, []);
+  assert.match(result.stderr, /^ci-gate: HOSTED_MAC_REPOS must list owner\/repository names$/m);
+  assert.ok(!result.calls.some((call) => call.includes('actions/runners') || call.includes(' run list ')));
 });
