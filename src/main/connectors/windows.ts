@@ -5,8 +5,9 @@
 // broker holds the latest report, and a page never reported is hidden (fail closed).
 //
 // - Through the router's seam before the owner switch (`beforeCommand`), on both shapes: a page's first lease command
-//   follows its window and waits for the first report to land before it continues, so no lease command reaches the
-//   broker ahead of the window it runs under.
+//   follows its window, and every lease command waits until the machine holds the window's latest report (every report
+//   queued answered, the last taken, under the current connection), so no lease command reaches the broker ahead of
+//   the window it runs under.
 // - The window is read, never an event's name trusted: when first followed, on its show, hide, minimize and restore, and
 //   every WINDOW_RECHECK_MS while followed, shown or hidden (P3-H re-read only a hidden one; the machine can no longer
 //   re-read before work starts, so a hide no event announced is reported within the re-read: D8's stated residual). On
@@ -53,9 +54,12 @@ interface Followed {
   readonly client: ClientRef;
   readonly window: ClientWindowShown | null;
   sent: boolean | null; // the last state reported
-  landed: number; // the connection (an `epoch`) that took the last report, or -1
+  queued: number; // the last report's sequence number
+  queuedOn: number; // the connection (an `epoch`) the last report was made for
+  settled: number; // the sequence number of the last report answered
+  took: boolean; // whether the machine took it
+  settledOn: number; // the connection it was made for
   chain: Promise<void>; // the reports, in order
-  pending: Promise<void> | null; // the report a lease command waits for
   untaken: boolean; // said that the machine did not take its report (once, until one lands)
   unfollow(): void;
 }
@@ -67,31 +71,42 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
 
   const live = (entry: Followed) => !stopped && followed.get(entry.client.id) === entry;
   const read = (entry: Followed) => entry.window !== null && entry.window.shown();
-  const send = (entry: Followed, shown: boolean): Promise<void> => {
+  const send = (entry: Followed, shown: boolean): void => {
     entry.sent = shown;
     const at = epoch;
+    const sequence = (entry.queued += 1);
+    entry.queuedOn = at;
     entry.chain = entry.chain.then(async () => {
       const took = await report(entry.client, shown).catch(() => false);
-      entry.landed = took ? at : -1;
+      entry.settled = sequence;
+      entry.took = took;
+      entry.settledOn = at;
       if (took) entry.untaken = false;
     });
-    return entry.chain;
   };
+  // The machine holds the window's latest report: every report queued has been answered, the last one taken, under the
+  // current connection
+  const current = (entry: Followed) => entry.settled === entry.queued && entry.took && entry.settledOn === epoch;
   const changed = (entry: Followed) => {
     if (!live(entry)) return;
     const shown = read(entry);
-    if (shown !== entry.sent) void send(entry, shown);
+    if (shown !== entry.sent) send(entry, shown);
   };
-  // Until the machine holds this connection's report of the window (a stale one in flight is waited for, then made
-  // again once); then the command goes, taken or not.
+  // Until the machine holds the window's latest report under the current connection (the task review's findings 4 and
+  // 5): every report queued is waited for, a change queued behind a late answer included; a report made for a connection
+  // a restart ended is made again for the current one, however many restarts overtake it; a report the current
+  // connection did not take is made again once. Then the command goes, taken or not (the machine then reads the page
+  // hidden, or as last taken).
   const reported = async (entry: Followed) => {
-    for (let tries = 0; tries < 2 && entry.landed !== epoch && live(entry); tries += 1) {
-      entry.pending ??= send(entry, read(entry)).finally(() => {
-        entry.pending = null;
-      });
-      await entry.pending;
+    let failures = 0;
+    while (live(entry) && !current(entry)) {
+      const caughtUp = entry.settled === entry.queued;
+      if (entry.queuedOn !== epoch || (caughtUp && !entry.took)) send(entry, read(entry));
+      const awaited = entry.queued;
+      await entry.chain;
+      if (entry.settled === awaited && !entry.took && entry.settledOn === epoch && (failures += 1) >= 2) break;
     }
-    if (entry.landed === epoch || !live(entry) || entry.untaken) return;
+    if (current(entry) || !live(entry) || entry.untaken) return;
     entry.untaken = true;
     log(`the window of client ${entry.client.id} was not taken by the machine; its pages read hidden there until reported`);
   };
@@ -112,9 +127,12 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
       client,
       window,
       sent: null,
-      landed: -1,
+      queued: 0,
+      queuedOn: -1,
+      settled: 0,
+      took: false,
+      settledOn: -1,
       chain: Promise.resolve(),
-      pending: null,
       untaken: false,
       unfollow: () => {
         clearInterval(recheck);

@@ -263,4 +263,48 @@ describe('the window reporter', () => {
     expect(reports).toHaveLength(5);
     expect(logged).toEqual([expect.stringContaining('was not taken')]); // said once until a report lands
   });
+
+  // The task review's finding 4: a lease command goes under the window's latest report, not one a later change queued
+  // behind an answer still awaited
+  it('holds a lease command until the latest queued report has landed, a hide queued behind a late show included', async () => {
+    win().visible = false;
+    await lease(); // hidden, reported and taken
+    let landShow!: (ok: boolean) => void;
+    answers = (_client, shown) => (shown ? new Promise((resolve) => (landShow = resolve)) : Promise.resolve(true));
+    win().show(); // its answer comes late
+    await settle();
+    win().hide(); // queued behind it
+    await settle();
+    let went = false;
+    const going = lease(me, 'connectors.call').then(() => (went = true));
+    await settle();
+    expect(reports).toEqual([[me.id, false], [me.id, true]]);
+    expect(went).toBe(false);
+    landShow(true);
+    await going;
+    expect(reports).toEqual([[me.id, false], [me.id, true], [me.id, false]]); // the hide landed before the call went
+  });
+
+  // The task review's finding 5: answers from connections a restart ended do not use up the command's retries
+  it('waits for a report under the current connection however many restarts overtake the reports in flight', async () => {
+    const lands: ((ok: boolean) => void)[] = [];
+    answers = () => new Promise((resolve) => lands.push(resolve));
+    let went = false;
+    const going = lease().then(() => (went = true));
+    await settle();
+    reporter.reportAgain();
+    lands[0]!(true);
+    await settle();
+    reporter.reportAgain();
+    lands[1]!(true);
+    await settle();
+    reporter.reportAgain();
+    lands[2]!(true);
+    await settle();
+    expect(went).toBe(false);
+    expect(reports).toHaveLength(4);
+    lands[3]!(true);
+    await going;
+    expect(logged).toEqual([]);
+  });
 });
