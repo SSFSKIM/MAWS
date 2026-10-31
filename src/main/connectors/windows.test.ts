@@ -256,9 +256,11 @@ describe('the window reporter', () => {
     answers = async () => false;
     await expect(lease()).resolves.toBeUndefined(); // the machine holds no report: the page reads hidden there
     expect(reports).toHaveLength(2); // asked once more before letting it go
+    await lease(me, 'connectors.declare');
+    expect(reports).toHaveLength(4);
     answers = null;
     await lease(me, 'connectors.call');
-    expect(reports).toEqual([[me.id, true], [me.id, true], [me.id, true]]);
-    expect(logged).toEqual([expect.stringContaining('was not taken')]);
+    expect(reports).toHaveLength(5);
+    expect(logged).toEqual([expect.stringContaining('was not taken')]); // said once until a report lands
   });
 });

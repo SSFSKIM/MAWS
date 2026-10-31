@@ -56,6 +56,7 @@ interface Followed {
   landed: number; // the connection (an `epoch`) that took the last report, or -1
   chain: Promise<void>; // the reports, in order
   pending: Promise<void> | null; // the report a lease command waits for
+  untaken: boolean; // said that the machine did not take its report (once, until one lands)
   unfollow(): void;
 }
 
@@ -72,6 +73,7 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
     entry.chain = entry.chain.then(async () => {
       const took = await report(entry.client, shown).catch(() => false);
       entry.landed = took ? at : -1;
+      if (took) entry.untaken = false;
     });
     return entry.chain;
   };
@@ -89,7 +91,9 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
       });
       await entry.pending;
     }
-    if (entry.landed !== epoch && live(entry)) log(`the window of client ${entry.client.id} was not taken by the machine; its pages read hidden there until reported`);
+    if (entry.landed === epoch || !live(entry) || entry.untaken) return;
+    entry.untaken = true;
+    log(`the window of client ${entry.client.id} was not taken by the machine; its pages read hidden there until reported`);
   };
 
   const follow = (client: ClientRef): Followed | null => {
@@ -111,6 +115,7 @@ export function startWindowReporter({ windowShown, report, before, log = (line) 
       landed: -1,
       chain: Promise.resolve(),
       pending: null,
+      untaken: false,
       unfollow: () => {
         clearInterval(recheck);
         off?.();
