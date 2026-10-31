@@ -18,6 +18,9 @@ const argOf = (name, fallback) => {
 const out = argOf('--out', path.join(process.cwd(), 'out'));
 const fixtureDir = argOf('--fixture', __dirname);
 fs.mkdirSync(out, { recursive: true });
+// The macOS half (../macos/run.sh): the render host's own line, an accessory app with no Dock icon, set before ready.
+const accessory = args.includes('--accessory');
+if (accessory && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
 const result = { argv: process.argv, env: { DISPLAY: process.env.DISPLAY ?? null, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? null, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? null, INVOCATION_ID: process.env.INVOCATION_ID ?? null }, steps: [], errors: [] };
 const t0 = Date.now();
@@ -178,7 +181,8 @@ function memory(label) {
 }
 
 app.whenReady().then(async () => {
-  step('ready', { versions: process.versions, platform: process.platform, arch: process.arch, headless: app.commandLine.hasSwitch('headless'), noSandbox: app.commandLine.hasSwitch('no-sandbox'), gpu: app.getGPUFeatureStatus(), ozone: app.commandLine.getSwitchValue('ozone-platform') || null });
+  if (accessory && process.platform === 'darwin') { try { app.dock?.hide(); } catch (error) { fail('dock.hide', error); } }
+  step('ready', { versions: process.versions, platform: process.platform, arch: process.arch, headless: app.commandLine.hasSwitch('headless'), noSandbox: app.commandLine.hasSwitch('no-sandbox'), gpu: app.getGPUFeatureStatus(), ozone: app.commandLine.getSwitchValue('ozone-platform') || null, accessory, dockVisible: process.platform === 'darwin' ? (() => { try { return app.dock?.isVisible() ?? null; } catch { return null; } })() : null });
   try {
     protocol.handle(SCHEME, serve);
     const { session } = require('electron');
