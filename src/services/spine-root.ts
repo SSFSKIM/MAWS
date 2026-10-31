@@ -452,7 +452,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
     onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
     sessions: async () => {
-      const listed = await hosts.dispatch('engine-host', 'engine.sessions', undefined);
+      const listed = (await hosts.dispatch('engine-host', 'engine.sessions', undefined)) as CommandResult<'engine.sessions'>;
       if (!listed.ok) throw new Error(listed.error.message);
       return listed.value;
     },
