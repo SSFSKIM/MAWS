@@ -9,6 +9,9 @@
 //   out/main/**                  main's build, whose second input is mawsd.js (and the host bundles it spawns)
 //   node_modules/…               the production closure of the externals the bundle guard allows (zod, the MCP SDK,
 //                                node-pty), copied from the installed tree as Node would resolve them
+//   bin/maws-session-host        the session host for the pack's platform (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md,
+//                                M1): the committed prebuild native/session-host/prebuilds/<platform>-<arch>/, mode 0755;
+//                                required on Linux, where every lane B launch runs under it
 //   package.json                 a minimal one, naming the release ({ mawsd: { release, commit, platform, arch, node } })
 //   runtime/                     on Linux only: the pinned Node (packaging/mawsd/node.json), downloaded from nodejs.org,
 //                                checked against its sha256 before it is unpacked, and put through the smoke checks
@@ -18,7 +21,7 @@
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -129,6 +132,19 @@ async function addRuntime({ into, target, manifestPath, cache, download, log }) 
   return pinned.version;
 }
 
+// P5 O16 M1: the session host's prebuild for the pack's platform into bin/, executable. A Linux pack refuses without it;
+// elsewhere (a Mac's pack, which never installs) a missing one is left out.
+function addSessionHost({ root, into, platform, arch }) {
+  const prebuild = join(root, 'native', 'session-host', 'prebuilds', `${platform}-${arch}`, 'maws-session-host');
+  if (!existsSync(prebuild)) {
+    if (platform === 'linux') throw new Error(`no session host prebuild for linux-${arch} (${prebuild}; pnpm build:session-host)`);
+    return;
+  }
+  mkdirSync(join(into, 'bin'), { recursive: true });
+  cpSync(prebuild, join(into, 'bin', 'maws-session-host'));
+  chmodSync(join(into, 'bin', 'maws-session-host'), 0o755);
+}
+
 // The smoke checks, with the runtime: its version is the pin; `node:sqlite` loads without a flag; `--disable-sigusr1`
 // is accepted; a .ts file importing another by its .ts extension runs under default type stripping (residue 23); and
 // node-pty's addon, as the pack carries it, loads.
@@ -189,6 +205,7 @@ export async function pack({
       node = await addRuntime({ into: join(staged, 'runtime'), target: `linux-${arch}`, manifestPath: manifest, cache: join(out, DOWNLOADS), download, log });
       smoke({ node: join(staged, 'runtime', 'bin', 'node'), version: node, pack: staged });
     }
+    addSessionHost({ root, into: staged, platform, arch });
     release = `${version}-${commit}-${contentId(staged)}`;
     const packageJson = { name: 'maws-mawsd', version, private: true, main: 'out/main/mawsd.js', mawsd: { release, commit, platform, arch, node } };
     writeFileSync(join(staged, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`);

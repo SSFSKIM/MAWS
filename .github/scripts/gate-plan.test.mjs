@@ -1318,7 +1318,7 @@ test('the walk fails closed: a rewrite that lets a step run after a refused star
     ['      - if: matrix.build\n', '      - if: always() && matrix.build\n', ['e2e: build', 'e2e-vm: build']],
     ['      - if: matrix.variant\n', '      - if: always() && matrix.variant\n', ['e2e: actions/download-artifact@v8', 'e2e-vm: actions/download-artifact@v8']],
     // A checkout that can run after a refused start guards nothing.
-    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts']],
+    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts', 'static: session-host']],
     // An expression over a variable can name the Mac.
     ['    runs-on: ${{ fromJSON(needs.plan.outputs.packaged_runner || \'["self-hosted","macOS","ARM64"]\') }}\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
   ];

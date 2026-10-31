@@ -443,6 +443,11 @@ jobs:
       - id: checkout
         uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+      # P5 O16 M1: the Go that native/session-host/go.version pins, for scripts/check-session-host.sh below.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: native/session-host/go.version
+          cache: false
       # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
       # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
       # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script. At once only on a
@@ -459,6 +464,7 @@ jobs:
           $bg start lint 'error TS|problems?\b' pnpm lint
           $bg start build 'built in|error' pnpm build
           $bg start gate-scripts '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
+          $bg start session-host '^session-host: ' scripts/check-session-host.sh
       - name: pnpm typecheck
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait typecheck
@@ -471,6 +477,11 @@ jobs:
       - name: the gate scripts' tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait gate-scripts
+      # Each committed session host prebuild is what its source builds (Go's builds are the same bytes on any build host
+      # under -trimpath, so this box checks the darwin build too).
+      - name: the session host prebuilds
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: .github/scripts/gate-bg.sh wait session-host
 
   # On the pool the whole suite runs in shards, `unit <k>/<n>`, each its own box (gate-plan.mjs's UNIT_SHARDS); a
   # selected run that tests the related suites, and a run off the pool, is the one job `unit`.
