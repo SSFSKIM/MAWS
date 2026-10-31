@@ -14,7 +14,7 @@ import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
-import { dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls
+import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
@@ -134,6 +134,13 @@ import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
 import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 // P3-E end
 import { startCatalog } from './catalog'; // P4-AGG M2: Discover's catalog
+// P5 O4 M2 start: what stays in the app of the connectors and delivery
+import { startAppConnectors } from './connectors';
+import { adoptLegacyGrants } from './connectors/adoption';
+import { legacySealer } from './connectors/legacy-custody';
+import { electronWindowShown } from './client/window-shown';
+import { registerDeliverySend } from './delivery/send';
+// P5 O4 M2 end
 
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
 // owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
@@ -450,6 +457,24 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     watchReplay = spine.watches;
   }
   const view = spine.view;
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §B, §F; D8, D28, D32): the connectors are
+  // the spine's (mawsd's on the daemon shape, startSpine's above on the embedded one). The app reports each page's window
+  // to them through the router's seam before a lease command, adopts the grants Electron's safeStorage sealed once per
+  // launch (at the machine host's first streaming on the daemon shape, now on the embedded one), and at each later
+  // streaming of the machine host tells its windows `connectors.reset`, on which they rebuild their leases.
+  const appConnectors = startAppConnectors({
+    machine: data === null ? { streaming: () => hosts.streaming('machine'), onStreaming: (listener) => hosts.onStreaming('machine', listener) } : null,
+    windowShown: (client) => {
+      const page = pageOf(client);
+      const win = page && BrowserWindow.fromWebContents(page);
+      return win ? electronWindowShown(win) : null;
+    },
+    invoke: bus.invoke,
+    before: beforeCommand,
+    emit: (name, payload) => void emit(name, payload),
+    adopt: () => adoptLegacyGrants({ directory: join(profile, 'connectors', 'oauth'), sealer: legacySealer(), invoke: bus.invoke, log: (line) => console.log(line) }),
+  });
+  shutdown.add('connectors', appConnectors.stop);
 
   // ---- C5: layout store ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
@@ -624,7 +649,19 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
   // grants, rows and sign-ins, the engine's MCP sign-in and the owner's Send to are the machine's, composed with the spine
-  // (mawsd's on the daemon shape, startSpine's above on the embedded one). Main keeps the export step of Send to.
+  // (mawsd's on the daemon shape, startSpine's above on the embedded one). Main keeps the export step of Send to
+  // (Interfaces §G; D14, D15, D38): `delivery.send` reads the machine's status, exports as the library exports, and hands
+  // the file to the machine's `delivery.deliver`; a cancel in its export phase is answered here.
+  shutdown.add(
+    'delivery send',
+    registerDeliverySend({
+      register: registerMainHandler,
+      before: beforeCommand,
+      exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      invoke: bus.invoke,
+    }),
+  );
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
   // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
   // cwd through the host, re-read on its `plugins.changed`
