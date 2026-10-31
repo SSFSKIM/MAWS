@@ -195,7 +195,7 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
   it('fails the start, naming the host\'s log, when the binary cannot run or exits at once', { timeout: LONG }, async () => {
     const { deps } = profile();
     await expect(startSessionHost('Lmissing', { ...deps, binary: join(deps.hostsDir, 'nope') })).rejects.toThrow(HostStartFailed);
-    const failed = await startSessionHost('Lfalse', { ...deps, binary: '/usr/bin/false' }).catch((error: unknown) => error as HostStartFailed);
+    const failed = (await startSessionHost('Lfalse', { ...deps, binary: '/usr/bin/false' }).catch((error: unknown) => error)) as HostStartFailed;
     expect(failed).toBeInstanceOf(HostStartFailed);
     expect(failed.message).toContain(join(deps.hostsDir, 'Lfalse.log'));
     expect(existsSync(join(deps.hostsDir, 'Lfalse.token'))).toBe(false);

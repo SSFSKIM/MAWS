@@ -57,6 +57,7 @@ export interface SessionHostDeps {
 export interface StartedHost {
   readonly holderId: string;
   readonly pid: number;
+  readonly binary: string; // what was spawned (the spawn row's `holder.binary`)
   readonly paths: SessionHostPaths;
   readonly hello: Hello;
   // The launch's transport: `launch` with the plan's argv, cwd and environment, then `commit`. Once.
@@ -107,6 +108,7 @@ export async function startSessionHost(launchId: string, deps: SessionHostDeps):
   return {
     holderId: hello.holderId,
     pid: hello.pid,
+    binary: deps.binary,
     paths,
     hello,
     transport(plan, opts) {

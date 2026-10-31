@@ -47,7 +47,7 @@ export interface ScriptedTransport extends EngineTransport {
 // `onWrite` runs after each write is recorded (an auto-responder); `failWrites` rejects every write as a dead pipe,
 // `failWrite` only the frames it names; `holdWrite` returns a promise the write waits on before it resolves.
 export function scriptedTransport(
-  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number } = {},
+  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number; holder?: EngineTransport['holder'] /* P5 O16 M2: a hosted process */ } = {},
 ): ScriptedTransport {
   const frames = new Queue<TransportItem>();
   const stderr = new Queue<StderrItem>();
@@ -56,6 +56,7 @@ export function scriptedTransport(
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
   const t: ScriptedTransport = {
     pid: opts.pid ?? 4242,
+    ...(opts.holder && { holder: opts.holder }),
     frames,
     stderr,
     writes: [],

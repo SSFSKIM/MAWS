@@ -8,7 +8,8 @@ import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os'; // P5 O16 M2
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
 import { scheduleJournalPruning } from './journal';
@@ -24,7 +25,10 @@ import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
 import { readMachineRole } from './role'; // P5 O2 M2
-import { buildIdOf } from './supervisor-files';
+import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
+import { signalOrphan } from './live-ledger'; // P5 O16 M2
+import { gateSocketPath, hostsDirOf, sessionHostBinary } from './holder/files'; // P5 O16 M2
+import { startSessionHost } from './holder/transport'; // P5 O16 M2
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 // P3-A start
@@ -137,6 +141,15 @@ const register: HostRegister = (untimedOn, emit, client) => {
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
+    // P5 O16 M2 (D8): on the detached and daemon shapes every live launch runs under a session host, this build's binary
+    // (Decision Log 161), its child signalled by the orphan sweep's own rule if the host is lost
+    holder:
+      supervisorDir === undefined
+        ? undefined
+        : {
+            start: (launchId) => startSessionHost(launchId, { hostsDir: hostsDirOf(supervisorDir), binary: sessionHostBinary(entryFile), userData, tmpdir: tmpdir(), log: (line) => console.log(`[session-host] ${line}`), child: { isAlive, procStartOf, signal: signalOrphan } }),
+            gateSocket: gateSocketPath(supervisorDir, dirname(supervisorDir), tmpdir()),
+          },
   });
   ({ table } = ipc);
   table.startSampling();

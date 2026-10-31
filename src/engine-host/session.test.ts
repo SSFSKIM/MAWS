@@ -1576,6 +1576,58 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
 // C12 end
 
 
+// P5 O16 M2 (D12): under a session host an interrupt is owed from before its write until its answer, so an adopter after
+// a crash in between sends it first; a request left unanswered keeps the mark, and a direct process never marks it
+describe('P5 O16: the owed interrupt', () => {
+  const HOLDER = { pid: 77, holderId: 'L-host', fence: 1 };
+  it('is marked before the interrupt is written and cleared at its answer, under a session host only', async () => {
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    const save = store.saveOwedInterrupt.bind(store);
+    store.saveOwedInterrupt = async (id, owed) => {
+      marks.push(owed);
+      await save(id, owed);
+    };
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    await t.session.start();
+    expect(t.session.status().holder).toEqual({ pid: 77, holderId: 'L-host', adopted: false });
+    const pending = t.session.interrupt({ cancelEngineQueued: false });
+    for (let i = 0; i < 50 && t.transport.requestsOf('interrupt').length === 0; i += 1) await flush();
+    expect(marks).toEqual([true]);
+    expect(await store.loadOwedInterrupt(t.session.status().appSessionId)).toBe(true);
+    t.transport.answer('interrupt', { still_queued: [] });
+    await pending;
+    await flush();
+    expect(marks).toEqual([true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+
+    const direct = new MemorySessionStateStore();
+    const directMarks: boolean[] = [];
+    direct.saveOwedInterrupt = async (_id, owed) => void directMarks.push(owed);
+    const d = setup({ session: { store: direct }, responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [] } }) }) });
+    await d.session.start();
+    expect(d.session.status().holder).toBeNull();
+    await d.session.interrupt({ cancelEngineQueued: false });
+    expect(directMarks).toEqual([]);
+    d.transport.exit(0);
+    await d.session.exited;
+  });
+
+  it('is cleared when the engine answers the interrupt with an error', async () => {
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => ({ error: 'not now' }) }) });
+    await t.session.start();
+    await expect(t.session.interrupt({ cancelEngineQueued: false })).rejects.toThrow('not now');
+    await flush();
+    expect(marks).toEqual([true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+});
+
 describe('F2 session lifecycle regressions', () => {
   const result = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } };
   async function staged(responder: Responder = {}, opts: { session?: Partial<EngineSessionOptions>; transport?: TransportOpts } = {}) {
