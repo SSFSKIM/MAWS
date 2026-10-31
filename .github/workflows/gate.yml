@@ -316,13 +316,17 @@ env:
   # 127.0.0.1:8641, which the mini runs and the EC2 Mac does not (there it answered `relay_unreachable` in runs
   # 40429551303 and 40432481369).
   MAC_HOME_E2E: discover
+  # Groups that install a KeepAlive unit daemon never run in the mini's home account, beside the owner's real mawsd.
+  # Hosted Macs, EC2 and the disposable guest account are safe; off hosted, only an effective MAC_VM_E2E group
+  # takes the guest alone (never a peer), otherwise EC2. MAC_EC2=off refuses that EC2 placement at plan time.
+  LAUNCHD_E2E: cross-build daemon-unit
   # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
   # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
   # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
   # minor apart (gate-plan.mjs), unless an older run holds the check: then a hosted waiter follows its verdict.
   # A real peer job fetches that one
   # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
-  # and stops every supervisor of either build whatever happened. Exclusive on the mirror route; eligible on direct.
+  # and stops every supervisor of either build whatever happened. EC2 on the mirror route; eligible on direct.
   PEER_E2E: cross-build
 
 defaults:
@@ -386,6 +390,7 @@ jobs:
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
+          MAC_EC2: ${{ vars.MAC_EC2 }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/gate-peer-held.mjs
       - id: plan
@@ -400,6 +405,7 @@ jobs:
           INPUT_HOSTED_ROUTE: ${{ inputs.hosted_route }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
+          MAC_EC2: ${{ vars.MAC_EC2 }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -874,16 +880,16 @@ jobs:
       - name: Publish flaky tests
         if: always() && github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && steps.checkout.outcome == 'success'
         run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
+      # LAUNCHD_E2E groups load LaunchAgents into this account. Boot out every e2e unit before stopping peer
+      # processes: a spec that died before unit.remove() leaves KeepAlive set, which would relaunch a killed daemon.
+      - if: always() && matrix.launchd && steps.checkout.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
       # job started is left to the next job on this Mac.
       # Any job of a peer group that checked out, so a prepare cancelled midway is undone too.
       - if: always() && matrix.peer && steps.checkout.outcome == 'success'
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
-      # e2e:daemon-unit (P5 O2 M7) loads LaunchAgents into this Mac's account, so whatever the run did, every
-      # `dev.maws.mawsd.e2e-*` agent and plist in the account is booted out and removed, this job's and any earlier one's.
-      - if: always() && matrix.group == 'daemon-unit' && steps.checkout.outcome == 'success'
-        run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       # A flaky pass keeps the same evidence as a red job, including the failed attempt's attachments.

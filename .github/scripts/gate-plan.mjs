@@ -94,9 +94,10 @@
 // static or probes check stays quick; not to a live run (its live groups alone) nor a `Selection: affected` one (never
 // landing evidence). gate-peer-held supplies PEER_HELD_BY when an older run holds this tree and peer's check,
 // suppressing the automatic join but never an explicit request. A peer group's job fetches the
-// peer's one commit and builds it beside this tree (gate.yml), so outside direct hosting it takes the Mac's exclusive
-// instance: never a mirror job (maws-app has no history to fetch a peer from), the shared instances or the
-// guest. Its entry carries the `peer` sha; asked for without a Peer: trailer it has none, and its spec runs nothing.
+// peer's one commit and builds it beside this tree (gate.yml): never a mirror job (maws-app has no history to
+// fetch a peer from), the shared instances or the guest (it cannot build the peer there). A LAUNCHD_E2E peer
+// group off direct hosting takes EC2 alone, never the home account. Its entry carries the `peer` sha; asked for
+// without a Peer: trailer it has none, and its spec runs nothing.
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
@@ -235,6 +236,9 @@ export function planOf(env, scripts, now) {
 
   // A live run takes the live groups and nothing else: beside them `default` would run every live spec its bare set
   // collects. A live group runs only in a live run: two of them spend under their own scripts' flag (Decision Log 75).
+  const launchd = new Set(words(env.LAUNCHD_E2E));
+  const liveLaunchd = live ? [...launchd].filter((group) => gates.has(`e2e:${group}`)) : [];
+  if (liveLaunchd.length > 0) refuse(`LAUNCHD_E2E groups never run in the home account, including a live run: ${liveLaunchd.join(', ')}`);
   const liveGroups = words(env.LIVE_E2E).map((group) => `e2e:${group}`);
   const notLive = live ? [...gates].filter((gate) => !liveGroups.includes(gate)) : [];
   if (notLive.length > 0) refuse(`a live run takes only the live e2e groups (${liveGroups.join(', ')}), not ${words(asked).length > 0 ? notLive.join(', ') : 'the default set'}: ask with Gates: naming those alone (ci-gate.sh --live --gates e2e:<group>,…)`);
@@ -284,7 +288,17 @@ export function planOf(env, scripts, now) {
   const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
   const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
-  const placed = (group) => (peerGroups.has(group) ? RUNNERS.macos : lane === 'macos' && (measured.has(group) || home.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
+  const launchdConflicts = [...launchd].flatMap((group) => [
+    measured.has(group) && `${group} (MEASURED_E2E)`, home.has(group) && `${group} (MAC_HOME_E2E)`,
+    listedShared.includes(group) && `${group} (MAC_SHARED_E2E)`,
+  ].filter(Boolean));
+  if (launchdConflicts.length > 0) refuse(`LAUNCHD_E2E names what can run in the home account: ${launchdConflicts.join(', ')}`);
+  // Hosted and overflow placements are chosen first. Unit daemons outside those routes must never reach the
+  // home account through exclusive, solo or shared labels: only a proven guest group (never a peer), else EC2.
+  const placed = (group) => {
+    if (launchd.has(group)) return !peerGroups.has(group) && macVm.has(group) ? (LANES[vmLane] ?? RUNNERS.macVm) : RUNNERS.macEc2;
+    return peerGroups.has(group) ? RUNNERS.macos : lane === 'macos' && (measured.has(group) || home.has(group) || live) ? RUNNERS.macHome : !offMac.has(group) ? (lane === 'macos' ? onMac(group) : RUNNERS[lane]) : class1a === 'pool' ? poolBox(4) : RUNNERS.linux;
+  };
   // The hosted Macs. Why a group never goes there, if it never does: its selection is the whole run's (`default`), its
   // bounds the mini's (measured), it spends (live), it needs a credential (secret), it needs the mini (home), or it never
   // takes a Mac (pool).
@@ -347,6 +361,7 @@ export function planOf(env, scripts, now) {
         shadowSent[overflowOf(group, shadowSent, true) ? 'ec2' : 'hosted']++;
       }
       const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
+      if (launchd.has(group) && where === RUNNERS.macEc2 && env.MAC_EC2?.toLowerCase() === 'off') refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
@@ -356,7 +371,7 @@ export function planOf(env, scripts, now) {
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
       const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
@@ -424,7 +439,9 @@ export function planOf(env, scripts, now) {
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
-    said('EC2 overflow (ci-kit-mac-ec2)', jobsOn(RUNNERS.macEc2)) +
+    said('EC2 overflow (ci-kit-mac-ec2)', e2e.filter((entry) => entry.overflow).map((entry) => `e2e:${entry.group}`)) +
+    said('EC2 (LAUNCHD_E2E, never the home account)', e2e.filter((entry) => launchd.has(entry.group) && !entry.overflow && entry.runner === JSON.stringify(RUNNERS.macEc2)).map((entry) => `e2e:${entry.group}`)) +
+    (!vmLane ? said('Guest alone (LAUNCHD_E2E, never the home account)', jobsOn(RUNNERS.macVm)) : '') +
     (backlog ? ` Mac backlog at ${backlog.at}: hosted ${backlog.hostedQueued} queued + ${backlog.hostedRunning} running; EC2 ${backlog.ec2}, ${backlog.ec2Queued} queued${backlog.partial.length ? `; hosted lower bound (capped: ${backlog.partial.join(', ')})` : ''}.` : '') +
     said('Home Mac', jobsOn(RUNNERS.macHome)) +
     said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +

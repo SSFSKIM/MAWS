@@ -7,7 +7,7 @@ import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
 import { READ_AS_DATA, SOURCE_READERS, affected } from './gate-affected.mjs';
-import { FINAL_LABELS } from './gate-plan.mjs';
+import { FINAL_LABELS, planOf } from './gate-plan.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scenarios = [
@@ -55,6 +55,8 @@ function plan(scenarioEnv) {
         HOSTED_MAC_E2E: '',
         MAC_SECRET_E2E: '',
         MAC_HOME_E2E: '',
+        LAUNCHD_E2E: '',
+        MAC_EC2: '',
         E2E_MINUTES: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
@@ -340,7 +342,7 @@ const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((e
 // class-1 set, only when a run names them); no group shares the host desktop.
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'LAUNCHD_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
@@ -355,7 +357,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(home, ['discover']);
   const groups = Object.entries(placement(outputs));
   assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
-  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : home.includes(group) ? [homeMac, 40] : proven.includes(group) ? [soloMac, 40] : [mac, 40], group);
+  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : home.includes(group) ? [homeMac, 40] : group === 'daemon-unit' ? [ec2Mac, 40] : proven.includes(group) ? [soloMac, 40] : [mac, 40], group);
   assert.equal(outputs.unit_darwin, 'true');
   assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
@@ -582,7 +584,7 @@ test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the gu
 // The workflow's proven-VM groups build only the variants this run needs, even when a solo job lands on the host.
 test("gate.yml's proven-VM groups split into e2e_vm with just their build variants; Linux and class 1a alone build nothing", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'LAUNCHD_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
@@ -600,7 +602,7 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const linuxGroups = own.LINUX_E2E.split(/\s+/);
   const linuxGates = `Gates: static,unit,probes,${linuxGroups.map((group) => `e2e:${group}`).join(',')}\nRunner: linux`;
-  const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : own.MAC_HOME_E2E.split(/\s+/).includes(group) ? homeMac : mac]);
+  const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : own.MAC_HOME_E2E.split(/\s+/).includes(group) ? homeMac : group === 'daemon-unit' ? ec2Mac : mac]);
   const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
     'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-cua', 'browser-chrome', 'dashboard', 'connectors', 'connectors-direct', 'connectors-oauth', 'delivery'];
   const runs = [
@@ -683,7 +685,7 @@ const cachedOf = (group) => {
 };
 const ownLists = () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'LAUNCHD_E2E', 'E2E_MINUTES'];
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
@@ -2085,5 +2087,118 @@ test('the hosted quota defaults to five, but fifty keeps the same backlog hosted
 test('a configured hosted quota must be a positive whole number', () => {
   for (const HOSTED_MAC_CAP of ['0', '-1', '1.5', 'no', 'Infinity', '1e2', '9007199254740992']) {
     assert.throws(() => overflowPlan(undefined, { HOSTED_MAC_CAP }), /HOSTED_MAC_CAP/, HOSTED_MAC_CAP);
+  }
+});
+
+
+// Unit daemons share the account's launchd domain, not just the job's checkout.
+const launchdLists = { LAUNCHD_E2E: 'cross-build daemon-unit', PEER_E2E: 'cross-build', HOSTED_MAC_E2E: 'daemon-unit' };
+const ec2Mac = [...mac, 'ci-kit-mac-ec2'];
+const launchdPlan = (extra = {}) => {
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  return planOf({ ...launchdLists, HEAD_MESSAGE: 'Gates: e2e:cross-build,e2e:daemon-unit,e2e:library\nRunner: macos', ...extra }, scripts, Date.now());
+};
+
+test('LAUNCHD_E2E never reaches the home account across routes, lanes and final refs', () => {
+  for (const route of ['mirror', 'direct']) for (const lane of ['', 'hosted', 'no-hosted', 'vm', 'vm-trial']) {
+    for (const runner of ['macos', 'linux']) for (const final of ['', ...FINAL_LABELS]) {
+      const groups = runner === 'linux' ? ['cross-build'] : ['cross-build', 'daemon-unit'];
+      const context = `${route} ${lane || 'none'} ${runner} ${final || 'ordinary'}`;
+      const { outputs } = launchdPlan({
+        HOSTED_MAC_ROUTE: route, GITHUB_REF: final && `refs/heads/ci/${final}-test`,
+        HEAD_MESSAGE: `Gates: ${groups.map((group) => `e2e:${group}`).join(',')}\nRunner: ${runner}\nLane: ${lane}`,
+      });
+      for (const entry of JSON.parse(outputs.e2e)) {
+        const hosted = !final && lane !== 'no-hosted' && (entry.group === 'daemon-unit' || route === 'direct');
+        assert.deepEqual(JSON.parse(entry.runner), hosted ? route === 'direct' ? 'macos-26' : waiter : ec2Mac, `${context} ${entry.group}`);
+        assert.equal(entry.launchd, true, context);
+      }
+    }
+  }
+});
+
+test('LAUNCHD_E2E uses only the guest for effective VM groups, never solo, and never the guest for peers or unbuilt groups', () => {
+  for (const route of ['mirror', 'direct']) for (const lane of ['', 'hosted', 'no-hosted', 'vm', 'vm-trial']) {
+    const { outputs } = launchdPlan({
+      HOSTED_MAC_ROUTE: route, MAC_VM_E2E: 'cross-build daemon-unit',
+      GITHUB_REF: 'refs/heads/ci/e1-final-test',
+      HEAD_MESSAGE: `Gates: e2e:cross-build,e2e:daemon-unit,e2e:library\nRunner: macos\nLane: ${lane}`,
+    });
+    assert.deepEqual(runners(outputs), { 'cross-build': ec2Mac, 'daemon-unit': lane === 'vm-trial' ? vmTrialMac : vmMac, library: mac });
+    assert.deepEqual(JSON.parse(outputs.e2e_vm).map((entry) => [entry.group, entry.variant, entry.launchd, entry.timeout]), [['daemon-unit', 'plain', true, 30]]);
+    assert.deepEqual(JSON.parse(outputs.e2e_build), ['plain']);
+    for (const key of ['e2e', 'e2e_host', 'e2e_vm']) for (const entry of JSON.parse(outputs[key])) assert.equal(entry.launchd === true, entry.group !== 'library', key);
+  }
+  // Listing alone is not enough: only a script built by e2e-build is guest-eligible.
+  const { outputs } = planOf({ LAUNCHD_E2E: 'unit-daemon', MAC_VM_E2E: 'unit-daemon', HEAD_MESSAGE: 'Gates: e2e:unit-daemon\nRunner: macos' }, { 'e2e:unit-daemon': 'node test.mjs' });
+  assert.deepEqual(runners(outputs), { 'unit-daemon': ec2Mac });
+});
+
+test('LAUNCHD_E2E refuses conflicting home-account lists even when the run does not select them', () => {
+  for (const list of ['MEASURED_E2E', 'MAC_HOME_E2E', 'MAC_SHARED_E2E']) for (const group of ['cross-build', 'daemon-unit']) {
+    const { status, stderr } = refusal({ ...launchdLists, [list]: group, HEAD_MESSAGE: 'Gates: static' });
+    assert.equal(status, 1);
+    assert.match(stderr, /LAUNCHD_E2E/);
+    assert.ok(stderr.includes(group) && stderr.includes(list), stderr);
+  }
+});
+
+test('LAUNCHD_E2E refuses a live run including an automatically added live guard', () => {
+  for (const group of ['cross-build', 'daemon-unit']) for (const guard of [false, true]) {
+    const { status, stderr } = refusal({
+      ...launchdLists, LIVE_E2E: `library-live ${group}`, LIVE_GUARD_E2E: guard ? group : '',
+      HEAD_MESSAGE: `Gates: e2e:${guard ? 'library-live' : group}\nRunner: macos\nLive: yes`,
+    });
+    assert.equal(status, 1);
+    assert.match(stderr, /LAUNCHD_E2E.*live/);
+    assert.ok(stderr.includes(group), stderr);
+  }
+});
+
+test('MAC_EC2 off refuses listed groups destined for EC2, not hosted or guest placements or unrelated runs', () => {
+  for (const group of ['cross-build', 'daemon-unit']) {
+    assert.throws(() => launchdPlan({ MAC_EC2: 'off', HEAD_MESSAGE: `Gates: e2e:${group}\nRunner: macos\nLane: no-hosted` }), (error) => /LAUNCHD_E2E/.test(error.message) && /MAC_EC2/.test(error.message) && error.message.includes(group));
+  }
+  for (const extra of [
+    { HOSTED_MAC_ROUTE: 'direct' },
+    { PEER_E2E: '', HOSTED_MAC_E2E: 'cross-build daemon-unit' },
+    { HEAD_MESSAGE: 'Gates: e2e:daemon-unit\nRunner: macos\nLane: no-hosted', MAC_VM_E2E: 'daemon-unit' },
+    { HEAD_MESSAGE: 'Gates: static' },
+  ]) assert.doesNotThrow(() => launchdPlan({ MAC_EC2: 'off', ...extra }));
+});
+
+test('listed hosted and overflow entries retain their placement and carry the sweep flag only for listed groups', () => {
+  for (const [sample, overflow] of [[overflowSample({ hostedQueued: 0, hostedRunning: 0 }), false], [overflowSample(), true]]) {
+    const env = { HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'daemon-unit library', HEAD_MESSAGE: `Gates: e2e:cross-build,e2e:daemon-unit,e2e:library\nRunner: macos\nMac-Backlog: ${sample}` };
+    const { outputs } = launchdPlan(env);
+    for (const key of ['e2e', 'e2e_host']) for (const entry of JSON.parse(outputs[key])) {
+      assert.equal(entry.launchd === true, entry.group !== 'library');
+      assert.equal(entry.overflow === true, overflow);
+      assert.deepEqual(JSON.parse(entry.runner), overflow ? ec2Mac : 'macos-26');
+      assert.equal(entry.retry, true);
+    }
+    if (overflow) assert.throws(() => launchdPlan({ ...env, MAC_EC2: 'off' }), /LAUNCHD_E2E.*MAC_EC2/);
+  }
+  const mirror = launchdPlan({ HEAD_MESSAGE: 'Gates: e2e:daemon-unit\nRunner: macos' }).outputs;
+  assert.equal(JSON.parse(mirror.e2e_hosted)[0].launchd, true);
+});
+
+test('gate.yml wires the launchd rule and sweeps every flagged job before stopping its peer', () => {
+  const workflow = readWorkflow();
+  assert.equal(workflowList(workflow, 'LAUNCHD_E2E'), launchdLists.LAUNCHD_E2E);
+  const planner = jobBody(workflow, 'plan');
+  for (const chunk of planner.split(/\n(?= {6}- )/).filter((step) => /run: node \.github\/scripts\/gate-(?:plan|peer-held)\.mjs/.test(step))) {
+    assert.match(chunk, /MAC_EC2: \$\{\{ vars\.MAC_EC2 \}\}/);
+  }
+  for (const job of ['e2e', 'e2e-vm']) {
+    const body = jobBody(workflow, job);
+    const sweep = body.split(/\n(?= {6}- )/).find((step) => step.includes('run: .github/scripts/launchd-sweep.sh'));
+    const condition = /(?:- )?if: (.+)/.exec(sweep)[1];
+    for (const launchd of [true, false, undefined]) for (const checkout of ['success', 'failure', 'skipped']) {
+      const enabled = Function('matrix', 'steps', 'always', `return Boolean(${condition})`)({ group: 'some-new-group', launchd }, { checkout: { outcome: checkout } }, () => true);
+      assert.equal(enabled, launchd === true && checkout === 'success', job);
+    }
+    assert.match(condition, /always\(\)/);
+    assert.ok(body.indexOf('launchd-sweep.sh') < body.indexOf('gate-peer.sh stop'), job);
   }
 });
