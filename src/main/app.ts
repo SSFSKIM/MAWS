@@ -140,6 +140,7 @@ import { adoptLegacyGrants } from './connectors/adoption';
 import { legacySealer } from './connectors/legacy-custody';
 import { electronWindowShown } from './client/window-shown';
 import { registerDeliverySend } from './delivery/send';
+import { exportHeldFor } from './delivery/e2e-hold';
 // P5 O4 M2 end
 
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
@@ -657,7 +658,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     registerDeliverySend({
       register: registerMainHandler,
       before: beforeCommand,
-      exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+      exportArtifact: exportHeldFor((...args: Parameters<typeof artifacts.exports.exportForLibrary>) => artifacts.exports.exportForLibrary(...args), process.env), // the e2e's hold (./delivery/e2e-hold.ts)
       call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
       invoke: bus.invoke,
     }),
