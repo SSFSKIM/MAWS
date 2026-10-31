@@ -15,6 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { RelayHealth } from '@shared/engine/relay-health';
+import { HostCommandError } from '@shared/host/runtime'; // P5 O16 M2
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { LaunchResult } from '@shared/ipc/schema/session';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
@@ -26,7 +27,8 @@ import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
 import { EngineSession } from './session';
-import type { EngineTransport } from './transport';
+import { MAX_LINE_CHARS, type EngineTransport } from './transport';
+import { HostStartFailed, type StartedHost } from './holder/transport'; // P5 O16 M2
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
@@ -59,7 +61,10 @@ export interface LauncherDeps {
   // P3-HD: the local-scope key of a live launch's cwd, captured beside the probes, before the spawn (bounded, never failing
   // the launch: a failure is an unidentified key); tests inject it
   captureLocalKey?: (cwd: string) => Promise<ConnectorLocalKey>;
-  gateSocket?: string; // O16 M5: the gate's path, MAWS_HOLDER_SOCKET in every live launch's environment
+  // P5 O16 M2 (D8, D51): on the detached and daemon shapes, the session host every live launch runs under, started
+  // before its row is reserved; `gateSocket` is the launch's MAWS_HOLDER_SOCKET. Absent (the embedded shape), the
+  // direct spawn; a replay never has one.
+  holder?: { start: (launchId: string) => Promise<StartedHost>; gateSocket: string };
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -85,7 +90,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
     let connectorLocalKey: ConnectorLocalKey | undefined; // P3-HD: live launches only
-    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }; // P2-C: the flag's declaration
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean }; // P2-C, P5 O16 M2: the flags' declarations
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -102,17 +107,33 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       captured = env;
       relayHealth = relay ?? undefined;
       connectorLocalKey = localKey; // P3-HD
-      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize }; // P2-C; P5 O16 M2 (D20, D48)
     }
 
     spec = await withParentBudget(spec, artifactScope, deps); // P2-F wave S (S-budget)
 
+    const hosting = spec.replay === null ? (deps.holder ?? null) : null; // P5 O16 M2
     let plan: LaunchPlan;
     try {
-      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: process.pid, gateSocket: deps.gateSocket /* O16 M5 */, ...engine }); // spawned by this host (ipc.ts spawnEngine)
+      // spawned by this host (ipc.ts spawnEngine), or by its session host, whose pid replaces the placeholder below
+      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: hosting ? 0 : process.pid, ...engine, ...(hosting && { holder: { gateSocket: hosting.gateSocket } }) });
     } catch (error) {
       if (error instanceof LaunchSpecConflict) return refused('settings_conflict', error.message);
       throw error;
+    }
+
+    // P5 O16 M2 (D8, D51): the session host starts before the row is reserved, so one that fails answers the launch with
+    // `host_unavailable` naming its log, and nothing is spawned directly. It is the engine's parent: SMNS_MEMBER names it.
+    let host: StartedHost | null = null;
+    if (hosting) {
+      try {
+        host = await hosting.start(plan.launchId);
+      } catch (error) {
+        if (!(error instanceof HostStartFailed)) throw error;
+        deps.log(`${spec.appSessionId}: ${error.message}`);
+        throw new HostCommandError({ code: 'host_unavailable', message: error.message });
+      }
+      plan = { ...plan, env: { ...plan.env, SMNS_MEMBER: String(host.pid) } };
     }
 
     const replay = journal;
@@ -121,30 +142,47 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       projects === null
         ? undefined
         : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
-    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
-    const outcome = deps.table.reserve(spec.appSessionId, () => {
-      const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
-      const session = new EngineSession({
-        spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
-        journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
-        // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
-        statefulMcpServers: () => deps.table.statefulMcpServers,
-        reconnectTrigger: released ? 'process_exit' : 'user',
-        // C12 end
-        // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
-        launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
-        appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
-        unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
-        observedFacts: deps.observedFacts, // P2-A
-        artifactScope, // P2-E1
-        artifacts: deps.artifacts, // P3-A (M6)
-        datasetRefresh: deps.datasetRefresh, // E3
-        connectorLocalKey, // P3-HD
+    const hosted = host;
+    const spawn =
+      replay !== null
+        ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser })
+        : hosted !== null
+          ? (hostedPlan: LaunchPlan) => hosted.transport(hostedPlan, { appSessionId: spec.appSessionId, maxLineChars: MAX_LINE_CHARS }) // P5 O16 M2
+          : deps.spawn;
+    let outcome: ReturnType<ProcessTable['reserve']>;
+    try {
+      outcome = deps.table.reserve(spec.appSessionId, () => {
+        const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
+        const session = new EngineSession({
+          spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
+          journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
+          // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
+          statefulMcpServers: () => deps.table.statefulMcpServers,
+          reconnectTrigger: released ? 'process_exit' : 'user',
+          // C12 end
+          // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
+          launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
+          appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
+          unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
+          observedFacts: deps.observedFacts, // P2-A
+          artifactScope, // P2-E1
+          artifacts: deps.artifacts, // P3-A (M6)
+          datasetRefresh: deps.datasetRefresh, // E3
+          connectorLocalKey, // P3-HD
+          // P5 O16 M2: the session host, named in the spawn row and the status; released if the session ends unspawned
+          ...(hosted && { holder: { pid: hosted.pid, holderId: hosted.holderId, binary: hosted.binary }, unspawned: () => hosted.abandon() }),
+        });
+        deps.wire(session, plan, spec);
+        return session;
       });
-      deps.wire(session, plan, spec);
-      return session;
-    });
-    if (outcome.status === 'refused') return outcome; // a launch that raced this one to the reservation
+    } catch (error) {
+      hosted?.abandon(); // P5 O16 M2: a host whose launch got no row launches nothing
+      throw error;
+    }
+    if (outcome.status === 'refused') {
+      hosted?.abandon(); // P5 O16 M2
+      return outcome; // a launch that raced this one to the reservation
+    }
     return { status: 'launching', session: outcome.session.status() };
   };
   // the table holds it from its entry (P5 Decision Log 124: no collection lands on its preparation, which has no row yet)

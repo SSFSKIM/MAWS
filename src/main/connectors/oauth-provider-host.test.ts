@@ -15,8 +15,9 @@ import { ScriptedPool } from '../../engine-host/connectors/direct-pool.fixture';
 import { ConnectorStatusCache, connectorLaunchContext } from '../../engine-host/connectors/provenance';
 import type { ConnectorOAuthFlow } from './oauth-flow';
 import { createConnectorOAuthProvider, type ConnectorOAuthProvider } from './oauth-provider';
-import { createConnectorOAuthStore, type ConnectorOAuthSealer } from './oauth-store';
-import { oauthIdentityOf, type ConnectorOAuthGrant } from './oauth-types';
+import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { createConnectorOAuthStore } from './oauth-store';
+import { oauthIdentityOf, type ConnectorOAuthGrant } from '@shared/connectors/oauth-types';
 
 const SAVED = '11111111-1111-4111-8111-111111111111';
 const FRESH = '33333333-3333-4333-8333-333333333333';
@@ -36,6 +37,7 @@ const grant = (accessToken: string): ConnectorOAuthGrant => ({
   tokens: { accessToken, refreshToken: `rt-${accessToken}`, tokenType: 'Bearer', expiresAt: NOW + 3_600_000, obtainedAt: NOW },
 });
 const sealer: ConnectorOAuthSealer = {
+  format: SEALED_FORMAT_V1,
   available: async () => true,
   seal: async (text) => Buffer.from(Buffer.from(text, 'utf8').map((byte) => byte ^ 0x5a)),
   open: async (sealed) => ({ text: Buffer.from(sealed.map((byte) => byte ^ 0x5a)).toString('utf8'), reseal: false }),

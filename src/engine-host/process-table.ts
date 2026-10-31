@@ -242,7 +242,7 @@ export class ProcessTable {
         if (procStart === '') this.log(`the orphan ledger records ${status.appSessionId} (pid ${status.pid}) with no start time (ps could not read it): a successor's sweep will not stop it`);
         this.procStarts.set(session, procStart);
       }
-      rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId });
+      rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId, holderId: status.holder?.holderId ?? null /* P5 O16 M2 */ });
     }
     const signature = JSON.stringify(rows);
     if (signature === this.ledgerWritten) return;

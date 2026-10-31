@@ -1,9 +1,9 @@
 // P3-HD M3c1: MAWS's own OAuth provider, main-only (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, "OAuth
 // custody and owner controls", M3 and Decision Log 13, 18, 19, 21 and 22; P3 co-work Decision Log 98). It joins the
 // sealed store (./oauth-store.ts) and the explicit flow (./oauth-flow.ts) into the lifecycle of one saved grant per
-// configured identity (./oauth-types.ts: the exact request URL plus server, scope, config file and entry path), and is
-// route D's credential preparation (./direct-route.ts's `DirectCredentialPreparation`) as well as the owner's Connect,
-// Reconnect and Disconnect. Refresh tokens, registrations and safeStorage stay here; the engine host receives only an
+// configured identity (@shared/connectors/oauth-types.ts: the exact request URL plus server, scope, config file and
+// entry path), and is route D's credential preparation (./direct-route.ts's `DirectCredentialPreparation`) as well as
+// the owner's Connect, Reconnect and Disconnect. Refresh tokens, registrations and safeStorage stay here; the engine host receives only an
 // access token under a credential epoch, for one operation the route prepared.
 //
 // - Lazy: nothing touches the store (so safeStorage) until a demand, a state query, a listing or an owner action.
@@ -57,7 +57,7 @@ import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
 import { ConnectorOAuthError, type ConnectorOAuthFailure, type ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthStoreError, type ConnectorOAuthClaim, type ConnectorOAuthSaved, type ConnectorOAuthStore } from './oauth-store';
-import { oauthIdentityOf, sameOAuthIdentity, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthRecord, type ConnectorOAuthTokens } from './oauth-types';
+import { oauthIdentityOf, sameOAuthIdentity, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthRecord, type ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 
 // A token this close to its expiry is refreshed on demand (and used meanwhile while still valid).
 export const OAUTH_REFRESH_MARGIN_MS = 60_000;

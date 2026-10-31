@@ -100,6 +100,11 @@ export const EngineSessionStatusSchema = z.strictObject({
   // process (holder/gate.ts): `absent` while none was ever seen on it, `unhealthy` once one was seen and went silent or
   // away. Absent from an older host.
   reap: z.strictObject({ state: z.enum(['idle', 'arming', 'armed', 'signalled', 'term_ignored']), observer: z.enum(['absent', 'healthy', 'unhealthy']) }).optional(),
+  // P5 O16 M2 (additive X6; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D): the session host the
+  // process runs under on the daemon and detached shapes (`pid` the host's, the status's own `pid` the engine's;
+  // `holderId` the launch id; `adopted` once a successor engine host re-attached to it, M3); null on a replay or
+  // embedded launch; absent from an older host.
+  holder: z.strictObject({ pid: z.number().int(), holderId: z.string(), adopted: z.boolean() }).nullable().optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

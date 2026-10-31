@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { hostsDirOf, sessionHostBinary, sessionHostPaths } from './files';
+import { socketPathFor } from '../supervisor-files';
+import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './files';
 
 let dir: string;
 beforeEach(() => {
@@ -47,5 +48,15 @@ describe("a session host's files", () => {
     expect(paths.socket).toMatch(/^\/tmp-x\/maws-session-hosts-[0-9a-f]{12}\/ABCD2345\.sock$/);
     const other = sessionHostPaths(hostsDirOf(join(`${userData}2`, 'supervisor')), 'ABCD2345', { userData: `${userData}2`, tmpdir: '/tmp-x' });
     expect(other.socket).not.toBe(paths.socket);
+  });
+});
+
+// P5 O16 M2 (Interfaces §B): the gate's socket, set in every hosted launch's MAWS_HOLDER_SOCKET (M5 serves it)
+describe('the gate socket', () => {
+  it('is supervisor/gate.sock, or beside the supervisor socket in its tmpdir fallback when that path is too long', () => {
+    expect(gateSocketPath('/u/supervisor', '/u', '/tmp-x')).toBe('/u/supervisor/gate.sock');
+    const userData = `/u/${'p'.repeat(90)}`;
+    const dir = join(userData, 'supervisor');
+    expect(gateSocketPath(dir, userData, '/tmp-x')).toBe(join(socketPathFor(dir, userData, '/tmp-x'), '..', 'gate.sock'));
   });
 });

@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { SOCKET_PATH_MAX_BYTES } from '../supervisor-files';
+import { SOCKET_PATH_MAX_BYTES, socketPathFor } from '../supervisor-files';
 
 export const SESSION_HOST_BINARY = 'maws-session-host';
 
@@ -57,4 +57,14 @@ export function sessionHostPaths(hostsDir: string, launchId: string, opts: { use
     socket: fits ? inDir : join(opts.tmpdir, `maws-session-hosts-${profile}`, `${launchId}.sock`),
     log: join(hostsDir, `${launchId}.log`),
   };
+}
+
+// P5 O16 M2 (Interfaces §B, §E): the gate's socket, `<supervisorDir>/gate.sock`, or, past sun_path's limit, beside the
+// supervisor's own socket in its tmpdir fallback directory. Every hosted launch's MAWS_HOLDER_SOCKET names it; M5
+// serves it.
+export const GATE_SOCKET = 'gate.sock';
+export function gateSocketPath(supervisorDir: string, userData: string, tmpdir: string): string {
+  const inDir = join(supervisorDir, GATE_SOCKET);
+  if (Buffer.byteLength(inDir, 'utf8') <= SOCKET_PATH_MAX_BYTES) return inDir;
+  return join(dirname(socketPathFor(supervisorDir, userData, tmpdir)), GATE_SOCKET);
 }

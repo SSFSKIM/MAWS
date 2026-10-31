@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeObserver } from './fake-observer';
-import { Gate, gateSocketPath, STOP_REASON, type GateChannel, type GateListener, type ObserverState } from './gate';
+import { Gate, STOP_REASON, type GateChannel, type GateListener, type ObserverState } from './gate';
 
 let root: string;
 let gate: Gate;
@@ -67,13 +67,6 @@ describe('the socket', () => {
     await other.close();
   });
 
-  it('a path past the socket limit falls back beside the engine host’s own fallback directory', () => {
-    const userData = join('/tmp', 'x'.repeat(120));
-    const supervisorDir = join(userData, 'supervisor');
-    const fallback = gateSocketPath(supervisorDir, userData, '/var/tmp');
-    expect(fallback).toMatch(/^\/var\/tmp\/maws-supervisor-[0-9a-f]{12}\/gate\.sock$/);
-    expect(gateSocketPath('/u/p/supervisor', '/u/p', '/var/tmp')).toBe('/u/p/supervisor/gate.sock');
-  });
 });
 
 describe('hello', () => {

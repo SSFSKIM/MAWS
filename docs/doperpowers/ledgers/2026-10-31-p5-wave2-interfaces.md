@@ -34,6 +34,11 @@
 | `connectors.reset` | main-owned event to the app's windows, off the wire manifest | O4 M2 | the renderer's connectors client rebuilds its leases on it |
 | router `before(names, hook)` seam | src/main/ipc/router.ts | O4 M2 | O4's window report and its delivery cancel |
 | `remote.session`, `remote.gap` | main-owned, `src/shared/ipc/schema/remote.ts` | O7 M2 | the renderer |
+| `HandshakeOptions.protocol?`, `VECTOR_PROTOCOL` | apps/org-protocol: the recorded handshake vectors pinned at RL2 1.0 | O7 M2 | every later RL2 minor bump (O7 M3, M4, M7, any sibling's) keeps the vectors |
+| `maws-session-host <socket> --hosts <dir>` (and `--version`: `maws-session-host 1.0.0 protocol 1`); the holder id is the socket's base name | the session host's command line | O16 M1 | the engine host (M2), `mawsd`'s pack |
+| `problem.stream`, `problem {kind: 'roster'}`, `hello`'s null session ids before `launch`, `RING_RECORD_OVERHEAD` 48 | session host protocol 1, additive | O16 M1 | the engine host's `HostTransport` (M2) |
+| `src/engine-host/holder/protocol.ts` exports (`HostMessageSchema`, `HostStreamDecoder`, `controlLine`, `stdinRecord`), `files.ts` (`sessionHostBinary`, `sessionHostPaths`, `hostsDirOf`); roster temp files `.<holderId>.json.<pid>.tmp` | TS modules | O16 M1 | O16 M2 on; the roster reader skips the temp files |
+| `DaemonServices.artifacts` (and `EndpointServices.artifacts` in `src/endpoint/services.ts`, `test/endpoint/fake-services.ts`), `daemon.status.artifacts` (`{loaded, requests}`, optional), `DAEMON_FILES.artifactsSocket`, `DaemonPaths.artifactsSocket` | `mawsd` services and status, `src/shared/daemon/files.ts` | O5 M2 | O7 M5; O10's endpoint services (the desk track told) |
 
 ## Shared files and who goes first
 
@@ -57,6 +62,10 @@
 | `eslint.config.js` (the Electron-adapter allowlist entry moves from `oauth-root.ts` to `legacy-custody.ts`), `src/services/command-budgets.ts`, `test/support/spine-lists.ts` | O4 M2, M3 | the later lander reconciles |
 | `src/endpoint/capabilities.ts`, `src/main/machines/remote/capabilities.ts` (the two RL2 capability constants) | O7 M2 | O7 only |
 | the e2e group `e2e:remote` (package.json, gate.yml CLASS1_E2E, the e2e-default-specs pin); the harness env `MAWS_E2E_STEP_UP=accept`; `session.json`'s `directMap` for `MAWS_DEV_ORG` (unpackaged only) | O7 M2 | CI-opt reviews the gate.yml hunk |
+| `src/shared/host/host-supervisor.ts` (`forward` takes a `ClientRef` into the link's `clientGoneRelay`, never on a protocol-2 link), `src/mawsd/daemon.ts` (the seam's two `forward` lines pass it) | O7 M2 | O16 re-homes the engine host's links and carries it through; the later lander reconciles |
+| `package.json` (`build:session-host`), `scripts/build-session-host.sh`, `scripts/check-session-host.sh`, `electron-builder.yml` (`extraResources` to `session-host/`), `scripts/mawsd-pack.mjs` (`addSessionHost`, a Linux pack refuses without it) | O16 M1 | separate from O5's runtime step; the later lander reconciles |
+| `.github/workflows/gate.yml` static job (`actions/setup-go@v7` from `native/session-host/go.version`, the `session-host` gate-bg start and its wait step), `.github/scripts/gate-plan.test.mjs` (the refused-start list) | O16 M1 | CI-opt reviews the hunk |
+| new directories `src/services/artifacts/scheme/` and `src/render/` (first file `scheme.ts`); `tsconfig.node.json` and `tsconfig.web.json` include lists (explicit globs only: `src/render/**/*` broke the renderer suite); `test/support/mawsd-scene.ts` (`ENGINE_COMMANDS` gains `artifacts.content`); `ArtifactsDeps` in `src/main/artifacts/index.ts` | O5 M2 | the later lander reconciles |
 
 ## Start order
 
@@ -67,3 +76,4 @@
 
 - 2026-10-31, the architect: written from the four documents' shared-surface sections, before any executor starts.
 - 2026-10-31, the architect: O4's and O7's additions at their starts (ledger rule 5).
+- 2026-10-31, the architect: the rule 5 additions of O4 M1, O7 M2, O16 M1 and O5 M2; O5's entry split landed first (#398, master 3239a670f), so O4 and O7 edit `src/main/app.ts` from now on (P5 Decision Log 169).

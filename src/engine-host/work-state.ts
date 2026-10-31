@@ -61,6 +61,15 @@ export class WorkState {
     if (clean && this.crons.state === 'unknown' && this.crons.why === 'resumed') this.crons = { state: 'known', list: [] };
   }
 
+  // P5 O16 (D32, D38): an adopted process's seed, before the journal's fold applies what came after it: the state file's
+  // cron record (no cron tool since its Stop: the listed crons are known, empty or not; a tool since, or no record:
+  // unknown until the next Stop) and the task list the journal last held (`unknown` after a gap, until a snapshot).
+  adoptedWith(record: CronRecord | null, tasks: readonly unknown[] | 'unknown'): void {
+    if (this.crons.state !== 'unknown' || this.crons.why !== 'adopted') return;
+    if (record !== null && !record.toolSinceStop) this.crons = { state: 'known', list: copy(record.sessionCrons) };
+    if (tasks !== 'unknown') this.tasksUnknown = null;
+  }
+
   // What the state file keeps, written at each Stop and each cron tool.
   cronRecord(): CronRecord {
     return { sessionCrons: copy(this.crons.list), toolSinceStop: this.crons.state !== 'known' };

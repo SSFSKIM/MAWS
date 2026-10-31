@@ -260,14 +260,6 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.MAWS_LANE).toBe('B');
     });
 
-    // O16 M5 (OX10 as adopted): where the observer bridge connects to the reap's gate, over any value the capture holds
-    it('sets MAWS_HOLDER_SOCKET to the gate’s path when the host serves one, and only then', () => {
-      const captured = { ...CAPTURED, MAWS_HOLDER_SOCKET: '/elsewhere/gate.sock' };
-      expect(buildLaunch(spec(), captured, { ...OPTS, gateSocket: '/p/supervisor/gate.sock' }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
-      expect(buildLaunch(spec({ gateway: 'direct' }), captured, { ...OPTS, gateSocket: '/p/supervisor/gate.sock' }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
-      expect(buildLaunch(spec(), captured, OPTS).env.MAWS_HOLDER_SOCKET).toBeUndefined();
-    });
-
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({
@@ -477,4 +469,20 @@ describe('the native ask withdrawn where the maws server is offered (P2-C2)', ()
 it('disables paid tool summaries even when the login shell enables them', () => {
   const plan = buildLaunch(spec(), { ...CAPTURED, CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: 'true' }, OPTS);
   expect(plan.env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES).toBe('false');
+});
+
+// P5 O16 M2: a hosted launch (D48's --await-initialize; Interfaces §C's environment)
+describe('a launch under a session host (P5 O16 M2)', () => {
+  it('passes --await-initialize right after the fixed flags only when the binary declares it', () => {
+    expect(buildLaunch(spec(), CAPTURED, OPTS).args).not.toContain('--await-initialize');
+    expect(buildLaunch(spec(), CAPTURED, { ...OPTS, declaresAwaitInitialize: false }).args).not.toContain('--await-initialize');
+    const args = buildLaunch(spec(), CAPTURED, { ...OPTS, declaresAwaitInitialize: true }).args;
+    expect(args.slice(0, ENGINE_FLAGS.length + 1)).toEqual([...ENGINE_FLAGS, '--await-initialize']);
+  });
+
+  it('sets MAWS_HOLDER_SOCKET to the gate\'s path over any value the capture holds, and never without a holder', () => {
+    const captured = { ...CAPTURED, MAWS_HOLDER_SOCKET: '/elsewhere' };
+    expect(buildLaunch(spec(), captured, { ...OPTS, holder: { gateSocket: '/p/supervisor/gate.sock' } }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
+    expect(buildLaunch(spec(), captured, OPTS).env).not.toHaveProperty('MAWS_HOLDER_SOCKET');
+  });
 });

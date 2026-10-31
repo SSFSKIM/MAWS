@@ -141,4 +141,8 @@ export interface SessionStateStore {
   // last seen on the gate, so an engine host that adopts that process restores its observer as seen; null when never
   loadObserverSeen(appSessionId: AppSessionId): Promise<string | null>;
   saveObserverSeen(appSessionId: AppSessionId, launchId: string): Promise<void>;
+  // P5 O16 M2 (D12): an interrupt written to a hosted process and not yet answered (set before the write, cleared at the
+  // answer or a failed write), which an adopter sends first; false when never set
+  loadOwedInterrupt(appSessionId: AppSessionId): Promise<boolean>;
+  saveOwedInterrupt(appSessionId: AppSessionId, owed: boolean): Promise<void>;
 }

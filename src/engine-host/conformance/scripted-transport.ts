@@ -4,7 +4,7 @@
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import type { SessionJournal } from '../session';
-import { TransportClosed, type EngineTransport, type TransportItem } from '../transport';
+import { TransportClosed, type EngineTransport, type StderrItem, type TransportItem } from '../transport';
 
 class Queue<T> implements AsyncIterable<T> {
   private readonly items: T[] = [];
@@ -34,9 +34,10 @@ class Queue<T> implements AsyncIterable<T> {
 export interface ScriptedTransport extends EngineTransport {
   readonly writes: StdinFrame[];
   readonly calls: string[]; // 'endInput', 'kill:SIGTERM', 'kill:SIGKILL', in order
-  push(frame: unknown): void;
-  pushProblem(problem: TransportItem['error']): void;
-  pushStderr(line: string): void;
+  readonly journaledSeqs: number[]; // P5 O16 M2: what the session reported journaled, under a `holder`
+  push(frame: unknown, hseq?: number): void;
+  pushProblem(problem: TransportItem['error'], hseq?: number): void;
+  pushStderr(line: string, hseq?: number): void;
   endStdout(): void; // stdout and stderr close; the process has not exited yet
   exit(code: number | null, signal?: NodeJS.Signals | null): void;
   // Answers the latest written control_request of `subtype` with a success payload (or an error).
@@ -47,15 +48,17 @@ export interface ScriptedTransport extends EngineTransport {
 // `onWrite` runs after each write is recorded (an auto-responder); `failWrites` rejects every write as a dead pipe,
 // `failWrite` only the frames it names; `holdWrite` returns a promise the write waits on before it resolves.
 export function scriptedTransport(
-  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number } = {},
+  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number; holder?: EngineTransport['holder'] /* P5 O16 M2: a hosted process */ } = {},
 ): ScriptedTransport {
   const frames = new Queue<TransportItem>();
-  const stderr = new Queue<string>();
+  const stderr = new Queue<StderrItem>();
   let exited = false;
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
   const t: ScriptedTransport = {
     pid: opts.pid ?? 4242,
+    ...(opts.holder && { holder: opts.holder, journaled: (seq: number) => void t.journaledSeqs.push(seq) }), // P5 O16 M2
+    journaledSeqs: [],
     frames,
     stderr,
     writes: [],
@@ -74,14 +77,14 @@ export function scriptedTransport(
     kill(signal) {
       t.calls.push(`kill:${signal}`);
     },
-    push(frame) {
-      frames.push({ frame, raw: JSON.stringify(frame), error: null });
+    push(frame, hseq) {
+      frames.push({ frame, raw: JSON.stringify(frame), error: null, ...(hseq !== undefined && { hseq }) });
     },
-    pushProblem(problem) {
-      frames.push({ frame: null, raw: '', error: problem! });
+    pushProblem(problem, hseq) {
+      frames.push({ frame: null, raw: '', error: problem!, ...(hseq !== undefined && { hseq }) });
     },
-    pushStderr(line) {
-      stderr.push(line);
+    pushStderr(line, hseq) {
+      stderr.push({ text: line, ...(hseq !== undefined && { hseq }) });
     },
     endStdout() {
       frames.end();

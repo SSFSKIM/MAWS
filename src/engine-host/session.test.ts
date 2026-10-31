@@ -17,6 +17,12 @@ import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, SESSION_START_HOOK_MS
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+import { mkdtempSync, rmSync } from 'node:fs'; // P5 O16 M2
+import { tmpdir } from 'node:os'; // P5 O16 M2
+import { JOURNAL_MAX_BYTES, JournalWriter } from './journal'; // P5 O16 M2
+import { mapFileOf } from './holder/checkpoint'; // P5 O16 M2
+import { LATE_TABLE_MS } from './rpc'; // P5 O16 M2 fix wave 2
+import type { SessionJournal } from './session'; // P5 O16 M2
 // C7 start
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1575,6 +1581,222 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
 });
 // C12 end
 
+
+// P5 O16 M2 (D12): under a session host an interrupt is owed from before its write until its answer, so an adopter after
+// a crash in between sends it first; a request left unanswered keeps the mark, and a direct process never marks it
+describe('P5 O16: the owed interrupt', () => {
+  const HOLDER = { pid: 77, holderId: 'L-host', fence: 1 };
+  it('is marked before the interrupt is written and cleared at its answer, under a session host only', async () => {
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    const save = store.saveOwedInterrupt.bind(store);
+    store.saveOwedInterrupt = async (id, owed) => {
+      marks.push(owed);
+      await save(id, owed);
+    };
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    await t.session.start();
+    expect(t.session.status().holder).toEqual({ pid: 77, holderId: 'L-host', adopted: false });
+    const pending = t.session.interrupt({ cancelEngineQueued: false });
+    for (let i = 0; i < 50 && t.transport.requestsOf('interrupt').length === 0; i += 1) await flush();
+    expect(marks).toEqual([true]);
+    expect(await store.loadOwedInterrupt(t.session.status().appSessionId)).toBe(true);
+    t.transport.answer('interrupt', { still_queued: [] });
+    await pending;
+    await flush();
+    expect(marks).toEqual([true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+
+    const direct = new MemorySessionStateStore();
+    const directMarks: boolean[] = [];
+    direct.saveOwedInterrupt = async (_id, owed) => void directMarks.push(owed);
+    const d = setup({ session: { store: direct }, responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [] } }) }) });
+    await d.session.start();
+    expect(d.session.status().holder).toBeNull();
+    await d.session.interrupt({ cancelEngineQueued: false });
+    expect(directMarks).toEqual([]);
+    d.transport.exit(0);
+    await d.session.exited;
+  });
+
+  // Interfaces §C (D23, D39): a hosted record's map line goes before its row and the ack after it; a row that failed is
+  // retracted and never acked; a gap is a lost range the frontier passes, with its notice
+  describe('the host map', () => {
+    const dirs: string[] = [];
+    afterEach(() => {
+      for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+    function hosted() {
+      const dir = mkdtempSync(join(tmpdir(), 'maws-hosted-'));
+      dirs.push(dir);
+      const writer = new JournalWriter(dir, 'L1', { maxBytes: JOURNAL_MAX_BYTES });
+      let failNext: ((direction: string) => boolean) | null = null;
+      const journal: SessionJournal = {
+        get path() {
+          return writer.path;
+        },
+        get currentPath() {
+          return writer.currentPath;
+        },
+        get lastSeq() {
+          return writer.lastSeq;
+        },
+        row(direction, frame) {
+          if (failNext?.(direction)) {
+            failNext = null;
+            throw new Error('ENOSPC: no space left on device');
+          }
+          return writer.row(direction, frame);
+        },
+        close: () => writer.close(),
+      };
+      const t = setup({ transport: { holder: HOLDER }, session: { journal } });
+      const map = () => readFileSync(mapFileOf(writer.currentPath), 'utf8').trim().split('\n');
+      const rows = () => readFileSync(writer.currentPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { seq: number; direction: string; frame: Record<string, unknown> });
+      return { ...t, map, rows, failOn: (check: (direction: string) => boolean) => (failNext = check) };
+    }
+
+    it('names each hosted row by its journal seq before it is acked, stderr and problems among them', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.transport.push({ type: 'system', subtype: 'status', status: null, uuid: 'u-1', session_id: 's' }, 3);
+      t.transport.pushStderr('a warning', 4);
+      t.transport.pushProblem({ kind: 'parse_error', message: 'not JSON', length: 7, typeGuess: null }, 5);
+      await flush();
+      const rows = t.rows();
+      const seqOf = (match: (r: { direction: string; frame: Record<string, unknown> }) => boolean) => rows.find(match)!.seq;
+      expect(t.map()).toEqual([
+        `3 ${seqOf((r) => r.direction === 'in' && r.frame.uuid === 'u-1')}`,
+        `4 ${seqOf((r) => r.direction === 'stderr')}`,
+        `5 ${seqOf((r) => r.frame.event === 'parse_error')}`,
+      ]);
+      expect(t.transport.journaledSeqs).toEqual([3, 4, 5]);
+      t.transport.exit(0);
+      await t.session.exited;
+    });
+
+    it('retracts the line of a row whose append failed, acks nothing for it, and ends the process', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.failOn((direction) => direction === 'in');
+      t.transport.push({ type: 'system', subtype: 'status', status: null, uuid: 'u-2', session_id: 's' }, 7);
+      await flush();
+      expect(t.map()).toEqual([expect.stringMatching(/^7 \d+$/), '7 -']);
+      expect(t.transport.journaledSeqs).toEqual([]);
+      expect(t.rows().some((r) => r.frame.code === 'journal_failed')).toBe(true);
+      expect(t.transport.calls).toContain('kill:SIGTERM');
+      t.transport.exit(null, 'SIGTERM');
+      await t.session.exited;
+    });
+
+    it('journals a gap with its notice, marks the lost range in the map, and passes the frontier over it', async () => {
+      const t = hosted();
+      await t.session.start();
+      t.transport.pushProblem({ kind: 'host_gap', message: 'records lost', length: 0, typeGuess: null, gap: { holderId: 'L-host', fence: 2, frontier: 5, firstSeq: 9, lostFrom: 6 } });
+      await flush();
+      const metas = t.rows().filter((r) => r.direction === 'meta').map((r) => r.frame);
+      expect(metas).toContainEqual({ event: 'host_attach', holderId: 'L-host', fence: 2, frontier: 5, replayed: 'gap', firstSeq: 9 });
+      expect(metas).toContainEqual(expect.objectContaining({ event: 'notice', key: 'holder:gap' }));
+      expect(t.map()).toEqual(['8 *']);
+      expect(t.transport.journaledSeqs).toEqual([6, 7, 8]);
+      t.transport.exit(0);
+      await t.session.exited;
+    });
+  });
+
+  // fix wave 1: a timed-out interrupt keeps its mark until that request's own answer arrives, late included; a newer
+  // interrupt owns the mark from its start, so an older one's late answer leaves it
+  it('clears the mark at a timed-out interrupt\'s late answer, but never a newer interrupt\'s', async () => {
+    vi.useFakeTimers();
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    const starting = t.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    const late = (index: number) => {
+      const request = t.transport.requestsOf('interrupt')[index]!;
+      t.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { still_queued: [] } } });
+    };
+    // one interrupt, timed out, answered late: cleared
+    const first = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    expect(await first).toMatchObject({ name: 'ControlTimeout' });
+    expect(marks).toEqual([true]);
+    late(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false]);
+    // a second times out, a third starts; the second's late answer leaves the third's mark
+    const second = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    await second;
+    const third = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false, true, true]);
+    late(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false, true, true]);
+    late(2);
+    await vi.advanceTimersByTimeAsync(0);
+    await third;
+    expect(marks).toEqual([true, false, true, true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
+  // fix wave 2: the mark's settlement outlives RPC's bounded late table; the session matches the answer itself
+  it('clears the mark at a timed-out interrupt\'s answer that arrives after the late table forgot it', async () => {
+    vi.useFakeTimers();
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    const starting = t.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    const pending = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    expect(await pending).toMatchObject({ name: 'ControlTimeout' });
+    await vi.advanceTimersByTimeAsync(LATE_TABLE_MS + 1_000); // RPC's late table has let the request go
+    const request = t.transport.requestsOf('interrupt')[0]!;
+    t.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { still_queued: [] } } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
+  // fix wave 1 (fail closed): no interrupt is written without its mark on disk
+  it('writes no interrupt when its mark cannot be saved, and answers the command with the failure', async () => {
+    const store = new MemorySessionStateStore();
+    store.saveOwedInterrupt = async () => {
+      throw new Error('EROFS: read-only file system');
+    };
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => ({ response: { still_queued: [] } }) }) });
+    await t.session.start();
+    await expect(t.session.interrupt({ cancelEngineQueued: false })).rejects.toThrow('EROFS');
+    await flush();
+    expect(t.transport.requestsOf('interrupt')).toEqual([]);
+    expect(t.session.queue.isPaused).toBe(false);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
+  it('is cleared when the engine answers the interrupt with an error', async () => {
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => ({ error: 'not now' }) }) });
+    await t.session.start();
+    await expect(t.session.interrupt({ cancelEngineQueued: false })).rejects.toThrow('not now');
+    await flush();
+    expect(marks).toEqual([true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+});
 
 describe('F2 session lifecycle regressions', () => {
   const result = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } };

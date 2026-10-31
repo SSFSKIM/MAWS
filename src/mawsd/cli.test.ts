@@ -10,7 +10,7 @@ import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
 import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
-import { runCli, type CliDeps } from './cli';
+import { runCli, sessionHostsLine, type CliDeps } from './cli';
 import { LazyEndpoint, NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
 import { REQUEST_TIMEOUT_MS } from './machine-client';
 
@@ -82,6 +82,12 @@ class FakeEndpoint implements EndpointModule {
 }
 
 describe('mawsd status', () => {
+  // P5 O16 M2: the engine host's session hosts, under its line when it reports them
+  it('names the engine host\'s session hosts, the adopted and the failed among them', () => {
+    expect(sessionHostsLine({ hosts: 1, adopted: 0, failed: 0 })).toBe('session hosts  1 (adopted 0, failed 0)');
+  });
+
+
   it('running: the daemon, its build, its machine ref, profile and role, its hosts, clients and endpoint', async () => {
     const daemon = await scene.start({ role: 'laptop', endpoint: new FakeEndpoint() }); // pinned: the machine's own role depends on its battery
     const { code, out } = await cli(['status']);

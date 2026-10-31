@@ -15,29 +15,43 @@ const PARSE_ERROR_PREVIEW_CHARS = 4_096;
 const CLOSE_AFTER_EXIT_GRACE_MS = 2_000;
 
 export interface TransportProblem {
-  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'stalled_write' | 'replay_mismatch' | 'replay_unrecorded_read'; // replay_*: the replay transport only (M2; debt wave 3)
+  // replay_*: the replay transport only (M2; debt wave 3). P5 O16 M2: host_lost and host_gap, the hosted transport only
+  // (holder/transport.ts): its session host died with the session's process, or a reconnect to a live one found output
+  // gone from its ring
+  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'stalled_write' | 'replay_mismatch' | 'replay_unrecorded_read' | 'host_lost' | 'host_gap';
   message: string;
   length: number; // characters of the offending line (0 for a spawn error or a replay item)
   typeGuess: string | null; // the `"type"` a malformed line seemed to carry
   replay?: { expected: string; got: string }; // the held out row and the unrecorded write, for the `meta replay_mismatch` row
   read?: { subtype: string; requestId: string }; // the unrecorded read the replay answered empty, for the `meta replay_unrecorded_read` row
+  gap?: { holderId: string; fence: number; frontier: number; firstSeq: number; lostFrom: number }; // host_gap: the `meta host_attach {replayed: 'gap'}` row's fields, and the first sequence lost
 }
 
 // One stdout line: a parsed frame, or a problem with the raw preview. `raw` is the whole line for a frame and at most
-// PARSE_ERROR_PREVIEW_CHARS for a problem, so a garbage line never pins its bytes in the journal.
+// PARSE_ERROR_PREVIEW_CHARS for a problem, so a garbage line never pins its bytes in the journal. P5 O16 M2: `hseq`, the
+// session host's sequence of the line (a frame or a parse problem read through one; absent on the direct and replay
+// transports), which the session maps to the line's journal row before writing it (holder/checkpoint.ts).
 export type TransportItem =
-  | { frame: unknown; raw: string; error: null }
-  | { frame: null; raw: string; error: TransportProblem };
+  | { frame: unknown; raw: string; error: null; hseq?: number }
+  | { frame: null; raw: string; error: TransportProblem; hseq?: number };
+
+// One stderr line; `hseq` as on a TransportItem (P5 O16 M2).
+export interface StderrItem { text: string; hseq?: number }
 
 export interface EngineTransport {
   readonly pid: number | null;
   frames: AsyncIterable<TransportItem>; // parsed stdout lines, in order
-  stderr: AsyncIterable<string>; // one line per item
+  stderr: AsyncIterable<StderrItem>; // one line per item
   // Abort discards a queued frame; a partially written frame closes stdin and reports stalled_write for cleanup.
   write(frame: StdinFrame, signal?: AbortSignal): Promise<void>; // resolves when the bytes reached the OS pipe; rejects on EPIPE/closed
   endInput(): void; // stdin.end()
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
   readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  // P5 O16 M2 (holder/transport.ts; absent on the direct and replay transports): the session host holding the process,
+  // and the session's word that the row of the record with host sequence `seq` is on disk (or that the record makes no
+  // row, D44), which advances the acknowledged frontier
+  readonly holder?: { pid: number; holderId: string; fence: number };
+  journaled?(seq: number): void;
 }
 
 export class TransportClosed extends Error {
@@ -117,7 +131,9 @@ export class LineSplitter {
   }
 }
 
-function cleanLine(line: string): string | null {
+// A line as the engine host reads it: a leading BOM and a trailing `\r` dropped; null for a blank line (P5 O16: the
+// hosted transport applies the same rule to each line its session host relays raw, D43).
+export function cleanLine(line: string): string | null {
   let out = line;
   if (out.charCodeAt(0) === 0xfeff) out = out.slice(1);
   if (out.endsWith('\r')) out = out.slice(0, -1);
@@ -129,10 +145,20 @@ function typeGuess(line: string): string | null {
   return match ? match[1]! : null;
 }
 
+// One cleaned stdout line as an item: its frame, or a parse problem with a bounded preview.
+export function parseStdoutLine(line: string): TransportItem {
+  try {
+    return { frame: JSON.parse(line) as unknown, raw: line, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { frame: null, raw: line.slice(0, PARSE_ERROR_PREVIEW_CHARS), error: { kind: 'parse_error', message, length: line.length, typeGuess: typeGuess(line) } };
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // A single-consumer async queue
 
-class AsyncQueue<T> implements AsyncIterable<T> {
+export class AsyncQueue<T> implements AsyncIterable<T> {
   private readonly items: T[] = [];
   private readonly waiters: ((result: IteratorResult<T>) => void)[] = [];
   private done = false;
@@ -167,7 +193,7 @@ class AsyncQueue<T> implements AsyncIterable<T> {
 export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): EngineTransport {
   const child = spawn(plan.bin, plan.args, { cwd: plan.cwd, env: plan.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const frames = new AsyncQueue<TransportItem>();
-  const stderr = new AsyncQueue<string>();
+  const stderr = new AsyncQueue<StderrItem>();
   const stdoutLines = new LineSplitter(opts.maxLineChars);
   const stderrLines = new LineSplitter(opts.maxLineChars);
   let ended = false; // every stream is done and `exited` settled
@@ -184,7 +210,7 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     if (stdoutEnded) return;
     stdoutEnded = true;
     const tail = stdoutLines.flush();
-    if (tail !== null) frames.push(parseLine(tail));
+    if (tail !== null) frames.push(parseStdoutLine(tail));
     frames.end();
   };
 
@@ -212,18 +238,9 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     ended = true;
     endFrames();
     const errTail = stderrLines.flush();
-    if (errTail !== null) stderr.push(errTail);
+    if (errTail !== null) stderr.push({ text: errTail });
     stderr.end();
     resolveExited(exit);
-  };
-
-  const parseLine = (line: string): TransportItem => {
-    try {
-      return { frame: JSON.parse(line) as unknown, raw: line, error: null };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { frame: null, raw: line.slice(0, PARSE_ERROR_PREVIEW_CHARS), error: { kind: 'parse_error', message, length: line.length, typeGuess: typeGuess(line) } };
-    }
   };
 
   child.stdout.on('data', (chunk: Buffer) => {
@@ -232,13 +249,13 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
       lines = stdoutLines.push(chunk);
     } catch (error) {
       const budget = error as LineBudgetExceeded;
-      for (const line of budget.lines) frames.push(parseLine(line)); // what the chunk completed before the overflow, in order
+      for (const line of budget.lines) frames.push(parseStdoutLine(line)); // what the chunk completed before the overflow, in order
       frames.push({ frame: null, raw: '', error: { kind: 'line_budget', message: budget.message, length: budget.length, typeGuess: null } });
       child.stdout.destroy();
       kill('SIGKILL');
       return;
     }
-    for (const line of lines) frames.push(parseLine(line));
+    for (const line of lines) frames.push(parseStdoutLine(line));
   });
   child.stdout.on('end', endFrames);
   child.stdout.on('error', () => {
@@ -252,7 +269,7 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
     } catch {
       return; // stderr noise over the budget is dropped, never fatal
     }
-    for (const line of lines) stderr.push(line);
+    for (const line of lines) stderr.push({ text: line });
   });
   child.stderr.on('error', () => {});
 

@@ -284,3 +284,44 @@ describe('the reap’s unknowns (O16 M5)', () => {
     expect(work.snapshot().unknown).toBe('observer_unhealthy');
   });
 });
+
+// P5 O16 (D32, D38): an adopted row's work state, seeded from the durable records before the journal's fold applies the
+// evidence after them
+describe('an adopted process seeded from its records', () => {
+  it('a clean cron record and a known task list: known, the record\'s crons listed', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [cron('a')], toolSinceStop: false }, []);
+    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: null });
+  });
+
+  it('a cron tool since the record\'s Stop, or no record: the crons stay unknown until the next Stop', () => {
+    for (const record of [{ sessionCrons: [], toolSinceStop: true }, null]) {
+      const work = state('adopted');
+      work.adoptedWith(record, []);
+      expect(work.snapshot().unknown).toBe('adopted');
+      work.stopped([], []);
+      expect(work.snapshot().unknown).toBeNull();
+    }
+  });
+
+  it('tasks unknown (a gap): unknown until a snapshot, however clean the record', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, 'unknown');
+    expect(work.snapshot().unknown).toBe('adopted');
+    work.tasksChanged();
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('the fold\'s later evidence applies over the seed: a CronCreate journaled after the record makes it dirty', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, []);
+    work.cronTool();
+    expect(work.snapshot().unknown).toBe('dirty');
+  });
+
+  it('only an adopted process takes it', () => {
+    const work = state('resumed');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, []);
+    expect(work.snapshot().unknown).toBe('resumed');
+  });
+});

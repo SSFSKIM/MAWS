@@ -21,14 +21,11 @@
 // the launch's reservation to its exit (`close`).
 import { chmodSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { clearSocketPath, makePrivateDirectory } from '@shared/host/private-listen';
 import { splitLines } from '@shared/host/socket-protocol';
-import { socketPathFor, SOCKET_PATH_MAX_BYTES } from '../supervisor-files';
 
 export const GATE_PROTOCOL = 1;
-export const GATE_SOCKET = 'gate.sock';
 export const OBSERVER_SILENCE_MS = 15_000; // the bridge beats every 5 s
 export const HELLO_WINDOW_MS = 5_000; // a connection that has not said hello by then is closed
 export const GATE_LINE_CAP = 64 * 1024; // the protocol's frames are a few hundred bytes
@@ -60,13 +57,7 @@ export interface GateChannel {
   close(): void; // the row's process exited: its observer is closed and no hello matches it again
 }
 
-// The gate's socket: in the supervisor directory, or beside the engine host's own socket in its tmpdir fallback when
-// that path would pass the socket limit (supervisor-files.ts socketPathFor).
-export function gateSocketPath(supervisorDir: string, userData: string, tmp: string = tmpdir()): string {
-  const inDir = join(supervisorDir, GATE_SOCKET);
-  if (Buffer.byteLength(inDir, 'utf8') <= SOCKET_PATH_MAX_BYTES) return inDir;
-  return join(dirname(socketPathFor(supervisorDir, userData, tmp)), GATE_SOCKET);
-}
+// The gate's socket path is holder/files.ts `gateSocketPath` (M2's, which every hosted launch's MAWS_HOLDER_SOCKET names).
 
 interface Connection { socket: Socket; row: Row | null }
 

@@ -8,7 +8,8 @@ import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os'; // P5 O16 M2
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
 import { scheduleJournalPruning } from './journal';
@@ -24,7 +25,10 @@ import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
 import { readMachineRole } from './role'; // P5 O2 M2
-import { buildIdOf } from './supervisor-files';
+import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
+import { signalOrphan } from './live-ledger'; // P5 O16 M2
+import { gateSocketPath, hostsDirOf, sessionHostBinary } from './holder/files'; // P5 O16 M2
+import { startSessionHost } from './holder/transport'; // P5 O16 M2
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 // P3-A start
@@ -53,7 +57,7 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
-import { Gate, gateSocketPath } from './holder/gate'; // O16 M5
+import { Gate } from './holder/gate'; // O16 M5
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -113,9 +117,9 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
   // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E): the gate, OX10's server, on both
-  // shapes (no observer connects on a replay); every live launch's environment names it (MAWS_HOLDER_SOCKET). A gate that
-  // cannot listen leaves every observer absent (logged), and the releases then follow owner Q1's rule.
-  const gatePath = gateSocketPath(supervisorDir ?? join(userData, 'supervisor'), userData);
+  // shapes (no observer connects on a replay); every hosted launch's environment names it (MAWS_HOLDER_SOCKET). A gate
+  // that cannot listen leaves every observer absent (logged), and the releases then follow owner Q1's rule.
+  const gatePath = supervisorDir === undefined ? gateSocketPath(join(userData, 'supervisor'), userData, tmpdir()) : gateSocketPath(supervisorDir, dirname(supervisorDir), tmpdir());
   const gate = new Gate({ log: (line) => console.log(`[supervisor] ${line}`) });
   let gateFailed = false; // the status names the path from the start, and null once its listen failed
   gate.listen(gatePath).catch((error: unknown) => {
@@ -149,7 +153,17 @@ const register: HostRegister = (untimedOn, emit, client) => {
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
-    gate, gateSocket: gatePath, // O16 M5
+    gate, // O16 M5
+    // P5 O16 M2 (D8): on the detached and daemon shapes every live launch runs under a session host, this build's binary
+    // (Decision Log 161), its child signalled by the orphan sweep's own rule if the host is lost; every hosted launch's
+    // MAWS_HOLDER_SOCKET names the gate (O16 M5: the one path both milestones compute, holder/files.ts)
+    holder:
+      supervisorDir === undefined
+        ? undefined
+        : {
+            start: (launchId) => startSessionHost(launchId, { hostsDir: hostsDirOf(supervisorDir), binary: sessionHostBinary(entryFile), userData, tmpdir: tmpdir(), log: (line) => console.log(`[session-host] ${line}`), child: { isAlive, procStartOf, signal: signalOrphan } }),
+            gateSocket: gatePath,
+          },
   });
   ({ table } = ipc);
   table.startSampling();

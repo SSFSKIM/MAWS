@@ -24,7 +24,7 @@ const IDENTITY: SupervisorIdentity = { pid: 4321, startedAt: T0.toISOString(), b
 const DETACHED: SupervisorIdentity = { ...IDENTITY, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log' };
 
 function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 'laptop') {
-  const rows: { lifecycle: 'starting' | 'initializing' | 'ready' | 'exiting' | 'exited' }[] = [];
+  const rows: { lifecycle: 'starting' | 'initializing' | 'ready' | 'exiting' | 'exited'; status: () => { holder: { pid: number; holderId: string; adopted: boolean } | null } }[] = [];
   const statusListeners = new Set<() => void>();
   const rowListeners = new Set<() => void>();
   const releases: { idleMs: number | null; active: boolean; ignoreInterest?: boolean }[] = [];
@@ -70,8 +70,8 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
   };
   const exits: SupervisorExit[] = [];
   const start = () => supervision.started(DETACHED, (reason) => void exits.push(reason));
-  const launch = () => {
-    rows.push({ lifecycle: 'ready' });
+  const launch = (hosted = false) => {
+    rows.push({ lifecycle: 'ready', status: () => ({ holder: hosted ? { pid: 7000 + rows.length, holderId: `L${rows.length}`, adopted: false } : null }) }); // P5 O16 M2: under a session host
     for (const listener of rowListeners) listener();
   };
   const exitRow = (i = 0) => {
@@ -332,12 +332,25 @@ describe('host.stopAll', () => {
 });
 
 describe('host.supervisorStatus', () => {
+  // P5 O16 M2: the live rows under a session host, which `mawsd`'s daemon.status counts; none in utility mode
+  it('counts the live rows under a session host in detached mode, and carries no holder in utility mode', async () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    h.launch(false);
+    h.launch(true);
+    expect((await h.call('host.supervisorStatus', undefined)).holder).toEqual({ hosts: 2, adopted: 0, failed: 0, gate: null, handover: 'none' });
+    h.exitRow(0);
+    expect((await h.call('host.supervisorStatus', undefined)).holder?.hosts).toBe(1);
+    expect(harness('utility').supervision.status()).not.toHaveProperty('holder');
+  });
+
   it('answers the status and emits it on every change, never twice the same, and always in the connect burst', async () => {
     const h = harness();
     h.start();
     h.supervision.clientChanged(true);
     const status = await h.call('host.supervisorStatus', undefined);
-    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0, release: { role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS } /* P5 O2 M2 */ });
+    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0, release: { role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS } /* P5 O2 M2 */, holder: { hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'none' } /* P5 O16 M2 */ });
     expect(h.emitted.at(-1)).toEqual(status);
     const count = h.emitted.length;
     h.supervision.clientChanged(true); // nothing changed
@@ -727,9 +740,10 @@ describe('host.supervisorStatus: the gate (O16 M5)', () => {
     expect(emitted.length).toBeGreaterThan(0);
   });
 
-  it('a harness with no gate reports neither', () => {
+  it('a harness with no gate reports no counts and no path: a detached one its session hosts alone, a utility one no holder', () => {
     const h = harness();
     expect(h.supervision.status().release).toEqual({ role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS });
-    expect(h.supervision.status().holder).toBeUndefined();
+    expect(h.supervision.status().holder).toEqual({ hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'none' });
+    expect(harness('utility').supervision.status().holder).toBeUndefined();
   });
 });

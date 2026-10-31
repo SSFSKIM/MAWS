@@ -34,13 +34,14 @@ import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2
 import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { expectedArgv } from './holder/descendants'; // O16 M5, D52
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
+import { HostMap } from './holder/checkpoint'; // P5 O16 M2
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
 import { MessageQueue, type SteerPriority } from './queue';
 // C12 start
 import { hardReasons } from './budget';
 // C12 end
-import { ControlClient, ControlError } from './rpc';
+import { ControlClient, ControlError, ControlTimeout } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
 import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-status';
@@ -89,6 +90,9 @@ export interface SessionJournal {
   row(direction: JournalDirection, frame: unknown): JournalRow;
   readonly path: string;
   close(): Promise<void>;
+  // P5 O16 M2: what a hosted launch's host map needs (holder/checkpoint.ts): the last row's seq and the file rows go to now
+  readonly lastSeq?: number;
+  readonly currentPath?: string;
 }
 
 export interface EngineSessionOptions {
@@ -135,6 +139,10 @@ export interface EngineSessionOptions {
   // P3-HD: the local-scope `projects` key the launcher captured before this launch spawned (connectors/local-key.ts);
   // host-private, for route D's observations only. Absent (a replay, a test), local scope stays engine-only.
   connectorLocalKey?: ConnectorLocalKey;
+  // P5 O16 M2: the session host this launch runs under (started before the row was reserved, D51), named in the spawn
+  // row; and what to do with it when the session ends without ever spawning (stopped first): release it
+  holder?: { pid: number; holderId: string; binary: string };
+  unspawned?: () => void;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -186,6 +194,9 @@ export class EngineSession {
   private readonly launchedAt = new Date().toISOString();
 
   private transport: EngineTransport | null = null;
+  private hostMap: HostMap | null = null; // P5 O16 M2: a hosted launch's map of host sequences to journal rows
+  // P5 O16 M2 (D12): the newest interrupt's number, and its request id once it timed out (its late answer clears the mark)
+  private readonly owedInterrupt: { generation: number; lateRequestId: string | null } = { generation: 0, lateRequestId: null };
   private client: ControlClient | null = null;
   private writer: OutboundWriter | null = null;
   private readonly held: TransportItem[] = []; // inbound frames read while an out write was in flight (M3 re-review)
@@ -404,9 +415,30 @@ export class EngineSession {
   async interrupt(opts: { cancelEngineQueued: boolean; holdEngineQueued?: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
     this.markUsed(); // C12
-    await this.queue.pause('interrupt');
-    if (opts.holdEngineQueued) await this.queue.holdAll();
-    const response: InterruptResponse = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
+    // P5 O16 M2 (D12): under a session host the interrupt is owed from before its write until its answer (or a failed
+    // write), so an adopter after a crash in between sends it first. The mark is on disk before anything moves, or the
+    // command fails with nothing written (fail closed). The newest interrupt owns it: a request left unanswered keeps it
+    // until that request's own late answer, and an older request's answer never clears a newer one's.
+    const owed = this.transport?.holder !== undefined;
+    const generation = ++this.owedInterrupt.generation;
+    if (owed) {
+      this.owedInterrupt.lateRequestId = null;
+      await this.store.saveOwedInterrupt(this.spec.appSessionId, true);
+    }
+    const settleOwed = () => {
+      if (owed && generation === this.owedInterrupt.generation) this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+    };
+    let response: InterruptResponse;
+    try {
+      await this.queue.pause('interrupt');
+      if (opts.holdEngineQueued) await this.queue.holdAll();
+      response = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
+    } catch (error) {
+      if (!(error instanceof ControlTimeout)) settleOwed();
+      else if (owed && generation === this.owedInterrupt.generation) this.owedInterrupt.lateRequestId = error.requestId;
+      throw error;
+    }
+    settleOwed();
     return { stillQueued: [...response.still_queued], cancelled: [...(response.cancelled ?? [])] };
   }
 
@@ -741,10 +773,18 @@ export class EngineSession {
       ...(this.surface.attached && { uiSurface: { clientId: this.surface.clientId } }), // R2
       ...(tracked.published && { published: tracked.published }), // P5 E312
       ...(this.reapView && { reap: { ...this.reapView } }), // O16 M5
+      holder: this.holderStatus(), // P5 O16 M2
     };
     // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
     if (status.process !== 'exited') status.keepAlive = hardReasons(status, this.opts.statefulMcpServers?.() ?? NO_SERVERS);
     return status;
+  }
+
+  // P5 O16 M2 (Interfaces §D): the session host this process runs under, null on a direct or replay launch; `pid` is the
+  // host's, the status's own `pid` the engine's
+  private holderStatus(): EngineSessionStatus['holder'] {
+    const holder = this.transport?.holder ?? (this.opts.holder ? { pid: this.opts.holder.pid, holderId: this.opts.holder.holderId } : null);
+    return holder ? { pid: holder.pid, holderId: holder.holderId, adopted: false } : null;
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -787,7 +827,7 @@ export class EngineSession {
     }
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: this.spec.retry?.reason ?? null });
     if (this.spec.retry) this.notice('launch:retry', `${this.spec.retry.reason} Trying once more (attempt ${this.spec.retry.attempt} of ${this.spec.retry.maxAttempts}).`); // C3 corrective
-    this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
+    this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown', holder: this.opts.holder }));
     void (this.opts.sessionStartHookMs ?? sessionStartHookMs)(this.plan).then(
       (ms) => {
         this.hookBoundMs = ms;
@@ -805,6 +845,7 @@ export class EngineSession {
       return;
     }
     this.transport = transport;
+    if (transport.holder !== undefined) this.hostMap = new HostMap(); // P5 O16 M2
     // One writer for every out frame of this process (requests, answers, user frames); the read loop holds inbound
     // frames while any of its writes is in flight and journals them after the write's own row.
     const writer = new OutboundWriter(transport, { row: (direction, frame) => this.record(direction, frame) });
@@ -1016,16 +1057,17 @@ export class EngineSession {
   private processItem(item: TransportItem): void {
     try {
       if (item.error) {
-        this.transportProblem(item.error);
+        this.transportProblem(item.error, item.hseq);
         return;
       }
-      const row = this.record('in', item.frame);
+      const row = this.recordHosted('in', item.frame, item.hseq);
       const frame = item.frame as Frame;
       if (!this.handshakeDone) this.hookBeforeAnswer(frame);
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
       if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
       // R2: an init that advertises the surface after an initialize answer that did not
       if (this.handshakeDone && this.client && frame.type === 'system' && frame.subtype === 'init' && Array.isArray(frame.capabilities)) void this.surface.attach(this.client, frame.capabilities as string[]);
+      this.settleOwedInterrupt(frame); // P5 O16 M2
       this.broker.observe(item.frame);
       this.bashMode.observe(item.frame);
       this.client?.observe(item.frame);
@@ -1038,6 +1080,17 @@ export class EngineSession {
 
   // The out path's rule (OutboundWriter.settle) for an inbound row: `transport_error { journal_failed }` if the journal
   // can still take it, then the ladder without end_session (whole-branch review).
+  // P5 O16 M2 (D12): a timed-out interrupt's answer, however late, settles the durable mark it holds. Matched here
+  // rather than through RPC's late table, which forgets a request after LATE_TABLE_MS while the mark lasts until the
+  // answer (or a newer interrupt takes it over).
+  private settleOwedInterrupt(frame: Frame): void {
+    const requestId = this.owedInterrupt.lateRequestId;
+    if (requestId === null || frame.type !== 'control_response') return;
+    if ((frame.response as { request_id?: unknown } | undefined)?.request_id !== requestId) return;
+    this.owedInterrupt.lateRequestId = null;
+    this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+  }
+
   private inboundJournalFailed(error: JournalWriteFailed): void {
     try {
       this.record('meta', { event: 'transport_error', code: 'journal_failed', message: `journal write failed: ${error.message}` });
@@ -1049,22 +1102,25 @@ export class EngineSession {
   }
 
   private async stderrLoop(transport: EngineTransport): Promise<void> {
-    for await (const line of transport.stderr) {
+    for await (const { text: line, hseq } of transport.stderr) {
       this.heard();
       this.stderrTail.push(line);
       if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift();
       try {
-        this.record('stderr', { text: line });
+        this.recordHosted('stderr', { text: line }, hseq);
       } catch (error) {
-        this.log(`stderr line not journaled: ${messageOf(error)}`);
+        // P5 O16 M2 (D39): under the host map a hosted stderr row that failed is a journal failure like an `in` row's,
+        // since a silent miss would let the map certify the wrong row; the direct transport's stays lenient
+        if (hseq !== undefined && this.hostMap !== null && error instanceof JournalWriteFailed) this.inboundJournalFailed(error);
+        else this.log(`stderr line not journaled: ${messageOf(error)}`);
       }
     }
   }
 
-  private transportProblem(problem: TransportProblem): void {
+  private transportProblem(problem: TransportProblem, hseq?: number): void {
     switch (problem.kind) {
       case 'parse_error':
-        this.record('meta', { event: 'parse_error', message: problem.message, length: problem.length, typeGuess: problem.typeGuess });
+        this.recordHosted('meta', { event: 'parse_error', message: problem.message, length: problem.length, typeGuess: problem.typeGuess }, hseq);
         return;
       case 'replay_mismatch':
         this.record('meta', { event: 'replay_mismatch', message: problem.message, ...(problem.replay ?? {}) });
@@ -1084,7 +1140,60 @@ export class EngineSession {
       case 'spawn_error':
         this.record('meta', { event: 'transport_error', message: problem.message, code: 'spawn_error' });
         return;
+      // P5 O16 M2: the session host died with the process's pipes; the transport has ended the stream and the process
+      case 'host_lost':
+        this.record('meta', { event: 'transport_error', message: problem.message, code: 'host_lost' });
+        return;
+      // D45: a reconnect to a live host found output gone from its ring: the gap is journaled with a notice, the map says
+      // the lost sequences are accounted for, and the frontier passes them (M3 reseeds the conversation)
+      case 'host_gap': {
+        const gap = problem.gap!;
+        this.record('meta', { event: 'host_attach', holderId: gap.holderId, fence: gap.fence, frontier: gap.frontier, replayed: 'gap', firstSeq: gap.firstSeq });
+        this.notice('holder:gap', 'Some output was lost while the engine host reconnected to the session host; the conversation may be missing part of it.');
+        try {
+          this.hostMap?.lost(gap.firstSeq - 1, this.journalFile());
+        } catch (error) {
+          throw new JournalWriteFailed(error); // D39: the map's failure is the journal's (processItem ends the process)
+        }
+        for (let seq = gap.lostFrom; seq < gap.firstSeq; seq += 1) this.transport?.journaled?.(seq);
+        return;
+      }
     }
+  }
+
+  // P5 O16 M2 (Interfaces §C; D23, D39): a row of a hosted record. Its map line `<hseq> <the row's seq>` is appended
+  // before the row, so an ack never covers a record whose line and row are not both on disk; a row whose append failed
+  // is retracted (its seq belongs to whatever row lands next); once written, the transport is told, which advances the
+  // acknowledged frontier. A retraction that cannot be written closes the journal first, so no later row reuses the seq.
+  private recordHosted(direction: JournalDirection, frame: unknown, hseq: number | undefined): JournalRow {
+    const map = this.hostMap;
+    if (hseq === undefined || map === null) return this.record(direction, frame);
+    if (this.journalClosed) throw new JournalClosed(`${direction} row`);
+    try {
+      map.line(hseq, (this.journal.lastSeq ?? 0) + 1, this.journalFile());
+    } catch (error) {
+      throw new JournalWriteFailed(error);
+    }
+    let row: JournalRow;
+    try {
+      row = this.record(direction, frame);
+    } catch (error) {
+      if (error instanceof JournalWriteFailed) {
+        try {
+          map.retract(hseq, this.journalFile());
+        } catch (retraction) {
+          this.journalClosed = true;
+          this.log(`the host map's retraction of record ${hseq} failed (${messageOf(retraction)}); the journal is closed`);
+        }
+      } else if (!(error instanceof JournalClosed)) this.transport?.journaled?.(hseq); // the row is on disk; what failed came after it
+      throw error;
+    }
+    this.transport?.journaled?.(hseq);
+    return row;
+  }
+
+  private journalFile(): string {
+    return this.journal.currentPath ?? this.journal.path;
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -1314,6 +1423,8 @@ export class EngineSession {
     if (this.observed) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status
     this.setProcess('exited');
     this.journalClosed = true;
+    this.hostMap?.close(); // P5 O16 M2
+    if (this.transport === null) this.opts.unspawned?.(); // P5 O16 M2: a session host that never launched is released
     void this.journal.close().catch((error: unknown) => this.log(`journal not closed: ${messageOf(error)}`));
     const summary: ExitSummary = { code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost };
     // `exited` (and so `stop()`) settles once the exit's store writes have landed, so an archive's `forget` is the last

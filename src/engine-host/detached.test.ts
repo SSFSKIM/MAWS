@@ -350,7 +350,7 @@ describe('the detached entry', () => {
 
     // the engine host's Supervision over the socket: host.stopAll's answer reaches the client before the exit order closes it
     it('host.stopAll answers the client, then the supervisor exits as stopAll', async () => {
-      const rows: { lifecycle: 'ready' | 'exited' }[] = [{ lifecycle: 'ready' }];
+      const rows: { lifecycle: 'ready' | 'exited'; status: () => { holder: null } }[] = [{ lifecycle: 'ready', status: () => ({ holder: null }) /* P5 O16 M2 */ }];
       let supervision!: Supervision;
       const host = harness({
         life: { started: (identity, exit) => supervision.started(identity, exit), clientChanged: (connected) => supervision.clientChanged(connected), exitWhenIdle: () => supervision.armExitWhenIdle(true), orphansSwept: (killed) => supervision.orphansSwept(killed) },
@@ -464,7 +464,7 @@ describe('the detached entry', () => {
       const child = spawn('/bin/sh', ['-c', 'echo up; exec sleep 30'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
       children.push(child);
       await new Promise((resolve) => child.stdout!.once('data', resolve));
-      const orphan = { appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' };
+      const orphan = { appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old', holderId: null };
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeLive(dir, { pid: 999_999, procStart: 'gone' }, [orphan]);
       const host = harness();
@@ -475,7 +475,7 @@ describe('the detached entry', () => {
       await until(() => !isAlive(child.pid!));
       expect(host.lines.some((line) => line.includes('orphan app-orphan') && line.includes('SIGTERM'))).toBe(true);
       expect(readLive(dir)?.owner.pid).toBe(999_999); // nothing written over the predecessor's until the table records
-      const row = { appSessionId: 'app-1', pid: 4242, procStart: 'T', launchId: 'L1' };
+      const row = { appSessionId: 'app-1', pid: 4242, procStart: 'T', launchId: 'L1', holderId: null };
       recordLive([row]);
       expect(readLive(dir)).toEqual({ owner: { pid: process.pid, procStart: readLock(dir)!.procStart }, rows: [row] });
     });
@@ -485,7 +485,7 @@ describe('the detached entry', () => {
       const living = { pid: process.pid, procStart: 'this test process, as a predecessor' };
       vi.mocked(procStartOf).mockReturnValue(null); // an unreadable start time never makes a live owner dead
       try {
-        writeLive(dir, living, [{ appSessionId: 'app-x', pid: process.pid, procStart: 'x', launchId: 'L' }]);
+        writeLive(dir, living, [{ appSessionId: 'app-x', pid: process.pid, procStart: 'x', launchId: 'L', holderId: null }]);
         const host = harness();
         await host.start();
         await until(() => host.life.orphansSwept.mock.calls.length === 1);
@@ -501,7 +501,7 @@ describe('the detached entry', () => {
       children.push(child);
       await new Promise((resolve) => child.stdout!.once('data', resolve));
       mkdirSync(dir, { recursive: true, mode: 0o700 });
-      writeLive(dir, { pid: 999_999, procStart: 'gone' }, [{ appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old' }]);
+      writeLive(dir, { pid: 999_999, procStart: 'gone' }, [{ appSessionId: 'app-orphan', pid: child.pid!, procStart: procStartOf(child.pid!)!, launchId: 'L-old', holderId: null }]);
       const host = harness();
       const supervisor = (await host.start())!; // the sweep has sent its SIGTERM and waits for the orphan's end
       await supervisor.stop('exit');

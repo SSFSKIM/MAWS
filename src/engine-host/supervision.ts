@@ -171,7 +171,9 @@ export class Supervision {
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
       release: { role: this.deps.role, idleMs: this.releaseIdleMs(), ...(this.deps.gate && { gate: this.deps.gate.counts() }) }, // P5 O2 M2; O16 M5: the gate
-      ...(this.deps.gate && { holder: { hosts: 0, adopted: 0, failed: 0, gate: this.deps.gate.path(), handover: 'none' as const } }), // O16 M5: the gate's path; M2 and M3 fill the rest
+      // P5 O16 M2: the live rows' session hosts (the detached mode's; a utility host spawns directly, so it counts none);
+      // O16 M5: the gate's path, on either shape that serves one (null before it listens or once its listen failed)
+      ...((this.deps.mode === 'detached' || this.deps.gate) && { holder: { hosts: this.deps.mode === 'detached' ? rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length : 0, adopted: 0, failed: 0, gate: this.deps.gate?.path() ?? null, handover: 'none' as const } }),
     };
   }
 

@@ -37,6 +37,7 @@ type Options struct {
 	Binary     string
 	Limits     Limits
 	Signals    <-chan os.Signal // the host's own SIGTERM, SIGINT and SIGHUP
+	SpawnDelay time.Duration    // tests (--spawn-delay-ms): how long a commit's fork stays under way before it runs
 
 	rosterWrite func(dir string, e roster.Entry) error // tests: a roster that cannot be written; roster.Write otherwise
 	beforeSpawn func()                                 // tests: what happens while the fork is under way

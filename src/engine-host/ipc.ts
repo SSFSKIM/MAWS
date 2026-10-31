@@ -20,10 +20,10 @@ import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schem
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
 import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
-import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
+import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
-import { createLauncher } from './launcher';
+import { createLauncher, type LauncherDeps } from './launcher';
 import type { Gate } from './holder/gate'; // O16 M5
 import { registerOps } from './ops'; // P5 O10 M7
 import { pendingCounts } from './pending-counts'; // P5 O10
@@ -187,7 +187,7 @@ export interface EngineIpcDeps {
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
   datasetRefresh?: DatasetRefreshRequests; // E3: the host's registry of agents' dataset refreshes (absent: none is ever pending)
   gate?: Gate; // O16 M5: the engine host's gate, the table's rows' observers (absent: none is ever seen)
-  gateSocket?: string; // O16 M5: its path, every live launch's MAWS_HOLDER_SOCKET
+  holder?: LauncherDeps['holder']; // P5 O16 M2: the session hosts of the detached and daemon shapes (index.ts); absent, the direct spawn
 }
 
 export interface EngineIpc {
@@ -294,7 +294,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
-    gateSocket: deps.gateSocket, // O16 M5
+    holder: deps.holder, // P5 O16 M2
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
@@ -330,7 +330,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     bounded(() => ready(input.appSessionId).client.request(subtype, {} as controls.OutboundRequest<S>));
 
   // -- engine.* ------------------------------------------------------------------------------------------------------
-  handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
+  handle('engine.binaryInfo', async () => binaryInfoOf(await binaryProbe())); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
@@ -366,7 +366,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     } catch (error) {
       throw new HostCommandError({ code: 'invalid_input', message: error instanceof Error ? error.message : String(error) });
     }
-    return binaryProbe();
+    return binaryInfoOf(await binaryProbe());
   });
   // C11 end
 
