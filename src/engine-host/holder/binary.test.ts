@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hostsDirOf, sessionHostBinary, sessionHostPaths, type SessionHostPaths } from './files';
-import { HostMessageSchema, HostStreamDecoder, SESSION_HOST_PROTOCOL, SESSION_HOST_VERSION, controlLine, stdinRecord, type ClientMessage, type HostItem } from './protocol';
+import { HostMessageSchema, HostStreamDecoder, RING_RECORD_OVERHEAD, SESSION_HOST_PROTOCOL, SESSION_HOST_VERSION, controlLine, stdinRecord, type ClientMessage, type HostItem } from './protocol';
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const HAVE_BINARY = existsSync(BINARY);
@@ -348,6 +348,32 @@ describe.skipIf(!HAVE_BINARY)('the session host binary', () => {
     expect(() => process.kill(grandchild, 0)).toThrow();
   });
 
+  it('keeps the ring bounded under a flood of blank lines', { timeout: LONG }, async () => {
+    const host = await startHost({ flags: ['--ring-cap-bytes', String(100 * RING_RECORD_OVERHEAD)] });
+    const w = await host.writer();
+    await launch(w, ['/bin/cat'], { read: false });
+    w.stdin(0, '\n'.repeat(50_000));
+    await w.expect('applied');
+    let ring: { firstSeq: number; lastSeq: number; bytes: number };
+    do {
+      ring = (await host.auth()).hello.ring as typeof ring;
+    } while (ring.lastSeq < 50_000 && (await sleep(20), true));
+    expect(ring.lastSeq - ring.firstSeq + 1).toBe(100);
+    expect(ring.bytes).toBe(0);
+  });
+
+  it('sends nothing after exit, even while a descendant holds the output pipe', { timeout: LONG }, async () => {
+    const host = await startHost();
+    const w = await host.writer();
+    await launch(w, ['/bin/sh', '-c', '(sleep 1.6; echo late) & echo early']); // the subshell outlives sh and the 1 s drain
+    expect((await w.record()).text).toBe('early');
+    await w.expect('exit');
+    await sleep(2_000);
+    expect(await w.next((item) => (item.kind === 'record' ? item : undefined), 'a record', [], 1).catch(() => null)).toBeNull();
+    const { hello } = await host.auth();
+    expect(hello.ring).toMatchObject({ lastSeq: 1 });
+  });
+
   it('ends the host when the linger after the exit ends', { timeout: LONG }, async () => {
     const host = await startHost({ flags: ['--linger-ms', '500'] });
     const w = await host.writer();
@@ -379,7 +405,8 @@ describe.skipIf(!HAVE_BINARY)('the session host binary', () => {
   });
 
   it('replays exactly from a sequence, and answers a gap below what the cap kept', { timeout: LONG }, async () => {
-    const host = await startHost({ flags: ['--ring-cap-bytes', '100'] });
+    const perRecord = 4 + RING_RECORD_OVERHEAD; // what each 4-byte line costs against the cap
+    const host = await startHost({ flags: ['--ring-cap-bytes', String(6 * perRecord)] });
     const w = await host.writer(); // it reads nothing: the ring alone keeps the output
     await launch(w, ['/bin/cat'], { read: false });
     for (let i = 1; i <= 30; i++) w.stdin((i - 1) * 5, `l${String(i).padStart(3, '0')}\n`); // 4-byte records
@@ -391,8 +418,7 @@ describe.skipIf(!HAVE_BINARY)('the session host binary', () => {
       await sleep(20);
     }
     const ring = hello.ring as { firstSeq: number; lastSeq: number; bytes: number };
-    expect(ring.bytes).toBeLessThanOrEqual(100);
-    expect(ring.firstSeq).toBeGreaterThan(1);
+    expect(ring).toEqual({ firstSeq: 25, lastSeq: 30, bytes: 6 * 4 }); // six records fit, payload bytes reported
 
     const exact = await host.writer(2);
     exact.send({ t: 'read', fromSeq: 28 });

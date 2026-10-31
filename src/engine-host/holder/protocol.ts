@@ -10,7 +10,8 @@ import * as z from 'zod';
 export const SESSION_HOST_PROTOCOL = 1;
 export const SESSION_HOST_VERSION = '1.0.0'; // `maws-session-host --version` prints `maws-session-host <it> protocol <major>`
 export const LINE_CAP = 64 * 1024 * 1024; // an output line past it is dropped with a `problem`
-export const RING_CAP = 8 * 1024 * 1024; // unacknowledged output the host keeps for a writer
+export const RING_CAP = 8 * 1024 * 1024; // unacknowledged output the host keeps for a writer, each record charged its bytes plus RING_RECORD_OVERHEAD
+export const RING_RECORD_OVERHEAD = 48; // native/session-host/ring RecordOverhead: so blank lines are bounded too
 export const STDIN_QUEUE_CAP = 64 * 1024 * 1024; // queued stdin bytes; one record of any valid size into an empty queue
 export const FRAME_CAP = LINE_CAP + 256; // a control line, or a record's header and bytes
 export const LINGER_MS = 10 * 60_000; // an exited child's host serves its exit this long, or until `release`
@@ -69,7 +70,8 @@ export const HostMessageSchema = z.discriminatedUnion('t', [
   z.looseObject({ t: z.literal('busy'), queued: z.number().int() }),
   z.looseObject({ t: z.literal('stdinClosed'), applied: z.number().int(), partial: z.number().int() }),
   z.looseObject({ t: z.literal('exit'), code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string() }),
-  z.looseObject({ t: z.literal('problem'), kind: z.string(), length: z.number().int(), stream: z.enum(['out', 'err']).optional() }),
+  // `line_budget` carries `length` and `stream`; `roster` (an entry write that failed, retried at the next state change) a `message`
+  z.looseObject({ t: z.literal('problem'), kind: z.string(), length: z.number().int().optional(), stream: z.enum(['out', 'err']).optional(), message: z.string().optional() }),
   z.looseObject({ t: z.literal('error'), message: z.string() }),
 ]);
 export type HostMessage = z.infer<typeof HostMessageSchema>;
@@ -86,55 +88,71 @@ export class HostStreamError extends Error {
 }
 
 // Splits the host's byte stream into items. A record's header names its length, and its bytes follow whatever they
-// hold; a line or record past `frameCap`, or a line that is not a JSON object with a string `t`, throws HostStreamError
-// (the connection is beyond repair: close it).
+// hold: the record's buffer is allocated once at its header and filled in place as chunks arrive, so a 64 MiB record
+// costs one copy however it is chunked. A line or record past `frameCap`, or a line that is not a JSON object with a
+// string `t`, throws HostStreamError (the connection is beyond repair: close it).
 export class HostStreamDecoder {
-  private pending: Buffer = Buffer.alloc(0);
-  private record: { stream: 'out' | 'err'; seq: number; len: number } | null = null;
+  private pending: Buffer = Buffer.alloc(0); // an unterminated line's start, held until its newline arrives
+  private record: { stream: 'out' | 'err'; seq: number; data: Buffer; filled: number } | null = null;
 
   constructor(private readonly frameCap: number = FRAME_CAP) {}
 
   push(chunk: Buffer): HostItem[] {
-    this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
     const items: HostItem[] = [];
+    const input = chunk;
+    let at = 0;
     for (;;) {
-      if (this.record) {
-        if (this.pending.length < this.record.len) break;
-        const { stream, seq, len } = this.record;
-        items.push({ kind: 'record', stream, seq, data: Buffer.from(this.pending.subarray(0, len)) });
-        this.pending = this.pending.subarray(len);
+      const record = this.record;
+      if (record) {
+        const take = Math.min(record.data.length - record.filled, input.length - at);
+        input.copy(record.data, record.filled, at, at + take);
+        record.filled += take;
+        at += take;
+        if (record.filled < record.data.length) break;
+        items.push({ kind: 'record', stream: record.stream, seq: record.seq, data: record.data });
         this.record = null;
         continue;
       }
-      const newline = this.pending.indexOf(0x0a);
+      if (at === input.length) break;
+      const newline = input.indexOf(0x0a, at);
       if (newline === -1) {
-        if (this.pending.length > this.frameCap) throw new HostStreamError(`a line over ${this.frameCap} bytes`);
+        const rest = input.subarray(at);
+        if (this.pending.length + rest.length > this.frameCap) throw new HostStreamError(`a line over ${this.frameCap} bytes`);
+        this.pending = this.pending.length === 0 ? Buffer.from(rest) : Buffer.concat([this.pending, rest]);
         break;
       }
-      const line = this.pending.subarray(0, newline).toString('utf8');
-      this.pending = this.pending.subarray(newline + 1);
-      let message: unknown;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        throw new HostStreamError(`a line that is not JSON: ${line.slice(0, 80)}`);
+      let lineBytes = input.subarray(at, newline);
+      if (this.pending.length > 0) {
+        lineBytes = Buffer.concat([this.pending, lineBytes]);
+        this.pending = Buffer.alloc(0);
       }
-      if (typeof message !== 'object' || message === null || typeof (message as { t?: unknown }).t !== 'string') {
-        throw new HostStreamError(`a line with no type: ${line.slice(0, 80)}`);
-      }
-      const typed = message as { t: string } & Record<string, unknown>;
-      if (typed.t === 'out' || typed.t === 'err') {
-        const { seq, len } = typed;
+      at = newline + 1;
+      if (lineBytes.length > this.frameCap) throw new HostStreamError(`a line over ${this.frameCap} bytes`);
+      const message = this.parseLine(lineBytes.toString('utf8'));
+      if (message.t === 'out' || message.t === 'err') {
+        const { seq, len } = message;
         if (typeof seq !== 'number' || typeof len !== 'number' || !Number.isInteger(len) || len < 0 || len > this.frameCap) {
-          throw new HostStreamError(`a record header out of range: ${line.slice(0, 80)}`);
+          throw new HostStreamError(`a record header out of range: ${JSON.stringify(message).slice(0, 80)}`);
         }
-        this.record = { stream: typed.t, seq, len };
+        this.record = { stream: message.t, seq, data: Buffer.allocUnsafe(len), filled: 0 };
         continue;
       }
-      items.push({ kind: 'control', message: typed });
+      items.push({ kind: 'control', message });
     }
-    if (this.pending.length === 0) this.pending = Buffer.alloc(0); // drop the reference to a consumed chunk
     return items;
+  }
+
+  private parseLine(line: string): { t: string } & Record<string, unknown> {
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      throw new HostStreamError(`a line that is not JSON: ${line.slice(0, 80)}`);
+    }
+    if (typeof message !== 'object' || message === null || typeof (message as { t?: unknown }).t !== 'string') {
+      throw new HostStreamError(`a line with no type: ${line.slice(0, 80)}`);
+    }
+    return message as { t: string } & Record<string, unknown>;
   }
 }
 

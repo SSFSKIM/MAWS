@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HostStreamDecoder, HostStreamError, controlLine, stdinRecord, type HostItem } from './protocol';
 
 const bytes = (s: string) => Buffer.from(s, 'utf8');
@@ -24,6 +24,27 @@ describe('the session host stream', () => {
       const items: HostItem[] = [];
       for (let at = 0; at < stream.length; at += size) items.push(...decoder.push(stream.subarray(at, at + size)));
       expect(items, `chunks of ${size}`).toEqual(whole);
+    }
+  });
+
+  it('fills a large record in place as its chunks arrive, never re-copying what came before', () => {
+    const size = 8 * 1024 * 1024;
+    const payload = Buffer.alloc(size);
+    for (let i = 0; i < size; i += 4096) payload[i] = i % 251;
+    const stream = Buffer.concat([bytes(`{"t":"out","seq":7,"len":${size}}\n`), payload, bytes('{"t":"hb"}\n')]);
+    const concat = vi.spyOn(Buffer, 'concat');
+    try {
+      const decoder = new HostStreamDecoder();
+      const items: HostItem[] = [];
+      for (let at = 0; at < stream.length; at += 16 * 1024) items.push(...decoder.push(stream.subarray(at, at + 16 * 1024)));
+      expect(items).toHaveLength(2);
+      expect(items[0]).toMatchObject({ kind: 'record', stream: 'out', seq: 7 });
+      expect((items[0] as { data: Buffer }).data.equals(payload)).toBe(true);
+      expect(items[1]).toEqual({ kind: 'control', message: { t: 'hb' } });
+      // 513 chunks: a decoder that joins each chunk to what it holds copies the record over and over
+      expect(concat.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally {
+      concat.mockRestore();
     }
   });
 
