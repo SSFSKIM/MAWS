@@ -30,7 +30,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing'] } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[] } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -49,6 +49,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
       if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
       emitted.push({ machine, name, payload: payload as Record<string, unknown> });
     },
+    laneOf: (machine, session) => (machine === MINI && options.laneA?.includes(session) ? 'A' : null),
     timing: { sendPendingMs: 60_000, ...options.timing },
     log: (line) => void logs.push(line),
   });
@@ -107,7 +108,7 @@ describe('acts', () => {
     l.link.onAct = settleWith({ state: 'done', result: { stillQueued: [], cancelled: [] } });
     expect(await l.cmd('session.interrupt', { appSessionId: APP, cancelEngineQueued: true })).toEqual({ ok: true, value: { stillQueued: [], cancelled: [] } });
     expect(l.link.acts.map((a) => a.request)).toEqual([
-      { action: 'session.interrupt', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, cancelEngineQueued: true }, executor: 'engine-host' },
+      { action: 'session.interrupt', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, cancelEngineQueued: true }, executor: 'engine-host', sendBy: expect.any(Number) },
     ]);
   });
 
@@ -129,7 +130,7 @@ describe('acts', () => {
     sub.sink.ended('unavailable');
     l.link.onAct = settleWith({ state: 'done', result: { status: 'ready', appSessionId: APP, launched: true, joined: false } });
     expect(await l.cmd('session.acquire', { appSessionId: APP, reason: 'send' })).toEqual({ ok: true, value: { status: 'ready', appSessionId: APP, launched: true, joined: false } });
-    expect(l.link.acts[0].request).toEqual({ action: 'session.acquire', args: { appSessionId: APP, reason: 'send' }, executor: 'machine' });
+    expect(l.link.acts[0].request).toEqual({ action: 'session.acquire', args: { appSessionId: APP, reason: 'send' }, executor: 'machine', sendBy: expect.any(Number) });
     expect(l.link.open()).toHaveLength(1); // no backoff waited
   });
 
@@ -150,8 +151,8 @@ describe('acts', () => {
     resumed.sink.snapshot({ epoch: 'L2', seq: 0 }, { status: statusOf(APP, 'L2') });
     expect(await sending).toEqual({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q1' } });
     expect(l.link.acts.map((a) => a.request)).toEqual([
-      { action: 'session.acquire', args: { appSessionId: APP, reason: 'send' }, executor: 'machine' },
-      { action: 'session.send', session: APP, context: { lane: 'B', launchId: 'L2', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, content: 'wake up' }, executor: 'engine-host' },
+      { action: 'session.acquire', args: { appSessionId: APP, reason: 'send' }, executor: 'machine', sendBy: expect.any(Number) },
+      { action: 'session.send', session: APP, context: { lane: 'B', launchId: 'L2', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, content: 'wake up' }, executor: 'engine-host', sendBy: expect.any(Number) },
     ]);
   });
 
@@ -222,28 +223,66 @@ describe('sends', () => {
     expect(l.logs.some((line) => line.includes('settled late') && line.includes('done'))).toBe(true);
   });
 
-  it('waits past the bound for an act never put on a channel, until the link’s hold ends it: A4’s words', async () => {
+  it('gives an act never put on a channel the bound as its `sendBy`, so the link’s hold ends it there: A4’s words', async () => {
     const l = lab();
     await live(l);
     l.link.onAct = (act) => act.move('waiting');
+    const made = Date.now();
     const sending = l.cmd('session.send', { appSessionId: APP, content: 'offline' });
-    await vi.advanceTimersByTimeAsync(60_500);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts[0].request.sendBy).toBe(made + 60_000);
     let answered = false;
     void sending.then(() => (answered = true));
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(answered).toBe(false);
-    l.link.acts[0].settle({ state: 'refused', reason: 'offline' });
+    await vi.advanceTimersByTimeAsync(1);
     expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
   });
 
-  it('answers an act that leaves `waiting` after the bound at once with the pending words', async () => {
+  it('keeps a resumed send inside the original bound: the resume’s time is not given back, and a send made at the bound is not made', async () => {
+    const l = lab({ timing: { sendPendingMs: 1000 } });
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open()[0].sink.ended('unavailable');
+    const made = Date.now();
+    const sending = l.cmd('session.send', { appSessionId: APP, content: 'hello' });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.acquire']);
+    l.link.acts[0].settle({ state: 'done', result: { status: 'ready', appSessionId: APP, launched: true, joined: false } });
+    l.link.onAct = (act) => act.move('waiting'); // the channel drops as the send is made
+    await vi.advanceTimersByTimeAsync(0);
+    const resumed = l.link.open()[0];
+    resumed.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    resumed.sink.snapshot({ epoch: 'L2', seq: 0 }, { status: statusOf(APP, 'L2') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts[1].request).toMatchObject({ action: 'session.send', sendBy: made + 1000 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    expect(l.link.acts[1].settled).toEqual({ state: 'refused', reason: 'offline' });
+
+    // A resume whose first status comes only at the bound: the send is not made at all.
+    l.link.onAct = () => {};
+    resumed.sink.ended('unavailable');
+    const late = l.cmd('session.send', { appSessionId: APP, content: 'too late' });
+    await vi.advanceTimersByTimeAsync(0);
+    const acquire = l.link.acts.at(-1)!;
+    expect(acquire.request.action).toBe('session.acquire');
+    await vi.advanceTimersByTimeAsync(999);
+    acquire.settle({ state: 'done', result: { status: 'ready', appSessionId: APP, launched: false, joined: true } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await late).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini didn’t resume the session in time' } });
+    expect(l.link.acts.filter((a) => a.request.action === 'session.send')).toHaveLength(1);
+  });
+
+  it('answers an act put on a channel just before the bound with the pending words at the bound', async () => {
     const l = lab();
     await live(l);
     l.link.onAct = (act) => act.move('waiting');
     const sending = l.cmd('session.send', { appSessionId: APP, content: 'late channel' });
-    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.advanceTimersByTimeAsync(59_900);
     l.link.acts[0].move('sent');
-    expect(await sending).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await sending).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the message but hasn’t confirmed it; check the transcript' } });
+    expect(l.link.acts[0].settled).toBeNull();
   });
 });
 
@@ -285,6 +324,28 @@ describe('the tabs and the links', () => {
     l.setLinks(new Map());
     expect(sub.closed).toBe(true);
     expect(l.of('remote.session').at(-1)).toMatchObject({ address: APP, stream: 'ended', reason: 'the link to mini closed' });
+  });
+
+  it('never places a tab of a session the org rows list as lane A: no record read, no subscription', async () => {
+    const l = lab({ tabs: ['la-1', APP], laneA: ['la-1'] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.map((c) => (c.input as { appSessionId: string }).appSessionId)).toEqual([APP]);
+    expect(l.link.open().map((s) => s.request.session.id)).toEqual([APP]);
+  });
+
+  it('says a held session’s state again after a page’s `session.get` of it, for a page that just subscribed (a reload, a second window)', async () => {
+    const l = lab();
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { queue: { entries: [], paused: false, pauseReason: null }, pendingItems: [], catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 } });
+    const said = l.emitted.length;
+    expect(await l.cmd('session.get', { appSessionId: APP })).toEqual({ ok: true, value: 'base' }); // the read itself is the manager's
+    expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session']);
+    expect(l.emitted.at(-1)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
+    // Nothing for a session this app doesn't hold, or another machine's.
+    const before = l.emitted.length;
+    await l.cmd('session.get', { appSessionId: 'app-elsewhere' });
+    await l.cmd('session.get', { appSessionId: APP }, OTHER);
+    expect(l.emitted).toHaveLength(before);
   });
 
   it('stops: every subscription closed', async () => {

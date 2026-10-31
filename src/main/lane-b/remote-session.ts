@@ -22,6 +22,8 @@
 //   while the tab is open, so a session resumed by anyone streams within the backoff (`kick` subscribes at once, after a
 //   resume this app asked for). `removed` and `closed` end it for good; any other end ends the stream with its reason.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
+// - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
+//   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
@@ -94,6 +96,8 @@ export class RemoteSession {
   #waiters = new Set<() => void>();
   #offs: Array<() => void> = [];
   #said = '';
+  /** The last queue, catalog (with its launch) and waiting items the stream gave, said again by a replay. */
+  #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -164,6 +168,18 @@ export class RemoteSession {
       }, Math.max(0, deadline - now()));
       this.#waiters.add(done);
     });
+  }
+
+  /** Says again what a page that just subscribed missed: the record, the last of each part, and `remote.session`. */
+  replay(): void {
+    const app = this.state.app;
+    if (this.state.record !== null) this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
+    if (this.state.status !== null) this.#emit('session.status', { appSessionId: app, status: this.state.status });
+    const { queue, catalog, items } = this.#lastParts;
+    if (queue !== undefined) this.#emit('session.queue', { ...queue, appSessionId: app });
+    if (catalog !== undefined) this.#emit('session.catalogChanged', { appSessionId: app, ...catalog });
+    if (items !== undefined) this.#emit('attention.changed', { appSessionId: app, items });
+    this.publish(true);
   }
 
   /** `remote.session` now, if it changed since it was last said (`force`: said whatever). */
@@ -298,14 +314,21 @@ export class RemoteSession {
       if (typeof value.status.launchId === 'string') this.state.launch = value.status.launchId;
       this.#emit('session.status', { appSessionId: app, status: value.status });
     }
-    if (isObject(value.queue)) this.#emit('session.queue', { ...value.queue, appSessionId: app });
-    if (isObject(value.catalog)) this.#emit('session.catalogChanged', { appSessionId: app, launchId, catalog: value.catalog });
+    if (isObject(value.queue)) {
+      this.#lastParts.queue = value.queue;
+      this.#emit('session.queue', { ...value.queue, appSessionId: app });
+    }
+    if (isObject(value.catalog)) {
+      this.#lastParts.catalog = { launchId, catalog: value.catalog };
+      this.#emit('session.catalogChanged', { appSessionId: app, launchId, catalog: value.catalog });
+    }
     if (Array.isArray(value.pendingItems)) {
       const items: AttentionItem[] = [];
       for (const raw of value.pendingItems) {
         const read = readTolerant(AttentionItemSchema, raw);
         if (read.ok && WAITING.has(read.value.state)) items.push(read.value);
       }
+      this.#lastParts.items = items;
       this.#emit('attention.changed', { appSessionId: app, items });
     }
   }

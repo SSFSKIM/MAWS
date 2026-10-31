@@ -387,9 +387,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // P5 O7 M2: lane B's acts, and the reads the pane makes that no offer row carries, for a machine O7's link reaches are
   // remote lane B's (src/main/lane-b/remote.ts), around lane A's; its subscriptions follow the tabs of that machine's
   // sessions. It writes no file either.
+  // The org rows (made below, over the spine's view) say which of a machine's sessions are lane A: O9's, never placed here.
+  let laneOfRow: (machine: MachineRef, session: string) => 'A' | 'B' | null = () => null;
   const remoteLaneB = createRemoteLaneB({
     local,
     layout,
+    laneOf: (machine, session) => laneOfRow(machine, session),
     remote: (ref) => machines.remote(ref),
     onRemote: (listener) => machines.onRemote(listener),
     emit: (machine, name, payload) => void emitFrom(machine, name, payload),
@@ -500,9 +503,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     localProjects: async () => view.projects(),
     onLocalProjects: (listener) => view.on('projects', () => listener()),
     files: orgDir,
-    emit: (rows) => void emit('org.rows.changed', rows),
+    emit: (rows) => {
+      void emit('org.rows.changed', rows);
+      remoteLaneB.refresh(); // P5 O7 M2: a row's lane decides whether its tab is remote lane B's
+    },
     log: (line) => console.log(`[org-rows] ${line}`),
   });
+  laneOfRow = (machine, session) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === session)?.lane ?? null;
+  void remoteRows.loaded.then(() => remoteLaneB.refresh());
   registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   const stopChatPanels = registerChatPanels(layout, view, local); // P5 O6 M2: local; P5 O3-C (reader R4): the view
   shutdown.add('chat panels', stopChatPanels);

@@ -5,6 +5,9 @@
 // the sessions of other machines, kept only for the machines an RL2 link reaches (a socket-linked profile's sessions
 // take the manager's path, and their events come over that link).
 //
+// A tab of a session the org rows list as lane A is O9's adapter's: it is not held here, and one held is let go at once
+// once the rows say so.
+//
 // `open` is called for every address a tab holds at each read (opening is the adapter's to make idempotent, and a
 // re-read is how a later click retries a session that could not be placed); `close` once, after the linger, or at once
 // when the machine stops being reached over RL2 (`refresh`, after its link closed).
@@ -39,13 +42,15 @@ export interface RemoteInterestDeps {
   local: MachineRef;
   /** Whether an RL2 link reaches the machine now. */
   isRemote(machine: MachineRef): boolean;
+  /** Whether the org rows list the session as lane A. */
+  isLaneA(machine: MachineRef, session: string): boolean;
   lingerMs: number;
   open(machine: MachineRef, app: string): void;
   close(machine: MachineRef, app: string): void;
 }
 
 export interface RemoteInterest {
-  /** Reads the tabs again: the roster of RL2 machines changed. */
+  /** Reads the tabs again: the roster of RL2 machines, or the org rows' lanes, changed. */
   refresh(): void;
   stop(): void;
 }
@@ -60,6 +65,7 @@ export function createRemoteInterest(deps: RemoteInterestDeps): RemoteInterest {
     for (const [machine, apps] of remoteSessionsInTabs(deps.layout.get('main.tabs'), deps.local)) {
       if (!deps.isRemote(machine)) continue;
       for (const app of apps) {
+        if (deps.isLaneA(machine, app)) continue;
         const key = `${machine}/${app}`;
         now.add(key);
         const entry = held.get(key);
@@ -73,7 +79,7 @@ export function createRemoteInterest(deps: RemoteInterestDeps): RemoteInterest {
     }
     for (const [key, entry] of held) {
       if (now.has(key)) continue;
-      if (!deps.isRemote(entry.machine)) {
+      if (!deps.isRemote(entry.machine) || deps.isLaneA(entry.machine, entry.app)) {
         if (entry.linger !== null) clearTimeout(entry.linger);
         held.delete(key);
         deps.close(entry.machine, entry.app);

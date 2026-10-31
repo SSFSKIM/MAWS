@@ -45,19 +45,30 @@ describe('createRemoteInterest', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  function harness(value: unknown) {
+  function harness(value: unknown, laneA: Set<string> = new Set()) {
     const store = layout(value);
     const calls: string[] = [];
     const interest = createRemoteInterest({
       layout: store,
       local: LOCAL,
       isRemote: (machine) => machine === MINI,
+      isLaneA: (machine, app) => laneA.has(`${machine}/${app}`),
       lingerMs: 10_000,
       open: (machine, app) => void calls.push(`open ${machine}/${app}`),
       close: (machine, app) => void calls.push(`close ${machine}/${app}`),
     });
     return { store, calls, interest };
   }
+
+  it('leaves a tab of a session the org rows list as lane A to lane A’s adapter, and lets one go at once when the rows say so', () => {
+    const laneA = new Set([`${MINI}/la-1`]);
+    const { calls, interest } = harness(tabs(session(at(MINI, 'la-1')), session(at(MINI, 'b')), session(at(MINI, 'unlisted'))), laneA);
+    expect(calls).toEqual([`open ${MINI}/b`, `open ${MINI}/unlisted`]);
+    calls.length = 0;
+    laneA.add(`${MINI}/unlisted`); // the rows now list it as lane A
+    interest.refresh();
+    expect(calls).toEqual([`open ${MINI}/b`, `close ${MINI}/unlisted`]);
+  });
 
   it('opens an RL2 machine’s tabs at once, never a socket-linked or the local machine’s, and again at each write (opening is idempotent)', () => {
     const { store, calls } = harness(tabs(session(at(MINI, 'a')), session(at(SOCKET, 'd')), session(at(LOCAL, 'c'))));
@@ -87,7 +98,7 @@ describe('createRemoteInterest', () => {
     let rl2 = new Set<MachineRef>();
     const store = layout(tabs(session(at(SOCKET, 'd'))));
     const calls: string[] = [];
-    const interest = createRemoteInterest({ layout: store, local: LOCAL, isRemote: (m) => rl2.has(m), lingerMs: 10_000, open: (m, app) => void calls.push(`open ${m}/${app}`), close: (m, app) => void calls.push(`close ${m}/${app}`) });
+    const interest = createRemoteInterest({ layout: store, local: LOCAL, isRemote: (m) => rl2.has(m), isLaneA: () => false, lingerMs: 10_000, open: (m, app) => void calls.push(`open ${m}/${app}`), close: (m, app) => void calls.push(`close ${m}/${app}`) });
     expect(calls).toEqual([]);
     rl2 = new Set([SOCKET]);
     interest.refresh();

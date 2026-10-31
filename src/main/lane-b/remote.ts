@@ -72,6 +72,12 @@ export interface RemoteLaneBDeps {
   onRemote(listener: (machines: readonly MachineRef[]) => void): () => void;
   /** emitFrom. */
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
+  /**
+   * The lane the org rows list a machine's session in, or null for one they don't (yet): a tab of a lane A session is
+   * O9's adapter's and is never placed here. A session not listed is taken as lane B (a session this app just resumed or
+   * spawned may be listed later). `refresh` reads the tabs again once the rows changed.
+   */
+  laneOf?(machine: MachineRef, session: string): 'A' | 'B' | null;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -81,6 +87,13 @@ export interface RemoteLaneB {
   /** Whether the adapter takes `name` for an RL2 machine: §L's lane B acts and the substitutes. */
   handles(name: CommandName): boolean;
   dispatch(link: RemoteLink, name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
+  /** The tabs read again: the org rows (`laneOf`) changed. */
+  refresh(): void;
+  /**
+   * Says a held session's record, last parts and `remote.session` again, for a page that has just subscribed: the pane's
+   * own `session.get` is that page's announcement (`routeLaneB`), made after it subscribed (C1's subscribe-then-read).
+   */
+  replay(machine: MachineRef, app: string): void;
   /** Every subscription closed: before the links, in the shutdown order. */
   stop(): void;
 }
@@ -100,11 +113,19 @@ export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['atte
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
 export const NOT_OPEN = 'open the session to drive it';
 
-/** The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to `base`. */
+/**
+ * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
+ * `base`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
+ * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
+ */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
-  return (machine, name, input, ctx) => {
+  return async (machine, name, input, ctx) => {
     const link = laneB.handles(name) ? remote(machine) : null;
-    return link === null ? base(machine, name, input, ctx) : laneB.dispatch(link, name, input, ctx);
+    if (link !== null) return laneB.dispatch(link, name, input, ctx);
+    const result = await base(machine, name, input, ctx);
+    const app = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
+    if (name === 'session.get' && typeof app === 'string' && remote(machine) !== null) laneB.replay(machine, app);
+    return result;
   };
 }
 
@@ -164,7 +185,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (lanes?.get(app) === lane) lanes.delete(app);
   }
 
-  const interest = createRemoteInterest({ layout: deps.layout, local: deps.local, isRemote: (machine) => deps.remote(machine) !== null, lingerMs: timing.unsubscribeLingerMs, open, close });
+  const interest = createRemoteInterest({
+    layout: deps.layout,
+    local: deps.local,
+    isRemote: (machine) => deps.remote(machine) !== null,
+    isLaneA: (machine, session) => deps.laneOf?.(machine, session) === 'A',
+    lingerMs: timing.unsubscribeLingerMs,
+    open,
+    close,
+  });
   const offRemote = deps.onRemote(() => {
     for (const [machine, { link, lanes }] of [...machines]) {
       if (deps.remote(machine) === link) continue;
@@ -204,7 +233,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   /** A `machine` act: placed by its args, no session, no context. A ready resume subscribes an idle session at once. */
   async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: name, args: fields, executor: 'machine' });
+    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline });
     const result = await settle(link, name, handle, deadline, String(fields.appSessionId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
     return result;
@@ -231,6 +260,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   async function engineAct(link: RemoteLink, lane: Lane, name: CommandName, fields: Fields, deadline: number): Promise<CommandResult<CommandName>> {
     const app = lane.session.state.app;
     let context = lane.session.context();
+    const resuming = context === null;
     if (context === null) {
       const resume = await resumed(link, app, lane, deadline);
       if ('ok' in resume) return resume;
@@ -245,7 +275,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       requestDigest = requestDigestOf(app, event);
       if (requestDigest === null) return failure('internal', `${name}: the request on ${link.name} has no digest to answer it by`);
     }
-    const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args: fields, executor: 'engine-host', ...(requestDigest !== undefined && { requestDigest }) });
+    // One bound from the act's turn: what the resume (or the request's read) spent is not given back, so an act made at
+    // the deadline is not made, and one made before it goes out by it or not at all (`sendBy`: no outbox, A4).
+    if (now() >= deadline) return resuming ? failure('host_unavailable', `Not sent: ${link.name} didn’t resume the session in time`) : outcomeAsResult(name, link.name, { state: 'refused', reason: 'offline' });
+    const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args: fields, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }) });
     return settle(link, name, handle, deadline, app);
   }
 
@@ -310,6 +343,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         deps.log(`lane B: ${name} for ${link.name} failed: ${(error as Error).message}`);
         return failure('internal', (error as Error).message);
       }
+    },
+    refresh: () => interest.refresh(),
+    replay(machine, app) {
+      const lane = machines.get(machine)?.lanes.get(app);
+      if (lane?.open === true) lane.session.replay();
     },
     stop() {
       interest.stop();

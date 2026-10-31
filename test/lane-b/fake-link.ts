@@ -124,6 +124,11 @@ export class FakeLink implements RemoteLink {
     const act = new FakeAct(request);
     this.acts.push(act);
     this.onAct(act);
+    // As the link holds it: one never put on a channel by its `sendBy` is refused `offline` then.
+    if (request.sendBy !== undefined)
+      setTimeout(() => {
+        if (act.settled === null && act.progress() === 'waiting') act.settle({ state: 'refused', reason: 'offline' });
+      }, Math.max(0, request.sendBy - Date.now()));
     return act;
   }
 

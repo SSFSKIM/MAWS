@@ -213,6 +213,31 @@ describe('an idle session', () => {
 });
 
 describe('remote.session', () => {
+  it('closes every control on a session-only `removed` (the right on it withdrawn, the link still up), in the session’s words', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('removed');
+    const ended = l.lastState()!;
+    expect(ended).toMatchObject({ stream: 'ended', reason: 'mini no longer lets you open this session', link: { state: 'up', refusal: null } });
+    expect(Object.values(ended.controls as Record<string, { available: boolean }>).every((c) => !c.available)).toBe(true);
+  });
+
+  it('says the record, the last of each part and its state again at `replay`, for a page that just subscribed', async () => {
+    const l = lab();
+    await opened(l);
+    const said = l.emitted.length;
+    l.session.replay();
+    expect(l.names().slice(said)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session']);
+    expect(l.emitted.slice(said).map((e) => e.payload)).toEqual([
+      { record: record(APP), cause: 'live', revision: expect.any(Number) },
+      { appSessionId: APP, status: statusOf('L1') },
+      { ...queue, appSessionId: APP },
+      { appSessionId: APP, launchId: 'L1', catalog },
+      { appSessionId: APP, items: [] },
+      l.lastState(),
+    ]);
+  });
+
   it('follows the link’s state and caps, said once per change', async () => {
     const l = lab();
     await opened(l);

@@ -91,6 +91,8 @@ export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream
   if (link.refusal === 'removed') return `This Mac is no longer allowed on ${machine}`;
   if (link.refusal !== null) return `${machine} refused this device (${link.refusal})`;
   if (state.ended === 'closed') return `the link to ${machine} closed`;
+  // The session's own right withdrawn (a share or grant taken back) while the device stays allowed on the machine.
+  if (state.ended === 'removed') return `${machine} no longer lets you open this session`;
   if (state.record === null) return state.stream === 'ended' ? `${machine} can’t place this session` : `Opening on ${machine}…`;
   return null;
 }

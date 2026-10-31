@@ -3,7 +3,8 @@
 // identity; a step-up goes only through the session's signer (RL §5.6).
 //
 // - Sent, or resealed, only within ACT_FRESH_MS of its creation (a step-up act's window runs from its signature, the
-//   time the person confirmed it). One the link could not put on a channel in that window resolves `refused offline` and
+//   time the person confirmed it), and never after the caller's own `sendBy` (P5 O7 M2: a send's pending budget, which a
+//   resume may have spent most of). One the link could not put on a channel in that window resolves `refused offline` and
 //   is never sent.
 // - An act is *ambiguous* once a transmission of it may have reached its executing side without its answer reaching the
 //   link: its channel was lost after it went and before a terminal answer, or ACK_TIMEOUT_MS passed. The endpoint checks
@@ -43,6 +44,8 @@ export interface ActRequest {
   stepUp?: 'required' | 'if-asked' | 'never';
   /** Default by name: 'sminos.' → 'sminos', 'endpoint.' → 'endpoint', else 'engine-host'. */
   executor?: Executor;
+  /** Epoch ms past which no copy goes out or is resealed, inside ACT_FRESH_MS (P5 O7 M2: the caller's bound). */
+  sendBy?: number;
 }
 /** waiting: not yet on a channel; unknown: lost track, querying. */
 export type ActProgress = 'waiting' | 'sent' | 'accepted' | 'unknown';
@@ -87,6 +90,8 @@ type Entry = {
   signing: boolean;
   /** When its send window began: its creation, or its signature. */
   windowFrom: number;
+  /** The caller's end of the window (`ActRequest.sendBy`), if any. */
+  sendBy: number | null;
   /** A copy went out with no definitive answer since: it may run. */
   outstanding: boolean;
   /** A copy may have reached the executing side without its answer reaching the link. */
@@ -166,6 +171,7 @@ export class ActTable {
       signed: false,
       signing: false,
       windowFrom: createdAt,
+      sendBy: request.sendBy ?? null,
       outstanding: false,
       ambiguous: false,
       acked: false,
@@ -335,14 +341,18 @@ export class ActTable {
 
   #armWindow(entry: Entry): void {
     this.#clearTimers(entry);
-    const left = entry.windowFrom + this.#deps.timing.ACT_FRESH_MS - this.#deps.now();
+    const left = this.#windowEnd(entry) - this.#deps.now();
     this.#after(entry, Math.max(0, left), () => {
       if (!entry.outstanding && !entry.signing) this.#settle(entry, { state: 'refused', reason: 'offline' });
     });
   }
 
   #inWindow(entry: Entry): boolean {
-    return this.#deps.now() - entry.windowFrom < this.#deps.timing.ACT_FRESH_MS;
+    return this.#deps.now() < this.#windowEnd(entry);
+  }
+
+  #windowEnd(entry: Entry): number {
+    return Math.min(entry.windowFrom + this.#deps.timing.ACT_FRESH_MS, entry.sendBy ?? Infinity);
   }
 
   /** Whether the current channel's peer reads `entry`'s executor; when it doesn't, the act settles (see the header). */

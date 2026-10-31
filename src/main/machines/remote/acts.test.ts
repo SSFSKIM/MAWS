@@ -264,6 +264,33 @@ describe('after a lost channel', () => {
     expect(h.acts().filter((m) => m.action.opId === held.opId)).toEqual([]);
     expect(handle.progress()).not.toBe('waiting');
   });
+
+  it('ends the held window at the caller’s `sendBy` (P5 O7 M2: a send’s pending budget): refused `offline` then, never sent after', async () => {
+    const h = await harness();
+    h.drop();
+    const handle = h.table.act({ ...SEND, sendBy: Date.now() + 1000 }, null);
+    expect(handle.progress()).toBe('waiting');
+    vi.advanceTimersByTime(999);
+    expect(await settled(handle.outcome)).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(await settled(handle.outcome)).toEqual({ state: 'refused', reason: 'offline' });
+    h.reconnect();
+    expect(h.acts()).toEqual([]);
+    // One whose `sendBy` has already passed is never sent, even on a current channel.
+    const late = h.table.act({ ...SEND, sendBy: Date.now() }, null);
+    expect(await settled(late.outcome)).toEqual({ state: 'refused', reason: 'offline' });
+    expect(h.acts()).toEqual([]);
+  });
+
+  it('reseals an act lost before its ack only before its `sendBy`; after it, the act is queried', async () => {
+    const h = await harness();
+    const handle = h.table.act({ ...SEND, sendBy: Date.now() + 1000 }, null);
+    h.drop();
+    vi.advanceTimersByTime(1000);
+    h.reconnect();
+    expect(h.acts().filter((m) => m.action.opId === handle.opId)).toHaveLength(1); // the first copy only
+    expect(h.queries()).toHaveLength(1);
+  });
 });
 
 describe('step-up', () => {
