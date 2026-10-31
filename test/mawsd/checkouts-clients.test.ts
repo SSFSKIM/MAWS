@@ -7,12 +7,11 @@
 // on its bus as the spine's root composes them, over a fake view holding one session in a scratch repository.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { createConnection, createServer, type Server } from 'node:net';
+import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SocketPort } from '@shared/host/socket-port';
-import { SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import { WIRE_MINOR } from '@shared/ipc/wire';
@@ -24,13 +23,12 @@ import { record } from '../support/builders';
 import { captureConsole } from '../support/console-capture';
 import { fakeSpineView } from '../support/fake-spine-view';
 import { FakeEngineHost } from './fake-engine-host';
+import { connectFront } from './front-client';
 
 const TOKEN = 'checkouts-clients-token';
 const IDENTITY: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId: 'test', capabilities: [], wire: 'test', pid: process.pid, startedAt: new Date().toISOString() };
 const MACHINE = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
 const APP = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
-
-type Evt = { t: 'evt'; name: string; payload: Record<string, unknown> };
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -78,58 +76,7 @@ async function lab() {
   });
   await new Promise<void>((resolve) => server.listen(path, resolve));
   cleanups.push(() => (checkouts.stop(), front.close(), server.close(), rmSync(dir, { recursive: true, force: true })));
-  return { repository, answered, connect: (appPid: number) => connect(path, appPid) };
-}
-
-// A machine.sock client: the hello, the welcome, `ready`, then C1's envelope over the socket port; each request names
-// the page it is for, and `gone` tells the front that page ended
-async function connect(path: string, appPid: number) {
-  const socket = createConnection(path);
-  cleanups.push(() => socket.destroy());
-  const rest = await new Promise<Buffer>((resolve, reject) => {
-    const splitter = splitLines(
-      (line) => {
-        if ((JSON.parse(line) as { t: string }).t !== 'welcome') reject(new Error(`no welcome: ${line}`));
-        return 'stop';
-      },
-      () => reject(new Error('a handshake line past the cap')),
-    );
-    const onData = (chunk: Buffer) => {
-      splitter.push(chunk);
-      socket.off('data', onData);
-      resolve(splitter.rest());
-    };
-    socket.on('data', onData);
-    socket.on('connect', () => socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token: TOKEN, minor: WIRE_MINOR, build: 'test', capabilities: [], appPid })}\n`));
-  });
-  const port = new SocketPort(socket, rest, { log: () => {} });
-  const events: Evt[] = [];
-  const answers = new Map<string, Record<string, unknown>>();
-  port.on('message', ({ data }) => {
-    const message = data as { t?: string; id?: string };
-    if (message.t === 'evt') events.push(data as Evt);
-    else if (message.t === 'res') answers.set(message.id!, data as Record<string, unknown>);
-  });
-  port.start();
-  port.postMessage({ t: 'ready' });
-  let next = 0;
-  const send = (name: string, input: unknown, page: string) => {
-    const id = `r${++next}`;
-    port.postMessage({ t: 'req', id, name, input, client: page });
-    return id;
-  };
-  return {
-    events,
-    of: (name: string) => events.filter((event) => event.name === name),
-    send,
-    async request(name: string, input: unknown, page: string): Promise<Record<string, unknown>> {
-      const id = send(name, input, page);
-      await vi.waitFor(() => expect(answers.has(id)).toBe(true), { timeout: 10_000 });
-      return answers.get(id)!;
-    },
-    gone: (page: string) => port.postMessage({ t: 'clientGone', client: page }),
-    leave: () => socket.destroy(),
-  };
+  return { repository, answered, connect: (appPid: number) => connectFront(path, TOKEN, appPid, cleanups) };
 }
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

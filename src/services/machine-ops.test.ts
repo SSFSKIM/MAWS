@@ -68,6 +68,28 @@ describe('machine.op', () => {
     for (const name of ['git.status', 'git.watch', 'scm.status', 'files.read', 'files.readResolved']) expect(claimable(name), name).toBe(false);
   });
 
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 8): the connectors' and delivery's
+  // commands, once machine's, by their grade: every machine-admin name, reads included; no view-graded or internal one
+  it('claims the connectors’ and delivery’s machine-admin names, and none graded view or internal', () => {
+    const admin = [
+      'connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh', 'connectors.visibility', 'connectors.close',
+      'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel',
+      'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
+      'delivery.status', 'delivery.connect', 'delivery.cancel', 'delivery.receipts',
+    ];
+    for (const name of admin) expect(claimable(name), name).toBe(true);
+    for (const name of ['artifacts.connectorGrants', 'connectors.windowShown', 'connectors.adoptGrant', 'delivery.deliver', 'delivery.send']) expect(claimable(name), name).toBe(false);
+  });
+
+  it('runs a connector grant once and answers a replayed op id with its stored result', async () => {
+    const { ops, invoke } = lab(vi.fn<Invoke>(async () => ({ ok: true, value: { ok: true, grant: { server: 'notes', tool: 'search', mode: 'read' } } })));
+    const input = { opId: 'op-g', opCreated: now(), claim: CLAIM, name: 'artifacts.grantConnectorTool', input: { artifactId: '11111111-1111-4111-8111-111111111111', tool: { server: 'notes', tool: 'search', mode: 'read' } } };
+    const first = await ops.op(input, CONTEXT);
+    expect(first).toMatchObject({ state: 'done' });
+    expect(await ops.op(input, CONTEXT)).toEqual(first);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it('claims an act whose grade follows its effect (session.update)', async () => {
     const { ops, invoke } = lab();
     expect(await ops.op({ opId: 'op-u', opCreated: now(), claim: CLAIM, name: 'session.update', input: { appSessionId: 'app-1', patch: { pinned: true } } }, CONTEXT)).toMatchObject({ state: 'done' });

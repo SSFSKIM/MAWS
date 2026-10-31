@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
-import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
+import { endableClientRef } from '@shared/ipc/client';
 import { composeConnectors } from '.';
 import { project, record } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
