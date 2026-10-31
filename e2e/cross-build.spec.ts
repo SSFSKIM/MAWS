@@ -202,14 +202,21 @@ function inputsOf(s: Scratch): Record<string, unknown> {
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
 type Answer = { ok: true } | { ok: false; code: string; message: string };
-const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }): Answer => (result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: result.error!.message });
+// P5 O4 M2: the ids a sample mints, fresh on each probe so a call on one supervisor leaves nothing the next one meets (the
+// same server answers both: a lease, a run or a grant under a reused id would be found the second time); a refusal that
+// names one (`no artifact <id>`) is compared with each probe's own id in its place.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const mintedIds = (value: unknown): string[] =>
+  typeof value === 'string' ? (UUID.test(value) ? [value] : []) : Array.isArray(value) ? value.flatMap(mintedIds) : isSchema(value) ? Object.values(value).flatMap(mintedIds) : [];
+const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }, input: unknown): Answer =>
+  result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: mintedIds(input).reduce((message, id) => message.replaceAll(id, '<sampled id>'), result.error!.message) };
 
 // Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
 async function probe(page: Page, newer: Build, older: Build, inputs: Record<string, unknown>): Promise<Map<string, Answer>> {
   const answers = new Map<string, Answer>();
   for (const name of addedCommands(newer, older).filter((name) => !newer.mainOnly.has(name))) {
     const input = name in inputs ? inputs[name] : sampleOf(commandOf(newer, name)!.input);
-    answers.set(name, answerOf(await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const)));
+    answers.set(name, answerOf(await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const), input));
   }
   return answers;
 }
