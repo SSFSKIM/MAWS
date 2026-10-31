@@ -28,7 +28,7 @@
 //   target, broadcast as it is made, for the header and the library's row. No delivery record persists.
 import { randomUUID } from 'node:crypto';
 import { constants, createWriteStream } from 'node:fs';
-import { mkdtemp, open, realpath, rm, type FileHandle } from 'node:fs/promises';
+import { lstat, mkdtemp, open, realpath, rm, unlink, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { basename, dirname, extname, join, normalize } from 'node:path';
@@ -314,8 +314,27 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     try {
       return await send(input, admitted, copies);
     } finally {
+      await removeAdmitted(admitted, input.target);
+      for (const directory of copies) await rm(directory, { recursive: true, force: true }).catch(() => log(`a copy of an export sent to ${input.target} was not removed`));
+    }
+  }
+
+  // The admitted export's own file, unlinked only while its path still names that file (its device and inode, as the
+  // descriptor reads them); a directory or another file in its place is left, and said. The descriptor closes last.
+  async function removeAdmitted(admitted: AdmittedExport, target: string): Promise<void> {
+    try {
+      const own = await admitted.file.stat();
+      const now = await lstat(admitted.path).catch(() => null);
+      if (now === null) return;
+      if (!now.isFile() || now.dev !== own.dev || now.ino !== own.ino) {
+        log(`the export sent to ${target} was replaced meanwhile: what is in its place was left`);
+        return;
+      }
+      await unlink(admitted.path);
+    } catch {
+      log(`an export sent to ${target} was not removed`);
+    } finally {
       await admitted.file.close().catch(() => {});
-      for (const path of [admitted.path, ...copies]) await rm(path, { recursive: true, force: true }).catch(() => log(`an export sent to ${input.target} was not removed`));
     }
   }
 

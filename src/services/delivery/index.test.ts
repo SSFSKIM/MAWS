@@ -10,7 +10,7 @@
 // under `<profile>/artifacts/<artifactId>/exports/` in the export grammar for the format and revision, sends it and
 // removes it whatever the answer; a path it does not admit is left where it is, nothing sent. A cancel that arrives
 // before its run is a tombstone the run consumes; one for an ended run answers false.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -465,11 +465,38 @@ describe('an export replaced after its admission', () => {
     return { answer: await answer, exportPath };
   }
 
+  // the re-review's finding: the cleanup removes the admitted file alone, never what took its place
+  async function replacedDuring(replace: (exportPath: string) => void) {
+    const exportPath = plant('docx', 7, ART, 'intended export');
+    dispatch.mockImplementationOnce(async () => {
+      rmSync(exportPath);
+      replace(exportPath);
+      return { ok: true, value: { artifact } };
+    });
+    const answer = await call('delivery.deliver', { runId: RUN(), target: 'drive', artifactId: ART, format: 'docx', destination: { kind: 'default' }, exportPath, revision: 7, title: 'Quarterly memo' });
+    return { answer, exportPath };
+  }
+
+  it('leaves a directory put in the export’s place, and everything in it', async () => {
+    const { answer, exportPath } = await replacedDuring((path) => {
+      mkdirSync(path);
+      writeFileSync(join(path, 'sentinel'), 'kept');
+    });
+    expect(answer).toMatchObject({ ok: true });
+    expect(readFileSync(join(exportPath, 'sentinel'), 'utf8')).toBe('kept');
+  });
+
+  it('leaves another file put in the export’s place', async () => {
+    const { answer, exportPath } = await replacedDuring((path) => writeFileSync(path, 'another file'));
+    expect(answer).toMatchObject({ ok: true });
+    expect(readFileSync(exportPath, 'utf8')).toBe('another file');
+  });
+
   it('sends Notion the admitted export’s content', async () => {
     const { answer, exportPath } = await swappedDuring('notion', 'md');
     expect(answer).toMatchObject({ ok: true });
     expect(connectors.send.mock.calls[0]![1].arguments.pages[0].content).toBe('intended export');
-    expect(existsSync(exportPath)).toBe(false);
+    expect(lstatSync(exportPath).isSymbolicLink()).toBe(true); // not the admitted file: left where it is
     expect(readFileSync(outside, 'utf8')).toBe('outside-secret'); // the link's target untouched
   });
 
@@ -484,6 +511,7 @@ describe('an export replaced after its admission', () => {
     expect(uploaded).toEqual([{ file: expect.not.stringContaining(join(artifactsRoot, ART)), content: 'intended export', mode: 0o600, dirMode: 0o700 }]);
     expect(existsSync(uploaded[0]!.file)).toBe(false);
     expect(existsSync(dirname(uploaded[0]!.file))).toBe(false);
-    expect(existsSync(exportPath)).toBe(false);
+    expect(lstatSync(exportPath).isSymbolicLink()).toBe(true); // not the admitted file: left where it is
+    expect(readFileSync(outside, 'utf8')).toBe('outside-secret');
   });
 });
