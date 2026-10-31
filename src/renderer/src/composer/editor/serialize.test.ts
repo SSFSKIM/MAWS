@@ -159,6 +159,14 @@ describe('serializeDraft maps docs to user content', () => {
     expect(serializeDraft(real(docOf([paragraph(textNode('x'))])), ctx).attachmentNames).toBeUndefined();
   });
 
+  // P5 O7 M4: a file bound for another machine's session goes up at the send (remote-uploads.ts), never as a block, and
+  // a draft that holds one alone is a message to send
+  it('leaves a file to upload out of the content, and counts it as something to send', () => {
+    const notes: Attachment = { id: 'a3', kind: 'file', name: 'notes.txt', mediaType: 'text/plain', bytes: 4, data: 'aGkK', persisted: true };
+    expect(serializeDraft(real(docOf([paragraph(textNode('see'))], [notes])), ctx)).toMatchObject({ mode: 'send', content: 'see', display: 'see' });
+    expect(serializeDraft(real(docOf([paragraph()], [notes])), ctx)).toMatchObject({ mode: 'send', content: '', empty: false });
+  });
+
   it('is empty with no text and no attachments', () => {
     expect(serializeDraft(real(docOf([paragraph(textNode('  ')), paragraph()])), ctx)).toMatchObject({ empty: true, content: '', display: '' });
   });

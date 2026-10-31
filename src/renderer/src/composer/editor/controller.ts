@@ -24,7 +24,8 @@ import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type Draf
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
-import { classifyFile, classifyText, mentionPath } from './paste';
+import { classifyFile, classifyText, mentionPath, type FileAction } from './paste';
+import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
@@ -98,9 +99,14 @@ export interface ControllerInputs {
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
+  // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
+  uploadsTo?: string | null;
 }
 
 // The component's state the controller sets.
+// P5 O7 M4: what a file becomes for this composer: classifyFile's here, remote-uploads.ts's for another machine
+type DropAction = FileAction | { kind: 'upload' };
 export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
   setCommandEmpty(empty: boolean): void;
@@ -550,15 +556,21 @@ export class EditorController {
     const taking = () => this.taking(epoch, signal);
     if (!taking()) return false;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
+    const machine = this.inputs.uploadsTo ?? null; // P5 O7 M4
     for (const file of files) {
       if (!taking()) return false;
-      const action = classifyFile(file, this.client.pathForFile(file));
+      const action: DropAction = machine === null ? classifyFile(file, this.client.pathForFile(file)) : classifyRemoteFile(file, machine);
       if (action.kind === 'image') {
         if (!(await this.attachImage(file.name, file, file.type, epoch, signal))) return false;
       } else if (action.kind === 'pdf') {
         const data = await fileBase64(file);
         if (!taking()) return false;
         this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
+      } else if (action.kind === 'upload') {
+        // P5 O7 M4: a file to go up to the session's machine at the send, its bytes held as a PDF's are
+        const data = await fileBase64(file);
+        if (!taking()) return false;
+        this.addAttachment({ id: atomId('attachment'), kind: 'file', name: file.name, mediaType: file.type === '' ? 'application/octet-stream' : file.type, bytes: file.size, data, persisted: true });
       } else if (action.kind === 'mention') this.insertMention(action.path);
       else if (action.kind === 'text') {
         const text = await file.text();
@@ -656,7 +668,12 @@ export class EditorController {
         const epoch = this.attachmentEpoch;
         for (const file of files) {
           if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
-          if (file.data === null) this.insertMention(file.path);
+          if (file.data === null) {
+            // P5 O7 M4: a path names nothing on another machine, and the + menu read no bytes of this file
+            const machine = this.inputs.uploadsTo ?? null;
+            if (machine === null) this.insertMention(file.path);
+            else warn(PICKED_BY_PATH(file.name, machine));
+          }
           else if (file.mediaType === 'application/pdf')
             this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.bytes, data: file.data, persisted: true });
           else {

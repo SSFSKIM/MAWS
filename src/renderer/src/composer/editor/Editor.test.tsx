@@ -837,3 +837,43 @@ describe('a `/btw` draft never reaches the conversation', () => {
   });
 });
 // E3 end
+
+// P5 O7 M4 ("What a drop sends"): for a lane B session on another machine (`uploadsTo`: that machine's name), a file the
+// API doesn't read as bytes goes to the machine with the message: it is held as a file to upload, never mentioned by its
+// local path (which names nothing there); a file past the upload bound, and one the + menu answered by path alone, are
+// refused in words; images and PDFs attach as locally.
+describe('a drop on a session on another machine', () => {
+  const remoteClient = { ...client, pathForFile: () => '/Users/me/notes.txt' } as MawsBridge;
+  const mountRemote = async () => {
+    useNotices.setState({ notices: [] });
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/w" sessionId="s" drafts={drafts(null).port} client={remoteClient} handle={handle} onSubmit={async () => true} uploadsTo="mini" />);
+    await act(async () => {});
+    return handle;
+  };
+  const notices = () => useNotices.getState().notices.map((n) => n.text);
+
+  it('holds any other file as one to upload, whatever its local path, and mentions nothing', async () => {
+    const handle = await mountRemote();
+    await act(async () => void (await handle.current!.attachFiles([new File(['hi'], 'notes.txt', { type: 'text/plain' })])));
+    expect(handle.current!.doc().attrs?.attachments).toEqual([{ id: expect.any(String), kind: 'file', name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true }]);
+    expect(handle.current!.serialize()).toMatchObject({ text: '', empty: false });
+  });
+
+  it('refuses a file past the upload bound and a picked file answered by its path alone, saying why', async () => {
+    const handle = await mountRemote();
+    const huge = new File(['x'], 'huge.zip', { type: 'application/zip' });
+    Object.defineProperty(huge, 'size', { value: 33 * 1024 * 1024 });
+    await act(async () => void (await handle.current!.attachFiles([huge])));
+    await act(async () => handle.current!.attachPicked([{ path: '/Users/me/build.log', name: 'build.log', mediaType: null, bytes: 10, data: null }]));
+    expect(handle.current!.doc().attrs?.attachments).toEqual([]);
+    expect(handle.current!.serialize().empty).toBe(true);
+    expect(notices()).toEqual(['huge.zip is over 32 MB, the most a file to mini can be', 'build.log can’t be sent to mini from here; drag it into the message instead']);
+  });
+
+  it('attaches a PDF as locally, to go up at the send', async () => {
+    const handle = await mountRemote();
+    await act(async () => void (await handle.current!.attachFiles([new File(['%PDF'], 'spec.pdf', { type: 'application/pdf' })])));
+    expect(handle.current!.doc().attrs?.attachments).toMatchObject([{ kind: 'document', name: 'spec.pdf' }]);
+  });
+});

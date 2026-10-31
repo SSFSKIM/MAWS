@@ -21,6 +21,7 @@ import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
+import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -1200,6 +1201,7 @@ describe('a lane B session on another machine', () => {
       recordsVersion: s.recordsVersion + 1,
     });
     resetRemoteDrafts();
+    resetRemoteUploads(); // P5 O7 M4
     remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
     window.maws = preloadOf(remote);
   });
@@ -1246,6 +1248,44 @@ describe('a lane B session on another machine', () => {
     mount([{ index: 0, id: R }]);
     expect(within(composerOf(0)).getByRole('button', { name: /^Model / }).title).toBe(reason);
     expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).toBe(reason);
+  });
+
+  // P5 O7 M4 ("What a drop sends", "Uploads in parts"): a file goes up to the machine first, once, its parts shown on its
+  // tile; then one send carries the text with the file's path there as a mention relative to the working directory
+  it('uploads a dropped file before the message, which mentions its path on the machine', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '/Users/me/notes.txt' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    expect(editorOf().editor.getText().trim()).toBe('look'); // no local path mentioned
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    expect(remote.invoked('files.upload')).toEqual([{ appSessionId: 'app-r', files: [{ name: 'notes.txt', bytes: 'aGk=' }] }]);
+    expect(within(composerOf(0)).getByRole('status', { name: 'Sending' }).textContent).toBe('Sending to mini…');
+    act(() => remote.event('remote.upload', { appSessionId: 'app-r', file: 0, name: 'notes.txt', sent: 1, parts: 1 }, OTHER_MACHINE));
+    expect(within(composerOf(0)).getByRole('status', { name: 'notes.txt upload' }).textContent).toBe('Uploading 1 of 1');
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.txt'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'look\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(within(composerOf(0)).queryByRole('list', { name: 'attachments' })).toBeNull();
+  });
+
+  it('keeps the text and the file when its upload fails, with the words and Send again, and sends nothing', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.fail('files.upload', 'Not sent: mini is offline', 'host_unavailable'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Not sent: mini is offline', ['Send again']]]));
+    expect(remote.invoked('session.send')).toEqual([]);
+    expect(editorOf().editor.getText().trim()).toBe('look');
+    expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt');
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

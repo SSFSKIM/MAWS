@@ -48,11 +48,11 @@ import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
-import { isRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
+import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode
+import { acquireBeforeMode, submitHumanSerialized, submitRemoteSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -197,6 +197,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
   const sendingRemote = useRemoteSending(appSessionId);
   const machineName = useMachineMark(appSessionId).name;
+  // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts)
+  const remoteB = useIsRemoteLaneB(appSessionId);
+  const uploadsTo = !setup && remoteB ? machineName : null;
   // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
   // availability decides the control, and a terminal or job holding it is named
   const holder = record?.holder ?? null;
@@ -302,6 +305,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
+    // P5 O7 M4: to a session on another machine, its files go up first and the message names their paths there
+    if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven });
     if (!decided.enabled) return false;
@@ -464,6 +469,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               onSubmit={onSubmit}
               suggestion={suggestion}
               onSuggestionTaken={() => setSuggestion(null)}
+              uploadsTo={uploadsTo}
             />
           </div>
         }

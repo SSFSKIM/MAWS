@@ -46,6 +46,7 @@ export interface EditorProps {
   onRestore?(doc: ComposerDoc): void; // a stored draft was restored
   suggestion?: string | null; // R2: a plugin's suggested prompt, shown as the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  uploadsTo?: string | null; // P5 O7 M4: the machine (by name) a lane B session on another machine runs on: its files go up there
   handle?: Ref<EditorHandle>;
   client?: MawsBridge;
 }
@@ -96,6 +97,7 @@ export function Editor(props: EditorProps) {
     onRestore: props.onRestore,
     suggestion: props.suggestion ?? null, // R2
     onSuggestionTaken: props.onSuggestionTaken,
+    uploadsTo: props.uploadsTo ?? null, // P5 O7 M4
   };
   const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy }, inputs));
   useLayoutEffect(() => controller.update(inputs));
