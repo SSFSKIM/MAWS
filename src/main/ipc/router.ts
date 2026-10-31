@@ -283,7 +283,7 @@ export const interceptCommand: <N extends CommandName>(name: N, handler: MainHan
 export const beforeCommand: (names: readonly CommandName[], hook: BeforeHook) => () => void = production.before;
 // P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
-// P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`, `library.read`'s files.readResolved).
+// P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`; P5 O4: the catalog's `catalog.engine`).
 export const invokeOwn: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.invokeOwn;
 
 // The sender must be the top frame of an app window (not a subframe, not a webContents without a window) and its

@@ -9,6 +9,6 @@ export const grades = {
   'files.openExternal': 'view', // opened on the asking client through the client port (OX4), never run on the machine
   'files.write': 'manage',
   'files.reveal': 'view',
-  'files.readResolved': 'internal', // P5 O3-E: main's own read for library.read
+  'files.readResolved': 'internal', // P5 O3-E: main's own read for library.read; P5 O4 M3: served for OX1's window, library.read reads in process
   'files.upload': 'manage', // P5 O3-E: a write into the session's attachments directory, claimed by machine.op
 } as const satisfies CommandGrades<'files'>;
