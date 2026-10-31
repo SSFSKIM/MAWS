@@ -76,6 +76,29 @@ describe("the repository's ignore rules as a prune", () => {
   });
 });
 
+// VM measure of M1: a kernel checkout's listing (3.9 MB, about 80,000 paths) held the loop 44 ms in one turn, split
+// whole before its chunked read began; the tree's walk runs meanwhile, and its lag is bounded (§G).
+describe("the repository's ignore rules, read from a listing of a million paths", () => {
+  it('never holds the loop for the whole listing', async () => {
+    const listed = Array.from({ length: 1_000_000 }, (_, i) => `d${i % 5_000}/s${i % 37}/f${i}.c\0`).join('');
+    const run: GitRun = async (_directory, args) => (args.includes('-i') ? 'build/\0' : listed);
+    let worst = 0;
+    let last = performance.now();
+    let ticking = true;
+    const tick = () => {
+      const now = performance.now();
+      worst = Math.max(worst, now - last);
+      last = now;
+      if (ticking) setImmediate(tick);
+    };
+    setImmediate(tick);
+    const prune = await gitIgnored(run, '/repo');
+    ticking = false;
+    expect(await Promise.all([prune('d7/s7'), prune('build'), prune('build/x')])).toEqual([false, true, true]);
+    expect(worst).toBeLessThan(30); // a whole split of it takes about 80 ms on an M-series Mac
+  });
+});
+
 // Real git: the listings' shapes and check-ignore's answers, through the service's own runner.
 describe("the repository's ignore rules, read from a real repository", () => {
   let repo: GitFixture;
