@@ -11,6 +11,7 @@
 // render library's e2e seams moved here from the app's specs run in the render host's main, unchanged in what they
 // assert: the PDF printer's request filter (from artifacts-store.spec.ts) and a document viewport's hostile HTML (as
 // document.spec.ts drives it on the document's own export).
+import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -41,6 +42,7 @@ interface Scene {
   front: FakeFront;
   endpoint: FakeArtifactsEndpoint;
   app: ElectronApplication;
+  child: ChildProcess; // kept from the launch: `app.process()` reads Playwright's live channel, disposed once the process ends
   client: FakeFrontClient;
   stderr(): string; // main's stderr so far
   exited: Promise<number | null>;
@@ -55,7 +57,7 @@ test.afterEach(async ({}, testInfo) => {
   scene = null;
   if (!ending) return;
   if (testInfo.status !== testInfo.expectedStatus) await testInfo.attach('render-host-stderr', { body: ending.stderr(), contentType: 'text/plain' });
-  const child = ending.app.process();
+  const { child } = ending;
   if (child.exitCode === null && child.signalCode === null) {
     await ending.app.close().catch(() => child.kill('SIGKILL'));
   }
@@ -122,7 +124,7 @@ async function startScene(): Promise<Scene> {
     client.send('render.request', request);
     return answered;
   };
-  return { profile, front, endpoint, app, client, stderr, exited, ask };
+  return { profile, front, endpoint, app, child, client, stderr, exited, ask };
 }
 
 const captureOf = (requestId: string): MawsArtifactCapture => ({ appSessionId: 'app-render-host-e2e', requestId, artifactId: ARTIFACT, revision: REVISION, width: 640, height: 480 }) as MawsArtifactCapture;
@@ -130,11 +132,11 @@ const captureOf = (requestId: string): MawsArtifactCapture => ({ appSessionId: '
 test('the render host renders windowless against a fake mawsd, three captures in a row, the bridge’s and the library’s exports, and exits 0 on render.exit', async () => {
   test.setTimeout(180_000);
   scene = await startScene();
-  const { app, client, profile, endpoint } = scene;
+  const { app, child, client, profile, endpoint } = scene;
 
   await test.step('it said hello as a render client, is out of the Dock and keeps its own userData under the daemon’s directory', async () => {
     expect(client.capabilities).toEqual([RENDER_CLIENT_CAPABILITY]);
-    expect(client.appPid).toBe(app.process().pid);
+    expect(client.appPid).toBe(child.pid);
     const facts = await app.evaluate(({ app: electron, BrowserWindow }) => ({ dock: electron.dock?.isVisible() ?? false, userData: electron.getPath('userData'), windows: BrowserWindow.getAllWindows().length }));
     expect(facts).toEqual({ dock: false, userData: join(profile, 'mawsd', 'render-host'), windows: 0 });
     expect(statSync(join(profile, 'mawsd', 'render-host')).mode & 0o777).toBe(0o700);
@@ -159,7 +161,7 @@ test('the render host renders windowless against a fake mawsd, three captures in
       }, answer.png);
       expect(centre, 'the page rendered, not a blank window').toEqual([255, 0, 0]);
       expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 'the capture window is gone').toBe(0);
-      expect(app.process().exitCode, 'the last window’s destruction did not end the render host').toBeNull();
+      expect(child.exitCode, 'the last window’s destruction did not end the render host').toBeNull();
     }
     expect(endpoint.requests.filter((url) => url === artifactUrl(ARTIFACT, REVISION, 'index.html')), 'each page came through the scheme proxy from the endpoint').toHaveLength(3);
   });
