@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>U4 fidelity fixture</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  @font-face { font-family: 'Noto Serif KR'; src: url('assets/NotoSerifKR-Regular-full.woff2') format('woff2'); font-weight: 400; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
+  body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 16px; line-height: 1.5; padding: 24px; }
+  h1 { font-size: 32px; margin: 0 0 8px; }
+  .serif { font-family: Georgia, 'Times New Roman', serif; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .kr { font-family: 'Noto Serif KR', serif; font-size: 20px; }
+  .kr-system { font-family: serif; font-size: 20px; }
+  .emoji { font-size: 28px; }
+  .band { height: 48px; margin: 12px 0; background: linear-gradient(90deg, #1d4ed8, #16a34a, #f59e0b); border-radius: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0; }
+  .card { border: 1px solid #d4d4d8; border-radius: 8px; padding: 12px; background: #fafafa; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .page-break { break-before: page; }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  canvas { border: 1px solid #999; display: block; }
+</style>
+</head>
+<body>
+<h1 id="h1">Render fidelity on a machine with no display</h1>
+<p id="sans">Sans: The quick brown fox jumps over the lazy dog. 0123456789 — fi fl ffi</p>
+<p id="serif" class="serif">Serif: The quick brown fox jumps over the lazy dog. 0123456789 — fi fl ffi</p>
+<p id="mono" class="mono">Mono: The quick brown fox jumps over the lazy dog. 0123456789</p>
+<p id="kr" class="kr">한국어 (Noto Serif KR, the bundled face): 빠른 갈색 여우가 게으른 개를 뛰어넘는다.</p>
+<p id="kr-system" class="kr-system">한국어 (system serif fallback): 빠른 갈색 여우가 게으른 개를 뛰어넘는다. 日本語 中文</p>
+<p id="emoji" class="emoji">Emoji: 😀 🚀 ✅ 🧭 — Symbols: ← → ✓ ∑ ∞</p>
+<div class="band"></div>
+<div class="grid">
+  <div class="card"><strong>Card one</strong><br>Borders, radius, shadow, background.</div>
+  <div class="card"><strong>Card two</strong><br><svg width="120" height="40" viewBox="0 0 120 40"><rect x="2" y="2" width="116" height="36" rx="6" fill="#e0f2fe" stroke="#0284c7"/><text x="60" y="26" font-size="14" text-anchor="middle" fill="#0c4a6e">inline SVG</text></svg></div>
+  <div class="card"><strong>Card three</strong><br><canvas id="c" width="160" height="40"></canvas></div>
+</div>
+<table>
+  <thead><tr><th>Row</th><th>Value</th><th>Note</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<h2 class="page-break">Second page</h2>
+<p>This heading forces a page break, so the PDF has at least two pages and an outline with two entries.</p>
+<div style="height: 1200px; background: repeating-linear-gradient(180deg, #f1f5f9 0 40px, #e2e8f0 40px 80px);"></div>
+<h2 class="page-break">Third page</h2>
+<p>End of the fixture.</p>
+<script>
+  // JS runs in the capture window (sandbox allow-scripts): a table filled by script, a canvas drawn by script.
+  const rows = document.getElementById('rows');
+  for (let i = 1; i <= 8; i++) { const tr = document.createElement('tr'); tr.innerHTML = `<td>${i}</td><td>${(i * 1234.5).toFixed(1)}</td><td>row ${i}</td>`; rows.appendChild(tr); }
+  const ctx = document.getElementById('c').getContext('2d');
+  ctx.fillStyle = '#f59e0b'; ctx.fillRect(4, 4, 60, 32); ctx.fillStyle = '#1d4ed8'; ctx.beginPath(); ctx.arc(120, 20, 14, 0, Math.PI * 2); ctx.fill();
+  // The widths of the same sentence per family: equal widths across sans, serif and mono mean one fallback face served all three.
+  window.__probeMetrics = () => {
+    const w = (id) => Math.round(document.getElementById(id).getBoundingClientRect().width);
+    const range = (id) => { const r = document.createRange(); r.selectNodeContents(document.getElementById(id)); return Math.round(r.getBoundingClientRect().width); };
+    return { textWidths: { sans: range('sans'), serif: range('serif'), mono: range('mono'), kr: range('kr'), krSystem: range('kr-system'), emoji: range('emoji') }, h1Width: w('h1'), scrollHeight: document.documentElement.scrollHeight, devicePixelRatio: window.devicePixelRatio, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+  };
+</script>
+</body>
+</html>
