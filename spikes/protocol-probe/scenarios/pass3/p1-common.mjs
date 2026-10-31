@@ -98,8 +98,9 @@ export const resultSummary=r=>r?{subtype:r.subtype,is_error:r.is_error,num_turns
 // Handlers answer every engine→host request the protocol can send besides the ones a scenario registers itself, so a
 // recording never leaves one open. Throws when the scenario body failed, the engine exited non-zero or the owner-file
 // delta is not empty. `sessionId: null` passes no --session-id (a plain `--resume <id>` launch, E7), as `pinned: false`
-// does; `spendCap` is the probe's --max-budget-usd guard; `debugPattern` picks the debug lines copied into the fixture.
-export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE,dir='fixtures/pass3/',relay=true,flagSettings=FLAG_SETTINGS}={},body){
+// does; `spendCap` is the probe's --max-budget-usd guard; `debugPattern` picks the debug lines copied into the fixture;
+// `detached` (P5-O16) spawns the engine as its own process group's leader, as transport.ts does.
+export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance={},model='haiku',flags=[],debugFile=run.debugFile,pinned=true,spendCap=SPEND_CAP,debugPattern=DEBUG_RE,dir='fixtures/pass3/',relay=true,flagSettings=FLAG_SETTINGS,detached=false}={},body){
  const env=engineEnv(run.home,vars);
  const {configHome,globalConfig}=assertScratch(env);
  if(relay)await relayReady(); // P4-B4: a launch against the stub API (stub-api.mjs) needs no relay
@@ -116,7 +117,7 @@ export async function launch(name,run,{vars={},sessionId=randomUUID(),provenance
   p.on('ui_prompt_suggest',()=>({shown:false}));
   try{await body(p,{sessionId,run});}catch(e){failure=e;throw e;}
   finally{noteDebug(p,debugFile,debugPattern);p.note({event:'spend',result:resultSummary(lastResult(p))});}
- },{cwd:run.cwd,env,bin:BIN,dir,model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--settings',JSON.stringify(flagSettings),...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
+ },{cwd:run.cwd,env,bin:BIN,dir,model,detached,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:[...PRODUCT_FLAGS,'--settings',JSON.stringify(flagSettings),...(pinned&&sessionId?['--session-id',sessionId]:[]),'--max-budget-usd',spendCap,'--debug-file',debugFile,...flags]});
  const exit=await p.closed;
  const after=ownerTmpKeys();
  const same=JSON.stringify(after)===JSON.stringify(before);
