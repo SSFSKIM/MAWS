@@ -110,6 +110,19 @@ describe('opening an owner-channel item at its mark', () => {
     expect(entry.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
   });
 
+  it('waits through a load that failed, and jumps once the Retry brings the history', async () => {
+    let fail = true;
+    const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => (fail ? Promise.reject(new Error('host down')) : Promise.resolve(history())) };
+    await useTranscriptStore.getState().attach(APP, source);
+    expect(useTranscriptStore.getState().entries[APP]!.phase).toBe('failed');
+    useTranscriptStore.getState().setOwnerLane(APP, true);
+    openAnchor(APP, anchor);
+    expect(useTranscriptStore.getState().entries[APP]!.reach).toBeUndefined(); // no jump started over a history that never came
+    fail = false;
+    await act(() => useTranscriptStore.getState().retry(APP));
+    expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
+  });
+
   it('a notification’s click on an owner item opens it at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);

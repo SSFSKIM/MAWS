@@ -9,19 +9,35 @@
 // them: a page that brings rows rebuilds the source, which the store installs (`hydrating`, then `live`) after the
 // render that names it. P5 O9 M9: a page the plane could not carry (`olderFailed`) is not asked again from here, which
 // would spin while another machine's link is down; the transcript asks it once the plane delivers again, or the reader.
+// The long-transcript window (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): MAWS's own disk-backed
+// sessions page the same way, through their source's pager (transcript/source/older.ts), whose `source` stand-in is the
+// revision a page bumps.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { useTranscriptStore } from '../../stores/transcript';
-import type { TranscriptSource } from '../../transcript/source/types';
 import type { TranscriptListHandle } from '../../transcript/view/Transcript';
-import type { PlaneTranscript, PlaneTranscriptState } from '../plane-transcript';
 import { useDrawnRowCount } from './drawn-rows';
+
+/** What the hook reads of a paged transcript: lane A's plane transcript, or a MAWS source's pager. */
+export interface OlderPagesView {
+  phase: string;
+  more: boolean;
+  loadingOlder: boolean;
+  olderFailed: string | null;
+  source: unknown; // changes when a page's rows are handed to the store
+}
+
+export interface OlderPagesController {
+  readonly key: string;
+  readonly state: { getState(): OlderPagesView };
+  loadOlder(): void;
+}
 
 /** Within this many pixels of the top the reader has reached it, and older rows are asked for. */
 export const TOP = 160;
 
-type Asked = { drawn: number; source: TranscriptSource; installed: boolean };
+type Asked = { drawn: number; source: unknown; installed: boolean };
 
-export function useOlderPages(controller: PlaneTranscript, list: RefObject<TranscriptListHandle | null>, state: Pick<PlaneTranscriptState, 'phase' | 'more' | 'loadingOlder' | 'olderFailed' | 'source'>, atRest = false): void {
+export function useOlderPages(controller: OlderPagesController, list: RefObject<TranscriptListHandle | null>, state: OlderPagesView, atRest = false): void {
   const drawnRows = useDrawnRowCount(controller.key, atRest);
   const storePhase = useTranscriptStore((s) => s.entries[controller.key]?.phase ?? null);
   const drawn = useRef(drawnRows);

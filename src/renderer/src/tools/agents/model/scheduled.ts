@@ -7,9 +7,12 @@
 // record names no job, so a session-only job carries no last-fire fact; a one-shot whose first match after its
 // creation is before now has fired or was missed, and the engine deletes it either way; a durable job's `lastFiredAt`
 // is the file's. Pure.
-import type { ToolUseId } from '@shared/graph/ids';
+import type { SessionEvent } from '@shared/graph/events';
+import type { MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { cronExpiry, nextCronMatch, parseCron } from '@shared/engine/cron';
 import type { TurnActivity } from '../../../transcript/model/activity';
+import { turnId as turnIds } from '../../../transcript/model/keys';
+import { orchestrationOf } from '../../../transcript/model/orchestration';
 import type { TurnId } from '../../../transcript/model/rows';
 
 // One job a successful `CronCreate` of this transcript made.
@@ -22,6 +25,7 @@ export interface CronJob {
   humanSchedule: string;
   createdAt: number; // the call's time (the engine stamps `Date.now()` as it runs the call)
   toolUseId: ToolUseId;
+  messageUuid: MessageUuid | null; // the creating call's message, which a jump into history seeks
   turnId: TurnId;
   lastFiredAt: null; // no observable fire names a session-only job (Decision Log 23)
 }
@@ -38,7 +42,30 @@ export interface DurableJob {
   createdBySessionId: string | null;
 }
 
-type CronActivity = Pick<TurnActivity, 'turnId' | 'crons'>;
+export type CronActivity = Pick<TurnActivity, 'turnId' | 'crons'>;
+
+// The cron calls a disk-backed session's older history holds, as its newest window's answer carried them
+// (`cronHistory`, history-window.ts `cronHistoryOf`: each turn's start, then its calls with their results), as activity
+// entries that go before the loaded turns' own. A turn whose page is loaded later is folded again where it sits, and
+// `createdCrons` keeps the last word on each id, so the list is the whole history's. The carry is the history as the
+// host read it at the open: a rewind the transcript took since (the store's `revised`: the turns it hides, and the
+// rewinds it holds, which name a carried turn the store may not hold) abandons a carried turn as the reducer would,
+// that turn and every carried one after it.
+export function cronHistoryActivity(events: readonly SessionEvent[], revised: { hidden: readonly TurnId[]; rewinds: readonly MessageUuid[] } = NOT_REVISED): CronActivity[] {
+  const turns: { turnId: TurnId; messages: Set<string>; events: SessionEvent[] }[] = [];
+  for (const event of events) {
+    if (event.kind === 'turn.started') turns.push({ turnId: event.userMessageUuid === null ? turnIds.ofEvent(event.id) : turnIds.ofMessage(event.userMessageUuid), messages: new Set(event.userMessageUuid === null ? [] : [event.userMessageUuid]), events: [] });
+    else {
+      const turn = turns.at(-1);
+      turn?.events.push(event);
+      if (turn && 'messageUuid' in event && event.messageUuid !== null) turn.messages.add(event.messageUuid);
+    }
+  }
+  const hidden = new Set(revised.hidden);
+  const abandonedFrom = Math.min(turns.length, ...revised.rewinds.map((target) => turns.findIndex((turn) => turn.messages.has(target))).filter((at) => at >= 0));
+  return turns.slice(0, abandonedFrom).filter((turn) => !hidden.has(turn.turnId)).map((turn) => ({ turnId: turn.turnId, crons: orchestrationOf(turn.events).crons }));
+}
+const NOT_REVISED = { hidden: [], rewinds: [] };
 
 // Every job the transcript's creates made and no later successful delete removed, in creation order, durable ones
 // included (their row comes from the file; this names the call that created them). A delete still waiting for its
@@ -46,7 +73,7 @@ type CronActivity = Pick<TurnActivity, 'turnId' | 'crons'>;
 export function createdCrons(activity: readonly CronActivity[]): CronJob[] {
   const jobs = new Map<string, CronJob>();
   for (const turn of activity) {
-    for (const { toolUseId, at, call, result } of turn.crons) {
+    for (const { toolUseId, messageUuid, at, call, result } of turn.crons) {
       if (result === null || !result.ok) continue;
       if (call.kind === 'delete') {
         jobs.delete(call.id);
@@ -56,7 +83,7 @@ export function createdCrons(activity: readonly CronActivity[]): CronJob[] {
       jobs.delete(result.id); // a re-used id lists where it was last created
       jobs.set(result.id, {
         id: result.id, cron: call.cron, prompt: call.prompt, recurring: call.recurring, durable: result.durable, humanSchedule: result.humanSchedule,
-        createdAt: Date.parse(at), toolUseId, turnId: turn.turnId, lastFiredAt: null,
+        createdAt: Date.parse(at), toolUseId, messageUuid, turnId: turn.turnId, lastFiredAt: null,
       });
     }
   }
@@ -130,7 +157,7 @@ export interface ScheduledRow {
   next: number | null; // the next match; null when the cron does not parse or never matches
   expiresAt: number | null; // a recurring job that is not permanent
   lastFiredAt: number | null;
-  link: { toolUseId: ToolUseId; turnId: TurnId } | null; // the creating call, when this transcript holds it
+  link: { toolUseId: ToolUseId; messageUuid: MessageUuid | null; turnId: TurnId } | null; // the creating call, when the transcript's history holds it
   dormant: boolean; // a session-only job of a session not running here: it resumes with the session
 }
 
@@ -171,14 +198,14 @@ export function scheduledRows({ created, session, durable, engineSessionId, live
         store: engineSessionId !== null && job.createdBySessionId === engineSessionId ? 'durable-this' : 'durable-other',
         prompt: promptLine(job.prompt), next: nextRun(job.cron, job.recurring, job.createdAt, now),
         expiresAt: job.recurring && !job.permanent ? cronExpiry(job.createdAt) : null, lastFiredAt: job.lastFiredAt,
-        link: own ? { toolUseId: own.toolUseId, turnId: own.turnId } : null, dormant: false,
+        link: own ? { toolUseId: own.toolUseId, messageUuid: own.messageUuid, turnId: own.turnId } : null, dormant: false,
       };
     });
   const sessionRows = session.map(
     (job): ScheduledRow => ({
       id: job.id, schedule: job.humanSchedule, recurring: job.recurring, store: 'session', prompt: promptLine(job.prompt),
       next: nextRun(job.cron, job.recurring, job.createdAt, now), expiresAt: job.recurring ? cronExpiry(job.createdAt) : null, lastFiredAt: null,
-      link: { toolUseId: job.toolUseId, turnId: job.turnId }, dormant: !live,
+      link: { toolUseId: job.toolUseId, messageUuid: job.messageUuid, turnId: job.turnId }, dormant: !live,
     }),
   );
   return [...durableRows, ...sessionRows];

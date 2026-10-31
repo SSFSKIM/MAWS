@@ -4,7 +4,7 @@
 // and the live stream across launches, where the agents tool's task graph sees only the current launch's wire. Read
 // from the turn's top-level events, so a child agent's calls (kept under `children`) are never the session's. Pure.
 import type { SessionEvent } from '@shared/graph/events';
-import type { ToolUseId } from '@shared/graph/ids';
+import type { MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { parseListing, type Listing } from './agent-listing';
 import { resultText } from './cells';
 import { parseCronResult } from './cron-result';
@@ -16,6 +16,7 @@ export type CronOutcome = { ok: true; id: string; humanSchedule: string; durable
 
 export interface TurnCron {
   toolUseId: ToolUseId;
+  messageUuid: MessageUuid | null; // the call's assistant message: where a jump into history finds it
   at: string; // the call's
   call: CronCall;
   result: CronOutcome;
@@ -58,24 +59,30 @@ function cronOutcome(call: CronCall, result: ToolResult): CronOutcome {
 }
 
 export function turnOrchestration(turn: TurnState): TurnOrchestration {
+  return orchestrationOf(turn.events);
+}
+
+// The same over a turn's events as the session's lane holds them (a turn's, or the cron calls a newest window's older
+// history carried, `cronHistory`).
+export function orchestrationOf(events: readonly SessionEvent[]): TurnOrchestration {
   const crons: TurnCron[] = [];
   const listings: TurnListing[] = [];
   const results = new Map<ToolUseId, ToolResult>();
   // A call whose message the engine retracted or superseded (a refused attempt) is none of the turn's, as derive.ts drops it.
   const dropped = new Set<string>();
-  for (const event of turn.events) {
+  for (const event of events) {
     if (event.kind === 'tool.result') results.set(event.toolUseId, event);
     else if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) dropped.add(uuid);
     else if (event.kind === 'assistant.block.complete') for (const uuid of event.supersedes) dropped.add(uuid);
   }
-  for (const event of turn.events) {
+  for (const event of events) {
     if (event.kind !== 'tool.use' || (event.messageUuid !== null && dropped.has(event.messageUuid))) continue;
     const result = results.get(event.toolUseId);
     if (event.toolName === 'ListAgents') {
       listings.push({ toolUseId: event.toolUseId, at: event.at, parsed: result ? parseListing(resultText(result.content)) : null });
     } else if (event.toolName === 'CronCreate' || event.toolName === 'CronDelete') {
       const call = cronCall(event.toolName, event.input);
-      if (call) crons.push({ toolUseId: event.toolUseId, at: event.at, call, result: result ? cronOutcome(call, result) : null });
+      if (call) crons.push({ toolUseId: event.toolUseId, messageUuid: event.messageUuid, at: event.at, call, result: result ? cronOutcome(call, result) : null });
     }
   }
   return { crons, listings };

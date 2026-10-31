@@ -134,7 +134,7 @@
 "commands.session.drafts.set.input":[".appSessionId AppSessionId"],
 "commands.session.engineStatuses.output":[".statuses[].appSessionId AppSessionId"],
 "commands.session.events.input":[".appSessionId AppSessionId"],
-"commands.session.events.output":[".events[]<kind=maws.delivery.artifact>.ownerAppSessionId AppSessionId",".events[]<kind=side.thread.opened>.childAppSessionId AppSessionId",".events[]<kind=side.thread.summarised>.childAppSessionId AppSessionId"],
+"commands.session.events.output":[".cronHistory[]<kind=maws.delivery.artifact>.ownerAppSessionId AppSessionId",".cronHistory[]<kind=side.thread.opened>.childAppSessionId AppSessionId",".cronHistory[]<kind=side.thread.summarised>.childAppSessionId AppSessionId",".events[]<kind=maws.delivery.artifact>.ownerAppSessionId AppSessionId",".events[]<kind=side.thread.opened>.childAppSessionId AppSessionId",".events[]<kind=side.thread.summarised>.childAppSessionId AppSessionId"],
 "commands.session.exportConversation.input":[".appSessionId AppSessionId"],
 "commands.session.follow.input":[".sessions[].appSessionId AppSessionId"],
 "commands.session.follow.output":[".streams[].appSessionId AppSessionId"],

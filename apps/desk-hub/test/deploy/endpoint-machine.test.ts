@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { composeScript, ScriptRunner, stopMachineWork, VmMachine, type Ssh } from '../../deploy/endpoint-machine.ts';
+import { composeScript, laneBEventLines, ScriptRunner, stopMachineWork, VmMachine, type Ssh } from '../../deploy/endpoint-machine.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 
 /** A stand-in for devcloud: records its argv, the mode of the file on its stdin and the script, answers `reply`. */
@@ -255,10 +255,44 @@ describe('the VM machine', () => {
 });
 
 describe('the VM’s record of the sessions the run started', () => {
-  it('reads `started`’s lines: lane A’s session and the seat’s, whichever exist', async () => {
-    const fake = standin(() => '@@BEGIN\nsession 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13\nseat 1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13\n@@END 0\n');
+  it('reads `started`’s lines: lane A’s session, the seat’s and lane B’s, whichever exist', async () => {
+    const fake = standin(() => '@@BEGIN\nsession 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13\nseat 1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13\nlane-b 2b3c4d5e-7c1d-4b9e-9a61-2d4f6b8c0e13\n@@END 0\n');
     const machine = new VmMachine({ devcloud: fake.bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831' });
-    expect(await machine.laneA.started()).toEqual(['0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13', '1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13']);
+    expect(await machine.laneA.started()).toEqual(['0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13', '1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13', '2b3c4d5e-7c1d-4b9e-9a61-2d4f6b8c0e13']);
     expect(fake.calls()[0].script).toContain('/opt/o10-m11/scene.sh started');
+  });
+});
+
+describe('the VM’s lane B session', () => {
+  const APP = '5b1f0c2e-8d4a-4c3b-9e7f-1a2b3c4d5e6f';
+  const ENGINE = '0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13';
+
+  it('is the scratch scene’s alone: a machine is given one only when it asks (production’s never does)', () => {
+    expect(new VmMachine({ devcloud: '/x', vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831' }).laneB).toBeNull();
+    expect(new VmMachine({ devcloud: '/x', vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831', laneB: true }).laneB).not.toBeNull();
+  });
+
+  it('starts by `lane-b-up <tag>` and reads its ids; reads the engine host’s numbering by `lane-b-events <app>`', async () => {
+    // The reply runs in the stand-in's own process: its ids are written out, not closed over.
+    const fake = standin((script) =>
+      script.includes('lane-b-up')
+        ? '@@BEGIN\n{"app":"5b1f0c2e-8d4a-4c3b-9e7f-1a2b3c4d5e6f","launch":"lnch0001","engine":"0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13","alias":"o10-b"}\n@@END 0\n'
+        : '@@BEGIN\nev lnch0001 1 0\nev lnch0001 1 1\nevents 2 complete\n@@END 0\n',
+    );
+    const machine = new VmMachine({ devcloud: fake.bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831', laneB: true });
+    expect(await machine.laneB!.up('abc1b')).toEqual({ app: APP, launch: 'lnch0001', engine: ENGINE, alias: 'o10-b' });
+    expect(await machine.laneB!.events(APP)).toEqual([
+      { epoch: 'lnch0001', seq: 1, idx: 0 },
+      { epoch: 'lnch0001', seq: 1, idx: 1 },
+    ]);
+    expect(fake.calls().map((c) => c.script.match(/scene\.sh [^\n]*/)?.[0])).toEqual(['scene.sh lane-b-up abc1b', `scene.sh lane-b-events ${APP}`]);
+    await expect(machine.laneB!.up('Bad tag')).rejects.toThrow(/a tag/);
+    await expect(machine.laneB!.events('not-an-id')).rejects.toThrow(/an app session id/);
+  });
+
+  it('takes the numbering only whole: its count line matching, and its end there', () => {
+    expect(laneBEventLines(['ev lnch0001 3 0', 'events 1 complete'])).toEqual([{ epoch: 'lnch0001', seq: 3, idx: 0 }]);
+    expect(() => laneBEventLines(['ev lnch0001 3 0', 'events 2 complete'])).toThrow(/counted 2 events and printed 1/);
+    expect(() => laneBEventLines(['ev lnch0001 3 0', 'lane-b: mawsd did not answer session.events within 30 s'])).toThrow(/did not end/);
   });
 });

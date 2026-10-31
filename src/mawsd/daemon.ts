@@ -89,7 +89,7 @@ import { machineEnrollment, machineName, machineProject } from '@shared/machine/
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
-import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
+import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
@@ -253,7 +253,30 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return view !== undefined && view.unavailable() === null && view.projectRows().some((row) => row.directory === path);
     },
   };
-  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects }) : options.endpoint;
+  // P5 O2 (the bundle swap): an upgrade replaces the bundle under a running daemon, whose module paths then name the new
+  // bundle's files. So before each host spawn, and each deferred chunk's load that would read the files as they are now
+  // (from a directory: a checkout's out/main; from an app.asar it reads the archive this process holds, the build it
+  // started from), the entry this daemon started from is read again past any held archive: another build there spawns
+  // and loads nothing, and counts no crash. A unit daemon restarts (its unit starts the new bundle's mawsd, which adopts
+  // the running hosts); a private one keeps serving what runs and refuses what needs new code, until the next app's
+  // build check restarts it. The hosts' build ids, which a hello presents, are read now, while they are this build's.
+  const entryOnDisk = realpathOr(options.modules.self); // a Linux unit's entry names `current`, which an install flips
+  const bundleReplaced = (): string | null => {
+    const now = currentBuildIdOf(entryOnDisk);
+    if (now === buildId) return null;
+    const reason = `mawsd's bundle was replaced: ${entryOnDisk} ${now === null ? 'is gone' : `is build ${now}`}, this mawsd runs build ${buildId}; ${kind === 'unit' ? 'mawsd restarts into the new bundle' : 'the next app to attach restarts mawsd'}`;
+    if (kind === 'unit') void stop('bundle replaced', EXIT_RESTART);
+    return reason;
+  };
+  const deferredLoadRefused = () => (packaged ? null : bundleReplaced());
+  for (const host of [options.modules.engineHost, options.modules.ptyHost]) {
+    try {
+      buildIdOf(host); // cached for the hello
+    } catch {
+      // read at the hello, as before
+    }
+  }
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects }, deferredLoadRefused) : options.endpoint;
   // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
   const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);
 
@@ -279,7 +302,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     emit: () => true, // every event is relayed as received (onRaw), none through this build's schemas
     userData: () => profileDir,
     packaged: () => packaged,
-    detached: { env: () => env, log: (line) => log(`[hosts] ${line}`), ...options.detached },
+    detached: { env: () => env, log: (line) => log(`[hosts] ${line}`), beforeSpawn: bundleReplaced, ...options.detached },
     restartBackoffMs: options.restartBackoffMs,
     onReplaced: (host) => {
       // an embedded-shape app took the engine host: stop reaching it and exit 0, so no unit restarts into a tug of war
@@ -300,7 +323,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     build: `${options.build.version}+${options.build.commit}`,
     hosts,
     intercept: (request) => interceptEngine(request),
-    load: options.spine?.load ?? loadServicesEntry,
+    load: () => {
+      const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
+      return refused === null ? (options.spine?.load ?? loadServicesEntry)() : Promise.reject(new Error(refused));
+    },
     deps: () => ({
       profile: profileDir,
       machine: ref,
@@ -336,7 +362,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
     },
     log,
-    ...(options.spine?.timing && { timing: options.spine.timing }),
+    // a provisional yield waits as long as a hello may wait for its upstream (the relay's hold)
+    timing: { ...(options.helloHoldMs !== undefined && { provisionalYieldMs: options.helloHoldMs }), ...options.spine?.timing },
     ...(options.spine?.lockWaitMs !== undefined && { lockWaitMs: options.spine.lockWaitMs }),
   });
 
@@ -1080,6 +1107,14 @@ function excludeFromBackups(dir: string, run: NonNullable<DaemonOptions['runComm
     else log(`could not exclude ${dir} from Time Machine (tmutil exited ${added.status})`);
   } catch (error) {
     log(`could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function realpathOr(path: string): string {
+  try {
+    return fs.realpathSync(path);
+  } catch {
+    return path;
   }
 }
 

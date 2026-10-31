@@ -27,6 +27,9 @@ const TIMING_TIMEOUTS = { testTimeout: 30_000, hookTimeout: 30_000 };
 const TIMING_NODE_TESTS = [
   'src/engine-host/binary-info.test.ts', // W13: every case runs real stand-in binaries for --version
   'src/engine-host/fs/follow.test.ts',
+  'src/engine-host/fs/history-window.test.ts', // the long-transcript window: real follows over a real store, a release clock
+  'src/engine-host/fs/history-window-transport.test.ts', // the same over a real Unix socket and C1's runtime
+  'src/mawsd/long-transcript.test.ts', // the same through mawsd's relay and its link to the engine host, real sockets
   'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
@@ -51,6 +54,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/rl10/conversation.local.test.ts', // P5 O10 M6: RL10's conversation replayed against the real socket and desk-hub's Worker in Miniflare
   'test/endpoint/subscriptions.local.test.ts', // P5 O10 M8: subscriptions across a forced drop over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
   'test/endpoint/rl10/uplink.test.ts', // P5 O10: the log plane's uploads held at a stand-in hub's real socket and RL10's, a burst signed and sent
+  'test/endpoint/rl10/held-read.test.ts', // P5 O10: a started endpoint's held events and revocations against a stand-in hub's real socket and RL10's
   'test/machines/remote-link.test.ts', // P5 O7 M1: main's RL2 link against a real endpoint on its direct listener (real sockets, the handshake's WebCrypto)
   'test/lane-a/remote.test.ts', // P5 O9 M9: remote lane A through main's RL2 link against a real endpoint (real sockets, the handshake's WebCrypto)
   'test/machines/remote-link.local.test.ts', // P5 O7 M1: the link over the hub's multiplex (desk-hub's Worker in Miniflare), a relay drop, the switch to direct, the hub away

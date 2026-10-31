@@ -243,6 +243,7 @@ test("gate.yml's env: scalars and folded lists are read, anything else throws", 
   assert.deepEqual(workflowEnv('name: gate\n'), {});
   const own = workflowEnv(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
   assert.equal(own.POOL_E2E, 'desk-web');
+  assert.equal(own.PEER_E2E, 'cross-build');
   assert.ok(own.CLASS1_E2E.split(' ').includes('library'));
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
 });

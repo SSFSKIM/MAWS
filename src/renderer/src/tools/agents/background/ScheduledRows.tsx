@@ -6,20 +6,24 @@
 // its expiry; and `Open creating turn` when this transcript holds the call, which jumps the transcript to its cell. The
 // section is omitted with nothing to list and nothing to say. Read-only: MAWS never writes the file or asks for a job.
 import { useMemo } from 'react';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { TurnId } from '../../../transcript/model/rows';
 import type { SessionRecord } from '@shared/graph/session';
 import { formatClock, formatDayTime, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
 import { SCHEDULED_COPY } from '../copy';
 import { formatAgo, formatIn } from '../model/elapsed';
-import { createdCrons, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
+import { createdCrons, cronHistoryActivity, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
 import { Group, type BackgroundSection } from './Group';
 import { useScheduledFile } from './scheduled-file';
 import { ACTION } from './TaskRows';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NO_TURNS: readonly TurnId[] = [];
+const NO_EVENTS: readonly SessionEvent[] = [];
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
@@ -39,7 +43,19 @@ interface Props {
 }
 
 export function ScheduledSection({ appSessionId, session, live, visible, expanded, onToggle }: Props) {
-  const activity = useTranscriptStore((s) => s.activity(appSessionId));
+  const loaded = useTranscriptStore((s) => s.activity(appSessionId));
+  // The long-transcript window: a long session's older history's cron calls, as its newest window carried them, go
+  // before the loaded turns' own, so the list is the whole history's whatever is loaded.
+  // A rewind the transcript took since abandons a carried turn as it would a loaded one (the turns it hides, and the
+  // rewinds it holds, whose targets the store may not hold).
+  const cronHistory = useTranscriptStore((s) => s.entries[appSessionId]?.cronHistory);
+  const hidden = useTranscriptStore((s) => s.entries[appSessionId]?.state.hidden?.turns ?? NO_TURNS);
+  const loose = useTranscriptStore((s) => s.entries[appSessionId]?.state.loose ?? NO_EVENTS);
+  const activity = useMemo(() => {
+    if (!cronHistory?.length) return loaded;
+    const rewinds = loose.flatMap((event) => (event.kind === 'boundary.rewind' ? [event.targetMessageUuid] : []));
+    return [...cronHistoryActivity(cronHistory, { hidden, rewinds }), ...loaded];
+  }, [cronHistory, hidden, loose, loaded]);
   const file = useScheduledFile(appSessionId, session);
   const created = useMemo(() => createdCrons(activity), [activity]);
   const durable = file?.status === 'ok' ? file.jobs : null;
@@ -53,7 +69,11 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
   const error = file?.status === 'error' ? file.message : null;
   if (rows.length === 0 && error === null) return null;
   const open = (row: ScheduledRow) => {
-    if (row.link) useTranscriptStore.getState().jumpTo(appSessionId, cellId.tool(row.link.toolUseId), { align: 'center', turnId: row.link.turnId });
+    if (!row.link) return;
+    const cell = cellId.tool(row.link.toolUseId);
+    // A creating turn older than what is loaded: its pages first (a jump into history, the bar saying so)
+    if (row.link.messageUuid !== null) void useTranscriptStore.getState().reachMessage(appSessionId, { messageUuid: row.link.messageUuid, cell, turnId: row.link.turnId });
+    else useTranscriptStore.getState().jumpTo(appSessionId, cell, { align: 'center', turnId: row.link.turnId });
   };
   return (
     <Group id="scheduled" heading={SCHEDULED_COPY.heading(rows.length)} expanded={expanded} onToggle={onToggle}>

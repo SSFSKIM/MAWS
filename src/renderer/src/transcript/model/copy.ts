@@ -376,6 +376,19 @@ export const SPILL = {
 
 // A transcript whose history could not be loaded (the store's failed hydration phase).
 export const HYDRATION = { failed: (reason: string) => `Could not load this transcript · ${reason}`, retry: 'Retry' } as const;
+// The long-transcript window: an older page that did not load (lane A's words, session/controls/lane-a.ts)
+export const OLDER = { failed: (reason: string) => `Older messages didn’t load: ${reason}`, retry: 'Retry' } as const;
+
+// A jump to a message older than what is loaded (the store's `reach`): the pages back to it on their way, and how it ended
+// when it did not land.
+export const REACH = {
+  loading: (progress: number | null) => `Loading earlier messages to reach the message${progress === null ? '…' : ` · ${Math.round(progress * 100)}%`}`,
+  missing: 'That message is no longer in this transcript.',
+  failed: (reason: string) => `Earlier messages didn’t load: ${reason}`,
+  stop: 'Stop',
+  retry: 'Retry',
+  dismiss: 'Dismiss',
+} as const;
 
 export const RECEIPT = {
   heading: (files: number) => `${plural(files, 'file')} changed`,

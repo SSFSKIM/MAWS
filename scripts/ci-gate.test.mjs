@@ -46,6 +46,10 @@ function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
     git('init', '--quiet', '--bare', origin);
     git('init', '--quiet', '-b', 'gates', tree);
     git('-C', tree, 'remote', 'add', 'origin', origin);
+    // Every launched tree has a workflow: peer preflight reads its PEER_E2E even for a non-peer e2e request.
+    mkdirSync(join(tree, '.github/workflows'), { recursive: true });
+    writeFileSync(join(tree, '.github/workflows/gate.yml'), 'env:\n  PEER_E2E: cross-build\n');
+    git('-C', tree, 'add', '-A');
     if (change) {
       for (const [path, content] of Object.entries(base)) {
         mkdirSync(dirname(join(tree, path)), { recursive: true });
@@ -369,9 +373,10 @@ test('a direct packaged/peer admission push is not held by the mini alert', () =
   const own = (path) => readFileSync(join(root, path), 'utf8');
   const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
-  const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct', '--peer', 'none'], { alerts: true, base, change: () => {} });
+  const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct'], { ...bump, alerts: true, base: { ...base, ...bump.base } });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.ok(result.refs.length > 0);
+  assert.match(result.message, /^Peer: [0-9a-f]{40}\nPeer-Wire: 3\.0\nWire: 3\.1$/m);
 });
 
 

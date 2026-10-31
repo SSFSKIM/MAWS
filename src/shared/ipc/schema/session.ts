@@ -8,7 +8,8 @@ import { SURFACE_VALUE_MAX } from '../../engine/surface';
 import { AttentionItemSchema } from '../../graph/attention';
 import { AutoModeRefusalCodeSchema, PermissionModeSchema } from '../../graph/enums';
 import { SessionEventSchema } from '../../graph/events';
-import { AppSessionIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
+import { HistorySoughtSchema } from '../../graph/history-window';
+import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
 import { RequestAnswerSchema } from '../../engine/answers';
 import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
 import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
@@ -79,7 +80,12 @@ export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 // O10 M8: `historyUnavailable` (present only as true) says part of the range asked for is gone: the ring had dropped it
 // and the journal could not be read back, so the answer is the ring's alone. `complete` can't say so, a page's limit
 // setting it false too, and seqs skip, so a reader can't tell a gap from the events alone.
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional() });
+// `earlier` (present only when older history remains) is the cursor a disk-backed answer gives for the page before its
+// first event, asked as `before` (docs/doperpowers/plans/2026-10-30-long-transcript-window.md). `sought` answers a
+// disk read's `seek`: where the page stands to the message a jump looks for (HistorySoughtSchema). `cronHistory`, on a
+// disk-backed newest window with older history, is the cron calls before it that a whole-history read counts, with their
+// results and their turns' starts (history-window.ts `cronHistoryOf`), so the Scheduled section lists every job.
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.
@@ -98,7 +104,12 @@ const c3Commands = {
   'session.launch': host(z.strictObject({ spec: LaunchSpecSchema, artifactScope: z.array(AppSessionIdSchema).max(16).optional() }), LaunchResultSchema),
   // P2-E1 end
   'session.status': host(input({}), EngineSessionStatusSchema),
-  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable() }), EventsSnapshotSchema),
+  // A session with no live stream here answers from its transcript, one bounded window at a time: `limit` null the
+  // newest window and its `earlier` cursor, `limit` N the first N events, `before` the page before that cursor (from
+  // the transcript, a live session's too), `agentId` that agent's events and its parent's reports on it. A live stream
+  // answers from `afterSeq` as before, `agentId` filtering it alike (2026-10-30, the long-transcript window). `seek` on a
+  // read from the transcript names a message a jump into history looks for; the answer's `sought` says where it is.
+  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional() }), EventsSnapshotSchema),
   // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
   // step as the stop); otherwise nothing happens and the answer says `skipped`
   'session.stop': host(input({ reason: z.enum(['stop', 'archive']), ifIdle: z.boolean().optional() }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable(), skipped: z.literal(true).optional() })),

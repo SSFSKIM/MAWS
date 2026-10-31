@@ -334,7 +334,8 @@ export class EndpointRecords {
 /**
  * The records the hub refused for now, each tried again after the link's backoff (`reconnectDelay`, 1 s doubling to
  * 30 s, jittered), one timer per record, its wait growing with each refusal; `clear()` when the connection ends, since
- * the next welcome sends every record again.
+ * the next welcome sends every record again. The endpoint's org-state read toward a `state` notice retries here too
+ * (`sync`), and is `settle`d once the head reaches the version announced.
  */
 export class RecordRetries {
   readonly #random: () => number;
@@ -365,6 +366,13 @@ export class RecordRetries {
         run();
       }, reconnectDelay(attempt, this.#random)),
     );
+  }
+
+  /** `key` done: its waiting retry dropped, and its next one waits from the start of the backoff again. */
+  settle(key: string): void {
+    this.#timers.get(key)?.();
+    this.#timers.delete(key);
+    this.#attempts.delete(key);
   }
 
   clear(): void {

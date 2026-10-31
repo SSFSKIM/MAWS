@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BREAK_STALE_MS, buildIdOf, isAlive, procStartOf, readLock, socketPathFor, takeLock, type LockDeps, type LockFile } from './supervisor-files';
+import { BREAK_STALE_MS, buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, socketPathFor, takeLock, type LockDeps, type LockFile } from './supervisor-files';
 
 let dir: string;
 beforeEach(() => {
@@ -291,5 +291,80 @@ describe('process facts', () => {
     expect(start).toMatch(/^\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/);
     expect(procStartOf(process.pid)).toBe(start);
     expect(procStartOf(spawnSync('/usr/bin/true').pid!)).toBeNull();
+  });
+});
+
+// P5 O2 (the bundle swap): the build on disk now, past what a process holds (Electron's open archives, buildIdOf's cache)
+describe('currentBuildIdOf', () => {
+  const idOf = (text: string) => createHash('sha1').update(text).digest('hex').slice(0, 16);
+
+  it('reads a plain file as it is now, where buildIdOf keeps its first read; null once it is gone', () => {
+    const file = join(dir, 'mawsd.js');
+    fs.writeFileSync(file, 'build A');
+    expect(buildIdOf(file)).toBe(idOf('build A'));
+    fs.writeFileSync(file, 'build B');
+    expect(currentBuildIdOf(file)).toBe(idOf('build B'));
+    expect(buildIdOf(file)).toBe(idOf('build A'));
+    fs.rmSync(file);
+    expect(currentBuildIdOf(file)).toBeNull();
+  });
+
+  // The archive as electron-builder writes it (@electron/asar, its dependency); a bundle replaced as an upgrade does,
+  // the old one renamed aside and the new one put at its path. @electron/asar 3.x resolves createPackage once its write
+  // stream's end() is called, not once the stream has closed (lib/disk.js, writeFileListToStream's `return out.end()`),
+  // so the archive's last bytes can land after it resolves: a loaded CI runner read the last-written archive short and
+  // currentBuildIdOf answered null (run 41160959527). The bundle waits until its archive holds every byte its header lists.
+  const whole = (archive: string): boolean => {
+    const fd = fs.openSync(archive, 'r');
+    try {
+      const sizes = Buffer.alloc(16);
+      if (fs.readSync(fd, sizes, 0, 16, 0) < 16) return false;
+      const header = Buffer.alloc(sizes.readUInt32LE(12));
+      if (fs.readSync(fd, header, 0, header.length, 16) < header.length) return false;
+      type Entry = { files?: Record<string, Entry>; offset?: string; size?: number; unpacked?: boolean };
+      let end = 0;
+      const walk = (entry: Entry): void => {
+        if (entry.files) Object.values(entry.files).forEach(walk);
+        else if (!entry.unpacked) end = Math.max(end, Number(entry.offset) + (entry.size ?? 0));
+      };
+      walk(JSON.parse(header.toString('utf8')) as Entry);
+      return fs.fstatSync(fd).size >= 8 + sizes.readUInt32LE(4) + end;
+    } catch {
+      return false; // the header itself not whole yet
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
+  it('reads a file inside an app.asar from the archive now at that path, an unpacked one beside it', async () => {
+    const { createPackageWithOptions } = await import('@electron/asar');
+    const bundle = async (name: string, build: string) => {
+      const src = join(dir, `src-${name}`);
+      fs.mkdirSync(join(src, 'out', 'main'), { recursive: true });
+      fs.mkdirSync(join(src, 'node_modules', 'native'), { recursive: true });
+      fs.writeFileSync(join(src, 'out', 'main', 'mawsd.js'), build);
+      fs.writeFileSync(join(src, 'out', 'main', `index-${name}.js`), `host ${build}`);
+      fs.writeFileSync(join(src, 'node_modules', 'native', 'pty.node'), `native ${build}`);
+      const resources = join(dir, name, 'MAWS.app', 'Contents', 'Resources');
+      fs.mkdirSync(resources, { recursive: true });
+      await createPackageWithOptions(src, join(resources, 'app.asar'), { unpack: '**/*.node' });
+      await vi.waitFor(() => expect(whole(join(resources, 'app.asar'))).toBe(true));
+      return join(dir, name, 'MAWS.app');
+    };
+    const [a, b] = [await bundle('a', 'build A'), await bundle('b', 'build B')];
+    const installed = join(dir, 'Applications', 'MAWS.app');
+    fs.mkdirSync(join(dir, 'Applications'));
+    fs.renameSync(a, installed);
+    const inside = (path: string) => join(installed, 'Contents', 'Resources', 'app.asar', path);
+
+    expect(currentBuildIdOf(inside('out/main/mawsd.js'))).toBe(idOf('build A'));
+    expect(currentBuildIdOf(inside('out/main/index-a.js'))).toBe(idOf('host build A'));
+    expect(currentBuildIdOf(inside('node_modules/native/pty.node'))).toBe(idOf('native build A')); // from app.asar.unpacked
+    expect(currentBuildIdOf(inside('out/main/index-b.js'))).toBeNull();
+    expect(currentBuildIdOf(inside('out/main'))).toBeNull(); // a directory is no build
+
+    fs.renameSync(installed, join(dir, 'Applications', 'MAWS-old.app'));
+    fs.renameSync(b, installed);
+    expect(currentBuildIdOf(inside('out/main/mawsd.js'))).toBe(idOf('build B'));
+    expect(currentBuildIdOf(inside('out/main/index-a.js'))).toBeNull();
   });
 });

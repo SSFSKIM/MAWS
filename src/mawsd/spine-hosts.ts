@@ -5,7 +5,12 @@
 //   the spine is cold it keeps the coalesced parts (the latest per session and name, `engine.budget` once), so a
 //   periodic status wakes nothing, and offers a `session.eventBatch` to the seam as a trigger; from a trigger until a
 //   load's barrier has passed it holds every event in arrival order; once a load's barrier passed it delivers each event
-//   to the loaded spine's listeners; once the seam is off (refused or yielded) it drops what arrives.
+//   to the loaded spine's listeners. A provisional yield (spine-seam.ts) holds as a load does. Once the seam is off (a
+//   confirmed yield) it drops every other event and keeps the coalesced parts as cold does, since a yield lifts (the
+//   app it yielded to departs) and the next load's barrier replays them: a permission raised while no app ran reaches
+//   attention only as the coalesced `session.brokerItems` of a connect burst. The parts are one link's state: a link that
+//   leaves `ready` voids them, kept or held, and what it delivers until the next link is ready is not kept; a load the
+//   lift resumes past its replay holds them first.
 // - `SpineHostsAdapter`, one per load: the `SpineHosts` the spine's root is given. Its `onEvent` listens on the core, its
 //   `dispatch` reaches the engine host through the daemon's intercepts first (so `host.configure`, `host.stopAll` and
 //   `host.exitWhenIdle` from the spine reach the clocks as the app's do), its `setResync` is run by the adapter itself at
@@ -49,27 +54,44 @@ export class SpineEvents {
   private held: Held[] = [];
   private heldBytes = 0;
   private delivering = -1; // the drain's index into `held`
+  private replayOwed = false; // a load began and its barrier has not replayed the coalesced parts yet
+  private linkReady: boolean; // the link is `ready`: its whole-state parts are the current link's
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly offs: (() => void)[];
   dropped = 0; // held events discarded since the seam started (daemon.status.spine.heldDropped)
 
   constructor(
-    link: Pick<EngineLink, 'onEvent'>,
+    link: Pick<EngineLink, 'onEvent' | 'onState' | 'snapshot'>,
     private readonly options: SpineEventsOptions,
   ) {
     this.offs = HOST_EVENTS.map((name) => link.onEvent(name, (payload: unknown) => this.receive(name, payload)));
+    // The coalesced parts are one link's whole state: a link that leaves `ready` voids them, kept or held, and what it
+    // still delivers (a recycled connection drains after its `restarting`) is none of the next link's (its successor's
+    // connect burst republishes every row it holds, and a row it lacks must not come back from the old host's parts)
+    this.linkReady = link.snapshot('engine-host').state === 'ready';
+    this.offs.push(link.onState('engine-host', (state) => this.linkState(state.state === 'ready')));
+  }
+
+  private linkState(ready: boolean): void {
+    this.linkReady = ready;
+    if (ready) return;
+    this.coalesced.clear();
+    if (this.delivering >= 0 || !this.held.some((h) => COALESCED_EVENTS.has(h.name))) return; // a drain's own order stays
+    this.held = this.held.filter((h) => !COALESCED_EVENTS.has(h.name));
+    this.heldBytes = this.held.reduce((bytes, h) => bytes + sizeOf(h.payload), 0);
   }
 
   private receive(name: string, payload: unknown): void {
+    if (!this.linkReady && COALESCED_EVENTS.has(name)) return; // a voided link's whole state
     switch (this.mode) {
       case 'live':
         return this.deliver(name, payload);
       case 'holding':
         return this.hold(name, payload);
       case 'off':
-        return;
       case 'cold':
         if (COALESCED_EVENTS.has(name)) return void this.coalesced.set(coalescedKey(name, payload), { name, payload });
+        if (this.mode === 'off') return;
         if (name === 'session.eventBatch' && this.options.wake()) this.hold(name, payload); // the wake moved the mode to holding
     }
   }
@@ -104,6 +126,9 @@ export class SpineEvents {
   // From a trigger or a later connection's streaming: what arrives is held. Off stays off (a yield) unless `resume`
   // says the yield lifted while the load went on.
   beginHold(resume = false): void {
+    if (this.mode === 'cold') this.replayOwed = true; // a load begins: its barrier replays the coalesced parts
+    // a load resumed past its barrier's replay: what the yield coalesced meanwhile goes first in the hold, in its order
+    if (this.mode === 'off' && resume && !this.replayOwed) for (const { name, payload } of this.takeCoalesced()) this.hold(name, payload);
     if (this.mode !== 'off' || resume) this.mode = 'holding';
   }
   holding(): boolean {
@@ -112,9 +137,13 @@ export class SpineEvents {
 
   // The barrier's step 2: the coalesced parts, in the order they were first kept, through the root's listeners.
   replayCoalesced(): void {
+    this.replayOwed = false;
+    for (const { name, payload } of this.takeCoalesced()) this.deliver(name, payload);
+  }
+  private takeCoalesced(): Held[] {
     const parts = [...this.coalesced.values()];
     this.coalesced.clear();
-    for (const { name, payload } of parts) this.deliver(name, payload);
+    return parts;
   }
 
   // The barrier's step 4: the hold in order (events a listener's work brings meanwhile are appended and drained too),
@@ -140,6 +169,9 @@ export class SpineEvents {
 
   // A load that ends refused or yielded: no spine of this daemon's will fold the hold. Counted and logged; then `next`.
   discard(why: string, next: Mode): void {
+    // Whole-state parts that reached only the hold stay the latest kept for the next load, as cold or off keeps them (a
+    // confirmed provisional yield, a refused or failed load); the last resort mid-load keeps none, its barrier going on
+    if (next !== 'holding') for (const { name, payload } of this.held) if (COALESCED_EVENTS.has(name)) this.coalesced.set(coalescedKey(name, payload), { name, payload });
     if (this.held.length > 0) {
       this.dropped += this.held.length;
       this.options.log(`[spine] the hold's ${this.held.length} events (${this.heldBytes} bytes) discarded: ${why}`);
@@ -150,13 +182,12 @@ export class SpineEvents {
   }
 
   // The parts stopped (an adapter's close removes the root's listeners): cold, where the next batch is a trigger and
-  // starts the next hold, or off (a yield), where nothing is kept.
+  // starts the next hold, or off (a yield), where only the coalesced parts are kept, for the load after the yield lifts.
   cold(): void {
     this.mode = 'cold';
   }
   off(): void {
     this.discard('the spine yielded', 'off');
-    this.coalesced.clear();
   }
 
   listenerCount(): number {

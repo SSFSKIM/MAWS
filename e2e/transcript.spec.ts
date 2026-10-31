@@ -746,6 +746,57 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// The long-transcript window's jumps into history (residue 2 of docs/doperpowers/plans/2026-10-30-long-transcript-window.md):
+// a long session opens on its newest window; a jump to text many pages back (an attention item's mark) says it is
+// loading, can be given up, and otherwise lands on the text once its page is in; one in none of the history says so.
+// The wire is the harness's stand-in for the host (harness/paged.ts); the store, pager and bar are the product's.
+test('a jump into a long session\u2019s history loads the pages back to its text and lands there, or says it is missing', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  const h = '__maws_harness';
+  const opened = await page.evaluate((key) => (window as unknown as Record<string, HarnessApi>)[key]!.loadPaged('synthetic/120', 250), h);
+  console.log(`paged open: ${JSON.stringify(opened)}`);
+  expect(opened.turns, 'the open draws the newest window only').toBeLessThan(opened.total / 3);
+  const reach = (n: number | 'missing') => page.evaluate(([key, target]) => (window as unknown as Record<string, HarnessApi>)[key]!.reach(target), [h, n] as const);
+  const rowOfText = (n: number) => page.evaluate(([key, turn]) => (window as unknown as Record<string, HarnessApi>)[key]!.rowOfText(turn), [h, n] as const);
+  const bar = page.getByTestId('reach');
+
+  // Given up on the way: nothing it walked is taken in, and no jump happens.
+  expect(await rowOfText(2)).toBeNull();
+  await reach(2);
+  await expect(bar).toHaveAttribute('data-phase', 'loading');
+  await expect(bar).toContainText('Loading earlier messages to reach the message');
+  await bar.getByRole('button', { name: 'Stop' }).click();
+  await expect(bar).toBeHidden();
+  expect(await rowOfText(2)).toBeNull();
+
+  // Landed: the pages back to turn 3 are in, and its text is in view with focus.
+  await reach(3);
+  await expect(bar).toHaveAttribute('data-phase', 'loading');
+  await expect(bar).toBeHidden({ timeout: 30_000 });
+  const row = await rowOfText(3);
+  expect(row, 'turn 3\u2019s text is loaded').not.toBeNull();
+  const text = page.locator(rowSelector(row!)).locator('[data-kind="assistant_text"]').first();
+  await expect(text).toBeFocused();
+  await settle(page, 300);
+  const placed = await text.evaluate((element) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
+    return { inView: rect.top >= scroller.top && rect.top < scroller.bottom, kind: element.closest('[data-kind]')?.getAttribute('data-kind') };
+  });
+  console.log(`history jump: ${JSON.stringify(placed)}`);
+  expect(placed).toEqual({ inView: true, kind: 'assistant_text' });
+
+  // In none of the history: said at once, until dismissed.
+  await reach('missing');
+  await expect(bar).toHaveAttribute('data-phase', 'missing');
+  await expect(bar).toContainText('That message is no longer in this transcript.');
+  await bar.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(bar).toBeHidden();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // A long unbreakable token (a path, a URL) in answer or commentary prose wraps inside a narrow transcript instead of
 // scrolling it sideways (R7 measured 80 px of horizontal overflow at 280 px before the prose wrapped).
 test('a long token in prose wraps in a narrow transcript', async ({ harness }) => {

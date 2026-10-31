@@ -6,8 +6,9 @@
 // except `fs.unbind`, for which an unbound id is a no-op.
 import * as z from 'zod';
 import { SessionEventSchema } from '@shared/graph/events';
+import { HistorySoughtSchema } from '@shared/graph/history-window';
 import { ForeignHolderSchema } from '@shared/graph/session';
-import { AgentIdSchema, AppSessionIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
+import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
 import {
   HolderSchema,
   JobStateSchema,
@@ -96,8 +97,20 @@ export type FsReadSpillOutput = z.infer<typeof FsReadSpillOutputSchema>;
 
 export const FOLLOW_STATES = ['backfilling', 'following', 'reloading', 'stopped', 'error'] as const;
 
+// Where a search-text pass ended, and what it needs to resume there: the byte offset after the last line it consumed,
+// the file's inode, a digest of the file's head and of the bytes just before the offset, and whether it has produced a
+// block yet (the next block's separator). The index stores it with the text and offers it back on the next pass; the
+// host resumes only when the file still agrees with it, and otherwise reads from byte 0 (`from` 0 in the answer).
+export const SearchCheckpointSchema = z.strictObject({ offset: z.number().int().nonnegative(), ino: z.string(), head: z.string(), started: z.boolean() });
+export type SearchCheckpoint = z.infer<typeof SearchCheckpointSchema>;
+
 export const commands = {
-  'fs.sessionText': { input: z.strictObject({ sessionId: SessionIdSchema, cursor: z.string().optional() }), output: z.strictObject({ text: z.string().max(128 * 1024), cursor: z.string().nullable(), size: z.number(), mtimeMs: z.number() }), owner: 'engine-host' },
+  'fs.sessionText': {
+    input: z.strictObject({ sessionId: SessionIdSchema, cursor: z.string().optional(), resume: SearchCheckpointSchema.optional() }),
+    // `from`: the byte offset the pass started at (0 for a full pass); `checkpoint`: on the last page, where it ended
+    output: z.strictObject({ text: z.string().max(128 * 1024), cursor: z.string().nullable(), size: z.number(), mtimeMs: z.number(), from: z.number().int().nonnegative().optional(), checkpoint: SearchCheckpointSchema.optional() }),
+    owner: 'engine-host',
+  },
   'fs.state': { input: z.void(), output: FsStateSchema, owner: 'engine-host' },
   'fs.scan': { input: z.strictObject({ known: z.array(FsScanKnownSchema).optional() }), output: FsScanResultSchema, owner: 'engine-host' },
   // main → host, after the index allocates or binds an app id
@@ -113,10 +126,13 @@ export const commands = {
   'fs.unfollow': { input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema.nullable() }), output: z.void(), owner: 'engine-host' },
   'fs.subagents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ agents: z.array(SubagentEntrySchema) }), owner: 'engine-host' },
   // C6's name: the child's transcript as X1 events; starts following it, and later events arrive on
-  // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished.
+  // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished. One bounded window at a
+  // time, as `session.events` from disk: the newest, or the page `before` a cursor; `earlier` the cursor of the page
+  // before this one, present only while older history remains (2026-10-30, the long-transcript window); `seek` and
+  // `sought` as `session.events`'.
   'fs.agentEvents': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema }),
-    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean() }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, before: EventIdSchema.optional(), seek: MessageUuidSchema.optional() }),
+    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional() }),
     owner: 'engine-host',
   },
   'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },

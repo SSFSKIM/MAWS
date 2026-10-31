@@ -241,6 +241,58 @@ export function buildIdOf(file: string): string {
   return id;
 }
 
+// P5 O2 (the bundle swap): `file`'s build id as the file is on disk now, never cached; null when it is missing or cannot
+// be read. A file inside an `app.asar` is read from the archive now at that path: Electron holds each archive it opened,
+// header and file handle, for the life of the process (lib/node/asar-fs-wrapper.ts's `cachedArchives`), so an ordinary
+// read there answers from the archive this process started with even after the bundle was replaced.
+export function currentBuildIdOf(file: string): string | null {
+  const archive = /^(.*?\.asar)[/\\](.+)$/.exec(file);
+  const asar = process.noAsar;
+  process.noAsar = true; // the archive file itself, not the directory Electron's fs makes of it (a no-op in plain Node)
+  try {
+    const bytes = archive ? readFromArchive(archive[1], archive[2].split(/[/\\]/)) : nodeFs.readFileSync(file);
+    return createHash('sha1').update(bytes).digest('hex').slice(0, 16);
+  } catch {
+    return null;
+  } finally {
+    process.noAsar = asar;
+  }
+}
+
+// A file's bytes from an asar archive (@electron/asar's format): two Chromium pickles, the first holding the size of the
+// second, which holds the header's JSON; a file's `offset` counts from the header's end, and an unpacked one lies beside
+// the archive under `<archive>.unpacked/`.
+function readFromArchive(archive: string, inner: string[]): Buffer {
+  const fd = nodeFs.openSync(archive, 'r');
+  try {
+    const read = (length: number, position: number) => {
+      const bytes = Buffer.alloc(length);
+      if (nodeFs.readSync(fd, bytes, 0, length, position) !== length) throw new Error(`${archive} is shorter than its header says`);
+      return bytes;
+    };
+    const sizes = read(16, 0);
+    const headerEnd = 8 + sizes.readUInt32LE(4);
+    let entry = JSON.parse(read(sizes.readUInt32LE(12), 16).toString('utf8')) as AsarEntry;
+    for (const name of inner) {
+      const files = entry.files;
+      if (!files || !Object.hasOwn(files, name)) throw new Error(`${archive} holds no ${inner.join('/')}`);
+      entry = files[name];
+    }
+    if (entry.unpacked) return nodeFs.readFileSync(join(`${archive}.unpacked`, ...inner));
+    if (typeof entry.size !== 'number' || typeof entry.offset !== 'string') throw new Error(`${inner.join('/')} in ${archive} is not a file`);
+    return read(entry.size, headerEnd + Number(entry.offset));
+  } finally {
+    nodeFs.closeSync(fd);
+  }
+}
+
+interface AsarEntry {
+  files?: Record<string, AsarEntry>;
+  size?: number;
+  offset?: string;
+  unpacked?: boolean;
+}
+
 // `process.kill(pid, 0)`: ESRCH is dead; EPERM is a live process of another user.
 export function isAlive(pid: number): boolean {
   if (!(pid > 0)) return false;

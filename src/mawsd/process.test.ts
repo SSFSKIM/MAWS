@@ -4,9 +4,9 @@
 // (started here as a unit would restart it) adopts the same engine host. Skipped without a build, as the bundle guard is;
 // class 1a builds first.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { RawApp, until } from '../../test/support/mawsd-scene';
@@ -41,9 +41,9 @@ const alive = (pid: number) => {
   }
 };
 
-function run(profile: string): { child: ChildProcess; exited: Promise<number | null>; output: () => string } {
+function run(profile: string, entry = MAWSD): { child: ChildProcess; exited: Promise<number | null>; output: () => string } {
   let output = '';
-  const child = spawn(process.execPath, ['--disable-sigusr1', MAWSD, 'run', '--private', '--dir', join(profile, 'mawsd')], {
+  const child = spawn(process.execPath, ['--disable-sigusr1', entry, 'run', '--private', '--dir', join(profile, 'mawsd')], {
     env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(profile, 'home'), MAWS_USER_DATA: profile },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -107,6 +107,37 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd under plain Node', () => {
     machine.destroy();
     second.child.kill('SIGTERM');
     await expect(second.exited).resolves.toBe(0);
+  });
+
+  // P5 O2 (the bundle swap): the bundle mawsd runs from replaced under it, the old one moved aside and a new build put at
+  // its path, whose engine-host chunk has another name, as a macOS upgrade does to /Applications/MAWS.app
+  it('spawns no engine host once its bundle was replaced, and keeps serving with the reason logged', async () => {
+    scratch = mkdtempSync(join(tmpdir(), 'maws-ms-'));
+    const profile = join(scratch, 'profile');
+    const bundle = join(scratch, 'MAWS.app');
+    mkdirSync(profile);
+    cpSync(dirname(MAWSD), join(bundle, 'out', 'main'), { recursive: true });
+    symlinkSync(resolve(__dirname, '../../node_modules'), join(bundle, 'node_modules')); // zod, as the bundle's own
+    const daemon = run(profile, join(bundle, 'out', 'main', 'mawsd.js'));
+    await served(profile, daemon, 1);
+
+    renameSync(bundle, join(scratch, 'MAWS-old.app'));
+    cpSync(join(scratch, 'MAWS-old.app'), bundle, { recursive: true, verbatimSymlinks: true });
+    const main = join(bundle, 'out', 'main');
+    appendFileSync(join(main, 'mawsd.js'), '\n// another build\n');
+    for (const chunk of readdirSync(main).filter((name) => /^index-.+\.js$/.test(name))) renameSync(join(main, chunk), join(main, `index-next-${chunk.slice(6)}`));
+
+    const token = readFileSync(join(profile, 'mawsd', 'mawsd.token'), 'utf8').trim();
+    const machine = await RawApp.connect(join(profile, 'mawsd', 'machine.sock'), token);
+    const status = await machine.request('daemon.status'); // it wakes the engine host
+    expect(status, log(profile)).toMatchObject({ ok: true, value: { pid: daemon.child.pid, hosts: { 'engine-host': { state: 'parked', pid: null } } } });
+    expect(log(profile)).toMatch(/\[hosts\] spawned nothing: mawsd's bundle was replaced: .+\/MAWS\.app\/out\/main\/mawsd\.js is build [0-9a-f]{16}, this mawsd runs build [0-9a-f]{16}; the next app to attach restarts mawsd\n/);
+    expect(log(profile)).not.toContain('Cannot find module');
+    expect(existsSync(join(profile, 'supervisor', 'host.lock'))).toBe(false); // no engine host ever started
+    expect(daemon.child.exitCode).toBeNull();
+    machine.destroy();
+    daemon.child.kill('SIGTERM');
+    await expect(daemon.exited).resolves.toBe(0);
   });
 });
 

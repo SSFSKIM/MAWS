@@ -139,6 +139,9 @@ export interface DetachedTransportOptions {
   buildPolicy?: BuildPolicy;
   relayed?: boolean;
   // P5 O2 M3 end
+  // P5 O2 (the bundle swap): asked just before each spawn; a reason means the code the spawn would run is no longer this
+  // process's build (its bundle was replaced), so nothing is spawned and the attempt ends in `notLaunched`
+  beforeSpawn?(): string | null;
 }
 
 // A served connection as the host supervisor sees it: C1's envelope both ways. P3-A M5 (socket protocol 2): and the
@@ -183,6 +186,7 @@ export interface DetachedEvents {
   // An incompatible supervisor still runs sessions: its refusal, the whole line (P5 O2 M3), for a relay to reflect;
   // refusedOn reads what it named
   waiting(refuse: ServerRefuse): void;
+  notLaunched(reason: string): void; // P5 O2: beforeSpawn's reason; nothing ran, so nothing exited
 }
 
 // P5 O1 M6: `wire` when the protocol-2 window was refused on the fingerprint (a protocol-2 supervisor of another
@@ -404,6 +408,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         return connecting();
       }
       if (pastBudget()) return fail('other', 'no supervisor answered within the start budget');
+      const declined = options.beforeSpawn?.() ?? null; // P5 O2 (the bundle swap)
+      if (declined !== null) {
+        log(`spawned nothing: ${declined}`);
+        finish();
+        waitingFor = null;
+        return events.notLaunched(declined);
+      }
       try {
         makePrivateDirectory(dir); // P5 O2 M3: created 0700 when missing, refused when not private
       } catch (error) {

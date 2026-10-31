@@ -23,6 +23,7 @@
 // the message listeners in its place among the lines, so neither the runtime nor the host supervisor sees a difference.
 import type { Socket } from 'node:net';
 import type { HostPort } from './runtime';
+import { ipcError } from '../ipc/errors';
 import { decodeJsonLine, encodeJsonLine } from './json-bytes';
 import { DOC_FRAME_CAP, encodeDocFrame, encodePtyFrame, LINE_CAP, splitRecords, WRITABLE_CAP, type PtyFrame } from './socket-protocol';
 
@@ -52,6 +53,7 @@ export class SocketPort implements HostPort {
   private readonly log: (line: string) => void;
   private readonly writableCap: number;
   private readonly ptyFrames: boolean; // P5 O2 M4
+  private readonly lineCap: number; // the long-transcript window: what this end reads, and so what it writes
 
   constructor(
     private readonly socket: Socket,
@@ -62,6 +64,7 @@ export class SocketPort implements HostPort {
     this.writableCap = options.writableCap ?? WRITABLE_CAP;
     this.ptyFrames = options.ptyFrames ?? false;
     const lineCap = options.lineCap ?? LINE_CAP;
+    this.lineCap = lineCap;
     const splitter = splitRecords(
       {
         line: (line) => this.receive(line),
@@ -89,7 +92,32 @@ export class SocketPort implements HostPort {
   // stalled the peer past the cap (the connection is then destroyed with the line still buffered, so it never leaves).
   postMessage(message: unknown): boolean {
     const frame = this.ptyFrames ? ptyFrameOf(message) : null; // P5 O2 M4
-    return this.write(frame ?? `${encodeJsonLine(message)}\n`);
+    if (frame) return this.write(frame);
+    const line = encodeJsonLine(message);
+    const bytes = line.length > this.lineCap / 3 ? Buffer.byteLength(line) : 0; // UTF-8 takes at most three bytes a unit
+    return bytes > this.lineCap ? this.overCap(message, bytes) : this.write(`${line}\n`);
+  }
+
+  // The long-transcript window (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): a line over the cap the
+  // peer reads by (both ends read by LINE_CAP) would make the peer close the connection, and with it every request in
+  // flight and every event behind it, for every session on the link. It is never written. An answer goes instead as its
+  // request's error, `internal` with `issues.tooLarge` naming the size (a new error code would take a wire major); any
+  // other message is dropped. Either is logged, and the connection stays.
+  private overCap(message: unknown, bytes: number): boolean {
+    const record = typeof message === 'object' && message !== null ? (message as Record<string, unknown>) : null;
+    const what = record?.t === 'res' ? `the answer to request ${String(record.id)}` : record?.t === 'evt' ? `the event ${String(record.name)}` : `a ${String(record?.t)} message`;
+    this.log(`refused to write ${what}: ${bytes} bytes, over the ${this.lineCap}-byte line cap`);
+    if (record?.t !== 'res' || typeof record.id !== 'string') return true;
+    const error = ipcError('internal', `the answer is ${bytes} bytes, over the ${this.lineCap}-byte line cap of the connection it would cross`, { tooLarge: { bytes, cap: this.lineCap } });
+    const reply = encodeJsonLine({ t: 'res', id: record.id, ok: false, error });
+    // A request id is unbounded, so the error can pass the cap too; it is then dropped like any other message over it,
+    // and the requester waits out its deadline rather than the connection closing.
+    const replyBytes = Buffer.byteLength(reply);
+    if (replyBytes > this.lineCap) {
+      this.log(`refused to write its error too: ${replyBytes} bytes, over the ${this.lineCap}-byte line cap`);
+      return true;
+    }
+    return this.write(`${reply}\n`);
   }
 
   // P3-A M5 start: a document frame for `channel`, under postMessage's rules.
