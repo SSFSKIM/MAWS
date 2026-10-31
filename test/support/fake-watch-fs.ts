@@ -1,5 +1,5 @@
 // An in-memory filesystem for the watch tree's tests (P5 O3-E M1, src/shared/fs/watch-tree.ts) and the two watchers that
-// take it: the `fs` the tree injects (`watch`, `readdir`, `lstat`), with directories, files and links held by absolute
+// take it: the `fs` the tree injects (`watch`, `lstatSync`, `readdir`, `lstat`), with directories, files and links held by absolute
 // path, every non-recursive watch recorded, events delivered by hand, a watch call made to fail on demand and a
 // directory's listing held until the test releases it.
 import { join } from 'node:path';
@@ -26,6 +26,7 @@ export class FakeWatchFs {
   watchCalls = 0;
   listings = 0;
   lstats: string[] = []; // the paths lstat was asked, in order
+  lstatSyncs: string[] = []; // the paths lstatSync was asked, in order
   // Answers the error a watch call throws, by its path and the call's ordinal (1-based), or null to let it open.
   failWatch: (path: string, call: number) => NodeJS.ErrnoException | null = () => null;
   private readonly gates = new Map<string, { promise: Promise<void>; open: () => void }>();
@@ -106,6 +107,11 @@ export class FakeWatchFs {
       return [...this.nodes.entries()]
         .filter(([key]) => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/'))
         .map(([key, child]) => ({ name: key.slice(path.length + 1), isDirectory: () => child.kind === 'dir', isSymbolicLink: () => child.kind === 'link' }));
+    },
+    lstatSync: (path: string) => {
+      this.lstatSyncs.push(path);
+      const node = this.nodes.get(path);
+      return node === undefined ? undefined : { isDirectory: () => node.kind === 'dir', isSymbolicLink: () => node.kind === 'link', dev: 1, ino: node.ino };
     },
     lstat: async (path: string) => {
       this.lstats.push(path);

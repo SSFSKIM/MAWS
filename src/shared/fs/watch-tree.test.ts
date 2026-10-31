@@ -93,16 +93,17 @@ describe('the watch tree walks a directory tree', () => {
     expect(() => watchTree('/missing', { fs: fake.options }, () => {})).toThrow(expect.objectContaining({ code: 'ENOENT' }));
   });
 
-  // VM measure of M1: the walk's allocations are what its RSS growth is made of, so it reads no directory's identity but
-  // the root's (whose replacement no parent can tell); a directory's is read when a pass lists it again.
-  it("reads the root's identity alone while it walks", async () => {
+  // A directory's identity is read as its watch opens, synchronously (no promise or stat survives it: the walk's
+  // allocations are what its RSS growth is made of, the VM measure of M1); the walk lists, and stats nothing else.
+  it("reads each directory's identity as its watch opens, and stats nothing else while it walks", async () => {
     const fake = new FakeWatchFs();
     fake.mkdir('a/b/c');
     fake.mkdir('d');
     const { handle } = open(fake);
     await drain();
     expect(fake.watched()).toHaveLength(5);
-    expect(fake.lstats).toEqual([fake.root]);
+    expect(fake.lstatSyncs.sort()).toEqual(['', 'a', 'a/b', 'a/b/c', 'd'].map((rel) => fake.abs(rel)).sort());
+    expect(fake.lstats).toEqual([fake.root]); // the initial pass's look at the root it already watches
     handle.close();
   });
 
@@ -239,38 +240,26 @@ describe('the watch tree follows directories created and removed after it opened
     handle.close();
   });
 
-  // A directory whose identity no pass has read yet cannot be told from a replacement: watched afresh, rather than keep
-  // a watch that may have died with the old one. Once a pass read it, the same directory named again keeps its watch.
-  it("keeps the watch of a directory named again once a pass read its identity, and renews it before", async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    try {
-      const fake = new FakeWatchFs();
-      fake.write('dist/a.js');
-      const { handle, heard } = open(fake);
-      await drain();
-      const first = fake.watches.find((watch) => watch.path === fake.abs('dist'))!;
-      fake.fire('', 'rename', 'dist'); // moved out and back, say: the same directory
-      await drain();
-      expect(first.closed).toBe(true);
-      expect(fake.watched()).toEqual(['', 'dist']);
-      const second = fake.watches.find((watch) => watch.path === fake.abs('dist') && !watch.closed)!;
-      await vi.advanceTimersByTimeAsync(RECONCILE_MS);
-      await drain();
-      heard.length = 0;
-      fake.fire('', 'rename', 'dist');
-      await drain();
-      expect(second.closed).toBe(false);
-      expect(heard).toEqual([['rename', 'dist']]);
-      fake.rm('dist');
-      fake.write('dist/b.js'); // replaced: a new identity
-      fake.fire('', 'rename', 'dist');
-      await drain();
-      expect(second.closed).toBe(true);
-      expect(heard).toContainEqual(['rename', 'dist/b.js']);
-      handle.close();
-    } finally {
-      vi.useRealTimers();
-    }
+  // Its identity known from its watch's opening, a directory named again keeps its watch; replaced, it is renewed.
+  it('keeps the watch of the same directory named again, and renews that of one replaced', async () => {
+    const fake = new FakeWatchFs();
+    fake.write('dist/a.js');
+    const { handle, heard } = open(fake);
+    await drain();
+    const first = fake.watches.find((watch) => watch.path === fake.abs('dist'))!;
+    heard.length = 0;
+    fake.fire('', 'rename', 'dist'); // moved out and back, say: the same directory
+    await drain();
+    expect(first.closed).toBe(false);
+    expect(heard).toEqual([['rename', 'dist']]);
+    fake.rm('dist');
+    fake.write('dist/b.js'); // replaced: a new identity
+    fake.fire('', 'rename', 'dist');
+    await drain();
+    expect(first.closed).toBe(true);
+    expect(fake.watched()).toEqual(['', 'dist']);
+    expect(heard).toContainEqual(['rename', 'dist/b.js']);
+    handle.close();
   });
 
   it('reports a file event once it knows the name is no directory', async () => {
@@ -535,6 +524,25 @@ describe('the watch tree reconciles', () => {
     await vi.advanceTimersByTimeAsync(RECONCILE_MS);
     await drain();
     expect(fake.watched().sort()).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    handle.close();
+  });
+
+  // Task review of the fix round (finding 1): a directory's identity is its watch's, read as the watch opens, so a pass
+  // tells a directory replaced while every event of it was lost (its parent's and its own) from the one it watches.
+  it('watches afresh, at the next pass, a directory replaced before anything read it while its events were lost', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('a/b');
+    const { handle, heard } = open(fake);
+    await drain();
+    const first = fake.watches.find((watch) => watch.path === fake.abs('a/b'))!;
+    fake.rm('a/b');
+    fake.write('a/b/new.txt'); // a new a/b; no event of either reaches the tree
+    heard.length = 0;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(first.closed).toBe(true);
+    expect(fake.watched().sort()).toEqual(['', 'a', 'a/b']);
+    expect(heard).toEqual([['rename', 'a/b/new.txt'], ['rename', 'a/b'], ['rename', null]]);
     handle.close();
   });
 

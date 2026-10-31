@@ -16,7 +16,7 @@
 // call closes the tree and is reported once, on a later tick, as an 'error' naming the code and the directory: the
 // caller's cue to fall back to polling. Imports Node's builtins alone (the engine host and the services library both
 // take it).
-import { watch as fsWatch } from 'node:fs';
+import { lstatSync as fsLstatSync, watch as fsWatch } from 'node:fs';
 import { lstat as fsLstat, readdir as fsReaddir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
@@ -30,7 +30,7 @@ export interface WatchTreeOptions {
   reconcileMs?: number;
   burst?: { events: number; windowMs: number; settleMs: number };
   concurrency?: number;
-  fs?: Pick<typeof import('node:fs/promises'), 'readdir' | 'lstat'> & { watch: typeof import('node:fs').watch }; // tests
+  fs?: Pick<typeof import('node:fs/promises'), 'readdir' | 'lstat'> & Pick<typeof import('node:fs'), 'watch' | 'lstatSync'>; // tests
 }
 export type WatchFn = (path: string, options: { recursive: boolean; prune?: WatchTreeOptions['prune'] }, listener: WatchListener) => WatchHandle;
 
@@ -77,10 +77,12 @@ class WatchTree implements WatchHandle {
   private readonly reconcileMs: number;
   private readonly burst: { events: number; windowMs: number; settleMs: number };
   private readonly concurrency: number;
-  // Root-relative ('' the root) → its watch and the directory's identity, null until read: the root's is read with its
-  // listing, any other's when a whole-tree pass lists it again (one lstat per directory at the walk was a sixth of the
-  // walk's allocations, the VM measure of M1).
-  private readonly watches = new Map<string, { watch: DirWatch; identity: string | null; pass: number }>();
+  // Root-relative ('' the root) → its watch and the identity (`dev`, `ino`) of the directory it watches, read as the watch
+  // opens (`ino` null: the directory was not there to read, so not known). Read synchronously and kept as two numbers,
+  // which leaves no promise, stat or string behind (a `dev:ino` string per directory was +4 MiB on a 5,900-directory
+  // walk, the numbers nothing measurable); a read on the next pass instead would adopt whatever stood there then (the task review of
+  // the fix round: a directory replaced while its events were lost kept a dead watch).
+  private readonly watches = new Map<string, Watched>();
   private readonly held = new Set<string>(); // directories admitted or awaiting the predicate, not yet watched
   private readonly queue: { rel: string; walk: Walk; report: boolean }[] = [];
   private readonly errorListeners: ((error: NodeJS.ErrnoException) => void)[] = [];
@@ -101,7 +103,7 @@ class WatchTree implements WatchHandle {
     options: WatchTreeOptions,
     private readonly listener: WatchListener,
   ) {
-    this.fs = options.fs ?? { watch: fsWatch, readdir: fsReaddir, lstat: fsLstat };
+    this.fs = options.fs ?? { watch: fsWatch, lstatSync: fsLstatSync, readdir: fsReaddir, lstat: fsLstat };
     this.prune = options.prune ?? (() => false);
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.burst = options.burst ?? { events: BURST_EVENTS, windowMs: BURST_WINDOW_MS, settleMs: BURST_SETTLE_MS };
@@ -133,9 +135,13 @@ class WatchTree implements WatchHandle {
 
   // Throws what the watch call throws.
   private open(rel: string): void {
+    // Read before the watch opens: a directory replaced between the two reads as replaced at the next look, never the
+    // other way round.
+    const stat = this.fs.lstatSync(this.abs(rel), { throwIfNoEntry: false });
+    const [dev, ino] = stat ? [Number(stat.dev), Number(stat.ino)] : [0, null];
     const watch = this.fs.watch(this.abs(rel), { persistent: true }, (event, name) => this.onEvent(rel, event, name));
     watch.on('error', (error: NodeJS.ErrnoException) => this.onWatchError(rel, watch, error));
-    this.watches.set(rel, { watch, identity: null, pass: this.passes });
+    this.watches.set(rel, { watch, dev, ino, pass: this.passes });
   }
 
   // Whether the directory is watched now. A directory that vanished since its listing (ENOENT, ENOTDIR) or that this
@@ -210,7 +216,7 @@ class WatchTree implements WatchHandle {
       return this.listener(event, null);
     }
     const entry = this.watches.get(rel);
-    if (entry && entry.identity !== null && entry.identity !== identityOf(own)) {
+    if (entry && entry.ino !== null && !sameDirectory(entry, own)) {
       this.drop(rel);
       if (rel === '') return this.reconcile(); // the root replaced: the pass watches the new one and names its contents
       return void this.admit(rel, this.lateWalk(rel), true); // replaced under its name: the new one is watched afresh
@@ -231,7 +237,7 @@ class WatchTree implements WatchHandle {
       if (entry || this.held.has(child)) this.drop(child);
       return this.listener(event, child);
     }
-    if (entry && (entry.identity === null ? event === 'rename' : entry.identity !== identityOf(stat))) this.drop(child); // replaced, or not known not to be
+    if (entry && (entry.ino === null ? event === 'rename' : !sameDirectory(entry, stat))) this.drop(child); // replaced, or not known not to be
     else if (entry || this.held.has(child)) return this.listener(event, child);
     void this.admit(child, this.lateWalk(child), true);
   }
@@ -312,8 +318,7 @@ class WatchTree implements WatchHandle {
       const now = await this.stat(rel);
       if (this.closed || this.watches.get(rel) !== entry) return;
       if (now === null || !now.isDirectory()) return this.drop(rel);
-      if (entry.identity === null) entry.identity = identityOf(now);
-      else if (entry.identity !== identityOf(now)) {
+      if (!sameDirectory(entry, now)) {
         this.drop(rel); // replaced while an event was lost (the root included): watched afresh, its contents new
         if (!this.place(rel)) return;
         report = walk.discover;
@@ -325,11 +330,7 @@ class WatchTree implements WatchHandle {
     walk.seen?.add(rel);
     let listing: Dirent[];
     try {
-      const root = rel === '' && this.watches.get('')?.identity === null;
-      const [dirents, stat] = await Promise.all([this.fs.readdir(this.abs(rel), { withFileTypes: true }), root ? this.stat('') : null]);
-      listing = dirents;
-      const placed = this.watches.get(rel);
-      if (placed && stat !== null && placed.identity === null) placed.identity = identityOf(stat);
+      listing = await this.fs.readdir(this.abs(rel), { withFileTypes: true });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ENOENT' || code === 'ENOTDIR') return this.drop(rel);
@@ -436,6 +437,14 @@ class WatchTree implements WatchHandle {
 type Stat = Awaited<ReturnType<TreeFs['lstat']>>;
 type Dirent = import('node:fs').Dirent;
 
-function identityOf(stat: Stat): string {
-  return `${stat.dev}:${stat.ino}`;
+interface Watched {
+  watch: DirWatch;
+  dev: number;
+  ino: number | null;
+  pass: number; // the whole-tree pass it was opened in
+}
+
+// Whether the directory a stat describes is the one the watch was opened on (an identity not read: not known to be).
+function sameDirectory(watched: Watched, stat: { dev: number | bigint; ino: number | bigint }): boolean {
+  return watched.ino !== null && watched.ino === Number(stat.ino) && watched.dev === Number(stat.dev);
 }
