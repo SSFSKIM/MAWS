@@ -1209,7 +1209,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
   });
 });
 
-test('(n) O16 M2b: the spine released just before an idle release: the release’s events load it again, and no engine host starts in place of the one that parks', async () => {
+test('(e′) O16 M2b: the spine released just before an idle release: the release’s events load it again, and no engine host starts in place of the one that parks', async () => {
   test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
   // The race behind case (e)'s flake (hosted run 41217185059), run on purpose. Two clocks start at about the turn's end:
   // the row's idle release (the idle time) and mawsd's spine release (its quiet period, the idle time unless
