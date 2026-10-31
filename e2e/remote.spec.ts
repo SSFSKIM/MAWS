@@ -208,8 +208,12 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await page.keyboard.press('Enter');
     await expect.poll(async () => JSON.stringify(await writtenOnB()), { timeout: 60_000, message: `B's transcript records A's send\n${mainSaid(page)}` }).toContain(SECOND);
     await expect(main(page).getByText(SECOND_REPLY).first(), 'the reply in A’s pane').toBeVisible({ timeout: 60_000 });
-    const deltas = (await batchedEvents(page, address)).filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta');
-    expect(deltas.map((e) => e.textDelta), 'the reply streamed to A as its deltas').toEqual(SECOND_DELTAS);
+    const onA = await batchedEvents(page, address);
+    const deltas = onA.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta');
+    const onB = (await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: app, afterSeq: null, limit: null })).events;
+    const batchIds = await page.evaluate(() => [...new Set((window as unknown as { __remote: { appSessionId: string }[] }).__remote.map((b) => b.appSessionId))]);
+    const said = () => `A's batches for ${address}: ${onA.map((e) => e.kind).join(', ')}\nthe sessions A's batches named: ${batchIds.join(', ')}\nB's events: ${onB.map((e) => e.kind).join(', ')}`;
+    expect(deltas.map((e) => e.textDelta), `the reply streamed to A as its deltas\n${said()}`).toEqual(SECOND_DELTAS);
     await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
 
     // A permission B's engine asks for, answered in A's pane: the replay goes on only on the `allow` it holds at.
