@@ -400,7 +400,7 @@ describe('ipcSource', () => {
 
     // M2's milestone review: a window main's read can't page across the channel until M4 (acceptance 12) is answered history
     // unavailable after main said why (`remote.historyTooLarge`); its bar says what the person can do, and only its bar
-    it('says a remote history too large for the channel opens once the session resumes, and an older page that it can’t be shown yet', async () => {
+    it('says a remote history too large for the channel can’t be shown yet, new messages still appearing, and an older page that it can’t be shown yet', async () => {
       useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
       const b = builder();
       turnOf(b, 2);

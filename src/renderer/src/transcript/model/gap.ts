@@ -15,7 +15,7 @@ export const HISTORY_GAP = 'Earlier history isn’t available';
 // M2's milestone review: a remote session's history window too large for the channel, which main can't page until M4
 // (acceptance 12; main says so as `remote.historyTooLarge`): the bar says what the person can do, never that it is lost
 export const HISTORY_TOO_LARGE = {
-  newest: (machine: string) => `This session’s history on ${machine} is too large to show here; it opens once the session resumes`,
+  newest: (machine: string) => `This session’s earlier history on ${machine} is too large to show here yet; new messages appear below as the session goes on`,
   older: (machine: string) => `Earlier history on ${machine} is too large to show here yet`,
 } as const;
 

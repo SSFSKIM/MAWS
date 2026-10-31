@@ -71,6 +71,6 @@ export const events = {
   // M2's milestone review: a remote session's history window too large for the channel, which main's read can't page
   // until M4 (acceptance 12), said just before main answers that read `historyUnavailable`: `newest`, a parked session's
   // newest window (the engine host's disk read); `older`, an older page (or a seek, a subagent's slice). The renderer's
-  // bar for that answer says the history opens once the session resumes, not that it is lost.
+  // bar for that answer says the history can't be shown here yet (new messages still appear), not that it is lost.
   'remote.historyTooLarge': z.strictObject({ appSessionId: AppSessionIdSchema, window: z.enum(['newest', 'older']) }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;
