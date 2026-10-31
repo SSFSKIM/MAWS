@@ -45,6 +45,8 @@ import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
 import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org } from '../endpoint/sub-harness';
 import { record, status } from '../support/builders';
+import { DaemonClocks } from '../../src/mawsd/clocks';
+import { engineRequests } from '../../src/mawsd/engine-requests';
 
 // The endpoint's `h2` list, the build's own by default, which a case narrows to an endpoint of an earlier build (before the
 // `machine` executor, before M4's byte budget); each case starts from the whole list again.
@@ -456,8 +458,29 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
   // parked one) and reports interest, which restarts the park clock; with the checkout feed carrying the record, an open
   // tab tries only when the record says the session runs. The adapter's backoff here is 50 ms doubling to 400 ms, so a
   // blind retry would show several times over the wait.
-  it('keeps an open tab on a session that isn’t live from placing it or reporting interest again, and picks it up once the machine says it runs', async () => {
+  it('keeps an open tab on a session that isn’t live from placing it or reporting interest again, so the machine’s host parks, and picks it up once the machine says it runs', async () => {
     const l = await lab();
+    // mawsd's park clock over the endpoint's seams, as daemon.ts wires them: every engine-host request goes through
+    // engineRequests (a park need), and the viewers' union is the interest. The park window here is 1.5 s.
+    const parks: number[] = [];
+    const clocks = new DaemonClocks('unit', { armEnginePark: () => (parks.push(Date.now()), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    cleanups.push(() => clocks.stop());
+    const needs = vi.spyOn(clocks, 'engineNeeded');
+    const flips = vi.spyOn(clocks, 'interest');
+    clocks.configure(1500);
+    clocks.served();
+    clocks.engineHost(4242);
+    const services = l.f.services;
+    const dispatch = services.dispatch.bind(services);
+    const requests = engineRequests({ hosts: { forward: (owner, { name, input }) => dispatch(owner, name, input), onState: () => () => {}, parked: () => parks.length > 0 }, clocks, log: () => {} });
+    services.dispatch = (owner, name, input, client) => (owner === 'engine-host' ? requests.forward(owner, { name, input }) : dispatch(owner, name, input, client));
+    const views = new Map<string, readonly string[]>();
+    const seam = services.interest;
+    services.interest = {
+      report: (viewer, sessions) => (seam.report(viewer, sessions), views.set(viewer, sessions), clocks.interest([...views.values()].every((s) => s.length === 0))),
+      drop: (viewer) => (seam.drop(viewer), views.delete(viewer), clocks.interest([...views.values()].every((s) => s.length === 0))),
+    };
+
     l.host.stored.set('app-r', []);
     l.place('app-r', 'eng-r'); // a record and no host row: released as idle, or the host parked since
     l.a.tabs('app-r');
@@ -465,11 +488,17 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     // The checkout feed opens beside the first try; its opening is said to the session, one more try at most.
     await new Promise((resolve) => setTimeout(resolve, 500));
     const placements = () => l.host.calls.filter((c) => c.name === 'session.status' && (c.input as { appSessionId: string }).appSessionId === 'app-r').length;
-    const [placed, interest] = [placements(), l.f.interest.length];
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const [placed, interest, needed, flipped, settled] = [placements(), l.f.interest.length, needs.mock.calls.length, flips.mock.calls.length, Date.now()];
+    expect(needed).toBeGreaterThan(0); // the opening needed the engine host
+    await until(() => parks.length > 0, 'the machine’s engine host asked to park', 3000);
+    expect(parks[0] - settled).toBeLessThan(1500 + 500); // within the window from the opening's last need
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // and nothing after it
+    expect(needs.mock.calls.length).toBe(needed);
+    expect(flips.mock.calls.length).toBe(flipped);
     expect(placements()).toBe(placed);
     expect(l.f.interest).toHaveLength(interest);
     expect(sessionOf(l.a, 'app-r')).toMatchObject({ stream: 'idle', reason: null });
+    clocks.hosts({ engine: true, pty: true }); // it parked
 
     // Someone else runs it (a send from another device, the machine's own app): its record's holder becomes `self`.
     const run = l.host.add('app-r', 'eng-r');
