@@ -49,6 +49,9 @@
 | `remote.historyTooLarge {appSessionId, window: 'newest' or 'older'}`, a main-owned event outside the wire (its `appSessionId` line in `address-paths.json`) | renderer event | O7 M2 | the renderer's gap bar; retired or kept by O7 M4's paged history |
 | `SpineHosts.need?()` (`src/services/spine-root.ts`), `SessionServiceDeps.host.need?` (`src/services/sessions/context.ts`), `SpineHostsAdapterOptions.wanted()` and `.need()`, `LazySpineOptions.needEngine?()`, `DaemonClocks.engineNeeded()` | the spine seam's wanted and need (P5 Decision Logs 173 and 174) | PRs #409 and #411 on master | O4's parts list and its dataset refresh trigger; O16 M3's handover |
 | main's log line `[delivery] a send was cancelled in its export phase (run <id>)` | a log line an e2e reads | O4 M2 | e2e:delivery |
+| the event `render.hostGeneration {generation}`; `render.request`'s `authors {human?, sessions?}` (`RenderAuthorsSchema`, `RENDER_AUTHOR_SESSIONS_MAX` 5000); `daemon.status.render` (`{state, detail, pid, starts, requests}`, optional) | wire | O5 M4 | main's render client, the render host, `mawsd status` |
+| `RunningDaemon.render: RenderService`, `DaemonOptions.render`; `src/mawsd/render-handle.ts` (`createRenderHandle`, `loadRenderChunk`); `render-seam.ts` (`createRenderSeam`, `captureForE2e`, `renderAuthors`, `renderCommand`, `spawnRenderHost`, `exitReason` and its constants); `FrontOptions.render`, `renderClients()`, `postRender()`; `MachineBinding.daemonRenders?()`; `ArtifactsDeps.registerMachine`; `RenderAttachment.answersRenders()`; `namesClient(ref)` in `src/shared/host/client-refs.ts`; `ExportService.export(request, {authors?})`; `runE2eRender` | mawsd's render seam and main's routing | O5 M4 | O16 (the front and the attachment), O4 (the router) |
+| `COMMAND_BUDGETS_MS['artifacts.export']` and `['daemon.e2eRender']` (120 s); `MAWS_RENDER_QUIET_MS`; the e2e global `__maws_daemonRender.capture` | budgets, environment and e2e seams | O5 M4 | e2e:render-host, e2e:daemon-idle-render, the machines scene |
 
 ## Shared files and who goes first
 
@@ -81,6 +84,8 @@
 | `src/main/design-systems/documents.ts` and `zip.ts` moved to `src/render/`; `test/support/fake-front.ts`, `test/support/fake-artifacts-endpoint.ts`; `tsconfig.node.json` and `tsconfig.e2e.json` includes (per-level globs, never `**`) and the vitest node project's `render,render-host`; `e2e:render-host` in `package.json`, in `gate.yml`'s `CLASS1_E2E` after `artifacts`, `e2e-default-specs.test.mjs` 101 to 102 | O5 M3 | importers of the moved files take `src/render/`; test support others may reuse; CI-opt reviews the gate hunks at landing |
 | `e2e/support/connector-direct-checks.ts` reads both sealed formats (1 and 2) | O4 M2 | e2e support; its existing callers unchanged |
 | `e2e/support/cross-build-samples.ts` (cross-build's sampler and INPUTS; `test/support/cross-build-samples.test.ts` checks every manifest command's sample, with the refused ones listed) | O4 M2 first, then O5 and O16 | a sibling adding a wire command or a cross-build scene adds its sample there and keeps the refused list explicit |
+| `test/support/mawsd-scene.ts` (`ENGINE_COMMANDS` gains `maws.artifact.captured` and `.exported`, the stand-in registry those two events; StandIn.clients as O7 M2 wrote it), the new `e2e/support/unit-daemon.ts` | O5 landing 1, after O7 M2 | a sibling extending the scene's command or event lists adds to them; cross-build's unit-daemon scenes use the new support file |
+| `src/shared/host/host-supervisor.ts`'s `forward` with a `ClientRef` (O7 M2's hunk, applied verbatim by O5 M4 for the render client's end) | O7 M2 first (#410), O5 landing 1 takes master's text | the later lander keeps one copy; O16 carries it through its re-homing |
 
 ## Start order
 
@@ -96,3 +101,4 @@
 - 2026-10-31, the architect: rule 5 additions from O5 M3 (the render client capability, the render library's and host's exports, the moved files, `e2e:render-host`) and O4 M2 (its e2e delivery hold, the direct checks reading both formats).
 - 2026-10-31, the architect: rule 5 additions from O7 M2's paged history (`remote-history.ts`, `PAGED_READS`, `remote.historyTooLarge`) and its test support.
 - 2026-10-31, the architect: #409 and #411 (fixes on master) add the spine's wanted and need names, which O4 and O16 consume; O4 M2 adds its delivery cancel log line and the shared cross-build sample file (P5 Decision Log 174).
+- 2026-10-31, the architect: rule 5 additions from O5 M4 (the render seam in mawsd: render.hostGeneration, render.request's authors, daemon.status.render, the seam's and front's names, budgets, MAWS_RENDER_QUIET_MS) and its shared files (mawsd-scene.ts's lists, e2e/support/unit-daemon.ts, host-supervisor.ts's forward after O7 M2) (P5 Decision Log 175).
