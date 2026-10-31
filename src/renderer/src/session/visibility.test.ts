@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -73,6 +74,17 @@ describe('session visibility', () => {
       { appSessionId: A, visible: false },
       { appSessionId: B, visible: true },
     ]);
+  });
+
+  // P5 O7 M2: another machine's lane B session's read marks are the owner's on its machine's index (O8 M6 keys them per
+  // member), and `session.setVisible` is not offered over RL2: its visibility is never reported, so nothing is refused.
+  it('reports nothing for a lane B session on another machine', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useSessions.setState({ records: new Map([[A, record(A)], [REMOTE, record(REMOTE)]]), listed: new Map(), listedMachines: new Set([OTHER_MACHINE]) });
+    useLayout.getState().openSession(REMOTE);
+    expect(sent()).toEqual([]);
+    useLayout.getState().openSession(A);
+    expect(sent()).toEqual([{ appSessionId: A, visible: true }]);
   });
 
   it('is false for every visible session when the window blurs, and true again on focus', () => {

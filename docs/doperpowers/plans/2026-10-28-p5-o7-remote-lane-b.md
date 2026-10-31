@@ -1257,6 +1257,9 @@ Added at the re-plan of 2026-10-31. Each is built as recommended unless answered
 - Observation (M2b): the endpoint harness's `FakeEngineHost` events (`note`, bare permission and question shapes) are not `SessionEvent`s, so a consumer that validates drops them; `test/lane-b/remote.test.ts`'s `LaneBHost` maps them to real shapes, for M3 and M4 to reuse.
   Evidence: `test/endpoint/sub-harness.ts` against `SessionEventSchema`.
 
+- Observation (from O4, 2026-10-31, for M5): `mawsd`'s services front has no main-only gate: any `machine.sock` client past the token can send a main-only `internal` name (`connectors.windowShown` for its own pages). Remote calls reach `mawsd` only through the endpoint's offer rows, so nothing is exposed today, but wherever M5 lets a remote lease report the window, the endpoint's rows must not forward a main-only `internal` name: the front will not refuse it.
+  Evidence: `src/mawsd/front.ts` (O3-D's front, unchanged); O4's report through the architect.
+
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on M1, repeated until a round yields nothing worth changing. M1's PR gets doperpowers:reviewer-high: it is the device side of RL2, it builds and step-up-signs actions, and it decides what is resealed. M2–M7 each get their own buildability round when they are re-planned after O3's cut, and the review rung that re-plan names.

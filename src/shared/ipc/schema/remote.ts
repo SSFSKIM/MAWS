@@ -28,6 +28,13 @@ export type RemoteCapability = z.infer<typeof RemoteCapabilitySchema>;
 
 export const MACHINE_RIGHTS = ['spawn', 'shell', 'machine-admin'] as const;
 
+// The channel's bound on a message to a session on another machine, as the composer checks it before sending (M2,
+// "Images"): a sealed act is at most org-protocol's MESSAGE_MAX_BYTES (4 MiB), less 64 KiB for the action's own fields, so
+// the content's UTF-8 JSON stays under this. And the words for an image past it, the composer's and main's alike (main
+// answers them for the link's own `too-large` refusal).
+export const REMOTE_INLINE_MAX_BYTES = 4 * 1024 * 1024 - 64 * 1024;
+export const REMOTE_TOO_LARGE_WORDS = 'an image larger than 2.5 MiB goes to a session on another machine as a file';
+
 // The link as a remote session's state carries it: its reported state, its carrier while up, the permanent verdict holding
 // it down, this device's member there (null before the first `caps`) and the member's machine rights.
 export const RemoteLinkStateSchema = z.strictObject({

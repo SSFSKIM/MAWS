@@ -3,16 +3,24 @@
 // those sites kept (the status, the availability, the holder) answer `capability`, and the chips keep their own
 // `disabled` (`liveBindings`). The submit table, the side question's and the compact widget's surface words stay at
 // their sites, as lane B's own reading of the session.
+// P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The capability list", "Images"): a lane B session on
+// another machine takes this port too, its commands reaching that machine through main's remote lane B adapter, with
+// `remote`: main's overlay (`remote.session`'s controls) closes what the session there can't take with main's reason, and
+// every control while one reason closes them all; a send is refused before it goes when its content would not fit the
+// channel (an image past the bound waits for M4's uploads), and is counted while on its way, for the composer's
+// "Sending to <machine>…".
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
 import type { Availability } from '@shared/ipc/schema/session';
+import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
 import { endedBindings, liveBindings, type LiveReads } from '../../composer/frame/bindings';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
 import { ENDED, STARTING } from '../../composer/submit/submit-state';
 import { availabilityIn, availabilityRefusal } from '../../sessions/availability';
+import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -27,6 +35,8 @@ export interface LaneBInputs {
   appSessionId: AppSessionId;
   client: MawsBridge;
   frame?: LaneBFrame;
+  // P5 O7 M2: a session on another machine, with main's word on it (null before the first)
+  remote?: { state: RemoteSession | null };
 }
 
 // The lane A verbs lane B reaches another way, and Take over, which a session MAWS holds has no use for.
@@ -44,12 +54,16 @@ const NEEDS_PROCESS = new Set<ControlKey>(['interrupt', 'stop-task']);
 const AVAILABLE: Capability = { available: true };
 const unavailable = (reason: string | null): Capability => (reason === null ? AVAILABLE : { available: false, reason });
 
+// P5 O7 M2: content that would not fit one message on the channel, by the bound main's link checks (its UTF-8 JSON).
+const encoder = new TextEncoder();
+const pastChannel = (content: string | readonly unknown[]): boolean => encoder.encode(JSON.stringify(content)).length > REMOTE_INLINE_MAX_BYTES;
+
 // A command's result as a control's: its value done, its failure refused with the IPC error's own code and words (a
 // timeout included, so a caller reads it as it read the error before).
 const controlResultOf = <N extends CommandName>(result: CommandResult<N>): ControlResult =>
   result.ok ? (result.value === undefined ? { state: 'done' } : { state: 'done', result: result.value }) : { state: 'refused', code: result.error.code, message: result.error.message };
 
-export function laneBControls(record: SessionRecord | null, { appSessionId, client, frame }: LaneBInputs): SessionControls {
+export function laneBControls(record: SessionRecord | null, { appSessionId, client, frame, remote }: LaneBInputs): SessionControls {
   const now = () => {
     if (frame) return frame;
     const state = useSessions.getState();
@@ -65,16 +79,33 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     return process === 'ready' ? null : process === 'starting' || process === 'initializing' ? STARTING : ENDED;
   };
   const refusedHere = (key: ControlKey): Promise<ControlResult> => Promise.resolve({ state: 'refused', code: 'unsupported', message: ELSEWHERE[key]! });
+  const ownCapability = (key: ControlKey): Capability => {
+    const elsewhere = ELSEWHERE[key];
+    if (elsewhere !== undefined) return { available: false, reason: elsewhere };
+    if (ALWAYS.has(key)) return AVAILABLE;
+    return unavailable(NEEDS_PROCESS.has(key) ? processRefusal() : writeRefusal());
+  };
+  // P5 O7 M2: main's overlay first, for a session on another machine
+  const capability = (key: ControlKey): Capability => {
+    const overlaid = remote?.state?.controls[key];
+    return overlaid !== undefined && !overlaid.available ? overlaid : ownCapability(key);
+  };
+  const sendRemote = async (content: Parameters<SessionControls['send']>[0], options: Parameters<SessionControls['send']>[1]) => {
+    const sendable = capability('send');
+    if (!sendable.available) return { disposition: 'refused' as const, started: false, reason: sendable.reason };
+    if (pastChannel(content)) return { disposition: 'refused' as const, started: false, reason: REMOTE_TOO_LARGE_WORDS };
+    const sent = beginRemoteSend(appSessionId);
+    try {
+      return await sendHumanPrompt(appSessionId, content, options, client);
+    } finally {
+      sent();
+    }
+  };
 
   return {
-    capability(key) {
-      const elsewhere = ELSEWHERE[key];
-      if (elsewhere !== undefined) return { available: false, reason: elsewhere };
-      if (ALWAYS.has(key)) return AVAILABLE;
-      return unavailable(NEEDS_PROCESS.has(key) ? processRefusal() : writeRefusal());
-    },
-    answerCapability: () => AVAILABLE, // lane B carries every RequestAnswer variant
-    send: (content, options) => sendHumanPrompt(appSessionId, content, options, client),
+    capability,
+    answerCapability: () => capability('answer'), // lane B carries every RequestAnswer variant; another machine's overlay may close them
+    send: (content, options) => (remote ? sendRemote(content, options) : sendHumanPrompt(appSessionId, content, options, client)),
     interrupt: (args) => client.invoke('session.interrupt', { appSessionId, ...args }),
     answer: (item, answer) => {
       const { requestId } = item.request;

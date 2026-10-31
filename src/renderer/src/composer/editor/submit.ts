@@ -16,6 +16,7 @@ import type { SessionControls } from '../../session/controls/types'; // P5 O9 M4
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
+import { isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Serialized } from './serialize';
@@ -29,9 +30,11 @@ export interface SubmitOptions {
   retry?: () => void; // offered on the refusal's toast
 }
 
-const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */) => {
-  const id = toast({ ...(notice !== undefined && { id: notice }), level: 'warning', text, actions: retry ? [{ label: 'Retry', run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
+const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */, label = 'Retry') => {
+  const id = toast({ ...(notice !== undefined && { id: notice }), level: 'warning', text, actions: retry ? [{ label, run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
 };
+// P5 O7 M2 (A4): a message to a session on another machine that did not go keeps its text, offered as Send again
+const retryLabel = (appSessionId: AppSessionId) => (isRemoteLaneB(appSessionId) ? 'Send again' : 'Retry');
 
 // The pre-check: whether the submission may go (a refusal is shown).
 export function precheck(s: Serialized): boolean {
@@ -69,7 +72,10 @@ export function afterAccepted(client: MawsBridge, appSessionId: AppSessionId, s:
 
 // The prompt's row in MAWS's history; P2-F (L118): also written by a record card's continuation once the host accepted
 // the composer message the card held (its display and pasted segments as the composer serialized them).
+// P5 O7 M2: none for a lane B session on another machine, whose prompt history is that machine's (its link offers the
+// read, `session.history.list`, and no write).
 export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s: Pick<Serialized, 'display' | 'pastedContents'>, project: string | null = null): void {
+  if (isRemoteLaneB(appSessionId)) return;
   const input = { appSessionId, display: s.display, pastedContents: s.pastedContents, ...(project === null ? {} : { project }) };
   void client.invoke('session.history.append', input).then((result) => {
     if (!result.ok) console.warn('[composer] session.history.append failed', result.error);
@@ -84,6 +90,8 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // P5 O9 M4: the prompt goes through the session's controls port (lane B: the seam above). P5 O9 M5: lane A's
 // `unconfirmed` (the bridge took the words and had not said whether they entered) is accepted: the draft clears, and the
 // port has handed the words to the pending-send strip, which keeps them by their key until their fate arrives.
+// P5 O7 M2: to a session on another machine, the refusal's or error's words are main's (A4's "Not sent: <machine> is
+// offline", the pending bound's "…hasn't confirmed it; check the transcript"), and Retry reads Send again.
 export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
   if (s.empty) return false;
   let tooLarge = false;
@@ -96,11 +104,11 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why
-      if (useSessions.getState().records.has(appSessionId)) warn(result.reason ?? 'The message was not sent', retry, startNoticeId(appSessionId));
+      if (useSessions.getState().records.has(appSessionId)) warn(result.reason ?? 'The message was not sent', retry, startNoticeId(appSessionId), retryLabel(appSessionId));
       return false;
     }
   } catch (error) {
-    warn(error instanceof Error ? error.message : String(error), retry);
+    warn(error instanceof Error ? error.message : String(error), retry, undefined, retryLabel(appSessionId));
     return false;
   }
   afterAccepted(client, appSessionId, s);

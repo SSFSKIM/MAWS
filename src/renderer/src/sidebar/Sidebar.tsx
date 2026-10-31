@@ -42,6 +42,7 @@ import { SidebarInteractionContext } from './interaction';
 import { openConversationSearch, openPalette } from '../palette/CommandPalette';
 import { NeedsYou } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
+import { HubNotice } from './HubNotice'; // P5 O7 M2
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
 
 export function Sidebar() {
@@ -328,6 +329,7 @@ function SidebarBody() {
             </button>}
           </div>
         </SidebarDestinations>
+        <HubNotice /* P5 O7 M2 (A2): once, while the hub can't be reached and another machine still is */ />
         <ContextMenu.Root modal={false} onOpenChange={(isOpen) => !isOpen && setMenuTarget(null)}>
           <ContextMenu.Trigger asChild>
             <div
