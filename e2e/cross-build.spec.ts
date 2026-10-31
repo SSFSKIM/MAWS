@@ -56,24 +56,46 @@
 //                       launched on the daemon shape. It is refused at the relay, `mawsd` yields its spine to it, the
 //                       old app finds the index unavailable, and no spine file changes after the yield while it idles.
 //                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
+// P5 O4 M4 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 10; D11, D31): route D's sealed grants and
+// the connectors left the app for `mawsd` at O4, so a post-O4 `mawsd` refuses the hello of an app whose capabilities
+// list `machine.spine` but not `machine.connectors`, on engine-host.sock and on machine.sock alike (OX1's exception):
+//   (pre-O4 app, daemon) this build's app leaves its `mawsd` running over a session held live and a grant it adopted;
+//                       the peer's app, from O3-D to before O4 (it lists `machine.spine`, not `machine.connectors`), is
+//                       launched on the daemon shape over it. Both sockets refuse it, naming `machine.connectors`, and
+//                       it shows the update banner; what its build check then does, and whether a Connectors sheet is
+//                       reachable in it (D11's residual: a Forget it could still make by hand), are recorded. Run with
+//                       such a peer (the merge-base peer until O4 lands); skipped for an O2-era peer, which the
+//                       (pre-O3 app, daemon) scene covers, and for a peer that lists `machine.connectors`.
+//   (downgrade, daemon) also carries a grant as a pre-O4 build kept it (format 1, sealed by this build's own
+//                       safeStorage under the mock keychain), which the keeper's launch adopts (format 2) before the peer
+//                       launches; a pre-O4 peer's sheet lists it as an unreadable row (D11: a downgrade's residual).
+//   (update, daemon)    also reads, from both ends' logs, which engine host was told the connectors are its client's
+//                       (`host.connectors`): the kept older host's welcome lists it not, so its dataset refreshes keep
+//                       O3-D's rule (the app's attachment) until it is replaced at idle; the host of this build lists it
+//                       (acceptance 3's old-host rule, its precondition; the rule itself is a unit test's, see the scene).
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
+import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
-import type { CommandInput } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
+import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
+import { readSealedText } from './support/connector-direct-checks';
+import { expectMockCustody } from './support/connector-direct-oauth';
+import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from './support/connector-oauth';
 import { REPO_ROOT } from './support/launch';
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
-import { isAlive } from './support/processes';
+import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -181,6 +203,11 @@ const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st
 // P5 O3-D M6: whether a build's engine host serves `host.attachment` (its manifest's capabilities, the union its peers
 // list), so a post-D `mawsd` keeps one permanent connection to it rather than O2's per attachment
 const hostsAttachment = (build: Build) => build.manifest.capabilities.includes('host.attachment');
+// P5 O4 M4: whether a build's engine host keys connector operations and dataset refreshes on a client that lists
+// `host.connectors` (Interfaces §D), and whether its app lists `machine.connectors` (an app from O4 on, which obeys
+// `mawsd` as the connectors' owner and reads the sealed store's format 2)
+const hostsConnectors = (build: Build) => build.manifest.capabilities.includes(CONNECTORS_CAPABILITY);
+const appObeysConnectors = (build: Build) => build.manifest.capabilities.includes(CONNECTORS_CLIENT_CAPABILITY);
 // P5 O3-D M6: whether a build's app takes `spine.lock` (O3-A on): one before it runs its spine with no lock at all
 const takesSpineLock = (build: Build) => ['src/main/settings/spine-lock.ts', 'src/services/settings/spine-lock.ts'].some((file) => existsSync(join(build.root ?? REPO_ROOT, file)));
 // The profile's spine.lock as takeLock writes it, or null when no process holds it
@@ -211,7 +238,14 @@ function welcomedWith(daemonLog: string, hostPid: number): string[] | null {
 }
 const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n').filter((l) => l.includes(`recycling the connection to pid ${hostPid}`)).length;
 
-async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED): Promise<string[]> {
+// P5 O4 M4: what a scene adds to a crossing, each answering the lines it records: `keeperReady`, once the keeper's app
+// is on its own supervisor, before its session; `attacherMoved`, at the end, the attacher on a supervisor of its build.
+interface CrossingSteps {
+  keeperReady?(run: Run): Promise<string[]>;
+  attacherMoved?(run: Run): Promise<string[]>;
+}
+
+async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED, steps: CrossingSteps = {}): Promise<string[]> {
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
@@ -221,6 +255,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
   const kept = own.supervisor!;
   const keeperDaemon = shapes.keeper === 'daemon' ? own.daemon!.pid : null;
+  if (steps.keeperReady) said.push(...(await steps.keeperReady(first)));
   const id = await s.record(first.page);
   const fixture = tailFixture(s.root);
   await launchOn(keeper, first.page, id, fixture, s);
@@ -323,7 +358,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(arrived, { message: 'rows arrive live after the answer' }).toBeGreaterThan(5);
   const live = await arrived();
   // P5 O3-D M6 (acceptance 9): this build's app quits mid-turn and reattaches while the kept, older engine host serves
-  if (attacherDaemon !== null) second = await quitAndReattach(s, second, attach, attacherRuns, { kept, daemon: attacherDaemon, id, capable: hostsAttachment(keeper), said });
+  if (attacherDaemon !== null) second = await quitAndReattach(s, second, attach, attacherRuns, { kept, daemon: attacherDaemon, id, capable: hostsAttachment(keeper), connectors: hostsConnectors(keeper), said });
   await turnEnded(second.page, id);
   said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${live} rows live`);
 
@@ -340,7 +375,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await launchOn(attacher, second.page, afterMove, join(REPO_ROOT, PERMISSION), s);
   said.push(`  moved: supervisor pid ${kept.pid} (build ${kept.buildId}) exited when idle; pid ${moved.supervisor!.pid} (build ${build}) serves a launch`);
   // P5 O3-D M6 (acceptance 9): the engine host of this build, which lists host.attachment, has mawsd's permanent client
-  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: moved.supervisor!.pid, daemon: attacherDaemon, id: afterMove, said });
+  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: moved.supervisor!.pid, daemon: attacherDaemon, id: afterMove, connectors: hostsConnectors(attacher), said });
 
   // across the gap, against what the newer build's own supervisor answers
   if (gap && before) {
@@ -374,6 +409,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const dropped = [...appLines, ...hostLines, ...daemonLines].filter((l) => DROPPED.test(l));
   said.push(dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
   for (const run of attacherRuns) expect(run.maws.consoleErrors()).toEqual([]);
+  if (steps.attacherMoved) said.push(...(await steps.attacherMoved(second)));
   return said;
 }
 
@@ -390,13 +426,17 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 // `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
 // departure and at the reattach, and no host.attachment sent. The older host's log: its client leaving at the quit
 // (`client disconnected`, which O2-era and current hosts both print) and a fresh one coming.
-async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; said: string[] }): Promise<Run> {
+async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; connectors: boolean; said: string[] }): Promise<Run> {
   const before = connectsFrom(s.log(), o.daemon);
   const leftBefore = departuresIn(s.log());
   const recycledBefore = recyclesTo(s.daemonLog(), o.kept.pid);
   const listed = welcomedWith(s.daemonLog(), o.kept.pid);
   expect(listed, `mawsd’s log: the kept host’s welcome (pid ${o.kept.pid})`).not.toBeNull();
   expect(listed!.includes('host.attachment'), `mawsd’s log: the kept host’s welcome ${o.capable ? 'lists' : 'lists no'} host.attachment, so mawsd ${o.capable ? 'keeps a permanent link' : 'takes O2’s recycle'}`).toBe(o.capable);
+  // P5 O4 M4 (acceptance 3's old-host rule, D10): a kept host from before O4 lists no host.connectors, so it keys its
+  // connector operations and dataset refreshes on the app's attachment, as at O3-D, until it is replaced at idle
+  expect(listed!.includes(CONNECTORS_CAPABILITY), `mawsd’s log: the kept host’s welcome ${o.connectors ? 'lists' : 'lists no'} ${CONNECTORS_CAPABILITY}`).toBe(o.connectors);
+  o.said.push(`  ${CONNECTORS_CAPABILITY} (acceptance 3's old-host rule): the kept host's welcome ${o.connectors ? 'lists it: its refreshes key on mawsd’s connection' : 'lists it not: its refreshes keep the app’s attachment until it is replaced at idle'}`);
   const lastSeq = () => Math.max(0, ...s.journal(o.id).map((r) => r.seq));
   await s.quit(run);
   expect(run.quitLines().filter((line) => line.startsWith('quit-guard: ')), 'the daemon shape asks nothing at quit (Q1)').toEqual([expect.stringMatching(/not asked: they outlive the app$/)]);
@@ -459,12 +499,19 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
 // host.attachment, `mawsd` is its permanent client: a session held mid-turn at its request (the unpaced replay holds there,
 // so neither the park nor the idle release ends the host while no app runs), the app's quit and reattach cross no new
 // connection, and the request is pending once after it.
-async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; said: string[] }): Promise<Run> {
+async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; connectors: boolean; said: string[] }): Promise<Run> {
   value(await invoke(run.page, 'session.send', { appSessionId: o.id, content: PROMPT }));
   await expect.poll(async () => (await pendingPermissions(run.page, o.id)).length, { timeout: 30_000, message: 'the request, held' }).toBe(1);
   const connects = connectsFrom(s.log(), o.daemon);
   const last = (s.log().match(new RegExp(`client connected: appPid ${o.daemon} .*`, 'g')) ?? []).at(-1) ?? '';
   expect(last, 'mawsd’s connection to the host of this build declares the attachment').toContain('host.attachment');
+  // P5 O4 M4 (acceptance 3, D10): to the host that replaced the kept one both ends list host.connectors, so its connector
+  // operations and dataset refreshes key on mawsd's connection and complete with no app
+  if (o.connectors) {
+    expect(last, `mawsd’s hello to the host of this build lists ${CONNECTORS_CAPABILITY}`).toContain(CONNECTORS_CAPABILITY);
+    expect(welcomedWith(s.daemonLog(), o.host), `mawsd’s log: the host of this build’s welcome lists ${CONNECTORS_CAPABILITY}`).toContain(CONNECTORS_CAPABILITY);
+    o.said.push(`  ${CONNECTORS_CAPABILITY} (acceptance 3): supervisor pid ${o.host} of this build and mawsd pid ${o.daemon} both list it, so its refreshes key on mawsd's connection`);
+  }
   await s.quit(run);
   const next = await attach();
   runs.push(next);
@@ -481,6 +528,80 @@ const record = (lines: string[]) => {
   for (const line of lines) console.log(`[cross-build] ${line}`);
 };
 
+// ---- P5 O4 M4: a grant as a pre-O4 build kept it, and the Connectors sheet that lists the saved ones --------------------
+
+// U7 (Interfaces §B): this build's app seals a placeholder grant's version 1 record with its own safeStorage, as a pre-O4
+// build's Electron sealer did (format 1), once main is shown to run on the mock keychain with this scratch profile. The
+// file is written after that app quits, so the next launch of this build adopts it at its machine host's first streaming.
+async function sealLegacyGrant(run: Run, s: Scratch): Promise<{ id: string; sealed: string }> {
+  await expectMockCustody(run.maws.app, s.userData);
+  const id = randomUUID();
+  return { id, sealed: await sealWithAppSafeStorage(run.maws.app, placeholderGrantText(id)) };
+}
+const oauthDirOf = (userData: string) => join(userData, 'connectors', 'oauth');
+// The format line of `<profile>/connectors/oauth/<id>.sealed` (1: safeStorage's, 2: the machine's key), null when absent
+function sealedFormat(userData: string, id: string): 1 | 2 | null {
+  const path = join(oauthDirOf(userData), `${id}.sealed`);
+  if (!existsSync(path)) return null;
+  const read = readSealedText(readFileSync(path, 'utf8'));
+  return read.ok ? read.format : null;
+}
+// This build's adoption at a launch: the file re-sealed in place under the machine's key, and main's count
+async function expectAdopted(run: Run, s: Scratch, id: string): Promise<void> {
+  await expect.poll(() => sealedFormat(s.userData, id), { timeout: 30_000, message: 'the grant adopted in place: format 2 under its id' }).toBe(2);
+  await expect.poll(() => run.output(), { timeout: 10_000, message: 'main said the adoption' }).toMatch(/\[connectors\] adopted 1 of 1 legacy grants\n/);
+}
+
+// A page that declares one tool, so its header offers the owner's Connectors sheet (whose rows list every saved
+// connection the store cannot read, whatever the page names); its space links no directory.
+const GRANTS_PAGE = 'Cross-build grants';
+const GRANTS_PAGE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>${GRANTS_PAGE}</title></head>
+<body>
+<p id="declared">declaring</p>
+<script>
+mawsConnectors.declare([{ server: 'xb-page', tool: 'read' }]).then((d) => { document.getElementById('declared').textContent = d.ok ? 'declared' : d.state + ':' + d.reason; });
+</script>
+</body></html>
+`;
+async function createGrantsPage(page: Page): Promise<string> {
+  const spaceId = value(await invoke(page, 'spaces.create', { name: 'Cross-build' })).space.id;
+  const created = await page.evaluate(
+    ([html, title, space]) => window.maws.invoke('artifacts.create', { kind: 'html', title, spaceId: space, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } }),
+    [GRANTS_PAGE_HTML, GRANTS_PAGE, spaceId] as const,
+  );
+  return value(created as CommandResult<'artifacts.create'>).artifact.id;
+}
+// The page's Connectors sheet: the page from its tab the layout restored (`restored`: the caller saved one), else from
+// the library, then the header's action. `missing`: null once the sheet shows, else the step that did not.
+const sheetSelector = '[data-connectors-sheet]';
+const unreadableRowsShown = (page: Page) => page.locator(`${sheetSelector} [data-connector-server][data-kind="unreadable"]`);
+type Step = [string, () => Promise<unknown>];
+async function openGrantsSheet(page: Page, artifactId: string, restored = false): Promise<{ from: 'its restored tab' | 'the library'; missing: string | null }> {
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+  const shows = (act: () => Promise<unknown>) => act().then(() => true, () => false);
+  const fromTab = restored && (await shows(() => expect(tab.locator('[data-artifact-frame="html"]')).toBeVisible({ timeout: 10_000 })));
+  const fromLibrary: Step[] = [
+    ['the sidebar’s Artifacts', () => page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 10_000 })],
+    ['the page’s row in the library', () => page.locator('[data-library]').getByRole('article', { name: GRANTS_PAGE, exact: true }).click({ timeout: 15_000 })],
+  ];
+  const steps: Step[] = [
+    ...(fromTab ? [] : fromLibrary),
+    ['the page’s declaration', () => expect(tab.frameLocator('[data-artifact-frame="html"]').locator('#declared')).not.toHaveText('declaring', { timeout: 20_000 })],
+    ['the header’s Connectors', () => page.locator('[data-region="main"]').getByRole('button', { name: 'Connectors' }).click({ timeout: 10_000 })],
+    ['the sheet', () => expect(page.locator(sheetSelector)).toBeVisible({ timeout: 10_000 })],
+  ];
+  const from = fromTab ? 'its restored tab' : 'the library';
+  for (const [step, act] of steps) if (!(await shows(act))) return { from, missing: step };
+  return { from, missing: null };
+}
+// The ids of the unreadable rows `connectors.servers` (the command the sheet reads) answers for the page, or its refusal
+async function unreadableRows(page: Page, artifactId: string): Promise<string[] | string> {
+  const answer = await invoke(page, 'connectors.servers', { artifactId, tools: [] });
+  if (!answer.ok) return `${answer.error.code}: ${answer.error.message}`;
+  return answer.value.servers.flatMap((row) => (row.kind === 'unreadable' ? [row.connectionId] : []));
+}
+
 test.beforeEach(() => test.setTimeout(240_000));
 
 test('(update) the older build’s app keeps a session; the newer build’s app attaches across the minor, is served, launches, meets what the older lacks, and moves to its own supervisor', async () => {
@@ -493,6 +614,12 @@ test('(downgrade) the newer build’s app keeps a session; the older build’s a
   await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null)));
 });
 
+// P5 O4 M4 (acceptance 3's old-host rule, acceptance 10): the scene also reads which engine host lists host.connectors
+// (quitAndReattach, permanentAcrossReattach). The rule's own behaviour, an agent's dataset refresh settled `noClient`
+// with no app while the kept older host serves and answered by mawsd once this build's host replaced it, is not driven
+// here: it needs a connector-backed dataset artifact, a connector fixture and a replayed turn that calls the MAWS tool
+// with that artifact's id, none of which this group's replays carry; a unit test over a fake host pins both keys, and
+// e2e:dashboard-live-data the app-less refresh on this build's host.
 test('(update, daemon) the peer’s app keeps a session on its own supervisor; this build’s app attaches on the daemon shape, its mawsd relays the peer’s engine host across the minor until idle, then starts its own', async () => {
   test.setTimeout(360_000); // P5 O3-D M6: acceptance 9's two quits and reattaches
   const { here, peer, newer, older } = builds();
@@ -500,10 +627,39 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
   await withScratch('xb-daemon-update', async (s) => record(await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' })));
 });
 
+// P5 O4 M4 (D11's downgrade residual): before the crossing, a launch of this build seals a grant as a pre-O4 build kept it
+// (format 1), and the machine it started is ended, so the keeper's launch starts it afresh under its own environment
+// (the paced replay); the keeper's launch adopts the grant (format 2). At the end the peer, on a supervisor of its own
+// build, lists it in its Connectors sheet: an unreadable row when the peer is from before O4 (format 2 is not its
+// store's; it can Forget it, then Connect again), a readable one, so no unreadable row, when the peer knows format 2.
 test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app ends mawsd (or, before O2, takes the engine host from it), attaches that engine host, is served as another build, and moves to its own supervisor', async () => {
+  test.setTimeout(300_000); // the sealing launch before the crossing
   const { here, peer, newer, older } = builds();
   const gap = peer === newer ? { newer, older } : null;
-  await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
+  await withScratch('xb-daemon-downgrade', async (s) => {
+    const sealing = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+    await s.ready(sealing.page, onShape('daemon'));
+    const grant = await sealLegacyGrant(sealing, s);
+    await s.quit(sealing);
+    await endProfileProcesses(s.userData);
+    writeLegacySealed(oauthDirOf(s.userData), grant.id, grant.sealed);
+    const unreadableToPeer = !appObeysConnectors(peer);
+    const said = await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' }, {
+      keeperReady: async (run) => {
+        await expectAdopted(run, s, grant.id);
+        return [`  grant ${grant.id}: planted in format 1, adopted by ${here.label}'s mawsd at the keeper's launch (format 2)`];
+      },
+      attacherMoved: async (run) => {
+        const artifactId = await createGrantsPage(run.page);
+        expect(await unreadableRows(run.page, artifactId), `${peer.label}'s connectors.servers: the adopted grant ${unreadableToPeer ? 'is an unreadable row (format 2 is not its store’s)' : 'is readable'}`).toEqual(unreadableToPeer ? [grant.id] : []);
+        expect((await openGrantsSheet(run.page, artifactId)).missing, `${peer.label}'s Connectors sheet opens from the page’s header (null: it did; else the step that did not show)`).toBeNull();
+        await expect(unreadableRowsShown(run.page), `${peer.label}'s sheet shows ${unreadableToPeer ? 'the one unreadable row' : 'no unreadable row'}`).toHaveCount(unreadableToPeer ? 1 : 0, { timeout: 20_000 });
+        expect(sealedFormat(s.userData, grant.id), `${peer.label} left the adopted file as it was`).toBe(2);
+        return [`  grant ${grant.id}: ${peer.label}'s Connectors sheet lists it ${unreadableToPeer ? 'as an unreadable row (Forget, then Connect again: the downgrade’s residual, D11)' : 'as readable: it knows the machine’s format'}`];
+      },
+    });
+    record(said);
+  });
 });
 
 // The upgrade's restart of `mawsd` (2026-10-31: after an upgrade New chat stayed disabled until the app was reopened). The
@@ -679,6 +835,109 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
     // O2's downgrade (D29), recorded, not asserted
     const lock = s.daemonLock();
     said.push(`  then (O2's downgrade, D29; recorded only): mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `exited${s.daemonLog().includes('exited (restart, code 75)') ? ' 75 at the old app’s daemon.restart' : ''}`}; the profile’s mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid}`}; spine.lock ${spineLockOf(s.userData) === null ? 'absent' : `names pid ${spineLockOf(s.userData)!.pid}`}`);
+    record(said);
+  });
+});
+
+// P5 O4 M4, acceptance 10's refusal (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D11, D31, D37). This build's
+// app on the daemon shape leaves its private `mawsd` running the connectors: a grant it adopted (sealed as a pre-O4
+// build kept it, format 1, adopted to format 2 at a launch) and a session held at its request. The peer's app, from O3-D
+// to before O4 (its hello lists `machine.spine` and no `machine.connectors`), is then launched on the daemon shape over
+// it. Asserted:
+//   1. the refusal on both sockets the app says hello on: `mawsd`'s own `refuse wire` line on engine-host.sock and on
+//      machine.sock, naming `machine.connectors`;
+//   2. the update banner: the old app's main reads the refusal and waits, and its window says so. The refusal carries
+//      the live sessions of `mawsd`'s latest welcome from its engine host (src/mawsd/daemon.ts, refuseWire), and an app
+//      refused with none live replaces in a loop with no banner (src/shared/host/detached-transport.ts), so the scene
+//      restarts `mawsd` once the session is held, and relaunches this build's app, whose new `mawsd` adopts the running
+//      engine host with the session live.
+// Recorded, not asserted: the old app's build check (src/main/hosts/daemon.ts asks a private daemon of another build
+// `daemon.restart` at the machine host's first ready), what the profile's `mawsd` is after it, and D11's residual: what
+// the refused app's `connectors.servers` answers, and whether its Connectors sheet (with a Forget that would unlink a
+// file) can be reached, from the page's tab this build's app left open, else from the library. Skipped for an O2-era peer (the (pre-O3 app, daemon) scene's) and for a peer that lists
+// `machine.connectors` (an app from O4 on: no refusal to show), so the scene stays right once O4 lands on master.
+const BUILD_CHECK_WINDOW_MS = 10_000; // the refused app watched this long after its banner, for its build check
+const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('(pre-O4 app, daemon) an app from before O4 over this build’s mawsd is refused on engine-host.sock and machine.sock, naming machine.connectors, and shows the update banner; its build check and its reach to a Connectors sheet are recorded', async () => {
+  test.setTimeout(360_000);
+  const { here, peer } = builds();
+  const spineReader = peer.manifest.capabilities.includes(MACHINE_SPINE_CAPABILITY);
+  test.skip(!appObeysConnectors(here) || !spineReader || appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is not an app from O3-D to before O4: it lists ${spineReader ? CONNECTORS_CLIENT_CAPABILITY : `no ${MACHINE_SPINE_CAPABILITY} (the (pre-O3 app, daemon) scene's peer)`}`);
+  await withScratch('xb-pre-o4', async (s) => {
+    const said = [`${here.label} (wire ${wireOf(here)}) on the daemon shape runs the connectors in its mawsd; ${peer.label} (wire ${wireOf(peer)}), from before O4, launches on the daemon shape over it`];
+    // this build's app: a grant sealed as a pre-O4 build kept it, a page whose header offers the Connectors sheet, and a
+    // session held at its request, which stays live while no app runs
+    const first = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+    const firstDaemon = (await s.ready(first.page, onShape('daemon'))).daemon!.pid;
+    const grant = await sealLegacyGrant(first, s);
+    const artifactId = await createGrantsPage(first.page);
+    // its tab opened, so the layout restores it at the next launch (the owner's dashboard left open across a downgrade)
+    expect((await openGrantsSheet(first.page, artifactId)).missing, 'this build’s Connectors sheet opens from the page’s header').toBeNull();
+    const id = await s.record(first.page);
+    await startTurn(first.page, s, id);
+    await untilRequested(first.page, id);
+    await s.quit(first);
+    writeLegacySealed(oauthDirOf(s.userData), grant.id, grant.sealed);
+
+    // `mawsd` restarted, then this build's app relaunched: its new `mawsd` adopts the running engine host, whose welcome
+    // counts the held session; the launch adopts the grant
+    const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    const restarted = await reached.link.request('daemon.restart', undefined);
+    reached.link.close();
+    expect(restarted, 'mawsd takes the restart').toMatchObject({ ok: true });
+    await expect.poll(() => isAlive(firstDaemon), { timeout: 15_000, message: 'the first mawsd exits at its restart' }).toBe(false);
+    const second = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+    const served = await s.ready(second.page, (st) => st.daemon !== null && st.daemon.pid !== firstDaemon && st.supervisor!.liveSessions > 0, 60_000);
+    const daemon = served.daemon!.pid;
+    const ours = served.daemon!.build.buildId;
+    await expectAdopted(second, s, grant.id);
+    await s.quit(second);
+    expect(isAlive(daemon), 'this build’s mawsd outlives its app').toBe(true);
+    said.push(`  this build's mawsd pid ${daemon} (build ${ours}) runs; its engine host pid ${served.supervisor!.pid}, ${served.supervisor!.liveSessions} live; grant ${grant.id} adopted (format 2)`);
+    const logFrom = s.daemonLog().length; // what this build's mawsd says from here
+
+    // the pre-O4 app, on the daemon shape over it
+    const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+    const oldPid = old.child.pid!;
+    const daemonSaid = () => s.daemonLog().slice(logFrom);
+    const sockets = ['engine-host.sock', 'machine.sock'] as const;
+    const refusal = (socket: string) => new RegExp(`${literally(socket)}: refuse wire to appPid ${oldPid} \\(build [^)]+\\): its hello lists no ${literally(CONNECTORS_CLIENT_CAPABILITY)}`);
+    const updateBanner = banner(old.page, 'MAWS was updated and cannot talk to the previous supervisor');
+    try {
+      // 1. the refusal on both sockets
+      for (const socket of sockets) await expect.poll(daemonSaid, { timeout: 30_000, message: `mawsd refuses the old app’s hello on ${socket}, naming ${CONNECTORS_CLIENT_CAPABILITY}` }).toMatch(refusal(socket));
+      // 2. the update banner: the old app's main waits on the refusal (one that said nothing live would read `speaks
+      // wire … with nothing live; replacing it`, and show none)
+      await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire and waits, the held session live' }).toMatch(/is incompatible \(wire\) and runs [1-9]\d* sessions; waiting/);
+      await expect(updateBanner, 'the old app’s update banner').toBeVisible({ timeout: 30_000 });
+    } catch (error) {
+      await test.info().attach('pre-o4-refusal', { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
+      throw error;
+    }
+    said.push(`  refused: ${sockets.map((socket) => daemonSaid().split('\n').find((line) => refusal(socket).test(line))?.trim()).join(' | ')}`);
+    said.push(`  the old app: ${old.output().split('\n').find((line) => /is incompatible \(wire\)/.test(line))?.trim()}; its banner: ${(await updateBanner.textContent())?.trim()}`);
+    said.push(`  the spine: ${daemonSaid().includes(`[spine] yielding to pid ${oldPid}`) ? `yielded to pid ${oldPid}` : 'not yielded to the refused app'}`);
+
+    // recorded: the old app's build check, and what the profile's mawsd is after it
+    await old.page.waitForTimeout(BUILD_CHECK_WINDOW_MS);
+    const after = daemonSaid();
+    const asked = after.indexOf('restart asked');
+    const refusedAgain = asked < 0 ? 0 : after.slice(asked).split('\n').filter((line) => sockets.some((socket) => refusal(socket).test(line))).length;
+    const lock = s.daemonLock();
+    said.push(
+      `  the build check (recorded): ${asked < 0 ? `no daemon.restart from the old app within ${BUILD_CHECK_WINDOW_MS / 1000} s of its banner` : `the old app asked daemon.restart; mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : 'exited'}; ${refusedAgain} refusals of the old app after it`}; the profile's mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid} build ${lock.buildId}${lock.buildId === ours ? ' (this build’s)' : ''}`}`,
+    );
+
+    // recorded: D11's residual, what the refused app can still reach of the sealed store
+    const listed = await unreadableRows(old.page, artifactId);
+    const reach = await openGrantsSheet(old.page, artifactId, true);
+    const shown = reach.missing === null ? await unreadableRowsShown(old.page).count() : 0;
+    said.push(
+      `  D11's residual (recorded): the refused app's connectors.servers ${typeof listed === 'string' ? `answers ${listed}` : `lists ${listed.length} unreadable rows${listed.includes(grant.id) ? ', the adopted grant among them' : ''}`}; its Connectors sheet, sought from ${reach.from}, ${reach.missing === null ? `opens, with ${shown} unreadable rows, each with a Forget that would unlink its file` : `is not reachable: ${reach.missing} did not show`}`,
+    );
+    expect(sealedFormat(s.userData, grant.id), 'the adopted grant is as this build left it').toBe(2);
     record(said);
   });
 });
