@@ -1103,11 +1103,16 @@ test('(n) P5: a command that waits on the engine host wakes it from its park wit
   test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
   const IDLE_MS = 4_000; // mawsd's idle time, the spine's host.configure (MAWS_E2E_SUPERVISOR_IDLE_MS)
   const QUIET_MS = 1_000; // the spine's quiet period (MAWS_SPINE_QUIET_MS): it releases well before the host parks
-  const NEED = 'a command waits on the engine host, which is parked: waking it';
-  const ASK = 'no app and no interest for the idle time: asking the engine host to exit when idle';
-  // mawsd.log's timestamp of the last line containing `text`
-  const loggedAt = (s: Scratch, text: string) => {
-    const line = s.daemonLog().split('\n').filter((l) => l.includes(text)).at(-1);
+  // The need finds the host parked, or still settling its idle exit: between the close and the park the link says
+  // `restarting` for one pid poll (200 ms), longer while the command's own load holds mawsd's event loop. Then the
+  // supervisor holds the wake's ping and launches at the close instead of parking (the transport's `closed`, the
+  // supervisor's `deliberate`). Both are the need's wake; the test cannot wait for the park without a status read,
+  // which would wake the host itself.
+  const NEED = /\[spine\] a command waits on the engine host, which is (?:parked|restarting): waking it/;
+  const ASK = /no app and no interest for the idle time: asking the engine host to exit when idle/;
+  // mawsd.log's timestamp of the last line matching `pattern`
+  const loggedAt = (s: Scratch, pattern: RegExp) => {
+    const line = s.daemonLog().split('\n').filter((l) => pattern.test(l)).at(-1);
     return line === undefined ? null : Date.parse(line.slice(0, line.indexOf(' ')));
   };
   await withScratch('parked-need', async (s) => {
@@ -1127,7 +1132,7 @@ test('(n) P5: a command that waits on the engine host wakes it from its park wit
       const answer = await reached.link.request('session.intent.list', undefined, DISCOVERY_WAKE_BOUND_MS);
       expect(answer, 'session.intent.list answers').toMatchObject({ ok: true, value: { intents: expect.any(Array) } });
       expect(Date.now() - started, 'within the host’s launch and the boot').toBeLessThan(DISCOVERY_WAKE_BOUND_MS);
-      expect(s.daemonLog()).toContain(NEED);
+      expect(s.daemonLog()).toMatch(NEED);
       woken = s.lock()!.pid;
       expect(woken, 'a new engine host').not.toBe(first);
       expect(isAlive(woken)).toBe(true);
