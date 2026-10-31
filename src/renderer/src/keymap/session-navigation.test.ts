@@ -1,9 +1,31 @@
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { visibleSessionStep } from './session-navigation';
 
 // P5 O6 M2: the rows render the page's ids, addresses
 const [a, b, c] = [at('a'), at('b'), at('c')];
+
+// P5 O7 M2: a lane B session on another machine is marked in this app's memory; its owner's record is never written
+describe('the unread toggle', () => {
+  it('marks a session on another machine in memory, and sends this Mac’s through session.update', async () => {
+    const { addressOf } = await import('@shared/machine/address');
+    const { OTHER_MACHINE } = await import('../../../../test/support/machine');
+    const { fakeClient } = await import('../../../../test/support/fake-client');
+    const { useSessions } = await import('../stores/sessions');
+    const { resetRemoteReadMarks, useRemoteReadMarks } = await import('../lane-b/read-marks');
+    const { setSessionUnread } = await import('./session-navigation');
+    const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useSessions.setState({ listed: new Map(), listedMachines: new Set([OTHER_MACHINE]) });
+    const fake = fakeClient({ 'session.update': () => undefined });
+    await setSessionUnread(remote, true, fake.client);
+    expect(useRemoteReadMarks.getState().unread.get(remote)).toBe(true);
+    expect(fake.invoked('session.update')).toEqual([]);
+    void setSessionUnread(a as AppSessionId, true, fake.client);
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: a, patch: { unread: true } }]);
+    resetRemoteReadMarks();
+  });
+});
 
 describe('session stepping follows rendered sidebar rows', () => {
   it('walks Needs-you first, skips duplicate rows, and wraps across projects', () => {

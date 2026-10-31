@@ -8,7 +8,8 @@
 // `remote`: main's overlay (`remote.session`'s controls) closes what the session there can't take with main's reason, and
 // every control while one reason closes them all; a send is refused before it goes when its content would not fit the
 // channel (an image past the bound waits for M4's uploads), and is counted while on its way, for the composer's
-// "Sending to <machine>…".
+// "Sending to <machine>…". Main resumes a released session there for the act itself, under the act's one bound (A4), so
+// nothing here acquires first: a send is one invocation, and a chip changes with no acquisition.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -16,8 +17,8 @@ import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema'
 import { ipcError } from '@shared/ipc/errors';
 import type { Availability } from '@shared/ipc/schema/session';
 import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
-import { endedBindings, liveBindings, type LiveReads } from '../../composer/frame/bindings';
-import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
+import { endedBindings, liveBindings, type FrameBindings, type LiveReads } from '../../composer/frame/bindings';
+import { sendHumanPrompt, sendWithoutAcquiring } from '../../composer/submit/send-human-prompt';
 import { ENDED, STARTING } from '../../composer/submit/submit-state';
 import { availabilityIn, availabilityRefusal } from '../../sessions/availability';
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
@@ -52,6 +53,9 @@ const ALWAYS = new Set<ControlKey>(['answer', 'decide', 'decide.scope', 'decide.
 const NEEDS_PROCESS = new Set<ControlKey>(['interrupt', 'stop-task']);
 
 const AVAILABLE: Capability = { available: true };
+// P5 O7 M2: `session.applyFlagSettings` and the rules read are not offered over a machine's link (O7's Interfaces §L)
+const REMOTE_DIRECTORIES = 'Adding a directory isn’t offered for a session on another machine';
+const refusedWith = (error: string) => async () => ({ ok: false as const, error });
 const unavailable = (reason: string | null): Capability => (reason === null ? AVAILABLE : { available: false, reason });
 
 // P5 O7 M2: content that would not fit one message on the channel, by the bound main's link checks (its UTF-8 JSON).
@@ -85,21 +89,40 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     if (ALWAYS.has(key)) return AVAILABLE;
     return unavailable(NEEDS_PROCESS.has(key) ? processRefusal() : writeRefusal());
   };
-  // P5 O7 M2: main's overlay first, for a session on another machine
-  const capability = (key: ControlKey): Capability => {
-    const overlaid = remote?.state?.controls[key];
-    return overlaid !== undefined && !overlaid.available ? overlaid : ownCapability(key);
+  // P5 O7 M2: a session on another machine. Main's overlay is the verdict from its record: a released session resumes
+  // there for the act, and a link down holds the act (A4) rather than closing it, so a status this page doesn't hold (it
+  // forgets a departed machine's) gates nothing; one it holds still says a process is starting or gone, for an act that
+  // never starts a session. Lane B's own words for what it reaches another way, and before main's first word.
+  const remoteCapability = (key: ControlKey, state: RemoteSession): Capability => {
+    const elsewhere = ELSEWHERE[key];
+    if (elsewhere !== undefined) return { available: false, reason: elsewhere };
+    const overlaid = state.controls[key];
+    if (!overlaid.available) return overlaid;
+    return NEEDS_PROCESS.has(key) && now().status !== null ? unavailable(processRefusal()) : AVAILABLE;
   };
+  const capability = (key: ControlKey): Capability => (remote?.state ? remoteCapability(key, remote.state) : ownCapability(key));
   const sendRemote = async (content: Parameters<SessionControls['send']>[0], options: Parameters<SessionControls['send']>[1]) => {
     const sendable = capability('send');
     if (!sendable.available) return { disposition: 'refused' as const, started: false, reason: sendable.reason };
     if (pastChannel(content)) return { disposition: 'refused' as const, started: false, reason: REMOTE_TOO_LARGE_WORDS };
     const sent = beginRemoteSend(appSessionId);
     try {
-      return await sendHumanPrompt(appSessionId, content, options, client);
+      return await sendWithoutAcquiring(appSessionId, content, options, client); // one invocation: main resumes and sends under one bound
     } finally {
       sent();
     }
+  };
+  // P5 O7 M2: the chips of a session on another machine: changed with no acquisition (main resumes it for the change),
+  // each closed with the overlay's reason for its key; the directories are not offered over the link
+  const remoteBindings = (live: FrameBindings): FrameBindings => {
+    const model = capability('model');
+    const mode = capability('mode');
+    return {
+      ...live,
+      model: model.available ? live.model : { ...live.model, disabled: model.reason, set: refusedWith(model.reason) },
+      mode: mode.available ? live.mode : { ...live.mode, disabled: mode.reason, set: refusedWith(mode.reason) },
+      directories: { ...live.directories, disabled: REMOTE_DIRECTORIES, set: refusedWith(REMOTE_DIRECTORIES) },
+    };
   };
 
   return {
@@ -115,7 +138,8 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     bindings() {
       const { status, availability } = now();
       const reads = frame?.reads ?? {};
-      return status !== null || record !== null ? liveBindings(status, record, reads, client, availability) : endedBindings();
+      if (status === null && record === null) return endedBindings();
+      return remote ? remoteBindings(liveBindings(status, record, reads, client, availability, false)) : liveBindings(status, record, reads, client, availability);
     },
     queue: () => ({
       promote: (args) => client.invoke('session.queue.promote', { appSessionId, ...args }),

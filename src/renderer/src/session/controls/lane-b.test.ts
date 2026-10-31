@@ -263,8 +263,55 @@ describe('lane B on another machine', () => {
     const port = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, remoteSessionState(REMOTE, { controls })));
     expect(port.capability('rewind')).toEqual({ available: false, reason: 'rewinding a session on another machine waits for its files panel' });
     expect(port.capability('send')).toEqual({ available: true });
-    expect(port.capability('interrupt')).toEqual({ available: false, reason: ENDED }); // lane B's own: no process to interrupt
     expect(port.capability('command')).toMatchObject({ available: false }); // lane B's own words where main opens it
+  });
+
+  // The overlay is main's verdict from the record (M2's overlay rule): a link down closes nothing, and this page forgets
+  // a departed machine's statuses, so a status it no longer holds gates nothing; one it holds still says a process is gone
+  it('keeps interrupt, send and answer open while the link is down and no status is held here', () => {
+    remoteRecord();
+    const down = remoteSessionState(REMOTE, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, down));
+    for (const key of ['interrupt', 'send', 'answer', 'model', 'mode'] as ControlKey[]) expect(port.capability(key), key).toEqual({ available: true });
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE, { process: 'exited' }) }, OTHER_MACHINE);
+    expect(laneBControls(record(REMOTE), remoteInputs(fakeClient().client, down)).capability('interrupt')).toEqual({ available: false, reason: ENDED });
+  });
+
+  // One deadline per send (A4): main's adapter resumes a released session itself under the send's own bound, so the
+  // renderer makes one invocation, never `session.acquire` first nor a status or queue read across the link
+  it('sends to a released session with one invocation, leaving the resume to main', async () => {
+    remoteRecord();
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: UUID } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    expect(await port.send('hello', { origin: 'composer' })).toEqual({ disposition: 'sent', started: false, messageUuid: UUID });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.send']);
+  });
+
+  it('steers while the status this page holds says a turn runs, and refuses what the caller’s own check declines', async () => {
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE, { engineState: 'running', turn: humanTurn }) }, OTHER_MACHINE);
+    const fake = fakeClient({ 'session.steer': { messageUuid: UUID } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    expect(await port.send('also this', { origin: 'composer' })).toMatchObject({ disposition: 'steered' });
+    expect(await port.send('too big', { origin: 'composer', precheck: () => false })).toEqual({ disposition: 'refused', started: false });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.steer']);
+  });
+
+  it('closes the chips with the overlay’s reasons, and changes a released session’s model without acquiring it', async () => {
+    remoteRecord();
+    const reason = 'mini refused this device (grade)';
+    const closed = { ...ALL_OPEN, model: { available: false as const, reason }, mode: { available: false as const, reason } };
+    const shut = laneBControls(record(REMOTE), remoteInputs(fakeClient().client, remoteSessionState(REMOTE, { controls: closed }))).bindings();
+    expect([shut.model.disabled, shut.mode.disabled]).toEqual([reason, reason]);
+    expect(await shut.model.set({ model: 'haiku', effort: null })).toEqual({ ok: false, error: reason });
+    expect(await shut.mode.set('plan')).toEqual({ ok: false, error: reason });
+    expect(shut.directories.disabled).toMatch(/another machine/);
+
+    const fake = fakeClient({ 'session.setModel': { ok: true, error: null, code: null }, 'session.setPermissionMode': { refusal: null, error: null } });
+    const open = laneBControls(record(REMOTE), remoteInputs(fake.client)).bindings();
+    expect([open.model.disabled, open.mode.disabled]).toEqual([null, null]);
+    expect(await open.model.set({ model: 'haiku', effort: null })).toEqual({ ok: true });
+    expect(await open.mode.set('plan')).toEqual({ ok: true });
+    expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.setModel', 'invoke session.setPermissionMode']);
   });
 
   it('closes every control with the reason main says, the answers to cards included', () => {

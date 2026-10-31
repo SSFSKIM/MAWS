@@ -18,7 +18,9 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
 import { remoteRow } from '../../../../test/support/builders'; // P5 O7 M2
 import { useMachines } from '../stores/machines'; // P5 O7 M2
-import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
+import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
+import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
+import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -1197,7 +1199,8 @@ describe('a lane B session on another machine', () => {
       engine: new Map(s.engine).set(R, addressing.output('engine.sessions').lift([status('app-r')], OTHER_MACHINE)[0]!),
       recordsVersion: s.recordsVersion + 1,
     });
-    remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined });
+    resetRemoteDrafts();
+    remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
     window.maws = preloadOf(remote);
   });
 
@@ -1223,6 +1226,26 @@ describe('a lane B session on another machine', () => {
     await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Not sent: mini is offline', ['Send again']]]));
     expect(editorOf().editor.getText()).toBe('over there');
     expect(within(composerOf(0)).queryByRole('status', { name: 'Sending' })).toBeNull();
+  });
+
+  // The overlay rule: a link down closes nothing (A4 holds the act), so a running turn keeps its Stop, and Stop reaches it
+  it('keeps Stop on a running turn while the machine’s link is down', async () => {
+    act(() => {
+      useSessions.setState({ engine: new Map(useSessions.getState().engine).set(R, addressing.output('engine.sessions').lift([status('app-r', { engineState: 'running', turn: humanTurn })], OTHER_MACHINE)[0]!) });
+      applyRemoteSession(remoteSessionState(R, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } }));
+    });
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    await waitFor(() => expect(remote.invoked('session.interrupt')).toHaveLength(1));
+  });
+
+  it('closes the model and mode chips with the overlay’s reason', async () => {
+    const reason = 'mini refused this device (grade)';
+    act(() => applyRemoteSession(remoteSessionState(R, { controls: { ...ALL_OPEN, model: { available: false, reason }, mode: { available: false, reason } } })));
+    mount([{ index: 0, id: R }]);
+    expect(within(composerOf(0)).getByRole('button', { name: /^Model / }).title).toBe(reason);
+    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).toBe(reason);
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

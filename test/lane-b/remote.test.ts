@@ -466,8 +466,9 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     l.host.upstream(false);
     l.host.upstream(true); // each stream catches up from its cursor
     await until(() => gapsOf(l.a, 'app-1').length === 2, 'the lost range’s gap');
-    expect(gapsOf(l.a, 'app-1')[1]).toEqual({ appSessionId: 'app-1', launchId: s.launchId });
+    // told where the hole ends: the first event the stream still had after it (P5 O7 M2's second review)
     await until(() => eventsOf(l.a, 'app-1').some((e) => e.id === kept[0].id), 'what the ring kept');
+    expect(gapsOf(l.a, 'app-1')[1]).toEqual({ appSessionId: 'app-1', launchId: s.launchId, at: { seq: kept[0].seq, idx: 0 } });
     await sleep(200);
     expect(gapsOf(l.a, 'app-1')).toHaveLength(2);
   });

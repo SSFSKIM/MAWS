@@ -153,12 +153,31 @@ describe('the stream', () => {
     expect(l.names().indexOf('session.status', gapAt)).toBeGreaterThan(gapAt);
     expect(l.lastState()).toMatchObject({ stream: 'live' });
     expect(l.session.context()).toEqual({ launchId: 'L2', engineSessionId: 'eng-1' });
-    sub.sink.subbed('missing', { epoch: 'L2', seq: 7 });
-    expect(l.of('remote.gap')).toHaveLength(2);
+    // A `missing` stream goes on from what the machine still has (lane B's from the launch's start): the hole ends at the
+    // first event it delivers, which the gap names (`at`), told just before it; an omitted event names its own place
+    sub.sink.subbed('missing', { epoch: 'L2', seq: 0, idx: -1 });
+    expect(l.lastState()).toMatchObject({ stream: 'gap' });
+    expect(l.of('remote.gap')).toHaveLength(1);
     deliver(sub, { epoch: 'L2', seq: 8, idx: 0 }, notice('L2', 8, 0));
+    expect(l.of('remote.gap')).toHaveLength(2);
     deliver(sub, { epoch: 'L2', seq: 9, idx: 0 }, { omitted: 'too-large', bytes: 5_000_000 });
     expect(l.of('session.eventBatch')).toHaveLength(1); // flushed before the gap
-    expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L2' }, { appSessionId: APP, launchId: 'L2' }, { appSessionId: APP, launchId: 'L2' }]);
+    expect(l.of('remote.gap')).toEqual([
+      { appSessionId: APP, launchId: 'L2' },
+      { appSessionId: APP, launchId: 'L2', at: { seq: 8, idx: 0 } },
+      { appSessionId: APP, launchId: 'L2', at: { seq: 9, idx: 0 } },
+    ]);
+    expect((l.of('session.eventBatch')[0].events as SessionEvent[]).map((e) => e.id)).toEqual([notice('L2', 8, 0).id]);
+    expect(l.names().filter((n) => n === 'remote.gap' || n === 'session.eventBatch').slice(-3)).toEqual(['remote.gap', 'session.eventBatch', 'remote.gap']); // each gap before what follows it
+  });
+
+  it('tells a `missing` gap the stream delivered nothing after when it ends, with no place', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.subbed('missing', { epoch: 'L1', seq: 0, idx: -1 });
+    expect(l.of('remote.gap')).toEqual([]);
+    sub.sink.ended('unavailable');
+    expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1' }]);
   });
 
   it('passes the link’s and the machine’s pauses on as the stream’s state', async () => {

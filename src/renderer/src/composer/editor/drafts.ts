@@ -78,6 +78,7 @@ export function createDraftWriter(save: (draft: Draft | null) => void, options: 
 // draft on another machine's index is per member, O8 M6). `remote` is asked at each load and save, so a session's
 // drafts go where its machine is as the stores know it then.
 const remoteDrafts = new Map<AppSessionId, Draft>();
+export const resetRemoteDrafts = (): void => remoteDrafts.clear(); // for suites
 export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean): P {
   return {
     ...port,

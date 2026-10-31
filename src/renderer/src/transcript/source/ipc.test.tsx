@@ -325,6 +325,77 @@ describe('ipcSource', () => {
       view.unmount();
     });
 
+    // M2's review: a gap told while the history is still being read stays at its launch's boundary, even when the read
+    // already holds the launch after it (the launch's events are named by their ids, `<app>:<launchId>:<seq>:<i>`)
+    it('keeps a gap told during the history read before the first event of its launch, or after the history without one', async () => {
+      const launched = (b: ReturnType<typeof builder>, launch: string, from: number) => b.events.map((event, i) => ({ ...event, seq: from + i, id: `app-r:${launch}:${from + i}:0` as EventId }));
+      const b1 = builder();
+      turnOf(b1, 1);
+      const b2 = builder();
+      turnOf(b2, 2);
+      const history = [...launched(b1, 'L1', 1), ...launched(b2, 'L2', 1)];
+      for (const [launchId, expected] of [['L2', 'between'], ['L3', 'last']] as const) {
+        useTranscriptStore.getState().detach(REMOTE);
+        const fake = fakeClient();
+        const hydrated = useTranscriptStore.getState().attach(REMOTE, ipcSourceOver(fake.client, REMOTE));
+        fake.emit('remote.gap', { appSessionId: REMOTE, launchId }, OTHER_MACHINE);
+        fake.calls[0].answer({ ok: true, value: { events: history, lastSeq: 9, complete: true } } as never);
+        await hydrated;
+        const order = kinds(REMOTE);
+        expect(order.filter((kind) => kind === 'gap'), launchId).toHaveLength(1);
+        if (expected === 'between') {
+          expect(order.indexOf('gap'), launchId).toBeGreaterThan(order.indexOf('assistant_text'));
+          expect(order.indexOf('gap'), launchId).toBeLessThan(order.lastIndexOf('user'));
+        } else expect(order.at(-1), launchId).toBe('gap');
+      }
+    });
+
+    // M2's second review: a lost range inside a launch (`missing`) names where the hole ends, its next event the first at
+    // or after `at`: the bar goes there, between what survives on either side, not at the launch's start
+    it('keeps a lost range’s gap told during the history read at its place inside the launch', async () => {
+      const launched = (b: ReturnType<typeof builder>, from: number) => b.events.map((event, i) => ({ ...event, seq: from + i, id: `app-r:L2:${from + i}:0` as EventId }));
+      const b1 = builder();
+      turnOf(b1, 1);
+      const b2 = builder();
+      turnOf(b2, 2);
+      useTranscriptStore.getState().detach(REMOTE);
+      const fake = fakeClient();
+      const hydrated = useTranscriptStore.getState().attach(REMOTE, ipcSourceOver(fake.client, REMOTE));
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2', at: { seq: 20, idx: 0 } }, OTHER_MACHINE);
+      fake.calls[0].answer({ ok: true, value: { events: [...launched(b1, 1), ...launched(b2, 20)], lastSeq: 40, complete: true } } as never);
+      await hydrated;
+      const order = kinds(REMOTE);
+      expect(order.filter((kind) => kind === 'gap')).toHaveLength(1);
+      expect(order.indexOf('gap')).toBeGreaterThan(order.indexOf('assistant_text'));
+      expect(order.indexOf('gap')).toBeLessThan(order.lastIndexOf('user'));
+    });
+
+    // A gap placed during the read is part of the history the older pages rebuild from, so loading one keeps it
+    it('keeps a gap placed during the history read when an older page is loaded', async () => {
+      const launched = (b: ReturnType<typeof builder>, launch: string) => b.events.map((event, i) => ({ ...event, seq: 1 + i, id: `app-r:${launch}:${1 + i}:0` as EventId }));
+      const b1 = builder();
+      turnOf(b1, 1);
+      const b2 = builder();
+      turnOf(b2, 2);
+      const [older, newer] = [launched(b1, 'L1'), launched(b2, 'L2')];
+      useTranscriptStore.getState().detach(REMOTE);
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, REMOTE);
+      const hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      fake.calls[0].answer({ ok: true, value: { events: newer, lastSeq: 9, complete: true, earlier: newer[0]!.id } } as never);
+      await hydrated;
+      expect(kinds(REMOTE).filter((kind) => kind === 'gap')).toHaveLength(1);
+      source.older!.loadOlder();
+      await vi.waitFor(() => expect(fake.calls.filter((call) => call.name === 'session.events')).toHaveLength(2));
+      fake.calls.filter((call) => call.name === 'session.events')[1]!.answer({ ok: true, value: { events: older, lastSeq: 9, complete: true } } as never);
+      await vi.waitFor(() => expect(kinds(REMOTE).filter((kind) => kind === 'user')).toHaveLength(2));
+      const order = kinds(REMOTE);
+      expect(order.filter((kind) => kind === 'gap')).toHaveLength(1);
+      expect(order.indexOf('gap')).toBeGreaterThan(order.indexOf('assistant_text'));
+      expect(order.indexOf('gap')).toBeLessThan(order.lastIndexOf('user'));
+    });
+
     it('draws it at the start of a page whose range is partly gone, once however often the key is read again', async () => {
       const fake = fakeClient();
       const source = ipcSourceOver(fake.client, APP);

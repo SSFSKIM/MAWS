@@ -65,5 +65,7 @@ export const commands = {} as const satisfies Record<`remote.${string}`, Command
 
 export const events = {
   'remote.session': RemoteSessionSchema,
-  'remote.gap': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string() }),
+  // `at`: where in the launch the gap ends, its next event the first at or after it (a lost range's `missing`, an event
+  // too large to carry); absent, before the launch's first event (a relaunch's `snapshot`) or where it was told
+  'remote.gap': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string(), at: z.strictObject({ seq: z.number().int(), idx: z.number().int().optional() }).optional() }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

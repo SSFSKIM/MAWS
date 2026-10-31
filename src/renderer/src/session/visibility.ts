@@ -17,6 +17,7 @@ import { SIDE_TOOL_ID } from '../side/actions';
 import { currentSet, floatingPane } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
+import { setRemoteVisible } from '../lane-b/read-marks'; // P5 O7 M2
 import { sideChildrenShown, useSidePane } from '../side/store'; // E3
 import { useCommentCard } from '../side/card/store'; // P2-E1
 import { panelInMain } from '../app/regions'; // P3-G
@@ -62,10 +63,11 @@ export function visibleSessions(
 export function connectVisibility(client: MawsBridge = ipc, stores = { layout: useLayout, sessions: useSessions, side: useSidePane /* E3 */ }): () => void {
   let viewing: AppSessionId | null = null;
   let reported = new Set<AppSessionId>();
-  // P5 O7 M2: a lane B session on another machine is not reported: its read marks are the owner's on that machine's index
-  // until O8 M6 keys them per member, and `session.setVisible` is not offered over its link
+  // P5 O7 M2: a lane B session on another machine is marked in this app's memory instead (lane-b/read-marks.ts): its read
+  // marks are the owner's on that machine's index until O8 M6 keys them per member, and `session.setVisible` is not offered
+  // over its link
   const send = (appSessionId: AppSessionId, visible: boolean) => {
-    if (isRemoteLaneB(appSessionId)) return;
+    if (isRemoteLaneB(appSessionId)) return setRemoteVisible(appSessionId, visible);
     void client.invoke('session.setVisible', { appSessionId, visible }).then((result) => {
       if (!result.ok) console.warn('[shell] session.setVisible failed', result.error);
     });
