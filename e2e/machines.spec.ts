@@ -334,15 +334,6 @@ test('export on another machine, the machine side: B, a daemon alone, renders ar
   let daemon: ProfileDaemon | null = null;
   try {
     daemon = await startProfileDaemon({ userData: bUserData, env: { MAWS_MACHINE_NAME: B_NAME } });
-    // The daemon's start read session.list, whose discovery wake woke the parked engine host and, its pass heard, asks it
-    // to exit when idle (discovery-wake.ts). A request racing that exit is answered host_unavailable, so the scene waits
-    // for the host to park: B's first request then wakes it on its own, and only the park clock (10 min) asks it again.
-    const parkedAgain = () => {
-      const text = daemon!.log();
-      const at = text.lastIndexOf('[spine] discovery: the wake is over: asking the engine host to exit when idle');
-      return at >= 0 && /\[hosts\] supervisor pid \d+ exited \(code 0\)/.test(text.slice(at));
-    };
-    await expect.poll(parkedAgain, { timeout: 60_000, message: `B's engine host parks after its discovery wake:\n${daemon.log()}` }).toBe(true);
     const reached = await reachMachine(daemonPaths(bUserData), { build: 'e2e-machines-render' });
     if (!reached.ok) throw new Error(`B's machine.sock: ${reached.state}: ${reached.why}`);
     try {

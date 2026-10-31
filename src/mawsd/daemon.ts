@@ -108,6 +108,7 @@ import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
+import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
@@ -472,6 +473,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       spine.quiet(quiet); // the spine's release runs on the daemon's quiet, with no working session (spine-seam.ts)
     },
   });
+
+  // P5 O5 (landing 1; engine-requests.ts): a client's request to the engine host (the front's, the endpoint's, the artifact
+  // endpoint's, the render seam's answers) is a need, holds the park off while in flight, and one sent after the park's
+  // ask waits for that host's exit, so none is sent to a host leaving under it
+  const clientEngine = engineRequests({ hosts, clocks, log });
 
   // --- the interest union (OX5): the relay connection's set and the endpoint's remote viewers -------------------------
   const interests = new Map<string, readonly AppSessionId[]>();
@@ -849,7 +855,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const machine = machineName(env, hostname());
   const renderQuietMs = positiveInteger(env.MAWS_RENDER_QUIET_MS); // the measured scene's quiet period
   const answerEngine = async (name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown) => {
-    const answer = await hosts.forward('engine-host', { name, input });
+    const answer = await clientEngine.forward('engine-host', { name, input });
     if (!answer.ok) {
       log(`[render] ${name} failed: ${answer.error.message}`);
       return null;
@@ -905,7 +911,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
     spine,
-    hosts,
+    hosts: { forward: clientEngine.forward, onRaw: hosts.onRaw, onStreaming: hosts.onStreaming, parked: hosts.parked }, // P5 O5: forward through the park's guard
     intercept: (request) => interceptEngine(request),
     daemon: daemonCommand,
     identity: () => {
@@ -925,7 +931,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
   const artifacts = createArtifactsEndpoint({
     content: async (input) => {
-      const answer = await hosts.forward('engine-host', { name: 'artifacts.content', input });
+      const answer = await clientEngine.forward('engine-host', { name: 'artifacts.content', input });
       return (answer.ok ? { ok: true, value: answer.value } : { ok: false, error: answer.error }) as CommandResult<'artifacts.content'>;
     },
     load: () => {
@@ -960,7 +966,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         if (answered) return { t: 'res', id: 'endpoint', ...answered } as HostResponse;
       }
       // P5 O7 M2: the asker goes as a ref, so the endpoint channel's end reaches the host as its clientGone
-      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client }) });
+      if (host === 'engine-host') return clientEngine.forward(host, { name, input: sent, ...(client && { client }) });
       // the pty host it woke stays up for the request (a spawn), and parks after it if nothing lives and no app is on
       ptyRequests += 1;
       try {
