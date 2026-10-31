@@ -29,6 +29,13 @@
 //   asked to exit when idle) or `serve` (any build of the major is served and never asked to exit);
 // - `relayed`: the lock holder is a relay (`mawsd`), not the host its welcome names, so after `exit now` on a refused
 //   connection the next attempt follows a poll instead of waiting for the lock holder's death, which never comes.
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40, D56): an engine host that lists
+// `host.holder` hands its sessions over instead of being waited out. Served, `handover` marks its connection for a
+// replacement (so its close, now or after a deferral, spawns the successor and never parks an on-demand host) and asks
+// `host.handover`; deferred, it is asked again every WAIT_RETRY_MS, nothing ever killed. Of another build with sessions
+// live, it is never served (a draining host is not ready): the attempt asks it on its own connection, and a fresh
+// attempt follows its exit, or the retry. A close after `exit idle` waits for the pid's death (bounded by `exitWaitMs`)
+// before it reads as a quiet close, which a slow exit used to (#413).
 // It also gains `recycle` (a draining close, then a fresh attempt at once) and `adopt` (one connect, no start). Every
 // local path is checked before it is used (private-path.ts, RL §5.11): the directory before the token is read, the
 // socket before a connect; a path that fails is logged and the host is unreachable.
@@ -47,6 +54,7 @@ import {
   ServerWelcomeV2Schema,
   SOCKET_PROTOCOL_V2,
   PTY_FRAMES_CAPABILITY,
+  HOLDER_CAPABILITY,
   splitLines,
   type ClientExit,
   type ClientHello,
@@ -55,7 +63,7 @@ import {
   type DocumentsOpen,
   type ServerRefuse,
 } from './socket-protocol';
-import type { HostMessage } from '../ipc/host-protocol';
+import type { HostMessage, HostRequest } from '../ipc/host-protocol';
 import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
 import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import {
@@ -91,6 +99,10 @@ export const CONNECT_TIMEOUT_MS = 1_000;
 export const START_TIMEOUT_MS = 15_000; // one budget for the whole attempt, exit-3 loops included
 export const WAIT_RETRY_MS = 5_000; // how often an incompatible supervisor that still runs sessions is asked again
 export const KILL_GRACE_MS = 2_000; // a candidate that never answered: SIGTERM, this long, then SIGKILL
+// P5 O16 M3b (#413): how long a host asked to exit when idle may outlive its closed socket before the close reads as quiet
+export const EXIT_WAIT_MS = 5_000;
+// P5 O16 M3b: how far past its `graceMs` a `host.handover` answer may come before the ask has failed
+export const HANDOVER_SLACK_MS = 5_000;
 export { HELLO_TIMEOUT_MS, PID_POLL_MS };
 
 export interface DetachedTiming {
@@ -100,6 +112,7 @@ export interface DetachedTiming {
   pidPollMs: number;
   waitRetryMs: number;
   killGraceMs: number;
+  exitWaitMs: number; // P5 O16 M3b
 }
 
 export const DETACHED_TIMING: DetachedTiming = {
@@ -109,6 +122,7 @@ export const DETACHED_TIMING: DetachedTiming = {
   pidPollMs: PID_POLL_MS,
   waitRetryMs: WAIT_RETRY_MS,
   killGraceMs: KILL_GRACE_MS,
+  exitWaitMs: EXIT_WAIT_MS,
 };
 
 // What the transport uses of node's ChildProcess.
@@ -162,8 +176,13 @@ export interface ExitInfo {
 
 // How a served connection ended, beyond `disconnected`: `quiet` (the welcomed pid lives on: backpressure, a socket
 // error; reconnect without a crash count), `deliberate` (main asked the supervisor to exit; a fresh start once it is
-// gone), `replaced` (another client took the supervisor; terminal), or a crash (the welcomed pid is dead).
-export type DetachedLoss = 'quiet' | 'deliberate' | 'replaced' | { crash: ExitInfo };
+// gone), `replaced` (another client took the supervisor; terminal), or a crash (the welcomed pid is dead). P5 O16 M3b:
+// `replace`, the close of a host asked to hand over: its successor is spawned at once (the next launch waits for the
+// pid's death), whether a request waits or not.
+export type DetachedLoss = 'quiet' | 'deliberate' | 'replaced' | 'replace' | { crash: ExitInfo };
+
+// P5 O16 M3b: `host.handover`'s answer as the transport read it; `failed` when none came or it was an error.
+export type HandoverAnswer = { state: 'detaching' } | { state: 'deferred'; inFlight: number } | { state: 'failed'; why: string };
 
 // Why an attempt gave up: a live process holds the lock and never answered, or something else (logged).
 export type DetachedFailure = 'held_lock' | 'other';
@@ -203,8 +222,12 @@ export interface DetachedTransport {
   // its refused connection, sessions live or not, and a fresh one started once it is gone.
   replaceIncompatible(): void;
   // Main is about to send the served supervisor a command after which it exits whatever its answer (`host.stopAll`):
-  // its close is then deliberate. False when nothing is served.
-  expectExit(): boolean;
+  // its close is then deliberate. False when nothing is served. P5 O16 M3b: `replace`, a handover's: the close spawns
+  // the successor instead.
+  expectExit(kind?: 'now' | 'replace'): boolean;
+  // P5 O16 M3b: the served host asked to hand its sessions over (`host.handover {graceMs}`), its connection marked for a
+  // replacement first; deferred, asked again every WAIT_RETRY_MS while it is served. A failed ask unmarks it.
+  handover(graceMs: number): Promise<HandoverAnswer>;
   // The quit: from here nothing reconnects or spawns. A served connection stays open for the quit's stop-all and its
   // close ends the transport; with none served the transport stops at once (false), and a supervisor whose connection
   // closed quietly, still alive and named by the lock, is sent SIGTERM so its exit order stops every row.
@@ -242,7 +265,8 @@ interface Proc {
 interface Served {
   port: SocketPort;
   proc: Proc;
-  exitAsked: ClientExit['when'] | null; // what main asked of the supervisor, on this connection or an earlier one
+  exitAsked: ClientExit['when'] | 'replace' | null; // what main asked of the supervisor, on this connection or an earlier one (P5 O16 M3b: `replace`, a handover)
+  handovers: Map<string, (data: unknown) => void>; // P5 O16 M3b: the `host.handover` asks awaiting their answers
   replaced: boolean;
   recycled: (() => void) | null; // P5 O2 M3: a recycle's draining close, and what runs at its end
 }
@@ -286,6 +310,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let waitingFor: string | null = null;
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
   let adopting: ((served: boolean) => void) | null = null; // P5 O2 M3: the adoption under way, answered once
+  let handoverAsks = 0; // P5 O16 M3b: the ids of `host.handover` requests, apart from any the host supervisor sends
 
   function after(ms: number, run: () => void): void {
     const timer = setTimeout(() => {
@@ -492,6 +517,14 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         if (adopting) return replaceLater(socket, proc); // P5 O2 M3: an adoption starts nothing
         return replace(socket, proc);
       }
+      // P5 O16 M3b (D9, D56): with sessions live, a host that hands over is asked to, never served
+      if (otherBuild && welcome.peer.capabilities.includes(HOLDER_CAPABILITY)) {
+        if (adopting) {
+          socket.destroy();
+          return giveUp(`pid ${welcome.pid}, of another build, hands its sessions over: the next launch asks it`);
+        }
+        return handingOver(socket, leftover, proc, welcome);
+      }
       attemptSockets.delete(socket);
       const answer = adopting; // P5 O2 M3: answered once served, not by the attempt's end
       adopting = null;
@@ -555,6 +588,32 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         events.waiting(refuse);
       }
       after(timing.waitRetryMs, launch);
+    }
+
+    // P5 O16 M3b: `host.handover` on this attempt's own connection, never served. Detaching: a fresh attempt once the pid
+    // is gone, whose spawn adopts its sessions. Deferred: the connection closed and asked again at the next attempt,
+    // WAIT_RETRY_MS on (the drain armed at the first ask goes on meanwhile). Failed: retried the same way.
+    function handingOver(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed): void {
+      attemptSockets.delete(socket);
+      const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`) });
+      const answers = new Map<string, (data: unknown) => void>();
+      port.on('message', ({ data }) => void routeHandoverAnswer(answers, data));
+      port.onClose(() => failHandoverAsks(answers));
+      port.start();
+      log(`supervisor pid ${welcome.pid} runs build ${welcome.peer.build} with ${welcome.liveSessions} sessions live; asking it to hand them over`);
+      void askHandover(port, answers, HANDOVER_GRACE_MS).then((answer) => {
+        port.close();
+        if (!current()) return;
+        finish();
+        if (answer.state === 'detaching') {
+          log(`supervisor pid ${proc.pid} is handing its sessions over; its successor follows its exit`);
+          awaitDeath = proc;
+          return launch();
+        }
+        if (answer.state === 'deferred') log(`engine host pid ${proc.pid} defers its handover: ${answer.inFlight} calls in flight`);
+        else log(`supervisor pid ${proc.pid} did not answer its handover (${answer.why}); asking again`);
+        after(timing.waitRetryMs, launch);
+      });
     }
 
     // `exit {when: 'now'}`, then a fresh start once the process is gone. P5 O2 M3: relayed, the lock holder is the relay
@@ -686,7 +745,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
-    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false, recycled: null };
+    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, handovers: new Map(), replaced: false, recycled: null };
     served = connection;
     unserved = null;
     waitingFor = null;
@@ -702,6 +761,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         if (refuse.value.reason === 'replaced') connection.replaced = true;
         return;
       }
+      if (routeHandoverAnswer(connection.handovers, data)) return; // P5 O16 M3b: the transport's own ask
       for (const listener of listeners) listener(data);
     });
     port.onClose(() => closed(connection));
@@ -721,6 +781,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   }
 
   function closed(connection: Served): void {
+    failHandoverAsks(connection.handovers); // P5 O16 M3b
     if (served !== connection) return;
     served = null;
     if (stopped) return;
@@ -750,19 +811,59 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       awaitDeath = connection.proc;
       return events.lost('deliberate');
     }
+    // P5 O16 M3b (D40): a host asked to hand over: its successor is spawned once it is gone, never parked
+    if (connection.exitAsked === 'replace') {
+      log(`supervisor pid ${connection.proc.pid} closed its connection after handing over; starting its successor`);
+      awaitDeath = connection.proc;
+      return events.lost('replace');
+    }
     unserved = connection.proc;
     events.disconnected();
     // A supervisor that died closes its socket before its pid is gone (a process still exiting, or a child not yet
-    // reaped), so the pid is looked at one poll later.
-    after(timing.pidPollMs, () => {
+    // reaped), so the pid is looked at one poll later. P5 O16 M3b (#413): one asked to exit when idle is looked at again
+    // every poll until it is gone, within `exitWaitMs`, so a slow exit is not read as a quiet close and relaunched.
+    const until = Date.now() + timing.exitWaitMs;
+    const look = () => {
       const exit = spawned.get(connection.proc.pid) ?? null;
       if (exit === null && sameProcess(connection.proc)) {
+        if (connection.exitAsked === 'idle' && Date.now() < until) return after(timing.pidPollMs, look);
         log(`the connection to supervisor pid ${connection.proc.pid} closed; it still runs`);
         return events.lost('quiet');
       }
       if (connection.exitAsked === 'idle') return events.lost('deliberate'); // it exited when idle, as asked
       log(`supervisor pid ${connection.proc.pid} is gone`);
       events.lost({ crash: exit ?? { code: null, signal: null } });
+    };
+    after(timing.pidPollMs, look);
+  }
+
+  // P5 O16 M3b: `host.handover` on a port, answered through `answers` (routeHandoverAnswer, from the port's messages);
+  // failed when no answer comes within its grace and HANDOVER_SLACK_MS, or the port closes first.
+  function askHandover(port: SocketPort, answers: Map<string, (data: unknown) => void>, graceMs: number): Promise<HandoverAnswer> {
+    const id = `transport-handover-${++handoverAsks}`;
+    return new Promise((resolve) => {
+      const settle = (answer: HandoverAnswer) => {
+        clearTimeout(timer);
+        answers.delete(id);
+        resolve(answer);
+      };
+      const timer = setTimeout(() => settle({ state: 'failed', why: `no answer within ${(graceMs + HANDOVER_SLACK_MS) / 1000} s` }), graceMs + HANDOVER_SLACK_MS);
+      answers.set(id, (data) => settle(readHandoverAnswer(data)));
+      const request: HostRequest = { t: 'req', id, name: 'host.handover', input: { graceMs } };
+      if (!port.postMessage(request)) settle({ state: 'failed', why: 'the socket refused the request' });
+    });
+  }
+
+  // A served host's deferral, asked again every WAIT_RETRY_MS while it is still the one served and marked for its
+  // replacement (its exit, once the drain settles, needs no ask: the first armed it).
+  function askAgain(connection: Served): void {
+    after(timing.waitRetryMs, () => {
+      if (served !== connection || connection.exitAsked !== 'replace') return;
+      void askHandover(connection.port, connection.handovers, 0).then((answer) => {
+        if (answer.state !== 'deferred') return;
+        log(`engine host pid ${connection.proc.pid} defers its handover: ${answer.inFlight} calls in flight`);
+        askAgain(connection);
+      });
     });
   }
 
@@ -816,9 +917,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   }
 
   // Remembered only once written: an exit the socket refused was never asked, and the next close is not deliberate.
+  // P5 O16 M3b: an idle exit asked of a host handing over (the park clock's) leaves its close the replacement's.
   function askExit(connection: Served, when: ClientExit['when']): boolean {
     if (!connection.port.postMessage({ t: 'exit', when } satisfies ClientExit)) return false;
-    if (connection.exitAsked !== 'now') connection.exitAsked = when;
+    if (connection.exitAsked !== 'now' && !(connection.exitAsked === 'replace' && when === 'idle')) connection.exitAsked = when;
     if (when === 'idle') idleArmed = connection.proc;
     log(`asked supervisor pid ${connection.proc.pid} to exit ${when}`);
     return true;
@@ -832,11 +934,31 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     },
     // E10 start
     replaceIncompatible: () => launch(true),
-    expectExit() {
+    expectExit(kind = 'now') {
       if (!served || stopped) return false;
-      served.exitAsked = 'now';
-      log(`supervisor pid ${served.proc.pid} is asked to stop all and exit`);
+      if (kind === 'now') {
+        served.exitAsked = 'now';
+        log(`supervisor pid ${served.proc.pid} is asked to stop all and exit`);
+      } else if (served.exitAsked !== 'now') served.exitAsked = 'replace'; // P5 O16 M3b
       return true;
+    },
+    // P5 O16 M3b
+    handover(graceMs) {
+      if (!served || stopped || quitting) return Promise.resolve({ state: 'failed', why: 'nothing is served' });
+      const connection = served;
+      const before = connection.exitAsked;
+      if (connection.exitAsked !== 'now') connection.exitAsked = 'replace';
+      log(`asking supervisor pid ${connection.proc.pid} to hand its sessions over`);
+      return askHandover(connection.port, connection.handovers, graceMs).then((answer) => {
+        if (answer.state === 'failed') {
+          if (connection.exitAsked === 'replace') connection.exitAsked = before;
+          log(`supervisor pid ${connection.proc.pid} did not hand over: ${answer.why}`);
+        } else if (answer.state === 'deferred') {
+          log(`engine host pid ${connection.proc.pid} defers its handover: ${answer.inFlight} calls in flight`);
+          askAgain(connection);
+        } else log(`supervisor pid ${connection.proc.pid} is handing its sessions over; its successor follows its exit`);
+        return answer;
+      });
     },
     quit() {
       if (stopped) return false;
@@ -875,7 +997,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     // P5 O2 M3 end
     expectIdleExit() {
       if (!served || stopped) return false;
-      if (served.exitAsked !== 'now') served.exitAsked = 'idle';
+      if (served.exitAsked !== 'now' && served.exitAsked !== 'replace') served.exitAsked = 'idle';
       idleArmed = served.proc;
       log(`supervisor pid ${served.proc.pid} is armed to exit when idle`);
       return true;
@@ -912,6 +1034,32 @@ export function supervisorEnv(env: NodeJS.ProcessEnv, opts: { userData: string; 
   return out;
 }
 
+
+// P5 O16 M3b: the default grace a handover's ask names (the host's own default too)
+const HANDOVER_GRACE_MS = 10_000;
+
+// P5 O16 M3b: a `res` naming one of `answers`' ids is handed to it (true); anything else is not this ask's (false).
+function routeHandoverAnswer(answers: Map<string, (data: unknown) => void>, data: unknown): boolean {
+  const record = typeof data === 'object' && data !== null ? (data as { t?: unknown; id?: unknown }) : null;
+  if (record?.t !== 'res' || typeof record.id !== 'string') return false;
+  const take = answers.get(record.id);
+  if (!take) return false;
+  take(data);
+  return true;
+}
+
+function failHandoverAsks(answers: Map<string, (data: unknown) => void>): void {
+  for (const take of [...answers.values()]) take({ t: 'res', ok: false, error: { message: 'the connection closed before it answered' } });
+}
+
+// `host.handover`'s answer, read loosely: its two states, else what failed.
+function readHandoverAnswer(data: unknown): HandoverAnswer {
+  const res = data as { ok?: unknown; value?: { state?: unknown; inFlight?: unknown }; error?: { message?: unknown } };
+  if (res.ok !== true) return { state: 'failed', why: typeof res.error?.message === 'string' ? res.error.message : 'an error answer' };
+  if (res.value?.state === 'detaching') return { state: 'detaching' };
+  if (res.value?.state === 'deferred' && typeof res.value.inFlight === 'number') return { state: 'deferred', inFlight: res.value.inFlight };
+  return { state: 'failed', why: 'an answer that is neither detaching nor deferred' };
+}
 
 // P5 O1 M6: a welcome in the hello's own form and of its major (`major`), read tolerantly.
 function parseAnswer(line: string, form: Form, major: number, logDropped: (message: string, dropped: readonly string[]) => void): Answer {

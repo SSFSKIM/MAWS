@@ -192,6 +192,46 @@ describe('mawsd restart', () => {
     expect(code).toBe(3);
     expect(err).toContain('mawsd is not running');
   });
+
+  // P5 O16 M3b (D9, D40): the engine host handed over to a successor that adopts its sessions; mawsd stays, a unit too
+  it('--engine-host: the engine host hands over, and the successor’s pid and adopted sessions are printed', async () => {
+    scene.engineSpawn = {
+      answers: {
+        'host.handover': () => {
+          const old = scene.lastEngine();
+          setImmediate(() => void old.supervisor.die());
+          return { state: 'detaching' };
+        },
+        'host.supervisorStatus': () => ({ mode: 'detached', pid: 1, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: 3, rows: 3, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 3, adopted: 3, failed: 0, gate: null, handover: 'none', adopting: false } }),
+      },
+    };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine().pid;
+    const { code, out } = await cli(['restart', '--engine-host']);
+    expect(code).toBe(0);
+    expect(scene.lastEngine().pid).not.toBe(old);
+    expect(out).toBe(`engine host restarted: pid ${scene.lastEngine().pid}, 3 sessions adopted\n`);
+    expect(scene.exits).toEqual([]); // mawsd itself stays
+  });
+
+  it('--engine-host deferred: says so and that the successor follows the drain', async () => {
+    scene.engineSpawn = { answers: { 'host.handover': () => ({ state: 'deferred', inFlight: 2 }) } };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const { code, out } = await cli(['restart', '--engine-host']);
+    expect(code).toBe(0);
+    expect(out).toBe('the engine host defers its handover: 2 calls in flight; it hands over once they finish, and its successor adopts its sessions\n');
+  });
+
+  it('--engine-host with the engine host parked: the refusal, exit 1', async () => {
+    await scene.start();
+    const { code, err } = await cli(['restart', '--engine-host']);
+    expect(code).toBe(1);
+    expect(err).toContain('daemon.restartEngineHost failed: engine-host is parked');
+  });
 });
 
 describe('mawsd logs', () => {

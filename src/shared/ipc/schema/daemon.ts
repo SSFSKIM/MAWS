@@ -84,6 +84,14 @@ const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) 
 export const commands = {
   'daemon.status': machine(z.void(), DaemonStatusSchema),
   'daemon.restart': machine(z.void(), z.void()), // answers, then the daemon exits 75 (its unit restarts it)
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40): `mawsd restart --engine-host`, the
+  // engine host asked to hand its sessions over to a successor of this build. `detaching`: answered once the successor
+  // is ready and its adoptions have ended (bounded), with its pid and how many sessions it adopted (absent past the
+  // bounds); `deferred`: answered at once, with the calls still in flight (the successor follows the drain).
+  'daemon.restartEngineHost': machine(
+    z.void(),
+    z.strictObject({ state: z.enum(['detaching', 'deferred']), inFlight: z.number().int().nonnegative(), pid: z.number().int().optional(), adopted: z.number().int().nonnegative().optional() }),
+  ),
   // the CLI's `mawsd endpoint …` (and its aliases `enroll`, `keys`), passed to the endpoint module's `cli`; `secret` is the
   // enrollment code from stdin or a prompt, never argv, never logged
   'daemon.endpoint': machine(

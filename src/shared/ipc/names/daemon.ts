@@ -4,4 +4,4 @@ export const commands = [] as const;
 
 export const events = [] as const;
 
-export const mainOnlyCommands = ['daemon.status', 'daemon.restart', 'daemon.endpoint', 'daemon.e2eSeam'] as const;
+export const mainOnlyCommands = ['daemon.status', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.endpoint', 'daemon.e2eSeam'] as const;

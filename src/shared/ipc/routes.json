@@ -391,6 +391,7 @@
   "daemon.e2eSeam",
   "daemon.endpoint",
   "daemon.restart",
+  "daemon.restartEngineHost",
   "daemon.status",
   "delivery.cancel",
   "delivery.connect",

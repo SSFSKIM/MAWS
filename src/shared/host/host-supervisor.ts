@@ -41,9 +41,9 @@ import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
 import { codecOf } from '../ipc/validate';
 import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
-import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink, type Welcomed } from './detached-transport'; // E10
+import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
-import { DocumentsClosedSchema, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
+import { DocumentsClosedSchema, HOLDER_CAPABILITY, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
 
 // The hosts a client reaches, and how a command is sent to one (main's router re-exports both).
 export type HostOwner = Exclude<Owner, 'main'>;
@@ -192,6 +192,12 @@ export interface HostSupervisor {
   disarmExit(owner: HostOwner): boolean; // the transport's disarmIdle
   expectIdleExit(owner: HostOwner): boolean; // the transport's expectIdleExit: a host.exitWhenIdle {armed: true} it answered
   // P5 O2 M5 end
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40, D56): the served host asked to hand
+  // its sessions over. It leaves `ready` first (a draining host is not ready: the spine sees it go, and every request
+  // from here is held for the successor), then `host.handover {graceMs}`; its close, now or after a deferral, starts
+  // the successor that adopts the sessions, never a park. A host that is not served and ready, or does not list
+  // `host.holder`, is refused `host_unavailable`; a failed ask reconnects to it (a recycle).
+  handover(owner: HostOwner, graceMs: number): Promise<CommandResult<'host.handover'>>;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -624,6 +630,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           return options.onReplaced?.(host.owner); // P5 O2 M5
         }
         disconnected();
+        // P5 O16 M3b (D40): a handover's close: the successor at once, whatever is held (a deferral's caller may be gone)
+        if (loss === 'replace') {
+          failSent(host, 'handed its sessions over');
+          if (host.state.state !== 'restarting') transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
+          return launch(host);
+        }
         if (loss === 'quiet') return relaunch(restartBackoffMs[0]);
         if (loss === 'deliberate') return deliberate();
         unexpected(loss.crash);
@@ -1012,5 +1024,23 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     welcome: (owner) => hostOf(owner).welcome, // P5 O2 M5
     disarmExit: (owner) => hosts[owner]?.transport?.disarmIdle() ?? false, // P5 O2 M5
     expectIdleExit: (owner) => hosts[owner]?.transport?.expectIdleExit() ?? false, // P5 O2 M5
+    // P5 O16 M3b
+    async handover(owner, graceMs) {
+      const host = hostOf(owner);
+      const transport = host.transport;
+      if (stopped || host.quitting || !transport || !host.port || host.state.state !== 'ready') return { ok: false, error: ipcError('host_unavailable', `${owner} is ${host.parked ? 'parked' : host.state.state}; it cannot hand over`) };
+      if (!host.peer?.capabilities.includes(HOLDER_CAPABILITY)) return { ok: false, error: ipcError('host_unavailable', `${owner} (build ${host.peer?.build ?? 'unknown'}) does not hand its sessions over`) };
+      host.readyAsked = false; // a sayReady belonged to the connection that ends here
+      unlink(host);
+      host.port = null;
+      transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
+      const answer: HandoverAnswer = await transport.handover(graceMs);
+      if (answer.state === 'failed') {
+        // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
+        transport.recycle(() => failSent(host, 'was recycled'));
+        return { ok: false, error: ipcError('internal', `${owner} did not hand over: ${answer.why}`) };
+      }
+      return { ok: true, value: answer };
+    },
   };
 }

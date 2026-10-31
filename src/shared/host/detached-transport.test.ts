@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { captureConsole } from '../../../test/support/console-capture';
 import { connectLines } from '../../../test/support/socket-lines';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from '../../../test/support/fake-supervisor';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostState } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
@@ -22,7 +22,11 @@ vi.mock('electron', () => ({ app: { isPackaged: false, getPath: () => '/nonexist
 import { createHostSupervisor, type HostDispatch, type HostOwner, type HostSupervisor, type HostSpec } from './host-supervisor';
 
 // Short clocks: the state table is the same, the waits are not.
-const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
+// P5 O16 M3b: `exitWaitMs`, how long an idle-armed host's pid may outlive its closed socket (#413), short enough that a
+// quiet close of one still reconnects within a test's wait
+const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60, exitWaitMs: 600 };
+// P5 O16 M3b: an engine host from before the handover (no `host.holder`), which main serves and asks to exit when idle
+const BEFORE_HOLDER = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY] };
 const BACKOFF = [30, 60, 90] as const;
 
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
@@ -85,9 +89,9 @@ afterEach(async () => {
   profile.dispose();
 });
 
-function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}, extra: Partial<DetachedTransportOptions> = {}): HostSupervisor {
+function makeSupervisor(packaged = false, timing: Partial<typeof TIMING> = {}, extra: Partial<DetachedTransportOptions> = {}, spec: Partial<HostSpec> = {} /* P5 O16 M3b */): HostSupervisor {
   const made = createHostSupervisor({
-    hosts: { 'engine-host': { modulePath: profile.modulePath, serviceName: 'maws-engine-host', transport: 'detached' } } as Record<HostOwner, HostSpec>,
+    hosts: { 'engine-host': { modulePath: profile.modulePath, serviceName: 'maws-engine-host', transport: 'detached', ...spec } } as Record<HostOwner, HostSpec>,
     emit,
     restartBackoffMs: BACKOFF,
     userData: () => profile.userData, // P5 O2 M3: the core's own, which the transport options below override
@@ -556,7 +560,7 @@ describe('the detached transport: the build and wire handshake (§Design 6’s t
   });
 
   it('another build, sessions live: served and asked to exit when idle, once per supervisor process; its exit is deliberate', async () => {
-    const old = await startFake({ buildId: 'older-build', ...live(1) });
+    const old = await startFake({ buildId: 'older-build', ...live(1), ...BEFORE_HOLDER });
     await supervisor.start();
     expect(state()).toMatchObject({ state: 'ready', pid: old.pid });
     await until(() => old.exits.length === 1);
@@ -756,7 +760,7 @@ describe('the detached transport: MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE_MAJOR', ()
 
   it('a build override makes the running supervisor another build (served, exit when idle); the one main starts after Restart now is its own', async () => {
     withIdentity({ MAWS_E2E_BUILD_ID: 'stale' });
-    const { fake, asked } = await startStoppable({ counts: { liveSessions: 1, rows: 1 } });
+    const { fake, asked } = await startStoppable({ counts: { liveSessions: 1, rows: 1 }, ...BEFORE_HOLDER });
     await supervisor.start();
     expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
     await until(() => fake.exits.length === 1);
@@ -1026,5 +1030,120 @@ describe('the detached transport: a newer supervisor’s document close', () => 
     await until(() => port.close.mock.calls.length === 1);
     expect(errors).not.toHaveBeenCalled();
     expect(dropped.lines()).toEqual(['[hosts] dropped newer from socket documents.closed, a field this build does not know (logged once per message and path)']);
+  });
+});
+
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40, D56; #413): the handover as `mawsd`'s
+// transport drives it. A served host asked to hand over leaves `ready` (requests held for the successor), is asked again
+// while it defers, and its close after the drain starts the successor, never a park, whatever is held and whatever the
+// park clock asked meanwhile. Another build with sessions live that hands over is never served. A host asked to exit when
+// idle whose pid outlives its socket is read as that exit, not as a quiet close.
+describe('the detached transport: the handover', () => {
+  const onDemand = () => {
+    supervisor.stop();
+    supervisor = makeSupervisor(false, {}, {}, { onDemand: true });
+  };
+  // A host that answers host.handover from `state()` (deferred while calls are in flight), recording each ask.
+  async function handingOverFake(options: Partial<FakeSupervisorOptions> = {}, inFlight = { count: 0 }) {
+    const asked: unknown[] = [];
+    const fake = await startFake({
+      ...options,
+      register: (on) => {
+        on('host.handover', async (input) => {
+          asked.push(input);
+          return inFlight.count > 0 ? { state: 'deferred' as const, inFlight: inFlight.count } : { state: 'detaching' as const };
+        });
+      },
+    });
+    return { fake, asked, inFlight };
+  }
+
+  it('a deferred handover leaves ready and is asked again; its close after the drain starts the successor, the park clock’s exit and no held request notwithstanding', async () => {
+    onDemand();
+    const { fake: old, asked, inFlight } = await handingOverFake({}, { count: 1 });
+    await supervisor.start();
+    supervisor.wake('engine-host');
+    await until(() => state().state === 'ready');
+    expect(await supervisor.handover('engine-host', 40)).toEqual({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    expect(asked[0]).toEqual({ graceMs: 40 });
+    expect(state().state).toBe('restarting'); // a draining host is not ready (D56)
+    await until(() => asked.length >= 2); // asked again, WAIT_RETRY_MS on
+    expect(logs).toContain(`engine host pid ${old.pid} defers its handover: 1 calls in flight`);
+    expect(supervisor.exitSupervisor('idle')).toBe(true); // the park clock fired meanwhile
+    await until(() => old.exits.includes('idle'));
+    inFlight.count = 0;
+    await old.die(); // the drain settled: the host exits
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(supervisor.parked('engine-host')).toBe(false);
+  });
+
+  it('a request made while it hands over is held and answered by the successor', async () => {
+    const { fake: old } = await handingOverFake();
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'detaching' } });
+    const pinged = ping();
+    await old.die();
+    const answer = await pinged;
+    expect(answer).toMatchObject({ ok: true });
+    expect((answer as { value: { pid: number } }).value.pid).not.toBe(old.pid);
+  });
+
+  it('refuses a host that does not list host.holder, and reconnects to one whose ask failed', async () => {
+    const plain = await startFake({ capabilities: [] });
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(await supervisor.handover('engine-host', 0)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(state()).toMatchObject({ state: 'ready', pid: plain.pid });
+    supervisor.stop();
+    await plain.die();
+
+    supervisor = makeSupervisor();
+    const failing = await startFake({
+      register: (on) => {
+        on('host.handover', async () => {
+          throw new Error('no drain here');
+        });
+      },
+    });
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(await supervisor.handover('engine-host', 0)).toMatchObject({ ok: false, error: { code: 'internal' } });
+    await until(() => state().state === 'ready');
+    expect(state().pid).toBe(failing.pid);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('another build with sessions live that hands over is never served: asked on the attempt’s connection, then its successor', async () => {
+    const { fake: old, asked, inFlight } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 2, rows: 2 } }, { count: 3 });
+    void supervisor.start(); // settles at the successor's welcome
+    await until(() => asked.length === 1);
+    expect(asked[0]).toEqual({ graceMs: 10_000 });
+    await until(() => logs.includes(`engine host pid ${old.pid} defers its handover: 3 calls in flight`));
+    inFlight.count = 0;
+    await until(() => asked.length === 2); // the next attempt asks again
+    await old.die();
+    await until(() => state().state === 'ready');
+    expect(state().pid).not.toBe(old.pid);
+    expect(states.some((s) => s.state === 'ready' && s.pid === old.pid)).toBe(false);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('a host asked to exit when idle whose pid outlives its closed socket is read as that exit, not a quiet close (#413)', async () => {
+    onDemand();
+    const old = await startFake({
+      onExitIdle: (self) => {
+        for (const socket of self.connections) socket.destroy();
+        setTimeout(() => void self.die(), 10 * TIMING.pidPollMs); // a slow exit: the pid outlives the socket
+      },
+    });
+    await supervisor.start();
+    supervisor.wake('engine-host');
+    await until(() => state().state === 'ready');
+    expect(supervisor.exitSupervisor('idle')).toBe(true);
+    await until(() => supervisor.parked('engine-host'));
+    expect(states.filter((s) => s.state === 'ready').map((s) => s.pid)).toEqual([old.pid]); // never reconnected to it
+    expect(spawn).not.toHaveBeenCalled();
   });
 });

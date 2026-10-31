@@ -9,6 +9,7 @@ import type { CommandGrades } from '../grades';
 export const grades = {
   'daemon.status': 'list',
   'daemon.restart': 'machine-admin',
+  'daemon.restartEngineHost': 'machine-admin', // P5 O16 M3b: a restart of the machine's engine host, its sessions kept
   'daemon.endpoint': 'internal',
   'daemon.e2eSeam': 'internal', // M5b fix round 2: the e2e's seams, never a remote caller's
 } as const satisfies CommandGrades<'daemon'>;

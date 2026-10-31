@@ -22,6 +22,7 @@ import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
 import { defaultProfileDir } from '@shared/daemon/profile';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { DaemonStatusSchema, type DaemonHost, type DaemonStatus } from '@shared/ipc/schema/daemon';
+import type { CommandOutput } from '@shared/ipc/schema';
 import { SupervisorStatusSchema, type SupervisorStatus } from '@shared/ipc/schema/host'; // O16 M5
 import { readTolerant } from '@shared/ipc/tolerant';
 import { IDENTITY_FILE, readMachineRef } from '@shared/machine/identity-file';
@@ -41,10 +42,14 @@ const WAIT_DEFAULT_S = 300; // a bare `--wait`'s seconds, and `provision`'s wait
 // bound only decides how long the caller sees the outcome itself, and ends the wait on a daemon that never answers.
 const ATTEST_HISTORY_TIMEOUT_MS = 60 * 60_000;
 const FOLLOW_INTERVAL_MS = 500;
+// P5 O16 M3b: `restart --engine-host` waits through daemon.ts's waits (the host's drain grace, 10 s; its successor's
+// welcome, 30 s; its adoptions, 60 s), with room for the answer's way back
+const RESTART_ENGINE_HOST_TIMEOUT_MS = 120_000;
 
 export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   status [--json]                  the daemon, its machine ref and its hosts
   restart                          a new mawsd; its hosts and their sessions keep running
+  restart --engine-host            a new engine host; its sessions are handed over and keep running
   logs [--follow] [--host daemon|engine|pty]
   enroll [--name <name>] [--replace] [--wait [<seconds>]] [--json]
                                    the enrollment code is read from stdin or a prompt
@@ -100,8 +105,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       case 'status':
         return await status(context, flags(args, ['--json']).has('--json'));
       case 'restart':
-        flags(args, []);
-        return await restart(context);
+        return flags(args, ['--engine-host']).has('--engine-host') ? await restartEngineHost(context) : await restart(context);
       case 'logs':
         return await logs(context, args);
       case 'enroll':
@@ -303,6 +307,22 @@ async function restart(context: Context): Promise<number> {
     const answer = await link.request('daemon.restart', undefined);
     if (!answer.ok) return failed(deps, `daemon.restart failed: ${answer.error.message}`);
     deps.out(`asked mawsd (pid ${link.welcome.pid}) to restart: a unit daemon is started again by its unit, a private one by the next client that needs it\n`);
+    return EXIT.done;
+  });
+}
+
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40): the engine host hands its sessions over
+// to a successor of mawsd's build, which adopts them; mawsd, and a unit's daemon, stay. The daemon answers a deferral at
+// once and a handover once the successor has adopted (its waits, daemon.ts's, inside this bound).
+async function restartEngineHost(context: Context): Promise<number> {
+  const { deps } = context;
+  return withDaemon(context, async (link) => {
+    const answer = await link.request('daemon.restartEngineHost', undefined, RESTART_ENGINE_HOST_TIMEOUT_MS);
+    if (!answer.ok) return failed(deps, `daemon.restartEngineHost failed: ${answer.error.message}`);
+    const value = answer.value as CommandOutput<'daemon.restartEngineHost'>;
+    if (value.state === 'deferred') deps.out(`the engine host defers its handover: ${value.inFlight} calls in flight; it hands over once they finish, and its successor adopts its sessions\n`);
+    else if (value.pid === undefined) deps.out('the engine host is handing its sessions over; its successor did not answer in time (mawsd logs --host engine)\n');
+    else deps.out(`engine host restarted: pid ${value.pid}${value.adopted === undefined ? ', its sessions still being adopted' : `, ${value.adopted} sessions adopted`}\n`);
     return EXIT.done;
   });
 }
