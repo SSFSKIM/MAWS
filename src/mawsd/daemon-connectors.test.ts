@@ -42,6 +42,7 @@ const POST_O4 = [...PEER_CAPABILITIES.app]; // this build's app
 const PRE_O4 = [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY]; // an app from O3-D M5b to before O4 M2
 const CLI: string[] = []; // src/mawsd/machine-client.ts's hello
 const LINK = [...PEER_CAPABILITIES.link]; // O6's link to another profile's machine.sock
+const PRE_O3 = [PTY_FRAMES_CAPABILITY]; // an app from O2 to before O3-D M5b: no machine.spine (D29: it asks a restart)
 
 // D45: with nothing live the refusal says one session, so an old app's transport waits on it (its banner) and asks again
 // every 5 s, rather than replacing mawsd every 200 ms (it reads 0 as "replace", and mawsd ignores that exit)
@@ -128,13 +129,20 @@ describe('the refusal of an app that lists no machine.connectors (D11)', () => {
     expect(scene.spawn.mock.calls.filter(([, args]) => (args as string[]).includes(scene.ptyProfile.modulePath))).toEqual([]); // no pty host woken
   });
 
-  it('this build’s app is welcomed on both; the CLI’s hello and the link’s, which carry no app’s list, are welcomed on machine.sock', async () => {
+  it('this build’s app is welcomed on all three; the CLI’s hello and the link’s, which carry no app’s list, on machine.sock and pty-host.sock; a pre-O3 app’s on pty-host.sock', async () => {
     await scene.start(PRODUCTION);
     expect((await scene.app('engine-host', { capabilities: POST_O4 })).welcomed()).toBe(true);
     for (const capabilities of [POST_O4, CLI, LINK]) {
       const client = await scene.app('machine', { capabilities });
       expect(client.first, JSON.stringify(capabilities)).toMatchObject({ t: 'welcome' });
       expect(await client.request('daemon.status')).toMatchObject({ ok: true });
+    }
+    // D45: pty-host.sock refuses only the pre-O4 app (its own case above); a hello without machine.spine is admitted
+    for (const capabilities of [POST_O4, CLI, LINK, PRE_O3]) {
+      const client = await scene.app('pty-host', { capabilities });
+      expect(client.first, `pty-host.sock: ${JSON.stringify(capabilities)}`).toMatchObject({ t: 'welcome' });
+      client.leave();
+      await until(() => client.closed, 3_000, 'the departure');
     }
     expect(scene.logs.some((line) => line.includes('refuse wire'))).toBe(false);
   });

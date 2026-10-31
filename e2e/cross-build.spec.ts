@@ -70,10 +70,12 @@
 //   (downgrade, daemon) also carries a grant as a pre-O4 build kept it (format 1, sealed by this build's own
 //                       safeStorage under the mock keychain), which the keeper's launch adopts (format 2) before the peer
 //                       launches; a pre-O4 peer's sheet lists it as an unreadable row (D11: a downgrade's residual).
-//   (update, daemon)    also reads, from both ends' logs, which engine host was told the connectors are its client's
-//                       (`host.connectors`): the kept older host's welcome lists it not, so its dataset refreshes keep
-//                       O3-D's rule (the app's attachment) until it is replaced at idle; the host of this build lists it
-//                       (acceptance 3's old-host rule, its precondition; the rule itself is a unit test's, see the scene).
+//   (update, daemon)    also proves acceptance 3's old-host rule at app level. Both ends' logs say which engine host was
+//                       told the connectors are its client's (`host.connectors`): the kept older host's welcome lists it
+//                       not, the host of this build lists it. And at each of acceptance 9's two quits, while no app
+//                       runs, an agent's dataset refresh is asked through the serving host's dashboard seam: the kept
+//                       older host settles it `noClient` (O3-D's rule, the app's attachment), the host that replaced it
+//                       at idle hands it to `mawsd`, whose connectors answer it with no app.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -87,8 +89,11 @@ import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
+import { AgentSeam } from './support/dashboards';
+import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
 import { readSealedText } from './support/connector-direct-checks';
 import { expectMockCustody } from './support/connector-direct-oauth';
 import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from './support/connector-oauth';
@@ -240,9 +245,14 @@ function welcomedWith(daemonLog: string, hostPid: number): string[] | null {
 const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n').filter((l) => l.includes(`recycling the connection to pid ${hostPid}`)).length;
 
 // P5 O4 M4: what a scene adds to a crossing, each answering the lines it records: `keeperReady`, once the keeper's app
-// is on its own supervisor, before its session; `attacherMoved`, at the end, the attacher on a supervisor of its build.
+// is on its own supervisor, before its session; `attacherMoved`, at the end, the attacher on a supervisor of its build;
+// on the daemon attacher's two reattaches (acceptance 9), while no app runs: `awayOnKept`, the kept older engine host
+// serving, `awayOnOwn`, the engine host of the attacher's build serving. `env`, added to every launch's.
 interface CrossingSteps {
+  env?: Record<string, string>;
   keeperReady?(run: Run): Promise<string[]>;
+  awayOnKept?(): Promise<string[]>;
+  awayOnOwn?(): Promise<string[]>;
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
@@ -251,7 +261,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
   // the keeper: a paced replay kept across a quit, its background failure and its request still ahead
-  const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS }, keeper.root);
+  const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
   const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
   const kept = own.supervisor!;
@@ -275,7 +285,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
   const idleMs = shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS;
-  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs) }, attacher.root);
+  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
@@ -359,7 +369,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(arrived, { message: 'rows arrive live after the answer' }).toBeGreaterThan(5);
   const live = await arrived();
   // P5 O3-D M6 (acceptance 9): this build's app quits mid-turn and reattaches while the kept, older engine host serves
-  if (attacherDaemon !== null) second = await quitAndReattach(s, second, attach, attacherRuns, { kept, daemon: attacherDaemon, id, capable: hostsAttachment(keeper), connectors: hostsConnectors(keeper), said });
+  if (attacherDaemon !== null) second = await quitAndReattach(s, second, attach, attacherRuns, { kept, daemon: attacherDaemon, id, capable: hostsAttachment(keeper), connectors: hostsConnectors(keeper), away: steps.awayOnKept, said });
   await turnEnded(second.page, id);
   said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${live} rows live`);
 
@@ -376,7 +386,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await launchOn(attacher, second.page, afterMove, join(REPO_ROOT, PERMISSION), s);
   said.push(`  moved: supervisor pid ${kept.pid} (build ${kept.buildId}) exited when idle; pid ${moved.supervisor!.pid} (build ${build}) serves a launch`);
   // P5 O3-D M6 (acceptance 9): the engine host of this build, which lists host.attachment, has mawsd's permanent client
-  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: moved.supervisor!.pid, daemon: attacherDaemon, id: afterMove, connectors: hostsConnectors(attacher), said });
+  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: moved.supervisor!.pid, daemon: attacherDaemon, id: afterMove, connectors: hostsConnectors(attacher), away: steps.awayOnOwn, said });
 
   // across the gap, against what the newer build's own supervisor answers
   if (gap && before) {
@@ -427,7 +437,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 // `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
 // departure and at the reattach, and no host.attachment sent. The older host's log: its client leaving at the quit
 // (`client disconnected`, which O2-era and current hosts both print) and a fresh one coming.
-async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; connectors: boolean; said: string[] }): Promise<Run> {
+async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; connectors: boolean; away?: () => Promise<string[]>; said: string[] }): Promise<Run> {
   const before = connectsFrom(s.log(), o.daemon);
   const leftBefore = departuresIn(s.log());
   const recycledBefore = recyclesTo(s.daemonLog(), o.kept.pid);
@@ -451,6 +461,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
   // the turn ends while no app runs (fix round 1, item 6): what the reattach recovers is then known, the end included
   const endRow = () => s.journal(o.id).find((r) => r.seq > awayFrom && r.direction === 'in' && r.frame.type === 'result');
   await expect.poll(() => endRow() !== undefined, { timeout: 30_000, message: 'the turn ends while no app runs' }).toBe(true);
+  if (o.away) o.said.push(...(await o.away())); // P5 O4 M4: the kept older host serving, no app
   const departed = connectsFrom(s.log(), o.daemon);
   const leftAway = departuresIn(s.log());
   const recycledAway = recyclesTo(s.daemonLog(), o.kept.pid);
@@ -500,7 +511,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
 // host.attachment, `mawsd` is its permanent client: a session held mid-turn at its request (the unpaced replay holds there,
 // so neither the park nor the idle release ends the host while no app runs), the app's quit and reattach cross no new
 // connection, and the request is pending once after it.
-async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; connectors: boolean; said: string[] }): Promise<Run> {
+async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; connectors: boolean; away?: () => Promise<string[]>; said: string[] }): Promise<Run> {
   value(await invoke(run.page, 'session.send', { appSessionId: o.id, content: PROMPT }));
   await expect.poll(async () => (await pendingPermissions(run.page, o.id)).length, { timeout: 30_000, message: 'the request, held' }).toBe(1);
   const connects = connectsFrom(s.log(), o.daemon);
@@ -514,6 +525,7 @@ async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promi
     o.said.push(`  ${CONNECTORS_CAPABILITY} (acceptance 3): supervisor pid ${o.host} of this build and mawsd pid ${o.daemon} both list it, so its refreshes key on mawsd's connection`);
   }
   await s.quit(run);
+  if (o.away) o.said.push(...(await o.away())); // P5 O4 M4: the host of this build serving, no app
   const next = await attach();
   runs.push(next);
   await s.ready(next.page, (st) => st.supervisor!.pid === o.host && st.daemon?.pid === o.daemon);
@@ -522,6 +534,25 @@ async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promi
   await expect.poll(async () => (await pendingPermissions(next.page, o.id)).length, { message: 'the request, pending once after the reattach' }).toBe(1);
   o.said.push(`  permanent (acceptance 9): supervisor pid ${o.host} of this build kept mawsd pid ${o.daemon}’s one connection across a quit and a reattach (${connects} connections from it in the log)`);
   return next;
+}
+
+// P5 O4 M4 (acceptance 3's old-host rule at app level, D10): an agent's refresh of a dataset's query while no app runs,
+// asked as `session` through the serving engine host's dashboard seam (MAWS_DASHBOARD_E2E, a seam every peer from E3 on
+// has), the session's own board written first. A host keyed on the app's attachment (O3-D's rule: it serves
+// host.attachment and lists no host.connectors) settles it `noClient` at once, in the tool's own words. A host keyed on
+// its client's connection (this build's, which lists host.connectors, or an O2-era one, whose client is `mawsd`'s
+// reconnected link) hands the request to `mawsd`, whose connectors answer it with no app: the board's query names a
+// server no route reaches, so nothing is published, in the connectors' words rather than an ending of the host's.
+const NO_CLIENT = 'MAWS is not open; the dataset cannot be refreshed';
+const ENDED_BY_HOST = /MAWS is not open|MAWS did not answer in time|the request was withdrawn/;
+async function refreshWithNoApp(agent: AgentSeam, session: string, host: string, noClient: boolean): Promise<string[]> {
+  const artifact = await writeBoard(agent, session);
+  await readDataset(agent, session, artifact); // the session's last read: `baseRevision: 'last'` is its revision
+  const answer = await agent.call(session, 'artifact_dataset', { artifact, id: DATASET, refresh: true, baseRevision: 'last' }, { timeoutMs: 200_000 });
+  expect(answer.isError, `nothing is published: no route reaches ${SOURCE.server} (${answer.text || JSON.stringify(answer.result)})`).toBe(true);
+  if (noClient) expect(answer.text, `${host}, keyed on the app's attachment: the refresh settles noClient`).toContain(NO_CLIENT);
+  else expect(answer.text, `${host}, keyed on mawsd's connection: mawsd answers the refresh`).not.toMatch(ENDED_BY_HOST);
+  return [`  refresh with no app (acceptance 3), ${host}: ${noClient ? 'settled noClient' : 'answered by mawsd'}: ${answer.text}`];
 }
 
 const record = (lines: string[]) => {
@@ -615,17 +646,23 @@ test('(downgrade) the newer build’s app keeps a session; the older build’s a
   await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null)));
 });
 
-// P5 O4 M4 (acceptance 3's old-host rule, acceptance 10): the scene also reads which engine host lists host.connectors
-// (quitAndReattach, permanentAcrossReattach). The rule's own behaviour, an agent's dataset refresh settled `noClient`
-// with no app while the kept older host serves and answered by mawsd once this build's host replaced it, is not driven
-// here: it needs a connector-backed dataset artifact, a connector fixture and a replayed turn that calls the MAWS tool
-// with that artifact's id, none of which this group's replays carry; a unit test over a fake host pins both keys, and
-// e2e:dashboard-live-data the app-less refresh on this build's host.
+// P5 O4 M4 (acceptance 3's old-host rule at app level, acceptance 10): besides which engine host lists host.connectors
+// (quitAndReattach, permanentAcrossReattach), an agent's refresh with no app at each of the two quits (refreshWithNoApp):
+// `noClient` from the kept older host when it keys on the app's attachment, answered by mawsd from the host of this build
+// that replaced it. The hosts' dashboard seam is on (MAWS_DASHBOARD_E2E) for every launch of the scene.
 test('(update, daemon) the peer’s app keeps a session on its own supervisor; this build’s app attaches on the daemon shape, its mawsd relays the peer’s engine host across the minor until idle, then starts its own', async () => {
-  test.setTimeout(360_000); // P5 O3-D M6: acceptance 9's two quits and reattaches
+  test.setTimeout(600_000); // P5 O3-D M6: acceptance 9's two quits and reattaches; P5 O4 M4: a refresh at each, 200 s at most
   const { here, peer, newer, older } = builds();
   const gap = here === newer ? { newer, older } : null;
-  await withScratch('xb-daemon-update', async (s) => record(await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' })));
+  await withScratch('xb-daemon-update', async (s) => {
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const said = await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' }, {
+      env: { MAWS_DASHBOARD_E2E: '1' },
+      awayOnKept: () => refreshWithNoApp(agent, 'xb-agent-kept', `${peer.label}'s kept engine host`, hostsAttachment(peer) && !hostsConnectors(peer)),
+      awayOnOwn: () => refreshWithNoApp(agent, 'xb-agent-own', `${here.label}'s engine host`, false),
+    });
+    record(said);
+  });
 });
 
 // P5 O4 M4 (D11's downgrade residual): before the crossing, a launch of this build seals a grant as a pre-O4 build kept it
@@ -851,8 +888,9 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
 //      machine.sock and pty-host.sock, naming `machine.connectors`;
 //   2. the update banner: the refusal says at least one live session (D45), so the old app's main waits on it, and its
 //      window says so;
-//   3. the banner's promise: with only the refused app asking, `mawsd` exits by itself once idle (a refused hello is no
-//      client on its idle clock).
+//   3. the banner's promise: `mawsd` exits, by the restart if the old app's build check asked one, else by itself once
+//      idle with only the refused app asking (a refused hello is no client on its idle clock); and a `mawsd` of this
+//      build that a restart re-executed exits by its idle clock too.
 // Recorded, not asserted: the old app's build check (src/main/hosts/daemon.ts asks a private daemon of another build
 // `daemon.restart` at the machine host's first ready), D11's residual (what the refused app's `connectors.servers`
 // answers, and whether its Connectors sheet, with a Forget that would unlink a file, can be reached, from the page's tab
@@ -930,20 +968,21 @@ test('(pre-O4 app, daemon) an app from before O4 over this build’s mawsd is re
     );
     expect(sealedFormat(s.userData, grant.id), 'the adopted grant is as this build left it').toBe(2);
 
-    // 3. the banner's promise: mawsd exits by itself once idle, the refused app its only asker (unless the build check
-    // above restarted it, which the record says)
-    if (asked < 0) {
-      try {
-        await expect.poll(() => isAlive(daemon), { timeout: PRE_O4_IDLE_MS + 60_000, message: 'mawsd exits once idle, with only the refused app asking' }).toBe(false);
-        expect(daemonSaid(), 'its idle exit').toContain('no client, both hosts parked and no hold for the idle time');
-      } catch (error) {
-        await evidence('pre-o4-idle-exit');
-        throw error;
-      }
+    // 3. the banner's promise: mawsd exits, by the restart the build check asked or, the refused app its only asker, by
+    // its idle clock (the restart is read again at the exit: one asked after the window above is still the old app's)
+    let restarted = asked >= 0;
+    try {
+      await expect.poll(() => isAlive(daemon), { timeout: PRE_O4_IDLE_MS + 60_000, message: restarted ? 'mawsd exits at the restart the old app asked' : 'mawsd exits once idle, with only the refused app asking' }).toBe(false);
+      restarted = daemonSaid().includes('restart asked');
+      expect(daemonSaid(), restarted ? 'its exit by the restart' : 'its idle exit').toMatch(restarted ? /restart asked\n(?:.*\n)*?.*exiting \(restart\)/ : /no client, both hosts parked and no hold for the idle time\n(?:.*\n)*?.*exiting \(idle\)/);
+    } catch (error) {
+      await evidence('pre-o4-exit');
+      throw error;
     }
     const exitedAt = Date.now();
+    const exitLogAt = s.daemonLog().length;
     const oldFrom = old.output().length;
-    said.push(`  the exit: mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `gone ${Math.round((exitedAt - quitAt) / 1000)} s after this build's app quit${asked < 0 ? ', by its idle clock' : ''}`}`);
+    said.push(`  the exit: mawsd pid ${daemon} gone ${Math.round((exitedAt - quitAt) / 1000)} s after this build's app quit, ${restarted ? 'by the restart the old app asked' : 'by its idle clock'}`);
 
     // recorded: what follows the exit, as the old app asks again
     await old.page.waitForTimeout(AFTER_EXIT_MS);
@@ -954,6 +993,21 @@ test('(pre-O4 app, daemon) an app from before O4 over this build’s mawsd is re
     said.push(
       `  after the exit (recorded, ${AFTER_EXIT_MS / 1000} s): the profile's mawsd ${lock === null ? 'is none' : `is pid ${lock.pid} build ${lock.buildId} (${whose}), ${isAlive(lock.pid) ? 'running' : 'gone'}`}; the old app ${connected.length > 0 ? `got through: ${connected.join(' | ')}` : 'got no welcome'}; its banner ${(await updateBanner.count()) > 0 ? 'still shows' : 'is gone'}`,
     );
+
+    // 3, after a restart: a mawsd of this build that it re-executed keeps the banner's promise too, exiting by its idle
+    // clock with only the refused app asking (no app of this build configures it: its idle time is the default's)
+    if (restarted && lock !== null && lock.pid !== daemon && lock.buildId === ours) {
+      test.setTimeout(test.info().timeout + DEFAULT_IDLE_EXIT_MS + 120_000);
+      const replacementSaid = () => s.daemonLog().slice(exitLogAt);
+      try {
+        await expect.poll(() => isAlive(lock.pid), { timeout: DEFAULT_IDLE_EXIT_MS + 60_000, message: `the replacement mawsd pid ${lock.pid} of this build exits once idle, with only the refused app asking` }).toBe(false);
+        expect(replacementSaid(), 'the replacement’s idle exit').toMatch(/no client, both hosts parked and no hold for the idle time\n(?:.*\n)*?.*exiting \(idle\)/);
+      } catch (error) {
+        await evidence('pre-o4-replacement-exit');
+        throw error;
+      }
+      said.push(`  the replacement: mawsd pid ${lock.pid} of this build, re-executed by the restart, exited by its idle clock`);
+    }
     record(said);
   });
 });
