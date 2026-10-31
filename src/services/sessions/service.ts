@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
 import type { PtyId } from '@shared/ipc/schema/pty';
-import type { SessionRecord } from '@shared/graph/session';
+import type { LaunchedBy, SessionRecord } from '@shared/graph/session';
 import { worktreeDirName } from '@shared/sessions/worktree';
 import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
@@ -422,7 +422,8 @@ export class SessionService {
 
   // `session.create`: an app id and a persisted intent; no process, no record, no row. With neither a project nor a
   // location it is a New chat (2026-10-01): no location until the composer's project picker patches one in.
-  async create(req: { projectId: ProjectId | null; location: Location | null }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
+  // P5 O7 M4: `launchedBy`, a remote spawn's requester (`session.spawn`), which the launched record carries.
+  async create(req: { projectId: ProjectId | null; location: Location | null; launchedBy?: LaunchedBy }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
     const s = await this.ready();
     const appSessionId = randomUUID() as AppSessionId;
     const now = this.now();
@@ -445,6 +446,7 @@ export class SessionService {
       message: null,
       draft: null,
       progress: emptyProgress(),
+      ...(req.launchedBy && { launchedBy: req.launchedBy }),
     };
     await this.putIntent(intent);
     return { appSessionId, intent };

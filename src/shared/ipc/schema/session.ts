@@ -719,6 +719,33 @@ const o3dEvents = {
   'session.visibleChanged': z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), // one session's change of the union
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 
+// P5 O7 M4 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O; O10's "lane B spawn"): a lane
+// B session started on this machine at another's request, composed by the spine from what the renderer does for a New
+// chat (`session.create`, `.intent.patch`, `.start`) on the machine's own settings. Its input is exactly DX6's spawn fields,
+// so the endpoint's `spawnRefusal` judges it as it judges `sminos.spawn`, with the mode required (an absent one reads as
+// the ceiling there and as the user's default here, which can be looser). `checkout` is a project's directory on this
+// machine; `worktree`, a new worktree of that name on a new branch of that name from HEAD. Answered once the start is
+// `launching` (the record exists); a checkout this machine has not trusted is refused `untrusted` with nothing created.
+export const SessionSpawnInputSchema = z.strictObject({
+  checkout: z.string().min(1),
+  worktree: z.string().min(1).optional(),
+  brief: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  effort: z.string().min(1).optional(),
+  permission_mode: z.string().min(1),
+});
+export type SessionSpawnInput = z.infer<typeof SessionSpawnInputSchema>;
+export const SPAWN_REFUSALS = ['untrusted', 'unknown-checkout', 'worktree-exists'] as const; // the reasons a caller words; any other is a sentence
+export const SessionSpawnOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ok'), appSessionId: AppSessionIdSchema }),
+  z.strictObject({ status: z.literal('refused'), reason: z.string() }),
+]);
+export type SessionSpawnOutput = z.infer<typeof SessionSpawnOutputSchema>;
+const o7Commands = {
+  'session.spawn': { input: SessionSpawnInputSchema, output: SessionSpawnOutputSchema, owner: 'machine' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P5 O7 M4 end
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -734,6 +761,7 @@ export const commands = {
   ...p5o2Commands, // P5 O2 M2
   ...o10Commands, // P5 O10 M8
   ...o3dCommands, // P5 O3-D
+  ...o7Commands, // P5 O7 M4
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

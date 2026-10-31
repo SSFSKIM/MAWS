@@ -275,6 +275,9 @@ ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
   // The conversation-search index resumes a transcript where it last stopped (src/services/index/session-search.ts): a
   // ready text's checkpoint, JSON, null until its next full pass.
   { version: 15, sql: 'ALTER TABLE session_text_state ADD COLUMN resume TEXT;' },
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): a session a remote spawn launched
+  // keeps who asked and the signed action (`SessionRecord.launchedBy`, JSON), for O12's observer; null for every other.
+  { version: 16, sql: 'ALTER TABLE sessions ADD COLUMN launched_by TEXT;' },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

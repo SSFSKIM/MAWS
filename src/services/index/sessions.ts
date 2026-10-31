@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
-import type { Lineage, SessionRecord } from '@shared/graph/session';
+import type { LaunchedBy, Lineage, SessionRecord } from '@shared/graph/session';
 import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
@@ -73,6 +73,7 @@ interface SessionRow {
   lineage_source: 'intent' | 'disk' | null;
   root_uuid: string | null;
   transcript_birthtime_ms: number | null;
+  launched_by: string | null; // P5 O7 M4 (migration 16): a remote spawn's requester and signed action, as JSON
 }
 
 export interface LaunchInit {
@@ -89,6 +90,8 @@ export interface LaunchInit {
   // E3 (X11): the lineage the launch's intent carries (a side thread's, C10's Fork's), kept as `intent` and never
   // recomputed by the disk rule; absent or null for a root session
   lineage?: Lineage | null;
+  // P5 O7 M4: who asked for a remote spawn, from its intent (`session.spawn`); absent for every other launch
+  launchedBy?: LaunchedBy;
 }
 
 // What the engine host needs to know of a record's engine id: bound (fs.scan's `known` when a transcript is on disk).
@@ -178,6 +181,7 @@ function toRecord(row: SessionRow): SessionRecord {
       refusal: row.pm_refusal as SessionRecord['permissionMode']['refusal'],
     },
     lineage: row.lineage === null ? null : (JSON.parse(row.lineage) as Lineage), // E3 (X11)
+    ...(row.launched_by !== null && { launchedBy: JSON.parse(row.launched_by) as LaunchedBy }), // P5 O7 M4
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -379,6 +383,7 @@ export class SessionStore {
         pm_refusal: init.permissionMode.refusal,
         first_prompt: init.firstPrompt ?? null,
         ...(init.lineage ? { lineage: JSON.stringify(init.lineage), lineage_source: 'intent' } : {}), // E3 (X11)
+        ...(init.launchedBy ? { launched_by: JSON.stringify(init.launchedBy) } : {}), // P5 O7 M4
         created_at: now,
         updated_at: now,
       });

@@ -66,6 +66,7 @@ import { ReplaySeam } from './sessions/replay-seam';
 import { readRestoredCost } from './sessions/restored-cost';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
+import { registerSpawn } from './sessions/spawn'; // P5 O7 M4
 import { createSpineView } from './sessions/spine-view';
 import { stopParts, type Part } from './stop-parts';
 import { allSettling, Work, type Settling } from './work';
@@ -331,6 +332,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
+    registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
     sessionService = service;
     settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
