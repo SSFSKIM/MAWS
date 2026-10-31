@@ -13,7 +13,8 @@
 //   lift resumes past its replay holds them first.
 // - `SpineHostsAdapter`, one per load: the `SpineHosts` the spine's root is given. Its `onEvent` listens on the core, its
 //   `dispatch` reaches the engine host through the daemon's intercepts first (so `host.configure`, `host.stopAll` and
-//   `host.exitWhenIdle` from the spine reach the clocks as the app's do), its `setResync` is run by the adapter itself at
+//   `host.exitWhenIdle` from the spine reach the clocks as the app's do) and, for a load the seam does not count as
+//   wanted, only while the host is ready (spine-seam.ts, `wanted`), its `setResync` is run by the adapter itself at
 //   each barrier (the supervisor never runs one for an `external` host), and `close` drops everything the root held on
 //   the link. Its `replay` tells the session source where a barrier stands (src/services/sessions/index.ts).
 //
@@ -220,6 +221,7 @@ export interface SpineHostsAdapterOptions {
   link: EngineLink;
   events: SpineEvents;
   intercept: EngineIntercept;
+  wanted(): boolean; // the seam's: whether this load may wake the engine host (spine-seam.ts, `wanted`)
   log(line: string): void;
   resyncBoundMs?: number;
 }
@@ -265,6 +267,10 @@ export class SpineHostsAdapter implements SpineHosts {
 
   dispatch: HostDispatch = async (owner, name, input, client) => {
     if (owner === 'engine-host') {
+      // The link holds a request for an engine host that is not ready and launches a parked one for it, so a load that
+      // is not wanted sends one only while the host is ready; the part that sent it sends again at the next welcome
+      const { state } = this.options.link.snapshot('engine-host');
+      if (state !== 'ready' && !this.options.wanted()) return { ok: false, error: ipcError('host_unavailable', `engine-host is ${state}; ${name} not sent: a spine loaded for the engine host’s events wakes no engine host`) };
       const intercepted = this.options.intercept({ id: 'spine', name, input, ...(client && { client: client.id }) });
       if (intercepted) return resultOf(await intercepted);
     }
