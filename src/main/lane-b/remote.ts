@@ -341,6 +341,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       return readEventsInPages(link, fields, {
         launch: () => lanesOf(link).get(app)?.session.state.launch ?? null,
         gap: (launchId, at) => deps.emit(link.machine, 'remote.gap', { appSessionId: app as EventPayload<'remote.gap'>['appSessionId'], launchId, at }),
+        tooLarge: (window) => deps.emit(link.machine, 'remote.historyTooLarge', { appSessionId: app as EventPayload<'remote.historyTooLarge'>['appSessionId'], window }),
         log: deps.log,
       });
     }

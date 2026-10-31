@@ -14,7 +14,8 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { historyGapEvent } from '../model/gap'; // P5 O7 M2
+import { HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2
+import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
 import { HistoryPager, withHistoryGap, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
@@ -197,6 +198,14 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
   let stale = false;
   let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
+  // P5 O7 M2 (the milestone review): the windows main last said were too large for the channel (`remote.historyTooLarge`),
+  // each said just before the read it answers `historyUnavailable`; that read's bar takes their words, once
+  // (heard while subscribed: the source's reads, its snapshot's and its older pages', run while it is)
+  const tooLarge = new Set<'newest' | 'older'>();
+  const tooLargeWords = (window: 'newest' | 'older'): string | undefined => {
+    if (!tooLarge.delete(window)) return undefined;
+    return HISTORY_TOO_LARGE[window](remoteMachineName(appSessionId));
+  };
   const gapPlaces = new WeakMap<SessionEvent, GapPlace>(); // P5 O7 M2: a gap told during a read, by where it goes
   // P5 O7 M2 (M2's reviews): a gap told while the history was being read is held behind it, and so would land after the
   // events the read already holds of the launch it names. It goes before the first of them at or after its `at` instead
@@ -218,7 +227,11 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   };
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
-    async (before, seek) => withHistoryGap(valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })), bareOf(appSessionId)), // P5 O7 M2
+    async (before, seek) => {
+      tooLarge.delete('older');
+      const page = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) }));
+      return withHistoryGap(page, bareOf(appSessionId), tooLargeWords('older')); // P5 O7 M2
+    },
     (page, last) => {
       const from = page[0] === undefined ? Infinity : atOf(page[0]);
       const placed = last ? appAside : appAside.filter((event) => atOf(event) >= from);
@@ -296,12 +309,16 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           subscription.held.push([gap]);
         } else subscription.pass([gap]);
       });
+      const offTooLarge = client.on('remote.historyTooLarge', ({ appSessionId: said, window }) => {
+        if (said === appSessionId) tooLarge.add(window);
+      });
       return () => {
         off();
         offChanged();
         offReleased();
         offLoss();
         offGap();
+        offTooLarge();
         subscription.held = null;
         subscription.pass = () => {};
         subscription.ended.abort();
@@ -316,7 +333,9 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       let events = pager.takeRebuilt();
       if (events === null) {
         stale = false; // this read follows the transcript again
-        const answer = withHistoryGap(valueOf(await eventsOnceKnown(client, appSessionId, subscription)), bareOf(appSessionId)); // P5 O7 M2: the gap bar at a page partly gone
+        tooLarge.delete('newest');
+        const read = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        const answer = withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')); // P5 O7 M2: the gap bar at a page partly gone
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;
         const first = answer.events[0];

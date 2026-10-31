@@ -12,13 +12,19 @@ import type { EventId, SessionId } from '@shared/graph/ids';
 
 export const HISTORY_GAP_KEY = 'maws:history-gap';
 export const HISTORY_GAP = 'Earlier history isn’t available';
+// M2's milestone review: a remote session's history window too large for the channel, which main can't page until M4
+// (acceptance 12; main says so as `remote.historyTooLarge`): the bar says what the person can do, never that it is lost
+export const HISTORY_TOO_LARGE = {
+  newest: (machine: string) => `This session’s history on ${machine} is too large to show here; it opens once the session resumes`,
+  older: (machine: string) => `Earlier history on ${machine} is too large to show here yet`,
+} as const;
 
 export const isHistoryGap = (event: SessionEvent): boolean => event.kind === 'notice.posted' && event.key === HISTORY_GAP_KEY;
 
-/** The gap's event: `bareApp` is the session's bare app id, `tag` what makes this gap's id its own. */
-export function historyGapEvent(bareApp: string, tag: string, at: string, sessionId: SessionId): SessionEvent {
+/** The gap's event: `bareApp` is the session's bare app id, `tag` what makes this gap's id its own, `text` its words. */
+export function historyGapEvent(bareApp: string, tag: string, at: string, sessionId: SessionId, text: string = HISTORY_GAP): SessionEvent {
   return {
     id: `${bareApp}:history-gap:${tag}` as EventId, sessionId, at, seq: null, agentId: null, parentToolUseId: null,
-    kind: 'notice.posted', level: 'notice', key: HISTORY_GAP_KEY, text: HISTORY_GAP,
+    kind: 'notice.posted', level: 'notice', key: HISTORY_GAP_KEY, text,
   };
 }

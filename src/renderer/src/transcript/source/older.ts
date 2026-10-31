@@ -49,10 +49,10 @@ export function withoutOlderThanWindow(held: readonly SessionEvent[][], snapshot
 // P5 O7 M2 (P5 Decision Log 77): a page `session.events` answered with part of its range gone (`historyUnavailable`)
 // starts with the gap bar's event (model/gap.ts), so the transcript draws "Earlier history isn't available" where the
 // page begins. Its id names the page's first event, so the same page read again draws the same one bar.
-export function withHistoryGap<P extends { events: SessionEvent[]; historyUnavailable?: true }>(page: P, bareApp: string): P {
+export function withHistoryGap<P extends { events: SessionEvent[]; historyUnavailable?: true }>(page: P, bareApp: string, text?: string): P {
   if (page.historyUnavailable !== true) return page;
   const first = page.events[0];
-  const gap = historyGapEvent(bareApp, `start:${first?.id ?? 'none'}`, first?.at ?? new Date().toISOString(), first?.sessionId ?? (bareApp as SessionId));
+  const gap = historyGapEvent(bareApp, `start:${first?.id ?? 'none'}`, first?.at ?? new Date().toISOString(), first?.sessionId ?? (bareApp as SessionId), text);
   return { ...page, events: [gap, ...page.events] };
 }
 

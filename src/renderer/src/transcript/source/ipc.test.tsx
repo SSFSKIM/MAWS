@@ -21,6 +21,8 @@ import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
+import { HISTORY_GAP, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2
+import { useMachines } from '../../stores/machines'; // P5 O7 M2
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -396,6 +398,37 @@ describe('ipcSource', () => {
       expect(order.indexOf('gap')).toBeLessThan(order.lastIndexOf('user'));
     });
 
+    // M2's milestone review: a window main's read can't page across the channel until M4 (acceptance 12) is answered history
+    // unavailable after main said why (`remote.historyTooLarge`); its bar says what the person can do, and only its bar
+    it('says a remote history too large for the channel opens once the session resumes, and an older page that it can’t be shown yet', async () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+      const b = builder();
+      turnOf(b, 2);
+      const newer = b.events.map((event, i) => ({ ...event, seq: 1 + i, id: `app-r:L2:${1 + i}:0` as EventId }));
+      const gapTexts = () => useTranscriptStore.getState().entries[REMOTE].rows.flatMap((row) => (row.kind === 'gap' ? [row.text] : []));
+      useTranscriptStore.getState().detach(REMOTE);
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, REMOTE);
+      let hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      fake.emit('remote.historyTooLarge', { appSessionId: REMOTE, window: 'newest' }, OTHER_MACHINE);
+      fake.calls[0].answer({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } } as never);
+      await hydrated;
+      expect(gapTexts()).toEqual([HISTORY_TOO_LARGE.newest('mini')]);
+
+      useTranscriptStore.getState().detach(REMOTE);
+      const reads = () => fake.calls.filter((call) => call.name === 'session.events');
+      hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      reads()[1]!.answer({ ok: true, value: { events: newer, lastSeq: 9, complete: true, earlier: newer[0]!.id } } as never);
+      await hydrated;
+      expect(gapTexts()).toEqual([]); // the newest window read whole this time: no bar
+      source.older!.loadOlder();
+      await vi.waitFor(() => expect(reads()).toHaveLength(3));
+      fake.emit('remote.historyTooLarge', { appSessionId: REMOTE, window: 'older' }, OTHER_MACHINE);
+      reads()[2]!.answer({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } } as never);
+      await vi.waitFor(() => expect(gapTexts()).toEqual([HISTORY_TOO_LARGE.older('mini')]));
+      expect(HISTORY_TOO_LARGE.newest('mini')).not.toBe(HISTORY_GAP); // a lost range keeps the generic words (the cases above)
+    });
+
     it('draws it at the start of a page whose range is partly gone, once however often the key is read again', async () => {
       const fake = fakeClient();
       const source = ipcSourceOver(fake.client, APP);
@@ -404,10 +437,12 @@ describe('ipcSource', () => {
       turnOf(b, 1);
       const answer = { ok: true, value: { events: b.events, lastSeq: 9, complete: false, historyUnavailable: true } } as never;
       const hydrated = store.attach(APP, source);
+      fake.emit('remote.historyTooLarge', { appSessionId: REMOTE, window: 'newest' }, OTHER_MACHINE); // another session's reason: not this bar's
       fake.calls[0].answer(answer);
       await hydrated;
       expect(kinds(APP)[0]).toBe('gap');
       expect(kinds(APP).filter((kind) => kind === 'gap')).toHaveLength(1);
+      expect(useTranscriptStore.getState().entries[APP].rows.find((row) => row.kind === 'gap')).toMatchObject({ text: HISTORY_GAP });
       store.detach(APP);
       const again = store.attach(APP, source);
       fake.calls[1].answer(answer);

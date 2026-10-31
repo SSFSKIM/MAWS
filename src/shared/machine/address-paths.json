@@ -282,6 +282,7 @@
 "events.pty.data":[".ptyId PtyId"],
 "events.pty.exit":[".ptyId PtyId"],
 "events.remote.gap":[".appSessionId AppSessionId"],
+"events.remote.historyTooLarge":[".appSessionId AppSessionId"],
 "events.remote.session":[".address AppSessionId"],
 "events.scm.remote.output":[".appSessionId AppSessionId"],
 "events.session.brokerItems":[".appSessionId AppSessionId",".items[].appSessionId AppSessionId",".items[].id AttentionId"],

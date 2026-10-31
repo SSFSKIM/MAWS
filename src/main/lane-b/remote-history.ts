@@ -15,7 +15,9 @@
 // - A window the inputs can't page is answered as history unavailable (no events, `complete`, `historyUnavailable`):
 //   an older page (`before`), a subagent's slice (`agentId`), a seek, and a transcript the engine host reads from disk
 //   (a session with no stream there: its events carry no `seq`, and its `limit` selects the transcript's first events,
-//   not a page after a cursor). Paging those needs a byte budget on the engine host's history window.
+//   not a page after a cursor). Paging those needs a byte budget on the engine host's history window (M4, acceptance
+//   12); until then main says why first, `remote.historyTooLarge {window}` (`newest` for the disk read, `older` for the
+//   rest), so the renderer's bar for that answer tells the person what to do rather than that history is lost.
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { SessionEvent } from '@shared/graph/events';
 import { dispatchOverLink } from '../machines/remote/dispatch';
@@ -32,6 +34,8 @@ export interface HistoryDeps {
   launch(): string | null;
   /** `remote.gap` for the session, at a row left out. */
   gap(launchId: string, at: { seq: number }): void;
+  /** `remote.historyTooLarge` for the session: a window this read can't page is answered history unavailable next. */
+  tooLarge(window: 'newest' | 'older'): void;
   log(line: string): void;
   pageEvents?: number;
 }
@@ -49,6 +53,7 @@ export async function readEventsInPages(link: RemoteLink, input: Record<string, 
   const said = `lane B: session.events of ${link.name}/${app}`;
   if (input.before !== undefined || input.agentId !== undefined || input.seek !== undefined) {
     deps.log(`${said}: an older window too large for the channel, answered as history unavailable`);
+    deps.tooLarge('older');
     return unavailable();
   }
 
@@ -79,6 +84,7 @@ export async function readEventsInPages(link: RemoteLink, input: Record<string, 
     const page = read.value as Events;
     if (fromDisk(page)) {
       deps.log(`${said}: a transcript read from disk too large for the channel, answered as history unavailable`);
+      deps.tooLarge('newest');
       return unavailable();
     }
     events.push(...page.events);

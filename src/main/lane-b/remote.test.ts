@@ -357,6 +357,14 @@ describe('session.events', () => {
     expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1', at: { seq: 2 } }]);
     expect(l.base).toEqual([]); // not the manager's one call
   });
+
+  it('says an older page too large for the channel is why its answer is history unavailable, before answering', async () => {
+    const l = lab();
+    await live(l);
+    l.link.answers.set('session.events', () => ({ ok: false, error: { code: 'too-large' } }));
+    expect(await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null, before: `${APP}:L1:9:0` })).toMatchObject({ ok: true, value: { events: [], historyUnavailable: true } });
+    expect(l.of('remote.historyTooLarge')).toEqual([{ appSessionId: APP, window: 'older' }]);
+  });
 });
 
 describe('the tabs and the links', () => {

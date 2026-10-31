@@ -68,4 +68,9 @@ export const events = {
   // `at`: where in the launch the gap ends, its next event the first at or after it (a lost range's `missing`, an event
   // too large to carry); absent, before the launch's first event (a relaunch's `snapshot`) or where it was told
   'remote.gap': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string(), at: z.strictObject({ seq: z.number().int(), idx: z.number().int().optional() }).optional() }),
+  // M2's milestone review: a remote session's history window too large for the channel, which main's read can't page
+  // until M4 (acceptance 12), said just before main answers that read `historyUnavailable`: `newest`, a parked session's
+  // newest window (the engine host's disk read); `older`, an older page (or a seek, a subagent's slice). The renderer's
+  // bar for that answer says the history opens once the session resumes, not that it is lost.
+  'remote.historyTooLarge': z.strictObject({ appSessionId: AppSessionIdSchema, window: z.enum(['newest', 'older']) }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

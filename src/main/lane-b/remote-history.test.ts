@@ -38,8 +38,8 @@ function machine(rows: SessionEvent[][], max = 4000) {
   return { link, asked };
 }
 
-const read = (link: FakeLink, gaps: Array<{ launchId: string; at: { seq: number } }> = [], input: Record<string, unknown> = { appSessionId: APP, afterSeq: null, limit: null }) =>
-  readEventsInPages(link, input, { launch: () => 'L1', gap: (launchId, at) => void gaps.push({ launchId, at }), log: () => {}, pageEvents: 8 });
+const read = (link: FakeLink, gaps: Array<{ launchId: string; at: { seq: number } }> = [], input: Record<string, unknown> = { appSessionId: APP, afterSeq: null, limit: null }, tooLarge: string[] = []) =>
+  readEventsInPages(link, input, { launch: () => 'L1', gap: (launchId, at) => void gaps.push({ launchId, at }), tooLarge: (window) => void tooLarge.push(window), log: () => {}, pageEvents: 8 });
 
 describe('readEventsInPages', () => {
   it('answers with one call when the whole answer fits the channel', async () => {
@@ -73,8 +73,12 @@ describe('readEventsInPages', () => {
     const link = new FakeLink();
     link.answers.set('session.events', (input) => (input.limit === null ? { ok: false, error: { code: 'too-large' } } : { ok: true, output: { events: [event(1, 0, 'disk', false)], lastSeq: 0, complete: true } }));
     const unavailable = { ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } };
-    expect(await read(link, [], { appSessionId: APP, afterSeq: null, limit: null, before: `${APP}:L1:9:0` })).toEqual(unavailable);
-    expect(await read(link)).toEqual(unavailable); // a disk page carries no seq: no read after it
+    // and says why first (P5 O7 M2's milestone review): the renderer's bar tells the person what to do, until M4 pages these
+    const said: string[] = [];
+    expect(await read(link, [], { appSessionId: APP, afterSeq: null, limit: null, before: `${APP}:L1:9:0` }, said)).toEqual(unavailable);
+    expect(said).toEqual(['older']);
+    expect(await read(link, [], undefined, said)).toEqual(unavailable); // a disk page carries no seq: no read after it
+    expect(said).toEqual(['older', 'newest']);
   });
 
   it('passes any other refusal on as the read’s', async () => {

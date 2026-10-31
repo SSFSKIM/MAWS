@@ -2,4 +2,4 @@
 // `../schema/remote.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`. P5 O7 M2.
 export const commands = [] as const;
 
-export const events = ['remote.session', 'remote.gap'] as const;
+export const events = ['remote.session', 'remote.gap', 'remote.historyTooLarge'] as const;
