@@ -41,6 +41,7 @@ vi.mock('electron', () => {
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
     powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+    systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
   };
 });
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
@@ -90,7 +91,7 @@ vi.mock('../services/entry', () => ({
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
 // C5 start: the layout store and the external-link command
-vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} onChange() { return () => {}; } /* P5 O7 M2: remote lane B follows main.tabs */ }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
