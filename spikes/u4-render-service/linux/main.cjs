@@ -24,9 +24,11 @@ if (accessory && process.platform === 'darwin') app.setActivationPolicy('accesso
 
 const result = { argv: process.argv, env: { DISPLAY: process.env.DISPLAY ?? null, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? null, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? null, INVOCATION_ID: process.env.INVOCATION_ID ?? null }, steps: [], errors: [] };
 const t0 = Date.now();
-const step = (name, data) => result.steps.push({ name, atMs: Date.now() - t0, ...data });
-const fail = (name, error) => result.errors.push({ name, atMs: Date.now() - t0, message: error instanceof Error ? error.stack ?? error.message : String(error) });
 const save = () => fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2));
+// Saved after every step and every failure, so a crash in a later step (round 1's GTK abort at the first window) still
+// leaves what ran before it.
+const step = (name, data) => { result.steps.push({ name, atMs: Date.now() - t0, ...data }); save(); };
+const fail = (name, error) => { result.errors.push({ name, atMs: Date.now() - t0, message: error instanceof Error ? error.stack ?? error.message : String(error) }); save(); };
 
 process.on('uncaughtException', (error) => { fail('uncaughtException', error); save(); });
 process.on('unhandledRejection', (error) => { fail('unhandledRejection', error); save(); });
