@@ -18,10 +18,15 @@
 // that came meanwhile follows with a new start. A request while the runtime is reported absent is answered at once with
 // its reason and spawns nothing. No request outlives its asker's deadline in the table unanswered: one still waiting for
 // the host's ready at its start deadline (inside the bridge's own) is answered with the start's reason and dropped; one
-// handed over waits for the host, whose library keeps its own budgets, or for the host's end.
+// handed over is answered with a sentence at its answer deadline (ANSWER_DEADLINE_MS, from its admission: inside the
+// bridge's for a session's tool, the start's and the library's own budgets for the library's Export) if the host has not
+// answered it by then. A host that has not said ready within START_WATCHDOG_MS of its spawn is ended and counted as a
+// failed start, so a hung start never holds the requests after it.
 //
 // `stop()` (the daemon's exit order, before the spine's stop ends the engine-host link): admission closes, every request
-// in the table is answered `ok: false` over the still-live link, then the host is ended.
+// in the table is answered `ok: false` over the still-live link, then the host is ended. A request the seam answered
+// itself after handing it over (its answer deadline, or the stop) is remembered until the host exits, so the host's late
+// answer is taken (not refused as unknown) and an inspection export's file it names is removed: nobody will read it.
 import { spawn as spawnProcess, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -58,11 +63,15 @@ export interface RenderSeamOptions {
   runtime(): RenderRuntime; // whether this machine can run the render host (a Mac with the app binary always can; M6 reads Linux's cache)
   engineHostRenders(): boolean; // the engine host's welcome lists host.render: its bridges send with no app attached
   appAttached(): boolean; // an app is attached to the engine host (an older host's bridges send then)
-  authors?(): RenderAuthors | undefined; // the Word comment authors this daemon holds, sent with each export
+  // the Word comment authors, sent with each export: the request waits for them before it is handed over (its deadlines
+  // running from its admission), the host's start meanwhile; the daemon bounds what it waits for them
+  authors?(): RenderAuthors | undefined | Promise<RenderAuthors | undefined>;
   hold(reason: string): () => void; // the daemon's clocks: no idle exit while a request is in the table
   onState?(state: RenderState, detail: string | null): void;
   log(line: string): void;
   startDeadlineMs?: Partial<Record<'capture' | 'export' | 'libraryExport', number>>;
+  answerDeadlineMs?: Partial<Record<'capture' | 'export' | 'libraryExport', number>>;
+  startWatchdogMs?: number;
   restartBackoffMs?: readonly number[]; // the detached transport's RESTART_BACKOFF_MS unless a test says
   exitGraceMs?: number;
   removeFile?(path: string): Promise<void>;
@@ -90,6 +99,16 @@ export interface RenderSeam extends RenderService {
 export const DEFAULT_QUIET_MS = 120_000;
 // Inside the bridges' 45 s (CAPTURE_ANSWER_MS) and 60 s (EXPORT_ANSWER_MS); the library's Export has the export's.
 export const START_DEADLINE_MS = { capture: 40_000, export: 55_000, libraryExport: 55_000 } as const;
+// A request's whole time in the seam, from its admission, handed over or not. A session's tool: the bridge's own, less
+// ANSWER_MARGIN_MS for the event's way here and the answer's way back, so its asker hears a sentence, never a timeout.
+// The library's Export (its own command budget, COMMAND_BUDGETS_MS['artifacts.export']): the start's, then the render
+// library's own export budget (src/render/export.ts's EXPORT_BUDGET_MS, which this chunk does not load).
+const ANSWER_MARGIN_MS = 2_000;
+const LIBRARY_EXPORT_MS = 55_000;
+export const ANSWER_DEADLINE_MS = { capture: 45_000 - ANSWER_MARGIN_MS, export: 60_000 - ANSWER_MARGIN_MS, libraryExport: START_DEADLINE_MS.libraryExport + LIBRARY_EXPORT_MS } as const;
+// A spawned host that has not said ready by then is hung: ended, and counted as a failed start (the backoff, then the
+// second failure's unavailability). Under the shortest start deadline, so a request waiting for it sees a second start.
+export const START_WATCHDOG_MS = 30_000;
 export const FAILURE_WINDOW_MS = 60_000;
 export const EXIT_GRACE_MS = 5_000;
 const DELIVERY_BOUND_MS = 2_000; // stop()'s wait for its refusals' answers from the engine host
@@ -101,17 +120,25 @@ interface Entry {
   kind: Kind;
   request: RenderRequest;
   posted: boolean;
-  deadline: ReturnType<typeof setTimeout> | null;
+  authoring: boolean; // its Word comment authors are still being resolved: not handed over yet
+  deadline: ReturnType<typeof setTimeout> | null; // its start deadline, while it waits for the host
+  overall: ReturnType<typeof setTimeout> | null; // its answer deadline
   settle(answer: unknown): void; // the render host's answer, or a failure the seam names ({ok: false, error})
 }
 
 export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   const { machine, log } = options;
   const deadlines = { ...START_DEADLINE_MS, ...options.startDeadlineMs };
+  const answerDeadlines = { ...ANSWER_DEADLINE_MS, ...options.answerDeadlineMs };
+  const startWatchdogMs = options.startWatchdogMs ?? START_WATCHDOG_MS;
   const backoff = options.restartBackoffMs ?? RESTART_BACKOFF_MS;
   const exitGraceMs = options.exitGraceMs ?? EXIT_GRACE_MS;
   const removeFile = options.removeFile ?? ((path: string) => rm(path, { force: true }));
   const table = new Map<string, Entry>();
+  // Handed over, then answered by the seam (its answer deadline, the stop): the host's late answer is taken, and an
+  // inspection export's file it names removed. Kept until the host exits, after which no answer comes.
+  const abandoned = new Map<string, Entry>();
+  const removals = new Set<Promise<void>>(); // stop() awaits them
   let state: RenderState = 'off';
   let detail: string | null = null;
   let child: RenderChild | null = null;
@@ -126,6 +153,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   let release: (() => void) | null = null;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let watchdog: ReturnType<typeof setTimeout> | null = null; // a spawned host's time to say ready
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   let exited: (() => void) | null = null; // stop()'s wait for the host's exit
   const deliveries = new Set<Promise<unknown>>(); // answers on their way to the engine host (stop() awaits them)
@@ -146,6 +174,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   // --- the table ------------------------------------------------------------------------------------------------------
   const settled = (entry: Entry) => {
     entry.deadline = clear(entry.deadline);
+    entry.overall = clear(entry.overall);
     table.delete(entry.id);
     if (table.size === 0) {
       release?.();
@@ -157,20 +186,60 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     settled(entry);
     entry.settle(answer);
   };
+  // The seam's own answer to what it holds; one the host holds is remembered for the host's late answer
   const failAll = (error: string, which: (entry: Entry) => boolean = () => true) => {
-    for (const entry of [...table.values()].filter(which)) answerWith(entry, failed(error));
+    for (const entry of [...table.values()].filter(which)) {
+      if (entry.posted && child !== null) abandoned.set(entry.id, entry);
+      answerWith(entry, failed(error));
+    }
+  };
+  // A file nobody will read: removed, a failure logged
+  const removeUnread = (path: string, why: string) => {
+    log(`[render] ${why}: its file removed`);
+    const removal = removeFile(path).catch((error: unknown) => log(`[render] could not remove ${path}: ${error instanceof Error ? error.message : String(error)}`));
+    removals.add(removal);
+    void removal.finally(() => removals.delete(removal));
+    return removal;
   };
 
   function admit(request: RenderRequest, settle: Entry['settle']): void {
     const refused = refusal();
     if (refused !== null) return settle(failed(refused));
-    const entry: Entry = { id: request.id, kind: request.kind, request, posted: false, deadline: null, settle };
+    const entry: Entry = { id: request.id, kind: request.kind, request, posted: false, authoring: false, deadline: null, overall: null, settle };
+    if (request.kind !== 'capture' && options.authors) {
+      const withAuthors = (authors: RenderAuthors | undefined) => {
+        if (authors && entry.request.kind !== 'capture') entry.request = { ...entry.request, authors };
+      };
+      const unresolved = (error: unknown) => log(`[render] the export's comment authors could not be resolved: ${error instanceof Error ? error.message : String(error)}`);
+      let authors: ReturnType<NonNullable<RenderSeamOptions['authors']>>;
+      try {
+        authors = options.authors();
+      } catch (error) {
+        authors = undefined;
+        unresolved(error);
+      }
+      if (authors instanceof Promise) {
+        entry.authoring = true; // resolved on demand (a cold spine's load): handed over once they are
+        void authors.then(withAuthors, unresolved).then(() => {
+          entry.authoring = false;
+          if (table.has(entry.id)) pump();
+        });
+      } else withAuthors(authors);
+    }
     entry.deadline = setTimeout(() => {
       entry.deadline = null;
-      if (entry.posted || !table.has(entry.id)) return; // handed over: the host's library answers within its own budgets
+      if (entry.posted || !table.has(entry.id)) return; // handed over: its answer deadline bounds it
       log(`[render] ${entry.kind} ${entry.id} waited ${deadlines[entry.kind] / 1000} s for the render host: answered with the start's reason`);
       answerWith(entry, failed(lastFailure !== null ? couldNotStart(lastFailure) : `the render service on ${machine} did not start within ${deadlines[entry.kind] / 1000} s`));
     }, deadlines[entry.kind]);
+    entry.overall = setTimeout(() => {
+      entry.overall = null;
+      if (!table.has(entry.id)) return;
+      const s = answerDeadlines[entry.kind] / 1000;
+      log(`[render] ${entry.kind} ${entry.id} was not answered by the render host within ${s} s of its arrival: answered with a failure`);
+      if (child !== null) abandoned.set(entry.id, entry);
+      answerWith(entry, failed(`the render service on ${machine} did not finish the ${entry.kind === 'capture' ? 'capture' : 'export'} within ${s} s`));
+    }, answerDeadlines[entry.kind]);
     table.set(entry.id, entry);
     release ??= options.hold('a render in flight');
     quietTimer = clear(quietTimer);
@@ -195,7 +264,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     if (stopped) return;
     if (state === 'ready' && childReady) {
       for (const entry of table.values()) {
-        if (entry.posted) continue;
+        if (entry.posted || entry.authoring) continue;
         if (!options.post(entry.request)) {
           log(`[render] the render host took no request (its connection is going): ${entry.kind} ${entry.id} waits for the next one`);
           return;
@@ -233,6 +302,28 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     starts += 1;
     log(`[render] starting the render host${why ? ` for ${why === 'capture' ? 'artifact_screenshot' : why === 'export' ? 'artifact_export' : 'the library’s Export'}` : ''} (pid ${started.pid ?? 'unknown'})`);
     started.onExit((code, signal) => onExit(started, code, signal));
+    watchdog = clear(watchdog);
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      if (child !== started || reached) return;
+      hung(started);
+    }, startWatchdogMs);
+  }
+
+  // A host that did not say ready within the watchdog: let go of (its exit is no longer the seam's), ended, a failed start
+  function hung(which: RenderChild): void {
+    child = null;
+    childReady = false;
+    abandoned.clear();
+    log(`[render] the render host (pid ${which.pid ?? 'unknown'}) did not say ready within ${startWatchdogMs / 1000} s: SIGTERM, then SIGKILL after ${exitGraceMs / 1000} s`);
+    let exited = false;
+    which.onExit(() => void (exited = true));
+    which.kill('SIGTERM');
+    const kill = setTimeout(() => {
+      if (!exited) which.kill('SIGKILL');
+    }, exitGraceMs);
+    (kill as { unref?: () => void }).unref?.();
+    failure(`the render host did not say ready within ${startWatchdogMs / 1000} s`);
   }
 
   function onExit(which: RenderChild, code: number | null, signal: string | null): void {
@@ -242,6 +333,8 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     child = null;
     childReady = false;
     killTimer = clear(killTimer);
+    watchdog = clear(watchdog);
+    abandoned.clear(); // no late answer comes from a host that has exited
     log(`[render] the render host exited (${signal ? `signal ${signal}` : `code ${code}`})${expected ? '' : wasReady ? ': unasked' : ' before it was ready'}`);
     failAll(`the render service ended on ${machine}`, (entry) => entry.posted);
     const done = exited;
@@ -319,22 +412,17 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     },
     export(request) {
       const { appSessionId, requestId } = request;
-      const authors = options.authors?.();
-      admit({ id: `export-${++next}`, kind: 'export', request, ...(authors && { authors }) }, (answer) => {
+      admit({ id: `export-${++next}`, kind: 'export', request }, (answer) => {
         const result = exportAnswer(answer);
         void engineAnswer('maws.artifact.exported', { appSessionId, requestId, answer: result }).then(async (outcome) => {
           // an inspection's file is unique and has no cache consumer: it is the bridge's once delivered, else removed here
-          if (request.inspection && result.ok && outcome !== 'delivered') {
-            log(`[render] an inspection export's answer was not delivered (${outcome ?? 'no link'}): its file removed`);
-            await removeFile(result.path).catch(() => {});
-          }
+          if (request.inspection && result.ok && outcome !== 'delivered') await removeUnread(result.path, `an inspection export's answer was not delivered (${outcome ?? 'no link'})`);
         });
       });
     },
     exportForLibrary(input) {
       return new Promise((resolve, reject) => {
-        const authors = options.authors?.();
-        admit({ id: `library-${++next}`, kind: 'libraryExport', request: input, ...(authors && { authors }) }, (answer) => {
+        admit({ id: `library-${++next}`, kind: 'libraryExport', request: input }, (answer) => {
           const value = answer as { ok?: unknown; error?: unknown; ipcError?: unknown; path?: unknown };
           if (value.ok === false) {
             const error = typeof value.error === 'string' ? value.error : 'the render host failed';
@@ -349,6 +437,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       if (state !== 'starting' || child === null) return log(`[render] a render client said ready while the seam is ${state}: not taken`);
       childReady = true;
       reached = true;
+      watchdog = clear(watchdog);
       set('ready');
       log(`[render] the render host is ready (pid ${child.pid ?? 'unknown'})`);
       pump();
@@ -369,6 +458,14 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       }, exitGraceMs);
     },
     answer({ id, answer }) {
+      const late = abandoned.get(id);
+      if (late) {
+        // answered already by the seam: taken, and an inspection's file nobody will read removed
+        abandoned.delete(id);
+        const value = answer as { ok?: unknown; path?: unknown };
+        if (late.kind === 'export' && (late.request.request as MawsArtifactExport).inspection && value.ok === true && typeof value.path === 'string') void removeUnread(value.path, `an inspection export answered after the seam had answered it (${id})`);
+        return true;
+      }
       const entry = table.get(id);
       if (!entry || !entry.posted) return false;
       answerWith(entry, answer);
@@ -389,6 +486,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       stopped = true;
       quietTimer = clear(quietTimer);
       startTimer = clear(startTimer);
+      watchdog = clear(watchdog);
       failAll(`the render service is restarting on ${machine}`);
       // the refusals answered over the live engine-host link (the spine's stop, after this, ends it), each bounded
       if (deliveries.size > 0) await Promise.race([Promise.allSettled([...deliveries]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
@@ -405,6 +503,8 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       }, exitGraceMs);
       await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, exitGraceMs + 1_000))]);
       clearTimeout(timer);
+      // a late inspection answer's removal, taken while the host finished its work
+      if (removals.size > 0) await Promise.race([Promise.allSettled([...removals]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
     },
   };
   return seam;

@@ -15,7 +15,8 @@ import type { RenderRequest } from '@shared/ipc/schema/render';
 import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
-import { createRenderSeam, exitReason, renderAuthors, renderCommand, START_DEADLINE_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
+import { EXPORT_BUDGET_MS } from '../render/export';
+import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, renderAuthors, renderCommand, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
 
 const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
 const PNG = { ok: true, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErrors: [] };
@@ -231,7 +232,7 @@ describe('the render seam (P5 O5 M4)', () => {
   });
 
   it('answers a request still waiting for the host at its start deadline, inside the bridge’s, and drops it', async () => {
-    const s = scene();
+    const s = scene({ startWatchdogMs: 120_000 }); // the deadline alone, before the watchdog's
     s.seam.capture(capture('cap-1'));
     s.seam.export(exportOf('exp-1'));
     await vi.advanceTimersByTimeAsync(40_000);
@@ -241,6 +242,101 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.seam.status().requests).toBe(0);
     s.seam.clientReady();
     expect(s.posted, 'nothing left to hand over').toEqual([]);
+  });
+
+  it('ends a host that has not said ready at the start watchdog, counts a failed start, and a second start serves what waits', async () => {
+    const s = scene();
+    s.seam.capture(capture('cap-1'));
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS - 1);
+    expect(s.children[0]!.killed).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.children[0]!.killed, 'the hung host is ended').toEqual(['SIGTERM']);
+    expect(s.logs).toContain('[render] the render service could not start on mini: the render host did not say ready within 30 s');
+    await vi.advanceTimersByTimeAsync(500); // the backoff
+    expect(s.children, 'the request is not trapped behind the hung child').toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(4_500);
+    expect(s.children[0]!.killed, 'SIGKILL when SIGTERM did not end it').toEqual(['SIGTERM', 'SIGKILL']);
+    s.children[0]!.exit(null, 'SIGKILL'); // its exit is no longer the seam's
+    expect(s.seam.state()).toBe('starting');
+    s.seam.clientReady();
+    expect(s.posted.map((request) => (request.request as { requestId: string }).requestId)).toEqual(['cap-1']);
+    s.seam.answer({ id: s.posted[0]!.id, answer: PNG });
+    await flush();
+    expect(s.engine).toEqual([{ name: 'maws.artifact.captured', input: { appSessionId: 'app-1', requestId: 'cap-1', result: PNG } }]);
+  });
+
+  it('two hung starts make the seam unavailable, and what waits is answered with the reason', async () => {
+    const s = scene();
+    s.seam.export(exportOf('exp-1'));
+    await vi.advanceTimersByTimeAsync(START_WATCHDOG_MS + 500 + START_WATCHDOG_MS);
+    expect(s.children.map((child) => child.killed)).toEqual([['SIGTERM', 'SIGKILL'], ['SIGTERM']]);
+    expect(s.seam.state()).toBe('unavailable');
+    await flush();
+    expect(s.engine.map((call) => call.input)).toEqual([{ appSessionId: 'app-1', requestId: 'exp-1', answer: { ok: false, error: 'the render service could not start on mini: the render host did not say ready within 30 s' } }]);
+  });
+
+  it('a capture handed over just before its start deadline is answered with a sentence inside the bridge’s 45 s, and the host’s late answer is taken', async () => {
+    const s = scene({ startWatchdogMs: 120_000 });
+    s.seam.capture(capture('cap-1'));
+    await vi.advanceTimersByTimeAsync(START_DEADLINE_MS.capture - 1_000);
+    s.seam.clientReady();
+    expect(s.posted).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(ANSWER_DEADLINE_MS.capture - (START_DEADLINE_MS.capture - 1_000) - 1);
+    expect(s.engine).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.engine.map((call) => call.input)).toEqual([{ appSessionId: 'app-1', requestId: 'cap-1', result: { ok: false, error: 'the render service on mini did not finish the capture within 43 s' } }]);
+    expect(s.seam.status().requests).toBe(0);
+    expect(s.seam.answer({ id: s.posted[0]!.id, answer: PNG }), 'the late answer is taken, not refused').toBe(true);
+    await flush();
+    expect(s.engine, 'answered once').toHaveLength(1);
+  });
+
+  it('an export rendering past the bridge’s remaining time is answered with a sentence at 58 s, and a late inspection file is removed', async () => {
+    const s = scene();
+    s.seam.export(exportOf('exp-1', { inspection: true }));
+    s.seam.clientReady();
+    await vi.advanceTimersByTimeAsync(ANSWER_DEADLINE_MS.export - 1);
+    expect(s.engine).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.engine.map((call) => call.input)).toEqual([{ appSessionId: 'app-1', requestId: 'exp-1', answer: { ok: false, error: 'the render service on mini did not finish the export within 58 s' } }]);
+    expect(s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/inspect-late.png' } })).toBe(true);
+    await flush();
+    expect(s.removed).toEqual(['/p/inspect-late.png']);
+  });
+
+  it('the library’s Export has its own longer allowance: the start’s and the library’s export budget', async () => {
+    const s = scene({ startWatchdogMs: 120_000 });
+    const asked = s.seam.exportForLibrary({ artifactId: ARTIFACT, format: 'pdf' }).catch((thrown: unknown) => thrown);
+    await vi.advanceTimersByTimeAsync(START_DEADLINE_MS.libraryExport - 1_000);
+    s.seam.clientReady();
+    await vi.advanceTimersByTimeAsync(ANSWER_DEADLINE_MS.libraryExport - (START_DEADLINE_MS.libraryExport - 1_000) - 1);
+    expect(s.seam.status().requests).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(((await asked) as HostCommandError).ipcError).toMatchObject({ code: 'host_unavailable', message: 'the render service on mini did not finish the export within 110 s' });
+  });
+
+  it('a stop’s refusal leaves no inspection file behind: the host’s late successful answer during its exit is taken and its file removed', async () => {
+    const s = scene();
+    s.seam.export(exportOf('exp-1', { inspection: true }));
+    s.seam.clientReady();
+    const stopped = s.seam.stop();
+    await flush();
+    expect(s.engine.map((call) => call.input)).toEqual([{ appSessionId: 'app-1', requestId: 'exp-1', answer: { ok: false, error: 'the render service is restarting on mini' } }]);
+    expect(s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/inspect-stop.png' } }), 'taken during the graceful exit').toBe(true);
+    s.children[0]!.exit(0);
+    await stopped;
+    expect(s.removed).toEqual(['/p/inspect-stop.png']);
+    expect(s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/x.png' } }), 'forgotten once the host exited').toBe(false);
+  });
+
+  it('logs a file it could not remove', async () => {
+    const s = scene({ removeFile: async () => Promise.reject(new Error('EACCES: permission denied')) });
+    s.outcome.value = 'not_pending';
+    s.seam.export(exportOf('exp-1', { inspection: true }));
+    s.seam.clientReady();
+    s.seam.answer({ id: s.posted[0]!.id, answer: { ok: true, revision: 2, path: '/p/inspect-1.png' } });
+    await flush();
+    expect(s.logs).toContain('[render] could not remove /p/inspect-1.png: EACCES: permission denied');
   });
 
   it('a host that ends unasked answers what it held, counts a failure, and starts again after the backoff for what waits', async () => {
@@ -319,6 +415,27 @@ describe('the render seam (P5 O5 M4)', () => {
     const error = await refused.catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(HostCommandError);
     expect((error as HostCommandError).ipcError).toEqual(ipc);
+  });
+
+  it('an export waits for authors resolved on demand before it is handed over, the host starting meanwhile; a failed resolution sends none', async () => {
+    let resolve!: (authors: { sessions: Record<string, string> }) => void;
+    const s = scene({ authors: () => new Promise((done) => (resolve = done)) });
+    s.seam.export(exportOf('exp-1'));
+    s.seam.capture(capture('cap-1'));
+    expect(s.children, 'the host starts while the authors resolve').toHaveLength(1);
+    s.seam.clientReady();
+    expect(s.posted.map((request) => request.kind), 'the capture goes ahead; the export waits').toEqual(['capture']);
+    resolve({ sessions: { 'app-1': 'Review agent' } });
+    await flush();
+    expect(s.posted.at(-1)).toMatchObject({ kind: 'export', authors: { sessions: { 'app-1': 'Review agent' } } });
+
+    const failing = scene({ authors: () => Promise.reject(new Error('the spine is refused')) });
+    failing.seam.export(exportOf('exp-2'));
+    failing.seam.clientReady();
+    await flush();
+    expect(failing.posted).toHaveLength(1);
+    expect(failing.posted[0]).not.toHaveProperty('authors');
+    expect(failing.logs).toContain("[render] the export's comment authors could not be resolved: the spine is refused");
   });
 
   it('a bridge export carries the authors too; a capture none', () => {
@@ -413,6 +530,16 @@ describe('the render commands’ budgets (src/services/command-budgets.ts)', () 
   it('cover the render host’s start and the export after it, whose library budget is inside the bridge’s EXPORT_ANSWER_MS', () => {
     expect(COMMAND_BUDGETS_MS['artifacts.export']).toBeGreaterThan(START_DEADLINE_MS.libraryExport + EXPORT_ANSWER_MS);
     expect(COMMAND_BUDGETS_MS['daemon.e2eRender']).toBeGreaterThan(START_DEADLINE_MS.capture + CAPTURE_ANSWER_MS);
+  });
+
+  it('the seam answers a session’s tool inside its bridge, and the library’s Export inside its command budget', () => {
+    expect(ANSWER_DEADLINE_MS.capture).toBeLessThan(CAPTURE_ANSWER_MS);
+    expect(ANSWER_DEADLINE_MS.export).toBeLessThan(EXPORT_ANSWER_MS);
+    expect(START_DEADLINE_MS.capture).toBeLessThan(ANSWER_DEADLINE_MS.capture);
+    expect(START_DEADLINE_MS.export).toBeLessThan(ANSWER_DEADLINE_MS.export);
+    expect(ANSWER_DEADLINE_MS.libraryExport, 'the start’s, then the render library’s own budget').toBe(START_DEADLINE_MS.libraryExport + EXPORT_BUDGET_MS);
+    expect(COMMAND_BUDGETS_MS['artifacts.export']).toBeGreaterThan(ANSWER_DEADLINE_MS.libraryExport);
+    expect(START_WATCHDOG_MS).toBeLessThan(Math.min(...Object.values(START_DEADLINE_MS)));
   });
 });
 

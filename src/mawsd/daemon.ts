@@ -709,6 +709,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- what the upstreams send ---------------------------------------------------------------------------------------
   let generation = 0;
+  // P5 O5 M4: the engine-host link's losses, as the embedded root counts them (src/main/artifacts/index.ts's hostLosses):
+  // the render host's `hostGeneration`, posted at each loss, before the loss's failed requests are answered (the
+  // supervisor fails them before it tells the state, and their answers go out after this), so a dashboard export whose
+  // read the loss refused captures again once, whenever the next host welcomes
+  let renderGeneration = 0;
   let upstreamConnected = false;
   hosts.onState('engine-host', (state) => {
     const ready = state.state === 'ready';
@@ -718,10 +723,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       upstreamConnected = true;
       generation += 1;
       each(upstreamListeners, { connected: true, generation });
-      front.postRender('render.hostGeneration', { generation }); // P5 O5 M4: a dashboard export captures again once across it
       void sendInterest(true); // a fresh link starts with no interest of its own
     } else if (!ready && upstreamConnected) {
       upstreamConnected = false;
+      renderGeneration += 1;
+      front.postRender('render.hostGeneration', { generation: renderGeneration }); // P5 O5 M4: at the loss, above
       each(upstreamListeners, { connected: false, generation }); // after every endpoint channel's `upstream` close (doc-relay)
     }
     if (!ready && recycling === 0) engineRelay.dropApp(`the engine host is ${state.state}`);
@@ -828,6 +834,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
 
   // --- the render seam (P5 O5 M4; render-handle.ts, render-seam.ts): its chunk loaded at the first request ----------------
+  const RENDER_AUTHORS_SPINE_WAIT_MS = 10_000; // an export's wait for a cold spine's session titles (its comment authors)
   const machine = machineName(env, hostname());
   const renderQuietMs = positiveInteger(env.MAWS_RENDER_QUIET_MS); // the measured scene's quiet period
   const answerEngine = async (name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown) => {
@@ -860,8 +867,20 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       runtime: options.render?.runtime ?? (() => (platform === 'darwin' ? { available: true } : { available: false, reason: `the render runtime is not installed on ${machine}` })), // Linux's is M6's
       engineHostRenders,
       appAttached: () => appPresent(),
-      authors: () => {
-        const view = spine.root()?.view;
+      // the session titles a document's comments name are the spine's records: a cold or released spine is loaded for
+      // the export (a trigger, never at idle: acceptance 14), waited for at most RENDER_AUTHORS_SPINE_WAIT_MS of the
+      // request's time, the render host's start meanwhile; else the exporters' own label, logged
+      authors: async () => {
+        let root = spine.root();
+        if (root === null) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          root = await Promise.race([
+            spine.ensure('command').catch((error: unknown) => (log(`[render] the spine did not load for an export's comment authors: ${error instanceof Error ? error.message : String(error)}`), null)),
+            new Promise<null>((resolve) => (timer = setTimeout(() => (log(`[render] the spine did not load within ${RENDER_AUTHORS_SPINE_WAIT_MS / 1000} s for an export's comment authors`), resolve(null)), RENDER_AUTHORS_SPINE_WAIT_MS))),
+          ]);
+          clearTimeout(timer);
+        }
+        const view = root?.view;
         return chunk.renderAuthors(settingsPaths(profileDir).client, view && view.unavailable() === null ? view.records() : null);
       },
       hold: (reason) => services.hold(reason),
@@ -885,9 +904,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
     readiness: () => presenceChanged(),
     beforeSpineCommand: wakeForDiscovery,
-    // P5 O5 M4: a render client hears the engine-host link's generation at its ready, before any work (and at each
-    // reconnect, onState above), so its dashboard exports capture again once across an engine host's restart
-    render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation }), render.front.clientReady()) },
+    // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
+    // onState above), so its dashboard exports capture again once across an engine host's restart
+    render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady()) },
     log,
   });
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`

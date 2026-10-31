@@ -77,6 +77,19 @@ function renderHosts() {
   return { options, children, connect };
 }
 
+// A spine stand-in: its records the session titles an export's comment authors read (an export loads a cold spine)
+function standInSpine(records: readonly { appId: string; title: { text: string } }[] = [], stop: () => void = () => {}): NonNullable<DaemonOptions['spine']> {
+  const load = async (): Promise<SpineEntry> => ({
+    takeSpineLock,
+    openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+    startSpine: (started) => {
+      started.bus.register('session.launchMode', () => ({ mode: 'index' }));
+      return { view: { engineStatuses: () => [], on: () => () => {}, unavailable: () => null, records: () => records } as never, settled: async () => {}, busy: () => false, stop };
+    },
+  });
+  return { load };
+}
+
 const requests = (host: RawApp) => host.events('render.request') as { id: string; kind: string; request: unknown; authors?: unknown }[];
 
 async function awake(daemon: RunningDaemon) {
@@ -107,7 +120,7 @@ describe('the render seam in mawsd (P5 O5 M4)', () => {
     expect((await daemon.status()).render).toMatchObject({ state: 'starting', pid: 4_242, starts: 1, requests: 1 });
     const host = await render.connect();
     await until(() => requests(host).length === 1, 3_000, 'the request handed over');
-    expect(host.events('render.hostGeneration'), 'the link’s generation before the work').toEqual([{ generation: 1 }]);
+    expect(host.events('render.hostGeneration'), 'the link’s loss count before the work: none yet').toEqual([{ generation: 0 }]);
     const [request] = requests(host);
     expect(request).toMatchObject({ kind: 'capture', request: CAPTURE });
     expect(await host.request('render.answer', { id: request!.id, answer: PNG })).toMatchObject({ ok: true });
@@ -122,7 +135,7 @@ describe('the render seam in mawsd (P5 O5 M4)', () => {
 
   it('answers the library’s Export from any machine.sock client through the render host, and refuses render.answer from a client that is none', async () => {
     const render = renderHosts();
-    await scene.start({ permanentClient: true, render: render.options });
+    await scene.start({ permanentClient: true, render: render.options, spine: standInSpine() });
     const client = await scene.app('machine', { capabilities: [...PEER_CAPABILITIES.app] });
     client.ready();
     const asked = client.request('artifacts.export', { artifactId: ARTIFACT, format: 'pdf', dialect: 'notion' }, 8_000);
@@ -160,18 +173,55 @@ describe('the render seam in mawsd (P5 O5 M4)', () => {
     expect((await daemon.status()).idleExitAt).toBeNull();
   });
 
+  it('posts the engine-host link’s loss to the render host at the loss, ahead of the failure of the read the loss refused, with no new host welcomed', async () => {
+    scene.engineSpawn = { ...scene.engineSpawn, answers: { ...scene.engineSpawn!.answers, 'artifacts.get': () => new Promise(() => {}) } }; // a read the link's loss refuses
+    const render = renderHosts();
+    const daemon = await scene.start({ permanentClient: true, render: render.options });
+    const engine = await awake(daemon);
+    await until(() => engine.emitRaw('maws.artifact.capture', CAPTURE), 3_000, 'the link’s ready line');
+    await until(() => render.children.length === 1, 3_000, 'the render host’s spawn');
+    const host = await render.connect();
+    await until(() => requests(host).length === 1, 3_000, 'the request handed over');
+    expect(host.events('render.hostGeneration')).toEqual([{ generation: 0 }]);
+
+    host.post({ t: 'req', id: 'snapshot-read', name: 'artifacts.get', input: { artifactId: ARTIFACT } });
+    await until(() => engine.calls.some((call) => call.name === 'artifacts.get'), 3_000, 'the read at the engine host');
+    scene.engineSpawn = null; // the next host is not welcomed in this case
+    await engine.supervisor.die();
+    await until(() => host.messages.some((message) => message.t === 'res' && message.id === 'snapshot-read'), 5_000, 'the read’s failure');
+    const at = (match: (message: Record<string, unknown>) => boolean) => host.messages.findIndex(match);
+    const failure = at((message) => message.t === 'res' && message.id === 'snapshot-read');
+    expect(host.messages[failure]).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    const loss = at((message) => message.t === 'evt' && message.name === 'render.hostGeneration' && (message.payload as { generation: number }).generation === 1);
+    expect(loss, 'the loss is posted').toBeGreaterThanOrEqual(0);
+    expect(loss, 'ahead of the read’s failure').toBeLessThan(failure);
+    expect(daemon.hosts.snapshot('engine-host').state, 'no host welcomed since').not.toBe('ready');
+    expect(host.events('render.hostGeneration')).toEqual([{ generation: 0 }, { generation: 1 }]);
+  });
+
+  it('a cold spine is loaded for an export’s comment authors: the session titles the embedded root names (view.record(id).title.text) ride the request', async () => {
+    const render = renderHosts();
+    const records = [
+      { appId: 'app-1', title: { text: 'Review agent' } },
+      { appId: 'app-2', title: { text: '   ' } }, // no title: the exporters' own label, as the embedded root's empty one gives
+    ];
+    const daemon = await scene.start({ permanentClient: true, render: render.options, spine: standInSpine(records) });
+    await awake(daemon);
+    expect((await daemon.status()).spine?.state, 'cold before the export').toBe('cold');
+    const client = await scene.app('machine', { capabilities: [...PEER_CAPABILITIES.app] });
+    client.post({ t: 'req', id: 'library-export', name: 'artifacts.export', input: { artifactId: ARTIFACT, format: 'docx' } });
+    await until(() => render.children.length === 1, 3_000, 'the render host’s spawn');
+    const host = await render.connect();
+    await until(() => requests(host).length === 1, 5_000, 'the request handed over');
+    expect(requests(host)[0]).toMatchObject({ kind: 'libraryExport', authors: { sessions: { 'app-1': 'Review agent' } } });
+    expect(requests(host)[0]!.authors).toEqual({ sessions: { 'app-1': 'Review agent' } });
+    expect(scene.logs).toContain('[spine] loading (command)');
+  });
+
   it('the exit answers a render in flight over the engine-host link before the loaded spine’s stop ends it, then ends the render host', async () => {
     const render = renderHosts();
     const stops = vi.fn();
-    const load = async (): Promise<SpineEntry> => ({
-      takeSpineLock,
-      openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
-      startSpine: (started) => {
-        started.bus.register('session.launchMode', () => ({ mode: 'index' }));
-        return { view: { engineStatuses: () => [], on: () => () => {}, unavailable: () => null, records: () => [] } as never, settled: async () => {}, busy: () => false, stop: stops };
-      },
-    });
-    const daemon = await scene.start({ permanentClient: true, render: render.options, spine: { load } });
+    const daemon = await scene.start({ permanentClient: true, render: render.options, spine: standInSpine([], stops) });
     const engine = await awake(daemon);
     const client = await scene.app('machine', { capabilities: [...PEER_CAPABILITIES.app] });
     expect(await client.request('session.launchMode')).toMatchObject({ ok: true }); // the spine loaded
