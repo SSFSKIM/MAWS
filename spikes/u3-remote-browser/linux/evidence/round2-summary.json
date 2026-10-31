@@ -1,0 +1,986 @@
+{
+  "generatedAt": "2026-10-31T23:20:58.877Z",
+  "modes": {
+    "hidden": {
+      "ready": {
+        "msFromSpawn": 812,
+        "hostSaysReady": true,
+        "versions": {
+          "electron": "44.4.5",
+          "chrome": "152.0.7977.130",
+          "node": "24.21.0"
+        },
+        "dockVisible": null,
+        "headless": true,
+        "noSandbox": false,
+        "pageState": {
+          "visibility": "hidden",
+          "hidden": true,
+          "w": 1280,
+          "h": 800,
+          "dpr": 1,
+          "title": "U3 text page"
+        },
+        "peer": "linux: uid-only stand-in addon (the socket is 0600 in a 0700 directory)"
+      },
+      "cua": {
+        "helloMs": 3,
+        "tabs": [
+          {
+            "id": 1,
+            "url": "http://127.0.0.1:40481/",
+            "title": "U3 text page",
+            "status": "complete"
+          }
+        ],
+        "attach": {
+          "ms": 5
+        },
+        "title": {
+          "ms": 4,
+          "value": "U3 text page"
+        },
+        "visibility": {
+          "ms": 2,
+          "value": "hidden"
+        },
+        "captureScreenshot": {
+          "ms": 8010,
+          "failed": "Command cancelled: deadline"
+        },
+        "vendorScreenshot": {
+          "ms": 122,
+          "value": {
+            "ms": 118,
+            "bytes": 193125
+          }
+        },
+        "cuaClick": {
+          "ms": 7
+        },
+        "cuaClickLanded": {
+          "ms": 2,
+          "value": 1
+        },
+        "createdTab": {
+          "create": {
+            "ms": 21,
+            "value": 2
+          },
+          "loaded": {
+            "ms": 79
+          },
+          "attach": {
+            "ms": 2
+          },
+          "captureScreenshot": {
+            "ms": 8010,
+            "failed": "Command cancelled: deadline"
+          },
+          "detach": {
+            "ms": 3
+          },
+          "remove": {
+            "ms": 2
+          }
+        },
+        "windows": {
+          "ms": 7,
+          "value": [
+            {
+              "id": 1,
+              "focused": false,
+              "type": "normal"
+            }
+          ]
+        }
+      },
+      "screencastStatic": {
+        "frames": 1,
+        "firstFrameMs": 39,
+        "bytes": 138420,
+        "firstFrameBytes": 138420,
+        "widths": [
+          1280
+        ],
+        "ms": 4009
+      },
+      "clickToPaint": {
+        "clicks": 20,
+        "landed": 20,
+        "missing": 20,
+        "medianMs": null,
+        "p95Ms": null,
+        "minMs": null,
+        "maxMs": null,
+        "dispatchMedianMs": 5005,
+        "lastClickTrusted": true
+      },
+      "textTick10Hz": {
+        "frames": 0,
+        "fps": 0,
+        "medianIntervalMs": null,
+        "p95IntervalMs": null,
+        "bytesPerSecond": 0,
+        "medianFrameBytes": null,
+        "maxFrameBytes": null,
+        "bytesPerSecondAt10fps": null,
+        "pageTicksPerSecond": 0.6,
+        "hostToViewerMedianMs": null,
+        "frameWidths": []
+      },
+      "textScroll": {
+        "frames": 0,
+        "fps": 0,
+        "medianIntervalMs": null,
+        "p95IntervalMs": null,
+        "bytesPerSecond": 0,
+        "medianFrameBytes": null,
+        "maxFrameBytes": null,
+        "bytesPerSecondAt10fps": null,
+        "pageTicksPerSecond": 0.6,
+        "hostToViewerMedianMs": null,
+        "frameWidths": []
+      },
+      "collision": {
+        "viewerFpsBefore": 0,
+        "agentScreenshot": {
+          "ms": 81,
+          "bytes": 193125
+        },
+        "viewerFpsAfterAgentStop": 0,
+        "viewerFpsAfterRestart": 0,
+        "cuaNotificationsDuringScreencast": {
+          "debugger.event Page.screencastVisibilityChanged": {
+            "n": 3,
+            "bytes": 444
+          },
+          "debugger.event Page.screencastFrame": {
+            "n": 3,
+            "bytes": 627504
+          }
+        },
+        "ms": 6596
+      },
+      "subscriptionTick10Hz": {
+        "frames": 0,
+        "fps": 0,
+        "medianIntervalMs": null,
+        "p95IntervalMs": null,
+        "bytesPerSecond": 0,
+        "medianFrameBytes": null,
+        "maxFrameBytes": null,
+        "bytesPerSecondAt10fps": null,
+        "pageTicksPerSecond": 0.6,
+        "hostToViewerMedianMs": null,
+        "frameWidths": []
+      },
+      "subscriptionClickToPaint": {
+        "clicks": 10,
+        "landed": 10,
+        "missing": 10,
+        "medianMs": null,
+        "p95Ms": null,
+        "minMs": null,
+        "maxMs": null,
+        "dispatchMedianMs": 5005,
+        "lastClickTrusted": true
+      },
+      "memory": {
+        "atReadyNoTab": {
+          "treeRssKiB": 138672,
+          "treeWorkingSetKiB": 138612,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 138672"
+          ]
+        },
+        "oneTabIdle": {
+          "treeRssKiB": 512952,
+          "treeWorkingSetKiB": 513112,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 171268",
+            "GPU:GPU rss 147128",
+            "Utility:network.mojom.NetworkService rss 91732",
+            "Tab rss 102824"
+          ]
+        },
+        "oneTabStreaming": {
+          "treeRssKiB": 555304,
+          "treeWorkingSetKiB": 555204,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 176056",
+            "GPU:GPU rss 164032",
+            "Utility:network.mojom.NetworkService rss 91644",
+            "Tab rss 123572"
+          ]
+        },
+        "oneTabIdleAfterScreencast": {
+          "treeRssKiB": 554212,
+          "treeWorkingSetKiB": 554160,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 178968",
+            "GPU:GPU rss 160024",
+            "Utility:network.mojom.NetworkService rss 91644",
+            "Tab rss 123576"
+          ]
+        }
+      },
+      "criterion": {
+        "bytesPerSecondAt10fps": null,
+        "under1_5MBps": false,
+        "measuredFps": 0
+      },
+      "hostExit": {
+        "code": 0,
+        "signal": null
+      },
+      "hostErrors": [],
+      "errors": [],
+      "hostStderrTail": []
+    },
+    "hidden-unthrottled": {
+      "ready": {
+        "msFromSpawn": 758,
+        "hostSaysReady": true,
+        "versions": {
+          "electron": "44.4.5",
+          "chrome": "152.0.7977.130",
+          "node": "24.21.0"
+        },
+        "dockVisible": null,
+        "headless": true,
+        "noSandbox": false,
+        "pageState": {
+          "visibility": "hidden",
+          "hidden": true,
+          "w": 1280,
+          "h": 800,
+          "dpr": 1,
+          "title": "U3 text page"
+        },
+        "peer": "linux: uid-only stand-in addon (the socket is 0600 in a 0700 directory)"
+      },
+      "cua": {
+        "helloMs": 6,
+        "tabs": [
+          {
+            "id": 1,
+            "url": "http://127.0.0.1:37387/",
+            "title": "U3 text page",
+            "status": "complete"
+          }
+        ],
+        "attach": {
+          "ms": 6
+        },
+        "title": {
+          "ms": 5,
+          "value": "U3 text page"
+        },
+        "visibility": {
+          "ms": 2,
+          "value": "hidden"
+        },
+        "captureScreenshot": {
+          "ms": 8011,
+          "failed": "Command cancelled: deadline"
+        },
+        "vendorScreenshot": {
+          "ms": 125,
+          "value": {
+            "ms": 122,
+            "bytes": 193125
+          }
+        },
+        "cuaClick": {
+          "ms": 7
+        },
+        "cuaClickLanded": {
+          "ms": 2,
+          "value": 1
+        },
+        "createdTab": {
+          "create": {
+            "ms": 22,
+            "value": 2
+          },
+          "loaded": {
+            "ms": 99
+          },
+          "attach": {
+            "ms": 3
+          },
+          "captureScreenshot": {
+            "ms": 8009,
+            "failed": "Command cancelled: deadline"
+          },
+          "detach": {
+            "ms": 3
+          },
+          "remove": {
+            "ms": 3
+          }
+        },
+        "windows": {
+          "ms": 7,
+          "value": [
+            {
+              "id": 1,
+              "focused": false,
+              "type": "normal"
+            }
+          ]
+        }
+      },
+      "screencastStatic": {
+        "frames": 1,
+        "firstFrameMs": 45,
+        "bytes": 139359,
+        "firstFrameBytes": 139359,
+        "widths": [
+          1280
+        ],
+        "ms": 4013
+      },
+      "clickToPaint": {
+        "clicks": 20,
+        "landed": 20,
+        "missing": 0,
+        "medianMs": 44,
+        "p95Ms": 53,
+        "minMs": 36,
+        "maxMs": 56,
+        "dispatchMedianMs": 4,
+        "lastClickTrusted": true
+      },
+      "textTick10Hz": {
+        "frames": 100,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 105,
+        "bytesPerSecond": 1403773,
+        "medianFrameBytes": 140376,
+        "maxFrameBytes": 140413,
+        "bytesPerSecondAt10fps": 1403760,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "textScroll": {
+        "frames": 477,
+        "fps": 59.6,
+        "medianIntervalMs": 15,
+        "p95IntervalMs": 28,
+        "bytesPerSecond": 8971110,
+        "medianFrameBytes": 150117,
+        "maxFrameBytes": 166533,
+        "bytesPerSecondAt10fps": 1501170,
+        "pageTicksPerSecond": 62.6,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "collision": {
+        "viewerFpsBefore": 10,
+        "agentScreenshot": {
+          "ms": 27,
+          "bytes": 162387
+        },
+        "viewerFpsAfterAgentStop": 0.3,
+        "viewerFpsAfterRestart": 10,
+        "cuaNotificationsDuringScreencast": {
+          "debugger.event Page.screencastVisibilityChanged": {
+            "n": 3,
+            "bytes": 441
+          },
+          "debugger.event Page.screencastFrame": {
+            "n": 706,
+            "bytes": 141133802
+          }
+        },
+        "ms": 6567
+      },
+      "subscriptionTick10Hz": {
+        "frames": 80,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 103,
+        "bytesPerSecond": 1403772,
+        "medianFrameBytes": 140374,
+        "maxFrameBytes": 140408,
+        "bytesPerSecondAt10fps": 1403740,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "subscriptionClickToPaint": {
+        "clicks": 10,
+        "landed": 10,
+        "missing": 0,
+        "medianMs": 46.5,
+        "p95Ms": 55,
+        "minMs": 30,
+        "maxMs": 55,
+        "dispatchMedianMs": 5,
+        "lastClickTrusted": true
+      },
+      "memory": {
+        "atReadyNoTab": {
+          "treeRssKiB": 138372,
+          "treeWorkingSetKiB": 138276,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 138372"
+          ]
+        },
+        "oneTabIdle": {
+          "treeRssKiB": 363156,
+          "treeWorkingSetKiB": 362960,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 170660",
+            "Utility:network.mojom.NetworkService rss 90812",
+            "Tab rss 101684"
+          ]
+        },
+        "oneTabStreaming": {
+          "treeRssKiB": 599692,
+          "treeWorkingSetKiB": 603652,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 188224",
+            "GPU:GPU rss 184580",
+            "Utility:network.mojom.NetworkService rss 91120",
+            "Tab rss 135768"
+          ]
+        },
+        "oneTabIdleAfterScreencast": {
+          "treeRssKiB": 575296,
+          "treeWorkingSetKiB": 575188,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 179668",
+            "GPU:GPU rss 168832",
+            "Utility:network.mojom.NetworkService rss 90776",
+            "Tab rss 136020"
+          ]
+        }
+      },
+      "criterion": {
+        "bytesPerSecondAt10fps": 1403760,
+        "under1_5MBps": true,
+        "measuredFps": 10
+      },
+      "hostExit": {
+        "code": 0,
+        "signal": null
+      },
+      "hostErrors": [],
+      "errors": [],
+      "hostStderrTail": []
+    },
+    "offscreen": {
+      "ready": {
+        "msFromSpawn": 729,
+        "hostSaysReady": true,
+        "versions": {
+          "electron": "44.4.5",
+          "chrome": "152.0.7977.130",
+          "node": "24.21.0"
+        },
+        "dockVisible": null,
+        "headless": true,
+        "noSandbox": false,
+        "pageState": {
+          "visibility": "visible",
+          "hidden": false,
+          "w": 1280,
+          "h": 800,
+          "dpr": 1,
+          "title": "U3 text page"
+        },
+        "peer": "linux: uid-only stand-in addon (the socket is 0600 in a 0700 directory)"
+      },
+      "cua": {
+        "helloMs": 7,
+        "tabs": [
+          {
+            "id": 1,
+            "url": "http://127.0.0.1:42893/",
+            "title": "U3 text page",
+            "status": "complete"
+          }
+        ],
+        "attach": {
+          "ms": 4
+        },
+        "title": {
+          "ms": 3,
+          "value": "U3 text page"
+        },
+        "visibility": {
+          "ms": 2,
+          "value": "visible"
+        },
+        "captureScreenshot": {
+          "ms": 119,
+          "value": 179322
+        },
+        "vendorScreenshot": {
+          "ms": 47,
+          "value": {
+            "ms": 43,
+            "bytes": 193125
+          }
+        },
+        "cuaClick": {
+          "ms": 8
+        },
+        "cuaClickLanded": {
+          "ms": 3,
+          "value": 1
+        },
+        "createdTab": {
+          "create": {
+            "ms": 46,
+            "value": 2
+          },
+          "loaded": {
+            "ms": 82
+          },
+          "attach": {
+            "ms": 5
+          },
+          "captureScreenshot": {
+            "ms": 134,
+            "value": 179322
+          },
+          "detach": {
+            "ms": 3
+          },
+          "remove": {
+            "ms": 2
+          }
+        },
+        "windows": {
+          "ms": 5,
+          "value": [
+            {
+              "id": 1,
+              "focused": false,
+              "type": "normal"
+            }
+          ]
+        }
+      },
+      "screencastStatic": {
+        "frames": 1,
+        "firstFrameMs": 40,
+        "bytes": 139359,
+        "firstFrameBytes": 139359,
+        "widths": [
+          1280
+        ],
+        "ms": 4012
+      },
+      "clickToPaint": {
+        "clicks": 20,
+        "landed": 20,
+        "missing": 0,
+        "medianMs": 56.5,
+        "p95Ms": 65,
+        "minMs": 47,
+        "maxMs": 66,
+        "dispatchMedianMs": 5,
+        "lastClickTrusted": true
+      },
+      "textTick10Hz": {
+        "frames": 100,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 103,
+        "bytesPerSecond": 1403784,
+        "medianFrameBytes": 140392.5,
+        "maxFrameBytes": 140420,
+        "bytesPerSecondAt10fps": 1403925,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "textScroll": {
+        "frames": 317,
+        "fps": 39.6,
+        "medianIntervalMs": 26,
+        "p95IntervalMs": 40,
+        "bytesPerSecond": 5957949,
+        "medianFrameBytes": 149979,
+        "maxFrameBytes": 166198,
+        "bytesPerSecondAt10fps": 1499790,
+        "pageTicksPerSecond": 62.6,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "collision": {
+        "viewerFpsBefore": 10,
+        "agentScreenshot": {
+          "ms": 36,
+          "bytes": 160419
+        },
+        "viewerFpsAfterAgentStop": 0.3,
+        "viewerFpsAfterRestart": 10,
+        "cuaNotificationsDuringScreencast": {
+          "debugger.event Page.screencastVisibilityChanged": {
+            "n": 3,
+            "bytes": 441
+          },
+          "debugger.event Page.screencastFrame": {
+            "n": 525,
+            "bytes": 104514172
+          }
+        },
+        "ms": 6597
+      },
+      "subscriptionTick10Hz": {
+        "frames": 80,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 109,
+        "bytesPerSecond": 1403580,
+        "medianFrameBytes": 140369.5,
+        "maxFrameBytes": 140406,
+        "bytesPerSecondAt10fps": 1403695,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "subscriptionClickToPaint": {
+        "clicks": 10,
+        "landed": 10,
+        "missing": 0,
+        "medianMs": 48.5,
+        "p95Ms": 59,
+        "minMs": 43,
+        "maxMs": 59,
+        "dispatchMedianMs": 4,
+        "lastClickTrusted": true
+      },
+      "memory": {
+        "atReadyNoTab": {
+          "treeRssKiB": 138592,
+          "treeWorkingSetKiB": 138532,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 138592"
+          ]
+        },
+        "oneTabIdle": {
+          "treeRssKiB": 543948,
+          "treeWorkingSetKiB": 519392,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 173112",
+            "GPU:GPU rss 171264",
+            "Utility:network.mojom.NetworkService rss 90552",
+            "Tab rss 109020"
+          ]
+        },
+        "oneTabStreaming": {
+          "treeRssKiB": 628556,
+          "treeWorkingSetKiB": 641556,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 198424",
+            "GPU:GPU rss 206324",
+            "Utility:network.mojom.NetworkService rss 90928",
+            "Tab rss 132880"
+          ]
+        },
+        "oneTabIdleAfterScreencast": {
+          "treeRssKiB": 604092,
+          "treeWorkingSetKiB": 604000,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 181920",
+            "GPU:GPU rss 197700",
+            "Utility:network.mojom.NetworkService rss 90928",
+            "Tab rss 133544"
+          ]
+        }
+      },
+      "criterion": {
+        "bytesPerSecondAt10fps": 1403925,
+        "under1_5MBps": true,
+        "measuredFps": 10
+      },
+      "hostExit": {
+        "code": 0,
+        "signal": null
+      },
+      "hostErrors": [],
+      "errors": [],
+      "hostStderrTail": []
+    },
+    "shown": {
+      "ready": {
+        "msFromSpawn": 728,
+        "hostSaysReady": true,
+        "versions": {
+          "electron": "44.4.5",
+          "chrome": "152.0.7977.130",
+          "node": "24.21.0"
+        },
+        "dockVisible": null,
+        "headless": true,
+        "noSandbox": false,
+        "pageState": {
+          "visibility": "visible",
+          "hidden": false,
+          "w": 1280,
+          "h": 800,
+          "dpr": 1,
+          "title": "U3 text page"
+        },
+        "peer": "linux: uid-only stand-in addon (the socket is 0600 in a 0700 directory)"
+      },
+      "cua": {
+        "helloMs": 3,
+        "tabs": [
+          {
+            "id": 1,
+            "url": "http://127.0.0.1:33777/",
+            "title": "U3 text page",
+            "status": "complete"
+          }
+        ],
+        "attach": {
+          "ms": 4
+        },
+        "title": {
+          "ms": 3,
+          "value": "U3 text page"
+        },
+        "visibility": {
+          "ms": 2,
+          "value": "visible"
+        },
+        "captureScreenshot": {
+          "ms": 108,
+          "value": 179322
+        },
+        "vendorScreenshot": {
+          "ms": 46,
+          "value": {
+            "ms": 43,
+            "bytes": 193125
+          }
+        },
+        "cuaClick": {
+          "ms": 7
+        },
+        "cuaClickLanded": {
+          "ms": 1,
+          "value": 1
+        },
+        "createdTab": {
+          "create": {
+            "ms": 22,
+            "value": 2
+          },
+          "loaded": {
+            "ms": 78
+          },
+          "attach": {
+            "ms": 6
+          },
+          "captureScreenshot": {
+            "ms": 135,
+            "value": 179322
+          },
+          "detach": {
+            "ms": 3
+          },
+          "remove": {
+            "ms": 3
+          }
+        },
+        "windows": {
+          "ms": 7,
+          "value": [
+            {
+              "id": 1,
+              "focused": false,
+              "type": "normal"
+            }
+          ]
+        }
+      },
+      "screencastStatic": {
+        "frames": 2,
+        "firstFrameMs": 56,
+        "bytes": 278718,
+        "firstFrameBytes": 139359,
+        "widths": [
+          1280
+        ],
+        "ms": 4014
+      },
+      "clickToPaint": {
+        "clicks": 20,
+        "landed": 20,
+        "missing": 0,
+        "medianMs": 47.5,
+        "p95Ms": 55,
+        "minMs": 40,
+        "maxMs": 57,
+        "dispatchMedianMs": 5,
+        "lastClickTrusted": true
+      },
+      "textTick10Hz": {
+        "frames": 100,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 103,
+        "bytesPerSecond": 1403585,
+        "medianFrameBytes": 140384.5,
+        "maxFrameBytes": 140417,
+        "bytesPerSecondAt10fps": 1403845,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "textScroll": {
+        "frames": 412,
+        "fps": 51.5,
+        "medianIntervalMs": 18,
+        "p95IntervalMs": 30,
+        "bytesPerSecond": 7746449,
+        "medianFrameBytes": 150091,
+        "maxFrameBytes": 166571,
+        "bytesPerSecondAt10fps": 1500910,
+        "pageTicksPerSecond": 62.6,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "collision": {
+        "viewerFpsBefore": 10,
+        "agentScreenshot": {
+          "ms": 41,
+          "bytes": 225378
+        },
+        "viewerFpsAfterAgentStop": 0.3,
+        "viewerFpsAfterRestart": 10,
+        "cuaNotificationsDuringScreencast": {
+          "debugger.event Page.screencastVisibilityChanged": {
+            "n": 3,
+            "bytes": 441
+          },
+          "debugger.event Page.screencastFrame": {
+            "n": 631,
+            "bytes": 125984726
+          }
+        },
+        "ms": 6576
+      },
+      "subscriptionTick10Hz": {
+        "frames": 80,
+        "fps": 10,
+        "medianIntervalMs": 100,
+        "p95IntervalMs": 103,
+        "bytesPerSecond": 1403725,
+        "medianFrameBytes": 140389.5,
+        "maxFrameBytes": 140418,
+        "bytesPerSecondAt10fps": 1403895,
+        "pageTicksPerSecond": 10,
+        "hostToViewerMedianMs": 1,
+        "frameWidths": [
+          1280
+        ]
+      },
+      "subscriptionClickToPaint": {
+        "clicks": 10,
+        "landed": 10,
+        "missing": 0,
+        "medianMs": 48,
+        "p95Ms": 54,
+        "minMs": 34,
+        "maxMs": 54,
+        "dispatchMedianMs": 4,
+        "lastClickTrusted": true
+      },
+      "memory": {
+        "atReadyNoTab": {
+          "treeRssKiB": 138216,
+          "treeWorkingSetKiB": 138160,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 138216"
+          ]
+        },
+        "oneTabIdle": {
+          "treeRssKiB": 527380,
+          "treeWorkingSetKiB": 517244,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 173004",
+            "GPU:GPU rss 154608",
+            "Utility:network.mojom.NetworkService rss 90596",
+            "Tab rss 109172"
+          ]
+        },
+        "oneTabStreaming": {
+          "treeRssKiB": 623692,
+          "treeWorkingSetKiB": 622584,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 210632",
+            "GPU:GPU rss 188024",
+            "Utility:network.mojom.NetworkService rss 90888",
+            "Tab rss 134148"
+          ]
+        },
+        "oneTabIdleAfterScreencast": {
+          "treeRssKiB": 570948,
+          "treeWorkingSetKiB": 570848,
+          "treeFootprintKiB": null,
+          "processes": [
+            "Browser rss 177500",
+            "GPU:GPU rss 167856",
+            "Utility:network.mojom.NetworkService rss 90888",
+            "Tab rss 134704"
+          ]
+        }
+      },
+      "criterion": {
+        "bytesPerSecondAt10fps": 1403845,
+        "under1_5MBps": true,
+        "measuredFps": 10
+      },
+      "hostExit": {
+        "code": 0,
+        "signal": null
+      },
+      "hostErrors": [],
+      "errors": [],
+      "hostStderrTail": []
+    }
+  }
+}

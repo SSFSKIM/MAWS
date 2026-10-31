@@ -79,4 +79,63 @@ The production tree (a Node parent in launchd's GUI domain spawning the Electron
 
 ## 4. Acceptance 10 on a VM (M5; not yet run)
 
-## 5. U3: the agent's browser for a remote session (M6; not yet run)
+## 5. U3: the agent's browser for a remote session (M7; the Linux half run 2026-10-31, the macOS half awaiting the mini)
+
+The probe is `spikes/u3-remote-browser/` (its own unknown, U3, beside U4's probes): a windowless Electron in the M1 probe's shape (`host/main.ts`: its own `userData`, the accessory policy on macOS, `window-all-closed` kept open) that composes the in-app browser's main side from `src/main/browser/` unmodified, bundled by `build.mjs` (20 of the bundle's 127 inputs: the `TabStore`, `createTabView` and the `Partitions` with the permission guard, the `Navigator`, `guardPage`, `attachWindowOpen`, the input seams, and cua's primitive server `startCuaBackend` with its connection, filter, claims and peer check); it opens one tab on a text page that the driver serves on the machine's loopback, serves one cua connection on the session's socket, and serves a screencast channel (`host/screencast.ts`, `lib/wire.mjs`) on a second unix socket. The driver (`driver.mjs`, plain Node as `mawsd` is) spawns it in a process group of its own, plays cua's host (`lib/cua-client.mjs`, the fake host's client) and a remote app's view: frames are recorded with their sizes and arrival times and acked end to end (the host acks Chromium only when the viewer acks), and clicks go back as `Input.dispatchMouseEvent` through the tab's `TabDebugger`. Four tab modes: `hidden` (a hidden `BaseWindow` holding the view, the app's `tabWebPreferences` with `backgroundThrottling: true`), `hidden-unthrottled` (the same with `setBackgroundThrottling(false)`), `offscreen` (the view made with `offscreen: true`, still in a hidden window, which gives it its size), and on Linux `shown` (the window shown without focus on the render host's own Xvfb, which nobody sees). `linux/run.sh` and `macos/run.sh` each write `results/summary.json`; the Linux runs' summaries and per-mode `driver.json` are under `linux/evidence/`.
+
+### 5.1 The Linux half (devcloud VM `dc-u3browser-985c`, made 22:53Z, deleted 23:23Z)
+
+Ubuntu 24.04.5, kernel 7.0.0-1014-gcp, 4 vCPU, 8 GB; Electron 44.4.5 linux-x64 (Chrome 152) from GitHub's release (SHASUMS checked), under §1.6's line: `xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp" electron --headless --hide-scrollbars`, the SUID `chrome-sandbox` root:root 4755 (`noSandbox: false` in every run). Two rounds: round 1 (23:01Z to 23:08Z) found the offscreen view unsized (no window: the page read 0×0 and painted nothing) and the cua phase all-or-nothing; round 2 (23:13Z to 23:21Z, `linux/evidence/round2-*`) is the reading below. Every run reached `READY` in 0.73 to 0.81 s from the spawn, the host exited 0 on the driver's `exit`, and no host error was recorded.
+
+**The tab engine and cua.** In every mode the cua socket answered its hello in 3 to 7 ms, `tabs.query` listed the tab, `debugger.attach` took 2 to 6 ms, `Runtime.evaluate` 2 to 5 ms, an agent's click through the primitive server 7 to 8 ms (and landed), `tabs.create` opened a second tab that the store placed in a hidden window of its own and that loaded in about 80 to 100 ms, and `tabs.remove` closed it. The difference is the page's visibility:
+
+| Mode | `document.visibilityState` | `Page.captureScreenshot` through cua | The vendor's screencast screenshot | A 10 Hz timer runs at | Screencast frames |
+|---|---|---|---|---|---|
+| `hidden` (the app's preferences) | hidden | never answers (`Command cancelled: deadline` at 8 s, both tabs) | 118 ms (the start's first frame) | 0.6 Hz | the first only; the viewer's click (a move, a press, a release) takes 5 s to dispatch, though cua's press and release take 7 ms |
+| `hidden-unthrottled` | hidden | never answers (deadline, both tabs) | 122 ms | 10 Hz | yes |
+| `offscreen` | visible | 119 ms (179 KB PNG); the second tab 134 ms | 43 ms | 10 Hz | yes |
+| `shown` (Linux Xvfb only) | visible | 108 ms; the second tab 135 ms | 43 ms | 10 Hz | yes |
+
+A hidden window is the wrong home for an agent's tab: Chromium treats the page as hidden, so `Page.captureScreenshot` (what cua's host sends for a screenshot when the screencast start yields no frame, and what its other captures send) waits for a frame that never comes, and with the app's throttling the page's timers and input stall too. An offscreen view (OSR) paints regardless of any window, which is what capture.ts already relies on for renders, and is the mode that is the same on both platforms; `shown` is a Linux-only equivalent.
+
+**The screencast** (`Page.startScreencast {format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: 1280, maxHeight: 800}`, every frame 1280 wide), the three painting modes:
+
+| Reading | `hidden-unthrottled` | `offscreen` | `shown` |
+|---|---|---|---|
+| A static text page | 1 frame in 4 s (the start's) | 1 | 2 |
+| Text page, a clock redrawn at 10 Hz: frames per second, median interval | 10.0, 100 ms (p95 105) | 10.0, 100 ms (p95 103) | 10.0, 100 ms (p95 103) |
+| Same: bytes per second (median frame) | **1,403,773 B/s** (140,376 B) | **1,403,784 B/s** (140,393 B) | **1,403,585 B/s** (140,385 B) |
+| The whole viewport scrolling every 16 ms: fps, bytes per second (median frame) | 59.6, 8.97 MB/s (150,117 B) | 39.6, 5.96 MB/s (149,980 B) | 51.5, 7.75 MB/s (150,091 B) |
+| Click to paint, 20 clicks: median, p95 (min to max) | 44, 53 ms (36 to 56) | 56.5, 65 ms (47 to 66) | 47.5, 55 ms (40 to 57) |
+| Host to viewer per frame (median) | 1 ms | 1 ms | 1 ms |
+
+A screencast sends a frame only when the page paints, so its cost is the page's change rate times the frame's size: a still page costs nothing, a page changing at 10 Hz costs 1.40 MB/s at quality 60 for this dense serif article (every frame a whole 1280×800 JPEG of about 140 KB), and continuous scrolling 6 to 9 MB/s, which the end-to-end ack would pace down to what a channel carries. The click-to-paint round trip is local (no channel in it): dispatch, the page's handler, the paint and the frame's delivery.
+
+**The viewer's screencast and the agent's share one CDP attachment, and collide.** The tab has one `TabDebugger` (one CDP session) that cua's lease and any other user share. Two faults, in every painting mode: the agent's plain screenshot (a screencast start, one frame, a stop) ends the viewer's stream (10 fps before, 0.3 fps in the 3 s after, back to 10 only when the viewer restarts it); and cua's connection forwards every event of its leased tab to cua's host (`connection.ts` `forward`, a `'*'` listener), so the viewer's frames reached the agent's host while it held the lease: 525 to 706 `Page.screencastFrame` events, 104 to 141 MB, in the 45 s of the screencast phases. Electron's own frame subscription (`webContents.beginFrameSubscription`, encoded with `toJPEG(60)` in the host) uses no CDP session and gives the same stream: 10.0 fps, 100 ms median interval, 1,403,580 to 1,403,772 B/s at a 10 Hz page in the three painting modes, click to paint 46.5 to 48.5 ms median (p95 54 to 59 ms). In `hidden` it delivers nothing either.
+
+**Memory, the render host's process tree with one tab** (RSS from `ps` per process; Xvfb, about 15.5 MiB by §1.5, outside it):
+
+| Mode | At `ready`, no tab (browser process alone) | One tab loaded, idle | Streaming | 10 s after the screencast stopped |
+|---|---|---|---|---|
+| `hidden` | 138,672 KiB | 512,952 KiB | 555,304 KiB | 554,212 KiB |
+| `hidden-unthrottled` | 138,372 KiB | 363,156 KiB (no GPU process yet) | 599,692 KiB | 575,296 KiB |
+| `offscreen` | 138,592 KiB | 543,948 KiB | 628,556 KiB | 604,092 KiB |
+| `shown` | 138,216 KiB | 527,380 KiB | 623,692 KiB | 570,948 KiB |
+
+In `offscreen` with the stream stopped: the browser 181,920 KiB, the GPU process 197,700, the network service 90,928, the tab's renderer 133,544. A held tab on a machine with no app keeps about 0.53 to 0.60 GiB resident on Linux, the order §1.5's after-render reading predicted.
+
+### 5.2 The macOS half (awaiting the mini through CI-opt)
+
+`cd <worktree at the pushed commit> && pnpm install --frozen-lockfile && bash spikes/u3-remote-browser/macos/run.sh`; results under `spikes/u3-remote-browser/macos/results/` (`summary.json`, per mode `driver.json` and the host's `result.json`), the modes `hidden`, `hidden-unthrottled` and `offscreen` with the accessory policy and the committed peer addon (the driver as the trusted root), the footprint read per process as M1 read it. It settles what Linux cannot: whether macOS's hidden window and OSR behave as Linux's (the `shown` mode has no macOS equivalent a person's Mac would accept), the frame size at `devicePixelRatio` 2 (the screencast is capped at 1280×800; the subscription is scaled to 1280 wide), and the physical footprint of a render host with one tab, the number the idle scene excludes.
+
+### 5.3 What the probe needed beyond `src/main/browser/` as it stands
+
+Nothing in `src/main/browser/` was changed, and nothing of the renderer is involved: the primitive server, the store and the page guards ran as bundled. Four things were added or set around them, each a product decision for M8: a placement for each tab's view (`host/headless-views.ts`, 56 lines, standing for the app's `ViewManager`, which places views in the app's windows from the renderer's pane rects), where the view must be offscreen (or, on Linux only, shown on the host's own display) rather than in a hidden window; the browser preload not registered (find, comments, extension pages: the person's chrome, not cua's); on Linux a peer check that admits by uid, since the cua server refuses every peer without the darwin-arm64 addon and no Linux build exists (`host/linux-peer.ts`, a stand-in that reads `/proc` but cannot read the peer's pid; O2's rule for Linux is the uid); and the viewer's frames taken outside the tab's CDP attachment (Electron's frame subscription), since the attachment is the agent's.
+
+### 5.4 The criterion (P5 §13 U3, O5 M7), on the Linux half
+
+- **The primitive server runs in the render host without a renderer rewrite**: holds, in the offscreen mode (§5.3's four additions, none a rewrite); fails in a hidden window, where captures never answer.
+- **Under 1.5 MB/s at 10 fps for a text page**: holds narrowly, 1.40 MB/s at quality 60 for a dense 1280×800 article (a 7% margin), by either frame source; a busier or denser page at the same quality would pass the line, and a still page costs nothing.
+- **The three sides under about 3,000 new or changed lines**: estimated at about 2,550 (a range of 2,000 to 3,200): the render host's tab engine about 1,350 with its tests (the composition, the offscreen placement, the Linux peer policy, the frame source, the seam's startup trigger, hold, handover and lifetime, the capability's `viewed`, the e2e scene), the RL2 kind about 550 (a stream kind over O7's §N credit and acks, the endpoint's feed from `mawsd`, the device adapter), the renderer's screencast view with input about 650 (the frame painter, mouse, wheel and keys mapped and scaled, the Browser tool's branch for a remote session's tab).
+
+Provisional verdict: **promote**, to be confirmed by the macOS half. If promoted, M8's re-plan carries: offscreen views for the render host's tabs (never hidden windows); the viewer's frames from a source outside the tab's CDP attachment, so the agent's screenshot never stops the person's view and the person's view never floods the agent's host; a uid peer policy for the cua server on Linux; and a held tab's 0.5 to 0.6 GiB counted as the background work M8 already names.
