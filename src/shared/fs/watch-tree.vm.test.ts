@@ -3,23 +3,24 @@
 // (comma-separated) on Linux; it reads /proc/self/fdinfo as O3-G's watch-measure.mjs did. Each root is watched through
 // the product's path, the repository watcher of a GitService over the platform's recursive watch (on Linux the tree,
 // with the git prune built over the real git runner), and read for: the inotify watches it takes; RSS growth with a
-// forced GC and its retained part (RSS less the V8 heap resident but free: the heap used, the external memory and the
-// rest, native), then RSS after MAWS_WATCH_TREE_IDLE_MS idle (60 s by default; no collection forced) and after a
-// memory-reducing collection; the event loop's worst lag during the initial walk; notification latency over 30 writes
-// at the root and at the deepest and the largest tracked directory, the writes made by a writer process of its own and
-// timed on CLOCK_MONOTONIC in both, from each write's return (§G's quantity) and from before it, with the writes the
-// filesystem held in their own call; and a 2,000-file burst created then removed in one new directory (the worst loop
-// lag, and the time until every burst file was named). MAWS's checkout is also walked with the prune off, and is
-// measured with a linked worktree under `.claude/worktrees/`, so the nested-checkout prune is read. With both MAWS and
-// the kernel named, one process walks MAWS and then the kernel, each root's growth read on its own (D21 (a): the second
-// root's RSS growth is §G's per-root bound). With MAWS_WATCH_TREE_STORE the synthetic store (seeded when empty: 5,000
-// transcripts in one project, 200 in another) is watched through the store watcher's tree. MAWS_WATCH_TREE_EXHAUST=
-// watches (after `sysctl` lowered max_user_watches to 600) or =instances (max_user_instances at the user's count) runs
-// the exhaustion arm instead. Each arm runs in a fresh process of its own (this file again, under vitest, with
-// MAWS_WATCH_TREE_ARM naming the arm), as O3-G's measure ran each in its own node. Prints one line per arm, appends it to
-// test-results/watch-tree-vm.lines and merges its numbers into test-results/watch-tree-vm.json. A notification slower
-// than §G's bound is recorded with the collections, child spawns and loop stalls that overlapped it. A missed bound
-// fails the case (each read softly, so every line prints); it is a finding for the architect, never a widened bound.
+// forced GC and its retained part, estimated (RSS less the V8 heap resident but free: the heap used, the external
+// memory and the rest, native; see growth()), then RSS after MAWS_WATCH_TREE_IDLE_MS idle (60 s by default; no
+// collection forced) and after a memory-reducing collection; the event loop's worst lag during the initial walk;
+// notification latency over 30 writes at the root and at the deepest and the largest tracked directory, the writes made
+// by a writer process of its own and timed on CLOCK_MONOTONIC in both, from each write's return (§G's quantity) and
+// from before it, with the writes the filesystem held in their own call; and a 2,000-file burst created then removed in
+// one new directory (the worst loop lag, and the time until every burst file was named). MAWS's checkout is also walked
+// with the prune off, and is measured with a linked worktree under `.claude/worktrees/`, so the nested-checkout prune
+// is read. With both MAWS and the kernel named, one process walks MAWS and then the kernel, each root's growth read on
+// its own (D21 (a): the second root's RSS growth is §G's per-root bound). With MAWS_WATCH_TREE_STORE the synthetic
+// store (seeded when empty: 5,000 transcripts in one project, 200 in another) is watched through the store watcher's
+// tree. MAWS_WATCH_TREE_EXHAUST= watches (after `sysctl` lowered max_user_watches to 600) or =instances
+// (max_user_instances at the user's count) runs the exhaustion arm instead. Each arm runs in a fresh process of its own
+// (this file again, under vitest, with MAWS_WATCH_TREE_ARM naming the arm), as O3-G's measure ran each in its own node.
+// Prints one line per arm, appends it to test-results/watch-tree-vm.lines and merges its numbers into
+// test-results/watch-tree-vm.json. A notification slower than §G's bound is recorded with the collections, child spawns
+// and loop stalls that overlapped it. A missed bound fails the case (each read softly, so every line prints); it is a
+// finding for the architect, never a widened bound.
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -291,10 +292,10 @@ class Tap {
 
 // A writer in a process of its own (D21's latency clock: in the product the writer is always another process, so a
 // write the filesystem holds in its call never holds the observing loop). Each write is stamped on CLOCK_MONOTONIC
-// before the call and at its return.
+// before the call and at its return. Should the child fail or exit, every write still pending rejects.
 class Writer {
   private readonly child: ChildProcess;
-  private readonly pending: ((stamps: { start: number; end: number }) => void)[] = [];
+  private readonly pending: { resolve: (stamps: { start: number; end: number }) => void; reject: (error: Error) => void }[] = [];
   private buffered = '';
 
   constructor() {
@@ -306,14 +307,19 @@ class Writer {
       while ((newline = this.buffered.indexOf('\n')) >= 0) {
         const { start, end } = JSON.parse(this.buffered.slice(0, newline)) as { start: string; end: string };
         this.buffered = this.buffered.slice(newline + 1);
-        this.pending.shift()?.({ start: Number(BigInt(start)) / 1e6, end: Number(BigInt(end)) / 1e6 });
+        this.pending.shift()?.resolve({ start: Number(BigInt(start)) / 1e6, end: Number(BigInt(end)) / 1e6 });
       }
     });
+    const fail = (error: Error) => {
+      for (const write of this.pending.splice(0)) write.reject(error);
+    };
+    this.child.on('error', fail);
+    this.child.on('exit', (code, signal) => fail(new Error(`the writer process exited (${signal ?? code}) with writes pending`)));
   }
 
   write(path: string, content: string, append = false): Promise<{ start: number; end: number }> {
-    return new Promise((resolve) => {
-      this.pending.push(resolve);
+    return new Promise((resolve, reject) => {
+      this.pending.push({ resolve, reject });
       this.child.stdin!.write(`${JSON.stringify({ path, content, append })}\n`);
     });
   }
@@ -354,19 +360,22 @@ function memory(): Memory {
   return { rss, heapTotal, heapPhysical: getHeapStatistics().total_physical_size, heapUsed, external };
 }
 
-// RSS growth and its retained part: RSS less the V8 heap resident but free after a full GC, which is the heap used,
-// the external memory (array buffers) and the rest, native (the watch handles, libuv's watcher lists, malloc's arenas).
-// The heap's resident size is V8's physical size, the pages it has touched; its committed size (heapTotal) also counts
-// reserved pages never touched, so a heap that shrinks its committed but untouched space would be credited with pages
-// RSS never held (the second-root arm's first root, once: retained 21.3 MiB on an RSS growth of 8.7). The committed
-// reading stays beside it, retainedByCommittedMiB.
+// RSS growth and its retained part, after a full GC. Retained is the heap used plus native, native being the RSS outside
+// V8's resident heap (the watch handles, libuv's watcher lists, malloc's arenas) and the external memory (array buffers);
+// so ΔRSS − Δ(resident heap − heap used) = Δheap used + Δexternal + Δnative, the resident heap being V8's physical size,
+// the pages it has touched. Its committed size (heapTotal) also counts pages never touched, never in RSS, which would
+// corrupt the native term: that reading stays beside it, retainedByCommittedMiB. Retained growth can exceed RSS growth:
+// a root's live data can fill heap pages already resident before its walk. Retained is an estimate: V8's physical size
+// is its own high-water accounting of the pages it touched, not the OS's census of resident pages, so after V8 discards
+// pages it still counts them and retained undercounts. The heap used is read directly, a check on the rest; atStartMiB
+// keeps the absolute baseline, so a growth can be read against what the process already held.
 function growth(before: Memory, after: Memory) {
   const mib = (key: keyof Memory) => (after[key] - before[key]) / MiB;
   const residentFree = mib('heapPhysical') - mib('heapUsed');
   const committedFree = mib('heapTotal') - mib('heapUsed');
   return {
     rssMiB: round1(mib('rss')),
-    retainedMiB: round1(mib('rss') - residentFree),
+    retainedMiB: round1(mib('rss') - residentFree), // an estimate, see above
     heapUsedMiB: round1(mib('heapUsed')),
     externalMiB: round1(mib('external')),
     nativeMiB: round1(mib('rss') - mib('heapPhysical') - mib('external')),
@@ -375,6 +384,7 @@ function growth(before: Memory, after: Memory) {
     retainedByCommittedMiB: round1(mib('rss') - committedFree),
     rssIdleMiB: null as number | null,
     rssReducedMiB: null as number | null,
+    atStartMiB: Object.fromEntries(Object.entries(before).map(([key, bytes]) => [key, round1(bytes / MiB)])),
   };
 }
 
@@ -393,7 +403,7 @@ async function settled(before: Memory, grown: ReturnType<typeof growth>): Promis
 }
 
 function memoryText(memory: ReturnType<typeof growth>): string {
-  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 resident and free +${memory.heapResidentFreeMiB}, committed and free +${memory.heapCommittedFreeMiB}, retained by the committed heap +${memory.retainedByCommittedMiB}; ${memory.rssReducedMiB === null ? 'not settled at the arm\'s end' : `at the arm's end after ${IDLE_MS / 1000} s idle ${memory.rssIdleMiB === null ? 'not read' : `+${memory.rssIdleMiB}`}, then after a memory-reducing collection +${memory.rssReducedMiB}`})`;
+  return `rss +${memory.rssMiB} MiB (retained, estimated, +${memory.retainedMiB}: heap used +${memory.heapUsedMiB} as read, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 resident and free +${memory.heapResidentFreeMiB}, committed and free +${memory.heapCommittedFreeMiB}, retained by the committed heap +${memory.retainedByCommittedMiB}; ${memory.rssReducedMiB === null ? 'not settled at the arm\'s end' : `at the arm's end after ${IDLE_MS / 1000} s idle ${memory.rssIdleMiB === null ? 'not read' : `+${memory.rssIdleMiB}`}, then after a memory-reducing collection +${memory.rssReducedMiB}`})`;
 }
 
 const GC_KINDS: Record<number, string> = {
@@ -469,12 +479,16 @@ async function repositoryArm(root: string) {
     await sleep(1_000);
     const { deepest, largest } = trackedSites(root);
     const writer = new Writer();
-    const latency = {
-      root: await latencyAt(root, root, tap, writer),
-      [`deepest ${relative(root, deepest)}`]: await latencyAt(root, deepest, tap, writer),
-      [`largest ${relative(root, largest)}`]: await latencyAt(root, largest, tap, writer),
-    };
-    writer.close();
+    let latency: Record<string, Awaited<ReturnType<typeof latencyAt>>>;
+    try {
+      latency = {
+        root: await latencyAt(root, root, tap, writer),
+        [`deepest ${relative(root, deepest)}`]: await latencyAt(root, deepest, tap, writer),
+        [`largest ${relative(root, largest)}`]: await latencyAt(root, largest, tap, writer),
+      };
+    } finally {
+      writer.close();
+    }
     const burst = await burstAt(root, tap);
     return { watches, memory: await settled(before, grown), walkLagMs, walkMs: walkedAt === null ? null : Math.round(walkedAt - start), latency, burst, changes: changed.length };
   } finally {
@@ -694,15 +708,18 @@ async function storeArm(storeDir: string) {
     const appends: Sample[] = [];
     const writer = new Writer();
     const overlaps = new Overlaps();
-    for (let i = 0; i < LATENCY_WRITES; i++) {
-      const id = sessionId((i * 97) % count);
-      const rel = `${slug}/${id}.jsonl`;
-      const [heardAt, { start, end }] = await Promise.all([tap.next((filename) => filename === rel, 2_000), writer.write(join(paths.projects, rel), '{"type":"assistant"}\n', true)]);
-      appends.push({ start, end, at: heardAt?.mono ?? null });
-      await sleep(20);
+    try {
+      for (let i = 0; i < LATENCY_WRITES; i++) {
+        const id = sessionId((i * 97) % count);
+        const rel = `${slug}/${id}.jsonl`;
+        const [heardAt, { start, end }] = await Promise.all([tap.next((filename) => filename === rel, 2_000), writer.write(join(paths.projects, rel), '{"type":"assistant"}\n', true)]);
+        appends.push({ start, end, at: heardAt?.mono ?? null });
+        await sleep(20);
+      }
+    } finally {
+      writer.close();
+      overlaps.stop();
     }
-    writer.close();
-    overlaps.stop();
     const cpu = process.cpuUsage();
     const listed = await new Discovery(paths).list();
     const used = process.cpuUsage(cpu);
