@@ -4,7 +4,7 @@
 // the product's path, the repository watcher of a GitService over the platform's recursive watch (on Linux the tree,
 // with the git prune built over the real git runner), and read for: the inotify watches it takes, RSS growth with a
 // forced GC, the event loop's worst lag during the initial walk, notification latency over 30 writes at the root and at
-// the deepest and the largest tracked directory, and a 2,000-file burst created then removed in one new directory (the
+// the deepest and the largest tracked directory (from each write's return), and a 2,000-file burst created then removed in one new directory (the
 // worst loop lag, and the time until every burst file was named). MAWS's checkout is also walked with the prune off,
 // and is measured with a linked worktree under `.claude/worktrees/`, so the nested-checkout prune is read. With
 // MAWS_WATCH_TREE_STORE the synthetic store (seeded when empty: 5,000 transcripts in one project, 200 in another) is
@@ -174,7 +174,10 @@ async function measure(arm: Arm, results: Record<string, unknown>): Promise<void
     const bound = kind === 'maws' ? BOUND.mawsWatches : kind === 'linux' ? BOUND.linuxWatches : null;
     results[root] = { kind, worktree, ...measured };
     line(root, `watches ${measured.watches} (bound ${bound ?? 'none'}) · ${memoryText(measured.memory)} · walk lag ${measured.walkLagMs} ms · burst ${BURST_FILES}: lag ${measured.burst.createLagMs}/${measured.burst.removeLagMs} ms, named in ${measured.burst.namedMs} ms · latency p50/p95 ${latencyText(measured.latency)}`);
-    for (const [site, figures] of Object.entries(measured.latency)) for (const slow of [...figures.create.slow, ...figures.modify.slow]) line(root, `slow write at ${site}: ${JSON.stringify(slow)}`);
+    for (const [site, figures] of Object.entries(measured.latency)) {
+      for (const slow of [...figures.create.slow, ...figures.modify.slow]) line(root, `slow notification at ${site}: ${JSON.stringify(slow)}`);
+      for (const [op, writes] of [['create', figures.create.blockedWrites], ['modify', figures.modify.blockedWrites]] as const) if (writes.length > 0) line(root, `${op} writes the filesystem held in their own call at ${site}: ${JSON.stringify(writes)}`);
+    }
     for (const stall of measured.burst.createStalls) line(root, `burst stall: ${JSON.stringify(stall)}`);
     if (bound !== null) expect.soft(measured.watches, `${kind}'s watches`).toBeLessThanOrEqual(bound);
     expect.soft(measured.memory.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
@@ -447,9 +450,10 @@ async function latencyAt(root: string, dir: string, tap: Tap) {
     const heard = tap.next((filename) => filename === rel, 2_000);
     const start = performance.now();
     writeFileSync(join(dir, name), content);
+    const written = performance.now();
     const at = await heard;
     await sleep(20);
-    return { start, at };
+    return { start: written, at, writeMs: written - start };
   };
   const create: Sample[] = [];
   const modify: Sample[] = [];
@@ -464,13 +468,22 @@ async function latencyAt(root: string, dir: string, tap: Tap) {
   // A write slower than §G's bound, with what overlapped it.
   const slowOf = (samples: Sample[]) =>
     samples.flatMap(({ start, at }, i) => (at !== null && at - start > BOUND.latencyP95Ms ? [{ write: i, ms: round2(at - start), ...overlaps.around(start, at) }] : []));
+  // A write the filesystem held in its own call (ext4 on the VM's disk held a rewrite of the probe up to 90 ms in
+  // writeFileSync, the process off the CPU throughout): no part of the tree's latency, which runs from the call's
+  // return, since the event cannot be read before it; recorded beside it.
+  const blocked = (samples: Sample[]) => samples.flatMap(({ writeMs }, i) => (writeMs > BOUND.latencyP95Ms ? [{ write: i, ms: round2(writeMs) }] : []));
   const timings = (samples: Sample[]) => samples.map(({ start, at }) => (at === null ? null : at - start));
-  return { entries: readdirSync(dir).length, create: { ...stats(timings(create)), slow: slowOf(create) }, modify: { ...stats(timings(modify)), slow: slowOf(modify) } };
+  return {
+    entries: readdirSync(dir).length,
+    create: { ...stats(timings(create)), slow: slowOf(create), blockedWrites: blocked(create) },
+    modify: { ...stats(timings(modify)), slow: slowOf(modify), blockedWrites: blocked(modify) },
+  };
 }
 
 interface Sample {
-  start: number;
+  start: number; // when the write's call returned
   at: number | null; // when the tree named it; null: never within 2 s
+  writeMs: number; // the write's own call
 }
 
 function stats(samples: (number | null)[]) {
