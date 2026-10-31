@@ -928,3 +928,110 @@ test('p5 O2 (5) a subagent cannot call CronCreate (no cron tool offered, the cal
  }
  assert.deepEqual(toolResultsO2(stepO2('p5-o2-stop-crons-main','list-after-subagent'),/./).map(b=>b.text),['No scheduled jobs.']);
 });
+// P5 O16 M0's spike (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M0; scenarios/pass3/p5-o16-holder.mjs and
+// p5-o16-relay/; findings-p5-o16-holder.txt): what the session host and the reap rely on the engine for, on the pinned
+// engine 2.1.283 (the fixtures) and on the installed 2.1.316 (`-installed`, the engine mawsd would run), each launch
+// MAWS's against the scripted Messages API, sminos installed from doperpowers cc459470, on a devcloud VM.
+const O16_ARMS=['main','end-session','end-session-pending','sigterm','sigterm-pending','reinit','await-seed','await-resume','plain-resume'];
+const O16_ENGINES=[['','2.1.283'],['-installed','2.1.316']];
+const loadO16=(arm,sfx)=>load5('p5-o16-holder-'+arm+sfx);
+const metaO16=(arm,sfx,event)=>meta4(loadO16(arm,sfx),event);
+const oneO16=(arm,sfx,event,pick=()=>true)=>{const all=metaO16(arm,sfx,event).filter(pick);assert.equal(all.length,1,arm+sfx+' '+event);return all[0];};
+const q1O16=(sfx,label)=>oneO16('main',sfx,'q1',q=>q.label===label);
+const treeO16=(sfx,label)=>oneO16('main',sfx,'tree',t=>t.label===label);
+for(const [sfx,version] of O16_ENGINES)for(const arm of O16_ARMS)test(`p5/p5-o16-holder-${arm}${sfx} is ordered NDJSON, P5-O16 provenance on ${version}, no managed settings, the owner file unchanged, no scenario error and no secret`,()=>{
+ const text=readFileSync(new URL('p5-o16-holder-'+arm+sfx+'.jsonl',dir5),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);rows.forEach((r,i)=>assert.equal(r.seq,i+1));
+ const prov=meta4(rows,'provenance')[0];
+ assert.deepEqual([prov.child,prov.engineVersion,prov.pin,prov.document],['P5-O16',version,'b429c8f3e697aaa8b4d7bf837c81db5f66ffe841','docs/doperpowers/plans/2026-10-31-p5-o16-holder.md']);
+ assert.deepEqual(prov.managedSettings,[]);assert.equal(meta4(rows,'owner_file_check')[1].same,true);
+ assert.deepEqual(meta4(rows,'scenario_error'),[]);
+ // sminos from the checkout the document names, installed into the scratch config home
+ if(prov.install)assert.deepEqual([prov.install.rev,prov.install.version,prov.install.steps.map(s=>s.status)],['cc459470f9cc8e75926ab30753d2cc367af6c505','1.27.17',[0,0]]);
+});
+test('p5 O16 (1) the fixture pin loads no sminos hooks module (bridge.tsx hooks "session.append", not an event on 2.1.283); 2.1.316 loads it and runs the bridge child under claude',()=>{
+ assert.ok(oneO16('main','','debug_full').lines.some(l=>/hooks module sminos@doperpowers failed to load: .*"session\.append" is not an event/.test(l)));
+ assert.ok(!treeO16('','rest').rows.some(r=>/sminos/.test(r.command)));
+ assert.ok(oneO16('main','-installed','debug_full').lines.some(l=>/hooks module sminos@doperpowers loaded .*turn\.step/.test(l)));
+ const rest=treeO16('-installed','rest');const bridge=rest.rows.find(r=>/sminos\.py bridge --session /.test(r.command));
+ assert.ok(bridge);assert.equal(bridge.ppid,rest.claudePid);
+});
+test('p5 O16 (1) a turn.step fence holds an engine-started turn, a cron fire and a task notification alike, for its 3.0 s before the main request on both engines, and its refusal ends the turn with no main request',()=>{
+ for(const [sfx] of O16_ENGINES){
+  assert.ok(q1O16(sfx,'task-baseline').startToRequestMs<1000,sfx);
+  for(const label of ['task-held','cron-held']){const q=q1O16(sfx,label);assert.equal(q.mainRequest.marker,label==='cron-held'?'FIRE':'NOTIFIED',sfx+label);assert.ok(q.startToRequestMs>=3000&&q.startToRequestMs<4000,sfx+label);}
+  const refused=q1O16(sfx,'task-refused');assert.equal(refused.mainRequest,null,sfx);assert.equal(refused.turnResult.result,'O16 fence refused this turn.',sfx);
+ }
+ // 2.1.316 pushes the fence's ui_log lines to the host: the hold measured inside the hook
+ for(const label of ['task-held','cron-held']){const q=q1O16('-installed',label);assert.ok(q.heldMs>=3000&&q.fence.some(l=>/^O16_FENCE held /.test(l.text)),label);}
+});
+test('p5 O16 (2) end_session ends a -p process at once (0, or 1 with a turn running: the pending permission cancelled, the turn aborted) and SIGTERM with 143, SessionEnd "other"; the background shell and the bridge go with it, the transcript whole',()=>{
+ for(const [sfx] of O16_ENGINES)for(const [arm,code,sigterm] of [['end-session',0,false],['end-session-pending',1,false],['sigterm',143,true],['sigterm-pending',143,true]]){
+  const q=oneO16(arm,sfx,'q2');const id=arm+sfx;
+  assert.deepEqual(q.exit,{code,signal:null},id);assert.ok(q.exitMs<3000,id);
+  assert.ok(q.shells.length===2&&q.shells.every(s=>!s.aliveAfter),id);assert.ok(q.bridges.every(b=>!b.aliveAfter),id);
+  assert.equal(q.stdinAfterIgnored,null,id); // never ignored, so never re-tried
+  // the host callback's SessionEnd comes on SIGTERM alone; the command hook on SIGTERM, and on end_session from 2.1.316
+  assert.deepEqual(metaO16(arm,sfx,'hook_callback_seen').filter(h=>h.hook_event_name==='SessionEnd').map(h=>h.reason),sigterm?['other']:[],id);
+  assert.deepEqual(q.sessionEnd.map(s=>s.input.reason),sigterm||sfx?['other']:[],id);
+  const t=oneO16(arm,sfx,'transcript');assert.ok(t.exists&&t.endsWithNewline&&t.unparsable===0,id);
+  if(arm==='end-session-pending'){assert.ok(q.rows.some(r=>r.type==='control_cancel_request'),id);assert.equal(q.rows.find(r=>r.type==='result').subtype,'error_during_execution',id);}
+ }
+});
+test('p5 O16 (3) a second initialize retires a pending hook callback (cancelled, its tool not run) and answers with the pending permission; the outstanding tools/call and the permission take their late answers; a response to an unsent id is dropped; a task snapshot follows; no task carries ambient',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const out=oneO16('reinit',sfx,'q3_outstanding');assert.deepEqual(out.held.map(k=>k.split(':')[0]).sort(),['call','hook','permission'],sfx);
+  const id=k=>out.held.find(x=>x.startsWith(k)).split(':')[1];
+  const stray=oneO16('reinit',sfx,'q3_stray');assert.deepEqual(stray.rows.filter(r=>r.dir==='in'),[],sfx);assert.equal(stray.alive,true,sfx);
+  const re=oneO16('reinit',sfx,'q3_reinit');
+  assert.equal(re.answer.subtype,'success',sfx);assert.deepEqual(re.answer.pending_permission_requests.map(p=>[p.request_id,p.request.tool_name]),[[id('permission'),'Read']],sfx);assert.deepEqual(re.answer.pending_user_dialog_requests,[],sfx);
+  const cancel=re.rows.find(r=>r.type==='control_cancel_request');const answer=re.rows.find(r=>r.dir==='in'&&r.type==='control_response');
+  assert.equal(cancel.request_id,id('hook'),sfx);assert.ok(cancel.seq<answer.seq,sfx);
+  assert.ok(re.rows.some(r=>r.subtype==='background_tasks_changed'&&r.detail.tasks.length===1),sfx);
+  assert.match(re.rows.find(r=>r.type==='user').blocks[0].text,/^PreToolUse:mcp__maws__hooked hook error: The SDK host reconnected before its PreToolUse hook answered, so this tool call was not executed\./,sfx);
+  const late=k=>oneO16('reinit',sfx,'q3_late',l=>l.kind===k);
+  assert.deepEqual(late('hook').rows.filter(r=>r.dir==='in'),[],sfx); // the retired callback's late answer: nothing back
+  assert.ok(late('permission').rows.some(r=>r.type==='user'&&r.blocks[0].is_error===false),sfx);
+  assert.ok(late('call').rows.some(r=>r.type==='user'&&r.blocks[0].text==='O16_HELD_RESULT'),sfx);
+  const rows=loadO16('reinit',sfx);
+  for(const r of rows)if(r.frame.type==='control_request'&&r.frame.request?.input?.hook_event_name==='Stop')for(const t of r.frame.request.input.background_tasks)assert.ok(!('ambient' in t),sfx);
+  for(const r of rows)if(r.frame.subtype==='background_tasks_changed')for(const t of r.frame.tasks)assert.ok(!('ambient' in t),sfx);
+ }
+});
+test('p5 O16 (4) at rest claude holds its stdio MCP servers (and on 2.1.316 the bridge child) in its own group; each Bash, foreground, background or a Monitor\'s, is a session of its own under claude; get_settings carries no mcpServers, mcp_status each server\'s command and args',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const after=treeO16(sfx,'rest-after-stop');const claude=after.rows[0];
+  const children=after.rows.filter(r=>r.depth===1).map(r=>r.command.replace(/\/tmp\/\S+?\//,'<root>/'));
+  assert.deepEqual(children.filter(c=>/o16-mcp/.test(c)).length,2,sfx);
+  assert.deepEqual(children.filter(c=>!/o16-mcp|sminos\.py bridge/.test(c)),[],sfx);
+  for(const r of after.rows.slice(1))assert.equal(r.pgid,claude.pgid,sfx);
+  for(const label of ['foreground-bash','background-bash','subagent']){
+   const shells=treeOf16(sfx,label);assert.ok(shells.length>=1,sfx+label);for(const s of shells){assert.equal(s.ppid,claude.pid,sfx+label);assert.equal(s.pgid,s.pid,sfx+label);}
+  }
+  const effective=oneO16('main',sfx,'get_settings').response.response.effective;assert.ok(!('mcpServers' in effective),sfx);
+  const servers=oneO16('main',sfx,'mcp_status').response.response.mcpServers;const prov=oneO16('main',sfx,'provenance');
+  assert.deepEqual(servers.find(s=>s.name==='o16-flag').config.args,prov.mcpConfig.mcpServers['o16-flag'].args,sfx);
+  assert.deepEqual(servers.map(s=>[s.name,s.config.type,s.scope]).sort(),[['o16-flag','stdio','dynamic'],['o16-user','stdio','user']],sfx);
+ }
+ const monitor=treeO16('-installed','monitor').rows.find(r=>/^tail -f /.test(r.command));assert.ok(monitor);
+ assert.ok(!treeO16('','monitor').rows.some(r=>/^tail -f /.test(r.command))); // 2.1.283 offers no Monitor
+});
+const treeOf16=(sfx,label)=>treeO16(sfx,label).rows.filter(r=>r.depth===1&&/^\/bin\/bash -c /.test(r.command));
+test('p5 O16 (5) --await-initialize is taken by both engines and holds a resumed session\'s cron until initialize; without it the resurrected cron fires before any initialize',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const held=oneO16('await-resume',sfx,'q5_withheld');assert.equal(held.exited,false,sfx);assert.deepEqual(held.rows.filter(r=>r.dir==='in'),[],sfx);
+  assert.deepEqual(held.requests.filter(q=>q.kind==='main'),[],sfx);
+  const after=oneO16('await-resume',sfx,'q5_after_initialize');assert.equal(after.answer.subtype,'success',sfx);assert.ok(after.turnStart&&after.turnResult,sfx);
+  assert.deepEqual(after.requests.filter(q=>q.kind==='main').map(q=>q.marker).slice(0,1),['FIRE'],sfx);
+  const plain=oneO16('plain-resume',sfx,'q5_withheld');assert.ok(plain.requests.filter(q=>q.kind==='main'&&q.marker==='FIRE').length>=1,sfx);
+  assert.ok(plain.rows.some(r=>r.type==='result'),sfx);
+ }
+});
+test('p5 O16 (6) the session host\'s relay adds about 0.12 ms at p50 and 0.15 ms at p95 per output line on the VM, twice, under the gate (0.5 / 1.5 ms)',()=>{
+ for(const name of ['p5-o16-holder-relay.json','p5-o16-holder-relay-repeat.json']){
+  const r=JSON.parse(readFileSync(new URL(name,dir5),'utf8'));
+  assert.equal(r.engineVersion,'2.1.316 (Claude Code)',name);assert.ok(r.trace.lines>1000,name);
+  assert.ok(r.replay.hop.p50<=500&&r.replay.hop.p95<=1500,name);assert.equal(r.verdict,'under the gate',name);
+  assert.ok(r.replay.direct.n===r.replay.hosted.n&&r.replay.direct.n===r.trace.lines*r.rounds,name);
+ }
+});
