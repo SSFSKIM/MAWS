@@ -6,7 +6,9 @@
 // its expiry; and `Open creating turn` when this transcript holds the call, which jumps the transcript to its cell. The
 // section is omitted with nothing to list and nothing to say. Read-only: MAWS never writes the file or asks for a job.
 import { useMemo } from 'react';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { TurnId } from '../../../transcript/model/rows';
 import type { SessionRecord } from '@shared/graph/session';
 import { formatClock, formatDayTime, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { useTranscriptStore } from '../../../transcript';
@@ -20,6 +22,8 @@ import { useScheduledFile } from './scheduled-file';
 import { ACTION } from './TaskRows';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NO_TURNS: readonly TurnId[] = [];
+const NO_EVENTS: readonly SessionEvent[] = [];
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
 
@@ -42,8 +46,16 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
   const loaded = useTranscriptStore((s) => s.activity(appSessionId));
   // The long-transcript window: a long session's older history's cron calls, as its newest window carried them, go
   // before the loaded turns' own, so the list is the whole history's whatever is loaded.
+  // A rewind the transcript took since abandons a carried turn as it would a loaded one (the turns it hides, and the
+  // rewinds it holds, whose targets the store may not hold).
   const cronHistory = useTranscriptStore((s) => s.entries[appSessionId]?.cronHistory);
-  const activity = useMemo(() => (cronHistory?.length ? [...cronHistoryActivity(cronHistory), ...loaded] : loaded), [cronHistory, loaded]);
+  const hidden = useTranscriptStore((s) => s.entries[appSessionId]?.state.hidden?.turns ?? NO_TURNS);
+  const loose = useTranscriptStore((s) => s.entries[appSessionId]?.state.loose ?? NO_EVENTS);
+  const activity = useMemo(() => {
+    if (!cronHistory?.length) return loaded;
+    const rewinds = loose.flatMap((event) => (event.kind === 'boundary.rewind' ? [event.targetMessageUuid] : []));
+    return [...cronHistoryActivity(cronHistory, { hidden, rewinds }), ...loaded];
+  }, [cronHistory, hidden, loose, loaded]);
   const file = useScheduledFile(appSessionId, session);
   const created = useMemo(() => createdCrons(activity), [activity]);
   const durable = file?.status === 'ok' ? file.jobs : null;

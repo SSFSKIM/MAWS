@@ -47,15 +47,25 @@ export type CronActivity = Pick<TurnActivity, 'turnId' | 'crons'>;
 // The cron calls a disk-backed session's older history holds, as its newest window's answer carried them
 // (`cronHistory`, history-window.ts `cronHistoryOf`: each turn's start, then its calls with their results), as activity
 // entries that go before the loaded turns' own. A turn whose page is loaded later is folded again where it sits, and
-// `createdCrons` keeps the last word on each id, so the list is the whole history's.
-export function cronHistoryActivity(events: readonly SessionEvent[]): CronActivity[] {
-  const turns: { turnId: TurnId; events: SessionEvent[] }[] = [];
+// `createdCrons` keeps the last word on each id, so the list is the whole history's. The carry is the history as the
+// host read it at the open: a rewind the transcript took since (the store's `revised`: the turns it hides, and the
+// rewinds it holds, which name a carried turn the store may not hold) abandons a carried turn as the reducer would,
+// that turn and every carried one after it.
+export function cronHistoryActivity(events: readonly SessionEvent[], revised: { hidden: readonly TurnId[]; rewinds: readonly MessageUuid[] } = NOT_REVISED): CronActivity[] {
+  const turns: { turnId: TurnId; messages: Set<string>; events: SessionEvent[] }[] = [];
   for (const event of events) {
-    if (event.kind === 'turn.started') turns.push({ turnId: event.userMessageUuid === null ? turnIds.ofEvent(event.id) : turnIds.ofMessage(event.userMessageUuid), events: [] });
-    else turns.at(-1)?.events.push(event);
+    if (event.kind === 'turn.started') turns.push({ turnId: event.userMessageUuid === null ? turnIds.ofEvent(event.id) : turnIds.ofMessage(event.userMessageUuid), messages: new Set(event.userMessageUuid === null ? [] : [event.userMessageUuid]), events: [] });
+    else {
+      const turn = turns.at(-1);
+      turn?.events.push(event);
+      if (turn && 'messageUuid' in event && event.messageUuid !== null) turn.messages.add(event.messageUuid);
+    }
   }
-  return turns.map((turn) => ({ turnId: turn.turnId, crons: orchestrationOf(turn.events).crons }));
+  const hidden = new Set(revised.hidden);
+  const abandonedFrom = Math.min(turns.length, ...revised.rewinds.map((target) => turns.findIndex((turn) => turn.messages.has(target))).filter((at) => at >= 0));
+  return turns.slice(0, abandonedFrom).filter((turn) => !hidden.has(turn.turnId)).map((turn) => ({ turnId: turn.turnId, crons: orchestrationOf(turn.events).crons }));
 }
+const NOT_REVISED = { hidden: [], rewinds: [] };
 
 // Every job the transcript's creates made and no later successful delete removed, in creation order, durable ones
 // included (their row comes from the file; this names the call that created them). A delete still waiting for its

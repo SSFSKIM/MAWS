@@ -226,6 +226,17 @@ describe('createdCrons over a window and its cronHistory (e7-cron and its resume
     expect(createdCrons(activityOf(all.slice(turnStarts.at(-1)!)))).toEqual([]);
   });
 
+  it('drops a carried job whose turn a rewind since abandoned: one the store hides, or one a rewind it holds names', () => {
+    const base = turnStarts[2]!; // turns 1 and 2 carried: the tick and the one-shot made in turn 1
+    const carried = cronHistoryOf(all, base);
+    const first = carried.find((event) => event.kind === 'turn.started')!;
+    const turnOne = first.kind === 'turn.started' && first.userMessageUuid !== null ? first.userMessageUuid : null;
+    const ids = (activity: ReturnType<typeof cronHistoryActivity>) => createdCrons(activity).map((job) => job.id);
+    expect(ids(cronHistoryActivity(carried))).toEqual(['481abb0a', '8d1a2582']);
+    expect(ids(cronHistoryActivity(carried, { hidden: [cronHistoryActivity(carried)[0]!.turnId], rewinds: [] }))).toEqual([]);
+    expect(ids(cronHistoryActivity(carried, { hidden: [], rewinds: [turnOne!] }))).toEqual([]);
+  });
+
   it('still lists them once older pages are loaded under the cronHistory the open carried', () => {
     for (const [i, base] of turnStarts.entries()) for (const loaded of turnStarts.slice(0, i)) expect(folded(base, loaded), `window ${base}, loaded from ${loaded}`).toEqual(whole);
   });

@@ -218,7 +218,6 @@ interface Attached {
   settled: Promise<void>;
   offReset: (() => void) | null;
   offRebuild: (() => void) | null; // the long-transcript window: the source's rebuild subscription
-  offCronHistory: (() => void) | null; // and its older history's cron calls
   // Set while the key is being started over: each hydration builds a fresh state (with this ui, what the reader had
   // opened) and installs it only once its snapshot has applied, so the old rows stay on screen until then, and stay if
   // the snapshot fails (a retry stages afresh).
@@ -246,8 +245,6 @@ export function createTranscriptStore() {
       attached.attachment = null;
       attached.offRebuild?.();
       attached.offRebuild = null;
-      attached.offCronHistory?.();
-      attached.offCronHistory = null;
       attached.offReset?.();
     };
     // The hydration protocol (source/hydrate.ts) over the key's current state. Resolves either way; a failure is
@@ -285,9 +282,9 @@ export function createTranscriptStore() {
             // asked for before the restart that the view has not handled yet.
             const pending = attached.stagedJump ?? entry(key)?.jump ?? null;
             attached.stagedJump = null;
-            put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null });
+            put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null, cronHistory: cronHistoryOf(attached) });
             if (pending) jump(key, pending.focus, { align: pending.align }, true);
-          } else put(key, { phase: 'live' });
+          } else put(key, { phase: 'live', cronHistory: cronHistoryOf(attached) });
         },
         (reason: unknown) => {
           if (!current()) return;
@@ -297,6 +294,9 @@ export function createTranscriptStore() {
       );
       return attached.settled;
     };
+    // What the source's newest window carried of its older history's cron calls, taken with the history it answered:
+    // installed with it, so a staged restart that fails keeps the carry of the history it keeps.
+    const cronHistoryOf = (attached: Attached) => attached.source.older?.state.getState().cronHistory;
     const put = (key: string, patch: Partial<TranscriptEntry>) => {
       const current = entry(key);
       if (!current) return;
@@ -378,7 +378,7 @@ export function createTranscriptStore() {
         // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
         // cannot recognise. The reducer state starts over in a staged state installed once the snapshot has applied;
         // what the reader opened is kept, keyed by ids that resolve again when the history is in the same form.
-        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, offRebuild: null, offCronHistory: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, offRebuild: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
         attached.offReset = source.onReset?.(() => {
@@ -397,15 +397,6 @@ export function createTranscriptStore() {
           put(key, { phase: 'hydrating', error: null });
           hydrate(key, attached);
         }) ?? null;
-        // The cron calls older history holds, as the source's newest window carried them.
-        const pages = source.older?.state;
-        if (pages) {
-          const carry = (cronHistory: readonly SessionEvent[] | undefined) => {
-            if (attachments.get(key) === attached && entry(key) && entry(key)!.cronHistory !== cronHistory) put(key, { cronHistory });
-          };
-          attached.offCronHistory = pages.subscribe((next, previous) => next.cronHistory !== previous.cronHistory && carry(next.cronHistory));
-          carry(pages.getState().cronHistory);
-        }
         return hydrate(key, attached);
       },
 
