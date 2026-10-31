@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { preAmendmentIndex, summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
 import { Index } from './index';
-import { MIGRATIONS, REPAIRS } from './migrations';
+import { ADDED_COLUMNS, MIGRATIONS, REPAIRS } from './migrations';
 
 describe('the index opens, migrates and refuses what it cannot own', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -401,6 +401,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const reference = join(dir.path, 'reference.sqlite');
       const raw = new DatabaseSync(reference);
       for (const migration of MIGRATIONS) raw.exec(migration.sql);
+      for (const { table, column, definition } of ADDED_COLUMNS) raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); // P5 O7 M4
       raw.close();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
