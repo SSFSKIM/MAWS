@@ -14,7 +14,7 @@ import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
-import { HYDRATION, OLDER } from '../model/copy';
+import { HYDRATION, OLDER, REACH } from '../model/copy';
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
@@ -546,6 +546,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
+  const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
   // The long-transcript window: a source whose history comes one window at a time pages older ones in as the reader
@@ -640,7 +641,21 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     <TranscriptProvider value={context}>
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
-        {pages.state.olderFailed !== null && (
+        {reach !== null ? (
+          // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
+          // how it ended when it did not land (the store's `reachMessage`)
+          <div role="status" data-testid="reach" data-phase={reach.phase} className="absolute inset-x-0 top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-1.5 text-ui-sm text-fg-muted">
+            <span className="min-w-0 flex-1">{reach.phase === 'loading' ? REACH.loading(reach.progress) : reach.phase === 'missing' ? REACH.missing : REACH.failed(reach.error)}</span>
+            {reach.phase === 'failed' && (
+              <button type="button" onClick={() => void useTranscriptStore.getState().reachMessage(storeKey, reach.anchor)} className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                {REACH.retry}
+              </button>
+            )}
+            <button type="button" onClick={() => useTranscriptStore.getState().stopReach(storeKey)} className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+              {reach.phase === 'loading' ? REACH.stop : REACH.dismiss}
+            </button>
+          </div>
+        ) : pages.state.olderFailed !== null && (
           // An older page that did not load: asked again here, since a pane too short to scroll has no other way to ask
           // (lane A's bar, RemoteTranscriptSlot.tsx)
           <div role="status" data-testid="older-failed" className="absolute inset-x-0 top-0 z-10 flex items-center gap-2 border-b border-border bg-bg px-4 py-1.5 text-ui-sm text-fg-muted">

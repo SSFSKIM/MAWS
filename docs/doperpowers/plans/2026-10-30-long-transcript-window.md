@@ -234,8 +234,15 @@ On the 625 MB transcript:
 1. **Memory per open follow.** A follow still keeps its whole event log while its session is open: 0.25–1 MB of heap
    per MB of JSONL. A per-follow history budget (the newest N MiB kept, older pages re-read) is the next step if
    open-session memory matters.
-2. **Jumps into history.** A jump to a row older than what is loaded (a search hit, an attention item in history) finds
-   nothing until that page is in. Claude Desktop's "find" pages back until found, bounded; that is a follow-up.
+2. ~~**Jumps into history.** A jump to a row older than what is loaded (a search hit, an attention item in history) finds
+   nothing until that page is in. Claude Desktop's "find" pages back until found, bounded; that is a follow-up.~~
+   Done (`fix/transcript-jump-into-history`): a read `before` a cursor may name a message to `seek`, and its answer says
+   where the page stands to it (`sought`: on it, earlier with how many events back, newer, absent; WIRE_MINOR 10). The
+   pager walks back only to the page holding it and takes the pages in with one rebuild; the store's `reachMessage`
+   lands the jump, the transcript saying so while the pages load (Stop), and when the message is in none of the history
+   (Dismiss) or a page failed (Retry). The owner channel's anchor (notification, ⌘⇧J, Needs-you row, Overview card)
+   opens through it; a disk child's history (`fs.agentEvents`) is reached the same way. Conversation-search hits open
+   their session and name no row, so they make no jump.
 3. **Refresh after a release.** A source still attached when its follow was released reads the newest window again
    at its session's next change, keeping what the reader opened. The older pages it had loaded go; the reader pages
    them in again.

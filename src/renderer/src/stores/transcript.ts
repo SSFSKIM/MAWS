@@ -35,7 +35,27 @@ export interface TranscriptEntry {
   working: boolean; // a turn is open
   clock: { at: number; wall: number } | null; // the latest event time applied, and the wall time it arrived: a working divider ticks from it
   jump: JumpRequest | null;
+  // Additive (the long-transcript window's jumps into history): a jump to a message older than what is loaded, on its way
+  // or ended without landing; absent when none
+  reach?: Reach;
 }
+
+export interface MessageAnchor {
+  messageUuid: MessageUuid;
+  blockIndex: number;
+}
+
+// A jump into history the transcript says something about: the pages back to the message on their way (`progress`,
+// the share walked once the host has said how far; null until then), the message in none of the history (`missing`:
+// a rewritten transcript, a cleared session, a rewound branch), or a page that did not load (`failed`).
+export type Reach = { anchor: MessageAnchor; phase: 'loading'; progress: number | null } | { anchor: MessageAnchor; phase: 'missing' } | { anchor: MessageAnchor; phase: 'failed'; error: string };
+
+// How `reachMessage` ended. The store has said so on the key (`reach`) for `missing` and `failed`.
+export type ReachOutcome = 'landed' | 'missing' | 'failed' | 'stopped';
+
+// How long a message the host places at or after what is loaded may take to arrive (a batch on its way) before the
+// jump says it is missing.
+export const REACH_ARRIVAL_MS = 2_000;
 
 // A receipt's undo state and a spill's load live in the state's `ui` (reduce.ts), so `rowsOf` reports them in the rows.
 export { RECEIPT_APPLIED, type ReceiptUndo, type SpillLoad };
@@ -81,8 +101,15 @@ export interface TranscriptStore {
   toggleReportRecord(key: string, turn: TurnId): void;
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
   // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
-  jumpToMessage(key: string, anchor: { messageUuid: MessageUuid; blockIndex: number }): boolean;
+  jumpToMessage(key: string, anchor: MessageAnchor): boolean;
   // P2-C end
+  // The long-transcript window's jumps into history: whether a source is attached to the key (its history is the
+  // source's, not one kept from an earlier mount); a jump to the text wherever it is in the history, the pages back to
+  // it loaded first when it is older than what is loaded (`reach` says how that goes, and how it ended when it did not
+  // land); and the reader giving up on one, or dismissing how it ended.
+  attached(key: string): boolean;
+  reachMessage(key: string, anchor: MessageAnchor): Promise<ReachOutcome>;
+  stopReach(key: string): void;
 }
 
 const NO_ROWS: Row[] = [];
@@ -200,9 +227,12 @@ export function createTranscriptStore() {
     return withAgents(ui === undefined ? state : { ...state, ui }, lookups.get(key));
   };
   let nonce = 0;
-  return create<TranscriptStore>()((set, get) => {
+  const reaching = new Map<string, number>(); // each key's jump into history in progress, by its run
+  let reachRun = 0;
+  return create<TranscriptStore>()((set, get, api) => {
     const entry = (key: string) => get().entries[key] as TranscriptEntry | undefined;
     const release = (attached: Attached) => {
+      attached.source.older?.stopSeek?.();
       attached.attachment?.detach();
       attached.attachment = null;
       attached.offRebuild?.();
@@ -480,6 +510,70 @@ export function createTranscriptStore() {
           expandTurn(ui, turn);
         });
       },
+      attached: (key) => attachments.has(key),
+
+      async reachMessage(key, anchor) {
+        const run = ++reachRun;
+        const previous = reaching.get(key);
+        reaching.set(key, run);
+        if (previous !== undefined) attachments.get(key)?.source.older?.stopSeek?.();
+        const mine = () => reaching.get(key) === run;
+        const end = (outcome: ReachOutcome, reach?: Reach): ReachOutcome => {
+          if (!mine()) return 'stopped';
+          reaching.delete(key);
+          if (entry(key) && entry(key)!.reach !== reach) put(key, { reach });
+          return outcome;
+        };
+        if (get().jumpToMessage(key, anchor)) return end('landed');
+        const attached = attachments.get(key);
+        const pages = attached?.source.older;
+        put(key, { reach: { anchor, phase: 'loading', progress: null } });
+        if (attached && pages?.seek) {
+          const result = await pages.seek(anchor.messageUuid, (progress) => {
+            if (mine()) put(key, { reach: { anchor, phase: 'loading', progress } });
+          });
+          if (!mine()) return 'stopped';
+          if (result.outcome === 'stopped') return end('stopped');
+          if (result.outcome === 'failed') return end('failed', { anchor, phase: 'failed', error: result.error });
+          if (result.outcome === 'absent') return end('missing', { anchor, phase: 'missing' });
+          if (result.outcome === 'found') {
+            await (attachments.get(key) ?? attached).settled; // the rebuild the page started
+            if (!mine()) return 'stopped';
+            return get().jumpToMessage(key, anchor) ? end('landed') : end('missing', { anchor, phase: 'missing' });
+          }
+        }
+        // The text is not older than what is loaded: it is on its way, or in none of the history.
+        const landed = await new Promise<boolean>((resolve) => {
+          let done = false;
+          const finish = (value: boolean) => {
+            done = true;
+            clearTimeout(timer);
+            off();
+            resolve(value);
+          };
+          const timer = setTimeout(() => finish(false), REACH_ARRIVAL_MS);
+          let searched: TranscriptEntry | undefined; // searched without the text: unchanged, it is not searched again
+          const check = () => {
+            if (done) return;
+            if (!mine()) return finish(false);
+            const current = entry(key);
+            if (current?.phase !== 'live' || current === searched) return;
+            done = true; // the jump's own change re-enters here
+            if (get().jumpToMessage(key, anchor)) return finish(true);
+            done = false;
+            searched = entry(key);
+          };
+          const off = api.subscribe(check);
+          check(); // what is loaded now: a page the reader asked for may have brought the text while the seek waited for it
+        });
+        return landed ? end('landed') : end('missing', { anchor, phase: 'missing' });
+      },
+
+      stopReach(key) {
+        if (reaching.delete(key)) attachments.get(key)?.source.older?.stopSeek?.();
+        if (entry(key)?.reach) put(key, { reach: undefined });
+      },
+
       jumpToMessage(key, { messageUuid, blockIndex }) {
         const current = entry(key);
         if (!current) return false;

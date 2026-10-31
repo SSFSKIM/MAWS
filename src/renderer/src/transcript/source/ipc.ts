@@ -197,7 +197,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   let stale = false;
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
-    async (before) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before })),
+    async (before, seek) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })),
     (page, last) => {
       const from = page[0] === undefined ? Infinity : atOf(page[0]);
       const placed = last ? appAside : appAside.filter((event) => atOf(event) >= from);
@@ -425,7 +425,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // never receive that batch a second time.
   // The long-transcript window: a disk-backed child's older pages (older.ts).
   const pager = new HistoryPager(
-    async (before) => valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId, before })),
+    async (before, seek) => valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId, before, ...(seek && { seek }) })),
     (page) => page,
     () => queueMicrotask(() => {
       for (const listener of [...resets]) listener();

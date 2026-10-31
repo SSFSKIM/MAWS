@@ -10,6 +10,7 @@ import type { SubagentRef, TurnId } from '../transcript/model/rows';
 import { replaySource, type ReplaySource } from '../transcript/source/replay';
 import type { TranscriptSource } from '../transcript/source/types';
 import type { LoadedFixture } from './fixtures';
+import { pagedSource } from './paged';
 
 let sessions = 0;
 
@@ -21,15 +22,20 @@ export class HarnessSession {
   readonly player: ReplaySource;
   readonly source: TranscriptSource; // the player, with every batch timed
   readonly eventCount: number;
+  readonly events: readonly SessionEvent[]; // the fixture's, whatever is loaded of them
   batches = 0;
   lastBatchMs = 0;
   deriveMs = 0; // the last batch that changed the row list
+  readonly attached: Promise<void>; // the key hydrated
 
-  constructor(fixture: LoadedFixture, speed: number) {
-    this.player = replaySource(fixture.events, { speed, key: this.key });
+  // `paged`: the fixture is a long session's disk history, opened on its newest window, older pages on their way after
+  // `delayMs` each (paged.ts); nothing streams.
+  constructor(fixture: LoadedFixture, speed: number, paged: { delayMs: number } | null = null) {
+    this.player = replaySource(paged ? [] : fixture.events, { speed, key: this.key });
     this.eventCount = fixture.events.length;
+    this.events = fixture.events;
     const { player } = this;
-    this.source = {
+    this.source = paged ? pagedSource(this.key, fixture.events, paged.delayMs) : {
       key: this.key,
       snapshot: () => player.snapshot(),
       subscribe: (listener) =>
@@ -42,8 +48,8 @@ export class HarnessSession {
           this.batches += 1;
         }),
     };
-    void useTranscriptStore.getState().attach(this.key, this.source);
-    if (fixture.streamFrom !== null) this.player.seek(fixture.streamFrom);
+    this.attached = useTranscriptStore.getState().attach(this.key, this.source);
+    if (fixture.streamFrom !== null && !paged) this.player.seek(fixture.streamFrom);
   }
 
   rows = () => useTranscriptStore.getState().rows(this.key);

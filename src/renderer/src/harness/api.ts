@@ -29,4 +29,11 @@ export interface HarnessApi {
   scrollToTurn(n: number): Promise<void>;
   metrics(): HarnessMetrics;
   setEffort(effort: string | null): void; // W8: the session effort the live thinking label names (none by default)
+  // The long-transcript window: the fixture as a long session's disk history, opened on its newest window, each older
+  // page `delayMs` away (paged.ts); `turns` how many of its `total` turns the open drew
+  loadPaged(fixture: string, delayMs: number): Promise<HarnessLoad & { turns: number; total: number }>;
+  // A jump to the first text of the fixture's `n`-th turn, as an attention item's mark makes one (the store's
+  // `reachMessage`), or to a message in none of its history (`'missing'`); not awaited
+  reach(n: number | 'missing'): void;
+  rowOfText(n: number): string | null; // the row the n-th turn's first text is drawn in, null while it is not loaded
 }

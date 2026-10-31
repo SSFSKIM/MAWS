@@ -13,10 +13,12 @@ export type ItemAnchor = NonNullable<AttentionItem['anchor']>;
 export const ownerAnchorOf = (item: AttentionItem): ItemAnchor | null =>
   (item.kind === 'async_input' || item.kind === 'essential_unread') && item.anchor !== undefined ? item.anchor : null;
 
-// A session's history arrives after its tab mounts; past this, a jump still waiting is dropped (the tab stays open,
-// in the report).
+// A session's history arrives after its tab mounts; past this, a jump still waiting for it is dropped (the tab stays
+// open, in the report). Once the history is in, the jump is the store's (`reachMessage`): it loads the pages back to
+// the text when it is older than the window a long session opens on, and says so in the transcript while it does, and
+// when the text is in none of the history.
 const ANCHOR_WAIT_MS = 10_000;
-let waiting: (() => void) | null = null; // the latest open wins: an earlier one still waiting is dropped
+let waiting: (() => void) | null = null; // the latest open wins: an earlier one still waiting, or still loading its pages, is dropped
 
 // The session's tab in the focused pane, as navigation opens it (the caller may open it its own way: the Needs-you row's).
 const inFocusedPane = (appSessionId: AppSessionId) => {
@@ -30,35 +32,38 @@ export function openAnchor(appSessionId: AppSessionId, anchor: Pick<ItemAnchor, 
   open(appSessionId);
   const key = appSessionId; // the session transcript's store key (`ipcSource`)
   let done = false;
-  let viewed = false;
-  let searched: unknown = null; // the entry last searched without the text: another session's change is not searched again
-  // Once the transcript has its history: the report, then the jump (which opens the turn's record if it holds the text).
-  // A history without the text keeps the wait: a transcript kept from an earlier tab is live before its fresh history
-  // arrives, and the text may be newer than it.
+  let reaching = false;
+  // Once the tab's source has given the transcript its history: the report, then the jump (which opens the turn's
+  // record if it holds the text). A transcript kept from an earlier tab, with no source attached, is live before its
+  // fresh history arrives, and the text may be newer than it: the jump waits for the tab's own; so does one whose load
+  // failed, until a Retry brings it.
   const settle = (): boolean => {
     if (done) return true;
-    const entry = useTranscriptStore.getState().entries[key];
-    if (!entry || entry.phase === 'hydrating' || entry === searched) return false;
-    if (!viewed) {
-      viewed = true; // once: a reader who turns to the full transcript while the jump waits keeps it
-      useTranscriptStore.getState().setView(key, 'report');
-      if (done) return true; // the view's own store change re-entered here and jumped
-    }
-    done = true; // likewise for the jump's own store change
-    if (!useTranscriptStore.getState().jumpToMessage(key, anchor)) {
-      done = false;
-      searched = useTranscriptStore.getState().entries[key];
-    }
-    return done;
+    const store = useTranscriptStore.getState();
+    const entry = store.entries[key];
+    if (entry?.phase !== 'live' || !store.attached(key)) return false; // a failed load waits for its Retry
+    done = true; // the view's and the jump's own store changes re-enter here
+    store.setView(key, 'report');
+    reaching = true;
+    void store.reachMessage(key, anchor).finally(() => {
+      reaching = false;
+      if (waiting === stop) waiting = null;
+    });
+    return true;
   };
-  if (settle()) return;
-  const off = useTranscriptStore.subscribe(() => void (settle() && stop()));
-  const timer = setTimeout(() => stop(), ANCHOR_WAIT_MS);
-  function stop() {
-    done = true;
+  const off = useTranscriptStore.subscribe(() => void (settle() && quiet()));
+  const timer = setTimeout(() => !done && stop(), ANCHOR_WAIT_MS);
+  // The wait is over; the jump, if it started, runs on in the store.
+  function quiet() {
     off();
     clearTimeout(timer);
+  }
+  function stop() {
+    done = true;
+    quiet();
+    if (reaching) useTranscriptStore.getState().stopReach(key);
     if (waiting === stop) waiting = null;
   }
   waiting = stop;
+  if (settle()) quiet();
 }

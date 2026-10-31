@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, EventId } from '@shared/graph/ids';
+import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -10,7 +10,8 @@ import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
-import type { TranscriptSource } from '../source/types';
+import type { OlderPagesState, SeekResult, TranscriptSource } from '../source/types';
+import { createStore } from 'zustand/vanilla';
 import { Transcript } from './Transcript';
 import { markTranscriptCarry, recordTranscriptScroll, scrollSignature, takeTranscriptCarry } from './scroll-carry'; // P4-B3
 
@@ -660,5 +661,73 @@ describe('the scroll carried across a card’s float and dock', () => {
       expect(metrics.scrolls.at(-1), 'at the end').toBeGreaterThan(2_000);
       expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
     });
+  });
+});
+
+// The long-transcript window's jumps into history (residue 2): what the reader sees while the pages back to a message
+// are on their way, and when the jump ends without landing.
+describe('a jump to a message older than what is loaded', () => {
+  // A source with older history whose walks back the test settles, one at a time.
+  function pagedSource() {
+    const walks: { target: MessageUuid; settle: (result: SeekResult) => void; progress?: (share: number) => void }[] = [];
+    const stopSeek = vi.fn(() => walks.at(-1)?.settle({ outcome: 'stopped' }));
+    const source: TranscriptSource = {
+      ...sourceOf(deniedThenAnswer()),
+      older: {
+        state: createStore<OlderPagesState>(() => ({ more: true, loadingOlder: false, olderFailed: null, revision: 0 })),
+        loadOlder: () => {},
+        seek: (target, progress) => new Promise<SeekResult>((settle) => walks.push({ target, settle, ...(progress && { progress }) })),
+        stopSeek,
+      },
+    };
+    return { source, walks, stopSeek };
+  }
+  const anchor = { messageUuid: 'older' as MessageUuid, blockIndex: 0 };
+
+  it('says it is loading, with how far once known, and Stop gives up the walk', async () => {
+    const { source, walks, stopSeek } = pagedSource();
+    render(<Transcript source={source} variant="session" />);
+    await act(async () => {});
+    let reaching!: Promise<unknown>;
+    act(() => void (reaching = useTranscriptStore.getState().reachMessage(source.key!, anchor)));
+    const bar = await screen.findByTestId('reach');
+    expect(bar.textContent).toContain('Loading earlier messages to reach the message…');
+    expect(walks.map((walk) => walk.target)).toEqual([anchor.messageUuid]);
+    act(() => walks[0]!.progress?.(0.4));
+    expect(screen.getByTestId('reach').textContent).toContain('40%');
+    fireEvent.click(within(screen.getByTestId('reach')).getByRole('button', { name: 'Stop' }));
+    expect(stopSeek).toHaveBeenCalled();
+    await act(() => reaching);
+    expect(screen.queryByTestId('reach')).toBeNull();
+  });
+
+  it('says the message is no longer in the transcript when it is in none of the history, until dismissed', async () => {
+    const { source, walks } = pagedSource();
+    render(<Transcript source={source} variant="session" />);
+    await act(async () => {});
+    let reaching!: Promise<unknown>;
+    act(() => void (reaching = useTranscriptStore.getState().reachMessage(source.key!, anchor)));
+    await act(async () => walks[0]!.settle({ outcome: 'absent' }));
+    await act(() => reaching);
+    expect(screen.getByTestId('reach').dataset.phase).toBe('missing');
+    expect(screen.getByTestId('reach').textContent).toContain('That message is no longer in this transcript.');
+    fireEvent.click(within(screen.getByTestId('reach')).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByTestId('reach')).toBeNull();
+  });
+
+  it('offers Retry when a page did not load, and walks again on a click', async () => {
+    const { source, walks } = pagedSource();
+    render(<Transcript source={source} variant="session" />);
+    await act(async () => {});
+    let reaching!: Promise<unknown>;
+    act(() => void (reaching = useTranscriptStore.getState().reachMessage(source.key!, anchor)));
+    await act(async () => walks[0]!.settle({ outcome: 'failed', error: 'the host did not answer' }));
+    await act(() => reaching);
+    expect(screen.getByTestId('reach').textContent).toContain('Earlier messages didn’t load: the host did not answer');
+    fireEvent.click(within(screen.getByTestId('reach')).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(walks).toHaveLength(2));
+    expect(screen.getByTestId('reach').dataset.phase).toBe('loading');
+    await act(async () => walks[1]!.settle({ outcome: 'absent' }));
+    await waitFor(() => expect(screen.getByTestId('reach').dataset.phase).toBe('missing'));
   });
 });

@@ -3,7 +3,7 @@
 // environment exactly as the engine reads it (`CLAUDE_CONFIG_DIR`, else `~/.claude`); C1's supervisor forks the host
 // with main's environment. When C3's login-shell capture lands in this host, the service reads the captured
 // environment through the same accessor the launch contract uses.
-import type { AgentId, AppSessionId, EventId, SessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import type { FsHoldersQuery, FsScanKnown } from '@shared/ipc/schema/fs';
 import { resolveStorePaths } from './paths';
@@ -24,7 +24,7 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   on('fs.holders', async (query) => service.holdersNow(query as FsHoldersQuery));
   on('fs.unfollow', async ({ appSessionId, agentId }) => service.unfollow(appSessionId as AppSessionId, agentId as AgentId | null));
   on('fs.subagents', async ({ appSessionId }) => service.subagents(appSessionId as AppSessionId));
-  on('fs.agentEvents', async ({ appSessionId, agentId, before }) => service.agentEvents(appSessionId as AppSessionId, agentId as AgentId, { before: (before ?? null) as EventId | null }));
+  on('fs.agentEvents', async ({ appSessionId, agentId, before, seek }) => service.agentEvents(appSessionId as AppSessionId, agentId as AgentId, { before: (before ?? null) as EventId | null, seek: (seek ?? null) as MessageUuid | null }));
   on('fs.workflows', async ({ appSessionId }) => service.workflows(appSessionId as AppSessionId));
   on('fs.tasks', async ({ listId }) => service.tasks(listId));
   on('fs.readSpill', async (input) => service.readSpill(input));

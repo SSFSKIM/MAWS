@@ -369,14 +369,15 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
-  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId }) => {
+  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek }) => {
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
     // (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): the newest, the page before `before`, the first
     // `limit` events, or `agentId`'s slice. A page before a cursor is the transcript's history whatever runs now: a
-    // live session's older pages come from a quiet follow of its transcript.
-    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null };
+    // live session's older pages come from a quiet follow of its transcript. `seek`: the page says where it stands to that
+    // message (a jump into history).
+    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }) };
     if (deps.diskEvents && request.before !== null) return { ...(await deps.diskEvents(id, request, streams.has(id))), lastSeq: 0 };
     if (deps.diskEvents && !streams.has(id)) return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     // C4 end

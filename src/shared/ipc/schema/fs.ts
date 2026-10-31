@@ -6,6 +6,7 @@
 // except `fs.unbind`, for which an unbound id is a no-op.
 import * as z from 'zod';
 import { SessionEventSchema } from '@shared/graph/events';
+import { HistorySoughtSchema } from '@shared/graph/history-window';
 import { ForeignHolderSchema } from '@shared/graph/session';
 import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
 import {
@@ -127,10 +128,11 @@ export const commands = {
   // C6's name: the child's transcript as X1 events; starts following it, and later events arrive on
   // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished. One bounded window at a
   // time, as `session.events` from disk: the newest, or the page `before` a cursor; `earlier` the cursor of the page
-  // before this one, present only while older history remains (2026-10-30, the long-transcript window).
+  // before this one, present only while older history remains (2026-10-30, the long-transcript window); `seek` and
+  // `sought` as `session.events`'.
   'fs.agentEvents': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, before: EventIdSchema.optional() }),
-    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean(), earlier: EventIdSchema.optional() }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, before: EventIdSchema.optional(), seek: MessageUuidSchema.optional() }),
+    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional() }),
     owner: 'engine-host',
   },
   'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },
