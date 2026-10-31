@@ -84,7 +84,8 @@ function wholly(run: GitRun): GitRead {
 }
 
 // A copy of a directory's name that holds nothing else: V8 keeps a longer substring as a view of the string it came
-// from, and a listing git wrote is one string of megabytes, held outside the heap for as long as one view of it lives.
+// from, a chunk's decoded text here (and, when the listing was one string, all of a kernel's 3.9 MB: +3.8 MiB, the VM
+// measure of the fix round).
 function detached(dir: string): string {
   return Buffer.from(dir).toString();
 }
