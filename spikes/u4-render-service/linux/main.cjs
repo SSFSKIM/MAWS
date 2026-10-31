@@ -42,10 +42,15 @@ const CSP = [
   'img-src data: blob:', 'font-src data: blob:', 'media-src data: blob:', 'connect-src data: blob:', 'worker-src blob:', "frame-src 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'none'",
 ].join('; ');
 
+// The page's face is inlined as a data: URL, as the product's exporters inline a design system's faces (the store frame
+// policy's `font-src data: blob:` admits no scheme load of a font; round 2 showed the fixture's scheme load blocked).
+const fontDataUrl = () => `data:font/woff2;base64,${fs.readFileSync(path.join(fixtureDir, 'NotoSerifKR-Regular-full.woff2')).toString('base64')}`;
 const files = {
-  'index.html': { type: 'text/html; charset=utf-8', body: () => fs.readFileSync(path.join(fixtureDir, 'fixture.html')) },
+  'index.html': { type: 'text/html; charset=utf-8', body: () => Buffer.from(fs.readFileSync(path.join(fixtureDir, 'fixture.html'), 'utf8').replace("url('assets/NotoSerifKR-Regular-full.woff2')", `url('${fontDataUrl()}')`), 'utf8') },
   'assets/NotoSerifKR-Regular-full.woff2': { type: 'font/woff2', body: () => fs.readFileSync(path.join(fixtureDir, 'NotoSerifKR-Regular-full.woff2')) },
 };
+// Electron quits on window-all-closed everywhere but macOS: the probe destroys its windows between steps and goes on.
+app.on('window-all-closed', () => {});
 // The scheme serves the fixture's files: `maws-probe://fixture/<path>`, the font with CORS as the artifact scheme does.
 const serve = (request) => {
   const url = new URL(request.url);
