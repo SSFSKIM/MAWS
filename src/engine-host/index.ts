@@ -98,7 +98,8 @@ const register: HostRegister = (untimedOn, emit, client) => {
   registerAttachment(on, client);
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): agents' dataset refreshes, asked of main by id alone;
   // the sessions' tools ask, main reads (artifacts.*) and answers (maws.*), route E's starts claim; the app's going ends them
-  const datasetRefresh = hostDatasetRefresh(emit, client.presence);
+  // (P5 O4 M2, Interfaces §D: the connectors' presence, which for a client listing `host.connectors` is its connection)
+  const datasetRefresh = hostDatasetRefresh(emit, client.connectorsPresence);
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env, datasetRefresh });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
@@ -144,8 +145,9 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const interested = table;
   fs.watchInterest({ set: () => interested.interest(), onChange: (listener) => interested.onHoldChanged(listener) });
   // C3 end
-  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3)
-  connectors = registerConnectors(on, emit, client.presence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
+  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3), or,
+  // for a client listing `host.connectors`, at its connection's end (P5 O4 M2, Interfaces §D)
+  connectors = registerConnectors(on, emit, client.connectorsPresence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;
