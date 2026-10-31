@@ -16,16 +16,20 @@
 // - each root is recorded in `<userData>/lane-a/uploads.json` before anything is written under it, and swept once no
 //   upload has gone to it for a day, its recorded path walked the same way.
 //
-// Node has no `openat`, so the walk is made per open: on macOS every open carries `O_NOFOLLOW_ANY`, which fails the
-// open if any component of the path is a link, atomically; elsewhere (Linux CI) each ancestor is `lstat`ed first and the
-// open carries `O_NOFOLLOW`, which refuses every link present when it looks. Nor has it `mkdirat` or `unlinkat`, so each
-// directory the walk reaches is pinned by its `dev` and `ino`, and every mutation (a mkdir, an unlink, an rmdir) first
-// reopens what it touches the same way and checks it is still that directory, or a regular file (`mutate`, below).
+// Node has no `openat`, so the walk is made per open (../fs/no-link.ts, shared with the files service): on macOS every
+// open carries `O_NOFOLLOW_ANY`, which fails the open if any component of the path is a link, atomically; elsewhere
+// (Linux) each ancestor is `lstat`ed first, the open carries `O_NOFOLLOW`, which refuses every link present when it
+// looks, and the opened descriptor's own path must be the walked one, so a link put above it since is refused at the
+// open (an exclusive create through it has made its empty file where the link pointed by then). Nor has it `mkdirat`
+// or `unlinkat`, so each directory the walk reaches is pinned by its `dev` and `ino`, and every mutation (a mkdir, an
+// unlink, an rmdir) first reopens what it touches the same way and checks it is still that directory, or a regular
+// file (`mutate`, below).
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
+import { confirmOpenedSync, LinkOnTheWay, NO_LINK, walkSync, WALKED } from '../fs/no-link';
 import { NotARepositoryError, type GitRun } from '../git/runner';
 import type { PostResult } from './deliveries';
 
@@ -39,10 +43,6 @@ export const BYTES_MAX: Record<MediaType, number> = { 'image/png': 5 * MiB, 'ima
 export const UPLOADS = ['.claude', 'desk-uploads'] as const; // under the working directory; the session's directory below
 export const EXCLUDE_LINE = '**/.claude/desk-uploads/'; // unanchored: a session in a subdirectory of the checkout matches too
 export const SWEEP_AFTER_MS = 24 * 3600_000;
-
-// macOS's `O_NOFOLLOW_ANY` (open(2), macOS 11): no link anywhere on the path. Node does not name it.
-const NOFOLLOW_ANY = process.platform === 'darwin' ? 0x2000_0000 : 0;
-const NO_LINK_LAST = NOFOLLOW_ANY === 0 ? constants.O_NOFOLLOW : 0; // the two are not taken together
 
 // A component of an upload's path that is a link or not a directory, or a file there already: nothing goes through it.
 export class Unsafe extends Error {}
@@ -104,28 +104,32 @@ function partsOf(path: string): string[] {
   return parts;
 }
 
-// Without O_NOFOLLOW_ANY: every directory from `/` to `dir` a directory, none a link, as it stands now.
-function checkAncestors(dir: string): void {
-  let at: string = sep;
-  for (const part of partsOf(dir)) {
-    at = join(at, part);
-    const stat = lstatSync(at, { throwIfNoEntry: false });
-    if (stat === undefined) throw Object.assign(new Error(`${at} is missing`), { code: 'ENOENT' });
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Unsafe(`${part} is a link or not a directory: nothing is written through it`);
-  }
-}
+const linked = (path: string) => new Unsafe(`${path} has a link or a file on its way: nothing is written through it`);
 
 // `path` opened with no link anywhere on its way; a link, or a component that is no directory, is Unsafe.
 function openNoLink(path: string, flags: number, mode?: number): number {
   partsOf(path);
-  if (NOFOLLOW_ANY === 0) checkAncestors(dirname(path));
   try {
-    return openSync(path, flags | NOFOLLOW_ANY | NO_LINK_LAST, mode);
+    if (WALKED) walkSync(dirname(path)); // without O_NOFOLLOW_ANY: every directory from `/` a directory, none a link, now
   } catch (error) {
-    if (code(error) === 'ELOOP' || code(error) === 'ENOTDIR') throw new Unsafe(`${path} has a link or a file on its way: nothing is written through it`);
+    if (error instanceof LinkOnTheWay) throw new Unsafe(`${error.part} is a link or not a directory: nothing is written through it`);
+    throw error;
+  }
+  let fd: number;
+  try {
+    fd = openSync(path, flags | NO_LINK, mode);
+  } catch (error) {
+    if (code(error) === 'ELOOP' || code(error) === 'ENOTDIR') throw linked(path);
     if (code(error) === 'EISDIR') throw new Unsafe(`${path} is a directory, not a regular file`);
     throw error;
   }
+  try {
+    confirmOpenedSync(fd, path);
+  } catch (error) {
+    closeSync(fd);
+    throw error instanceof LinkOnTheWay ? linked(path) : error;
+  }
+  return fd;
 }
 
 // A directory the walk reached with no link on its way, pinned by its device and inode.
