@@ -58,12 +58,13 @@
 //                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
 // P5 O4 M4 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 10; D11, D31): route D's sealed grants and
 // the connectors left the app for `mawsd` at O4, so a post-O4 `mawsd` refuses the hello of an app whose capabilities
-// list `machine.spine` but not `machine.connectors`, on engine-host.sock and on machine.sock alike (OX1's exception):
-//   (pre-O4 app, daemon) this build's app leaves its `mawsd` running over a session held live and a grant it adopted;
-//                       the peer's app, from O3-D to before O4 (it lists `machine.spine`, not `machine.connectors`), is
-//                       launched on the daemon shape over it. Both sockets refuse it, naming `machine.connectors`, and
-//                       it shows the update banner; what its build check then does, and whether a Connectors sheet is
-//                       reachable in it (D11's residual: a Forget it could still make by hand), are recorded. Run with
+// list `machine.spine` but not `machine.connectors`, on each of its sockets (OX1's exception; D45 for pty-host.sock):
+//   (pre-O4 app, daemon) this build's app leaves its `mawsd` running, idle, over a grant it adopted; the peer's app,
+//                       from O3-D to before O4 (it lists `machine.spine`, not `machine.connectors`), is launched on the
+//                       daemon shape over it. Its three sockets refuse it, naming `machine.connectors`; the refusal says
+//                       a session is live (D45), so it shows the update banner; and `mawsd` still exits once idle. What
+//                       its build check does, whether a Connectors sheet is reachable in it (D11's residual: a Forget it
+//                       could still make by hand), and what follows the idle exit are recorded. Run with
 //                       such a peer (the merge-base peer until O4 lands); skipped for an O2-era peer, which the
 //                       (pre-O3 app, daemon) scene covers, and for a peer that lists `machine.connectors`.
 //   (downgrade, daemon) also carries a grant as a pre-O4 build kept it (format 1, sealed by this build's own
@@ -95,7 +96,7 @@ import { REPO_ROOT } from './support/launch';
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -798,7 +799,9 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
     // 1. the relay's refusal: mawsd's own `refuse wire`, and the old app's main reading it
     expect(daemonSaid(), 'mawsd refuses the old app’s hello at the relay').toContain(refusedLine);
     expect(daemonSaid(), 'its hello lists no machine.spine, and it holds no spine.lock').toMatch(new RegExp(`refuse wire to appPid ${oldPid} \\(build [^)]+\\): its hello lists no machine\\.spine, so it runs a spine of its own\n`));
-    await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire' }).toMatch(/speaks wire \S+ with |is incompatible \(wire\)/);
+    // P5 O4 M4 (D45): the refusal says at least one live session, so the old app's main waits on it (its banner) rather
+    // than replacing mawsd in a loop
+    await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire and waits on it' }).toMatch(/is incompatible \(wire\) and runs [1-9]\d* sessions; waiting/);
     // 2. the yield: to the old app's pid, the loaded spine released within the yield's own bound of the refusal
     expect(daemonSaid(), 'mawsd yields its spine to the old app').toContain(`[spine] yielding to pid ${oldPid}, an app that runs its own spine`);
     const releasedSaid = () => daemonSaid().slice(daemonSaid().indexOf('[spine] yielding to pid')).includes('[spine] released');
@@ -839,105 +842,118 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
   });
 });
 
-// P5 O4 M4, acceptance 10's refusal (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D11, D31, D37). This build's
-// app on the daemon shape leaves its private `mawsd` running the connectors: a grant it adopted (sealed as a pre-O4
-// build kept it, format 1, adopted to format 2 at a launch) and a session held at its request. The peer's app, from O3-D
-// to before O4 (its hello lists `machine.spine` and no `machine.connectors`), is then launched on the daemon shape over
-// it. Asserted:
-//   1. the refusal on both sockets the app says hello on: `mawsd`'s own `refuse wire` line on engine-host.sock and on
-//      machine.sock, naming `machine.connectors`;
-//   2. the update banner: the old app's main reads the refusal and waits, and its window says so. The refusal carries
-//      the live sessions of `mawsd`'s latest welcome from its engine host (src/mawsd/daemon.ts, refuseWire), and an app
-//      refused with none live replaces in a loop with no banner (src/shared/host/detached-transport.ts), so the scene
-//      restarts `mawsd` once the session is held, and relaunches this build's app, whose new `mawsd` adopts the running
-//      engine host with the session live.
+// P5 O4 M4, acceptance 10's refusal (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D11, D31, D37, D45). This
+// build's app on the daemon shape leaves its private `mawsd` running the connectors, over a grant it adopted (sealed as a
+// pre-O4 build kept it, format 1, adopted to format 2 at a launch), with a short idle time and nothing live. The peer's
+// app, from O3-D to before O4 (its hello lists `machine.spine` and no `machine.connectors`), is then launched on the
+// daemon shape over it. Asserted:
+//   1. the refusal on the three sockets the app says hello on: `mawsd`'s own `refuse wire` line on engine-host.sock,
+//      machine.sock and pty-host.sock, naming `machine.connectors`;
+//   2. the update banner: the refusal says at least one live session (D45), so the old app's main waits on it, and its
+//      window says so;
+//   3. the banner's promise: with only the refused app asking, `mawsd` exits by itself once idle (a refused hello is no
+//      client on its idle clock).
 // Recorded, not asserted: the old app's build check (src/main/hosts/daemon.ts asks a private daemon of another build
-// `daemon.restart` at the machine host's first ready), what the profile's `mawsd` is after it, and D11's residual: what
-// the refused app's `connectors.servers` answers, and whether its Connectors sheet (with a Forget that would unlink a
-// file) can be reached, from the page's tab this build's app left open, else from the library. Skipped for an O2-era peer (the (pre-O3 app, daemon) scene's) and for a peer that lists
-// `machine.connectors` (an app from O4 on: no refusal to show), so the scene stays right once O4 lands on master.
+// `daemon.restart` at the machine host's first ready), D11's residual (what the refused app's `connectors.servers`
+// answers, and whether its Connectors sheet, with a Forget that would unlink a file, can be reached, from the page's tab
+// this build's app left open, else from the library), and what follows the idle exit: which build's `mawsd` the profile
+// runs next, and whether the old app's next hello gets through. Skipped for an O2-era peer (the (pre-O3 app, daemon)
+// scene's) and for a peer that lists `machine.connectors` (an app from O4 on: no refusal to show), so the scene stays
+// right once O4 lands on master.
 const BUILD_CHECK_WINDOW_MS = 10_000; // the refused app watched this long after its banner, for its build check
+const PRE_O4_IDLE_MS = 90_000; // mawsd's idle time here (MAWS_E2E_SUPERVISOR_IDLE_MS): past the scene's reads of the refused app
+const AFTER_EXIT_MS = 30_000; // what follows the idle exit, watched this long (the old app asks again every 5 s)
 const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-test('(pre-O4 app, daemon) an app from before O4 over this build’s mawsd is refused on engine-host.sock and machine.sock, naming machine.connectors, and shows the update banner; its build check and its reach to a Connectors sheet are recorded', async () => {
-  test.setTimeout(360_000);
+test('(pre-O4 app, daemon) an app from before O4 over this build’s mawsd is refused on its three sockets, naming machine.connectors, shows the update banner, and mawsd still exits once idle; its build check, its reach to a Connectors sheet and what follows the exit are recorded', async () => {
+  test.setTimeout(480_000);
   const { here, peer } = builds();
   const spineReader = peer.manifest.capabilities.includes(MACHINE_SPINE_CAPABILITY);
   test.skip(!appObeysConnectors(here) || !spineReader || appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is not an app from O3-D to before O4: it lists ${spineReader ? CONNECTORS_CLIENT_CAPABILITY : `no ${MACHINE_SPINE_CAPABILITY} (the (pre-O3 app, daemon) scene's peer)`}`);
   await withScratch('xb-pre-o4', async (s) => {
     const said = [`${here.label} (wire ${wireOf(here)}) on the daemon shape runs the connectors in its mawsd; ${peer.label} (wire ${wireOf(peer)}), from before O4, launches on the daemon shape over it`];
-    // this build's app: a grant sealed as a pre-O4 build kept it, a page whose header offers the Connectors sheet, and a
-    // session held at its request, which stays live while no app runs
-    const first = await s.launch({ MAWS_HOST_MODE: 'daemon' });
-    const firstDaemon = (await s.ready(first.page, onShape('daemon'))).daemon!.pid;
+    const env = { MAWS_HOST_MODE: 'daemon', MAWS_E2E_SUPERVISOR_IDLE_MS: String(PRE_O4_IDLE_MS) }; // mawsd's idle time, through its spine's host.configure
+    // this build's app: a grant sealed as a pre-O4 build kept it, and a page whose header offers the Connectors sheet,
+    // its tab left open; the grant's file is written after the quit, so the next launch adopts it
+    const first = await s.launch(env);
+    await s.ready(first.page, onShape('daemon'));
     const grant = await sealLegacyGrant(first, s);
     const artifactId = await createGrantsPage(first.page);
-    // its tab opened, so the layout restores it at the next launch (the owner's dashboard left open across a downgrade)
     expect((await openGrantsSheet(first.page, artifactId)).missing, 'this build’s Connectors sheet opens from the page’s header').toBeNull();
-    const id = await s.record(first.page);
-    await startTurn(first.page, s, id);
-    await untilRequested(first.page, id);
     await s.quit(first);
     writeLegacySealed(oauthDirOf(s.userData), grant.id, grant.sealed);
-
-    // `mawsd` restarted, then this build's app relaunched: its new `mawsd` adopts the running engine host, whose welcome
-    // counts the held session; the launch adopts the grant
-    const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build' });
-    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
-    const restarted = await reached.link.request('daemon.restart', undefined);
-    reached.link.close();
-    expect(restarted, 'mawsd takes the restart').toMatchObject({ ok: true });
-    await expect.poll(() => isAlive(firstDaemon), { timeout: 15_000, message: 'the first mawsd exits at its restart' }).toBe(false);
-    const second = await s.launch({ MAWS_HOST_MODE: 'daemon' });
-    const served = await s.ready(second.page, (st) => st.daemon !== null && st.daemon.pid !== firstDaemon && st.supervisor!.liveSessions > 0, 60_000);
+    const second = await s.launch(env);
+    const served = await s.ready(second.page, onShape('daemon'));
     const daemon = served.daemon!.pid;
     const ours = served.daemon!.build.buildId;
     await expectAdopted(second, s, grant.id);
     await s.quit(second);
+    const quitAt = Date.now();
     expect(isAlive(daemon), 'this build’s mawsd outlives its app').toBe(true);
-    said.push(`  this build's mawsd pid ${daemon} (build ${ours}) runs; its engine host pid ${served.supervisor!.pid}, ${served.supervisor!.liveSessions} live; grant ${grant.id} adopted (format 2)`);
+    said.push(`  this build's mawsd pid ${daemon} (build ${ours}) runs, idle time ${PRE_O4_IDLE_MS / 1000} s, nothing live; grant ${grant.id} adopted (format 2)`);
     const logFrom = s.daemonLog().length; // what this build's mawsd says from here
 
     // the pre-O4 app, on the daemon shape over it
     const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
     const oldPid = old.child.pid!;
     const daemonSaid = () => s.daemonLog().slice(logFrom);
-    const sockets = ['engine-host.sock', 'machine.sock'] as const;
+    const sockets = ['engine-host.sock', 'machine.sock', 'pty-host.sock'] as const;
     const refusal = (socket: string) => new RegExp(`${literally(socket)}: refuse wire to appPid ${oldPid} \\(build [^)]+\\): its hello lists no ${literally(CONNECTORS_CLIENT_CAPABILITY)}`);
     const updateBanner = banner(old.page, 'MAWS was updated and cannot talk to the previous supervisor');
+    const evidence = (label: string) => test.info().attach(label, { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
     try {
-      // 1. the refusal on both sockets
+      // 1. the refusal on the three sockets
       for (const socket of sockets) await expect.poll(daemonSaid, { timeout: 30_000, message: `mawsd refuses the old app’s hello on ${socket}, naming ${CONNECTORS_CLIENT_CAPABILITY}` }).toMatch(refusal(socket));
-      // 2. the update banner: the old app's main waits on the refusal (one that said nothing live would read `speaks
-      // wire … with nothing live; replacing it`, and show none)
-      await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire and waits, the held session live' }).toMatch(/is incompatible \(wire\) and runs [1-9]\d* sessions; waiting/);
+      // 2. the update banner: the refusal says a session is live (D45), so the old app's main waits on it
+      await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire and waits on it' }).toMatch(/is incompatible \(wire\) and runs [1-9]\d* sessions; waiting/);
       await expect(updateBanner, 'the old app’s update banner').toBeVisible({ timeout: 30_000 });
     } catch (error) {
-      await test.info().attach('pre-o4-refusal', { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
+      await evidence('pre-o4-refusal');
       throw error;
     }
     said.push(`  refused: ${sockets.map((socket) => daemonSaid().split('\n').find((line) => refusal(socket).test(line))?.trim()).join(' | ')}`);
     said.push(`  the old app: ${old.output().split('\n').find((line) => /is incompatible \(wire\)/.test(line))?.trim()}; its banner: ${(await updateBanner.textContent())?.trim()}`);
     said.push(`  the spine: ${daemonSaid().includes(`[spine] yielding to pid ${oldPid}`) ? `yielded to pid ${oldPid}` : 'not yielded to the refused app'}`);
 
-    // recorded: the old app's build check, and what the profile's mawsd is after it
+    // recorded: the old app's build check
     await old.page.waitForTimeout(BUILD_CHECK_WINDOW_MS);
-    const after = daemonSaid();
-    const asked = after.indexOf('restart asked');
-    const refusedAgain = asked < 0 ? 0 : after.slice(asked).split('\n').filter((line) => sockets.some((socket) => refusal(socket).test(line))).length;
-    const lock = s.daemonLock();
-    said.push(
-      `  the build check (recorded): ${asked < 0 ? `no daemon.restart from the old app within ${BUILD_CHECK_WINDOW_MS / 1000} s of its banner` : `the old app asked daemon.restart; mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : 'exited'}; ${refusedAgain} refusals of the old app after it`}; the profile's mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid} build ${lock.buildId}${lock.buildId === ours ? ' (this build’s)' : ''}`}`,
-    );
+    const checked = daemonSaid();
+    const asked = checked.indexOf('restart asked');
+    said.push(`  the build check (recorded): ${asked < 0 ? `no daemon.restart from the old app within ${BUILD_CHECK_WINDOW_MS / 1000} s of its banner` : `the old app asked daemon.restart; mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : 'exited'}`}`);
 
     // recorded: D11's residual, what the refused app can still reach of the sealed store
     const listed = await unreadableRows(old.page, artifactId);
     const reach = await openGrantsSheet(old.page, artifactId, true);
     const shown = reach.missing === null ? await unreadableRowsShown(old.page).count() : 0;
     said.push(
-      `  D11's residual (recorded): the refused app's connectors.servers ${typeof listed === 'string' ? `answers ${listed}` : `lists ${listed.length} unreadable rows${listed.includes(grant.id) ? ', the adopted grant among them' : ''}`}; its Connectors sheet, sought from ${reach.from}, ${reach.missing === null ? `opens, with ${shown} unreadable rows, each with a Forget that would unlink its file` : `is not reachable: ${reach.missing} did not show`}`,
+      `  D11's residual (recorded, ${Math.round((Date.now() - quitAt) / 1000)} s after this build's app quit, mawsd ${isAlive(daemon) ? 'still up' : 'gone'}): the refused app's connectors.servers ${typeof listed === 'string' ? `answers ${listed}` : `lists ${listed.length} unreadable rows${listed.includes(grant.id) ? ', the adopted grant among them' : ''}`}; its Connectors sheet, sought from ${reach.from}, ${reach.missing === null ? `opens, with ${shown} unreadable rows, each with a Forget that would unlink its file` : `is not reachable: ${reach.missing} did not show`}`,
     );
     expect(sealedFormat(s.userData, grant.id), 'the adopted grant is as this build left it').toBe(2);
+
+    // 3. the banner's promise: mawsd exits by itself once idle, the refused app its only asker (unless the build check
+    // above restarted it, which the record says)
+    if (asked < 0) {
+      try {
+        await expect.poll(() => isAlive(daemon), { timeout: PRE_O4_IDLE_MS + 60_000, message: 'mawsd exits once idle, with only the refused app asking' }).toBe(false);
+        expect(daemonSaid(), 'its idle exit').toContain('no client, both hosts parked and no hold for the idle time');
+      } catch (error) {
+        await evidence('pre-o4-idle-exit');
+        throw error;
+      }
+    }
+    const exitedAt = Date.now();
+    const oldFrom = old.output().length;
+    said.push(`  the exit: mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `gone ${Math.round((exitedAt - quitAt) / 1000)} s after this build's app quit${asked < 0 ? ', by its idle clock' : ''}`}`);
+
+    // recorded: what follows the exit, as the old app asks again
+    await old.page.waitForTimeout(AFTER_EXIT_MS);
+    const lock = s.daemonLock();
+    const oldBuild = await invoke(old.page, 'host.status', undefined).then((answer) => (answer.ok ? answer.value.appBuildId : null), () => null);
+    const whose = lock === null ? 'none' : lock.buildId === ours ? 'this build’s' : lock.buildId === oldBuild ? 'the old app’s build' : 'another build';
+    const connected = old.output().slice(oldFrom).split('\n').filter((line) => line.includes('connected to supervisor pid')).map((line) => line.trim());
+    said.push(
+      `  after the exit (recorded, ${AFTER_EXIT_MS / 1000} s): the profile's mawsd ${lock === null ? 'is none' : `is pid ${lock.pid} build ${lock.buildId} (${whose}), ${isAlive(lock.pid) ? 'running' : 'gone'}`}; the old app ${connected.length > 0 ? `got through: ${connected.join(' | ')}` : 'got no welcome'}; its banner ${(await updateBanner.count()) > 0 ? 'still shows' : 'is gone'}`,
+    );
     record(said);
   });
 });
