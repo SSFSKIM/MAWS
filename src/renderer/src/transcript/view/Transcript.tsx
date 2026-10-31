@@ -58,6 +58,7 @@ const ESTIMATES: Record<RowKind, number> = {
   browser_activity: 34, // E13: as a browser action's
   owner_record: 32, // P2-C: one line
   to_human: 96, // P4-R7: a message card, its label and a few lines
+  gap: 36, // P5 O7 M2: one bar
 };
 export function estimateRow(row: Row): number {
   if (row.kind === 'group' && row.expanded) return 280;

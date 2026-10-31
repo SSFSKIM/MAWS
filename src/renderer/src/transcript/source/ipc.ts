@@ -4,7 +4,7 @@
 // `…Over(client)` form so tests drive it with a fake X2 client; the plain forms use the app's validated client.
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { bareOf, machineOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
@@ -14,7 +14,8 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HistoryPager, withoutOlderThanWindow } from './older';
+import { historyGapEvent } from '../model/gap'; // P5 O7 M2
+import { HistoryPager, withHistoryGap, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
 // How much of a spilled result is read into the detail (residue *Spilled results*): past it, the head and Open full log.
@@ -195,9 +196,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // client's interest while the source stayed mounted, as a side thread off screen), so the transcript's later writes
   // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
   let stale = false;
+  let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
-    async (before, seek) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })),
+    async (before, seek) => withHistoryGap(valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })), bareOf(appSessionId)), // P5 O7 M2
     (page, last) => {
       const from = page[0] === undefined ? Infinity : atOf(page[0]);
       const placed = last ? appAside : appAside.filter((event) => atOf(event) >= from);
@@ -264,11 +266,21 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push([exit]);
         else subscription.pass([exit]);
       });
+      // P5 O7 M2: a remote lane B stream that went on past events it could not deliver says so in order with its batches;
+      // the gap bar goes in here, where they would have been (model/gap.ts)
+      const offGap = client.on('remote.gap', ({ appSessionId: gapped, launchId }) => {
+        if (gapped !== appSessionId) return;
+        const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
+        const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
+        if (subscription.held) subscription.held.push([gap]);
+        else subscription.pass([gap]);
+      });
       return () => {
         off();
         offChanged();
         offReleased();
         offLoss();
+        offGap();
         subscription.held = null;
         subscription.pass = () => {};
         subscription.ended.abort();
@@ -283,7 +295,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       let events = pager.takeRebuilt();
       if (events === null) {
         stale = false; // this read follows the transcript again
-        const answer = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        const answer = withHistoryGap(valueOf(await eventsOnceKnown(client, appSessionId, subscription)), bareOf(appSessionId)); // P5 O7 M2: the gap bar at a page partly gone
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;
         const first = answer.events[0];

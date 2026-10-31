@@ -99,6 +99,20 @@ export function rowOfListed(index: OrgIndex, listed: ListedSession, alsoListed?:
   return machineKey(listed.machine);
 }
 
+// P5 O7 M2 (one row per address): the row a record sits under when its address is listed and its project is not known
+// here (another machine's lane B session, whose record main read over that machine's link: RL2 machines send no projects):
+// its listing's, so its row stands where the listed row stood, the one the person clicked. Undefined when the record's
+// project is known, or no listing names its address: `rowOfSession` decides.
+export function rowOfListedRecord(index: OrgIndex, projects: ReadonlyMap<ProjectId, ProjectRecord>, record: SessionRecord, listed: ReadonlyMap<AppSessionId, ListedSession> | undefined, alsoListed?: ReadonlySet<RowKey>): RowKey | null | undefined {
+  const listing = listed?.get(record.appId);
+  if (listing === undefined || (record.projectId !== null && projects.has(record.projectId))) return undefined;
+  return rowOfListed(index, listing, alsoListed);
+}
+
+// P5 O7 M2: the tab set a listing's session files into: its row's, or its org key's when every checkout of it is hidden
+// (as a hidden project's sessions keep theirs).
+const setKeyOfListed = (index: OrgIndex, listing: ListedSession): RowKey => rowOfListed(index, listing) ?? listing.orgKey ?? machineKey(listing.machine);
+
 // The tab set a project's sessions file into (W12): its row's; a hidden project's keep its org key, which no row
 // shows, as a hidden project's set was before.
 export function setKeyOfProject(index: OrgIndex, project: ProjectRecord): RowKey {
@@ -126,17 +140,21 @@ export function selectOrgIndex(state: ProjectsHolder, local: MachineRef): OrgInd
 // project a New chat was made in, null for none, which keeps it in the no-project set); undefined for a session not
 // known now. What `connectShell` hands the layout as its `projectOf`.
 export function sessionSetKey(
-  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord> },
+  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed?: ReadonlyMap<AppSessionId, ListedSession> },
   local: MachineRef,
   appSessionId: AppSessionId,
   intentProject: () => ProjectId | null | undefined,
 ): RowKey | null | undefined {
   const index = selectOrgIndex(state, local);
   const record = state.records.get(appSessionId);
+  const listing = state.listed?.get(appSessionId); // P5 O7 M2
   if (record) {
     const project = record.projectId === null ? undefined : state.projects.get(record.projectId);
+    if (project === undefined && listing !== undefined) return setKeyOfListed(index, listing); // P5 O7 M2: where its listing is
     return project === undefined ? machineKey(machineOf(appSessionId)) : setKeyOfProject(index, project);
   }
+  // P5 O7 M2: a listed lane B session's tab goes where its row is from the click, before main has read its record
+  if (listing?.lane === 'B') return setKeyOfListed(index, listing);
   const intent = intentProject();
   if (intent === undefined || intent === null) return intent;
   const project = state.projects.get(intent);

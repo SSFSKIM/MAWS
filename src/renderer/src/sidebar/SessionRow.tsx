@@ -5,7 +5,7 @@
 import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
-import { MACHINE_OFFLINE, useMachineMark } from '../app/machine-mark';
+import { greyWords, useMachineMark } from '../app/machine-mark';
 import { sessionActionsFor } from '../app/session-actions';
 import { SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
@@ -21,6 +21,7 @@ import { sessionNodeId, useTree } from './tree';
 import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
+import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
@@ -44,7 +45,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const glyph = glyphFor(record, digest ?? null, pending);
   const selected = tree.selected === id;
   const title = displayTitle(record);
-  const hasActions = sessionActionsFor(record).includes('rename');
+  const hasActions = sessionActionsFor(record, { remote: isRemoteLaneB(id) /* P5 O7 M2 */ }).includes('rename');
   const machine = useMachineMark(id);
   const owners = useOwnersLabel(id);
 
@@ -54,7 +55,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         role="treeitem"
         aria-level={level}
         aria-selected={selected}
-        aria-label={machine.offline ? `${title}, ${MACHINE_OFFLINE}` : title}
+        aria-label={machine.offline ? `${title}, ${greyWords(machine)}` : title}
         data-offline={machine.offline || undefined}
         tabIndex={tree.tabStop === nodeId ? 0 : -1}
         data-tree-id={nodeId}

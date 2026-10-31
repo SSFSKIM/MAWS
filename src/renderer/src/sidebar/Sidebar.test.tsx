@@ -1432,13 +1432,14 @@ describe('listed rows from another machine', () => {
     expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
   });
 
+  // P5 O7 M2: the record stands where its listing was filed (its project is not known here), so the row doesn't move
   it('draws one row where a record holds a listed address, and none for a row the member does not own', () => {
     const recorded = record(studio('b1'), { projectId: null, title: { text: 'Studio build (record)', source: 'user' } });
     fill([listedOn('b1', { title: 'Studio build (listing)' }), listedOn('b2', { title: 'Someone else’s', mine: false })], [here, recorded]);
     expandAll();
     render(<Sidebar />);
-    expect(drawn(row('MAWS'))).toEqual([['Sidebar pass', 'session']]);
-    expect(drawn(row('Studio'))).toEqual([['Studio build (record)', 'session']]);
+    expect(drawn(row('MAWS')).sort()).toEqual([['Sidebar pass', 'session'], ['Studio build (record)', 'session']]);
+    expect(screen.queryByRole('treeitem', { name: 'Studio' })).toBeNull();
     expect(screen.queryByRole('treeitem', { name: 'Studio build (listing)' })).toBeNull();
     expect(screen.queryByRole('treeitem', { name: 'Someone else’s' })).toBeNull();
   });
@@ -1602,7 +1603,7 @@ describe('owners and the People toggle', () => {
   it('lists every owner with its email in the hover card of a listed row and of a record at a listed address', async () => {
     const opened = record(studio('b4'), { projectId: null, title: { text: 'Opened', source: 'user' } });
     fill([listedOn('b1', { title: 'Co-owned', owners: ['ana', ME, 'gone'], lane: 'A' }), theirs('b4', { owners: ['ben'] })], [here, opened]);
-    people(STUDIO_ROW);
+    people(ORG); // P5 O7 M2: the record is filed where its listing is
     expandAll();
     render(<Sidebar />);
     await userEvent.click(row('Co-owned'));

@@ -12,6 +12,11 @@ import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { SessionPane } from './SessionPane';
+import { useMachines } from '../stores/machines';
+import { useLayout } from '../stores/layout';
+import { connectRemoteLaneB } from '../lane-b/remote-connect';
+import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
+import { remoteSessionState } from '../lane-b/test-support/remote-session';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -132,5 +137,51 @@ describe('session pane', () => {
     expect(screen.getByText('Composer unavailable')).toBeTruthy();
     expect(screen.getByText('request permission docked')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'setup' })).toBeNull();
+  });
+
+  // P5 O7 M2: another machine's lane B session opens as "Opening on <machine>…" until main has read its record there, then
+  // swaps to the started pane; one main can't place says so, with Try again, which makes main open it again.
+  describe('another machine’s lane B session', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    let fake: ReturnType<typeof fakeClient>;
+    let off: () => void = () => {};
+    beforeEach(() => {
+      resetRemoteLaneBStore();
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 0, carrier: 'relay' }]);
+      useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+      fake = fakeClient({ 'session.get': null, 'layout.set': undefined });
+      off = connectRemoteLaneB(fake.client);
+      registerSlot('transcript', ({ appSessionId }) => <p>transcript {appSessionId}</p>);
+      registerSlot('newSession', () => <h2>setup</h2>);
+    });
+    afterEach(() => off());
+
+    it('reads “Opening on <machine>…” with no record, then swaps to the started pane when main says the record', () => {
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByRole('status').textContent).toBe('Opening on mini…');
+      expect(screen.queryByRole('heading', { name: 'setup' })).toBeNull();
+      expect(screen.queryByText('Composer unavailable')).toBeNull();
+      expect(fake.invoked('session.get')).toEqual([{ appSessionId: REMOTE }]); // the pane's announcement
+      act(() => void useSessions.getState().applyChanged({ record: record(REMOTE), cause: 'live', revision: 7 } as never, OTHER_MACHINE));
+      expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+      expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    });
+
+    it('says main can’t place the session, with Try again, which writes the tabs again', () => {
+      useLayout.setState({ hydrated: true });
+      applyRemoteSession(remoteSessionState(REMOTE, { stream: 'ended', reason: 'mini can’t place this session' }));
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByRole('status').textContent).toContain('mini can’t place this session');
+      act(() => screen.getByRole('button', { name: 'Try again' }).click());
+      expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: useLayout.getState().main }]);
+      useLayout.setState({ hydrated: false });
+    });
+
+    it('offers no Try again to a device the machine removed', () => {
+      applyRemoteSession(remoteSessionState(REMOTE, { stream: 'ended', link: { state: 'down', carrier: null, refusal: 'removed', member: null, rights: [] }, reason: 'This Mac is no longer allowed on mini' }));
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByRole('status').textContent).toContain('This Mac is no longer allowed on mini');
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    });
   });
 });

@@ -73,6 +73,23 @@ export function createDraftWriter(save: (draft: Draft | null) => void, options: 
   };
 }
 
+// P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Reads"): a draft for a lane B session on another
+// machine is kept in this app's memory for its run, never on that machine (`session.drafts.*` are not offered there: a
+// draft on another machine's index is per member, O8 M6). `remote` is asked at each load and save, so a session's
+// drafts go where its machine is as the stores know it then.
+const remoteDrafts = new Map<AppSessionId, Draft>();
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean): P {
+  return {
+    ...port,
+    load: () => (remote() ? Promise.resolve(remoteDrafts.get(appSessionId) ?? null) : port.load()),
+    save: (draft: Draft | null) => {
+      if (!remote()) return port.save(draft);
+      if (draft === null) remoteDrafts.delete(appSessionId);
+      else remoteDrafts.set(appSessionId, draft);
+    },
+  };
+}
+
 // Close guards read the editor before persistence catches up. Until it loads or changes, use the stored draft.
 const liveDrafts = new Map<AppSessionId, () => ComposerDoc | undefined>();
 export const liveDraftDoc = (id: AppSessionId): ComposerDoc | undefined => liveDrafts.get(id)?.();

@@ -6,7 +6,9 @@
 // branch and worktree, who holds a foreign-live session or what a working one does, and the last assistant line; then
 // the pending request, if any, through the `requestCard` slot in its `hover` placement, with the originating request
 // fetched once per item through `attention.request` and cached in the attention store. P5 O6 M5: the card always names
-// the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`). Opening it answers nothing:
+// the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`); P5 O7 M2:
+// for another machine reached over RL2, the carrier ("direct (tailnet)", "via the hub"), and for a machine that removed this
+// device, that. Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
 // the machine, the state and when it was issued, and no actions. P5 O8 M5 (Q2): a session you don't own alone, listed or a
@@ -19,7 +21,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { formatAgo } from '@shared/app/date-format';
-import { useMachineMark } from '../app/machine-mark';
+import { carrierWords, removedWords, useMachineMark, type MachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
 import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
@@ -189,7 +191,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
         {meta}
       </p>
       <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
-        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
+        {machineLine(machine, now)}
       </p>
       <Owners appId={appSessionId} />
       {place && (
@@ -247,7 +249,7 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
         {meta}
       </p>
       <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
-        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
+        {machineLine(machine, now)}
       </p>
       <Owners appId={appId} />
     </div>
@@ -270,6 +272,14 @@ function Owners({ appId }: { appId: AppSessionId }) {
       ))}
     </ul>
   );
+}
+
+// The machine's line: its name, with the carrier an RL2 link is up over (P5 O7 M2, A2); offline, when it was last seen; or
+// that it removed this device.
+function machineLine(machine: MachineMark, now: number): string {
+  if (machine.refusal === 'removed') return removedWords(machine.name);
+  if (machine.offline) return [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ');
+  return [machine.name, carrierWords(machine)].filter(Boolean).join(' · ');
 }
 
 // When an offline machine was last seen: when its link went down, as the roster says.

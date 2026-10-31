@@ -23,6 +23,7 @@ import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceG
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
+import { GapRow } from './GapRow'; // P5 O7 M2
 import { CellRow } from './Cell';
 import { DividerRow } from './Divider';
 import { ErrorRow } from './Error';
@@ -51,6 +52,7 @@ function body(row: Row) {
     case 'question': return <SurfaceQuestionRow row={row} />;
     case 'request_slot': return <RequestSlotRow row={row} />;
     case 'boundary': return <BoundaryRow row={row} />;
+    case 'gap': return <GapRow row={row} />; // P5 O7 M2
     case 'error': return <ErrorRow row={row} />;
     // E1 start
     case 'ask': return <AskCapsule row={row} />;

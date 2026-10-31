@@ -15,7 +15,7 @@
 // (released, or opening) is resumed by the act that needs it.
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
-import { CONTROL_KEYS, MACHINE_RIGHTS, type ControlKey, type RemoteCapability, type RemoteLinkState } from '@shared/ipc/schema/remote';
+import { CONTROL_KEYS, MACHINE_RIGHTS, REMOTE_TOO_LARGE_WORDS, type ControlKey, type RemoteCapability, type RemoteLinkState } from '@shared/ipc/schema/remote';
 import { codecOf } from '@shared/ipc/validate';
 import { LINK_REGISTRY } from '../machines/link-surface';
 import { refusalError } from '../machines/remote/dispatch';
@@ -30,8 +30,8 @@ const failure = (code: IpcErrorCode, message: string, issues?: unknown): Command
 /** A person's words to the session (a send, a steer) are a message; anything else a request. */
 const isMessage = (name: CommandName) => name === 'session.send' || name === 'session.steer';
 
-/** The channel's image bound, as the composer words it (MESSAGE_MAX_BYTES less headroom, base64). */
-export const TOO_LARGE_WORDS = 'an image larger than 2.5 MiB goes to a session on another machine as a file';
+/** The channel's image bound, as the composer words it (MESSAGE_MAX_BYTES less headroom, base64): one sentence, shared. */
+export const TOO_LARGE_WORDS = REMOTE_TOO_LARGE_WORDS;
 
 /** What a session on another machine can't take yet, by control: closed with these words whatever the link says. */
 export const REMOTE_GAPS: Readonly<Partial<Record<ControlKey, string>>> = {
