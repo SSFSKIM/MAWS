@@ -1,10 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { CHECK_IGNORE_BATCH_MS, gitIgnored } from './ignored';
-import { createGitRunner, GitCommandError, type GitRun, type GitRunOptions } from './runner';
+import { createGitReader, createGitRunner, GitCommandError, type GitRead, type GitRun, type GitRunOptions } from './runner';
 
 setFlagsFromString('--expose_gc');
 const gc = runInNewContext('gc') as () => void;
@@ -81,28 +84,78 @@ describe("the repository's ignore rules as a prune", () => {
   });
 });
 
-// VM measure of M1: a kernel checkout's listing (3.9 MB, about 80,000 paths) held the loop 44 ms in one turn, split
-// whole before its chunked read began; the tree's walk runs meanwhile, and its lag is bounded (§G).
-describe("the repository's ignore rules, read from a listing of a million paths", () => {
-  it('never holds the loop for the whole listing', async () => {
-    // A kernel's shape: some 6,000 directories, the paths beneath them many.
-    const listed = Array.from({ length: 1_000_000 }, (_, i) => `d${i % 2_000}/s${i % 3}/f${i}.c\0`).join('');
-    const run: GitRun = async (_directory, args) => (args.includes('-i') ? 'build/\0' : listed);
-    gc(); // the listing's making left a million strings: their collection is no turn of the read's
-    let worst = 0;
-    let last = performance.now();
+// D21: git's listing reaches the prune as git writes it. A kernel's (3.9 MB), read whole, held the loop 18 to 33 ms in
+// the runner's one decode while the tree walked; read chunk by chunk, no turn takes more than one chunk of it. Pinned by
+// the bytes a turn takes, not by milliseconds (a wall-clock bound flakes on a loaded runner).
+const LISTING_PATHS = 300_000; // about 5 MB, a kernel's shape: some 6,000 directories, the paths beneath them many
+const listingBytes = () => Buffer.from(Array.from({ length: LISTING_PATHS }, (_, i) => `d${i % 2_000}/s${i % 3}/f${i}.c\0`).join(''));
+
+describe("the repository's ignore rules, read as git writes them", () => {
+  it('decodes and parses at most one chunk of a listing in a turn', async () => {
+    const bytes = listingBytes();
+    const chunks: Buffer[] = [];
+    for (let at = 0; at < bytes.length; at += 65_536) chunks.push(bytes.subarray(at, at + 65_536)); // a pipe's chunks
+    let turn = 0;
     let ticking = true;
     const tick = () => {
-      const now = performance.now();
-      worst = Math.max(worst, now - last);
-      last = now;
+      turn++;
       if (ticking) setImmediate(tick);
     };
     setImmediate(tick);
-    const prune = await gitIgnored(run, '/repo');
+    const takenIn: number[] = []; // the turn each chunk was taken in; every chunk is ready at once, so only the reader's own yields separate them
+    const read: GitRead = (_directory, args) => ({
+      async *[Symbol.asyncIterator]() {
+        if (args.includes('-i')) return yield Buffer.from('build/\0');
+        for (const chunk of chunks) {
+          takenIn.push(turn);
+          yield chunk;
+        }
+      },
+    });
+    const run: GitRun = async (_directory, args) => {
+      throw new Error(`the listings are read as streams, not run: git ${args.join(' ')}`);
+    };
+    const prune = await gitIgnored(run, '/repo', read);
     ticking = false;
-    expect(await Promise.all([prune('d7/s1'), prune('build'), prune('build/x')])).toEqual([false, true, true]);
-    expect(worst).toBeLessThan(30); // split whole, the listing held the loop 95 ms on an M-series Mac, 120 to 180 ms on the VM
+    expect(takenIn).toHaveLength(chunks.length);
+    const perTurn = new Map<number, number>();
+    for (const at of takenIn) perTurn.set(at, (perTurn.get(at) ?? 0) + 1);
+    expect(Math.max(...perTurn.values())).toBe(1);
+    expect(await Promise.all([prune('d7/s1'), prune('d1999'), prune('build'), prune('build/x')])).toEqual([false, false, true, true]);
+  });
+
+  describe('through the runner, from a git that writes a multi-megabyte listing', () => {
+    let dir: string;
+    beforeEach(() => void (dir = mkdtempSync(join(tmpdir(), 'maws-ignored-'))));
+    afterEach(() => {
+      vi.restoreAllMocks();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('never holds the whole of it: no concatenation of its output and no decode of it whole', async () => {
+      const listing = join(dir, 'listing');
+      writeFileSync(listing, listingBytes());
+      const git = join(dir, 'git');
+      writeFileSync(git, `#!/bin/sh\ncase " $* " in\n  *" -i "*) printf 'build/\\0' ;;\n  *" -c "*) cat '${listing}' ;;\nesac\n`, { mode: 0o755 });
+      const env = { PATH: process.env.PATH, HOME: process.env.HOME, MAWS_GIT: git };
+      const whole = 256 * 1024; // the listing is 5 MB; a pipe's chunk at most 64 KiB
+      const held: string[] = []; // what took more than `whole` bytes of it at once
+      const concat = Buffer.concat;
+      vi.spyOn(Buffer, 'concat').mockImplementation((list, length) => {
+        const joined = concat(list, length);
+        if (joined.length > whole) held.push(`Buffer.concat of ${joined.length} bytes`);
+        return joined;
+      });
+      const toString = Buffer.prototype.toString; // called on its buffer below
+      vi.spyOn(Buffer.prototype, 'toString').mockImplementation(function (this: Buffer, ...args: unknown[]) {
+        if (this.length > whole) held.push(`a decode of ${this.length} bytes`);
+        return toString.apply(this, args as Parameters<Buffer['toString']>);
+      });
+      const prune = await gitIgnored(createGitRunner({ env }), dir, createGitReader({ env }));
+      vi.restoreAllMocks();
+      expect(held).toEqual([]);
+      expect(await Promise.all([prune('d7/s1'), prune('build'), prune('build/x')])).toEqual([false, true, true]);
+    });
   });
 });
 

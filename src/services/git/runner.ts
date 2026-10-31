@@ -33,6 +33,9 @@ export interface GitRunOptions {
   input?: string; // stdin (`check-ignore --stdin`)
 }
 export type GitRun = (directory: string, args: string[], options?: GitRunOptions) => Promise<string>;
+// A read whose stdout is taken as git writes it, chunk by chunk, never held whole (P5 O3-E D21: the prune's listings, a
+// kernel's 3.9 MB, whose buffered decode held the loop 18 to 33 ms in one turn). The iteration throws as a run throws.
+export type GitRead = (directory: string, args: string[], options?: { timeoutMs?: number }) => AsyncIterable<Buffer>;
 
 // A call killed at its timeout. The router answers it as `timeout`, and the watcher backs off on it.
 export class GitTimeoutError extends Error {}
@@ -157,6 +160,51 @@ export function createGitRunner(options: { env?: NodeJS.ProcessEnv; execFile?: E
       throw error;
     }
   };
+}
+
+// The streamed read (`GitRead`): the read mode's environment, `-C`, a new process group and the timeout, as a run has.
+// Stdout is handed over as the pipe delivers it, each chunk taken when the consumer asks (the pipe's back-pressure holds
+// git meanwhile); stderr is kept to its last STREAM_BOUND_BYTES for the failure. A consumer that stops early ends git.
+export function createGitReader(options: { env?: NodeJS.ProcessEnv } = {}): GitRead {
+  const env = options.env ?? process.env;
+  const binary = gitBinary(env);
+  return (directory, args, { timeoutMs = GIT_TIMEOUT_MS } = {}) => streamGit(binary, directory, args, gitEnv(env, 'read'), timeoutMs);
+}
+
+async function* streamGit(binary: string, directory: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): AsyncGenerator<Buffer> {
+  const child = spawn(binary, ['-C', directory, ...args], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => void (stderr = streamTail(stderr + chunk.toString('utf8'))));
+  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code, signal) => resolve({ code, signal }));
+  });
+  closed.catch(() => {}); // read below, or the consumer stopped first
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    signalGroup(child, 'SIGTERM');
+    setTimeout(() => signalGroup(child, 'SIGKILL'), KILL_GRACE_MS).unref?.();
+  }, timeoutMs);
+  let ended = false;
+  try {
+    for await (const chunk of child.stdout) yield chunk as Buffer;
+    let end: { code: number | null; signal: NodeJS.Signals | null };
+    try {
+      end = await closed;
+    } catch (error) {
+      throw failure(error as ExecFileException, '', stderr, binary, args[0]);
+    }
+    ended = true;
+    if (timedOut) throw new GitTimeoutError(`git ${args[0]} timed out after ${timeoutMs / 1000} s in ${directory}`);
+    if (end.code === 0 && end.signal === null) return;
+    const error = failure(Object.assign(new Error(`Git exited with ${end.signal ?? end.code}`), { code: end.code ?? undefined, signal: end.signal ?? undefined }), '', stderr, binary, args[0]);
+    if (error instanceof GitCommandError && /not a git repository/.test(error.stderr)) throw new NotARepositoryError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (!ended && child.exitCode === null && child.signalCode === null) signalGroup(child, 'SIGTERM');
+  }
 }
 
 // execFile does not forward `detached` to spawn. Use spawn directly so Git really leads a new process group.

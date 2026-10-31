@@ -9,7 +9,7 @@ import { isAbsolute, join } from 'node:path';
 import type { GitBranches, GitChanged, GitDiff, GitDiffFile, GitDiffInput, GitLog, GitLogInput, GitStatus } from '@shared/ipc/schema/git';
 import { gitIgnored } from './ignored';
 import { parseBranches, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
-import { createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRun } from './runner';
+import { createGitReader, createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRead, type GitRun } from './runner';
 import { GitWatcher, type WatchFn, type WatchOwner } from './watcher';
 
 // The repository a directory lies in: its top level (the watcher's key for a root), git dir and common dir.
@@ -24,12 +24,14 @@ export interface GitServiceOptions {
 
 export class GitService {
   private readonly run: GitRun;
+  private readonly read: GitRead; // the prune's listings, streamed (D21)
   private readonly watcher: GitWatcher;
 
   constructor(options: GitServiceOptions = {}) {
     this.run = createGitRunner({ env: options.env, execFile: options.execFile });
+    this.read = createGitReader({ env: options.env });
     // P5 O3-E M1: the watcher's prune on Linux reads what git ignores through this runner (`ls-files`, `check-ignore`).
-    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root) });
+    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read) });
   }
 
   async status(directory: string): Promise<GitStatus> {

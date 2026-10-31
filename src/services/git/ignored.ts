@@ -9,25 +9,26 @@
 // call per batch window of at most CHECK_IGNORE_BATCH_MS for every directory asked in it, the directory held unwatched
 // until its verdict. A batch git cannot answer (a path inside a submodule fails the whole call) admits its directories:
 // watched rather than missed.
-import type { GitRun } from './runner';
+import { StringDecoder } from 'node:string_decoder';
+import type { GitRead, GitRun } from './runner';
 
 export const CHECK_IGNORE_BATCH_MS = 250; // the repository watcher's own debounce
 const PARSE_SLICE_MS = 4; // the longest a listing's read holds the loop before it lets the walk run
 
-export async function gitIgnored(run: GitRun, root: string): Promise<(dir: string) => Promise<boolean>> {
-  const [ignoredOut, listedOut] = await Promise.all([
-    run(root, ['ls-files', '-z', '-o', '-i', '--exclude-standard', '--directory']),
-    run(root, ['ls-files', '-z', '-c', '-o', '--exclude-standard', '--directory']),
-  ]);
+// `read` takes the two listings as git writes them (the service passes the runner's streamed read); without it they
+// are run whole, which only a caller with small listings (the tests' fakes) should do.
+export async function gitIgnored(run: GitRun, root: string, read: GitRead = wholly(run)): Promise<(dir: string) => Promise<boolean>> {
   const known = new Set<string>(); // every directory either listing reaches
   const above = new Set<string>(); // every directory with an entry of the ignored listing beneath it
   const collapsed: string[] = []; // the ignored listing's `dir/` entries
-  await eachEntry(ignoredOut, (entry) => {
-    addAncestors(above, entry);
-    addAncestors(known, entry, true);
-    if (entry.endsWith('/')) collapsed.push(detached(entry.slice(0, -1)));
-  });
-  await eachEntry(listedOut, (entry) => addAncestors(known, entry, true));
+  await Promise.all([
+    eachEntry(read(root, ['ls-files', '-z', '-o', '-i', '--exclude-standard', '--directory']), (entry) => {
+      addAncestors(above, entry);
+      addAncestors(known, entry, true);
+      if (entry.endsWith('/')) collapsed.push(detached(entry.slice(0, -1)));
+    }),
+    eachEntry(read(root, ['ls-files', '-z', '-c', '-o', '--exclude-standard', '--directory']), (entry) => addAncestors(known, entry, true)),
+  ]);
   const ignored = new Set(collapsed.filter((dir) => !above.has(dir)));
   const batch = new CheckIgnoreBatch(run, root);
   return async (dir) => {
@@ -41,22 +42,45 @@ function entries(out: string): string[] {
   return out.split('\0').filter((entry) => entry !== '');
 }
 
-// Each entry of a NUL-terminated listing, a slice of at most PARSE_SLICE_MS at a time with the loop free between: a
-// kernel-sized checkout lists 80k paths (3.9 MB), which split whole held the loop 44 ms while the tree's walk ran beside
-// it, and a first slice of 5,000 entries, its code not yet optimised, 10 to 26 ms (the VM measure of M1).
-async function eachEntry(out: string, take: (entry: string) => void): Promise<void> {
+// Each entry of a NUL-terminated listing, as git writes it: one chunk decoded a turn (a kernel's 3.9 MB, decoded whole,
+// held the loop 18 to 33 ms in one turn: D21), and a chunk's entries read in slices of at most PARSE_SLICE_MS (a first
+// slice of cold code held it 10 to 26 ms, the VM measure of M1).
+async function eachEntry(chunks: AsyncIterable<Buffer>, take: (entry: string) => void): Promise<void> {
+  const decoder = new StringDecoder('utf8');
+  let rest = ''; // an entry the last chunk cut
+  for await (const chunk of chunks) {
+    const text = rest + decoder.write(chunk);
+    const end = text.lastIndexOf('\0');
+    rest = end < 0 ? text : text.slice(end + 1);
+    if (end >= 0) await entriesOf(text, end, take);
+    await new Promise((resolve) => setImmediate(resolve)); // the next chunk in a turn of its own
+  }
+  const last = rest + decoder.end();
+  if (last !== '') take(last);
+}
+
+async function entriesOf(text: string, length: number, take: (entry: string) => void): Promise<void> {
   let start = 0;
   let read = 0;
   let since = performance.now();
-  while (start < out.length) {
-    let end = out.indexOf('\0', start);
-    if (end < 0) end = out.length;
-    if (end > start) take(out.slice(start, end));
+  while (start < length) {
+    let end = text.indexOf('\0', start);
+    if (end < 0 || end > length) end = length;
+    if (end > start) take(text.slice(start, end));
     start = end + 1;
     if ((++read & 255) !== 0 || performance.now() - since < PARSE_SLICE_MS) continue;
     await new Promise((resolve) => setImmediate(resolve));
     since = performance.now();
   }
+}
+
+// A read that runs git and hands its output over whole, for a caller without a streamed read.
+function wholly(run: GitRun): GitRead {
+  return (directory, args) => ({
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(await run(directory, args));
+    },
+  });
 }
 
 // A copy of a directory's name that holds nothing else: V8 keeps a longer substring as a view of the string it came
