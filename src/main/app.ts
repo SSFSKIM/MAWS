@@ -39,7 +39,7 @@ import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliv
 import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
-import { excludeFromBackup } from './device/backup-exclusion';
+import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
 import { orgFiles } from './org/files'; // P5 O8 M1

@@ -35,7 +35,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import * as z from 'zod';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError, type OAuthFetch } from './oauth-http';
-import type { ConnectorOAuthGrant, ConnectorOAuthTokens } from './oauth-types';
+import type { ConnectorOAuthGrant, ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 
 export const CONNECT_CALLBACK_TIMEOUT_MS = 120_000;
 export const OAUTH_CALLBACK_PATH = '/callback';

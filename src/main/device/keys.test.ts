@@ -18,7 +18,7 @@ import {
   type OrgState,
 } from '../../../apps/org-protocol/src/index.ts';
 import { duplexPair } from '../../../apps/org-protocol/test-support/tamper-relay.ts';
-import { excludeFromBackup } from './backup-exclusion';
+import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import {
   createNextDeviceKeys,
   destroyRetiredDeviceKeys,

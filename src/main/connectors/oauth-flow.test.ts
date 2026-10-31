@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoopbackReply, LoopbackRequest } from './oauth-callback';
 import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, untilEnded, type ConnectorOAuthFlowDeps } from './oauth-flow';
-import type { ConnectorOAuthGrant } from './oauth-types';
+import type { ConnectorOAuthGrant } from '@shared/connectors/oauth-types';
 
 const MCP = 'https://mcp.example.com';
 const AS = 'https://auth.example.com';
