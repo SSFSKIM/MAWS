@@ -226,11 +226,17 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
     `machine ${status.machine}`,
     `profile ${status.profile ?? '(not shown)'} · role ${status.role}`,
     `engine host  ${hostText(status.hosts['engine-host'])}`,
+    ...(status.sessionHosts ? [sessionHostsLine(status.sessionHosts)] : []), // P5 O16 M2
     `pty host     ${hostText(status.hosts['pty-host'])}`,
     `clients      ${clients.length > 0 ? clients.join(' · ') : 'none'}`,
     `endpoint     ${JSON.stringify(status.endpoint.detail)}`,
     '',
   ].join('\n');
+}
+
+// P5 O16 M2: the engine host's session hosts, under its line (absent while it is parked or from an older one)
+export function sessionHostsLine(hosts: NonNullable<DaemonStatus['sessionHosts']>): string {
+  return `session hosts  ${hosts.hosts} (adopted ${hosts.adopted}, failed ${hosts.failed})`;
 }
 
 function hostText(host: DaemonHost): string {

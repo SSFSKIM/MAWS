@@ -841,7 +841,7 @@ describe('process table (E10): the orphan ledger', () => {
       await s.session.start();
       return s;
     };
-    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId });
+    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId, holderId: null });
     return { table, procStartOf, logs, writes, launch, row, record: () => table.recordLive((rows) => void writes.push([...rows])) };
   }
 
@@ -870,6 +870,16 @@ describe('process table (E10): the orphan ledger', () => {
     expect(writes.at(-1)).toEqual([row(b, 702)]);
     expect(writes).toHaveLength(count + 1);
     expect(procStartOf.mock.calls.map(([pid]) => pid)).toEqual([701, 702]); // once per process
+  });
+
+  // P5 O16 M2 (Interfaces §B): a row under a session host names it
+  it('names the session host a row runs under', async () => {
+    const { table, writes, record } = ledgerTable();
+    const s = scriptedSession({ spec: { appSessionId: 'h' as AppSessionId }, transport: { pid: 703 }, session: { holder: { pid: 99, holderId: 'L-h', binary: '/bin/host' } } });
+    table.reserve('h' as AppSessionId, () => s.session);
+    await s.session.start();
+    record();
+    expect(writes.at(-1)).toEqual([{ appSessionId: 'h', pid: 703, procStart: 'T703', launchId: s.session.status().launchId, holderId: 'L-h' }]);
   });
 
   it('records a start time it cannot read as empty, and a failed write is logged and retried at the next change', async () => {
@@ -1152,14 +1162,26 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     }
   });
 
-  it('an adopted process holds the session until a task snapshot and a Stop have both arrived', async () => {
+  // P5 O16 M2 (D48): a Stop that carries `background_tasks` reads the tasks too; one without them leaves them unknown
+  it('an adopted process holds the session until its tasks and its crons have both been read', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
-    await humanTurn(s.a!, [stop([])]);
+    const withoutTasks = stop([]);
+    delete (withoutTasks.request.input as { background_tasks?: unknown }).background_tasks;
+    await humanTurn(s.a!, [withoutTasks]);
     expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted' }); // the tasks are not read yet
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     s.a!.transport.push(tasks([], 'b-1'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('an adopted process\'s Stop with its background_tasks reads both at once (D48)', async () => {
+    const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await humanTurn(s.a!, [stop([])]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(lifecycle(s.a!)).toBe('exiting');
   });

@@ -168,6 +168,8 @@ export class Supervision {
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
       release: { role: this.deps.role, idleMs: this.releaseIdleMs() }, // P5 O2 M2
+      // P5 O16 M2: the live rows' session hosts (the detached mode's alone: a utility host spawns directly)
+      ...(this.deps.mode === 'detached' && { holder: { hosts: rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length, adopted: 0, failed: 0, gate: null, handover: 'none' as const } }),
     };
   }
 

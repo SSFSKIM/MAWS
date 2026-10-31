@@ -80,7 +80,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
-import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
+import { MAX_IDLE_EXIT_MS, type SupervisorStatus } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { CommandInput } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
@@ -741,6 +741,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const asked = hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
     const answered = await Promise.race([asked, new Promise<null>((resolve) => setTimeout(() => resolve(null), STATUS_BOUND_MS).unref())]);
     const live = answered?.ok ? (answered.value as { liveSessions: number }).liveSessions : null;
+    const holder = answered?.ok ? (answered.value as SupervisorStatus).holder : undefined; // P5 O16 M2: its session hosts
     return {
       pid: process.pid,
       startedAt,
@@ -756,6 +757,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       logPath: paths.log,
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
       spine: spine.status(),
+      ...(holder && { sessionHosts: { hosts: holder.hosts, adopted: holder.adopted, failed: holder.failed } }), // P5 O16 M2
     };
   }
   // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,

@@ -34,6 +34,11 @@ export const SupervisorStatusSchema = z.strictObject({
   // P5 O2 M2 (additive): the idle release's role and idle time (a laptop's the idle exit's, null for never; a server's
   // 24 hours); optional for an older supervisor
   release: z.strictObject({ role: z.enum(['laptop', 'server']), idleMs: z.number().int().positive().nullable() }).optional(),
+  // P5 O16 (additive; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D): the session hosts of the live
+  // rows (`hosts`), those a successor re-attached to and those it could not (`adopted`, `failed`, M3), the gate's socket
+  // (null until M5 serves it) and a handover under way (M3); `mawsd`'s `daemon.status` counts from it. Optional for an
+  // older supervisor.
+  holder: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']) }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 

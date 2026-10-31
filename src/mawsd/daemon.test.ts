@@ -204,6 +204,16 @@ describe('the upstreams and machine.sock', () => {
     expect(scene.spawn).toHaveBeenCalledOnce();
   });
 
+  // P5 O16 M2 (Interfaces §G): the engine host's session hosts, from its supervisor status; absent while it names none
+  it('daemon.status carries the engine host\'s session host counts when its supervisor status names them', async () => {
+    const holder = { hosts: 2, adopted: 1, failed: 0, gate: null, handover: 'none' };
+    const status = { mode: 'detached', pid: 1, startedAt: 'T', buildId: 'b', protocol: 1, wire: 'w', liveSessions: 2, rows: 2, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder };
+    scene.engineSpawn = { answers: { 'host.supervisorStatus': () => status } };
+    await scene.start();
+    const app = await scene.app('machine');
+    expect(await app.request('daemon.status')).toMatchObject({ ok: true, value: { sessionHosts: { hosts: 2, adopted: 1, failed: 0 } } });
+  });
+
   it('a wrong token on any socket is closed with nothing written', async () => {
     await scene.start();
     for (const socket of ['engine-host', 'pty-host', 'machine'] as const) {

@@ -22,12 +22,13 @@ export interface LiveRow {
   pid: number;
   procStart: string; // '' when it could not be read at the launch; such a row is never signalled
   launchId: string;
+  holderId: string | null; // P5 O16 M2 (Interfaces §B): the session host the process runs under, null for a direct spawn
 }
 
 const OwnerSchema = z.object({ pid: z.number().int(), procStart: z.string() });
 const LedgerSchema = z.object({
   owner: OwnerSchema,
-  rows: z.array(z.object({ appSessionId: z.string(), pid: z.number().int(), procStart: z.string(), launchId: z.string() })),
+  rows: z.array(z.object({ appSessionId: z.string(), pid: z.number().int(), procStart: z.string(), launchId: z.string(), holderId: z.string().nullable().default(null) /* P5 O16 M2; absent before it */ })),
 });
 
 export type Ledger = z.infer<typeof LedgerSchema>;

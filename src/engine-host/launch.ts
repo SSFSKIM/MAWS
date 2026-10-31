@@ -59,6 +59,8 @@ export const ENGINE_FLAGS: readonly string[] = Object.freeze([
   '--setting-sources', 'user,project,local',
 ]);
 
+export const AWAIT_INITIALIZE_FLAG = '--await-initialize'; // P5 O16 M2
+
 export interface LaunchPlan {
   bin: string;
   args: string[];
@@ -107,8 +109,10 @@ function isAllowed(key: string): boolean {
   return ALLOWED_KEYS.has(key) || ALLOWED_PREFIXES.some((p) => key.startsWith(p));
 }
 
-// `spawnerPid`: the process that spawns the engine, which is the engine's parent (sminos membership, below).
-export function buildEnvironment(spec: LaunchSpec, captured: Record<string, string>, relayUrl: string, spawnerPid: number): Record<string, string> {
+// `spawnerPid`: the process that spawns the engine, which is the engine's parent (sminos membership, below). P5 O16 M2:
+// `holder`, a launch under a session host (holder/transport.ts): the gate's socket for the observer bridge, and
+// `spawnerPid` a placeholder the launcher replaces with the session host's pid once it has started (the engine's parent).
+export function buildEnvironment(spec: LaunchSpec, captured: Record<string, string>, relayUrl: string, spawnerPid: number, holder: { gateSocket: string } | null = null): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(captured)) if (isAllowed(key)) env[key] = value;
   env.CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES = 'false';
@@ -139,6 +143,9 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   // only together with SMNS_MEMBER's parent check above, so a `claude` a tool starts under the engine, which inherits
   // both, stays a session of its own. Set over any value the capture holds (`MAWS_*` never passes the allowlist anyway).
   env.MAWS_LANE = 'B';
+  // P5 O16 M2 (Interfaces §E): where the observer bridge asks the engine host's gate (OX10); a refused connect is no gate
+  // (nothing listens until M5). Never set without a session host, and never from the capture (`MAWS_*` fails the allowlist).
+  if (holder !== null) env.MAWS_HOLDER_SOCKET = holder.gateSocket;
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
@@ -223,7 +230,7 @@ export function mintLaunchId(): string {
 export function buildLaunch(
   spec: LaunchSpec,
   captured: Record<string, string>,
-  opts: { relayUrl: string; bin: string; engineVersion: string; spawnerPid: number; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[] },
+  opts: { relayUrl: string; bin: string; engineVersion: string; spawnerPid: number; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[]; declaresAwaitInitialize?: boolean; holder?: { gateSocket: string } },
 ): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
@@ -234,6 +241,9 @@ export function buildLaunch(
   const sessionId = (pinned ? (spec.sessionId ?? randomUUID()) : spec.resume!.sessionId) as SessionId;
 
   const args = [...ENGINE_FLAGS];
+  // P5 O16 M2 (D20, D48): the engine reads nothing and runs no resurrected cron until `initialize` is answered, so an
+  // engine host's hooks are registered before any turn; a hidden option, passed only to a binary whose bytes declare it
+  if (opts.declaresAwaitInitialize === true) args.push(AWAIT_INITIALIZE_FLAG);
   if (spec.model !== null) args.push('--model', spec.model);
   if (spec.permissionMode !== null) args.push('--permission-mode', spec.permissionMode);
   for (const dir of spec.additionalDirectories) args.push('--add-dir', dir);
@@ -262,7 +272,7 @@ export function buildLaunch(
   return {
     bin: opts.bin,
     args,
-    env: buildEnvironment(spec, captured, opts.relayUrl, opts.spawnerPid),
+    env: buildEnvironment(spec, captured, opts.relayUrl, opts.spawnerPid, opts.holder ?? null),
     cwd: spec.cwd,
     flagSettings,
     launchId: mintLaunchId(),
@@ -274,7 +284,8 @@ export function buildLaunch(
 
 // The journal's `spawn` meta row (X8): written before `spawn()` returns so a launch that dies instantly still leaves a
 // journal. Env values are never journaled; the row lists key names.
-export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string }): {
+// P5 O16 M2: `holder`, the session host a hosted launch runs under, beside `bin`, the engine it runs.
+export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string; holder?: { pid: number; holderId: string; binary: string } }): {
   event: 'spawn';
   bin: string;
   args: string[];
@@ -286,6 +297,7 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string }): {
   charterPin: string;
   launchId: string;
   sessionId: string;
+  holder?: { pid: number; holderId: string; binary: string };
 } {
   return {
     event: 'spawn',
@@ -299,5 +311,6 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string }): {
     charterPin: CHARTER_PIN,
     launchId: plan.launchId,
     sessionId: plan.sessionId,
+    ...(opts.holder && { holder: { ...opts.holder } }),
   };
 }

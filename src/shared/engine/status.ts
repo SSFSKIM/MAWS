@@ -90,6 +90,11 @@ export const EngineSessionStatusSchema = z.strictObject({
   // (unverified), the verb, and when. It moves no ref the git watcher sees, so the PR row re-asks gh when `at` moves
   // rather than at its next poll. Absent before the first, and from an older host.
   published: z.strictObject({ url: z.string(), action: z.string().nullable(), at: z.string() }).optional(),
+  // P5 O16 M2 (additive X6; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D): the session host the
+  // process runs under on the daemon and detached shapes (`pid` the host's, the status's own `pid` the engine's;
+  // `holderId` the launch id; `adopted` once a successor engine host re-attached to it, M3); null on a replay or
+  // embedded launch; absent from an older host.
+  holder: z.strictObject({ pid: z.number().int(), holderId: z.string(), adopted: z.boolean() }).nullable().optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

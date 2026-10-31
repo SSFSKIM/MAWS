@@ -53,6 +53,9 @@ export const DaemonStatusSchema = z.strictObject({
   logPath: localOnly(z.string()),
   endpoint: z.strictObject({ present: z.boolean(), detail: z.unknown() }), // detail: the module's status() (O10), under the same rule
   spine: DaemonSpineSchema.optional(), // P5 O3-D: absent from a daemon before O3-D
+  // P5 O16 M2: the engine host's session hosts (its supervisor status's `holder`): live, re-attached by a successor and
+  // left unadopted; absent while the engine host is parked or did not answer, and from a daemon before O16
+  sessionHosts: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int() }).optional(),
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
 
