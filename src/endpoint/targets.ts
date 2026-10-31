@@ -21,7 +21,13 @@ import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
 
 export type Resolved =
-  | { kind: 'session'; target: SessionTarget }
+  /**
+   * `unavailable` (P5 O7 M4, fix wave 1): placed by its record's engine session, but the request can't run against it
+   * now (the engine host runs another engine session for it, or can't answer). The refusal is the caller's only once
+   * they are known to stand on the recorded engine session, so a caller below the floor hears `grade` for a session
+   * that lags as for one that doesn't exist.
+   */
+  | { kind: 'session'; target: SessionTarget; unavailable?: true }
   /** A session the input names that this machine can't place: no record can be found for it, so nobody holds a rank. */
   | { kind: 'unknown' }
   | { kind: 'machine' }
@@ -67,6 +73,12 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  * index lags a change of engine session (a `/clear`) and the request is `unavailable` until it catches up, so a member's
  * rank on one engine session never reaches another. An engine host that can't answer is `unavailable` too, which a
  * caller may try again.
+ *
+ * P5 O7 M4 (fix wave 1): a session with a recorded engine session is placed on it whatever the live check finds, and a
+ * failed check is the placement's `unavailable` flag, which authorization answers only after the caller's rank on the
+ * recorded engine session (the conservative choice: the record is what the machine says the session is, and a caller
+ * who stands on neither learns nothing). Without a recorded engine session the live row is the only placement, and an
+ * engine host that can't answer is `unavailable` for every such session, known or not.
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
@@ -79,9 +91,9 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
   const recorded = field(record.value, 'engineSessionId');
   const status = !isId(recorded) || live ? await dispatch('engine-host', 'session.status', { appSessionId }) : null;
   const hostAway = status !== null && !status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout');
-  if (hostAway) return unavailable;
   const running = status?.ok === true ? field(status.value, 'engineSessionId') : undefined;
-  if (isId(recorded)) return status === null || !status.ok || running === recorded ? placed(recorded) : unavailable;
+  if (isId(recorded)) return hostAway || (status?.ok === true && running !== recorded) ? { ...placed(recorded), unavailable: true } : placed(recorded);
+  if (hostAway) return unavailable;
   return isId(running) ? placed(running) : { kind: 'unknown' };
 }
 
@@ -90,21 +102,24 @@ export const CHECKOUT_BOUNDS_KEPT = 256;
 
 /**
  * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to
- * (`git.status`'s `repoRoot`), kept per set of roots (a record whose roots change is read afresh). A root that does not
- * resolve is dropped; one in no repository bounds only itself. A set whose repository reads didn't all answer (the
- * spine away, a git timeout) is used once and not kept.
+ * (`git.status`'s `repoRoot`). A root that does not resolve is dropped; one in no repository bounds only itself.
+ *
+ * The roots are realpathed on every read (cheap), and the repositories are kept per set of canonical roots, so a root
+ * that is a symlink retargeted since is read where it points now. A set is kept only when every root resolved and
+ * every repository read answered (the spine away, a git timeout): a root that appears later, or a read that failed,
+ * is read again next time (fix wave 1).
  */
 export class CheckoutBounds {
   readonly #kept = new Map<string, readonly string[]>();
 
   /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
   async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<readonly string[]> {
-    const roots = rootsOf(record);
-    const key = JSON.stringify(roots);
+    const resolved = await Promise.all(rootsOf(record).map((root) => realpathOf(root)));
+    const real = [...new Set(resolved.filter((root): root is string => root !== null))];
+    const key = JSON.stringify(real);
     const kept = this.#kept.get(key);
     if (kept !== undefined) return kept;
-    const real = (await Promise.all(roots.map((root) => realpathOf(root)))).filter((root): root is string => root !== null);
-    let answered = true;
+    let answered = !resolved.includes(null);
     const repos = await Promise.all(
       real.map(async (root) => {
         const status = await dispatch('machine', 'git.status', { directory: root }).catch(() => null);

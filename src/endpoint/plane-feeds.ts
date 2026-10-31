@@ -9,8 +9,9 @@
 // Each later event is `ev {body: {name, payload}}` at the next `seq`: every `files.changed` and `scm.remote.output` naming
 // the session, and every `git.changed` whose `repoRoot` lies in the session's checkout bounds, as the `checkout` target
 // rule reads them (targets.ts), so the device hears every repository it may watch and no other. The bounds are read at
-// the opening and again at each `session.changed` of the session (its roots may move); a `git.changed` that arrives
-// before the first read answers waits for it, the latest per repository.
+// the opening and again at each `session.changed` of the session (its roots may move). While a read is out the bounds
+// are unknown: a `git.changed` waits for the latest read's answer, the latest per repository, and is sent only if the
+// new bounds take it, so a root's change neither leaks the old repository's changes nor drops the new one's (fix wave 1).
 //
 // A feed lives with its channel and its access (the table re-checks it as any subscription), and ends `behind` when the
 // device leaves more than its backlog unread: the device opens it again, as after a reconnect.
@@ -28,15 +29,15 @@ export type PlaneFeedsContext = {
   backlogBytes?: number;
 };
 
-/** How many repositories' latest `git.changed` a feed holds while its bounds are first read. */
+/** How many repositories' latest `git.changed` a feed holds while its bounds are read. */
 export const HELD_REPOSITORIES = 64;
 
 type Open = {
   sub: Subscription;
   seq: number;
-  /** The session's checkout bounds; null until first read. */
+  /** The session's checkout bounds; null while a read of them is out. */
   bounds: readonly string[] | null;
-  /** Each repository's latest `git.changed`, held until the bounds are first read. */
+  /** Each repository's latest `git.changed`, held while the bounds are read. */
   held: Map<string, unknown>;
   /** Reads of the bounds begun: only the latest one's answer is taken. */
   reads: number;
@@ -93,9 +94,14 @@ export class PlaneFeeds implements Plane {
     }
   }
 
-  /** The session's checkout bounds, from `record` (a `session.changed`'s) or the spine's `session.get`; then what was held. */
+  /**
+   * The session's checkout bounds, from `record` (a `session.changed`'s) or the spine's `session.get`; then what was held.
+   * The bounds are unknown from the call on (synchronously, before anything else is delivered), and only the latest
+   * read's answer is taken.
+   */
   async #readBounds(open: Open, record: Record<string, unknown> | null): Promise<void> {
     const n = ++open.reads;
+    open.bounds = null;
     const dispatch = dispatchAs(this.#ctx.dispatch, open.sub.channel.client);
     let bounds: readonly string[] = [];
     try {

@@ -12,8 +12,9 @@
 //   4. the caller's standing at the command's floor: a session rank on the session its target rule reads (`no-target`
 //      when it names none, `grade` below it, or on a session this machine can't place; `list`-graded machine reads need
 //      none), a machine grade among the member's rights (`grade`). Nothing of a session is read for a caller below its
-//      floor, so a refusal says nothing of whether a session exists; then, for the `checkout` rule (P5 O7 M4), the
-//      input's path within the session's checkout (`no-target`);
+//      floor, so a refusal says nothing of whether a session exists: a lane B session whose live engine session isn't
+//      its recorded one is `unavailable` only after the caller's rank on the recorded one (P5 O7 M4, fix wave 1); then,
+//      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout (`no-target`);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
@@ -236,6 +237,8 @@ export class Authorizer {
     const record = target === undefined ? null : reads.record(target);
     const atFloor = await this.#stands(floor, target, record, who, reads);
     if (atFloor !== null) return no(atFloor);
+    // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
+    if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.
     if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds)))) return no('no-target');
 
@@ -350,6 +353,7 @@ export class Authorizer {
     const owners = await reads.owners();
     const allowed = cards ? owns(record, who.member, owners) : rankAtLeast(sessionRank(record, who.member, owners), 'view');
     if (!allowed) return refuse(webCards ? 'class' : 'grade');
+    if (resolved.unavailable === true) return refuse('unavailable');
     return { ok: true, target: resolved.target };
   }
 

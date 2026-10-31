@@ -128,6 +128,55 @@ describe('a session’s checkout feed', () => {
     expect(names(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: added, status: status(added), reason: 'fs' }]);
   });
 
+  // Fix wave 1: while a change of roots is read, the old bounds no longer stand and the new ones don't yet.
+  it('across a change of roots, delivers neither the old repository’s changes nor drops the new one’s, and takes only the latest read', async () => {
+    const [repoA, repoB, repoC, repoD] = [scratch(), scratch(), scratch(), scratch()];
+    const f = await startEndpoint(org, started);
+    const record = session(f, 'app-1', repoA);
+    const gates = new Map<string, Promise<void>>();
+    const open = new Map<string, () => void>();
+    const gate = (dir: string) => gates.set(dir, new Promise<void>((resolve) => open.set(dir, resolve)));
+    f.spine.handle('git.status', async (input) => {
+      const { directory } = input as { directory: string };
+      await gates.get(directory);
+      return status(directory);
+    });
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'f1', { lane: 'B', id: 'app-1' });
+    const changed = (repoRoot: string, reason: string) => f.host.emitMachine('git.changed', { repoRoot, status: status(repoRoot), reason });
+    changed(repoA, 'before');
+    await until(() => evs(a, 'f1').length === 1, 'A’s change under the first bounds');
+
+    // A is removed and B added; B's repository read is held.
+    gate(repoB);
+    f.host.emitMachine('session.changed', { record: { ...record, directory: repoB }, cause: 'updated', revision: 2 });
+    changed(repoA, 'during');
+    changed(repoB, 'during');
+    await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoB), 'B’s read begun');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(evs(a, 'f1')).toHaveLength(1);
+    open.get(repoB)!();
+    await until(() => evs(a, 'f1').length === 2, 'B’s held change');
+    expect(names(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: repoB, status: status(repoB), reason: 'during' }]);
+
+    // Two changes in a row: the older read (to D, held) lands after the newer (to C): the bounds are C's.
+    gate(repoD);
+    f.host.emitMachine('session.changed', { record: { ...record, directory: repoD }, cause: 'updated', revision: 3 });
+    f.host.emitMachine('session.changed', { record: { ...record, directory: repoC }, cause: 'updated', revision: 4 });
+    await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoC), 'C’s read');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    open.get(repoD)!();
+    await until(() => f.host.calls.filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoD).length === 1, 'D’s read');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    changed(repoD, 'after');
+    changed(repoA, 'after');
+    changed(repoB, 'after');
+    changed(repoC, 'after');
+    await until(() => evs(a, 'f1').length === 3, 'C’s change');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(names(a, 'f1').slice(2)).toEqual([['git.changed', { repoRoot: repoC, status: status(repoC), reason: 'after' }]]);
+  });
+
   it('is refused to a caller who can’t view the session, for a lane A session, and as an attention feed (not offered until M6)', async () => {
     const repo = scratch();
     const f = await startEndpoint(org, started);

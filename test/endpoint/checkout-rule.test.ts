@@ -4,7 +4,7 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
@@ -140,6 +140,59 @@ describe('the checkout rule', () => {
     expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('no-target');
     session(f, 'app-1', { directory: one.root, additionalDirectories: [two.root] });
     expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('ok');
+  });
+
+  // Fix wave 1: the bounds follow the roots as they resolve now, not as they resolved when first read.
+  it('follows a root that is a symlink retargeted since, and a root that didn’t resolve until later', async () => {
+    const one = await repo();
+    const two = await repo();
+    const three = await repo();
+    const current = `${one.root}-current`;
+    symlinkSync(one.root, current);
+    const later = `${three.root}-later`; // not there yet
+    const f = await machine(one.serviceEnv());
+    session(f, 'app-1', { directory: current, additionalDirectories: [later] });
+    const a = await openRemote(f, org.a1, org.A);
+    try {
+      expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('ok');
+      expect(code(await call(a, 'git.status', { directory: three.root }, B('app-1')))).toBe('no-target');
+      // `current` now points at another repository: the first is no longer the session's.
+      rmSync(current);
+      symlinkSync(two.root, current);
+      expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('ok');
+      // The root that didn't resolve does now.
+      symlinkSync(three.root, later);
+      expect(code(await call(a, 'git.status', { directory: three.root }, B('app-1')))).toBe('ok');
+    } finally {
+      rmSync(current, { force: true });
+      rmSync(later, { force: true });
+    }
+  });
+
+  // Fix wave 1: the index lags the engine session the host runs (a `/clear`). A caller is placed on the recorded engine
+  // session and ranked there; only one who stands on it hears that the session can't be read now.
+  it('answers a caller below view `grade` on a session whose live engine session isn’t its recorded one, reading nothing of its checkout', async () => {
+    const one = await repo();
+    const f = await machine(one.serviceEnv());
+    session(f, 'app-1', { directory: one.root });
+    f.host.add('app-1', 'eng-live');
+    f.records.set({ lane: 'B', session: 'eng-live', owners: [org.B] }, 'app-1');
+    const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+    const asked = f.host.calls.length;
+    // B owns the live engine session, not the recorded one: below view on the session as placed.
+    expect(code(await call(b, 'git.status', { directory: one.root }, B('app-1')))).toBe('grade');
+    expect(code(await call(b, 'session.status', { appSessionId: 'app-1' }))).toBe('grade');
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'sub', sub: 'f1', feed: 'checkout', session: B('app-1'), cursor: null, credit: 1024 });
+    expect(await waitFor(b, (m) => m.sub === 'f1' && m.t === 'ended', 'the feed refused', from)).toMatchObject({ reason: 'grade' });
+    // Placement read the record and the live row, once each per request; nothing of the checkout was read.
+    expect(f.host.calls.slice(asked).map((c) => c.name).filter((name) => name !== 'session.get' && name !== 'session.status')).toEqual([]);
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'session.get')).toHaveLength(3);
+    // A, who owns the recorded engine session, hears that it can't be read now.
+    expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('unavailable');
+    expect(code(await call(a, 'session.status', { appSessionId: 'app-1' }))).toBe('unavailable');
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.status')).toEqual([]);
   });
 });
 
