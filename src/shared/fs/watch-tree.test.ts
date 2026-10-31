@@ -547,6 +547,46 @@ describe('the watch tree reconciles', () => {
     handle.close();
   });
 
+  // The final review's finding 3: a caller whose predicate changed asks for a pass, or has the slow timer's pass wait
+  // on it; every pass asks the predicate again for each directory not watched.
+  it('watches, at a pass asked for now, a directory its predicate no longer prunes, naming what it holds', async () => {
+    const fake = new FakeWatchFs();
+    fake.write('build/out.txt');
+    let pruned = true;
+    const { handle, heard } = open(fake, (dir) => pruned && dir === 'build');
+    await drain();
+    expect(fake.watched()).toEqual(['']);
+    heard.length = 0;
+    pruned = false;
+    handle.reconcileNow();
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'build']);
+    expect(heard).toEqual([['rename', 'build/out.txt'], ['rename', 'build'], ['rename', null]]);
+    handle.close();
+  });
+
+  it('walks its slow pass only once the caller’s beforeReconcile settles, with the predicate as it then answers', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('build');
+    let pruned = true;
+    let ready!: () => void;
+    const beforeReconcile = vi.fn(() => new Promise<void>((resolve) => (ready = () => ((pruned = false), resolve()))));
+    const handle = watchTree(fake.root, { fs: fake.options, prune: (dir) => pruned && dir === 'build', beforeReconcile }, () => {});
+    await drain();
+    expect(beforeReconcile).not.toHaveBeenCalled(); // the initial walk is no slow pass
+    const listings = fake.listings;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(beforeReconcile).toHaveBeenCalledTimes(1);
+    expect(fake.listings).toBe(listings); // waiting
+    ready();
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'build']);
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS); // the timer armed again after the pass began
+    expect(beforeReconcile).toHaveBeenCalledTimes(2);
+    handle.close();
+  });
+
   // The final review's finding 2: the root's own listing failing for a reason of its own (EMFILE) says nothing of what
   // lies beneath it either, so the pass keeps every watch, and a later event beneath is still heard
   it('keeps every watch beneath the root when the root’s own listing failed for a reason of its own', async () => {

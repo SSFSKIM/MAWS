@@ -1,5 +1,6 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { watch as fsWatch, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { watch as fsWatch, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1117,6 +1118,239 @@ describe('the repository watcher over the watch tree', () => {
     expect(emitted.slice(quiet)).toEqual([{ repoRoot: ROOT, status: current, reason: 'worktree' }]);
     watcher.dispose();
   });
+});
+
+// The final review's finding 3: what git ignores is read when the root's tree first asks and rebuilt when its inputs
+// change, so a directory a removed rule (a switched branch, a force-added file) admits is watched at the tree's next
+// pass. A `.gitignore` anywhere in the tree, the common dir's `info/exclude` and the git dir's HEAD rebuild it at once,
+// coalesced (one in flight, one more for whatever changed meanwhile), followed by one pass; the index only marks it
+// stale, rebuilt once before the slow timer's next pass walks, and an index write inside our own status's window is
+// ours, never a mark.
+describe('the repository watcher rebuilds what git ignores when its rules change', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  afterEach(() => vi.useRealTimers());
+
+  function treeOver(fs: FakeWatchFs): WatchFn {
+    return (path, options, listener) => watchTree(path, { prune: options.prune, beforeReconcile: options.beforeReconcile, fs: fs.options }, listener);
+  }
+
+  // A repository whose `build/` git ignores until the test says otherwise; `ignored` counts every snapshot read.
+  function lab(over: { status?: (fs: FakeWatchFs) => Promise<GitStatus> } = {}) {
+    const fs = new FakeWatchFs(ROOT);
+    fs.mkdir('.git/info');
+    fs.mkdir('.git/refs');
+    fs.write('.git/HEAD');
+    fs.write('.git/index');
+    fs.write('.gitignore');
+    fs.write('build/out.txt');
+    fs.write('src/.gitignore');
+    const rules = { build: true };
+    let holding: Promise<void> | null = null;
+    const ignored = vi.fn(async () => {
+      const verdict = rules.build; // what git reads at the snapshot's start
+      await holding;
+      return async (dir: string) => verdict && dir === 'build';
+    });
+    const statuses = vi.fn(async () => (over.status ? over.status(fs) : status()));
+    const watcher = new GitWatcher({ status: statuses, emit: () => {}, watch: treeOver(fs), statFile: async () => null, ignored, isRepository: async () => false });
+    const hold = () => {
+      let open!: () => void;
+      holding = new Promise((resolve) => (open = resolve));
+      return () => {
+        holding = null;
+        open();
+      };
+    };
+    return { fs, rules, ignored, statuses, watcher, hold };
+  }
+
+  it('watches a directory its removed rule admits after the pass a .gitignore change starts, and hears an edit inside it', async () => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    expect(fs.watched()).not.toContain('build');
+    expect(ignored).toHaveBeenCalledTimes(1);
+    rules.build = false;
+    fs.fire('', 'change', '.gitignore');
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it.each([
+    ['a nested .gitignore', 'src', '.gitignore'],
+    ["the git dir's info/exclude", '.git/info', 'exclude'],
+    ["the git dir's HEAD", '.git', 'HEAD'],
+  ])('rebuilds at once on %s', async (_name, dir, file) => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    rules.build = false;
+    fs.fire(dir, 'change', file);
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it('coalesces a burst of changes into one rebuild in flight and one more, then one pass', async () => {
+    const { fs, rules, ignored, watcher, hold } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    const release = hold();
+    fs.fire('', 'change', '.gitignore'); // the first rebuild, held
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    rules.build = false;
+    for (let i = 0; i < 20; i++) fs.fire('src', 'change', '.gitignore'); // a checkout's .gitignore files
+    fs.fire('.git', 'change', 'HEAD');
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    const listings = fs.listings;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(3); // one more, for everything that changed during the first
+    expect(fs.watched()).toContain('build');
+    expect(fs.listings - listings).toBeLessThanOrEqual(fs.watched().length + 1); // one whole-tree pass, not one per change
+    watcher.dispose();
+  });
+
+  it('takes a rule changed during the first read as one more read and one pass, never a second read beside it', async () => {
+    const { fs, rules, ignored, watcher, hold } = lab();
+    const release = hold();
+    await watcher.watch(ROOT);
+    await drain(); // the walk asks: the first read, held
+    expect(ignored).toHaveBeenCalledTimes(1);
+    rules.build = false;
+    fs.fire('', 'change', '.gitignore');
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(1);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build');
+    watcher.dispose();
+  });
+
+  it('rebuilds on an index change only before the slow timer’s next pass walks, and only once', async () => {
+    const { fs, rules, ignored, watcher } = lab();
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1_000); // the settle pass
+    rules.build = false; // a force-add beneath build/: only the index moved
+    fs.fire('.git', 'change', 'index');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(1);
+    expect(fs.watched()).not.toContain('build');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS - 2_000);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    expect(fs.watched()).toContain('build'); // that pass walked with the new snapshot
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 3);
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    watcher.dispose();
+  });
+
+  // The architect's guard: status → index write → rebuild → pass → null event → status must not loop.
+  it('takes an index write its own status made as no change of the rules: a rebuild’s pass whose status rewrites the index starts no second rebuild', async () => {
+    const { fs, ignored, statuses, watcher } = lab({
+      status: async (repo) => {
+        repo.fire('.git', 'change', 'index'); // git status refreshing the index, as a git that takes optional locks does
+        await Promise.resolve();
+        return status();
+      },
+    });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(1_000);
+    fs.fire('', 'change', '.gitignore');
+    await vi.advanceTimersByTimeAsync(1_000); // the rebuild, its pass, the pass's status (which wrote the index)
+    await drain();
+    expect(ignored).toHaveBeenCalledTimes(2);
+    const runs = statuses.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 4); // each period's pass runs a status, which writes the index again
+    await drain();
+    expect(statuses.mock.calls.length).toBeGreaterThan(runs);
+    expect(ignored).toHaveBeenCalledTimes(2);
+    watcher.dispose();
+  });
+
+  it('reads nothing of git where the tree never asked (macOS: the watch takes no prune)', async () => {
+    const fake = fakeWatch();
+    const ignored = vi.fn(async () => async () => false);
+    const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null, ignored });
+    await watcher.watch(ROOT);
+    fake.fire(ROOT, '.gitignore');
+    fake.fire(ROOT, '.git/HEAD');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS * 2);
+    expect(ignored).not.toHaveBeenCalled();
+    watcher.dispose();
+  });
+});
+
+// Real git (the final review's finding 3): the rule removed, the tree's pass, the directory watched, an edit in it heard.
+describe('what git ignores, rebuilt from a real repository when its rule is removed', () => {
+  let repo: GitFixture;
+  let service: GitService;
+  let events: GitChanged[];
+  const watched = new Set<string>();
+  // The tree over the real filesystem, recording the directories it watches.
+  const tree: WatchFn = (path, options, listener) =>
+    watchTree(path, {
+      prune: options.prune,
+      beforeReconcile: options.beforeReconcile,
+      fs: {
+        readdir, lstat, lstatSync,
+        watch: ((dir: string, watchOptions: object, onEvent: (event: string, filename: string | null) => void) => {
+          const handle = fsWatch(dir, watchOptions, onEvent);
+          watched.add(dir);
+          const close = handle.close.bind(handle);
+          handle.close = () => {
+            watched.delete(dir);
+            close();
+          };
+          return handle;
+        }) as typeof fsWatch,
+      },
+    }, listener);
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    events = [];
+    watched.clear();
+    await repo.write('.gitignore', 'build/\n');
+    await repo.git('add', '.gitignore');
+    await repo.git('commit', '-q', '-m', 'ignore build');
+    await repo.write('build/out.txt', 'one\n');
+    service = new GitService({ emit: (e) => events.push(e), env: repo.serviceEnv(), watch: tree });
+  });
+  afterEach(() => {
+    service.dispose();
+    repo.dispose();
+  });
+  const until = async (what: string, ok: () => boolean, withinMs: number) => {
+    for (const start = Date.now(); !ok(); await new Promise((resolve) => setTimeout(resolve, 20))) if (Date.now() - start > withinMs) throw new Error(`not ${what} within ${withinMs} ms`);
+  };
+
+  it('watches build/ once its rule is removed and reports an edit inside it', async () => {
+    await service.watch(repo.root);
+    await until('walked', () => watched.has(repo.path('.git')), 5_000);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(watched).not.toContain(repo.path('build'));
+    await repo.write('.gitignore', '');
+    await until('watching build/', () => watched.has(repo.path('build')), 5_000);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const baseline = events.length;
+    await repo.write('build/out.txt', 'two, edited\n');
+    await until('told of the edit', () => events.length > baseline, 2_000);
+    expect(events.at(-1)!.status.files).toContainEqual(expect.objectContaining({ path: 'build/', untracked: true }));
+  }, 20_000);
 });
 
 // Real repositories, real FSEvents. Each wait is bounded; the "within 1 s" pin is measured from the write.

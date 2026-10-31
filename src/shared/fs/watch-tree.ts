@@ -14,8 +14,10 @@
 // root's own watch follows the root: replaced under its name, it is watched afresh and its contents named; gone, every
 // watch closes until a pass finds it back. ENOSPC or EMFILE from a watch
 // call closes the tree and is reported once, on a later tick, as an 'error' naming the code and the directory: the
-// caller's cue to fall back to polling. Imports Node's builtins alone (the engine host and the services library both
-// take it).
+// caller's cue to fall back to polling. A caller whose predicate can change (git's rules, rebuilt) asks for a pass at
+// once (`reconcileNow`) or has the slow timer's pass wait on it (`beforeReconcile`): every pass asks the predicate
+// again for each directory not watched, so a directory it now admits is watched and its contents named. Imports Node's
+// builtins alone (the engine host and the services library both take it).
 import { lstatSync as fsLstatSync, watch as fsWatch } from 'node:fs';
 import { lstat as fsLstat, readdir as fsReaddir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -24,15 +26,20 @@ export type WatchListener = (event: string, filename: string | null) => void; //
 export interface WatchHandle {
   close(): void;
   on(event: 'error', listener: (error: NodeJS.ErrnoException) => void): unknown;
+  reconcileNow?(): void; // the tree's (fs.watch has none): a whole-tree pass now, or once more after the one under way
+}
+export interface WatchTreeHandle extends WatchHandle {
+  reconcileNow(): void;
 }
 export interface WatchTreeOptions {
   prune?(dir: string): boolean | Promise<boolean>; // `dir` relative to the root; true: never walk or watch it (its ancestors are watched regardless)
+  beforeReconcile?(): Promise<void> | void; // awaited as the slow timer fires, before its pass walks (the caller's predicate brought up to date)
   reconcileMs?: number;
   burst?: { events: number; windowMs: number; settleMs: number };
   concurrency?: number;
   fs?: Pick<typeof import('node:fs/promises'), 'readdir' | 'lstat'> & Pick<typeof import('node:fs'), 'watch' | 'lstatSync'>; // tests
 }
-export type WatchFn = (path: string, options: { recursive: boolean; prune?: WatchTreeOptions['prune'] }, listener: WatchListener) => WatchHandle;
+export type WatchFn = (path: string, options: { recursive: boolean } & Pick<WatchTreeOptions, 'prune' | 'beforeReconcile'>, listener: WatchListener) => WatchHandle;
 
 export const RECONCILE_MS = 120_000;
 export const BURST_EVENTS = 200;
@@ -48,11 +55,11 @@ export function isExhaustion(error: unknown): error is NodeJS.ErrnoException & {
 
 // The platform's recursive watch: the tree on Linux for `recursive: true`, `fs.watch` otherwise (FSEvents on macOS
 // is one native stream per root). `tree` sets the tree's own options (the store's longer reconcile).
-export function recursiveWatch(platform: NodeJS.Platform = process.platform, tree: Omit<WatchTreeOptions, 'prune'> = {}): WatchFn {
-  return (path, { recursive, prune }, listener) => (recursive && platform === 'linux' ? watchTree(path, { ...tree, prune }, listener) : fsWatch(path, { recursive }, listener));
+export function recursiveWatch(platform: NodeJS.Platform = process.platform, tree: Omit<WatchTreeOptions, 'prune' | 'beforeReconcile'> = {}): WatchFn {
+  return (path, { recursive, prune, beforeReconcile }, listener) => (recursive && platform === 'linux' ? watchTree(path, { ...tree, prune, beforeReconcile }, listener) : fsWatch(path, { recursive }, listener));
 }
 
-export function watchTree(root: string, options: WatchTreeOptions, listener: WatchListener): WatchHandle {
+export function watchTree(root: string, options: WatchTreeOptions, listener: WatchListener): WatchTreeHandle {
   return new WatchTree(root, options, listener);
 }
 
@@ -71,9 +78,10 @@ interface Walk {
   done?: () => void;
 }
 
-class WatchTree implements WatchHandle {
+class WatchTree implements WatchTreeHandle {
   private readonly fs: TreeFs;
   private readonly prune: (dir: string) => boolean | Promise<boolean>;
+  private readonly beforeReconcile: (() => Promise<void> | void) | undefined;
   private readonly reconcileMs: number;
   private readonly burst: { events: number; windowMs: number; settleMs: number };
   private readonly concurrency: number;
@@ -106,6 +114,7 @@ class WatchTree implements WatchHandle {
   ) {
     this.fs = options.fs ?? { watch: fsWatch, lstatSync: fsLstatSync, readdir: fsReaddir, lstat: fsLstat };
     this.prune = options.prune ?? (() => false);
+    this.beforeReconcile = options.beforeReconcile;
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.burst = options.burst ?? { events: BURST_EVENTS, windowMs: BURST_WINDOW_MS, settleMs: BURST_SETTLE_MS };
     this.concurrency = options.concurrency ?? WALK_CONCURRENCY;
@@ -128,6 +137,10 @@ class WatchTree implements WatchHandle {
   close(): void {
     this.disposed = true;
     this.shut();
+  }
+
+  reconcileNow(): void {
+    this.reconcile();
   }
 
   private abs(rel: string): string {
@@ -405,8 +418,19 @@ class WatchTree implements WatchHandle {
   private armReconcile(): void {
     if (this.closed) return;
     this.reconcileTimer = setTimeout(() => {
-      this.reconcile();
-      this.armReconcile();
+      this.reconcileTimer = null;
+      const run = () => {
+        this.reconcile();
+        this.armReconcile();
+      };
+      let before: Promise<void> | void;
+      try {
+        before = this.beforeReconcile?.();
+      } catch {
+        before = undefined; // a caller that cannot bring its predicate up to date: the pass walks with the one it has
+      }
+      if (before) void before.then(run, run);
+      else run();
     }, this.reconcileMs);
     this.reconcileTimer.unref?.();
   }
