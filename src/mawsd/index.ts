@@ -141,7 +141,9 @@ function readStdin(): Promise<string> {
   });
 }
 
-// A line read from the terminal with nothing echoed (the enrollment code); ^C abandons it.
+// A line read from the terminal with nothing echoed (the enrollment code); ^C abandons it. The terminal is raw before the
+// question is written, as getpass(3) and readpassphrase(3) have it: whoever answers the question as soon as it shows
+// types into a terminal that no longer echoes, nor turns ^C into a signal.
 function hiddenPrompt(question: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin;
@@ -160,8 +162,8 @@ function hiddenPrompt(question: string): Promise<string> {
         value = char === '\u007f' || char === '\b' ? value.slice(0, -1) : value + char;
       }
     };
-    process.stderr.write(question);
     stdin.setRawMode(true);
+    process.stderr.write(question);
     stdin.setEncoding('utf8');
     stdin.on('data', onData);
     stdin.resume();
