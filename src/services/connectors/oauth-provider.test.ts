@@ -1308,6 +1308,37 @@ describe('the adoption of a format 1 record', () => {
     await connecting;
   });
 
+  // the task review's finding 2: an identity's uniqueness is decided once its adoptions are serialized
+  it('commits one of two concurrent adoptions of one identity under two ids; the other answers present, and the identity is served', async () => {
+    await seed(tokens(1), IDENTITY, SAVED);
+    await seed(tokens(2), IDENTITY, OTHER);
+    const [first, second] = [await opened(SAVED), await opened(OTHER)];
+    adopting();
+    const gate = deferred<void>();
+    two.hold = gate;
+    const adoptions = Promise.all([provider.adopt(SAVED, first), provider.adopt(OTHER, second)]);
+    await vi.waitFor(() => expect(two.sealing).toBe(true));
+    gate.resolve();
+    expect(await adoptions).toEqual([{ adopted: true }, { adopted: false, reason: 'present' }]);
+    expect([headOf(SAVED), headOf(OTHER)]).toEqual([SEALED_FORMAT_V2, SEALED_FORMAT_V1]);
+    expect(await provider.state(IDENTITY)).toMatchObject({ state: 'connected', connectionId: SAVED });
+  });
+
+  it('answers a Connect for the identity busy while its adoption runs', async () => {
+    await seed();
+    const record = await opened();
+    adopting();
+    const gate = deferred<void>();
+    two.hold = gate;
+    const adoption = provider.adopt(SAVED, record);
+    await vi.waitFor(() => expect(two.sealing).toBe(true));
+    expect(await provider.connect(source())).toEqual({ ok: false, why: 'busy' });
+    expect(await provider.reconnect(source())).toEqual({ ok: false, why: 'busy' });
+    gate.resolve();
+    expect(await adoption).toEqual({ adopted: true });
+    expect(flow.connects).toEqual([]);
+  });
+
   it('answers unavailable once stopped', async () => {
     await seed();
     const record = await opened();

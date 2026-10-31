@@ -27,8 +27,10 @@
 // - A receipt is held in memory for the service's life (the spine's residency, D30): the latest of each artifact and
 //   target, broadcast as it is made, for the header and the library's row. No delivery record persists.
 import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { open, readFile, realpath, rm } from 'node:fs/promises';
+import { constants, createWriteStream } from 'node:fs';
+import { mkdtemp, open, realpath, rm, type FileHandle } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { pipeline } from 'node:stream/promises';
 import { basename, dirname, extname, join, normalize } from 'node:path';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
 import type { ClientRef } from '@shared/ipc/client';
@@ -78,18 +80,23 @@ export interface DeliveryDeps {
   port: Pick<ClientPort, 'openExternal'>; // the client port (OX4): gws's sign-in page, in the asking client's browser
   artifactsRoot: string; // <profile>/artifacts: where `delivery.deliver` admits an export
   gws?: GwsDriver; // tests
-  readFile?: (path: string) => Promise<string>; // tests: the Notion export's read
+  readFile?: (file: FileHandle) => Promise<string>; // tests: the Notion export's read, through the admitted descriptor
   now?: () => number;
   log?: (line: string) => void;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-// The export's canonical path when `exportPath` is an own-file export of the artifact at `revision` in `format` under
-// its exports directory, with no link below the profile (the directory's real path is the artifact's own, and the file
-// opens as a regular file with no link on the way); null otherwise. Links above `artifactsRoot` are the profile's own
-// location, as the profile names it.
-export async function admitExport(artifactsRoot: string, request: { artifactId: string; format: ArtifactExportFormat; revision: number; exportPath: string }): Promise<string | null> {
+// The export, open, when `exportPath` is an own-file export of the artifact at `revision` in `format` under its exports
+// directory, with no link below the profile (the directory's real path is the artifact's own, and the file opens as a
+// regular file with no link on the way): its canonical path and the descriptor that admission opened, which is what is
+// sent (the pathname may name something else by then); the caller closes it. Null otherwise. Links above
+// `artifactsRoot` are the profile's own location, as the profile names it.
+export interface AdmittedExport {
+  readonly path: string;
+  readonly file: FileHandle;
+}
+export async function admitExport(artifactsRoot: string, request: { artifactId: string; format: ArtifactExportFormat; revision: number; exportPath: string }): Promise<AdmittedExport | null> {
   const { artifactId, format, revision, exportPath } = request;
   if (normalize(exportPath) !== exportPath || dirname(exportPath) !== join(artifactsRoot, artifactId, 'exports')) return null;
   const name = basename(exportPath);
@@ -110,13 +117,15 @@ export async function admitExport(artifactsRoot: string, request: { artifactId: 
   } catch {
     return null;
   }
+  let admitted = false;
   try {
     await confirmOpened(handle.fd, canonical);
-    return (await handle.stat()).isFile() ? canonical : null;
+    admitted = (await handle.stat()).isFile();
+    return admitted ? { path: canonical, file: handle } : null;
   } catch {
     return null;
   } finally {
-    await handle.close();
+    if (!admitted) await handle.close();
   }
 }
 
@@ -177,7 +186,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   const gws: GwsDriver = deps.gws ?? { find: findGws, state: readGwsState, login: gwsLogin, upload: gwsUpload };
   const now = deps.now ?? (() => Date.now());
   const log = deps.log ?? ((line: string) => console.warn(`[delivery] ${line}`));
-  const readExport = deps.readFile ?? ((path: string) => readFile(path, 'utf8'));
+  const readExport = deps.readFile ?? ((file: FileHandle) => file.readFile('utf8'));
   const sources = new Map<string, DirectSource>(); // a located source's handle, the window's to name back
   const receipts = new Map<string, DeliveryReceipt>(); // by artifact and target
   const runs = new Map<string, Run>(); // by run id
@@ -293,20 +302,35 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   }
 
   // P5 O4 M2 (Interfaces §G; D14, D38): main's export, admitted, sent and then removed whatever the answer
+  // The task review's finding 1: what is sent is read through the admitted descriptor (Notion), or a private copy made
+  // through it (Drive, whose CLI takes a path), never the pathname again; the copy goes with the export.
   async function deliver(input: CommandInput<'delivery.deliver'>): Promise<DeliverySendAnswer> {
-    const path = await admitExport(deps.artifactsRoot, input);
-    if (path === null) {
+    const admitted = await admitExport(deps.artifactsRoot, input);
+    if (admitted === null) {
       log(`an export handed over for ${input.target} was not admitted: nothing was sent`);
       return failure('export');
     }
+    const copies: string[] = [];
     try {
-      return await send(input, path);
+      return await send(input, admitted, copies);
     } finally {
-      await rm(path, { force: true }).catch(() => log(`an export sent to ${input.target} was not removed`));
+      await admitted.file.close().catch(() => {});
+      for (const path of [admitted.path, ...copies]) await rm(path, { recursive: true, force: true }).catch(() => log(`an export sent to ${input.target} was not removed`));
     }
   }
 
-  async function send(input: CommandInput<'delivery.deliver'>, path: string): Promise<DeliverySendAnswer> {
+  // The admitted export's bytes in a fresh file under a directory of the service's own (0700, the file 0600), for gws;
+  // `copies` names the directory for the caller to remove.
+  async function privateCopy(admitted: AdmittedExport, copies: string[]): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), 'maws-delivery-'));
+    copies.push(directory);
+    const copy = join(directory, basename(admitted.path));
+    await pipeline(admitted.file.createReadStream({ start: 0, autoClose: false }), createWriteStream(copy, { flags: 'wx', mode: 0o600 }));
+    return copy;
+  }
+
+  async function send(input: CommandInput<'delivery.deliver'>, admitted: AdmittedExport, copies: string[]): Promise<DeliverySendAnswer> {
+    const { path } = admitted;
     const { runId, target, artifactId, format, versionId, destination, revision, title } = input;
     const slot = `${artifactId}\0${target}`;
     if (tombstones.delete(runId)) return failure('cancelled'); // P5 O4 D15: cancelled before it arrived
@@ -350,7 +374,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       const name = notionTitle(title);
       const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision, ...(versionId !== undefined && { versionId }), destination });
       if (notion) {
-        const content = await readExport(path);
+        const content = await readExport(admitted.file);
         if (signal.aborted) return failure('cancelled');
         if (Buffer.byteLength(content) > NOTION_CONTENT_MAX_BYTES) return failure('tooLarge');
         const args = notionArguments({ title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
@@ -362,8 +386,9 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
         return made(receipt(read.url, read.name ?? name));
       }
       const fileName = `${name}${extname(path)}`;
+      const file = await privateCopy(admitted, copies);
       if (!writes()) return failure('cancelled'); // the upload is one request once gws runs: never called back
-      const uploaded = await gws.upload(drive!.bin, drive!.env, { file: path, name: fileName, mime: MIME[format], ...(destination.kind === 'inside' && { parent: destination.id }), signal: stopping.signal });
+      const uploaded = await gws.upload(drive!.bin, drive!.env, { file, name: fileName, mime: MIME[format], ...(destination.kind === 'inside' && { parent: destination.id }), signal: stopping.signal });
       if (uploaded.ok) return made(receipt(uploaded.link ?? null, uploaded.name));
       switch (uploaded.why) {
         case 'timeout':

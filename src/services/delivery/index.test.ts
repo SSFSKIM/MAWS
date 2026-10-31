@@ -10,9 +10,9 @@
 // under `<profile>/artifacts/<artifactId>/exports/` in the export grammar for the format and revision, sends it and
 // removes it whatever the answer; a path it does not admit is left where it is, nothing sent. A cancel that arrives
 // before its run is a tombstone the run consumes; one for an ended run answers false.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { endableClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
@@ -312,7 +312,7 @@ describe('the Drive target (gws)', () => {
     expect(gws.upload).toHaveBeenCalledTimes(1);
     const [bin, env, opts] = gws.upload.mock.calls[0]!;
     expect([bin, env]).toEqual(['/scratch/bin/gws', { PATH: '/scratch/bin', HOME: '/scratch/home' }]);
-    expect(opts).toMatchObject({ file: expect.stringMatching(/\/artifacts\/11111111-1111-4111-8111-111111111111\/exports\/7-docx-[0-9a-f-]{36}\.docx$/), name: 'Quarterly memo.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', parent: '1AbCdEfGhIjKlMn' });
+    expect(opts).toMatchObject({ file: expect.stringMatching(/\/maws-delivery-[^/]+\/7-docx-[0-9a-f-]{36}\.docx$/) /* a private copy of the admitted export */, name: 'Quarterly memo.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', parent: '1AbCdEfGhIjKlMn' });
     expect(answer).toMatchObject({ ok: true, receipt: { target: 'drive', name: 'Quarterly memo.docx', url: 'https://drive.google.com/file/d/f1/view', format: 'docx' } });
     expect(answer).toMatchObject({ receipt: { revision: 7 } }); // the revision main exported, as it named it
     expect(removed()).toBe(true);
@@ -357,7 +357,10 @@ describe('the export’s admission', () => {
 
   it('admits the artifact’s own export in the grammar for its format and revision, by its canonical path', async () => {
     const path = plant('docx');
-    expect(await admitExport(artifactsRoot, { artifactId: ART, format: 'docx', revision: 7, exportPath: path })).toMatch(/\/exports\/7-docx-[0-9a-f-]{36}\.docx$/);
+    const admitted = await admitExport(artifactsRoot, { artifactId: ART, format: 'docx', revision: 7, exportPath: path });
+    expect(admitted?.path).toMatch(/\/exports\/7-docx-[0-9a-f-]{36}\.docx$/);
+    expect(await admitted?.file.readFile('utf8')).toBe('bytes'); // open: what is sent is read through it
+    await admitted?.file.close();
   });
 
   it.each([
@@ -438,5 +441,49 @@ describe('a cancel ahead of its run', () => {
     await call('delivery.cancel', { runId });
     stop();
     expect(await call('delivery.cancel', { runId: RUN() })).toEqual({ cancelled: false });
+  });
+});
+
+// The task review's finding 1 (D14): what is sent is the file admitted, read through the descriptor the admission
+// opened; a link put in the export's place after the admission is never followed
+describe('an export replaced after its admission', () => {
+  let outside: string;
+  async function swappedDuring(target: 'notion' | 'drive', format: ArtifactExportFormat) {
+    outside = join(dir, 'outside.txt');
+    writeFileSync(outside, 'outside-secret');
+    const exportPath = plant(format, 7, ART, 'intended export');
+    let release!: () => void;
+    dispatch.mockImplementationOnce(async () => {
+      rmSync(exportPath);
+      symlinkSync(outside, exportPath); // while artifacts.get is pending
+      await new Promise<void>((resolve) => (release = resolve));
+      return { ok: true, value: { artifact } };
+    });
+    const answer = call('delivery.deliver', { runId: RUN(), target, artifactId: ART, format, destination: { kind: 'default' }, exportPath, revision: 7, title: 'Quarterly memo' });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    release();
+    return { answer: await answer, exportPath };
+  }
+
+  it('sends Notion the admitted export’s content', async () => {
+    const { answer, exportPath } = await swappedDuring('notion', 'md');
+    expect(answer).toMatchObject({ ok: true });
+    expect(connectors.send.mock.calls[0]![1].arguments.pages[0].content).toBe('intended export');
+    expect(existsSync(exportPath)).toBe(false);
+    expect(readFileSync(outside, 'utf8')).toBe('outside-secret'); // the link's target untouched
+  });
+
+  it('uploads to Drive a private copy of the admitted export, never the path main named, and removes the copy', async () => {
+    const uploaded: { file: string; content: string; mode: number; dirMode: number }[] = [];
+    gws.upload.mockImplementationOnce(async (_bin, _env, opts: { file: string; name: string }) => {
+      uploaded.push({ file: opts.file, content: readFileSync(opts.file, 'utf8'), mode: statSync(opts.file).mode & 0o777, dirMode: statSync(dirname(opts.file)).mode & 0o777 });
+      return { ok: true, id: 'f1', name: opts.name };
+    });
+    const { answer, exportPath } = await swappedDuring('drive', 'docx');
+    expect(answer).toMatchObject({ ok: true });
+    expect(uploaded).toEqual([{ file: expect.not.stringContaining(join(artifactsRoot, ART)), content: 'intended export', mode: 0o600, dirMode: 0o700 }]);
+    expect(existsSync(uploaded[0]!.file)).toBe(false);
+    expect(existsSync(dirname(uploaded[0]!.file))).toBe(false);
+    expect(existsSync(exportPath)).toBe(false);
   });
 });

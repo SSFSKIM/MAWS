@@ -194,3 +194,32 @@ describe('MAWS’s own OAuth beside route D', () => {
     for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect']) expect(bus.registered(), name).not.toContain(name);
   });
 });
+
+// P5 O4 M2 (D17; the task review's finding 3): a release of the spine waits for the owner's work, an acknowledged
+// Disconnect's forgetting and revocation included
+describe('an acknowledged Disconnect', () => {
+  it('keeps the part busy until the provider’s disconnect ends, and settles then', async () => {
+    const bus = fakeBus();
+    let finish!: (result: { local: 'forgotten'; host: 'confirmed'; revocation: 'none' }) => void;
+    const oauth = { onChange: () => () => {}, disconnect: () => new Promise((resolve) => (finish = resolve)), stop: () => {} };
+    const part = composeConnectors({
+      bus,
+      hosts: { dispatch: async () => ({ ok: false, error: { code: 'host_unavailable', message: 'none' } }), onEvent: () => () => {}, onState: () => () => {}, onStreaming: () => () => {}, streaming: () => true } as never,
+      view: fakeSpineView(),
+      port: { openExternal: vi.fn() },
+      direct: () => ({ stop() {}, hostLost() {}, reconcile() {} }) as never,
+      oauth: () => oauth as never,
+      log: () => {},
+    });
+    service = part; // the file's afterEach stops it
+    expect(await bus.invoke('connectors.disconnect', { connectionId: '11111111-1111-4111-8111-111111111111' })).toEqual({ ok: true, value: { accepted: true } });
+    expect(part.busy()).toBe(true);
+    let settled = false;
+    const settling = part.settled().then(() => void (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish({ local: 'forgotten', host: 'confirmed', revocation: 'none' });
+    await settling;
+    expect(part.busy()).toBe(false);
+  });
+});

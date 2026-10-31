@@ -223,6 +223,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   const slots = new Map<string, Slot>();
   const forgotten = new Set<string>(); // connection ids this main removed (or is removing)
   const discarding = new Set<string>(); // an ended flow's connection whose removal has not settled
+  const adoptions = new Map<string, Promise<void>>(); // P5 O4 M2 (D23): by identity, its adoptions in turn (the latest)
   const issuedHigh = new Map<string, { epoch: number; key: string }>(); // per connection: the highest epoch issued
   const retirements = new Map<string, Retirement>();
   let unattributed = false; // a connection was forgotten without its identity learned
@@ -626,7 +627,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
 
   // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says).
   async function lookUp(slot: Slot): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
-    if (slot.flow) return { ok: false, why: 'busy' };
+    if (slot.flow || adoptions.has(slot.key)) return { ok: false, why: 'busy' }; // P5 O4 M2: an adoption's turn too
     if (slot.held) return null;
     const found = await adopt(slot);
     if (found === 'stale') return { ok: false, why: 'cancelled' };
@@ -638,8 +639,37 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   function admission(slot: Slot, alive: () => boolean): Extract<ConnectorOAuthConnectResult, { ok: false }> | null {
     if (stopped) return { ok: false, why: 'stopped' };
     if (!alive()) return { ok: false, why: 'cancelled' };
-    if (slot.flow) return { ok: false, why: 'busy' };
+    if (slot.flow || adoptions.has(slot.key)) return { ok: false, why: 'busy' };
     return null;
+  }
+
+  // One adoption, its identity's turn (`adopt`)
+  async function adoptOne(connectionId: string, record: ConnectorOAuthRecord, claim: ConnectorOAuthClaim): Promise<{ adopted: true } | { adopted: false; reason: ConnectorAdoptRefusal }> {
+    if (stopped) return { adopted: false, reason: 'unavailable' };
+    if (forgotten.has(connectionId) || discarding.has(connectionId)) return { adopted: false, reason: 'stale' };
+    const key = keyOf(record.identity);
+    if (slots.get(key)?.flow) return { adopted: false, reason: 'present' };
+    let text: string;
+    try {
+      text = await store.sealText(record);
+      if (slots.get(key)?.flow) return { adopted: false, reason: 'present' };
+      const listed = await store.list();
+      if (listed.some((entry) => entry.state === 'sealed' && entry.connectionId !== connectionId && sameOAuthIdentity(entry.identity, record.identity))) return { adopted: false, reason: 'present' };
+    } catch (error) {
+      return { adopted: false, reason: error instanceof ConnectorOAuthStoreError && error.code === 'unavailable' ? 'unavailable' : error instanceof ConnectorOAuthStoreError && error.code === 'tooLarge' ? 'invalid' : 'io' };
+    }
+    let committed: Awaited<ReturnType<ConnectorOAuthStore['adoptSealed']>>;
+    try {
+      committed = await store.adoptSealed(claim, text, SEALED_FORMAT_V1);
+    } catch {
+      return { adopted: false, reason: 'io' };
+    }
+    if (committed !== 'adopted') return { adopted: false, reason: committed };
+    // the identity's state is read afresh: nothing held for it while the file was unreadable stands
+    const held = slots.get(key);
+    if (held && !held.held && !held.flow && held.blocked === 'needsConnect') held.blocked = null;
+    notify();
+    return { adopted: true };
   }
 
   function unavailableOf(found: Found): ConnectorOAuthState | null {
@@ -800,37 +830,24 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     withdrawnUnattributed: () => unattributed,
     // P3-HD M3c2 correction end
 
-    // P5 O4 M2 (D23): the claim is taken before anything awaits, so a Forget meanwhile stales the commit; a Connect under
-    // way for the identity, or another record of it, keeps the identity to one record (`present`)
+    // P5 O4 M2 (D23): the claim is taken before anything awaits, so a Forget meanwhile stales the commit. An identity's
+    // adoptions run one at a time, and a Connect or Reconnect for it is busy meanwhile (`adoptions`), so whether it
+    // already has a record (a flow under way, or another id sealed) is read after the seal, with nothing that could add
+    // one able to run until the commit: one record per identity (`present` for the others).
     async adopt(connectionId, value) {
       if (stopped) return { adopted: false, reason: 'unavailable' };
       const record = store.recordOf(value, connectionId);
       if (record === null) return { adopted: false, reason: 'invalid' };
       if (forgotten.has(connectionId) || discarding.has(connectionId)) return { adopted: false, reason: 'stale' };
       const claim = store.claim(connectionId);
-      const slot = slots.get(keyOf(record.identity));
-      if (slot?.flow) return { adopted: false, reason: 'present' };
-      let text: string;
-      try {
-        const listed = await store.list();
-        if (listed.some((entry) => entry.state === 'sealed' && entry.connectionId !== connectionId && sameOAuthIdentity(entry.identity, record.identity))) return { adopted: false, reason: 'present' };
-        text = await store.sealText(record);
-      } catch (error) {
-        return { adopted: false, reason: error instanceof ConnectorOAuthStoreError && error.code === 'unavailable' ? 'unavailable' : error instanceof ConnectorOAuthStoreError && error.code === 'tooLarge' ? 'invalid' : 'io' };
-      }
-      if (slots.get(keyOf(record.identity))?.flow) return { adopted: false, reason: 'present' };
-      let committed: Awaited<ReturnType<ConnectorOAuthStore['adoptSealed']>>;
-      try {
-        committed = await store.adoptSealed(claim, text, SEALED_FORMAT_V1);
-      } catch {
-        return { adopted: false, reason: 'io' };
-      }
-      if (committed !== 'adopted') return { adopted: false, reason: committed };
-      // the identity's state is read afresh: nothing held for it while the file was unreadable stands
-      const held = slots.get(keyOf(record.identity));
-      if (held && !held.held && !held.flow && held.blocked === 'needsConnect') held.blocked = null;
-      notify();
-      return { adopted: true };
+      const key = keyOf(record.identity);
+      const turn = (adoptions.get(key) ?? Promise.resolve()).then(() => adoptOne(connectionId, record, claim));
+      const tail = turn.then(() => {}, () => {});
+      adoptions.set(key, tail);
+      void tail.then(() => {
+        if (adoptions.get(key) === tail) adoptions.delete(key);
+      });
+      return turn;
     },
 
     hostLost() {

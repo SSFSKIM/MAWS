@@ -470,14 +470,17 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     remember(retiring, connectionId, label === undefined || label === 'unreadable' ? null : label);
     disconnects.add(connectionId);
     changed();
-    void oauth
-      .disconnect(connectionId)
-      .then((result) => remember(lastByConnection, connectionId, { action: 'disconnect', ...result }))
-      .catch(() => log('connectors: a MAWS connection could not be disconnected'))
-      .finally(() => {
-        disconnects.delete(connectionId);
-        if (!stopped) changed();
-      });
+    // P5 O4 D17: counted until the grant is forgotten and revoked, so a release waits for it
+    void (deps.track ?? ((action) => action))(
+      oauth
+        .disconnect(connectionId)
+        .then((result) => remember(lastByConnection, connectionId, { action: 'disconnect', ...result }))
+        .catch(() => log('connectors: a MAWS connection could not be disconnected'))
+        .finally(() => {
+          disconnects.delete(connectionId);
+          if (!stopped) changed();
+        }),
+    );
     return { accepted: true };
   }
 
