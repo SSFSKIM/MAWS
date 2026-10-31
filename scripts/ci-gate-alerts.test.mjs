@@ -592,7 +592,6 @@ test('alert planning sees the direct variable and its mirror override, including
   assert.deepEqual(ask({ trailers: 'Hosted-Route: mirror' }), { jobs: ['packaged'], guest: null, home: [] });
 });
 
-
 test('preflight uses the pushed ref for reserved-final exclusions on either hosted route', () => {
   const target = hostedTree();
   for (const route of ['direct', 'mirror']) {
@@ -623,4 +622,19 @@ test('the committed planner carries overflow labels into the alert check, but st
   const ask = (value) => macPlan({ ...candidate, gates: 'e2e:tools', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: 'direct' }, trailers: `Mac-Backlog: ${JSON.stringify(value)}` });
   assert.deepEqual(ask(sample), { jobs: ['e2e:tools'], guest: null, ec2: ['e2e:tools'], home: [] });
   assert.deepEqual(ask({ ...sample, at: '2020-01-01T00:00:00Z' }), { jobs: [], guest: 'none', home: [] });
+});
+
+test('the configured hosted quota keeps a hosted-only run clear of an open EC2 alert', () => {
+  const candidate = tree(envOf('  HOSTED_MAC_E2E: tools\n  HOSTED_MAC_ONLY_E2E: ""\n'));
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [] };
+  const ask = (cap) => {
+    const { gh } = fakeGh({
+      variables: [...Object.entries(today), ['HOSTED_MAC_ROUTE', 'direct'], ['HOSTED_MAC_CAP', cap]],
+      issues: [{ number: 99, title: 'ci-kit alert: ec2: SecurityAgent since 2026-10-29T02:00Z' }],
+      runners: [{ name: 'ci-kit-mac-ec2', status: 'online', labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'] }],
+    });
+    return check({ ...candidate, gh, gates: 'e2e:tools', runner: 'macos', trailers: `Mac-Backlog: ${JSON.stringify(sample)}` });
+  };
+  assert.equal(ask('5').stop, true);
+  assert.deepEqual(ask('50'), { stop: false, lines: [] });
 });

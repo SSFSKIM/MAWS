@@ -80,7 +80,7 @@
 // on reserved final refs. Hosted packaged runs two bare-suite shards, each building its app; self-hosted stays one
 // unsharded job. Lane moves e2e groups only, not packaged.
 // A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone when
-// its speed-weighted queue starts sooner than the hosted queue (fractional rounds at five slots); ties stay hosted.
+// its speed-weighted queue starts sooner than the hosted queue (fractional rounds at HOSTED_MAC_CAP slots, default five); ties stay hosted.
 // HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy, uses the exclusive timeout
 // and self-hosted setup, and carries overflow: true (the job name and ci-gate tail identify it). No sample: no change.
 // The old full-round rule runs in shadow with independent queues. The entry point emits its count as the plan check's
@@ -123,6 +123,9 @@ const refuse = (message) => {
 // The caller supplies now (epoch milliseconds) for snapshot freshness; absent time makes the advisory fail open.
 // Output values are the exact strings GitHub receives; property order preserves GITHUB_OUTPUT byte for byte.
 export function planOf(env, scripts, now) {
+  const cap = env.HOSTED_MAC_CAP || '5';
+  if (!/^[0-9]+$/.test(cap) || !Number.isSafeInteger(Number(cap)) || Number(cap) <= 0) refuse('HOSTED_MAC_CAP must be a positive whole number');
+  const hostedCap = Number(cap);
   const dispatched = env.EVENT === 'workflow_dispatch';
   const trailer = (key) =>
     (env.HEAD_MESSAGE ?? '')
@@ -314,7 +317,7 @@ export function planOf(env, scripts, now) {
   // took 3 min 22 s on the mini (run 40495960740: the peer 47 s, this tree's build 40 s, the crossings 1.4 min), four
   // times over for a cold store or a slow Mac.
   const PEER_MINUTES = 15;
-  // The caller counts all five account repos; capped hosted counts are lower bounds, favoring today's placement.
+  // The caller counts the configured quota-sharing repos; capped hosted counts are lower bounds, favoring today's placement.
   // EC2's queue must be complete. Missing, failed or stale samples never move work; the mini is never overflow.
   // Lane: hosted asks for the hosted Macs themselves (a trial or an admission): nothing of it moves, whatever a sample says.
   const backlog = !dispatched && direct && laneAsked !== 'hosted' ? backlogOf(trailer('Mac-Backlog'), now) : null;
@@ -327,7 +330,7 @@ export function planOf(env, scripts, now) {
   const overflowOf = (group, queue, shadow = false) => {
     if (!backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
     const ec2Ahead = (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + queue.ec2;
-    const hostedAhead = (backlog.hostedRunning + backlog.hostedQueued + queue.hosted - 5) / 5;
+    const hostedAhead = (backlog.hostedRunning + backlog.hostedQueued + queue.hosted - hostedCap) / hostedCap;
     // Greedy expected start in hosted-runtime units, without rounding; a tie stays hosted.
     // The shadow preserves the old predicate, charging only its own hypothetical placements.
     return shadow ? ec2Ahead < Math.max(0, Math.floor(hostedAhead)) : ec2Ahead * EC2_HOSTED_RUNTIME_RATIO < hostedAhead;

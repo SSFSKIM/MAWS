@@ -2070,3 +2070,17 @@ test('the workflow runs the same retry and flaky notice on hosted and overflow, 
     assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)({ ...matrix, retry: false }, runner, github), '');
   }
 });
+
+test('the hosted quota defaults to five, but fifty keeps the same backlog hosted', () => {
+  const sample = overflowSample();
+  const placements = (extra) => JSON.parse(overflowPlan(sample, extra).outputs.e2e).map((e) => e.runner);
+  assert.deepEqual(placements({ HOSTED_MAC_CAP: '' }), placements({ HOSTED_MAC_CAP: '5' }));
+  assert.ok(placements({ HOSTED_MAC_CAP: '' }).some((runner) => runner.includes('ci-kit-mac-ec2')));
+  assert.deepEqual(placements({ HOSTED_MAC_CAP: '50' }), Array(4).fill('"macos-26"'));
+});
+
+test('a configured hosted quota must be a positive whole number', () => {
+  for (const HOSTED_MAC_CAP of ['0', '-1', '1.5', 'no', 'Infinity', '1e2', '9007199254740992']) {
+    assert.throws(() => overflowPlan(undefined, { HOSTED_MAC_CAP }), /HOSTED_MAC_CAP/, HOSTED_MAC_CAP);
+  }
+});
