@@ -119,7 +119,9 @@ export class SideJournal {
   // with `deltas`, the text streams first as the engine's partial messages (`pass2/auto-routed` seq 36 to 38's
   // `stream_event`s: the message's start, its text block's start, one `text_delta` per chunk), then the whole message
   // and its block's stop.
-  reply(prompt: string, text: string, deltas: readonly string[] = []): void {
+  // `between` writes what comes after the deltas and before the whole message (a held read, which keeps the partial text
+  // on screen until the test lets the engine go on).
+  reply(prompt: string, text: string, deltas: readonly string[] = [], between: () => void = () => undefined): void {
     const swap = { [RECORDED.echoed.session]: this.sessionId, [RECORDED.echoed.prompt]: prompt };
     const recorded = swapped(frameOf(ECHOED, 26), swap) as Frame & { message: Frame };
     // a streamed message has an id of its own, so its deltas join it and no earlier reply of the journal (whose
@@ -130,6 +132,7 @@ export class SideJournal {
       stream({ type: 'message_start', message: { ...assistant.message, content: [], stop_reason: null } });
       stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
       for (const chunk of deltas) stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: chunk } });
+      between();
     }
     this.push('in', { ...assistant, uuid: this.uuid(), message: { ...assistant.message, content: [{ type: 'text', text }] } });
     if (deltas.length > 0) this.push('in', { type: 'stream_event', event: { type: 'content_block_stop', index: 0 }, session_id: this.sessionId, parent_tool_use_id: null, uuid: this.uuid() });
@@ -225,6 +228,15 @@ export class SideJournal {
       const row = rows.find((r) => r.seq === seq)!;
       this.push(row.direction, swapped(row.frame, { [RECORDED.side.session]: this.sessionId }));
     }
+  }
+
+  // P5 O7 M2: a hold: the engine waits at a `get_context_usage` (reads.jsonl seq 56 and 57) until the test asks one
+  // (`session.getContextUsage {detail: 'summary'}`), as to-human-replay.ts holds its steer.
+  holdAtContextUsage(): void {
+    const reads = rowsOf(`${FIXTURES}/reads.jsonl`);
+    const request = reads.find((r) => r.seq === 56)!.frame.request as Frame;
+    const response = (reads.find((r) => r.seq === 57)!.frame.response as { response: Frame }).response;
+    this.read(request, response);
   }
 
   // P2-A (2026-10-09): a read MAWS asks (a widget's, after its Load now) and the engine's answer, e.g. `get_skills_dialog`.

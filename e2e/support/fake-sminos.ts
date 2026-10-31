@@ -10,13 +10,14 @@
 // cannot load, so it is bundled with esbuild first, to CommonJS, and required (local-org.ts's pattern).
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { expect } from '@playwright/test';
 import { build } from 'esbuild';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const FAKE_SMINOS = join(REPO_ROOT, 'test/endpoint/rl10/fake-sminos.ts');
 
 type Frame = { t: string } & Record<string, unknown>;
-type Harness = { send(frame: object): void; next(match: (frame: Frame) => boolean, what: string, ms?: number): Promise<Frame>; close(): void; closed: boolean; received: Frame[] };
+type Harness = { send(frame: object): void; close(): void; closed: boolean; received: Frame[] };
 type FakeSminosModule = { FakeSminos: { open(path: string): Promise<Harness> } };
 
 /** One lane B session's record, as sminos's `member` frame carries it (src/endpoint/rl10/members.ts's `Member`). */
@@ -54,7 +55,7 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
   const s = await FakeSminos.open(info.socket);
   const policy = { read_only: false, ceiling: 'settings' };
   s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: [], token: info.token, sminos: { version: 'e2e-remote' }, policy });
-  await s.next((frame) => frame.t === 'welcome', 'the endpoint’s welcome', 15_000);
+  await expect.poll(() => s.received.some((frame) => frame.t === 'welcome'), { timeout: 15_000, message: 'the endpoint’s welcome' }).toBe(true);
   s.send({ t: 'restated' });
   const present = new Set<string>();
   return {

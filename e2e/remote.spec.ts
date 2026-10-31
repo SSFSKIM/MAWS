@@ -39,8 +39,11 @@ const FIRST_REPLY = 'Hello from B.';
 const TITLE = 'B’s lane B session';
 // What A sends, and what B's replayed engine answers to each (the replay matches a prompt by type, so A's words are A's)
 const SECOND = 'A asks B over the link.';
-const SECOND_DELTAS = ['Streamed ', 'from B ', 'to A.'];
-const SECOND_REPLY = SECOND_DELTAS.join('');
+// The reply streams a strict prefix of itself, then the engine holds before the whole message, so A's pane can only show
+// the prefix by drawing the deltas
+const SECOND_DELTAS = ['Streamed ', 'from B '];
+const SECOND_PARTIAL = 'Streamed from B';
+const SECOND_REPLY = 'Streamed from B to A.';
 const THIRD = 'Run the one command, then answer.';
 const APPROVED = 'remote-approved';
 const THIRD_REPLY = 'The command ran on B.';
@@ -132,7 +135,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // command the engine asks permission for (the replay holds at the `allow`), and a message with a pasted image.
     const journal = new SideJournal(B_SESSION, checkout);
     journal.turn(FIRST_REPLY);
-    journal.turn(SECOND_REPLY, SECOND_DELTAS);
+    const second = journal.prompt();
+    journal.reply(second, SECOND_REPLY, SECOND_DELTAS, () => journal.holdAtContextUsage());
+    journal.completed(second);
     const third = journal.prompt();
     journal.permission(third, 'Bash', { command: `echo ${APPROVED}`, description: 'Print a word' }, APPROVED);
     journal.reply(third, THIRD_REPLY);
@@ -210,7 +215,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await page.keyboard.type(SECOND);
     await page.keyboard.press('Enter');
     await expect.poll(async () => JSON.stringify(await writtenOnB()), { timeout: 60_000, message: `B's transcript records A's send\n${mainSaid(page)}` }).toContain(SECOND);
-    await expect(main(page).getByText(SECOND_REPLY).first(), 'the reply in A’s pane').toBeVisible({ timeout: 60_000 });
+    // While B's engine holds before the whole message, A's pane draws the streamed prefix, and only that.
+    await expect(main(page).getByText(SECOND_PARTIAL).first(), `the streamed text in A's pane before the whole reply\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+    await expect(main(page).getByText(SECOND_REPLY)).toHaveCount(0);
+    await b.request('session.getContextUsage', { appSessionId: app, detail: 'summary' }); // lets B's engine go on
+    await expect(main(page).getByText(SECOND_REPLY).first(), 'the whole reply in A’s pane').toBeVisible({ timeout: 60_000 });
     const onA = await batchedEvents(page, b.ref, app);
     const deltas = onA.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta');
     const onB = (await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: app, afterSeq: null, limit: null })).events;
