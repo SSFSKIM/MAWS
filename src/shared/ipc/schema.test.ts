@@ -174,9 +174,9 @@ describe('ipc schema validates both directions', () => {
     });
 
     // C4 (M6): the read-only git service, owned by main.
-    it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
+    it('carries the C4 git.* entries, every command owned by machine (P5 O3-E), with the diff and log bounds', () => {
       expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
-      for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('main'); // O3-E moves them
+      for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('machine'); // P5 O3-E: mawsd's with the spine
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'everything' }).ok).toBe(false);
@@ -224,10 +224,11 @@ describe('ipc schema validates both directions', () => {
     });
     // C5 end
 
-    // C8c start: the read-only files.* service over a session's own directories, owned by main.
-    it('carries the C8c files.* entries, every command owned by main, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.reveal' /* E1 */, 'files.unwatch', 'files.watch', 'files.write']);
-      for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('main');
+    // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
+    // the spine, with library.read's reach and the upload).
+    it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
+      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write']);
+      for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
       expect(read({})).toBe(true);
@@ -251,6 +252,31 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('files.reveal', { appSessionId: 'a', path: '/r/hello.txt' }).ok).toBe(true);
       expect(validateCommandOutput('files.reveal', { revealed: false, message: "path outside the session's directories" }).ok).toBe(true);
       expect(validateCommandOutput('files.reveal', { revealed: true }).ok).toBe(false);
+    });
+    // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C, §F): library.read's reach takes
+    // files.read's input but the session, and the upload's bounds are its schema's, so an oversized call is invalid_input
+    // before it reaches a socket
+    it('bounds files.upload in its schema: 1 to 8 files, 32 MiB decoded each and in all; files.readResolved takes a path', () => {
+      const file = (bytes: string, name = 'a.png') => ({ name, bytes });
+      const upload = (files: unknown[]) => validateCommandInput('files.upload', { appSessionId: 'a', files });
+      expect(upload([file('iVBORw0KGgo=')]).ok).toBe(true);
+      expect(upload([]).ok).toBe(false);
+      expect(upload(Array.from({ length: files.UPLOAD_FILES_MAX }, () => file('YQ=='))).ok).toBe(true);
+      expect(upload(Array.from({ length: files.UPLOAD_FILES_MAX + 1 }, () => file('YQ=='))).ok).toBe(false);
+      expect(upload([file('not base64!')]).ok).toBe(false);
+      const encoded = (bytes: number) => 'A'.repeat(4 * Math.ceil(bytes / 3));
+      expect(upload([file(encoded(files.UPLOAD_FILE_MAX_BYTES))]).ok).toBe(true);
+      expect(upload([file(encoded(files.UPLOAD_FILE_MAX_BYTES + 3))]).ok).toBe(false); // one file past the bound
+      const half = encoded(files.UPLOAD_CALL_MAX_BYTES / 2 + 3);
+      const together = upload([file(half), file(half)]);
+      expect(together.ok).toBe(false); // each within, together past it
+      expect(together.ok ? null : together.error.code).toBe('invalid_input');
+      expect(validateCommandOutput('files.upload', { status: 'ok', paths: ['/r/.claude/desk-uploads/a/x.0.png'] }).ok).toBe(true);
+      expect(validateCommandOutput('files.upload', { status: 'refused', reason: 'uploads are not available this run' }).ok).toBe(true);
+      expect(validateCommandInput('files.readResolved', { path: '/a/b.csv', offset: 0, hash: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readResolved', { appSessionId: 'a', path: '/a/b.csv' }).ok).toBe(false);
+      expect(MAIN_ONLY_COMMANDS).toContain('files.readResolved');
+      expect(MAIN_ONLY_COMMANDS).not.toContain('files.upload');
     });
     // C8c end
 
@@ -543,7 +569,8 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('registers the catalogue event, history, usage, file picking and file listing with their owners', () => {
-      for (const name of ['settings.usage', 'layout.pickFiles', 'git.lsFiles'] as const) expect(commands[name].owner, name).toBe('main');
+      for (const name of ['settings.usage', 'layout.pickFiles'] as const) expect(commands[name].owner, name).toBe('main');
+      expect(commands['git.lsFiles'].owner).toBe('machine'); // P5 O3-E: the checkouts'
       for (const name of ['session.history.list', 'session.history.append'] as const) expect(commands[name].owner, name).toBe('machine'); // P5 O3-D: the spine's
       for (const name of ['session.catalogChanged', 'settings.usageChanged']) expect(Object.hasOwn(events, name), name).toBe(true);
     });
@@ -1025,12 +1052,12 @@ describe('ipc schema validates both directions', () => {
       remoteUrl: 'https://github.com/o/r', pushUrls: ['https://github.com/o/r'], repository: null, branch: 'main', head: 'abc', upstream: 'origin/main', expiresAt: '2026-10-06T00:05:00.000Z',
     };
 
-    it('carries the E6 scm.* entries: twelve commands and one event, every command owned by main and bridged', () => {
+    it('carries the E6 scm.* entries: twelve commands and one event, every command owned by machine (P5 O3-E) and bridged', () => {
       expect(Object.keys(scm.commands)).toEqual([
         'scm.status', 'scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit', 'scm.push.plan', 'scm.push', 'scm.pr.plan', 'scm.pr.create',
         'scm.remote.cancel', 'scm.remote.last', 'scm.pr.state',
       ]);
-      for (const spec of Object.values(scm.commands)) expect(spec.owner).toBe('main');
+      for (const spec of Object.values(scm.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(scm.events)).toEqual(['scm.remote.output']);
       expect([...NAMES.scm.commands]).toEqual(Object.keys(scm.commands));
       expect([...NAMES.scm.events]).toEqual(['scm.remote.output']);

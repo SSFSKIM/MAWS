@@ -5,7 +5,11 @@ export const commands = [
   'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal',
   'files.write', // E5
   'files.reveal', // E1
+  'files.upload', // P5 O3-E: bridged, no caller yet (O7 M4's drag and drop)
 ] as const;
+
+// P5 O3-E (Interfaces §D): `library.read`'s reach to a path main resolved, main's alone to send
+export const mainOnlyCommands = ['files.readResolved'] as const;
 
 export const events = [
   'files.changed',

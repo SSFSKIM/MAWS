@@ -80,7 +80,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
   const pushes = () => spawned.filter((s) => s.program === GIT);
   const lastPush = () => pushes().at(-1)!.child;
 
-  function service(): ScmService {
+  function service({ admitMs }: { admitMs?: number } = {}): ScmService {
     const read: GitRun = async (directory, args) => {
       const command = args.join(' ');
       // the trust key's read and the checkout's keys: a subdirectory answers its root, a linked worktree its own top
@@ -118,6 +118,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       spawn,
       kill,
       now: () => clock,
+      admitMs,
     });
   }
 
@@ -369,6 +370,73 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       await scm.prState({ appSessionId: SIDE, refresh: false }); // still kept
       expect(ghCalls('pr view')).toHaveLength(3);
       expect(pushes()).toHaveLength(1);
+    });
+
+    // P5 O3-E M2 (Interfaces §H; D17): a push waiting past the admission deadline answers busy and spends nothing, so the
+    // sheet's Retry runs it; busy is decided again at admission
+    it('refuses busy a push still queued at its deadline, keeping its token for the next call', async () => {
+      scm.dispose();
+      scm = service({ admitMs: 60 });
+      const plan = await planPush();
+      let release!: () => void;
+      mutate.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { stdout: '', stderr: '' };
+      });
+      status = { ...status, files: [{ path: 'a.txt', oldPath: null, index: 'M', worktree: '.', untracked: false }] };
+      const commit = scm.commit({ appSessionId: ID, message: 'x', noVerify: false });
+      await vi.waitFor(() => expect(mutate).toHaveBeenCalled(), { timeout: 5_000 });
+      expect(await scm.run({ appSessionId: ID, token: plan.token }, 'push')).toMatchObject({ refused: 'busy' });
+      release();
+      await commit;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(pushes()).toEqual([]); // it never ran
+      expect(await scm.run({ appSessionId: ID, token: plan.token }, 'push')).toEqual({ started: true, token: plan.token });
+      expect(pushes()).toHaveLength(1);
+    });
+
+    it('decides busy again at admission, for a push that waited behind another checkout run’s start', async () => {
+      const first = await planPush();
+      const second = await scm.planPush({ appSessionId: OTHER }); // another session of the checkout: both plans stand
+      if (!('token' in second)) throw new Error(JSON.stringify(second));
+      let release!: () => void;
+      mutate.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { stdout: '', stderr: '' };
+      });
+      status = { ...status, files: [{ path: 'a.txt', oldPath: null, index: 'M', worktree: '.', untracked: false }] };
+      const commit = scm.commit({ appSessionId: ID, message: 'x', noVerify: false });
+      await vi.waitFor(() => expect(mutate).toHaveBeenCalled(), { timeout: 5_000 });
+      status = { ...status, files: [] };
+      const one = scm.run({ appSessionId: ID, token: first.token }, 'push');
+      const two = scm.run({ appSessionId: OTHER, token: second.token }, 'push'); // queued, nothing running yet
+      release();
+      await commit;
+      expect(await one).toEqual({ started: true, token: first.token });
+      expect(await two).toMatchObject({ refused: 'busy' }); // the first started while it waited
+      lastPush().close(0);
+      expect(await scm.run({ appSessionId: OTHER, token: second.token }, 'push')).toEqual({ started: true, token: second.token }); // unspent
+    });
+
+    // P5 O3-E M2 (D14): a run outlives its command's answer, so the spine's release waits for it
+    it('reports a run in flight until it ends, and none after dispose', async () => {
+      const plan = await planPush();
+      expect(scm.runs.busy()).toBe(false);
+      await scm.run({ appSessionId: ID, token: plan.token }, 'push');
+      expect(scm.runs.busy()).toBe(true);
+      let settled = false;
+      const settling = scm.runs.settled().then(() => void (settled = true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(settled).toBe(false);
+      lastPush().close(0);
+      await settling;
+      expect(scm.runs.busy()).toBe(false);
+      const again = await planPush();
+      await scm.run({ appSessionId: ID, token: again.token }, 'push');
+      expect(scm.runs.busy()).toBe(true);
+      scm.dispose();
+      await scm.runs.settled(); // the run ended with the dispose
+      expect(scm.runs.busy()).toBe(false);
     });
 
     it('stops every run on dispose and answers nothing after', async () => {

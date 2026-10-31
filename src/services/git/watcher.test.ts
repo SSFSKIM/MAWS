@@ -216,6 +216,23 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     watcher.dispose();
   });
 
+  // P5 O3-E M2: the checkouts in mawsd's log, one line at a root's first watch and one at its last release
+  it('logs a root once when its first watch opens it and once when its last watcher lets it go', async () => {
+    const fake = fakeWatch();
+    const lines: string[] = [];
+    const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null, log: (line) => void lines.push(line) });
+    await watcher.watch(ROOT, 'page:1.1');
+    await watcher.watch(`${ROOT}/src`, 'page:2.1');
+    expect(lines).toEqual([`[git] watching ${ROOT}`]);
+    watcher.unwatch(ROOT, 'page:1.1');
+    expect(lines).toHaveLength(1);
+    watcher.release('page:2.1');
+    expect(lines).toEqual([`[git] watching ${ROOT}`, `[git] released ${ROOT}`]);
+    watcher.unwatch(ROOT, 'page:1.1'); // nothing held: no second line
+    expect(lines).toHaveLength(2);
+    watcher.dispose();
+  });
+
   it('says head when HEAD moved, whatever paths the change touched', async () => {
     const fake = fakeWatch();
     let current = status();

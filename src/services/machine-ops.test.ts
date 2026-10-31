@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext } from '@shared/ipc/client';
-import { machineOps } from './machine-ops';
+import { claimable, machineOps } from './machine-ops';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -60,6 +60,12 @@ describe('machine.op', () => {
     expect(await ask('session.nonesuch', {})).toEqual({ state: 'refused', reason: 'unavailable' });
     expect(await ask('session.rename', { appSessionId: 'app-1', title: 7 })).toEqual({ state: 'refused', reason: 'malformed' });
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 4): the checkouts' acts, once machine's
+  it('claims the checkouts’ acts and none of their reads', () => {
+    for (const name of ['scm.commit', 'scm.stage', 'scm.push', 'files.write', 'files.upload']) expect(claimable(name), name).toBe(true);
+    for (const name of ['git.status', 'git.watch', 'scm.status', 'files.read', 'files.readResolved']) expect(claimable(name), name).toBe(false);
   });
 
   it('claims an act whose grade follows its effect (session.update)', async () => {

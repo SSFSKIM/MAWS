@@ -10,7 +10,7 @@ import type { ScmService } from './service';
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
 
 describe('main answers scm.* on the services bus', () => {
-  let service: { [K in Exclude<keyof ScmService, 'dispose'>]: ReturnType<typeof vi.fn> };
+  let service: { [K in Exclude<keyof ScmService, 'dispose' | 'runs'>]: ReturnType<typeof vi.fn> }; // P5 O3-E: runs, the root's settling
   let bus: FakeBus;
   beforeEach(() => {
     service = {

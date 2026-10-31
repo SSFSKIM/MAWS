@@ -35,6 +35,19 @@ export interface LibraryFilesDeps {
 
 type Out<N extends CommandName> = Promise<CommandOutput<N>>;
 
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D; D6): `readFile` as the files
+// service's files.readResolved over main's own route, which answers in process on the embedded shape and through mawsd
+// on the daemon one; a failure is thrown as the route answered it, so library.read's caller sees the files service's
+// error (`not found: <path>`, `not a regular file: <path>`, `path must be absolute`) or the host's (`host_unavailable`
+// while mawsd's spine is refused) either way.
+export function readResolvedThrough(invoke: (name: 'files.readResolved', input: CommandInput<'files.readResolved'>) => Promise<CommandResult<'files.readResolved'>>): LibraryFilesDeps['readFile'] {
+  return async (input) => {
+    const result = await invoke('files.readResolved', input);
+    if (result.ok) return result.value;
+    throw new CommandFailure(result.error);
+  };
+}
+
 // A title as a file name: no path separator, colon or control character, at most 120 characters, never empty.
 export function fileNameOf(title: string): string {
   // eslint-disable-next-line no-control-regex

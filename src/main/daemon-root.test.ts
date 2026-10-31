@@ -45,11 +45,17 @@ vi.mock('electron', () => {
 });
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
 vi.mock('./hosts', () => ({ createHosts: () => ({ hosts: fake.hosts, daemon: daemonWatch }), prepareLaunch: () => ({ mode: 'daemon', daemon: 'private', unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} }));
-const mirrors = vi.hoisted(() => ({ spine: [] as unknown[], settings: [] as unknown[], stop: vi.fn() })); // stop is called in its own case
+const mirrors = vi.hoisted(() => ({
+  spine: [] as unknown[], settings: [] as unknown[], stop: vi.fn(), // stop is called in its own case
+  // P5 O3-E M2: what the router's forwards reach (plain records: the suite clears mocks between cases)
+  forwards: [] as unknown[][], watched: [] as unknown[][],
+  forwarded: (...args: unknown[]) => void mirrors.forwards.push(args),
+  watches: { owns: (name: string) => name === 'git.watch' || name === 'git.unwatch', dispatch: async (...args: unknown[]) => (mirrors.watched.push(args), { ok: true, value: undefined }) },
+}));
 vi.mock('./sessions/daemon-spine', () => ({
   startDaemonSpine: (options: unknown) => {
     mirrors.spine.push(options);
-    return { view: { on: () => () => {}, unavailable: () => 'the machine daemon is connecting', record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: mirrors.stop };
+    return { view: { on: () => () => {}, unavailable: () => 'the machine daemon is connecting', record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, forwarded: mirrors.forwarded, watches: mirrors.watches /* P5 O3-E */, stop: mirrors.stop };
   },
 }));
 vi.mock('./client/machine-settings-mirror', () => ({ createMachineSettingsMirror: (options: unknown) => (mirrors.settings.push(options), { state: () => ({}), update: vi.fn(), onChange: () => () => {}, stop: vi.fn() }) }));
@@ -65,13 +71,13 @@ vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => (
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
 const router = vi.hoisted(() => ({ installs: [] as unknown[] })); // plain records: the suite clears mocks between cases
-vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: Error /* C11 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-C (M4): the services entry's roots, stubbed as main sees them: the machine's identity (no machine.json under the
 // fixed getPath; main binds its ref), the spine's data (spine.lock held, the split done, the machine half), the spine
-// with an empty view, and the checkouts; each root's start and stop recorded
-const roots = vi.hoisted(() => ({ release: vi.fn(), opened: 0, spineStarted: 0, checkoutsStarted: 0, stopSpine: vi.fn(), stopCheckouts: vi.fn() }));
+// with an empty view (P5 O3-E: the checkouts are the spine root's own parts); each root's start and stop recorded
+const roots = vi.hoisted(() => ({ release: vi.fn(), opened: 0, spineStarted: 0, stopSpine: vi.fn() }));
 vi.mock('../services/entry', () => ({
   COMMAND_BUDGETS_MS: {}, // main's `machine` budgets (sweep#3): none here, every name at the host's 10 s
   startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })),
@@ -79,10 +85,6 @@ vi.mock('../services/entry', () => ({
   startSpine: () => {
     roots.spineStarted += 1;
     return { view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: roots.stopSpine };
-  },
-  startCheckouts: () => {
-    roots.checkoutsStarted += 1;
-    return { files: { readResolved: vi.fn() }, stop: roots.stopCheckouts };
   },
 }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
@@ -118,16 +120,30 @@ beforeAll(async () => {
 });
 
 describe('the daemon shape’s root in main', () => {
+  // P5 O3-E M2: nor the checkouts, which the spine's root composes in mawsd
   it('opens none of the spine’s data and composes no spine: mawsd holds spine.lock and the machine’s files', () => {
     expect(roots.opened).toBe(0);
     expect(roots.spineStarted).toBe(0);
-    expect(roots.checkoutsStarted).toBe(1); // the checkouts stay main's until O3-E, over the mirror's view
   });
 
   it('binds `machine` as `host` and reads the spine and the machine half through their mirrors', () => {
     expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host' } })]);
     expect(mirrors.spine).toEqual([expect.objectContaining({ hosts: fake.hosts, daemon: daemonWatch })]);
     expect(mirrors.settings).toEqual([expect.objectContaining({ file: '/tmp/maws-lifecycle-test/machine-settings.json', hosts: fake.hosts })]);
+  });
+
+  // P5 O3-E M2 (Interfaces §E): a page's git.watch and git.unwatch go through the watch replay, never straight to the
+  // host; every other forward (files.watch among them) is told to the mirror and the replay, then sent
+  it('routes a page’s git.watch through the watch replay and tells every other forward on its way to mawsd', async () => {
+    const { dispatchToHost } = router.installs[0] as { dispatchToHost: (owner: string, name: string, input: unknown, client?: unknown) => Promise<unknown> };
+    const page = { id: 'page:3.1', onGone: () => () => {} };
+    await dispatchToHost('machine', 'git.watch', { directory: '/r' }, page);
+    expect(mirrors.watched).toEqual([['git.watch', { directory: '/r' }, page]]);
+    expect(mirrors.forwards).toEqual([]);
+    expect(fake.hosts.dispatch).not.toHaveBeenCalled();
+    await dispatchToHost('machine', 'files.watch', { appSessionId: 's', path: '/r' }, page);
+    expect(mirrors.forwards).toEqual([['files.watch', { appSessionId: 's', path: '/r' }, page]]);
+    expect(fake.hosts.dispatch).toHaveBeenCalledWith('machine', 'files.watch', { appSessionId: 's', path: '/r' }, page);
   });
 
   it('stops the mirror at will-quit and releases no lock it never took', () => {

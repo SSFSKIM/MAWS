@@ -46,6 +46,9 @@ export interface GitWatcherDeps {
   linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
   isRepository?(directory: string): Promise<boolean>; // whether git reads the directory as a repository of its own; isNestedRepository by default
   ignored?(root: string): Promise<(dir: string) => Promise<boolean>>; // what git ignores under the root (`gitIgnored`); nothing without it
+  // P5 O3-E M2: a root's first watch and its last release, one line each (`[git] watching <root>`, `[git] released
+  // <root>`), so an operator sees the checkouts working in mawsd's log; none unless given
+  log?(line: string): void;
 }
 
 const DEBOUNCE_MS = 250;
@@ -300,7 +303,9 @@ export class GitWatcher {
 
   private drop(repoRoot: string, count: number): void {
     const root = this.roots.get(repoRoot);
-    if (root && (root.count -= count) <= 0) this.close(root);
+    if (!root || (root.count -= count) > 0) return;
+    this.close(root);
+    this.deps.log?.(`[git] released ${root.root}`);
   }
 
   private open(status: GitStatus, projection: string, nested: string[]): Root {
@@ -392,6 +397,7 @@ export class GitWatcher {
       throw error;
     }
     this.roots.set(root.root, root);
+    this.deps.log?.(`[git] watching ${root.root}`);
     // FSEvents starts its stream asynchronously, and the status above was read before the watch opened: one pass after
     // the debounce closes both gaps (the store watcher's settle rescan, M2, for the same reason).
     this.schedule(root);

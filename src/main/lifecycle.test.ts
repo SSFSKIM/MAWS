@@ -54,13 +54,13 @@ vi.mock('./design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-
 vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: Error /* C11 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-C (M4): the services entry's roots, stubbed as main sees them: the machine's identity (no machine.json under the
 // fixed getPath; main binds its ref), the spine's data (spine.lock held, the split done, the machine half), the spine
-// with an empty view, and the checkouts; each root's start and stop recorded
-const roots = vi.hoisted(() => ({ release: vi.fn(), spineStarted: 0, checkoutsStarted: 0, stopSpine: vi.fn(), stopCheckouts: vi.fn() }));
+// with an empty view (P5 O3-E: the checkouts are the spine root's own parts); each root's start and stop recorded
+const roots = vi.hoisted(() => ({ release: vi.fn(), spineStarted: 0, stopSpine: vi.fn() }));
 vi.mock('../services/entry', () => ({
   COMMAND_BUDGETS_MS: {}, // main's `machine` budgets (sweep#3): none here, every name at the host's 10 s
   startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })),
@@ -68,10 +68,6 @@ vi.mock('../services/entry', () => ({
   startSpine: () => {
     roots.spineStarted += 1;
     return { view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: roots.stopSpine };
-  },
-  startCheckouts: () => {
-    roots.checkoutsStarted += 1;
-    return { files: { readResolved: vi.fn() }, stop: roots.stopCheckouts };
   },
 }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
@@ -162,13 +158,10 @@ describe('app lifecycle (macOS, D-11)', () => {
   it('stops the hosts on will-quit', () => {
     fake.emit('will-quit');
     expect(fake.hosts.stop).toHaveBeenCalledOnce();
-    // P5 O3-C (D21): the spine and the checkouts were composed once, at ready, and each root stops in one step at
-    // will-quit, the checkouts right after the spine (the order inside the spine is spine-root.test.ts's)
+    // P5 O3-C (D21): the spine was composed once, at ready, and stops in one step at will-quit (P5 O3-E: the checkouts
+    // with it, its last parts; the order inside the spine is spine-root.test.ts's)
     expect(roots.spineStarted).toBe(1);
-    expect(roots.checkoutsStarted).toBe(1);
     expect(roots.stopSpine).toHaveBeenCalledOnce();
-    expect(roots.stopCheckouts).toHaveBeenCalledOnce();
-    expect(roots.stopSpine.mock.invocationCallOrder[0]).toBeLessThan(roots.stopCheckouts.mock.invocationCallOrder[0]);
     // P5 O3-A: spine.lock outlives the will-quit steps (their promises settle after them); the process's exit releases it
     expect(roots.release).not.toHaveBeenCalled();
   });

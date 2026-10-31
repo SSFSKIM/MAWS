@@ -62,3 +62,8 @@ export function clientOfId(id: string): ClientRef | null {
 export function pageOf(client: ClientRef): WebContents | null {
   return pages.get(client) ?? null;
 }
+
+// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main itself as the asker of its own
+// in-process calls (`library.read`'s files.readResolved). Never ended: it holds no watch; on the daemon shape mawsd's
+// front mints a ref for its id that never goes, harmless for a read.
+export const mainClient: ClientRef = endableClientRef('main');

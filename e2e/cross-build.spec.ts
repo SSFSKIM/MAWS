@@ -178,6 +178,10 @@ function fitTo(schema: unknown, value: unknown, root: unknown = schema): unknown
 // refuses are named here, each with an input that changes nothing on the scratch profile (an id no session has, a
 // journal that does not exist).
 const INPUTS: Record<string, unknown> = {
+  // P5 O3-E M2: the checkouts' two whose sample their pattern refuses (a hash's hex, the bytes' base64); an unknown
+  // session's, so nothing is written (the upload is refused as a value until M3, and after it for an unknown session)
+  'files.upload': { appSessionId: 'x', files: [{ name: 'x', bytes: '' }] },
+  'files.write': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64) },
   'laneA.answer': { appSessionId: 'x', request: 'x', answer: { kind: 'permission', decision: 'deny' } }, // `allow` needs a scope
   'laneA.model': { appSessionId: 'x', model: 'x' }, // a model, an effort or both
   'session.drafts.set': { appSessionId: 'x', draft: null },

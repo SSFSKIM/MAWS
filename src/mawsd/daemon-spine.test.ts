@@ -2,6 +2,7 @@
 // §B): the seam loads the services entry (its source here; the built chunk is the bundle guard's and the measured
 // scene's) over a scratch profile at the first spine command, behind the front, against the fake engine host, and
 // answers a machine.sock client through it; then it releases and loads again in the same process.
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -127,6 +128,22 @@ describe('the spine inside mawsd', () => {
     // P5 O3-D M5 (D44(3)): the engine-host names the front loads a cold spine for are those the spine intercepts, and
     // lane B's claimed op (D47), which the spine takes for an inner name among them
     expect(front.intercepts()).toEqual([...SPINE_ENGINE_INTERCEPTS, 'host.op'].sort());
+  }, 30_000);
+
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 1 and 9): the checkouts load with the
+  // spine, never at mawsd's start: none of their names in the front's table while it is cold, and the first checkout
+  // command loads it and is answered from it
+  it('serves the checkouts only once loaded, a checkout command loading the spine', async () => {
+    const request = client();
+    expect(await request('machine.identity')).toMatchObject({ ok: true });
+    expect(front.commands()).toEqual([...FRONT_COMMANDS]);
+    expect(spine.state()).toBe('cold');
+    await link.ready();
+    const repository = mkdtempSync(join(dir, 'repository-'));
+    execFileSync('git', ['init', '-q', '-b', 'main', repository]);
+    expect(await request('git.status', { directory: repository })).toMatchObject({ ok: true, value: { branch: 'main' } });
+    expect(spine.state()).toBe('loaded');
+    for (const name of ['git.status', 'git.watch', 'files.read', 'files.readResolved', 'files.upload', 'scm.commit']) expect(front.commands(), name).toContain(name);
   }, 30_000);
 
   it('releases after the quiet period, every part stopped and its listeners gone, and loads again at the next trigger', async () => {

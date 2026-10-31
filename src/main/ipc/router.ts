@@ -62,6 +62,9 @@ export interface Router<R extends WireRegistry> {
   intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
   // P5 O6 M3: the route minus the sender check, for the client and machine `ctx` names; `internal` before `install`
   dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
+  // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main's own in-process call, the
+  // local route minus the main-only refusal too (a main-only name is main's to send), as the services bus's `invoke`
+  invokeOwn(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
 }
 
 export interface RouterOptions {
@@ -130,14 +133,14 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     return dispatch(name, rawInput, { client: clientOf(event.sender), target }, options);
   }
 
-  // Everything after the sender check and the machine's parse: `route`'s rest, and (P5 O6 M3) `dispatchLocal`.
+  // Everything after the sender check, the main-only refusal and the machine's parse: `route`'s rest, (P5 O6 M3)
+  // `dispatchLocal`'s and (P5 O3-E) `invokeOwn`'s.
   async function dispatch(
     name: string,
     rawInput: unknown,
     context: MainContext,
     { local, dispatchToHost = hostsNotStarted, machine = { kind: 'embedded' }, remote }: RouterOptions,
   ): Promise<CommandResult<CommandName>> {
-    if (mainOnly.has(name)) return mainOnlyRefusal(name);
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
@@ -213,6 +216,11 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     }) as Router<R>['intercept'],
     async dispatchLocal(name, input, ctx) {
       if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
+      if (mainOnly.has(name)) return mainOnlyRefusal(name);
+      return dispatch(name, input, ctx, installed);
+    },
+    async invokeOwn(name, input, ctx) {
+      if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
       return dispatch(name, input, ctx, installed);
     },
   };
@@ -239,6 +247,8 @@ export const registerMachineHandler: <N extends CommandName>(name: N, handler: M
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
 // P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
+// P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`, `library.read`'s files.readResolved).
+export const invokeOwn: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.invokeOwn;
 
 // The sender must be the top frame of an app window (not a subframe, not a webContents without a window) and its
 // URL must be at the app's origin: `file:` for the built app, the dev server's origin under `pnpm dev`.

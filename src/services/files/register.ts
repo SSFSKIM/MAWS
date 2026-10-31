@@ -1,4 +1,5 @@
-// Main's handlers for `files.*` (C8c execution document, M1). Every failure is `internal` with the service's message
+// The handlers for `files.*` (C8c execution document, M1; P5 O3-E: registered by the spine's root, in `mawsd` on the
+// daemon shape). Every failure is `internal` with the service's message
 // (the refusal `path outside the session's directories`, `unknown app session: <id>`, `not found: <path>`, …). Watches
 // are held per requesting client, as `registerGitHandlers` holds git's: a client that ends (its page closes, crashes or
 // reloads) releases whatever it still holds, since its page can no longer unwatch and a reloaded page watches afresh.
@@ -48,5 +49,7 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   register('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
   register('files.openExternal', ({ appSessionId, path }, { client }) => files.openExternal(session(appSessionId), path, client));
   register('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
+  // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach, main-only, a path main resolved read with files.read's rules
+  register('files.readResolved', (input) => files.readResolved(input));
   return Object.assign(files, { followed: followed as ReadonlySet<ClientId> });
 }

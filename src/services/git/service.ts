@@ -20,6 +20,7 @@ export interface GitServiceOptions {
   env?: NodeJS.ProcessEnv; // where PATH, HOME and MAWS_GIT are read; process.env by default
   execFile?: ExecFileFn;
   watch?: WatchFn;
+  log?: (line: string) => void; // P5 O3-E: the watcher's root lines (GitWatcherDeps.log)
 }
 
 export class GitService {
@@ -31,7 +32,7 @@ export class GitService {
     this.run = createGitRunner({ env: options.env, execFile: options.execFile });
     this.read = createGitReader({ env: options.env });
     // P5 O3-E M1: the watcher's prune on Linux reads what git ignores through this runner (`ls-files`, `check-ignore`).
-    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read) });
+    this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read), log: options.log });
   }
 
   async status(directory: string): Promise<GitStatus> {
