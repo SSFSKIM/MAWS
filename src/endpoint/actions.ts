@@ -20,6 +20,8 @@
 // failed `{state: 'failed', error}`; `{state: 'refused', reason}`; `{state: 'in-progress'}`). An engine host that can't
 // be reached once the action is handed on leaves it unknown (`{state: 'unknown', reason}`): the device asks by `query`.
 //
+// What reaches the engine host or the machine's services carries the asking channel's `ClientRef` (P5 O7 M2).
+//
 // Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
 // result by the nonce it answers.
 //
@@ -34,7 +36,7 @@ import type { Granted } from './gate';
 import { LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
-import type { EndpointServices } from './services';
+import { dispatchAs, type EndpointServices } from './services';
 
 export const STOP_WAIT_MS = 2000;
 
@@ -142,6 +144,7 @@ export class Actions {
     if (row === undefined) return refuse('not-offered');
     if (row.executor !== 'engine-host' && row.executor !== 'sminos' && row.executor !== 'endpoint' && row.executor !== 'machine') return refuse('no-ledger');
     const who = { member: channel.member, device: channel.device };
+    const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
     const fingerprint = await actionFingerprint(action);
     if (channel.closed) return;
 
@@ -167,7 +170,7 @@ export class Actions {
       accept();
       const release = this.#hold();
       try {
-        const answer = await this.ctx.dispatch('machine', 'machine.op', { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args });
+        const answer = await dispatch('machine', 'machine.op', { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args });
         channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
       } finally {
         release();
@@ -179,7 +182,7 @@ export class Actions {
     const context = action.context;
     const appSessionId = decision.target?.lane === 'B' ? decision.target.appSessionId : undefined;
     if (context?.lane !== 'B' || appSessionId === undefined) return refuse('malformed');
-    const status = await this.ctx.dispatch('engine-host', 'session.status', { appSessionId });
+    const status = await dispatch('engine-host', 'session.status', { appSessionId });
     if (!status.ok) return refuse(status.error.code === 'host_unavailable' || status.error.code === 'timeout' ? 'unavailable' : 'context');
     const now = isObject(status.value) ? status.value : {};
     if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
@@ -187,7 +190,7 @@ export class Actions {
     accept();
     const release = this.#hold();
     try {
-      const answer = await this.ctx.dispatch('engine-host', 'host.op', {
+      const answer = await dispatch('engine-host', 'host.op', {
         opId: action.opId,
         opCreated: action.opCreated,
         member: who.member,

@@ -18,12 +18,13 @@
 // after the same check. An `opCreated` past OP_HORIZON is `expired` whether or not a ledger still holds the op. An
 // outcome reads as `done`'s does (actions.ts's `outcomeOf`).
 import { OP_HORIZON_S, type DeviceClass, type QueriedMessage, type QueryMessage } from 'org-protocol';
+import type { ClientRef } from '@shared/ipc/client';
 import { closedLedgerOf, outcomeOf } from './actions';
 import type { AuthorizeRequest, Decision, QueryBinding, Who } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { QueryAnswer, Rl10 } from './rl10/link';
-import type { EndpointServices } from './services';
+import { dispatchAs, type EndpointServices } from './services';
 import type { SessionTarget } from './sources';
 import { resolveTarget } from './targets';
 
@@ -63,12 +64,12 @@ export class Queries {
     const { opId, opCreated } = m;
     const queried = (fields: Omit<QueriedMessage, 't' | 'opId'>): QueriedMessage => ({ t: 'queried', opId, ...fields });
     if (this.ctx.now() - Date.parse(opCreated) > OP_HORIZON_S * 1000) return queried({ state: 'expired' });
-    const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
-    // P5 O3-D M4: `machine` (the services' ledger) is no member of RL2's executor until O7 adds it behind a capability
-    const executor: string = m.executor;
+    const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
+    // P5 O7 M2: `machine` (the services' ledger) is RL2's since 1.1, behind `rl2.executor.machine`
+    const { executor } = m;
     const answer =
-      executor === 'engine-host' ? await this.#ledger('engine-host', 'host.opQuery', opId, opCreated)
-      : executor === 'machine' ? await this.#ledger('machine', 'machine.opQuery', opId, opCreated)
+      executor === 'engine-host' ? await this.#ledger('engine-host', 'host.opQuery', opId, opCreated, channel.client)
+      : executor === 'machine' ? await this.#ledger('machine', 'machine.opQuery', opId, opCreated, channel.client)
       : executor === 'endpoint' ? this.#own(opId, opCreated)
       : await this.#sminos(opId, opCreated, who.clientClass);
     if (SILENT.has(answer.state)) return queried({ state: answer.state as QueriedMessage['state'] });
@@ -85,8 +86,9 @@ export class Queries {
    * The engine host's ledger (lane B) or the services' (`machine.opQuery`, P5 O3-D M4), looked up and tombstoned in one
    * turn. Its target is an appSessionId, or none (the machine).
    */
-  async #ledger(owner: 'engine-host' | 'machine', name: 'host.opQuery' | 'machine.opQuery', opId: string, opCreated: string): Promise<Answer> {
-    const response = await this.ctx.dispatch(owner, name, { opId, opCreated, tombstoneIfAbsent: true });
+  async #ledger(owner: 'engine-host' | 'machine', name: 'host.opQuery' | 'machine.opQuery', opId: string, opCreated: string, client: ClientRef | undefined): Promise<Answer> {
+    const dispatch = dispatchAs(this.ctx.dispatch, client);
+    const response = await dispatch(owner, name, { opId, opCreated, tombstoneIfAbsent: true });
     if (response.ok && owner === 'engine-host') this.ctx.engineHostLedger?.(closedLedgerOf(response.value));
     if (!response.ok || !isObject(response.value) || !isText(response.value.state)) return { state: 'unavailable', binding: null };
     const value = response.value;
@@ -95,7 +97,7 @@ export class Queries {
     // The stored target is the lane B session's stable id; its record is read through the engine session it has now.
     let target: SessionTarget | null = null;
     if (value.target !== null && value.target !== undefined) {
-      const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, this.ctx.dispatch) : null;
+      const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, dispatch) : null;
       if (resolved?.kind === 'refused' && resolved.reason === 'unavailable') return { state: value.state as string, binding: 'unplaceable' };
       if (resolved?.kind !== 'session') return { state: value.state as string, binding: null };
       target = resolved.target;

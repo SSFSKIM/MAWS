@@ -3,6 +3,7 @@
 // when it comes, answers nothing that would end the newer one; and the stream's credit rule.
 import type { EndpointMessage, SubMessage } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
+import { endableClientRef } from '@shared/ipc/client';
 import type { RemoteChannel } from '../../src/endpoint/channels';
 import { Interest } from '../../src/endpoint/interest';
 import { STREAM_WINDOW_BYTES, Subscriptions, type Plane, type Subscription } from '../../src/endpoint/subscriptions';
@@ -24,6 +25,7 @@ function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: Endp
     member: 'm-1',
     device: 'd-1',
     clientClass: 'native-mac',
+    client: endableClientRef('d-1/ch-1'),
     closed: false,
     sent,
     send: (message) => (sent.push(message), true),

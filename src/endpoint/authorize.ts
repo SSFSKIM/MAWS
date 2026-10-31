@@ -29,7 +29,11 @@
 // grade. A `sub` takes `view` on its session, or ownership for the `cards` view; a `query` is answered only to the member
 // who sent the operation, while they still hold `view` on its stored target (M7 brings the binding), and to a web-cards
 // device only for what its class may do on a session its member owns.
+//
+// P5 O7 M2: the reads a decision makes on the machine (a lane B session's placement, a pending request's kind) carry the
+// asking channel's `ClientRef` (`Who.client`), as its executors' do.
 import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right } from 'org-protocol';
+import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-effect';
@@ -37,13 +41,14 @@ import { machineOwnerMembers } from './grants';
 import { higher, isMachineGrade, isRoutingClass, isSessionRank, owns, rankAtLeast, sessionRank } from './grades';
 import { OFFERS, type OfferRow, type Offers } from './offers';
 import { spawnRefusal, type Policy } from './policy';
-import type { EndpointServices } from './services';
+import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
 import { resolveSubscription, resolveTarget, type Resolved } from './targets';
 
 export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub'; name: string; input: unknown; action?: Action };
-export type Who = { member: string; device: string; clientClass: DeviceClass };
+/** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
+export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
 export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reason: RefusalReason };
 /** What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. */
 export type QueryBinding = { member: string; target: SessionTarget | null };
@@ -99,6 +104,8 @@ class Reads implements EffectReads {
     private readonly org: { head: OrgState; certificates: Certificates },
     private readonly ref: string,
     private readonly now: Date,
+    /** The machine as this decision reads it: on behalf of the asker. */
+    readonly dispatch: EndpointServices['dispatch'],
   ) {}
 
   /** The machine's owners as members. */
@@ -122,7 +129,7 @@ class Reads implements EffectReads {
     const key = `${appSessionId}\n${requestId}`;
     let read = this.#pending.get(key);
     if (read === undefined) {
-      read = this.ctx.dispatch('engine-host', 'session.pendingRequest', { appSessionId, requestId }).then((response) => {
+      read = this.dispatch('engine-host', 'session.pendingRequest', { appSessionId, requestId }).then((response) => {
         // An engine host that can't answer now can't let an answer be graded; one that holds nothing for it, nobody.
         if (!response.ok) throw new Refused(response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : 'grade');
         const event = isObject(response.value) ? response.value.event : null;
@@ -151,7 +158,7 @@ export class Authorizer {
       const ref = this.ctx.ref();
       if (org === null || ref === null) return refuse('unavailable');
       const before = this.#stamp();
-      const reads = new Reads(this.ctx, org, ref, new Date(now));
+      const reads = new Reads(this.ctx, org, ref, new Date(now), dispatchAs(this.ctx.dispatch, who.client));
       const moved = () => reads.recordsMoved() || !sameStamp(before, this.#stamp());
       let standing: Standing;
       try {
@@ -208,7 +215,7 @@ export class Authorizer {
     if (webCards && !WEB_CARDS.has(name)) return no('class');
 
     // 4. The caller's standing at the floor, before anything of the session is read.
-    const resolved = await resolveTarget(row.target, input, action, this.ctx.dispatch);
+    const resolved = await resolveTarget(row.target, input, action, reads.dispatch);
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
@@ -313,7 +320,7 @@ export class Authorizer {
     const cards = message.view === 'cards';
     const webCards = who.clientClass === 'web-cards';
     if (webCards && !cards) return refuse('class');
-    const resolved: Resolved = await resolveSubscription(message.session, this.ctx.dispatch);
+    const resolved: Resolved = await resolveSubscription(message.session, reads.dispatch);
     if (resolved.kind === 'refused') return refuse(resolved.reason);
     if (resolved.kind !== 'session') return refuse('grade');
     const record = reads.record(resolved.target);

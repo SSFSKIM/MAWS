@@ -17,7 +17,7 @@ import { fakeServices, type FakeServices } from './fake-services';
 import { ADMIN, credentials, ORG, startMiniflareHub, type LocalHub } from './miniflare-hub';
 import { genesis, newDevice, successor, type TestDevice } from './org-fixtures';
 import type { FakeSminos } from './rl10/fake-sminos';
-import { counter, cursorOf, drop, evs, FakeEngineHost, laneAMember, openRemote, Records, serve, sleep, sminos, subscribe, until, type Fixture, type Remote } from './sub-harness';
+import { counter, cursorOf, drop, evs, FakeEngineHost, FakeSpine, laneAMember, openRemote, Records, serve, sleep, sminos, subscribe, until, type Fixture, type Remote } from './sub-harness';
 
 const TAILNET = '100.101.102.109';
 const v4 = (address: string): NetworkInterfaceInfo => ({ address, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null });
@@ -51,6 +51,9 @@ beforeAll(async () => {
   services = fakeServices();
   const host = new FakeEngineHost();
   host.serve(services);
+  const spine = new FakeSpine(host);
+  spine.serve(services);
+  host.spine = spine;
   const records = new Records();
   endpoint = createEndpoint({
     build: 'm8-carriers',
@@ -84,7 +87,7 @@ beforeAll(async () => {
   await until(() => endpoint.hub.connected, 'the hub link’s welcome', 15_000);
   await until(() => endpoint.status().listener.bound && port !== 0, 'the direct listener bound', 15_000);
   relay = await RelayDialer.open(hub.url, ref, credentials(ADMIN));
-  f = { org: ORG, endpoint, services, host, records, ref, key: await generateSigningKey(), chain, port: () => port, interest: [] };
+  f = { org: ORG, endpoint, services, host, spine, records, ref, key: await generateSigningKey(), chain, port: () => port, interest: [] };
   s = await sminos(f, [laneAMember({ session: 'la-relayed' }), laneAMember({ session: 'la-direct' })]);
 }, 120_000);
 
