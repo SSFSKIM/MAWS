@@ -175,6 +175,7 @@ async function measure(arm: Arm, results: Record<string, unknown>): Promise<void
     results[root] = { kind, worktree, ...measured };
     line(root, `watches ${measured.watches} (bound ${bound ?? 'none'}) · ${memoryText(measured.memory)} · walk lag ${measured.walkLagMs} ms · burst ${BURST_FILES}: lag ${measured.burst.createLagMs}/${measured.burst.removeLagMs} ms, named in ${measured.burst.namedMs} ms · latency p50/p95 ${latencyText(measured.latency)}`);
     for (const [site, figures] of Object.entries(measured.latency)) for (const slow of [...figures.create.slow, ...figures.modify.slow]) line(root, `slow write at ${site}: ${JSON.stringify(slow)}`);
+    for (const stall of measured.burst.createStalls) line(root, `burst stall: ${JSON.stringify(stall)}`);
     if (bound !== null) expect.soft(measured.watches, `${kind}'s watches`).toBeLessThanOrEqual(bound);
     expect.soft(measured.memory.rssMiB, 'RSS growth').toBeLessThanOrEqual(BOUND.rssMiB);
     expect.soft(measured.walkLagMs, "the initial walk's worst lag").toBeLessThanOrEqual(BOUND.walkLagMs);
@@ -360,6 +361,11 @@ class Overlaps {
     };
   }
 
+  // Each stall of the loop over `ms`, with what overlapped it.
+  stallsOver(ms: number) {
+    return this.stalls.filter((stall) => stall.end - stall.start > ms).map((stall) => ({ ms: round2(stall.end - stall.start), ...this.around(stall.start, stall.end), stalls: undefined }));
+  }
+
   stop(): void {
     this.observer.disconnect();
     unsubscribe('child_process', this.onSpawn);
@@ -501,17 +507,19 @@ async function burstAt(root: string, tap: Tap) {
       if (named.size === BURST_FILES) allAt = at;
     };
     let lag = lagMonitor();
+    const overlaps = new Overlaps();
     const start = performance.now();
     await node(`const fs=require('fs');for(let i=0;i<${BURST_FILES};i++)fs.writeFileSync(${JSON.stringify(dir)}+'/c'+i,'x'+i)`);
     await until(() => allAt !== null, 10_000, 'every burst file').catch(() => {});
     await sleep(300);
     const createLagMs = lag.stop();
+    overlaps.stop();
     tap.onEach = null;
     lag = lagMonitor();
     await node(`const fs=require('fs');for(let i=0;i<${BURST_FILES};i++)fs.rmSync(${JSON.stringify(dir)}+'/c'+i)`);
     await sleep(1_000);
     const removeLagMs = lag.stop();
-    return { files: BURST_FILES, namedMs: allAt === null ? null : Math.round(allAt - start), filesNamed: named.size, createLagMs, removeLagMs };
+    return { files: BURST_FILES, namedMs: allAt === null ? null : Math.round(allAt - start), filesNamed: named.size, createLagMs, removeLagMs, createStalls: overlaps.stallsOver(50) };
   } finally {
     tap.onEach = null;
     rmSync(dir, { recursive: true, force: true });
