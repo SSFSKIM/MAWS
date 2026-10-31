@@ -11,6 +11,8 @@ import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
 import { connectLaneA } from './stores/lane-a'; // P5 O9 M5
 import { connectRemoteLaneA } from './lane-a/remote-connect'; // P5 O9 M9
+import { connectRemoteLaneB } from './lane-b/remote-connect'; // P5 O7 M2
+import { connectHubAccess } from './stores/hub-access'; // P5 O7 M2
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
@@ -167,6 +169,8 @@ export function App() {
   useEffect(() => connectShell(), []); // C5: sessions, attention and layout, app-wide
   useEffect(() => connectLaneA(), []); // P5 O9 M5: the terminal sessions MAWS drives through their sminos bridges
   useEffect(() => connectRemoteLaneA(), []); // P5 O9 M9: other machines' terminal sessions: their rows' opener, their cards
+  useEffect(() => connectRemoteLaneB(), []); // P5 O7 M2: other machines' lane B sessions: their rows' opener, their panes' reads (after connectShell)
+  useEffect(() => connectHubAccess(), []); // P5 O7 M2 (A2): the sidebar's "Hub unreachable"
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast

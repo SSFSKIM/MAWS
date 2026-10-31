@@ -21,6 +21,7 @@ import { machineKey } from '@shared/machine/org-key';
 import { machineProjectId } from '@shared/machine/project-ids';
 import { SPINE_REEXECUTE_DEFAULT } from './daemon';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
+import { fetchOverSocket } from '../services/artifacts/scheme/http'; // P5 O5 M2
 
 let scene: MawsdScene;
 
@@ -712,5 +713,71 @@ describe('the spine (P5 O3-D M2)', () => {
       }
       scene.logs.length = 0;
     }
+  });
+});
+
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M2's Proves; Interfaces §A, §C): the artifact endpoint
+// at start step 6, beside the other sockets: private like them, its welcome capability on every socket, its answers
+// resolved through the engine host (woken for them, the spine left cold), its state in daemon.status, gone at the exit.
+describe('the artifact endpoint (P5 O5 M2)', () => {
+  const PAGE_ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
+  const pageFile = () => {
+    const file = join(scene.root, 'page.html');
+    writeFileSync(file, '<!doctype html><head></head><p>M2</p>');
+    return file;
+  };
+
+  it('serves artifacts.sock 0600 beside the other sockets, and every welcome lists machine.artifacts', async () => {
+    await scene.start();
+    expect(scene.paths.artifactsSocket).toBe(join(scene.paths.socketDir, 'artifacts.sock'));
+    expect(statSync(scene.paths.artifactsSocket).isSocket()).toBe(true);
+    expect(mode(scene.paths.artifactsSocket)).toBe(0o600);
+    expect(scene.logs).toContain(`listening on ${scene.paths.artifactsSocket}`);
+    for (const socket of ['machine', 'engine-host'] as const) {
+      const app = await scene.app(socket);
+      expect(app.first?.capabilities, socket).toContain('machine.artifacts');
+    }
+  });
+
+  it('answers a page through the engine host’s artifacts.content, waking it and leaving the spine cold; daemon.status counts it', async () => {
+    const path = pageFile();
+    scene.engineSpawn = { answers: { 'artifacts.content': () => ({ revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path }) } };
+    const daemon = await scene.start();
+    expect(daemon.hosts.parked('engine-host')).toBe(true);
+    const page = await fetchOverSocket(scene.paths.artifactsSocket, new Request(`maws-artifact://${PAGE_ID}/live/index.html`));
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('<p>M2</p>');
+    expect(scene.lastEngine().named('artifacts.content')).toEqual([{ artifactId: PAGE_ID, path: 'index.html' }]);
+    const status = await daemon.status();
+    expect(status.artifacts).toEqual({ loaded: true, requests: 1 });
+    expect(status.spine?.state).toBe('cold');
+    const fetched = await daemon.services.artifacts.fetch({ url: `maws-artifact://${PAGE_ID}/live/index.html`, method: 'GET', range: 'bytes=0-8' });
+    expect(fetched.status).toBe(206);
+    expect(await new Response(fetched.body).text()).toBe('<!doctype');
+  });
+
+  it('loads nothing for the endpoint at the start', async () => {
+    const daemon = await scene.start();
+    expect((await daemon.status()).artifacts).toEqual({ loaded: false, requests: 0 });
+    expect(scene.logs.some((line) => line.includes('artifact endpoint'))).toBe(false);
+  });
+
+  it('removes artifacts.sock at the exit, and the proxy then reads the endpoint as not running', async () => {
+    const daemon = await scene.start();
+    await daemon.stop('test');
+    expect(existsSync(scene.paths.artifactsSocket)).toBe(false);
+    expect((await fetchOverSocket(scene.paths.artifactsSocket, new Request(`maws-artifact://${PAGE_ID}/live/index.html`))).status).toBe(503);
+  });
+
+  it('refuses to start over a symlink at artifacts.sock (exit 1), leaving it in place', async () => {
+    mkdirSync(scene.paths.dir, { recursive: true, mode: 0o700 });
+    chmodSync(scene.paths.dir, 0o700);
+    const elsewhere = join(scene.root, 'elsewhere.sock');
+    writeFileSync(elsewhere, '');
+    symlinkSync(elsewhere, scene.paths.artifactsSocket);
+    await expect(scene.start()).rejects.toThrow('did not start');
+    expect(scene.exits).toEqual([1]);
+    expect(scene.logs.some((line) => line.startsWith('fatal: cannot listen') && line.includes(scene.paths.artifactsSocket))).toBe(true);
+    expect(readFileSync(elsewhere, 'utf8')).toBe('');
   });
 });

@@ -27,6 +27,21 @@ export function runIdOf(env, random = () => randomBytes(4).toString('hex')) {
 
 export const e2eLabel = (run, name) => `${E2E_LABEL_PREFIX}${run}-${name}`;
 
+// P5 O5 M4 (the architect's ruling): no group that installs a unit `mawsd` runs on the mini's home instance, whose
+// launchd domain holds the owner's own unit (`dev.maws.mawsd`, src/mawsd/units/unit.ts's DEFAULT_LABEL). The gate's plan
+// routes such groups off the home labels; this is the second guard, at the install: by the runner's name, and by the
+// owner's label loaded in the account's `gui/<uid>` domain (`ownerUnitLoaded`, read by the caller from launchctl). A
+// refusal fails the case; it never skips.
+export const OWNER_UNIT_LABEL = 'dev.maws.mawsd';
+export const HOME_INSTANCE_RUNNER = 'ci-kit-mac-mini';
+
+export function homeInstanceRefusal(env, ownerUnitLoaded) {
+  const rule = "no group that installs a unit mawsd runs where the owner's own dev.maws.mawsd lives (the architect's ruling); nothing was installed";
+  if (env.RUNNER_NAME === HOME_INSTANCE_RUNNER) return `refused on the mini's home instance (RUNNER_NAME ${HOME_INSTANCE_RUNNER}): ${rule}`;
+  if (ownerUnitLoaded) return `refused: ${OWNER_UNIT_LABEL} is loaded in this account's gui domain: ${rule}`;
+  return null;
+}
+
 // run as the package script's step (`node e2e/support/daemon-unit-guard.mjs`), not when imported
 if (basename(process.argv[1] ?? '') === 'daemon-unit-guard.mjs') {
   const refusal = ciRefusal(process.env);

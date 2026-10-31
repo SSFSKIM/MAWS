@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { URL, fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { planOf } from './gate-plan.mjs';
 import { peerHeldBy } from './gate-peer-held.mjs';
 
 const peer = 'a'.repeat(40);
@@ -165,4 +166,36 @@ test('the workflow entry point authenticates the API request and writes only a v
 
 test('an overflowed peer job still holds the peer verdict', async () => {
   assert.equal((await check({ jobs: [job('plan', 'completed', 'success'), job('e2e:cross-build (EC2 overflow)', 'completed', 'success')] })).result, '90 succeeded');
+});
+
+
+test('EC2 off discovers a hosted peer holder before final placement refuses an unheld peer', async () => {
+  const protectedEnv = { ...env, LAUNCHD_E2E: 'cross-build', MAC_EC2: 'off', HOSTED_MAC_ROUTE: 'mirror' };
+  const holder = run(90, { head_commit: { tree_id: tree, message: message('unit', 'Hosted-Route: direct') } });
+  const { result, paths, warnings } = await check({ env: protectedEnv, runs: [holder] });
+  assert.equal(result, '90 queued');
+  assert.equal(paths.length, 2);
+  assert.deepEqual(warnings, []);
+  const planning = { ...protectedEnv, HEAD_MESSAGE: event.head_commit.message };
+  const { outputs } = planOf({ ...planning, PEER_HELD_BY: result }, scripts);
+  assert.equal(outputs.e2e, '[]');
+  assert.deepEqual(JSON.parse(outputs.peer_wait), [{ group: 'cross-build', run: '90', timeout: 180, wait: 175 }]);
+  const unheld = await check({ env: protectedEnv, runs: [] });
+  assert.equal(unheld.result, '');
+  assert.deepEqual(unheld.warnings, []);
+  assert.throws(() => planOf({ ...planning, PEER_HELD_BY: unheld.result }, scripts), /LAUNCHD_E2E.*MAC_EC2/);
+  // An explicit request still runs its own peer check, even if a matching holder exists.
+  assert.throws(() => planOf({ ...planning, HEAD_MESSAGE: message('e2e:cross-build'), PEER_HELD_BY: result }, scripts), /LAUNCHD_E2E.*MAC_EC2/);
+});
+
+
+test('a queued candidate whose final plan needs disabled EC2 cannot hold a newer hosted peer check', async () => {
+  const protectedEnv = { ...env, LAUNCHD_E2E: 'cross-build', MAC_EC2: 'off', HOSTED_MAC_ROUTE: 'direct' };
+  const holder = run(90, { head_commit: { tree_id: tree, message: message('unit', 'Lane: no-hosted') } });
+  const { result } = await check({ env: protectedEnv, runs: [holder], jobs: [job('plan', 'in_progress')] });
+  assert.equal(result, '');
+  const { outputs } = planOf({ ...protectedEnv, HEAD_MESSAGE: event.head_commit.message, PEER_HELD_BY: result }, scripts);
+  const entries = JSON.parse(outputs.e2e);
+  assert.deepEqual(entries.map((entry) => [entry.group, JSON.parse(entry.runner)]), [['cross-build', 'macos-26']]);
+  assert.equal(outputs.peer_wait, '[]');
 });

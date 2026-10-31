@@ -19,7 +19,7 @@ export interface OrgSession {
 }
 
 export interface SignedIn {
-  /** clientClass 'native-mac'; channelKey from loadDeviceKeys; build: main's build string; capabilities []. */
+  /** clientClass 'native-mac'; channelKey from loadDeviceKeys; build: main's build string; capabilities DEVICE_CAPABILITIES (P5 O7 M2). */
   identity: DeviceIdentity;
   /** Verified; its provider persists what `advance` adopts, and fires `onChanged` when it adopts a head. */
   view: OrgView;

@@ -16,29 +16,50 @@
 // permission policies on both sessions (`installStorePolicies`, before the first window loads) and `artifact_screenshot`'s
 // capture service (capture.ts), which renders an `html` artifact's revision through the same scheme. Under MAWS_E2E=1
 // `globalThis.__maws_captures` runs a capture in main directly (no IPC command exists for it).
+//
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §D): the scheme's serving is the plain-Node
+// library's (src/services/artifacts/scheme/) and its Electron half src/render/scheme.ts. On the daemon shape the two
+// sessions' handler goes through the scheme proxy to `mawsd`'s artifact endpoint (`artifactsSocket`) for each request
+// made while the daemon's welcome lists `machine.artifacts`, and serves the store's files in main otherwise (an older
+// daemon, or none welcomed yet); the presenter's embeds answer first either way.
+//
+// P5 O5 M3 (Interfaces §A, M3's "One library, two roots"): the capture and export code is the render library
+// (src/render/), which this, the embedded root, composes in-process (`composeRender`) as main always did, answering its
+// engine host's `maws.artifact.capture` and `maws.artifact.export` and registering `artifacts.export` over it; the render
+// host composes the same library in a windowless process. The frame and permission policies stay main's to apply to
+// its own windows, imported from where the library keeps them.
+//
+// P5 O5 M4 (M4's "`artifacts.export` becomes `machine`"): the command is machine-owned, registered here through
+// `registerMachine`, which the router runs on the embedded shape and, on the daemon shape, only while the attached `mawsd`
+// does not render (an older daemon; the router's fallback). A post-O5 `mawsd` posts its engine host's capture and export
+// requests to no client, so the listeners below answer only an embedded engine host's or an older daemon's.
 import { MessageChannelMain, session, type BrowserWindow } from 'electron';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
-import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
-import { CAPTURE_PARTITION, captureArtifact, startCaptureService } from './capture';
 import type { HostSupervisor } from '../hosts/supervisor';
-import type { registerMainHandler } from '../ipc/router';
-import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportService } from './export';
-import { renderDocumentViewport } from './inspection';
+import type { registerMachineHandler, registerMainHandler } from '../ipc/router';
 import { openDocument } from './open';
-import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
-import { serveArtifacts, type ContentLookup } from './protocol';
+import { CAPTURE_PARTITION, answerCaptureRequests } from '../../render/capture';
+import { composeRender } from '../../render/compose'; // P5 O5 M3
+import { installRenderSeams } from '../../render/e2e-seams'; // P5 O5 M3
+import { answerExportRequests, type ExporterRegistry, type ExportService } from '../../render/export';
+import type { DocumentAuthorDeps } from '../../render/export-document';
+import { appOriginOf, guardPermissions, installFramePolicies } from '../../render/policies';
+import { serveArtifacts, type ContentLookup } from '../../render/scheme'; // P5 O5 M2
 import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
+import { MACHINE_ARTIFACTS_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M2
 
-export { registerStoreSchemes } from './protocol';
-export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
+export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from '../../render/export';
 
 export interface ArtifactsDeps {
-  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent'>;
+  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent' | 'peer'>;
   register: typeof registerMainHandler;
+  registerMachine: typeof registerMachineHandler; // P5 O5 M4: artifacts.export, machine-owned
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // P3-A M5: to the renderer
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
+  artifactsSocket: string | null; // P5 O5 M2: the daemon shape's `mawsd` artifacts.sock, proxied to while its welcome lists machine.artifacts; null on the embedded shape
+  authors?: DocumentAuthorDeps; // P5 O5 M3: a document's Word comment authors (WR 73), the root's to read
 }
 
 // The store frames' policies on the window's default session and on the capture partition (P3-L M6b; E2's, in
@@ -51,69 +72,49 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, emit, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, registerMachine, emit, env, openWindow, root, artifactsSocket, authors }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ExportService, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);
   const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds);
-  const exporters = new ExporterRegistry();
-  const stopHtml = registerHtmlExporters(exporters, { content, env });
+  // P5 O5 M2: read per request, so a daemon restarted into another build is followed (the build check's restart)
+  const endpoint = artifactsSocket === null ? undefined : () => (hosts.peer('machine')?.capabilities.includes(MACHINE_ARTIFACTS_CAPABILITY) ? { socketPath: artifactsSocket } : null);
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds, endpoint);
   // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart
   let hostLosses = 0;
   const stopLosses = hosts.onState('engine-host', (state) => {
     if (state.state !== 'ready') hostLosses += 1;
   });
-  const exports = startExportService({
-    registry: exporters,
-    root,
-    call,
+  // P5 O5 M3: the render library, composed in-process (P3-A M7's export service and P3-L M6b's captures, with every
+  // kind's exporters)
+  const render = composeRender({ call, content, root, env, ...(authors && { authors }), hostGeneration: () => hostLosses });
+  const stopExports = answerExportRequests(render, {
     onEvent: (name, listener) => hosts.onEvent(name, listener),
     answer: (input) => call('maws.artifact.exported', input),
-    hostGeneration: () => hostLosses,
   });
-  register('artifacts.export', (input) => exports.exportForLibrary(input));
+  registerMachine('artifacts.export', (input) => render.exportForLibrary(input)); // P5 O5 M4: machine-owned
   // P3-L M6b: `artifact_screenshot`'s captures, answered to the requesting session
-  const stopCaptures = startCaptureService({
+  const stopCaptures = answerCaptureRequests(render.capture, {
     onEvent: (name, listener) => hosts.onEvent(name, listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'maws.artifact.captured', input),
-    content,
-    env,
   });
   const stopResync = hosts.onStreaming('engine-host', () => void emit('artifacts.resync', {})); // P3-A M5
-  const seam = globalThis as {
-    __maws_documents?: { openWindow(): number };
-    __maws_exports?: { print(html: string): Promise<{ head: string; blocked: string[] }>; inspect(html: string): Promise<string> };
-    __maws_captures?: { capture(request: MawsArtifactCapture): ReturnType<typeof captureArtifact> }; // P3-L M6b
-  };
-  if (env.MAWS_E2E === '1') {
-    seam.__maws_documents = { openWindow: () => openWindow().id };
-    seam.__maws_captures = { capture: (request) => captureArtifact(request, { content, env }) };
-    // M7 fix wave 1: the PDF printer alone, as an exporter's context calls it (the e2e proves its request filter)
-    seam.__maws_exports = {
-      // The real document viewport path, so the e2e can inject hostile HTML and prove CSP beside host layout reads.
-      inspect: async (html) => (await renderDocumentViewport(html, { artifactId: 'e2e-inspection', kind: 'document', format: 'png', revision: 0, path: '', width: 640, height: 480 }, new AbortController().signal, env)).toString('base64'),
-      print: async (html) => {
-        const blocked: string[] = [];
-        const pdf = await printHtmlToPdf(html, { signal: new AbortController().signal, blocked: (url) => blocked.push(url) });
-        return { head: Buffer.from(pdf.subarray(0, 5)).toString('latin1'), blocked };
-      },
-    };
-  }
+  const seam = globalThis as { __maws_documents?: { openWindow(): number } };
+  if (env.MAWS_E2E === '1') seam.__maws_documents = { openWindow: () => openWindow().id };
+  const stopSeams = installRenderSeams({ content, env }); // P5 O5 M3: the render library's own, as the render host installs them
   return {
-    exporters,
-    exports, // P4-B5
+    exporters: render.exporters,
+    exports: render, // P4-B5
     stop: () => {
       stopResync();
       stopLosses(); // E3
       stopCaptures();
-      exports.stop();
-      stopHtml();
+      stopExports();
+      render.stop();
+      stopSeams();
       delete seam.__maws_documents;
-      delete seam.__maws_exports;
-      delete seam.__maws_captures;
     },
   };
 }

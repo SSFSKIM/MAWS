@@ -12,4 +12,5 @@ export const grades = {
   'daemon.restartEngineHost': 'machine-admin', // P5 O16 M3b: a restart of the machine's engine host, its sessions kept
   'daemon.endpoint': 'internal',
   'daemon.e2eSeam': 'internal', // M5b fix round 2: the e2e's seams, never a remote caller's
+  'daemon.e2eRender': 'internal', // P5 O5 M4: the render seam's e2e capture, likewise
 } as const satisfies CommandGrades<'daemon'>;

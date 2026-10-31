@@ -10,6 +10,7 @@
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
+import { AbsolutePathSchema } from './settings'; // P5 O5 M4: daemon.e2eRender's `to`
 
 // Always set locally; never shown to a remote caller.
 export const localOnly = <T extends z.ZodType>(schema: T) => schema.optional().meta({ localOnly: true });
@@ -36,6 +37,28 @@ export const DaemonSpineSchema = z.strictObject({
 });
 export type DaemonSpine = z.infer<typeof DaemonSpineSchema>;
 
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §C): the artifact endpoint on
+// artifacts.sock. `loaded`, whether its handler's chunk is in (it loads at the first use, never at the start);
+// `requests`, the requests its handler answered since the start.
+export const DaemonArtifactsSchema = z.strictObject({
+  loaded: z.boolean(),
+  requests: z.number().int().nonnegative(),
+});
+export type DaemonArtifacts = z.infer<typeof DaemonArtifactsSchema>;
+
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §B): the render seam. `state` is the seam's
+// (`off`, `starting`, `ready`, `ending`, `unavailable`), a string as a host's is; `detail`, why it is unavailable or what
+// it waits for; `pid`, the render host's while one runs; `starts`, the render hosts started since the daemon's start;
+// `requests`, the requests in its table now.
+export const DaemonRenderSchema = z.strictObject({
+  state: z.string(),
+  detail: z.string().nullable(),
+  pid: z.number().int().nullable(),
+  starts: z.number().int().nonnegative(),
+  requests: z.number().int().nonnegative(),
+});
+export type DaemonRender = z.infer<typeof DaemonRenderSchema>;
+
 export const DaemonStatusSchema = z.strictObject({
   pid: z.number().int(),
   startedAt: z.string(),
@@ -56,6 +79,8 @@ export const DaemonStatusSchema = z.strictObject({
   // P5 O16 M2: the engine host's session hosts (its supervisor status's `holder`): live, re-attached by a successor and
   // left unadopted; absent while the engine host is parked or did not answer, and from a daemon before O16
   sessionHosts: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int() }).optional(),
+  artifacts: DaemonArtifactsSchema.optional(), // P5 O5 M2: absent from a daemon before it
+  render: DaemonRenderSchema.optional(), // P5 O5 M4: absent from a daemon before it
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
 
@@ -102,6 +127,13 @@ export const commands = {
   // the scenario's manual clock played to `ms`, the library's refreshes held; refused unless `mawsd` runs under MAWS_E2E=1
   'daemon.e2eSeam': machine(
     z.discriminatedUnion('seam', [z.strictObject({ seam: z.literal('scenario.advanceTo'), ms: z.number().int().nonnegative() }), z.strictObject({ seam: z.literal('library.holdRefreshes') })]),
+    z.void(),
+  ),
+  // P5 O5 M4 (Interfaces §K): a capture through the render seam, fed to it as the engine host's `maws.artifact.capture`
+  // would be, its PNG written to `to` (src/mawsd/e2e-seam.ts); refused unless `mawsd` runs under MAWS_E2E=1. A command of
+  // its own, since a member added to daemon.e2eSeam's union would break the wire.
+  'daemon.e2eRender': machine(
+    z.strictObject({ artifactId: z.uuid(), revision: z.number().int().min(0), width: z.number().int().min(16).max(4096), height: z.number().int().min(16).max(4096), to: AbsolutePathSchema }),
     z.void(),
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

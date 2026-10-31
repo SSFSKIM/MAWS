@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { expect, type FrameLocator, type JSHandle, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { BrowserWindow } from 'electron';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER, type CallLogEntry } from './connector-engine';
 import { launchMaws, type MawsLaunch } from './launch';
 import { installedEngine } from './p1-live';
@@ -91,7 +91,7 @@ type Result<N extends CommandName> = CommandResult<N>;
 export function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<Result<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<Result<N>>;
 }
-export function value<N extends CommandName>(result: Result<N>) {
+export function value<N extends CommandName>(result: Result<N>): CommandOutput<N> {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   return result.value;
 }

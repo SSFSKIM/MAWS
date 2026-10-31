@@ -13,6 +13,7 @@ import { vi, type Mock } from 'vitest';
 import * as z from 'zod';
 import { daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions } from '@shared/host/host-supervisor';
+import type { ClientRef } from '@shared/ipc/client';
 import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
@@ -37,11 +38,11 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 // What the stand-in engine host serves: every command it is sent, read as received (z.unknown), so a test sees the
 // relay's inputs exactly; one event, `probe.event`, whose payload is anything (keys no registry names included).
 const ANY = { input: z.unknown(), output: z.unknown(), owner: 'engine-host' as const };
-export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'host.handover' /* P5 O16 M3b */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */] as const;
+export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'host.handover' /* P5 O16 M3b */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */, 'artifacts.content' /* P5 O5 M2: the artifact endpoint's lookup */, 'maws.artifact.captured', 'maws.artifact.exported' /* P5 O5 M4: the render seam's answers */, 'artifacts.get' /* P5 O5 M4: a render host's snapshot read */] as const;
 const ENGINE_REGISTRY = {
   commands: Object.fromEntries(ENGINE_COMMANDS.map((name) => [name, ANY])),
-  events: { 'probe.event': z.unknown() },
-  hostEvents: ['probe.event'],
+  events: { 'probe.event': z.unknown(), 'maws.artifact.capture': z.unknown(), 'maws.artifact.export': z.unknown() /* P5 O5 M4: the bridges' requests */ },
+  hostEvents: ['probe.event', 'maws.artifact.capture', 'maws.artifact.export'],
   ptyHostEvents: [],
   machineEvents: [],
   mainOnly: new Set<string>(),
@@ -66,6 +67,7 @@ export interface StandInOptions extends Partial<Omit<FakeSupervisorOptions, 'run
 // ready client for the next client's connect burst, as SessionStream's undelivered tail does.
 export class StandIn {
   readonly calls: { name: string; input: unknown }[] = [];
+  readonly clients: ClientRef[] = []; // P5 O7 M2: each request's asker, as the runtime minted it, in order
   // P5 O3-D M3: the engine host's presence as attachment.ts keeps it: its gone hooks run, its shell recaptures counted
   appGone = 0;
   shellRecaptured = 0;
@@ -89,8 +91,9 @@ export class StandIn {
       (on, emit, client) => {
         this.hostEmit = emit;
         for (const name of names.filter((n) => n !== 'host.attachment'))
-          on(name, async (input) => {
+          on(name, async (input, ctx) => {
             this.calls.push({ name, input });
+            this.clients.push(ctx.client);
             return (this.answers[name]?.(input) ?? null) as never;
           });
         if (this.kind !== 'engine-host') return;

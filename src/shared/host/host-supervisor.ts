@@ -184,7 +184,9 @@ export interface HostSupervisor {
   adopt(owner: HostOwner): Promise<boolean>; // a parked host: one connect, no spawn; false leaves it parked
   parked(owner: HostOwner): boolean;
   refusal(owner: HostOwner): ServerRefuse | null; // while `incompatible`: the refusal's whole line, for a relay to reflect
-  forward(owner: HostOwner, request: { name: string; input: unknown; client?: string }): Promise<HostResponse>;
+  // `client`: the asker, by id (a relayed app's, whose end mawsd never learns) or as a ref, whose end the link relays
+  // once the request carried it (P5 O7 M2: the endpoint's per-channel ref)
+  forward(owner: HostOwner, request: { name: string; input: unknown; client?: string | ClientRef }): Promise<HostResponse>;
   onRaw(owner: HostOwner, listener: (message: { name: string; payload: unknown }) => void): () => void;
   // P5 O2 M3 end
   // P5 O2 M5 start (above)
@@ -220,6 +222,7 @@ interface Pending {
   sent: boolean;
   client: ClientRef | null; // P5 O1 M5: the asker a `machine` request names, whose end the link relays once it is sent
   forwardedClient: string | null; // P5 O2 M3: a forwarded request's `client`, kept off a protocol-2 link
+  forwardedRef: ClientRef | null; // P5 O7 M2: that client as a ref, whose end the link relays once the request carried it
 }
 
 // E10: the port a host is spoken to through, a utility host's channel or the detached transport's socket link.
@@ -514,9 +517,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   function send(host: Host, pending: Pending): void {
     pending.sent = true;
     // P5 O2 M3: a forwarded `client` never reaches a protocol-2 link, whose strict `req` refuses it (P5 Decision Log 42)
-    const request = pending.forwardedClient && host.peer?.major !== SOCKET_PROTOCOL_V2 ? { ...pending.request, client: pending.forwardedClient } : pending.request;
+    const forwarded = host.peer?.major !== SOCKET_PROTOCOL_V2 ? pending.forwardedClient : null;
+    const request = forwarded ? { ...pending.request, client: forwarded } : pending.request;
     host.port!.postMessage(request);
-    if (pending.client) host.gone?.carry(pending.client); // P5 O1 M5: after the request, so a gone client's line follows it
+    const asker = pending.client ?? (forwarded ? pending.forwardedRef : null);
+    if (asker) host.gone?.carry(asker); // P5 O1 M5: after the request, so a gone client's line follows it
   }
 
   function sendHeld(host: Host): void {
@@ -821,8 +826,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   }
   // E10 end
 
+  const forwardedAs = (client: string | ClientRef | null) =>
+    typeof client === 'string' || client === null ? { forwardedClient: client, forwardedRef: null } : { forwardedClient: client.id, forwardedRef: client };
+
   // A request, held while the host starts or restarts; `raw` answers a forwarded one as received (P5 O2 M3).
-  function request(owner: HostOwner, name: string, input: unknown, client: ClientRef | null, forwarded: { client: string | null; raw: (response: HostResponse) => void } | null): Promise<CommandResult<CommandName>> {
+  function request(owner: HostOwner, name: string, input: unknown, client: ClientRef | null, forwarded: { client: string | ClientRef | null; raw: (response: HostResponse) => void } | null): Promise<CommandResult<CommandName>> {
     const host = hosts[owner];
     if (!host) return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `no ${owner} host runs in this process; cannot answer ${name}`) }); // P5 O1 M5
     // E10: once started, a request made while the host starts or restarts is held and sent when it is ready
@@ -841,7 +849,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       // reads strictly) never carries it
       const asker = owner === 'machine' && client ? client : null;
       const message: HostMessage = asker ? { t: 'req', id, name: name as CommandName, input, client: asker.id } : { t: 'req', id, name: name as CommandName, input };
-      const pending: Pending = { name, resolve, raw: forwarded?.raw ?? null, timer, request: message, sent: false, client: asker, forwardedClient: forwarded?.client ?? null };
+      const pending: Pending = { name, resolve, raw: forwarded?.raw ?? null, timer, request: message, sent: false, client: asker, ...forwardedAs(forwarded?.client ?? null) };
       host.pending.set(id, pending);
       if (host.port) send(host, pending);
       else if (host.parked) launch(host); // P5 O2 M3: a request wakes a parked host

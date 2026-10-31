@@ -9,7 +9,7 @@ import { appWindows, registerAppWindow } from './windows'; // E2
 import { recordImeTrace } from './ime-trace'; // P2-F S ime-trace, temporary
 import { showAppWindow } from './window-show';
 // E2 start
-import { attributeConsole, guardFrames, guardWindowNavigation, isCspExempt } from './artifacts/policies';
+import { attributeConsole, guardFrames, guardWindowNavigation, isCspExempt } from '../render/policies';
 import { emit } from './ipc/events';
 // E2 end
 import type { ResolvedTheme } from './client/settings-store'; // P5 O3-A: the client half's

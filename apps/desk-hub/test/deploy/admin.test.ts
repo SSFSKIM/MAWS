@@ -614,6 +614,9 @@ describe('a root device revoked', () => {
 describe('root add', () => {
   // The owner's co-root step (P5 O8 M3, "The co-root"): the app's device, paired under the owner, made a root beside
   // this admin device by the one verb that adds a root. Each successor of a two-root head needs one root's signature.
+  // The app's device id is a random key id, so it goes after `--`, as README.md writes the verbs (`root add -- <id>`):
+  // one id in 64 starts with '-', which parseArgs reads as an option (exit 2). Each status is asserted with the run's
+  // stderr as its message, so a run that ends otherwise says why.
   let hub: LocalHub;
   const keys = join(scratch, 'root-add-keys', 'keys.json');
   const asLocal = () => ['--hub', hub.url, '--user', ADMIN, '--keys', keys];
@@ -640,14 +643,16 @@ describe('root add', () => {
     const { id, ...rest } = device;
     const mac = await pairingMac(base64urlDecode(code.k), { org: code.org, member: code.member, device });
     expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId: id, ...rest, mac } })).status).toBe(201);
-    expect(await running).toBe(0);
+    expect(await running, f.err.join('\n')).toBe(0);
     return f.out;
   }
 
   beforeAll(async () => {
     hub = await startLocalHub();
-    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
-    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal(), '--yes'], fake().io)).toBe(0);
+    const init = fake();
+    expect(await runAdmin(['init', '--keys', keys], init.io), init.err.join('\n')).toBe(0);
+    const genesis = fake();
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal(), '--yes'], genesis.io), genesis.err.join('\n')).toBe(0);
     const admin = await readAdminKeys(keys);
     adminKid = await keyId(admin.stepUp.pub);
     member = ((await hub.fetchAs(ADMIN, '/api/me').then((r) => r.json())) as { member: { id: string } }).member.id;
@@ -676,7 +681,8 @@ describe('root add', () => {
     const added = await signOrgState(await successor((await served()).state, (s) => void s.members.push({ id: other.member, email: 'second-admin@example.com', role: 'admin', devices: [otherDevice] })), [admin.stepUp]);
     expect(await postState(added)).toMatchObject({ status: 201 });
     // The admin's anchor follows the head the test signed.
-    expect(await runAdmin(['devices', ...asLocal()], fake().io)).toBe(0);
+    const devices = fake();
+    expect(await runAdmin(['devices', ...asLocal()], devices.io), devices.err.join('\n')).toBe(0);
   });
   afterAll(() => hub?.close());
 
@@ -688,30 +694,30 @@ describe('root add', () => {
       ['no-such-device', new RegExp(`^admin: ${member} has no device no-such-device in the head \\(version ${before}\\)$`)],
     ] as const) {
       const f = fake();
-      expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], f.io), id).toBe(1);
+      expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], f.io), `${id}: ${f.err.join('\n')}`).toBe(1);
       expect(f.err, id).toEqual([expect.stringMatching(why)]);
       expect(f.out.some((l) => l.startsWith('make ')), id).toBe(false);
     }
     const declined = fake(['n']);
-    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal()], declined.io)).toBe(1);
+    expect(await runAdmin(['root', 'add', ...asLocal(), '--', app.device.id], declined.io), declined.err.join('\n')).toBe(1);
     expect(declined.err).toEqual(['admin: not made a root: nothing was signed']);
     expect((await served()).state.version).toBe(before);
     expect((await served()).state.root.keys).toEqual([adminKid]);
     const bare = fake();
-    expect(await runAdmin(['root', 'add', ...asLocal()], bare.io)).toBe(1);
+    expect(await runAdmin(['root', 'add', ...asLocal()], bare.io), bare.err.join('\n')).toBe(1);
     expect(bare.err).toEqual(['admin: root add <device id>']);
   });
 
   it('shows the genesis root: its kid and the admin device that holds it', async () => {
     const f = fake();
-    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    expect(await runAdmin(['show', ...asLocal()], f.io), f.err.join('\n')).toBe(0);
     expect(f.out.filter((l) => l.startsWith('root '))).toEqual([`root ${adminKid} (${ADMIN} device ${(await readAdminKeys(keys)).id})`]);
   });
 
   it("confirms with the device, its member, pair's fingerprint and the step-up kid, then adds the kid to the root set", async () => {
     const before = await served();
     const f = fake();
-    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal(), '--yes'], f.io)).toBe(0);
+    expect(await runAdmin(['root', 'add', ...asLocal(), '--yes', '--', app.device.id], f.io), f.err.join('\n')).toBe(0);
     // The fingerprint over the head's entry (its endorsement dropped) is the line `pair` printed for the device.
     const listed = before.state.members.find((m) => m.id === member)!.devices.find((d) => d.id === app.device.id)!;
     expect(listed.endorsement).toBeDefined();
@@ -729,14 +735,14 @@ describe('root add', () => {
     expect(rest).toEqual(was);
 
     const again = fake();
-    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal(), '--yes'], again.io)).toBe(1);
+    expect(await runAdmin(['root', 'add', ...asLocal(), '--yes', '--', app.device.id], again.io), again.err.join('\n')).toBe(1);
     expect(again.err).toEqual([`admin: ${app.device.id} is a root already (step-up ${app.kid})`]);
     expect((await served()).state.version).toBe(after.state.version);
   });
 
   it('shows both roots once one is added, each with its device', async () => {
     const f = fake();
-    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    expect(await runAdmin(['show', ...asLocal()], f.io), f.err.join('\n')).toBe(0);
     expect(f.out.filter((l) => l.startsWith('root '))).toEqual([`root ${adminKid} (${ADMIN} device ${(await readAdminKeys(keys)).id})`, `root ${app.kid} (${ADMIN} device ${app.device.id})`]);
   });
 
@@ -753,7 +759,7 @@ describe('root add', () => {
     expect(await postState(outsider)).toEqual({ status: 409, error: 'not-root-signed' });
     // The deployment admin verifies the app's successor in its chain and signs on top of it.
     const f = fake();
-    expect(await runAdmin(['refresh', ...asLocal()], f.io)).toBe(0);
+    expect(await runAdmin(['refresh', ...asLocal()], f.io), f.err.join('\n')).toBe(0);
     expect(f.out.at(-1)).toBe(`refreshed: version ${byApp.state.version + 1} (no change)`);
   });
 
@@ -773,10 +779,10 @@ describe('root add', () => {
     const admin = await readAdminKeys(keys);
     expect((await served()).state.root.keys).toEqual([adminKid, app.kid]);
     const self = fake();
-    expect(await runAdmin(['remove-device', admin.id, ...asLocal(), '--yes'], self.io)).toBe(1);
+    expect(await runAdmin(['remove-device', admin.id, ...asLocal(), '--yes'], self.io), self.err.join('\n')).toBe(1);
     expect(self.err.join('\n')).toMatch(/is this admin device/);
     const f = fake();
-    expect(await runAdmin(['remove-device', app.device.id, ...asLocal(), '--yes'], f.io)).toBe(0);
+    expect(await runAdmin(['remove-device', ...asLocal(), '--yes', '--', app.device.id], f.io), f.err.join('\n')).toBe(0);
     const head = await served();
     expect(head.state.root.keys).toEqual([adminKid]);
     expect(head.state.revoked.map((r) => r.keyId).sort()).toEqual([await keyId(app.device.channelPub), app.kid].sort());
@@ -788,32 +794,33 @@ describe('root add', () => {
     const id = '-dash-mac';
     await paired({ id, class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub });
     const bare = fake();
-    expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], bare.io)).toBe(2);
+    expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], bare.io), bare.err.join('\n')).toBe(2);
     expect(bare.err.join('\n')).toMatch(/Unknown option/);
     const added = fake();
-    expect(await runAdmin(['root', 'add', ...asLocal(), '--yes', '--', id], added.io)).toBe(0);
+    expect(await runAdmin(['root', 'add', ...asLocal(), '--yes', '--', id], added.io), added.err.join('\n')).toBe(0);
     expect(added.out.at(-1)).toMatch(new RegExp(`^root added: ${id}, step-up `));
     expect((await served()).state.root.keys).toHaveLength(2);
     const removed = fake();
-    expect(await runAdmin(['remove-device', ...asLocal(), '--yes', '--', id], removed.io)).toBe(0);
+    expect(await runAdmin(['remove-device', ...asLocal(), '--yes', '--', id], removed.io), removed.err.join('\n')).toBe(0);
     expect((await served()).state.root.keys).toEqual([adminKid]);
   });
 
   it('takes its options before the subcommand, as the runners pass them, and refuses a second --config rather than pick one', async () => {
     // The runners' order: their own options (--config, --keys) first, then the owner's verb and its arguments.
     const shown = fake();
-    expect(await runAdmin([...asLocal(), 'show'], shown.io)).toBe(0);
+    expect(await runAdmin([...asLocal(), 'show'], shown.io), shown.err.join('\n')).toBe(0);
     expect(shown.out).toContain(`member ${member} ${ADMIN} admin`);
     const id = '-front-mac';
     await paired({ id, class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub });
     const added = fake();
-    expect(await runAdmin([...asLocal(), '--yes', 'root', 'add', '--', id], added.io)).toBe(0);
+    expect(await runAdmin([...asLocal(), '--yes', 'root', 'add', '--', id], added.io), added.err.join('\n')).toBe(0);
     expect(added.out.at(-1)).toMatch(new RegExp(`^root added: ${id}, step-up `));
-    expect(await runAdmin([...asLocal(), '--yes', 'remove-device', '--', id], fake().io)).toBe(0);
+    const removed = fake();
+    expect(await runAdmin([...asLocal(), '--yes', 'remove-device', '--', id], removed.io), removed.err.join('\n')).toBe(0);
     expect((await served()).state.root.keys).toEqual([adminKid]);
     // A caller's --config beside a runner's: neither wins; nothing is read or sent.
     const twice = fake();
-    expect(await runAdmin(['--config', unreachableConfig(), '--config', unreachableConfig(), ...asLocal(), 'show'], twice.io)).toBe(1);
+    expect(await runAdmin(['--config', unreachableConfig(), '--config', unreachableConfig(), ...asLocal(), 'show'], twice.io), twice.err.join('\n')).toBe(1);
     expect(twice.err).toEqual(['admin: name one --config and one --keys']);
     expect(twice.out).toEqual([]);
   });

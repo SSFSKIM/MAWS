@@ -5,7 +5,7 @@
 // owners after the title when they aren't you alone.
 import { useState } from 'react';
 import { MachineChip } from '../app/MachineChip';
-import { MACHINE_OFFLINE, useMachineMark } from '../app/machine-mark';
+import { greyWords, useMachineMark } from '../app/machine-mark';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { listedGlyph } from '../attention/glyph';
@@ -40,7 +40,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
         role="treeitem"
         aria-level={level}
         aria-selected={tree.selected === id}
-        aria-label={machine.offline ? `${title}, ${MACHINE_OFFLINE}` : title}
+        aria-label={machine.offline ? `${title}, ${greyWords(machine)}` : title}
         data-offline={machine.offline || undefined}
         tabIndex={tree.tabStop === nodeId ? 0 : -1}
         data-tree-id={nodeId}

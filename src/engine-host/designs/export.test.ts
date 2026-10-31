@@ -29,9 +29,8 @@ import { logRows, makeLegacyDesign } from './legacy.fixture';
 import { commands as libraryCommands } from '@shared/ipc/schema/library';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
-const { ExporterRegistry, startExportService } = await import('../../main/artifacts/export');
-const { registerDesignExporters } = await import('../../main/design/export');
-const { CommandFailure } = await import('../../main/ipc/router');
+const { ExporterRegistry, startExportService } = await import('../../render/export');
+const { registerDesignExporters } = await import('../../render/design/export');
 const { createLibraryFiles } = await import('../../main/library/files');
 
 const SELF = 'app-self' as AppSessionId;
@@ -209,8 +208,8 @@ describe('the library’s route: artifacts.export to main’s design exporter', 
     const input = artifactCommands['artifacts.export'].input.parse({ artifactId: id, format: 'png', board: 'poster' });
     expect(input).toEqual({ artifactId: id, format: 'png', board: 'poster' });
     const failure = await service.exportForLibrary(input).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(CommandFailure);
-    expect((failure as InstanceType<typeof CommandFailure>).error).toMatchObject({ code: 'invalid_input', issues: { reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 9000, maxScale: 0.9102 } } });
+    expect(failure).toBeInstanceOf(HostCommandError);
+    expect((failure as HostCommandError).ipcError).toMatchObject({ code: 'invalid_input', issues: { reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 9000, maxScale: 0.9102 } } });
 
     const scaled = await service.exportForLibrary(artifactCommands['artifacts.export'].input.parse({ artifactId: id, format: 'png', board: 'poster', scale: 0.9102 }));
     expect(readFileSync(scaled.path, 'utf8')).toBe('png:poster');
@@ -233,7 +232,7 @@ describe('a retained version of a design whose live legacy state cannot migrate 
     expect(loaded[0]).toContain('data-frame="phone" data-size="390x844"');
     expect(logRows(userData, id)).toEqual(rows);
     const tooLarge = await service.exportForLibrary({ artifactId: id, format: 'png', versionId: versionId!, board: 'poster' }).catch((error: unknown) => error);
-    expect((tooLarge as InstanceType<typeof CommandFailure>).error.issues).toEqual({ reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 10_000, maxScale: 0.8192 } });
+    expect((tooLarge as HostCommandError).ipcError.issues).toEqual({ reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 10_000, maxScale: 0.8192 } });
     // Decision Log 33: L's Save As reads the row without preparing the live design, and copies the version's bytes
     const row = async () => ((await hostCall('artifacts.get', { artifactId: id, prepare: false })) as { ok: true; value: { artifact: { revision: number } } }).value.artifact.revision;
     const revision = await row();
@@ -288,7 +287,7 @@ describe('managed export files (Decision Log 33)', () => {
     expect([readFileSync(sent.path, 'utf8'), readFileSync(other.path, 'utf8')]).toEqual(['png:poster', 'png:phone']);
     // its refusal is still the design's, named
     const refused = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'poster', ownFile: true }).catch((error: unknown) => error);
-    expect((refused as InstanceType<typeof CommandFailure>).error.issues).toMatchObject({ reason: 'exportTooLarge', data: { board: 'poster', maxScale: 0.9102 } });
+    expect((refused as HostCommandError).ipcError.issues).toMatchObject({ reason: 'exportTooLarge', data: { board: 'poster', maxScale: 0.9102 } });
     const to = join(userData, 'sent.png');
     await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: sent.revision, format: 'png', exportId: sent.exportId! } } }, null);
     expect(readFileSync(to, 'utf8')).toBe('png:poster');

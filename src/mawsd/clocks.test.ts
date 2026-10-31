@@ -246,6 +246,40 @@ describe('the engine host’s park clock', () => {
     expect(actions.armEnginePark).toHaveBeenLastCalledWith('discovery');
   });
 
+  // P5 O5 (landing 1, the park race): clients' requests to the engine host
+  it('asks no park while a client’s request to the engine host is in flight, the discovery wake’s included, and asks it once they are answered', () => {
+    const c = clocks();
+    c.configure(MIN);
+    c.discoveryWaking();
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    c.engineRequests(1); // a request sent before the pass was heard
+    c.parkNow();
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.engineRequests(0);
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+    expect(c.parkAsked()).toBe(true);
+  });
+
+  it('a park asked of a host that stays (live rows) is taken back for a request: disarmed, and the clock starts again', () => {
+    const c = clocks();
+    c.configure(MIN);
+    c.engineHost(4001);
+    vi.advanceTimersByTime(MIN);
+    expect(c.parkAsked()).toBe(true);
+    c.takeBackPark();
+    expect(actions.disarmEnginePark).toHaveBeenCalledOnce();
+    expect(c.parkAsked()).toBe(false);
+    vi.advanceTimersByTime(MIN - 1);
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(1);
+    expect(actions.armEnginePark).toHaveBeenCalledTimes(2);
+    c.hosts({ engine: true, pty: true }); // it parked
+    expect(c.parkAsked()).toBe(false);
+    c.takeBackPark(); // nothing asked: nothing to take back
+    expect(actions.disarmEnginePark).toHaveBeenCalledOnce();
+  });
+
   it('the idle clock’s ask that was not sent is asked again at the same host’s reconnect', () => {
     const c = clocks();
     c.configure(MIN);

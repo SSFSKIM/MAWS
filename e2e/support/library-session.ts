@@ -8,7 +8,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { ScratchRepo } from '../../test/support/scratch-repo';
 import { StoreFixture } from '../../test/support/store-fixture';
 import { launchMaws, type MawsLaunch } from './launch';
@@ -23,7 +23,7 @@ export const FIRST_REPLY = 'The dashboard page is in your artifacts.';
 export function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
-export function value<N extends CommandName>(result: CommandResult<N>) {
+export function value<N extends CommandName>(result: CommandResult<N>): CommandOutput<N> {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   return result.value;
 }

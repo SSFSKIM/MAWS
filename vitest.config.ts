@@ -58,6 +58,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/rl10/held-read.test.ts', // P5 O10: a started endpoint's held events and revocations against a stand-in hub's real socket and RL10's
   'test/machines/remote-link.test.ts', // P5 O7 M1: main's RL2 link against a real endpoint on its direct listener (real sockets, the handshake's WebCrypto)
   'test/lane-a/remote.test.ts', // P5 O9 M9: remote lane A through main's RL2 link against a real endpoint (real sockets, the handshake's WebCrypto)
+  'test/lane-b/remote.test.ts', // P5 O7 M2: remote lane B through main's RL2 link against a real endpoint (real sockets, the handshake's WebCrypto)
   'test/machines/remote-link.local.test.ts', // P5 O7 M1: the link over the hub's multiplex (desk-hub's Worker in Miniflare), a relay drop, the switch to direct, the hub away
   'test/org/sign-in.local.test.ts', // P5 O8 M1: the app's sign-in against desk-hub's Worker in Miniflare, O13's real `pair` approving
   'test/org/rows.local.test.ts', // P5 O8 M2: a real endpoint's listings as rows through desk-hub's Worker in Miniflare and the app's feed
@@ -142,7 +143,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['src/{shared,main,services,preload,engine-host,pty-host,endpoint,mawsd}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd; P5 O3-C: src/services
+          include: ['src/{shared,main,services,preload,engine-host,pty-host,endpoint,mawsd,render,render-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd; P5 O3-C: src/services; P5 O5 M3: src/render, src/render-host
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS, ...DISPLAY_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json

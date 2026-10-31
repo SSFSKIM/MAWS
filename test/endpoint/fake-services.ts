@@ -36,6 +36,7 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
       return () => void holds.delete(id);
     },
     interest: { report: () => {}, drop: () => {} },
+    artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
     log: (line) => void lines.push(line),
     lines,
     holds,

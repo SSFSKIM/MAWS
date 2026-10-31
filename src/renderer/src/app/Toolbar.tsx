@@ -26,6 +26,7 @@ import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionE
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M9
+import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { displayTitle } from '../sessions/title';
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
@@ -224,7 +225,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
       <SessionMenuItem id="takeOver" appSessionId={appSessionId} label={SESSION_ACTIONS.takeOver} gap={takeOver === null || takeOver.available ? null : takeOver.reason} />
     </SessionMenu>;
   }
-  const ids = record ? sessionActionsFor(record, { bridged }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */ }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <SessionMenu disabled={ids.length === 0}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
   </SessionMenu>;

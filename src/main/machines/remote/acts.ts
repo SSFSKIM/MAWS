@@ -3,7 +3,8 @@
 // identity; a step-up goes only through the session's signer (RL §5.6).
 //
 // - Sent, or resealed, only within ACT_FRESH_MS of its creation (a step-up act's window runs from its signature, the
-//   time the person confirmed it). One the link could not put on a channel in that window resolves `refused offline` and
+//   time the person confirmed it), and never after the caller's own `sendBy` (P5 O7 M2: a send's pending budget, which a
+//   resume may have spent most of). One the link could not put on a channel in that window resolves `refused offline` and
 //   is never sent.
 // - An act is *ambiguous* once a transmission of it may have reached its executing side without its answer reaching the
 //   link: its channel was lost after it went and before a terminal answer, or ACK_TIMEOUT_MS passed. The endpoint checks
@@ -20,9 +21,14 @@
 // - An act unsettled OP_HORIZON_S after its creation resolves `unknown expired` (a copy went out) or `refused expired`,
 //   whether or not a channel is current: the ledger no longer answers for it.
 // - Pending acts live in memory: an app quit forgets them, while the machine's ledger keeps each result for a day.
-import { base64urlEncode, isAction, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
+// - P5 O7 M2: what the peer could not read never goes. An act or a query for an executor the current channel's peer did
+//   not list in `h2` (capabilities.ts) is refused `not-offered` while no copy of it went out, and left `unknown
+//   not-offered` once one did (it can't be asked after); and an act whose sealed form would be over the channel's message
+//   limit is refused `too-large`, checked as built (before a person is asked to confirm it) and as signed.
+import { base64urlEncode, isAction, MESSAGE_MAX_BYTES, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
+import { peerTakesExecutor } from './capabilities';
 import type { RemoteTiming } from './timing';
 
 export interface ActRequest {
@@ -38,6 +44,8 @@ export interface ActRequest {
   stepUp?: 'required' | 'if-asked' | 'never';
   /** Default by name: 'sminos.' → 'sminos', 'endpoint.' → 'endpoint', else 'engine-host'. */
   executor?: Executor;
+  /** Epoch ms past which no copy goes out or is resealed, inside ACT_FRESH_MS (P5 O7 M2: the caller's bound). */
+  sendBy?: number;
 }
 /** waiting: not yet on a channel; unknown: lost track, querying. */
 export type ActProgress = 'waiting' | 'sent' | 'accepted' | 'unknown';
@@ -64,6 +72,8 @@ export interface ActTableDeps {
   send(message: DeviceMessage): boolean;
   /** Whether a channel is current (the link `up`, or within its grace on a fresh channel). */
   current(): boolean;
+  /** The capabilities the current channel's peer listed in `h2`; null while none is current. */
+  peerCapabilities(): readonly string[] | null;
   timing: RemoteTiming;
   now(): number;
   log(line: string): void;
@@ -80,6 +90,8 @@ type Entry = {
   signing: boolean;
   /** When its send window began: its creation, or its signature. */
   windowFrom: number;
+  /** The caller's end of the window (`ActRequest.sendBy`), if any. */
+  sendBy: number | null;
   /** A copy went out with no definitive answer since: it may run. */
   outstanding: boolean;
   /** A copy may have reached the executing side without its answer reaching the link. */
@@ -99,6 +111,9 @@ type Entry = {
 
 const random = (bytes: number) => base64urlEncode(crypto.getRandomValues(new Uint8Array(bytes)));
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const encoder = new TextEncoder();
+/** Whether the channel would carry the act: its `act` message, as `Channel.send` measures it, within the message limit. */
+const fits = (action: Action) => encoder.encode(JSON.stringify({ t: 'act', action })).length <= MESSAGE_MAX_BYTES;
 
 export const executorOf = (name: string): Executor => (name.startsWith('sminos.') ? 'sminos' : name.startsWith('endpoint.') ? 'endpoint' : 'engine-host');
 
@@ -156,6 +171,7 @@ export class ActTable {
       signed: false,
       signing: false,
       windowFrom: createdAt,
+      sendBy: request.sendBy ?? null,
       outstanding: false,
       ambiguous: false,
       acked: false,
@@ -186,6 +202,7 @@ export class ActTable {
     if (ended !== null) this.#settle(entry, { state: 'refused', reason: ended });
     else if (signedIn === null) this.#settle(entry, { state: 'refused', reason: 'offline' });
     else if ((request.session !== undefined && request.context === undefined) || !isAction(action)) this.#settle(entry, { state: 'refused', reason: 'malformed' });
+    else if (!fits(action)) this.#settle(entry, { state: 'refused', reason: 'too-large' });
     else if (entry.mode === 'required') void this.#sign(entry);
     else this.#trySend(entry);
     // Past the horizon the executor's ledger no longer answers (`#query`), and a lost channel may never come back to ask.
@@ -307,6 +324,7 @@ export class ActTable {
     if (entry.settled) return;
     if (!result.ok) return this.#settle(entry, { state: 'refused', reason: result.reason === 'malformed' ? 'malformed' : 'step-up-cancelled' });
     if (result.action.opId !== entry.opId || result.action.opCreated !== entry.opCreated) return this.#settle(entry, { state: 'refused', reason: 'malformed' });
+    if (!fits(result.action)) return this.#settle(entry, { state: 'refused', reason: 'too-large' });
     entry.action = result.action;
     entry.signed = true;
     entry.windowFrom = this.#deps.now();
@@ -323,19 +341,32 @@ export class ActTable {
 
   #armWindow(entry: Entry): void {
     this.#clearTimers(entry);
-    const left = entry.windowFrom + this.#deps.timing.ACT_FRESH_MS - this.#deps.now();
+    const left = this.#windowEnd(entry) - this.#deps.now();
     this.#after(entry, Math.max(0, left), () => {
       if (!entry.outstanding && !entry.signing) this.#settle(entry, { state: 'refused', reason: 'offline' });
     });
   }
 
   #inWindow(entry: Entry): boolean {
-    return this.#deps.now() - entry.windowFrom < this.#deps.timing.ACT_FRESH_MS;
+    return this.#deps.now() < this.#windowEnd(entry);
+  }
+
+  #windowEnd(entry: Entry): number {
+    return Math.min(entry.windowFrom + this.#deps.timing.ACT_FRESH_MS, entry.sendBy ?? Infinity);
+  }
+
+  /** Whether the current channel's peer reads `entry`'s executor; when it doesn't, the act settles (see the header). */
+  #offered(entry: Entry): boolean {
+    const capabilities = this.#deps.peerCapabilities();
+    if (capabilities === null || peerTakesExecutor(entry.executor, capabilities)) return true;
+    this.#settle(entry, entry.outstanding ? { state: 'unknown', reason: 'not-offered' } : { state: 'refused', reason: 'not-offered' });
+    return false;
   }
 
   /** One copy on the current channel: the act as built or signed, or (`reseal`) with a fresh nonce; `created` now unless signed. */
   #transmit(entry: Entry, reseal: boolean): void {
     this.#clearTimers(entry);
+    if (!this.#offered(entry)) return;
     if (!entry.signed) entry.action = { ...entry.action, ...(reseal ? { nonce: random(NONCE_BYTES) } : {}), created: new Date(this.#deps.now()).toISOString() };
     if (!this.#deps.send({ t: 'act', action: entry.action })) {
       if (!entry.outstanding) this.#armWindow(entry);
@@ -355,7 +386,7 @@ export class ActTable {
     this.#clearTimers(entry);
     this.#progress(entry, 'unknown');
     if (this.#deps.now() - Date.parse(entry.opCreated) > OP_HORIZON_S * 1000) return this.#settle(entry, { state: 'unknown', reason: 'expired' });
-    if (!this.#deps.current()) return;
+    if (!this.#deps.current() || !this.#offered(entry)) return;
     if (this.#deps.send({ t: 'query', opId: entry.opId, opCreated: entry.opCreated, executor: entry.executor })) entry.querying = true;
   }
 

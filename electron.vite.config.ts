@@ -84,7 +84,10 @@ export default defineConfig(({ command }) => {
       // library's one door, is the third, held by the same guard to mawsd's rule; O3-D's mawsd composes the spine from it.
       // P5 O5: the app's root (out/main/app.js), which the entry (index.js) loads by a deferred import, is an input of its
       // own so it lands beside index.js rather than under chunks/: its modules read `__dirname` for the preloads, the
-      // renderer's page and mawsd.js.
+      // renderer's page and mawsd.js. M3: the render host's root (src/render-host/root.ts) is a chunk the entry loads on
+      // `--render-host`, reading no `__dirname`; the render library both roots compose lands in the chunks they share as
+      // the bundler splits them. Not a `manualChunks` entry: a manual chunk takes in its modules' dependencies, mawsd's
+      // shared ones among them, and mawsd.js would then require a chunk that requires electron (bundle-guard.test.ts).
       build: {
         rollupOptions: {
           input: { index: resolve(__dirname, 'src/main/index.ts'), app: resolve(__dirname, 'src/main/app.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },

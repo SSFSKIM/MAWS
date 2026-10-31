@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
 import { REPO_ROOT } from './launch';
 
@@ -21,7 +21,7 @@ export const replaySpec = (appSessionId: string, replay: string, over: Partial<L
 export function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
-export function value<N extends CommandName>(result: CommandResult<N>) {
+export function value<N extends CommandName>(result: CommandResult<N>): CommandOutput<N> {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   return result.value;
 }

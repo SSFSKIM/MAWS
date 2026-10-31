@@ -91,12 +91,15 @@ env:
   # P5 O3-B (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, O3-B): every group runs on the daemon shape, a private
   # mawsd on its scratch profile, unless its script or spec pins MAWS_HOST_MODE for what it tests. The embedded shape keeps
   # two sentinels until O15 deletes its root: supervisor (its detached supervisor) and c7-utility, c7's specs with both
-  # hosts Electron utility processes.
+  # hosts Electron utility processes. render-host (P5 O5 M3) is the render host started alone against a fake mawsd.
+  # remote (P5 O7 M2): remote lane B over RL2, the app on one profile and a second profile's enrolled mawsd on a local org;
+  # it proves behaviour and carries no wall-clock bound (e2e:remote-latency, measured, holds those). It joins
+  # HOSTED_MAC_E2E only by the rule below (three green `Lane: hosted` runs on one tree), CI-opt's call.
   CLASS1_E2E: >-
-    default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
+    default artifacts render-host library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 c7-utility scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover supervisor-daemon daemon-unit machines lane-a
+    discover supervisor-daemon daemon-unit machines lane-a remote
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -174,7 +177,7 @@ env:
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of
@@ -290,6 +293,9 @@ env:
   # the `Lane: no-hosted` baseline 40831064338 on the same tree (10 passed, on ci-kit-mac-ec2). The flake was begin()
   # waiting expect's default 5 s for the main window after launchMaws, short of a fresh hosted Mac's first launch; it
   # now waits 60 s, as c12-prerun does.
+  # remote (P5 O7 M2, CI-opt): 3/3 green under `Lane: hosted` at master 3adf9c979 (tree aaf2effe6) in runs
+  # 41231090341 (#410's merge gate), 41233011088 and 41233011061 (1 passed each), against the `Lane: no-hosted`
+  # baseline 41233011649 on the same tree (1 passed, on ci-kit-mac-ec2).
   # c7-utility (P5 O3-B), the embedded shape's utility sentinel: admitted by the rule above on the tree that lists it, its
   # three `Lane: hosted` runs (the O3-B after-sets) and its `Lane: no-hosted` baseline recorded in the O3-B ledger
   # (docs/doperpowers/ledgers/2026-10-28-p5-o3-b.md, Gate runs).
@@ -297,6 +303,7 @@ env:
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
     design-systems tools panel browser-cua terminal c7 c7-utility browser transcript supervisor-daemon daemon-unit machines lane-a
+    remote
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
   # packaged (CI-opt): PR #297 records the admission evidence: 3/3 direct hosted greens on one tree, with the
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
@@ -316,13 +323,17 @@ env:
   # 127.0.0.1:8641, which the mini runs and the EC2 Mac does not (there it answered `relay_unreachable` in runs
   # 40429551303 and 40432481369).
   MAC_HOME_E2E: discover
+  # Groups that install a KeepAlive unit daemon never run in the mini's home account, beside the owner's real mawsd.
+  # Hosted Macs, EC2 and the disposable guest account are safe; off hosted, only an effective MAC_VM_E2E group
+  # takes the guest alone (never a peer), otherwise EC2. MAC_EC2=off refuses that EC2 placement at plan time.
+  LAUNCHD_E2E: cross-build daemon-unit
   # The groups that check this tree against another build, its peer (the two-build check, e2e/cross-build.spec.ts):
   # scripts/ci-gate.sh names the peer in a `Peer:` trailer (the merge base with master, unless its --peer names another)
   # beside both trees' wires, and the plan adds these groups to a run with unit or an e2e group whenever the two are a
   # minor apart (gate-plan.mjs), unless an older run holds the check: then a hosted waiter follows its verdict.
   # A real peer job fetches that one
   # commit, checks it out under RUNNER_TEMP with an install of its own and builds its out/ (.github/scripts/gate-peer.sh),
-  # and stops every supervisor of either build whatever happened. Exclusive on the mirror route; eligible on direct.
+  # and stops every supervisor of either build whatever happened. EC2 on the mirror route; eligible on direct.
   PEER_E2E: cross-build
 
 defaults:
@@ -386,6 +397,7 @@ jobs:
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
+          MAC_EC2: ${{ vars.MAC_EC2 }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/gate-peer-held.mjs
       - id: plan
@@ -400,6 +412,7 @@ jobs:
           INPUT_HOSTED_ROUTE: ${{ inputs.hosted_route }}
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
+          MAC_EC2: ${{ vars.MAC_EC2 }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -890,16 +903,16 @@ jobs:
       - name: Publish flaky tests
         if: always() && github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && steps.checkout.outcome == 'success'
         run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
+      # LAUNCHD_E2E groups load LaunchAgents into this account. Boot out every e2e unit before stopping peer
+      # processes: a spec that died before unit.remove() leaves KeepAlive set, which would relaunch a killed daemon.
+      - if: always() && matrix.launchd && steps.checkout.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the
       # job started is left to the next job on this Mac.
       # Any job of a peer group that checked out, so a prepare cancelled midway is undone too.
       - if: always() && matrix.peer && steps.checkout.outcome == 'success'
         run: .github/scripts/gate-peer.sh stop "$RUNNER_TEMP/maws-peer"
-      # e2e:daemon-unit (P5 O2 M7) loads LaunchAgents into this Mac's account, so whatever the run did, every
-      # `dev.maws.mawsd.e2e-*` agent and plist in the account is booted out and removed, this job's and any earlier one's.
-      - if: always() && matrix.group == 'daemon-unit' && steps.checkout.outcome == 'success'
-        run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       # A flaky pass keeps the same evidence as a red job, including the failed attempt's attachments.

@@ -238,6 +238,26 @@ describe('a session row’s hover card', () => {
     const card = await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
     expect(within(card).getByTestId('hover-machine').textContent).toBe(`Studio · offline · last seen ${formatAgo(5 * 60_000, { narrow: true })}`);
   });
+
+  // P5 O7 M2 (A2): how this app reaches the machine, on the machine's line; a machine that removed this device greys its
+  // rows with that in place of "offline"
+  it('says the carrier an RL2 link is up over, nothing for a socket, and that the machine removed this device', async () => {
+    withMain();
+    const since = new Date(Date.now() - 5 * 60_000).toISOString();
+    const roster = (over: { state?: 'up' | 'down'; carrier?: 'socket' | 'direct' | 'relay'; refusal?: string }) =>
+      useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: false, state: 'up', since, generation: 0, ...over }]);
+    for (const [carrier, words] of [['direct', 'Studio · direct (tailnet)'], ['relay', 'Studio · via the hub'], ['socket', 'Studio']] as const) {
+      act(() => roster({ carrier }));
+      render(<Sidebar />);
+      expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent, carrier).toBe(words);
+      cleanup();
+    }
+    act(() => roster({ state: 'down', refusal: 'removed' }));
+    render(<Sidebar />);
+    await userEvent.setup().hover(needsRow('Fix sidebar drag, This Mac is no longer allowed on Studio'));
+    const card = await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
+    expect(within(card).getByTestId('hover-machine').textContent).toBe('This Mac is no longer allowed on Studio');
+  });
 });
 
 // W11 (I6): a project row's card, in the same shell: the name, the path home-abbreviated, the counts, the last activity

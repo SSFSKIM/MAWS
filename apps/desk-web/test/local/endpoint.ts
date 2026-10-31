@@ -261,7 +261,7 @@ async function build(stops: Array<() => unknown>, stop: () => Promise<void>, opt
   const fake = services.dispatch;
   services.dispatch = async (owner, name, input) => {
     if (owner !== 'engine-host' || (name !== 'host.op' && name !== 'host.opQuery')) return fake(owner, name, input);
-    host.calls.push({ name, input });
+    host.calls.push({ owner, name, input });
     const forced = name === 'host.op' ? world.hostOp?.(input as Record<string, unknown>) : null;
     if (forced !== null && forced !== undefined) return forced;
     // The runtime checks every input against the registry before a handler sees it.

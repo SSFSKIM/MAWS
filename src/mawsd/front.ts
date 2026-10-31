@@ -28,15 +28,26 @@
 // for an id it was not asked) and `machine.client` (the attached app's browser socket, which the spine reads through
 // `browserSocket()`). A client's end ends its streams and settles what the port asked it `noClient`.
 //
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §B, §G): the render host is a client whose
+// hello lists `render.client`. Its ready and its end go to the render seam (`render`), which hands it work through
+// `postRender` (to the newest ready render client alone: `render.request`, `render.exit`, `render.hostGeneration`) and
+// takes its `render.answer` (from a render client alone, refused for an id the seam did not post). Nothing of the bus's
+// fan-out reaches it, and it is no client for the daemon's clocks (`renderClients`). The engine host's
+// `maws.artifact.capture` and `maws.artifact.export` are posted to no client: the seam answers them (daemon.ts hands it
+// the raw events), so an app of any build hears none. `artifacts.export` is the seam's (the front's own name, cold: no
+// spine). Every engine-host request a client's connection makes is forwarded naming that connection's ref, so the
+// engine host keys what it holds for the asker (a dashboard export's dataset holds) to it, and the connection's end
+// reaches the host as the link's clientGone.
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
 // and, under claimSpine (D47), the endpoint's `engine-host` route, a phone's claimed `host.op` of one of them included.
 // A spine refused by the lock or yielded leaves the request to go on unintercepted, as a request did before the spine
 // moved here: the note is then the lock holder's to keep. Any other failure to load answers it host_unavailable.
-import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
+import { HostCommandError, thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
-import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import { eventPosition } from '@shared/host/stream-catchup';
 import type { SessionEvent } from '@shared/graph/events';
@@ -46,7 +57,7 @@ import { endableClientRef, type ClientRef, type HandlerContext } from '@shared/i
 import { ipcError } from '@shared/ipc/errors';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostResponse } from '@shared/ipc/host-protocol';
 import { REGISTRY } from '@shared/ipc/registry';
-import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
@@ -58,9 +69,12 @@ import { SpineUnavailable } from './spine-seam';
 import type { EngineIntercept } from './spine-hosts';
 
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
-export const FRONT_COMMANDS = ['clientPort.answer', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'session.follow'] as const;
+// P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
+export const FRONT_COMMANDS = ['artifacts.export', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
-const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'session.follow']);
+const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
+// P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears
+const RENDER_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
 // (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
 // daemon-spine.test.ts pins it to what the spine registers.
@@ -77,6 +91,22 @@ export interface ClientFacts {
   capabilities: readonly string[];
 }
 
+// P5 O5 M4: the render seam as the front reaches it (daemon.ts's, which loads the seam's chunk at its first use)
+export interface FrontRender {
+  clientReady(): void; // a render client said ready
+  clientGone(): void; // a ready render client's connection ended
+  answer(input: CommandInput<'render.answer'>): boolean; // false for an id the seam did not post
+  exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
+}
+
+// A front with no render seam: a render client's work is never taken, the library's Export unavailable
+const NO_RENDER: FrontRender = {
+  clientReady: () => {},
+  clientGone: () => {},
+  answer: () => false,
+  exportForLibrary: async () => Promise.reject(new HostCommandError(ipcError('host_unavailable', 'this mawsd renders nothing'))),
+};
+
 export interface FrontOptions {
   spine: Pick<LazySpine, 'ensure'>;
   hosts: Pick<HostSupervisor, 'forward' | 'onRaw' | 'onStreaming' | 'parked'>; // the forwarded owners, and the streams' reads
@@ -91,6 +121,7 @@ export interface FrontOptions {
   // discovery wake); `app` is a client whose hello listed machine.spine, the app, which keeps the index current itself;
   // `arrivedAt` is when the front took the request, before the load (the panel's sweep#4: the wait is bounded from it)
   beforeSpineCommand?(name: CommandName, app: boolean, arrivedAt: number): Promise<void>;
+  render?: FrontRender; // P5 O5 M4: none, a front that renders nothing (NO_RENDER)
 }
 
 export interface ServicesFront {
@@ -110,6 +141,8 @@ export interface ServicesFront {
   // engine host's app-bound events reach it (the daemon's app presence for such an app, D40)
   appReady(): boolean;
   clients(): number;
+  renderClients(): number; // P5 O5 M4: the render clients among them, which the daemon's clocks do not count
+  postRender(name: 'render.request' | 'render.exit' | 'render.hostGeneration', payload: unknown): boolean; // P5 O5 M4: to the newest ready render client; false with none
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go
   close(): void;
@@ -122,12 +155,14 @@ const OWN: ReadonlySet<string> = new Set(FRONT_COMMANDS);
 
 export function createServicesFront(options: FrontOptions): ServicesFront {
   const { log } = options;
+  const render = options.render ?? NO_RENDER; // P5 O5 M4
   const table = new Map<string, AnyHandler>();
   const intercepts = new Map<string, AnyHandler>();
   const taps = new Map<string, Set<(payload: unknown) => void>>();
   const emitted = new Set<(name: string, payload: unknown) => void>();
   const clients = new Set<FrontClient>();
   let connections = 0;
+  let readies = 0; // P5 O5 M4
 
   // Who a ClientRef a client's request minted belongs to, and its id there (null: the connection's own).
   const owners = new WeakMap<ClientRef, { client: FrontClient; id: string | null }>();
@@ -158,7 +193,15 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
   const offStreaming = options.hosts.onStreaming('engine-host', () => streams.relinked());
 
   const own: Record<(typeof FRONT_COMMANDS)[number], (input: unknown, context: HandlerContext, from: FrontClient | null) => unknown> = {
+    'artifacts.export': (input) => render.exportForLibrary(input as CommandInput<'artifacts.export'>), // P5 O5 M4
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
+    'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
+    // P5 O5 M4: the render host's answer, from a render client alone
+    'render.answer': (input, _context, from) => {
+      if (!from!.renders) throw new HostCommandError(ipcError('forbidden_sender', 'render.answer from a client whose hello did not list render.client'));
+      const answered = input as CommandInput<'render.answer'>;
+      if (!render.answer(answered)) throw new HostCommandError(ipcError('invalid_input', `render.answer for ${answered.id}, which mawsd did not post or has answered already`));
+    },
     'daemon.e2eSeam': async (input) => void (await options.daemon('daemon.e2eSeam', input)),
     'daemon.endpoint': (input) => options.daemon('daemon.endpoint', input),
     'daemon.restart': async () => void (await options.daemon('daemon.restart', undefined)),
@@ -179,12 +222,14 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       }
     }
   };
+  // P5 O5 M4: a render client hears only what the seam posts it (postRender)
   const post = (name: string, payload: unknown, to: (client: FrontClient) => boolean = () => true) => {
-    for (const client of clients) if (to(client)) client.event(name, payload);
+    for (const client of clients) if (!client.renders && to(client)) client.event(name, payload);
   };
 
   const offRaw = options.hosts.onRaw('engine-host', ({ name, payload }) => {
     tap(name, payload);
+    if (RENDER_EVENTS.has(name)) return; // P5 O5 M4: the render seam's to answer
     if (STREAM_EVENTS.has(name) && !diskBatch(name, payload)) return streams.liveEvent(name, payload);
     const app = sessionOf(payload);
     post(name, payload, app === null ? readsHostEvents : (client) => readsHostEvents(client) || client.follower.carries(app));
@@ -206,12 +251,13 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     return output as CommandResult<CommandName>;
   }
 
-  async function forward(name: string, input: unknown): Promise<CommandResult<CommandName>> {
+  // P5 O5 M4: `client`, the asker's ref, named to the engine host (its end relayed as the link's clientGone)
+  async function forward(name: string, input: unknown, client: ClientRef): Promise<CommandResult<CommandName>> {
     const { owner } = REGISTRY.commands[name as CommandName];
     if (owner !== 'engine-host' && owner !== 'pty-host') return { ok: false, error: ipcError('internal', `mawsd serves no ${owner} command (${name})`) };
     if (name === 'host.attachment') return { ok: false, error: ipcError('forbidden_sender', 'host.attachment is mawsd’s own link to the engine host') };
     const intercepted = owner === 'engine-host' ? options.intercept({ id: 'machine', name, input }) : null;
-    const response: HostResponse = await (intercepted ?? options.hosts.forward(owner, { name, input }));
+    const response: HostResponse = await (intercepted ?? options.hosts.forward(owner, { name, input, ...(owner === 'engine-host' && { client }) }));
     return (response.ok ? { ok: true, value: response.value } : { ok: false, error: response.error }) as CommandResult<CommandName>;
   }
 
@@ -247,7 +293,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     if (owner !== 'machine') {
       const taken: Taken = loaded ? { handler: intercepts.get(name) } : await spineIntercept(name, rawInput); // the spine's own invoke never waits on it
       if (taken.failed) return taken.failed;
-      return taken.handler ? run(name, taken.handler, input.value, context) : forward(name, rawInput);
+      return taken.handler ? run(name, taken.handler, input.value, context) : forward(name, rawInput, context.client);
     }
     if (CLIENT_COMMANDS.has(name) && from === null) return { ok: false, error: ipcError('internal', `${name} is a machine.sock client's own`) };
     if (OWN.has(name)) return run(name, (value, ctx) => own[name as keyof typeof own](value, ctx, from), input.value, context);
@@ -316,9 +362,12 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     private refs: RemoteClients | null = null;
     readonly follower: Follower;
     browserSocket: string | null = null;
+    readonly renders: boolean; // P5 O5 M4: its hello listed render.client
+    readyAt = 0; // P5 O5 M4: the order render clients said ready in (postRender's newest)
 
     constructor(readonly facts: ClientFacts) {
       this.follower = streams.follower((name, payload) => this.send(name, payload));
+      this.renders = facts.capabilities.includes(RENDER_CLIENT_CAPABILITY);
     }
 
     serve(port: HostPort): void {
@@ -330,6 +379,8 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
         if (readTolerant(HostReadySchema, data).ok) {
           if (this.ready) return;
           this.ready = true;
+          this.readyAt = ++readies;
+          if (this.renders) return void render.clientReady(); // P5 O5 M4: no app's presence
           return void options.readiness?.();
         }
         const gone = readTolerant(HostClientGoneSchema, data);
@@ -378,7 +429,12 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.delete(this);
       this.follower.end();
       clientPort.gone(this);
+      if (wasReady && this.renders) return void render.clientGone(); // P5 O5 M4
       if (wasReady) options.readiness?.();
+    }
+
+    isReady(): boolean {
+      return this.ready;
     }
 
     docPort(_message: HostDoc, end: DocPortEnd): void {
@@ -407,6 +463,11 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
     appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
+    renderClients: () => [...clients].filter((client) => client.renders).length,
+    postRender(name, payload) {
+      const newest = [...clients].filter((client) => client.renders && client.isReady()).sort((a, b) => b.readyAt - a.readyAt)[0];
+      return newest?.send(name, payload) ?? false;
+    },
     commands: () => [...FRONT_COMMANDS, ...table.keys()].sort() as CommandName[],
     unbind() {
       table.clear();

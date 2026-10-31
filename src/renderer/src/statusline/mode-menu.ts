@@ -96,9 +96,10 @@ export function liveModeBinding(
   models: readonly ModelOption[] | null,
   client: MawsBridge = ipc,
   unavailable: string | null = null,
+  acquires = true, // P5 O7 M2: false where the session's host resumes it for the change itself (lane B on another machine)
 ): ModeBinding {
   const mode = status?.permissionMode ?? record.permissionMode;
-  const ready = status?.process === 'ready';
+  const ready = status?.process === 'ready' || !acquires;
   return {
     value: mode.effective,
     options: MODE_OPTIONS.map((o) => o.mode),

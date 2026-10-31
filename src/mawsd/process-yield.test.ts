@@ -59,10 +59,13 @@ describe.skipIf(!existsSync(MAWSD))('the yield’s writes: the spine released th
     const token = readFileSync(join(profile, 'mawsd', 'mawsd.token'), 'utf8').trim();
     const paths = daemonPaths(profile);
 
-    // the spine loaded (and the index migrated) by a bare machine.sock client, as the CLI's
+    // the spine loaded (and the index migrated) by a bare machine.sock client, as the CLI's, with a read that wakes no
+    // engine host. A discovery read (session.list) wakes the parked host, whose first start seeds the built-in design
+    // systems; the library's first sync then brings them into the index and drops the fixture's row the host's store
+    // never held, on the host's clock and not the yield's, so a reading on either side of the refusal could hold it.
     const client = await RawApp.connect(paths.sockets.machine, token);
     opened.push(client);
-    expect(await client.request('session.list', { includeArchived: true }, 60_000), `${output}\n${daemonLog(profile)}`).toMatchObject({ ok: true });
+    expect(await client.request('attention.list', undefined, 60_000), `${output}\n${daemonLog(profile)}`).toMatchObject({ ok: true });
     expect(existsSync(join(profile, 'index.sqlite-wal')), 'the loaded index runs on its WAL').toBe(true);
     expect(spineFilesOpen(mawsd.pid!, profile), 'the loaded spine holds its index open').toContain(join(profile, 'index.sqlite'));
 
@@ -85,7 +88,8 @@ describe.skipIf(!existsSync(MAWSD))('the yield’s writes: the spine released th
     expect(changed.filter((path) => !closing.includes(path)), 'no spine file but the index’s changed from the refusal to the release').toEqual([]);
     expect(released.has('index.sqlite-wal') || released.has('index.sqlite-shm'), 'the close checkpointed the WAL and removed -wal and -shm').toBe(false);
     expect(released.has('index.sqlite'), 'the index itself stays').toBe(true);
-    expect(indexContents(profile), 'the checkpoint changed no row and no schema of the index').toEqual(contentsAtRefusal);
+    expect(daemonLog(profile), 'no host started: nothing a host seeds reached the index around the readings').not.toContain('spawned a supervisor');
+    expect(indexContents(profile), `the checkpoint changed no row and no schema of the index\n${daemonLog(profile)}`).toEqual(contentsAtRefusal);
     expect(spineFilesOpen(mawsd.pid!, profile), 'released: mawsd holds no spine file open').toEqual([]);
     expect(mawsd.exitCode, 'mawsd runs on, its spine yielded').toBeNull();
   });

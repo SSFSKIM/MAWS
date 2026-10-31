@@ -41,6 +41,7 @@ vi.mock('electron', () => {
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
     powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+    systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
   };
 });
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
@@ -63,11 +64,6 @@ vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('./connectors', () => ({ startConnectors: () => ({ stop: vi.fn() }) })); // P3-H H3b: the connector broker's main side
-vi.mock('./design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
-vi.mock('./artifacts/inspection', () => ({ registerInspectionExporters: vi.fn(() => () => {}) }));
-vi.mock('./presentations/export', () => ({ registerPresentationExporters: vi.fn() })); // P3-C M9: the presentation's exporters, registered into the artifacts' registry
-vi.mock('./design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-E (E1's M5): the design's exporters, registered into the artifacts' registry
-vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
 const router = vi.hoisted(() => ({ installs: [] as unknown[] })); // plain records: the suite clears mocks between cases
@@ -90,7 +86,7 @@ vi.mock('../services/entry', () => ({
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
 // C5 start: the layout store and the external-link command
-vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} onChange() { return () => {}; } /* P5 O7 M2: remote lane B follows main.tabs */ }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
@@ -127,7 +123,7 @@ describe('the daemon shape’s root in main', () => {
   });
 
   it('binds `machine` as `host` and reads the spine and the machine half through their mirrors', () => {
-    expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host' } })]);
+    expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host', daemonRenders: expect.any(Function) /* P5 O5 M4: router.test drives it */ } })]);
     expect(mirrors.spine).toEqual([expect.objectContaining({ hosts: fake.hosts, daemon: daemonWatch })]);
     expect(mirrors.settings).toEqual([expect.objectContaining({ file: '/tmp/maws-lifecycle-test/machine-settings.json', hosts: fake.hosts })]);
   });
