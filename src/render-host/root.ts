@@ -9,8 +9,9 @@
 // render's window (FINDINGS §1.2), the capture partition takes the app's store frame policies and the scheme proxy to
 // `mawsd`'s artifact endpoint (the only session a render loads from), and the default session refuses every permission.
 // The library is composed over the `machine.sock` link's engine-host commands, with no Word comment authors of its own
-// (the exporters' defaults) and no restart count (a dashboard export is not captured twice); its exports are written
-// under the profile's store, `<profile>/artifacts`, as the app writes them.
+// (P5 O5 M4: each export's request carries what `mawsd` holds, else the exporters' defaults) and the engine host's link
+// generation `mawsd` posts as its restart count (a dashboard export captured again once across a restart, as the app's);
+// its exports are written under the profile's store, `<profile>/artifacts`, as the app writes them.
 import { writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, session } from 'electron';
@@ -54,10 +55,10 @@ export function runRenderHost(entryDir: string): Promise<void> {
       guardPermissions(session.defaultSession, 'all');
       serveArtifactsThrough(capture, { socketPath: paths.artifactsSocket });
     },
-    compose(call, profile) {
+    compose(call, profile, hostGeneration) {
       const content: ContentLookup = (input) => call('artifacts.content', input);
       installRenderSeams({ content, env: process.env });
-      return composeRender({ call, content, root: join(profile, 'artifacts'), env: process.env });
+      return composeRender({ call, content, root: join(profile, 'artifacts'), env: process.env, hostGeneration });
     },
     log: (line) => console.error(line),
     exit: (code) => app.exit(code),

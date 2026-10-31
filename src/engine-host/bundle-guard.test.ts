@@ -157,6 +157,18 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
     }
     expect([...run].some(([, text]) => /\bfunction createArtifactsEndpoint\(/.test(text)), 'the listener is on the run path').toBe(true);
   });
+
+  // P5 O5 M4 (acceptance 8): the render seam (its table, the render host's command line and spawn, the authors' read) is
+  // a chunk the handle loads at the first render request, never at start; the handle, which is, holds none of it
+  it('keep the render seam off the run path, in the chunk its handle loads at the first request', () => {
+    const markers = { createRenderSeam: /\bfunction createRenderSeam\(/, spawnRenderHost: /\bfunction spawnRenderHost\(/, renderAuthors: /\bfunction renderAuthors\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createRenderHandle\(/.test(text)), 'the handle is on the run path').toBe(true);
+  });
 });
 
 // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M3; Interfaces §E): main's entry loads one of two roots.

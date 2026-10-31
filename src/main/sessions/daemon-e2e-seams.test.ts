@@ -3,10 +3,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { installDaemonE2eSeams } from './daemon-e2e-seams';
 
-const seams = globalThis as { __maws_scenario?: { advanceTo(ms: number): Promise<void> }; __maws_library?: { holdRefreshes(): Promise<void> } };
+const seams = globalThis as { __maws_scenario?: { advanceTo(ms: number): Promise<void> }; __maws_library?: { holdRefreshes(): Promise<void> }; __maws_daemonRender?: { capture(input: unknown): Promise<void> } };
 afterEach(() => {
   delete seams.__maws_scenario;
   delete seams.__maws_library;
+  delete seams.__maws_daemonRender;
 });
 
 function machine(answer: { ok: true } | { ok: false; message: string } = { ok: true }) {
@@ -35,6 +36,17 @@ describe('the daemon shape’s e2e seams', () => {
     expect(seams.__maws_library).toBeUndefined();
   });
 
+  // P5 O5 M4: a capture through mawsd's render seam, its PNG written where the spec names (daemon.e2eRender)
+  it('relays a capture through mawsd’s render seam to daemon.e2eRender, and removes it at stop', async () => {
+    const m = machine();
+    const stop = installDaemonE2eSeams(m.hosts, { MAWS_E2E: '1' });
+    const input = { artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', revision: 1, width: 640, height: 480, to: '/tmp/capture.png' };
+    await seams.__maws_daemonRender!.capture(input);
+    expect(m.asked).toEqual([['machine', 'daemon.e2eRender', input]]);
+    stop();
+    expect(seams.__maws_daemonRender).toBeUndefined();
+  });
+
   it('rejects with mawsd’s answer', async () => {
     installDaemonE2eSeams(machine({ ok: false, message: 'no scenario clock: mawsd is not in launch mode scenario with MAWS_SCENARIO_CLOCK=manual' }).hosts, { MAWS_E2E: '1' });
     await expect(seams.__maws_scenario!.advanceTo(1)).rejects.toThrow('no scenario clock');
@@ -44,5 +56,6 @@ describe('the daemon shape’s e2e seams', () => {
     installDaemonE2eSeams(machine().hosts, {})();
     expect(seams.__maws_scenario).toBeUndefined();
     expect(seams.__maws_library).toBeUndefined();
+    expect(seams.__maws_daemonRender).toBeUndefined();
   });
 });

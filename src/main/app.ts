@@ -5,7 +5,7 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
 import { COMMAND_BUDGETS_MS, openSpineData, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandResult } from '@shared/ipc/schema';
+import type { CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
@@ -100,6 +100,7 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
+import { MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4
 // E11 end
 // E4a start
 import { startBrowser, type Browser } from './browser';
@@ -377,7 +378,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
   };
-  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: { kind: data === null ? 'host' : 'embedded' } });
+  // P5 O5 M4: on the daemon shape artifacts.export goes to mawsd's render seam while its welcome lists machine.render, and
+  // is answered by this root's own registration (startArtifacts) on an older daemon; before any welcome it is forwarded
+  const daemonRenders = () => {
+    const peer = hosts.peer('machine');
+    return peer === null || peer.capabilities.includes(MACHINE_RENDER_CAPABILITY);
+  };
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: data === null ? { kind: 'host', daemonRenders } : { kind: 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -632,6 +639,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   const artifacts = startArtifacts({
     hosts,
     register: registerMainHandler,
+    registerMachine: registerMachineHandler, // P5 O5 M4: artifacts.export
     emit, // P3-A M5: artifacts.resync
     env: process.env,
     openWindow,
@@ -678,7 +686,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   const delivery = startDelivery({
     register: registerMainHandler,
     emit: (name, payload) => emit(name, payload),
-    exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+    // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the embedded
+    // shape (and on an older daemon), mawsd's render seam on the daemon shape
+    exportArtifact: async (input, options) => {
+      const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
+      if (!exported.ok) throw new Error(exported.error.message);
+      return exported.value as CommandOutput<'artifacts.export'>;
+    },
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     connectors: connectors.delivery ?? null,
     shellEnv: () => engineEnv,

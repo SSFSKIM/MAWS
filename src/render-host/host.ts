@@ -17,9 +17,11 @@ import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
-import { RenderRequestSchema, type RenderAnswer, type RenderRequest } from '@shared/ipc/schema/render';
+import { events as renderEvents, RenderRequestSchema, type RenderAnswer, type RenderAuthors, type RenderRequest } from '@shared/ipc/schema/render';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { connectRenderClient, hostCall, type RenderClient, type RenderClientOptions } from './client';
+
+const RenderHostGenerationSchema = renderEvents['render.hostGeneration']; // P5 O5 M4
 
 export const RENDER_HOST_FLAG = '--render-host';
 export const RENDER_HOST_DIR = 'render-host'; // under the daemon's directory
@@ -28,10 +30,11 @@ export const EXIT_UNREACHABLE = 1; // no mawsd to serve
 export const EXIT_FAILED = 70; // the render host itself failed (EX_SOFTWARE): root.ts's `fatal`
 
 // What the render host asks of the render library (src/render/compose.ts's `Render`)
+// P5 O5 M4: an export is handed the Word comment authors its request carries (`mawsd`'s), beside the request
 export interface RenderLibrary {
   capture(request: MawsArtifactCapture): Promise<MawsArtifactCapturedResult>;
-  export(request: MawsArtifactExport): Promise<MawsArtifactExportAnswer>;
-  exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
+  export(request: MawsArtifactExport, options: { authors?: RenderAuthors }): Promise<MawsArtifactExportAnswer>;
+  exportForLibrary(input: CommandInput<'artifacts.export'>, options: { authors?: RenderAuthors }): Promise<CommandOutput<'artifacts.export'>>;
 }
 
 export type EngineCall = <N extends CommandName>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
@@ -42,7 +45,9 @@ export interface RenderHostDeps {
   userData(dir: string): void; // before `ready`: Electron's userData, the accessory policy, the window-all-closed guard
   ready(): Promise<void>; // Electron's ready, the Dock hidden
   sessions(paths: DaemonPaths): void; // the capture partition's policies and scheme proxy, the default session's guard
-  compose(call: EngineCall, profile: string): RenderLibrary; // the library and the e2e's seams
+  // the library and the e2e's seams; P5 O5 M4: `hostGeneration`, the engine host's link generation `mawsd` last posted
+  // (render.hostGeneration), the library's one recapture of a dashboard across an engine host's restart
+  compose(call: EngineCall, profile: string, hostGeneration: () => number): RenderLibrary;
   connect?: (paths: DaemonPaths, options: RenderClientOptions) => ReturnType<typeof connectRenderClient>;
   log(line: string): void;
   exit(code: number): void;
@@ -75,9 +80,14 @@ export async function startRenderHost(deps: RenderHostDeps): Promise<void> {
   deps.userData(userData);
 
   let serving: RequestLoop | null = null; // the front posts to a ready client alone, so no event comes before it exists
+  let generation = 0; // P5 O5 M4: render.hostGeneration's last
   const reached = await (deps.connect ?? connectRenderClient)(paths, {
     build: deps.build(),
-    onEvent: (name, payload) => serving?.event(name, payload),
+    onEvent: (name, payload) => {
+      if (name !== 'render.hostGeneration') return serving?.event(name, payload);
+      const read = readTolerant(RenderHostGenerationSchema, payload);
+      if (read.ok) generation = read.value.generation;
+    },
   });
   if (!reached.ok) return refuse(EXIT_UNREACHABLE, reached.why);
   const { client } = reached;
@@ -90,7 +100,7 @@ export async function startRenderHost(deps: RenderHostDeps): Promise<void> {
   });
   await deps.ready();
   deps.sessions(paths);
-  const library = deps.compose(hostCall(client.invoke), profile);
+  const library = deps.compose(hostCall(client.invoke), profile, () => generation);
   serving = requestLoop(library, client, log, () => {
     if (ending) return;
     ending = true;
@@ -124,9 +134,9 @@ function requestLoop(library: RenderLibrary, client: Pick<RenderClient, 'invoke'
       case 'capture':
         return library.capture(request.request);
       case 'export':
-        return library.export(request.request);
+        return library.export(request.request, { ...(request.authors && { authors: request.authors }) });
       case 'libraryExport':
-        return library.exportForLibrary(request.request);
+        return library.exportForLibrary(request.request, { ...(request.authors && { authors: request.authors }) });
     }
   };
   return {

@@ -178,6 +178,7 @@ export interface EngineIpcDeps {
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready (the stream's refused batch)
   appAttached?: () => boolean; // P5 O3-D M3: the app's presence (the runtime's AppPresence), the bridges' gate; absent, always
+  rendersAnswered?: () => boolean; // P5 O5 M4: the capture and export bridges' gate (attachment.ts's answersRenders); absent, appAttached
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
   afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
   // P3-HD M2: started with the sessions' stop and awaited with it, so route D's owned MCP processes are gone (within their
@@ -288,6 +289,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     appVersion: deps.appVersion ?? 'unknown',
     log,
     appAttached: deps.appAttached, // E10: each session's bridges fail fast with no app (P5 O3-D M3: its presence)
+    rendersAnswered: deps.rendersAnswered, // P5 O5 M4: the capture and export bridges, a client that renders
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3

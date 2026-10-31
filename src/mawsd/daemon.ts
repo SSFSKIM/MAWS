@@ -63,6 +63,14 @@
 // render host's scheme proxy, resolved through the engine host's `artifacts.content`, its handler a chunk loaded at the
 // first use. Every welcome lists `machine.artifacts`; `daemon.status.artifacts` says whether the handler is loaded; the
 // exit ends its connections with the clients' and removes the socket with the others.
+//
+// P5 O5 M4 (Interfaces §A, §B, §F, §G): the render seam (render-handle.ts, its chunk render-seam.ts loaded at the first
+// request). The engine host's `maws.artifact.capture` and `maws.artifact.export` go to it, never to a relay or the
+// endpoint; it starts the render host (a machine.sock client the front tells it about), and its `stop()` runs in the
+// exit order after the endpoint's and before the spine's, whose release ends the engine-host link its refusals travel
+// over. To an engine host whose welcome lists `host.render`, `host.attachment` says `render: true` at each streaming
+// of the permanent link and at each presence change; every welcome lists `machine.render`; `daemon.status.render` is
+// the seam's state; a render client is no client for the clocks (the seam holds the daemon while a request is in flight).
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -80,7 +88,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
@@ -93,6 +101,7 @@ import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
+import { settingsPaths } from '@shared/settings/paths'; // P5 O5 M4: the export name the render seam sends
 import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
 import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
@@ -102,7 +111,9 @@ import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
-import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
+import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
+import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
+import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 import { SpineReaders } from './spine-readers';
@@ -160,6 +171,8 @@ export interface DaemonOptions {
   // and yielded to (above); on in the product since M5b, with permanentClient, when apps list machine.spine
   claimSpine?: boolean;
   singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
+  // P5 O5 M4: the render seam's chunk, the render host's spawn and the runtime's report (a fake host and platform)
+  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime };
 }
 
 export interface RunningDaemon {
@@ -170,6 +183,7 @@ export interface RunningDaemon {
   projects: CheckoutSource; // the endpoint's injected source of MAWS's own projects
   status(): Promise<DaemonStatus>;
   stop(reason: string, code?: number): Promise<void>; // the exit order; a second call joins the first
+  render: RenderService; // P5 O5 M4 (Interfaces §G): the library's Export as artifacts.export runs it, for O4's Send to
 }
 
 type FrameListener = Parameters<DaemonServices['onFrame']>[0];
@@ -498,9 +512,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let appOnEngine = false; // an app is attached on engine-host.sock (a second attach without a departure replaces it)
   let appReadsMachine = false; // its hello listed machine.spine: its events come on machine.sock, not on the relay
   let toldPresent = false; // the last attachment told the permanent link's host
+  // P5 O5 M4 (Interfaces §F): `render: true` to a host whose welcome lists host.render, an older one never hearing the field
+  const engineHostRenders = () => hosts.peer('engine-host')?.capabilities.includes(HOST_RENDER_CAPABILITY) ?? false;
   const tellAttachment = (attached: boolean): Promise<void> => {
     if (hosts.parked('engine-host')) return Promise.resolve();
-    return hosts.forward('engine-host', { name: 'host.attachment', input: { attached } }).then((answer) => {
+    const input = engineHostRenders() ? { attached, render: true } : { attached };
+    return hosts.forward('engine-host', { name: 'host.attachment', input }).then((answer) => {
       if (!answer.ok) log(`host.attachment {attached: ${attached}} failed: ${answer.error.message}`);
     });
   };
@@ -701,6 +718,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       upstreamConnected = true;
       generation += 1;
       each(upstreamListeners, { connected: true, generation });
+      front.postRender('render.hostGeneration', { generation }); // P5 O5 M4: a dashboard export captures again once across it
       void sendInterest(true); // a fresh link starts with no interest of its own
     } else if (!ready && upstreamConnected) {
       upstreamConnected = false;
@@ -716,8 +734,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
   hosts.onStreaming('engine-host', () => {
     if (permanentLink && !available) availability(true); // P5 O3-D M3: events are available from here on, with or without an app
+    // P5 O5 M4 (§F): each streaming of the permanent link (the first, and each after an engine host's restart, whose
+    // signal resets at connect), so a machine where no app ever attaches has the render gate open
+    if (permanentLink && engineHostRenders()) {
+      toldPresent = appPresent();
+      void tellAttachment(toldPresent);
+    }
   });
   hosts.onRaw('engine-host', (message) => {
+    if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     engineRelay.deliver(message);
     each(eventListeners, 'engine-host', message);
   });
@@ -764,6 +789,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
       spine: spine.status(),
       artifacts: artifacts.status(), // P5 O5 M2
+      render: render.status(), // P5 O5 M4
     };
   }
   // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
@@ -779,6 +805,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return undefined;
       case 'daemon.e2eSeam':
         return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
+      case 'daemon.e2eRender':
+        return runE2eRender(input as CommandInput<'daemon.e2eRender'>, e2eSeamsAllowed, (request) => render.captureForE2e(request)); // P5 O5 M4
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
@@ -799,6 +827,50 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     log,
   });
 
+  // --- the render seam (P5 O5 M4; render-handle.ts, render-seam.ts): its chunk loaded at the first request ----------------
+  const machine = machineName(env, hostname());
+  const renderQuietMs = positiveInteger(env.MAWS_RENDER_QUIET_MS); // the measured scene's quiet period
+  const answerEngine = async (name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown) => {
+    const answer = await hosts.forward('engine-host', { name, input });
+    if (!answer.ok) {
+      log(`[render] ${name} failed: ${answer.error.message}`);
+      return null;
+    }
+    return (answer.value as { outcome: 'delivered' | 'not_pending' }).outcome;
+  };
+  const render = createRenderHandle({
+    machine,
+    load: () => {
+      const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
+      return refused === null ? (options.render?.load ?? loadRenderChunk)() : Promise.reject(new Error(refused));
+    },
+    compose: (chunk) => ({
+      machine,
+      spawn:
+        options.render?.spawn ??
+        (() => {
+          const replaced = bundleReplaced(); // as the hosts' beforeSpawn: another build's binary renders nothing for this one
+          if (replaced !== null) throw new Error(replaced);
+          return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(options.modules.self), '..', '..'), profile: profileDir, env }), log);
+        }),
+      post: (request) => front.postRender('render.request', request),
+      postExit: () => front.postRender('render.exit', {}),
+      answerEngine,
+      quietMs: () => renderQuietMs ?? chunk.DEFAULT_QUIET_MS,
+      runtime: options.render?.runtime ?? (() => (platform === 'darwin' ? { available: true } : { available: false, reason: `the render runtime is not installed on ${machine}` })), // Linux's is M6's
+      engineHostRenders,
+      appAttached: () => appPresent(),
+      authors: () => {
+        const view = spine.root()?.view;
+        return chunk.renderAuthors(settingsPaths(profileDir).client, view && view.unavailable() === null ? view.records() : null);
+      },
+      hold: (reason) => services.hold(reason),
+      log,
+    }),
+    answerEngine,
+    log,
+  });
+
   // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
@@ -813,6 +885,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
     readiness: () => presenceChanged(),
     beforeSpineCommand: wakeForDiscovery,
+    // P5 O5 M4: a render client hears the engine-host link's generation at its ready, before any work (and at each
+    // reconnect, onState above), so its dashboard exports capture again once across an engine host's restart
+    render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation }), render.front.clientReady()) },
     log,
   });
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
@@ -931,7 +1006,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let machineClients: SocketClients | null = null;
   const clientsChanged = () => {
     clocks.relaysBetween(engineRelay.between() || ptyRelay.between());
-    clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0));
+    // P5 O5 M4: a render client is no client for the clocks (the seam holds the daemon while a request is in flight)
+    clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0) - front.renderClients());
   };
   const counts = (host: 'engine-host' | 'pty-host') => () => {
     const welcome = hosts.welcome(host);
@@ -1018,6 +1094,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }
+      await render.stop(); // P5 O5 M4: its refusals over the engine-host link, which the spine's stop ends; then its host ended (bounded)
       await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
@@ -1048,7 +1125,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
   clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
-  return { paths, ref, hosts, services, projects, status, stop };
+  return { paths, ref, hosts, services, projects, status, stop, render: { exportForLibrary: (input) => render.exportForLibrary(input) } };
 }
 
 // An endpoint document channel's end, as main's relay holds a window's port (doc-relay.ts's RelayPort).

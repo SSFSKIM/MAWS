@@ -389,6 +389,7 @@
   "connectors.unwatch",
   "connectors.visibility",
   "connectors.watch",
+  "daemon.e2eRender",
   "daemon.e2eSeam",
   "daemon.endpoint",
   "daemon.restart",

@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -211,19 +211,21 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     expect([ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY]).toEqual(['host.attachment', 'machine.spine']);
     expect(MACHINE_ARTIFACTS_CAPABILITY).toBe('machine.artifacts'); // P5 O5 M2
     expect(RENDER_CLIENT_CAPABILITY).toBe('render.client'); // P5 O5 M3
-    expect(manifest.capabilities).toEqual(['host.attachment', 'machine.artifacts', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect([MACHINE_RENDER_CAPABILITY, HOST_RENDER_CAPABILITY]).toEqual(['machine.render', 'host.render']); // P5 O5 M4
+    expect(manifest.capabilities).toEqual(['host.attachment', 'host.render', 'machine.artifacts', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
     expect([...WIRE_CAPABILITIES].sort()).toEqual(manifest.capabilities);
     // D4: the engine host lists host.attachment from M3, when it serves the command, and mawsd's hello to it from M3
     // (under its permanent-client option, which drops the name otherwise); main's hellos list machine.spine from M5b,
     // when main stops composing the spine on the daemon shape; P5 O5 M2: mawsd's welcome lists machine.artifacts, the
-    // artifact endpoint on artifacts.sock; P5 O5 M3: the render host's hello lists render.client
+    // artifact endpoint on artifacts.sock; P5 O5 M3: the render host's hello lists render.client; P5 O5 M4: the engine
+    // host's welcome lists host.render (it reads host.attachment's render), mawsd's machine.render (its render seam)
     expect(PEER_CAPABILITIES).toEqual({
-      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY],
+      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY],
       ptyHost: [PTY_FRAMES_CAPABILITY],
       app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY],
       daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY],
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
-      daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY],
+      daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY],
       link: [PTY_FRAMES_CAPABILITY],
       renderClient: [RENDER_CLIENT_CAPABILITY],
     });

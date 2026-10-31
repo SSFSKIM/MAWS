@@ -47,6 +47,7 @@ describe('startArtifacts', () => {
     const started = startArtifacts({
       hosts: hosts as unknown as ArtifactsDeps['hosts'],
       register: vi.fn() as never,
+      registerMachine: vi.fn() as never,
       emit: emit as never,
       env: {},
       openWindow: vi.fn() as never,
@@ -60,15 +61,17 @@ describe('startArtifacts', () => {
     expect(streaming).toEqual([]);
   });
 
-  it('serves maws-artifact: on the window’s session and the capture partition, registers artifacts.export and every kind’s exporters through the render library, and listens for the host’s exports and captures (M7; P5 O5 M3)', () => {
+  it('serves maws-artifact: on the window’s session and the capture partition, registers artifacts.export (P5 O5 M4: machine-owned) and every kind’s exporters through the render library, and listens for the host’s exports and captures (M7; P5 O5 M3)', () => {
     const register = vi.fn();
+    const registerMachine = vi.fn();
     const onEvent = vi.fn(() => () => {});
     const hosts = { dispatch: vi.fn(), postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent };
-    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket: null });
+    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, registerMachine: registerMachine as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket: null });
     expect(sessions.default.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.capture.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.partitions).toContain('maws-capture');
-    expect(register.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(['artifacts.open', 'artifacts.export']));
+    expect(register.mock.calls.map(([name]) => name)).toEqual(['artifacts.open']);
+    expect(registerMachine.mock.calls.map(([name]) => name)).toEqual(['artifacts.export']);
     expect(onEvent).toHaveBeenCalledWith('maws.artifact.export', expect.any(Function));
     expect(onEvent).toHaveBeenCalledWith('maws.artifact.capture', expect.any(Function));
     expect(started.exporters.get('html', 'pdf')).toMatchObject({ kind: 'html', format: 'pdf' });
@@ -114,7 +117,7 @@ describe('the scheme on the daemon shape (P5 O5 M2)', () => {
     const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: (owner: string) => (owner === 'machine' && listed ? { major: 3, minor: 13, build: 'b', capabilities: listed } : null) };
     const start = (artifactsSocket: string | null) => {
       sessions.default.protocol.handle.mockClear();
-      const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket });
+      const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, registerMachine: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket });
       const handler = sessions.default.protocol.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
       return { started, load: async () => (await handler(new Request(URL_))).text() };
     };

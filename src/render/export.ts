@@ -42,6 +42,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts'; // P3-E: artifactRefusalOf
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
+import type { RenderAuthors } from '@shared/ipc/schema/render'; // P5 O5 M4
 import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
 import { restrictRequests, type SeamEnv } from './policies';
@@ -79,11 +80,19 @@ export interface ExportRequest {
   // P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a file of its own (a design's export, or `ownFile`), minted
   // by the service as it takes the request, its id in `path`'s name
   exportId?: string;
-  // P4-B5: the format's dialect for a connector (main's delivery only, never the agent's or the library's IPC): `notion`,
-  // a document's Markdown as Notion's enhanced Markdown takes it. Always a file of its own.
+  // P4-B5: the format's dialect for a connector (main's delivery, never the agent's): `notion`, a document's Markdown as
+  // Notion's enhanced Markdown takes it. Always a file of its own. P5 O5 M4: on `artifacts.export`'s input too.
   dialect?: ExportDialect;
+  // P5 O5 M4: the Word comments' authors the asker sent with the request (the render host's, from `mawsd`), before the
+  // root's own (withDocumentAuthors)
+  authors?: RenderAuthors;
 }
 export type ExportDialect = 'notion'; // P4-B5
+// P5 O5 M4: what an asker may add to a request beside its input (the dialect on the wire's input too, for main's delivery)
+export interface ExportOptions {
+  dialect?: ExportDialect;
+  authors?: RenderAuthors;
+}
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
 export interface ExportContext {
@@ -292,9 +301,9 @@ export interface ExportBridgeDeps {
 
 export interface ExportService {
   // `artifact_export`'s request (the bridge's), answered; never rejects
-  export(request: MawsArtifactExport): Promise<MawsArtifactExportAnswer>;
-  // P4-B5: `options.dialect`, main's delivery's (the request then always a file of its own)
-  exportForLibrary(input: CommandInput<'artifacts.export'>, options?: { dialect?: ExportDialect }): Promise<CommandOutput<'artifacts.export'>>;
+  export(request: MawsArtifactExport, options?: Pick<ExportOptions, 'authors'>): Promise<MawsArtifactExportAnswer>;
+  // P4-B5: `options.dialect`, main's delivery's (the request then always a file of its own); P5 O5 M4: or the input's
+  exportForLibrary(input: CommandInput<'artifacts.export'>, options?: ExportOptions): Promise<CommandOutput<'artifacts.export'>>;
 }
 
 const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
@@ -462,10 +471,11 @@ export function createExportService({ registry, root, call, print = printHtmlToP
   };
 
   return {
-    export(request) {
-      return queued(jobOf(request), new ExportBudget(EXPORT_BUDGET_MS), request.inspection === true);
+    export(request, options = {}) {
+      return queued({ ...jobOf(request), ...(options.authors && { authors: options.authors }) /* P5 O5 M4 */ }, new ExportBudget(EXPORT_BUDGET_MS), request.inspection === true);
     },
-    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }, options = {}) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */, dialect: asked /* P5 O5 M4 */ }, options = {}) {
+      const dialect = options.dialect ?? asked; // P5 O5 M4: main's delivery's option, or the wire input's
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
@@ -493,8 +503,8 @@ export function createExportService({ registry, root, call, print = printHtmlToP
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */, ...(options.dialect !== undefined && { dialect: options.dialect }) /* P4-B5 */ };
-      const result = await queued(request, time, ownFile === true || options.dialect !== undefined); // P3-H: ownFile; P4-B5: a dialect's file is its own, never the format's cache
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */, ...(dialect !== undefined && { dialect }) /* P4-B5 */, ...(options.authors && { authors: options.authors }) /* P5 O5 M4 */ };
+      const result = await queued(request, time, ownFile === true || dialect !== undefined); // P3-H: ownFile; P4-B5: a dialect's file is its own, never the format's cache
       if (!result.ok && result.refusal) throw new HostCommandError(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new HostCommandError(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.commentAuthorName !== undefined && { commentAuthorName: result.commentAuthorName }), ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };

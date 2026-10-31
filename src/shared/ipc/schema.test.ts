@@ -2093,7 +2093,7 @@ describe('ipc schema validates both directions', () => {
 
     it('posts one request per kind, carrying what the bridge or the library asked, unchanged', () => {
       expect(Object.fromEntries(Object.entries(render.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'render.answer': 'machine' });
-      expect(Object.keys(render.events)).toEqual(['render.request', 'render.exit']);
+      expect(Object.keys(render.events)).toEqual(['render.request', 'render.exit', 'render.hostGeneration' /* P5 O5 M4 */]);
       expect(MAIN_ONLY_COMMANDS).toContain('render.answer');
       expect(validateEventPayload('render.request', { id: 'r1', kind: 'capture', request: CAPTURE }).ok).toBe(true);
       expect(validateEventPayload('render.request', { id: 'r2', kind: 'export', request: EXPORT }).ok).toBe(true);
@@ -2101,6 +2101,11 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('render.request', { id: 'r4', kind: 'export', request: CAPTURE }).ok, 'a capture is not an export').toBe(false);
       expect(validateEventPayload('render.request', { id: '', kind: 'capture', request: CAPTURE }).ok).toBe(false);
       expect(validateEventPayload('render.exit', {}).ok).toBe(true);
+      // P5 O5 M4: the Word comment authors an export carries, and the engine-host link's generation
+      expect(validateEventPayload('render.request', { id: 'r5', kind: 'export', request: EXPORT, authors: { human: 'K. Min', sessions: { 'app-1': 'Quarterly review' } } }).ok).toBe(true);
+      expect(validateEventPayload('render.request', { id: 'r6', kind: 'capture', request: CAPTURE, authors: {} }).ok, 'a capture carries none').toBe(false);
+      expect(validateEventPayload('render.hostGeneration', { generation: 2 }).ok).toBe(true);
+      expect(validateEventPayload('render.hostGeneration', { generation: -1 }).ok).toBe(false);
     });
 
     it('answers by id with the kind’s answer or a failure, a library export’s refusal carried as its IPC error', () => {

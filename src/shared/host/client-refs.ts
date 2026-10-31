@@ -63,6 +63,11 @@ export function remoteClients(connection: number): RemoteClients {
   };
 }
 
+// P5 O5 M4: whether a receiving side's ref names a client its sender named (`<connection>/<client id>`), not the
+// connection's own (`<connection>`), so a handler can key state to the asker the request carried and keep a rule of its
+// own for requests that name none
+export const namesClient = (ref: ClientRef): boolean => ref.id.includes('/');
+
 // The sending side, one per link: `carry` each client a request sent on the link names.
 export interface ClientGoneRelay {
   carry(client: ClientRef): void;

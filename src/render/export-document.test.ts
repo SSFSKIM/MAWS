@@ -89,6 +89,33 @@ describe('the document exporters', () => {
     expect(humanAuthorName).toHaveBeenCalledTimes(2);
   });
 
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M4's "Inputs from M3"): the render host composes the
+  // exporters with no names of its own; the request carries what `mawsd` holds, and the comments name the same authors
+  // as the embedded root's, which reads them from the app
+  it('names the comments by the authors a request carries, as the embedded root names them from its own reads', async () => {
+    const doc = newDoc();
+    const tabId = createDocument(doc, { title: 'Review' });
+    addThread(doc, { threadId: 'carried', tabId, blockId: null, quote: 'Words', anchor: { kind: 'block' }, by: HUMAN, at: 1, body: 'Keep it.' });
+    reply(doc, 'carried', { id: 'agent', by: AGENT, at: 2, body: 'Kept.' });
+    const state = stateV2(doc);
+    doc.destroy();
+    const authorsOf = async (register: (registry: ExporterRegistry) => void, extra: Partial<DocumentExportRequest>) => {
+      const registry = new ExporterRegistry();
+      register(registry);
+      const { ctx, written } = context(state);
+      await registry.get('document', 'docx')!.run(request('docx', extra), ctx);
+      const comments = await (await JSZip.loadAsync(written.get('/exports/7-docx') as Uint8Array)).file('word/comments.xml')!.async('string');
+      return [...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1]);
+    };
+    const embedded = await authorsOf((registry) => registerDocumentExporters((e) => registry.register(e), { humanAuthorName: () => 'Kim Min', sessionTitle: (id) => (id === 'app-session-1' ? 'Review agent' : undefined) }), {});
+    const rendered = await authorsOf((registry) => registerDocumentExporters((e) => registry.register(e)), { authors: { human: 'Kim Min', sessions: { 'app-session-1': 'Review agent' } } });
+    expect(embedded).toEqual(['Kim Min', 'Review agent']);
+    expect(rendered).toEqual(embedded);
+    // a title the request does not carry is the root's own read, else the default; an inherited key is never a title
+    const partial = await authorsOf((registry) => registerDocumentExporters((e) => registry.register(e)), { authors: { sessions: { toString: 'x' } } });
+    expect(partial).toEqual(['Comment author', 'Claude']);
+  });
+
   it('uses a neutral name rather than Owner when no identity is available', async () => {
     const doc = newDoc();
     const tabId = createDocument(doc, { title: 'Review' });

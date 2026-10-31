@@ -28,10 +28,15 @@
 // engine host's `maws.artifact.capture` and `maws.artifact.export` and registering `artifacts.export` over it; the render
 // host composes the same library in a windowless process. The frame and permission policies stay main's to apply to
 // its own windows, imported from where the library keeps them.
+//
+// P5 O5 M4 (M4's "`artifacts.export` becomes `machine`"): the command is machine-owned, registered here through
+// `registerMachine`, which the router runs on the embedded shape and, on the daemon shape, only while the attached `mawsd`
+// does not render (an older daemon; the router's fallback). A post-O5 `mawsd` posts its engine host's capture and export
+// requests to no client, so the listeners below answer only an embedded engine host's or an older daemon's.
 import { MessageChannelMain, session, type BrowserWindow } from 'electron';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
-import type { registerMainHandler } from '../ipc/router';
+import type { registerMachineHandler, registerMainHandler } from '../ipc/router';
 import { openDocument } from './open';
 import { CAPTURE_PARTITION, answerCaptureRequests } from '../../render/capture';
 import { composeRender } from '../../render/compose'; // P5 O5 M3
@@ -48,6 +53,7 @@ export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from '.
 export interface ArtifactsDeps {
   hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent' | 'peer'>;
   register: typeof registerMainHandler;
+  registerMachine: typeof registerMachineHandler; // P5 O5 M4: artifacts.export, machine-owned
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // P3-A M5: to the renderer
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
@@ -66,7 +72,7 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, emit, env, openWindow, root, artifactsSocket, authors }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ExportService, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, registerMachine, emit, env, openWindow, root, artifactsSocket, authors }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ExportService, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
@@ -88,7 +94,7 @@ export function startArtifacts({ hosts, register, emit, env, openWindow, root, a
     onEvent: (name, listener) => hosts.onEvent(name, listener),
     answer: (input) => call('maws.artifact.exported', input),
   });
-  register('artifacts.export', (input) => render.exportForLibrary(input));
+  registerMachine('artifacts.export', (input) => render.exportForLibrary(input)); // P5 O5 M4: machine-owned
   // P3-L M6b: `artifact_screenshot`'s captures, answered to the requesting session
   const stopCaptures = answerCaptureRequests(render.capture, {
     onEvent: (name, listener) => hosts.onEvent(name, listener),

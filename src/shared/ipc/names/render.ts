@@ -2,6 +2,6 @@
 // `mawsd`'s requests over machine.sock, never a window; the request and the exit are events to that client.
 export const commands = [] as const;
 
-export const events = ['render.request', 'render.exit'] as const;
+export const events = ['render.request', 'render.exit', 'render.hostGeneration' /* P5 O5 M4 */] as const;
 
 export const mainOnlyCommands = ['render.answer'] as const;

@@ -10,7 +10,7 @@
 // document's Word comments (`authors`: the session titles and the person's export name) are the embedded root's; a root
 // without them writes the exporters' defaults. `hostGeneration` is the embedded root's count of its engine host's
 // connection losses (E3's one recapture of a dashboard export across a restart); a root without it never retries.
-import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import { createCaptureService } from './capture';
 import { registerDashboardExporters } from './dashboard/export';
 import { registerDesignExporters } from './design/export';
@@ -36,7 +36,7 @@ export interface RenderDeps {
 
 export interface Render {
   capture(request: MawsArtifactCapture): Promise<MawsArtifactCapturedResult>; // never rejects
-  export(request: MawsArtifactExport): Promise<MawsArtifactExportAnswer>; // never rejects
+  export: ExportService['export']; // never rejects; P5 O5 M4: `options.authors`, the names the asker sent
   exportForLibrary: ExportService['exportForLibrary']; // rejects with a HostCommandError the router answers as named
   exporters: ExporterRegistry;
   stop(): void; // the exporters withdrawn
@@ -58,7 +58,7 @@ export function composeRender({ call, content, root, env, authors = {}, hostGene
   const capture = createCaptureService({ content, env });
   return {
     capture,
-    export: (request) => exports.export(request),
+    export: (request, options) => exports.export(request, options),
     exportForLibrary: (input, options) => exports.exportForLibrary(input, options),
     exporters,
     stop: () => {

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHostRuntime, type HostClientHooks, type HostPort, type HostRuntime } from '@shared/host/runtime';
 import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import { registerAttachment } from './attachment';
+import { registerAttachment, type RenderAttachment } from './attachment';
 import { hostDatasetRefresh, type DatasetRefreshRequests } from './connectors/dataset-requests';
 import { HostBridge } from './tool-server/bridge';
 
@@ -42,6 +42,8 @@ let announced: string[];
 let holdsReleased: number;
 let connectorsEnded: number;
 let shellRecaptured: number;
+let render: RenderAttachment; // P5 O5 M4
+let renders: HostBridge<{ requestId: RequestId }, string>; // P5 O5 M4: the capture and export bridges' gate
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -51,7 +53,7 @@ beforeEach(() => {
   shellRecaptured = 0;
   runtime = createHostRuntime((on, emit, client: HostClientHooks) => {
     on('engine.ping', async () => ({ pid: 1, uptimeMs: 1, hostVersion: 'test' }));
-    registerAttachment(on, client, () => void shellRecaptured++);
+    render = registerAttachment(on, client, () => void shellRecaptured++);
     // as the entry wires them: the registry announced only to an attached app and ended at its going; the holds and
     // connectors' route E ended at its going; the bridges asking only an attached app
     requests = hostDatasetRefresh((name, payload) => {
@@ -61,6 +63,7 @@ beforeEach(() => {
     client.presence.onGone(() => void holdsReleased++);
     client.presence.onGone(() => void connectorsEnded++);
     bridge = new HostBridge({ send: () => {}, answerMs: 60_000, hasClient: client.presence.attached });
+    renders = new HostBridge({ send: () => {}, answerMs: 60_000, hasClient: render.answersRenders }); // P5 O5 M4: as the entry gates captures and exports
   });
 });
 
@@ -139,5 +142,67 @@ describe('host.attachment (P5 O3-D M3)', () => {
     expect(await bridge.request({ requestId: 'req-4' as RequestId }, never())).toEqual({ kind: 'noClient' }); // a later one settles at once
     bridge.processExited();
     expect(await bridged).toEqual({ kind: 'ended' });
+  });
+});
+
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §F): `render` on host.attachment says the
+// client answers render requests, so the capture and export bridges send with no app attached; the pane bridge and the
+// asks keep the app's presence.
+describe('host.attachment.render (P5 O5 M4)', () => {
+  it('{attached: false, render: true}: a capture request leaves the host with no app, the app-bound gates stay closed', async () => {
+    const fake = fakePort();
+    runtime.serve(fake.port, DECLARING);
+    runtime.setReady();
+    expect(await fake.request('host.attachment', { attached: false, render: true })).toMatchObject({ ok: true });
+    expect(runtime.presence.attached()).toBe(false);
+    expect(render.answersRenders()).toBe(true);
+    const sent = renders.request({ requestId: 'req-r1' as RequestId }, never());
+    expect(renders.pending).toBe(1); // sent, waiting for the answer
+    expect(await bridge.request({ requestId: 'req-p1' as RequestId }, never())).toEqual({ kind: 'noClient' }); // show_pane's gate
+    expect(await requests.ask(ASK, never())).toEqual({ kind: 'noClient' });
+    expect(shellRecaptured).toBe(0); // no app came
+    renders.processExited();
+    expect(await sent).toEqual({ kind: 'ended' });
+  });
+
+  it('{attached: false, render: false}, or render absent: a capture request settles noClient at once', async () => {
+    const fake = fakePort();
+    runtime.serve(fake.port, DECLARING);
+    runtime.setReady();
+    expect(await renders.request({ requestId: 'req-r2' as RequestId }, never())).toEqual({ kind: 'noClient' }); // none sent yet
+    await fake.request('host.attachment', { attached: false, render: true });
+    await fake.request('host.attachment', { attached: false, render: false });
+    expect(await renders.request({ requestId: 'req-r3' as RequestId }, never())).toEqual({ kind: 'noClient' });
+    await fake.request('host.attachment', { attached: false, render: true });
+    await fake.request('host.attachment', { attached: false }); // an older mawsd's signal: render absent reads false
+    expect(await renders.request({ requestId: 'req-r4' as RequestId }, never())).toEqual({ kind: 'noClient' });
+  });
+
+  it('an attached app still opens the gate without render, as before', async () => {
+    const fake = fakePort();
+    runtime.serve(fake.port, DECLARING);
+    runtime.setReady();
+    await fake.request('host.attachment', { attached: true });
+    expect(render.answersRenders()).toBe(true);
+    void renders.request({ requestId: 'req-r5' as RequestId }, never());
+    expect(renders.pending).toBe(1);
+  });
+
+  it('the declaring connection’s end closes it; a client that did not declare cannot open it', async () => {
+    const fake = fakePort();
+    runtime.serve(fake.port, DECLARING);
+    runtime.setReady();
+    await fake.request('host.attachment', { attached: false, render: true });
+    runtime.detach();
+    expect(render.answersRenders()).toBe(false);
+    const other = fakePort();
+    runtime.serve(other.port, DECLARING);
+    runtime.setReady();
+    expect(render.answersRenders()).toBe(false); // a new connection starts with no signal
+    const main = fakePort();
+    runtime.serve(main.port, MAIN);
+    runtime.setReady();
+    expect(await main.request('host.attachment', { attached: false, render: true })).toMatchObject({ ok: false, error: { code: 'internal' } });
+    expect(render.answersRenders()).toBe(true); // keyed on its connection, as the presence is (main renders in-process)
   });
 });

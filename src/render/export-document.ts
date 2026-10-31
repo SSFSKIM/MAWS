@@ -83,12 +83,16 @@ export interface DocumentAuthorDeps {
   humanAuthorName?: () => string | Promise<string>;
 }
 
-/** WR 73: capture the human identity once per export, shared by document and dashboard entry points. */
+/** WR 73: capture the human identity once per export, shared by document and dashboard entry points. P5 O5 M4: the
+ * names the request carries (the render host's, sent by `mawsd`) come before the root's own. */
 export function withDocumentAuthors(exporter: DocumentExporter, deps: DocumentAuthorDeps): DocumentExporter {
   return {
     ...exporter,
     run: async (request, context) => {
-      const authorName = context.authorName ?? exportAuthorName(deps.sessionTitle, await deps.humanAuthorName?.());
+      const carried = request.authors;
+      const titles = carried?.sessions;
+      const sessionTitle = titles ? (appSessionId: string) => (Object.hasOwn(titles, appSessionId) ? titles[appSessionId] : undefined) ?? deps.sessionTitle?.(appSessionId) : deps.sessionTitle;
+      const authorName = context.authorName ?? exportAuthorName(sessionTitle, carried?.human ?? (await deps.humanAuthorName?.()));
       await exporter.run(request, { ...context, authorName });
     },
   };

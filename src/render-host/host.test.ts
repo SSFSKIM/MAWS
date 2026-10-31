@@ -41,17 +41,19 @@ function heldLibrary() {
       pending.set(id, resolve as (value: unknown) => void);
       failing.set(id, reject);
     });
+  const options: unknown[] = []; // P5 O5 M4: what each export was handed beside its request
   const library: RenderLibrary = {
     capture: (request) => hold(request.requestId),
-    export: (request) => hold(request.requestId),
-    exportForLibrary: (input) => hold(`library:${input.format}`),
+    export: (request, given) => (options.push(given), hold(request.requestId)),
+    exportForLibrary: (input, given) => (options.push(given), hold(`library:${input.format}`)),
   };
-  return { library, started, finish: (id: string, value: unknown) => pending.get(id)!(value), fail: (id: string, error: unknown) => failing.get(id)!(error) };
+  return { library, started, options, finish: (id: string, value: unknown) => pending.get(id)!(value), fail: (id: string, error: unknown) => failing.get(id)!(error) };
 }
 
 function host(profile: string, library: RenderLibrary, argv: readonly string[] = ['electron', 'out/main/index.js', '--render-host', profile]) {
   const steps: string[] = [];
   const lines: string[] = [];
+  const generation: { read: (() => number) | null } = { read: null }; // P5 O5 M4: the composed library's hostGeneration
   let exited!: (code: number) => void;
   const exit = new Promise<number>((resolve) => (exited = resolve));
   const deps: RenderHostDeps = {
@@ -60,11 +62,11 @@ function host(profile: string, library: RenderLibrary, argv: readonly string[] =
     userData: (dir) => void steps.push(`userData ${dir}`),
     ready: async () => void steps.push('ready'),
     sessions: (paths) => void steps.push(`sessions ${paths.artifactsSocket}`),
-    compose: () => (steps.push('compose'), library),
+    compose: (_call, _profile, hostGeneration) => (steps.push('compose'), (generation.read = hostGeneration), library),
     log: (line) => void lines.push(line),
     exit: (code) => exited(code),
   };
-  return { deps, steps, lines, exit };
+  return { deps, steps, lines, exit, generation };
 }
 
 async function served(handlers: Parameters<typeof startFakeFront>[1] = {}) {
@@ -180,5 +182,27 @@ describe('the render host (src/render-host/host.ts)', () => {
     front.drop();
     expect(await started.exit).toBe(0);
     expect(started.lines).toContain('[render-host] mawsd closed the connection: exiting');
+  });
+
+  // P5 O5 M4 (M4's "Inputs from M3"): the Word comment authors `mawsd` sends with an export reach the library beside the
+  // request; the engine host's link generation `mawsd` posts is the library's `hostGeneration`
+  it('hands an export the authors its request carries, and reads the engine host’s generation from render.hostGeneration', async () => {
+    const { front, answers } = await served();
+    const work = heldLibrary();
+    const started = host(front.profile, work.library);
+    await startRenderHost(started.deps);
+    const seen = await front.client();
+    await seen.ready();
+    expect(started.generation.read?.()).toBe(0);
+    const authors = { human: 'Kim Min', sessions: { 'app-1': 'Review agent' } };
+    const exported = { appSessionId: 'app-1', requestId: 'exp-1', artifactId: ARTIFACT, kind: 'document', format: 'docx', revision: 2, path: '/p/artifacts/x/exports/2.docx' };
+    seen.send('render.request', { id: 'a', kind: 'export', request: exported, authors });
+    seen.send('render.request', { id: 'b', kind: 'libraryExport', request: { artifactId: ARTIFACT, format: 'docx', dialect: 'notion' }, authors });
+    seen.send('render.request', { id: 'c', kind: 'libraryExport', request: { artifactId: ARTIFACT, format: 'pdf' } });
+    await expect.poll(() => work.started).toEqual(['exp-1', 'library:docx', 'library:pdf']);
+    expect(work.options).toEqual([{ authors }, { authors }, {}]);
+    seen.send('render.hostGeneration', { generation: 3 });
+    await expect.poll(() => started.generation.read?.()).toBe(3);
+    expect(answers).toEqual([]);
   });
 });

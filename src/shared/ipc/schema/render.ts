@@ -19,10 +19,24 @@ export const RENDER_KINDS = ['capture', 'export', 'libraryExport'] as const;
 
 const RenderIdSchema = z.string().min(1).max(128);
 
+// P5 O5 M4: the names a document's Word comments carry (WR 73), which the embedded root reads from the app (the session
+// titles, the person's export name) and the render host cannot: `mawsd` sends what it holds with each export (the
+// loaded spine's session titles, the profile's saved export name), and a name it holds not falls back to the exporters'
+// own ("Claude", "Comment author"). Additive on Interfaces §A.
+export const RENDER_AUTHOR_SESSIONS_MAX = 5_000;
+export const RenderAuthorsSchema = z.strictObject({
+  human: z.string().min(1).max(200).optional(),
+  sessions: z
+    .record(z.string().max(128), z.string().max(1_000))
+    .refine((titles) => Object.keys(titles).length <= RENDER_AUTHOR_SESSIONS_MAX, { message: `at most ${RENDER_AUTHOR_SESSIONS_MAX} session titles` })
+    .optional(),
+});
+export type RenderAuthors = z.infer<typeof RenderAuthorsSchema>;
+
 export const RenderRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: RenderIdSchema, kind: z.literal('capture'), request: MawsArtifactCaptureSchema }),
-  z.strictObject({ id: RenderIdSchema, kind: z.literal('export'), request: MawsArtifactExportSchema }),
-  z.strictObject({ id: RenderIdSchema, kind: z.literal('libraryExport'), request: artifacts['artifacts.export'].input }),
+  z.strictObject({ id: RenderIdSchema, kind: z.literal('export'), request: MawsArtifactExportSchema, authors: RenderAuthorsSchema.optional() /* P5 O5 M4 */ }),
+  z.strictObject({ id: RenderIdSchema, kind: z.literal('libraryExport'), request: artifacts['artifacts.export'].input, authors: RenderAuthorsSchema.optional() /* P5 O5 M4 */ }),
 ]);
 export type RenderRequest = z.infer<typeof RenderRequestSchema>;
 
@@ -40,4 +54,8 @@ export const commands = {
 export const events = {
   'render.request': RenderRequestSchema, // to the one ready render.client
   'render.exit': z.strictObject({}), // to the render client alone: end after the work in flight, then exit 0
+  // P5 O5 M4: the engine host's link generation as `mawsd` counts it (one more at each reconnect after a loss), to the
+  // render client at its ready and at each change, so a dashboard export captures again once across an engine host's
+  // restart as the embedded root's does (E3; composeRender's `hostGeneration`)
+  'render.hostGeneration': z.strictObject({ generation: z.number().int().nonnegative() }),
 } as const satisfies Record<`render.${string}`, z.ZodType>;
