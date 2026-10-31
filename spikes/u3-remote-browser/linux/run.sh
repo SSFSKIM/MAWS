@@ -2,7 +2,8 @@
 # U3's Linux half (O5 M7), on a devcloud VM (Ubuntu 24.04, no display): U4's facts for the display, the sandbox and the
 # packages (spikes/u4-render-service/FINDINGS.md §1: Xvfb through xvfb-run for GTK, --headless for Chromium's software
 # compositing, --hide-scrollbars, the SUID chrome-sandbox set root:root 4755, never --no-sandbox), then the probe in its
-# three tab modes (a hidden window with the app's background throttling, the same unthrottled, an offscreen view), each
+# four tab modes (a hidden window with the app's background throttling, the same unthrottled, an offscreen view, and
+# the window shown without focus on the Xvfb display nobody sees), each
 # a driver run (../driver.mjs) that writes results/<mode>/driver.json; results/summary.json is the one-page reading.
 #
 #   cd ~/Developer/GitHub/MAWS && bash spikes/u3-remote-browser/linux/run.sh
@@ -42,7 +43,7 @@ log "electron $("$electron" --version 2>/dev/null) at $electron on $(uname -srm)
 
 node "$here/build.mjs" 2>&1 | tee -a "$results/run.log"
 xvfb=(xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp")
-for mode in hidden hidden-unthrottled offscreen; do
+for mode in hidden hidden-unthrottled offscreen shown; do
   rm -rf "$results/$mode"
   log "mode $mode"
   timeout -k 10 300 node "$here/driver.mjs" --out "$results/$mode" --mode "$mode" --repo "$repo" -- "${xvfb[@]}" "$electron" --headless --hide-scrollbars "$here/build/host.cjs" 2>"$results/$mode.driver-stderr.txt"

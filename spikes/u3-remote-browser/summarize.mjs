@@ -24,7 +24,7 @@ for (const name of readdirSync(results).sort()) {
   const tick = p['text page ticking at 10 Hz (cdp)'];
   modes[name] = {
     ready: { msFromSpawn: r.ready?.msFromSpawn, hostSaysReady: !!r.ready?.cuaSocket, versions: step('ready')?.versions, dockVisible: step('ready')?.dockVisible, headless: step('ready')?.headless, noSandbox: step('ready')?.noSandbox, pageState: step('tab loaded')?.pageState, peer: step('cua socket')?.peer },
-    cua: pick(p['cua primitives'], ['helloMs', 'tabs', 'attachMs', 'titleMs', 'title', 'captureScreenshotMs', 'captureScreenshotBytes', 'vendorScreenshot', 'cuaClickMs', 'cuaClickLanded', 'createdTab', 'failed']),
+    cua: pick(p['cua primitives'], ['helloMs', 'tabs', 'attach', 'title', 'visibility', 'captureScreenshot', 'vendorScreenshot', 'cuaClick', 'cuaClickLanded', 'createdTab', 'windows', 'failed']),
     screencastStatic: p['screencast static'],
     clickToPaint: pick(p['click to paint (cdp)'], trips),
     textTick10Hz: pick(tick, cadence),

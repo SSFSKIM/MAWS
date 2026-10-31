@@ -183,11 +183,6 @@ async function clickRun(count, gapMs) {
 let cua = null;
 let cuaTabId = null;
 const cuaSend = (method, params = {}, timeoutMs = 15_000, tabId = cuaTabId) => cua.request('debugger.sendCommand', { debuggee: { tabId }, method, params, timeoutMs }, timeoutMs + 2000);
-const timed = async (fn) => {
-  const t = Date.now();
-  const value = await fn();
-  return { value, ms: Date.now() - t };
-};
 // The vendor's plain screenshot: a screencast started, its first frame, acked, stopped (filter.ts's note).
 async function vendorScreenshot(tabId) {
   const t = Date.now();
@@ -199,41 +194,56 @@ async function vendorScreenshot(tabId) {
   return { ms: got.at - t, bytes: Math.round((got.params.params.data.length * 3) / 4) };
 }
 
+// Each primitive is tried on its own and timed, so one that hangs (a capture of a page that never paints) is recorded
+// as such and the next still runs.
+const attempt = async (fn) => {
+  const t = Date.now();
+  try {
+    const value = await fn();
+    return { ms: Date.now() - t, value };
+  } catch (error) {
+    return { ms: Date.now() - t, failed: error.message };
+  }
+};
+const b64Bytes = (data) => Math.round(((data?.length ?? 0) * 3) / 4);
+const brief = ({ ms, value, failed }, read = () => undefined) => (failed ? { ms, failed } : { ms, ...(read(value) !== undefined && { value: read(value) }) });
+
 await phase('cua primitives', async () => {
   cua = await connectCua(ready.cuaSocket);
   const tabs = await cua.request('tabs.query');
   cuaTabId = tabs[0]?.id;
-  const attach = await timed(() => cua.request('debugger.attach', { tabId: cuaTabId }));
-  const title = await timed(() => cuaSend('Runtime.evaluate', { expression: 'document.title', returnByValue: true }));
-  const shot = await timed(() => cuaSend('Page.captureScreenshot', { format: 'png' }));
-  const vendor = await vendorScreenshot(cuaTabId);
-  const click = await timed(async () => {
-    await cuaSend('Input.dispatchMouseEvent', { type: 'mousePressed', x: CLICK_X, y: CLICK_Y, button: 'left', buttons: 1, clickCount: 1 });
-    await cuaSend('Input.dispatchMouseEvent', { type: 'mouseReleased', x: CLICK_X, y: CLICK_Y, button: 'left', buttons: 0, clickCount: 1 });
+  const attach = await attempt(() => cua.request('debugger.attach', { tabId: cuaTabId }));
+  const title = await attempt(() => cuaSend('Runtime.evaluate', { expression: 'document.title', returnByValue: true }));
+  const visibility = await attempt(() => cuaSend('Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }));
+  const shot = await attempt(() => cuaSend('Page.captureScreenshot', { format: 'png' }, 8000));
+  const vendor = await attempt(() => vendorScreenshot(cuaTabId));
+  const click = await attempt(async () => {
+    await cuaSend('Input.dispatchMouseEvent', { type: 'mousePressed', x: CLICK_X, y: CLICK_Y, button: 'left', buttons: 1, clickCount: 1 }, 8000);
+    await cuaSend('Input.dispatchMouseEvent', { type: 'mouseReleased', x: CLICK_X, y: CLICK_Y, button: 'left', buttons: 0, clickCount: 1 }, 8000);
   });
-  const clicked = await cuaSend('Runtime.evaluate', { expression: 'window.__clicks.length', returnByValue: true });
+  const clicked = await attempt(() => cuaSend('Runtime.evaluate', { expression: 'window.__clicks.length', returnByValue: true }));
   // a tab the agent opens: the store makes its view, the host places it in a hidden window of its own
-  const created = await timed(() => cua.request('tabs.create', { url: `${pageUrl}?second` }));
-  const loaded = await cua.next('tabs.updated', (p) => p.tabId === created.value.id && p.status === 'complete', 15_000).then(() => true, (e) => e.message);
-  await cua.request('debugger.attach', { tabId: created.value.id });
-  const secondShot = await timed(() => cuaSend('Page.captureScreenshot', { format: 'png' }, 15_000, created.value.id));
-  await cua.request('debugger.detach', { tabId: created.value.id });
-  await cua.request('tabs.remove', { tabId: created.value.id });
-  const windows = await cua.request('windows.query');
+  const created = await attempt(() => cua.request('tabs.create', { url: `${pageUrl}?second` }));
+  const second = created.value?.id;
+  const loaded = second === undefined ? { failed: 'no tab' } : await attempt(() => cua.next('tabs.updated', (p) => p.tabId === second && p.status === 'complete', 15_000));
+  const secondAttach = second === undefined ? null : await attempt(() => cua.request('debugger.attach', { tabId: second }));
+  const secondShot = second === undefined ? null : await attempt(() => cuaSend('Page.captureScreenshot', { format: 'png' }, 8000, second));
+  const secondDetach = second === undefined ? null : await attempt(() => cua.request('debugger.detach', { tabId: second }));
+  const removed = second === undefined ? null : await attempt(() => cua.request('tabs.remove', { tabId: second }));
+  const windows = await attempt(() => cua.request('windows.query'));
   return {
     helloMs: cua.helloMs,
     hello: cua.hello,
     tabs: tabs.map((t) => ({ id: t.id, url: t.url, title: t.title, status: t.status })),
-    attachMs: attach.ms,
-    titleMs: title.ms,
-    title: title.value?.result?.value,
-    captureScreenshotMs: shot.ms,
-    captureScreenshotBytes: Math.round(((shot.value?.data?.length ?? 0) * 3) / 4),
-    vendorScreenshot: vendor,
-    cuaClickMs: click.ms,
-    cuaClickLanded: clicked?.result?.value,
-    createdTab: { ms: created.ms, loaded, captureScreenshotMs: secondShot.ms, bytes: Math.round(((secondShot.value?.data?.length ?? 0) * 3) / 4) },
-    windows,
+    attach: brief(attach),
+    title: brief(title, (v) => v?.result?.value),
+    visibility: brief(visibility, (v) => v?.result?.value),
+    captureScreenshot: brief(shot, (v) => b64Bytes(v?.data)),
+    vendorScreenshot: brief(vendor, (v) => v),
+    cuaClick: brief(click),
+    cuaClickLanded: brief(clicked, (v) => v?.result?.value),
+    createdTab: { create: brief(created, (v) => v?.id), loaded: brief(loaded), attach: secondAttach && brief(secondAttach), captureScreenshot: secondShot && brief(secondShot, (v) => b64Bytes(v?.data)), detach: secondDetach && brief(secondDetach), remove: removed && brief(removed) },
+    windows: brief(windows, (v) => v),
   };
 });
 
