@@ -70,7 +70,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 describe('main’s adoption of the legacy grants', () => {
   it('hands a planted format 1 record to connectors.adoptGrant once, under main’s own client, as the registry takes it', async () => {
     plant(A);
-    expect(await adopt()).toEqual({ adopted: 1, left: 0, stopped: false });
+    expect(await adopt()).toEqual({ adopted: 1, left: 0, stopped: false, retry: false });
     expect(invoked).toEqual([{ name: 'connectors.adoptGrant', input: { connectionId: A, record: record(A) }, client: 'main' }]);
     expect(validateCommandInput('connectors.adoptGrant', invoked[0]!.input).ok).toBe(true);
     expect(logged).toEqual(['[connectors] adopted 1 of 1 legacy grants']);
@@ -78,9 +78,9 @@ describe('main’s adoption of the legacy grants', () => {
 
   it('asks the sealer and the machine nothing when no format 1 file is there', async () => {
     plant(A, SEALED_FORMAT_V2);
-    expect(await adopt()).toEqual({ adopted: 0, left: 0, stopped: false });
+    expect(await adopt()).toEqual({ adopted: 0, left: 0, stopped: false, retry: false });
     rmSync(dir, { recursive: true });
-    expect(await adopt()).toEqual({ adopted: 0, left: 0, stopped: false });
+    expect(await adopt()).toEqual({ adopted: 0, left: 0, stopped: false, retry: false });
     expect(sealer.available).not.toHaveBeenCalled();
     expect(sealer.open).not.toHaveBeenCalled();
     expect(invoked).toEqual([]);
@@ -90,9 +90,55 @@ describe('main’s adoption of the legacy grants', () => {
   it('leaves a record the machine declines or cannot be asked to take, under its reason', async () => {
     plant(A);
     answer = { ok: true, value: { adopted: false, reason: 'present' } };
-    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: false });
+    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: false, retry: false });
     answer = { ok: false, error: { code: 'host_unavailable', message: 'mawsd is not running' } };
-    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: false });
+    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: false, retry: true });
     expect(logged).toEqual(['[connectors] adopted 0 of 1 legacy grants; left: present 1', '[connectors] adopted 0 of 1 legacy grants; left: host_unavailable 1']);
+  });
+
+  // P5 O4 (whole-branch review): a record the machine could not take yet asks for the pass again at the machine host's
+  // next streaming (./index.ts); a decline, or a sealer that stopped the pass, settles it for the launch.
+  it('says the pass is worth running again when the machine could not take a record yet, and only then', async () => {
+    const B = '22222222-2222-4222-8222-222222222222';
+    plant(A);
+    plant(B);
+    const notYet: CommandResult<'connectors.adoptGrant'>[] = [
+      { ok: false, error: { code: 'unknown_command', message: 'unknown command: connectors.adoptGrant' } }, // a pre-O4 mawsd
+      { ok: false, error: { code: 'host_unavailable', message: 'machine is restarting' } },
+      { ok: false, error: { code: 'timeout', message: 'no answer within 10 s' } },
+      { ok: true, value: { adopted: false, reason: 'unavailable' } }, // the machine's custody or connectors not up
+    ];
+    for (const given of notYet) {
+      answer = given;
+      expect(await adopt()).toEqual({ adopted: 0, left: 2, stopped: false, retry: true });
+    }
+    const settled: CommandResult<'connectors.adoptGrant'>[] = [
+      { ok: true, value: { adopted: false, reason: 'stale' } },
+      { ok: true, value: { adopted: false, reason: 'io' } },
+      { ok: false, error: { code: 'internal', message: 'the handler threw' } },
+    ];
+    for (const given of settled) {
+      answer = given;
+      expect(await adopt()).toEqual({ adopted: 0, left: 2, stopped: false, retry: false });
+    }
+  });
+
+  it('one record the machine could not take yet among adopted ones asks for the pass again', async () => {
+    const B = '22222222-2222-4222-8222-222222222222';
+    plant(A);
+    plant(B);
+    let calls = 0;
+    const answers: CommandResult<'connectors.adoptGrant'>[] = [{ ok: true, value: { adopted: true } }, { ok: false, error: { code: 'unknown_command', message: 'unknown command' } }];
+    const result = await adoptLegacyGrants({ directory: dir, sealer, invoke: (async () => answers[calls++]) as never, log: () => {} });
+    expect(result).toEqual({ adopted: 1, left: 1, stopped: false, retry: true });
+  });
+
+  it('never asks for the pass again when the sealer stopped it', async () => {
+    plant(A);
+    sealer.available.mockResolvedValueOnce(false);
+    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: true, retry: false });
+    sealer.seal.mockRejectedValueOnce(new Error('the Keychain denied'));
+    expect(await adopt()).toEqual({ adopted: 0, left: 1, stopped: true, retry: false });
+    expect(invoked).toEqual([]);
   });
 });

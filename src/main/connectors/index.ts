@@ -8,6 +8,12 @@
 // - at each streaming of the machine host after the first (a restarted `mawsd`, which holds no lease and no report),
 //   every page marked unreported, then `connectors.reset` told to the windows, whose connectors clients rebuild their
 //   leases (src/renderer/src/artifacts/connectors.ts). The embedded shape never tells it.
+// - P5 O4 (whole-branch review): the adoption is once per launch when its pass settles every record. A pass that left a
+//   record the machine could not take yet (`retry`: the updated app's first streaming can be a pre-O4 `mawsd`'s, which
+//   answers `connectors.adoptGrant` unknown_command before the build check restarts it) runs again at the machine host's
+//   next streaming, beside the reset; at once when that streaming came while it ran. One pass at a time. A pass the
+//   sealer stopped never asks for a retry (./adoption.ts), so the Keychain is asked at most once in the launch; a pass run
+//   again after the sealer opened records asks it nothing, since Electron's safeStorage keeps the encryptor it got.
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -22,7 +28,7 @@ export interface AppConnectorsDeps {
   invoke: ServicesBus['invoke']; // main's own route
   before(names: readonly CommandName[], hook: BeforeHook): () => void; // the router's seam (beforeCommand)
   emit(name: 'connectors.reset', payload: Record<string, never>): void; // to every window
-  adopt(): Promise<unknown>; // the legacy grants' adoption pass (./adoption.ts)
+  adopt(): Promise<{ retry: boolean }>; // the legacy grants' adoption pass (./adoption.ts)
   log?: (line: string) => void;
 }
 
@@ -37,34 +43,60 @@ export function startAppConnectors({ machine, windowShown, invoke, before, emit,
     before,
     log,
   });
-  let adopted = false;
-  const adoptOnce = () => {
-    if (adopted) return;
-    adopted = true;
-    const failed = (error: unknown) => log(`the legacy grants were not adopted: ${error instanceof Error ? error.message : String(error)}`);
+  // P5 O4 (whole-branch review): `due` until a pass settles every record for good; `streamedMeanwhile`, a streaming of
+  // the machine host heard while a pass ran, whose machine that pass may not have reached
+  let adoption: 'due' | 'running' | 'settled' = 'due';
+  let streamedMeanwhile = false;
+  let stopped = false;
+  const adoptWhenDue = () => {
+    if (stopped) return;
+    if (adoption === 'running') {
+      streamedMeanwhile = true;
+      return;
+    }
+    if (adoption === 'settled') return;
+    adoption = 'running';
+    streamedMeanwhile = false;
+    const failed = (error: unknown) => {
+      adoption = 'settled';
+      log(`the legacy grants were not adopted: ${error instanceof Error ? error.message : String(error)}`);
+    };
+    const settle = ({ retry }: { retry: boolean }) => {
+      adoption = retry ? 'due' : 'settled';
+      if (!retry || stopped) return;
+      if (streamedMeanwhile) adoptWhenDue();
+      else log(`the machine could not take every legacy grant yet; the machine host's next streaming adopts them`);
+    };
     try {
-      void adopt().catch(failed);
+      void adopt().then(settle, failed);
     } catch (error) {
       failed(error); // never a throw into main's startup
     }
   };
   if (machine === null) {
-    adoptOnce();
-    return { stop: () => reporter.stop() };
+    adoptWhenDue();
+    return {
+      stop: () => {
+        stopped = true;
+        reporter.stop();
+      },
+    };
   }
   let streamed = machine.streaming();
-  if (streamed) adoptOnce();
+  if (streamed) adoptWhenDue();
   const offStreaming = machine.onStreaming(() => {
     if (!streamed) {
       streamed = true;
-      adoptOnce();
+      adoptWhenDue();
       return;
     }
     reporter.reportAgain(); // before the windows hear it, so a rebuilt lease's first command reports first
     emit('connectors.reset', {});
+    adoptWhenDue(); // P5 O4 (whole-branch review): a pass the machine could not complete runs again
   });
   return {
     stop: () => {
+      stopped = true;
       offStreaming();
       reporter.stop();
     },
