@@ -17,6 +17,14 @@
 // streams, so a page's call made during a restart is answered once it streams. A replayed first watch of a root emits
 // `git.changed` as `initial`, which every window's git store applies.
 //
+// No page request waits without bound (the final review's finding 1). A page's watch is held only as the supervisor
+// would hold its request: while the host starts or restarts. At `crashed` (the crash limit, an unreachable daemon) the
+// supervisor fails what it held and answers at once while crashed, so the replay answers every unit whose page request
+// is pending `host_unavailable`, and a watch made while crashed at once; and whatever the state, a page request still
+// pending at the command's budget from the page's call answers the supervisor's own `timeout`. A unit answered either
+// way is removed and its ref ended, as a terminal answer is; an installed unit (its page answered) stays, given back
+// when the host streams again.
+//
 // files: a files watch installs and lists nothing, so a re-sent `files.watch` would leave a pane stale for what changed
 // while disconnected. Main only observes `files.watch` and `files.unwatch` on their way through, and at each streaming
 // emits `files.changed {kind: 'invalidated'}` once per distinct live (session, directory), on which the renderer's
@@ -25,7 +33,7 @@
 // once its invalidations are out: each connection counts only what was watched on it.
 //
 // The O6 link's watches of another machine's session are not given back here (O7's, with the link's reconnect).
-import type { HostSupervisor } from '@shared/host/host-supervisor';
+import { REQUEST_TIMEOUT_MS, type HostSupervisor } from '@shared/host/host-supervisor';
 import { endableClientRef, type ClientRef, type EndableClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -40,8 +48,9 @@ export interface WatchReplay {
 }
 
 export interface WatchReplayOptions {
-  hosts: Pick<HostSupervisor, 'dispatch' | 'onState' | 'onStreaming' | 'streaming'>;
+  hosts: Pick<HostSupervisor, 'dispatch' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot'>;
   emit(name: 'files.changed', payload: FilesChanged): void;
+  budgetsMs?: Readonly<Partial<Record<CommandName, number>>>; // the machine host's (COMMAND_BUDGETS_MS): a page's watch is answered within git.watch's
 }
 
 type Answer = CommandResult<CommandName>;
@@ -52,6 +61,7 @@ interface Unit {
   state: 'queued' | 'sent' | 'installed';
   removed: boolean;
   request: ((answer: Answer) => void) | null; // the page's git.watch, until answered
+  deadline: ReturnType<typeof setTimeout> | null; // the budget from the page's call, while its request is pending
 }
 
 interface Entry {
@@ -70,15 +80,20 @@ interface Page {
 const OWNED: ReadonlySet<string> = new Set(['git.watch', 'git.unwatch']);
 const ok: Answer = { ok: true, value: undefined as never };
 
-export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchReplay {
+export function createWatchReplay({ hosts, emit, budgetsMs }: WatchReplayOptions): WatchReplay {
   const pages = new Map<string, Page>();
   let connection: Connection | null = hosts.streaming('machine') ? {} : null;
+  let crashed = hosts.snapshot('machine').state === 'crashed'; // the supervisor holds no request while crashed
   let ordinal = 0;
   let stopped = false;
+  const budgetMs = budgetsMs?.['git.watch'] ?? REQUEST_TIMEOUT_MS; // as the supervisor bounds the send
+  const unavailable = (): Answer => ({ ok: false, error: ipcError('host_unavailable', 'machine is crashed; cannot answer git.watch') });
 
   const answer = (unit: Unit, result: Answer) => {
     const request = unit.request;
     unit.request = null;
+    if (unit.deadline !== null) clearTimeout(unit.deadline);
+    unit.deadline = null;
     request?.(result);
   };
   const end = (entry: Entry, unit: Unit) => {
@@ -104,6 +119,7 @@ export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchRep
   function answered(entry: Entry, unit: Unit, on: Connection, result: Answer): void {
     if (entry.sending === unit) entry.sending = null;
     if (unit.removed) answer(unit, result); // unwatched while in flight: its watch request takes this answer
+    else if (on !== connection && crashed && unit.request !== null) settleUnavailable(entry, unit); // and the host is down for good
     else if (on !== connection) unit.state = 'queued'; // the connection ended under it: sent again on the next
     else if (result.ok) {
       unit.state = 'installed';
@@ -115,6 +131,14 @@ export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchRep
     if (entry.units.length === 0 && entry.sending === null) entry.forget();
     else drive(entry);
   }
+
+  // A page request the replay may not hold on: the unit removed, its ref ended, the page answered.
+  function settle(entry: Entry, unit: Unit, result: Answer): void {
+    if (!unit.removed) end(entry, unit);
+    answer(unit, result);
+    if (entry.units.length === 0 && entry.sending === null) entry.forget();
+  }
+  const settleUnavailable = (entry: Entry, unit: Unit) => settle(entry, unit, unavailable());
 
   function pageOf(client: ClientRef): Page | null {
     const page = pages.get(client.id);
@@ -141,13 +165,16 @@ export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchRep
   function watch(input: CommandInput<'git.watch'>, client: ClientRef): Promise<Answer> {
     const page = pageOf(client);
     if (page === null || stopped) return Promise.resolve({ ok: false, error: ipcError('internal', 'the page ended before it was watched') });
+    if (crashed) return Promise.resolve(unavailable());
     let entry = page.git.get(input.directory);
     if (!entry) {
       const created: Entry = { input, units: [], sending: null, forget: () => void (page.git.get(input.directory) === created && page.git.delete(input.directory)) };
       page.git.set(input.directory, (entry = created));
     }
-    const unit: Unit = { ref: endableClientRef(`${client.id}~git.watch.${++ordinal}`), state: 'queued', removed: false, request: null };
+    const unit: Unit = { ref: endableClientRef(`${client.id}~git.watch.${++ordinal}`), state: 'queued', removed: false, request: null, deadline: null };
     const result = new Promise<Answer>((resolve) => (unit.request = resolve));
+    const at = entry;
+    unit.deadline = setTimeout(() => settle(at, unit, { ok: false, error: ipcError('timeout', `machine did not answer git.watch within ${budgetMs / 1000} s`) }), budgetMs);
     entry.units.push(unit);
     drive(entry);
     return result;
@@ -166,9 +193,15 @@ export function createWatchReplay({ hosts, emit }: WatchReplayOptions): WatchRep
 
   const offs = [
     // the host left streaming (every transition does): what was installed ended with the connection
-    hosts.onState('machine', () => {
+    hosts.onState('machine', (state) => {
       connection = null;
+      crashed = state.state === 'crashed';
       for (const page of pages.values()) for (const entry of page.git.values()) for (const unit of entry.units) unit.state = 'queued';
+      if (!crashed) return;
+      // what waits for a send not in flight is answered now; a send in flight is failed by the supervisor's detach
+      for (const page of pages.values()) {
+        for (const entry of [...page.git.values()]) for (const unit of [...entry.units]) if (unit.request !== null && entry.sending !== unit) settleUnavailable(entry, unit);
+      }
     }),
   ];
 

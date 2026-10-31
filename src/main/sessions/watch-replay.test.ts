@@ -25,6 +25,7 @@ interface Sent {
 function fakeMachineHost({ auto = true }: { auto?: boolean } = {}) {
   let connection = 1;
   let streaming = true;
+  let down: 'restarting' | 'crashed' = 'restarting';
   const stateListeners = new Set<(state: HostState) => void>();
   const streamingListeners = new Set<() => void>();
   let holds = new Map<string, number>();
@@ -42,8 +43,11 @@ function fakeMachineHost({ auto = true }: { auto?: boolean } = {}) {
     onState: (_owner: string, listener: (state: HostState) => void) => (stateListeners.add(listener), () => void stateListeners.delete(listener)),
     onStreaming: (_owner: string, listener: () => void) => (streamingListeners.add(listener), () => void streamingListeners.delete(listener)),
     streaming: () => streaming,
-    // the connection drops: the supervisor fails what it sent, the host leaves `ready`, and the daemon's refs end
-    detach() {
+    snapshot: (): HostState => ({ state: streaming ? 'ready' : (down as HostState['state']), pid: null, restarts: 0, revision: connection }),
+    // the connection drops: the supervisor fails what it sent, the host leaves `ready`, and the daemon's refs end;
+    // `crashed` is the supervisor's terminal state (the crash limit reached, the daemon unreachable), `restarting` a
+    // reconnect under way
+    detach(state: 'restarting' | 'crashed' = 'restarting') {
       const failing = sent.filter((entry) => !entry.settled && entry.connection === connection);
       streaming = false;
       connection += 1;
@@ -53,7 +57,8 @@ function fakeMachineHost({ auto = true }: { auto?: boolean } = {}) {
         entry.settled = true;
         void Promise.resolve().then(() => resolveRaw(entry, { ok: false, error: ipcError('host_unavailable', 'machine disconnected before answering git.watch') }));
       }
-      for (const listener of stateListeners) listener({ state: 'restarting', pid: null, restarts: 1, revision: connection } as HostState);
+      down = state;
+      for (const listener of stateListeners) listener({ state, pid: null, restarts: 1, revision: connection } as HostState);
     },
     stream() {
       streaming = true;
@@ -104,10 +109,12 @@ function fakeMachineHost({ auto = true }: { auto?: boolean } = {}) {
   return host;
 }
 
+const WATCH_BUDGET_MS = 40_000; // COMMAND_BUDGETS_MS['git.watch'], which main hands over
+
 function lab(options?: { auto?: boolean }) {
   const host = fakeMachineHost(options);
   const emitted: FilesChanged[] = [];
-  const replay = createWatchReplay({ hosts: host as never, emit: (_name, payload) => void emitted.push(payload) });
+  const replay = createWatchReplay({ hosts: host as never, emit: (_name, payload) => void emitted.push(payload), budgetsMs: { 'git.watch': WATCH_BUDGET_MS } });
   host.onStreaming('machine', () => replay.replay()); // as daemon-spine.ts wires it
   const page = endableClientRef('page:3.1');
   const watch = (directory = '/r', client: ClientRef = page) => replay.dispatch('git.watch', { directory }, client);
@@ -228,6 +235,56 @@ describe('the watch replay', () => {
     replay.replay();
     await tick();
     expect(host.sent).toHaveLength(1); // no unit retained, nothing sent again
+  });
+
+  // The final review's finding 1: a crashed machine host is the supervisor's terminal state (it fails what it held and
+  // answers host_unavailable at once while crashed), so no page request waits on it
+  it('answers host_unavailable to every pending watch when the host crashes for good, and at once to a watch made while crashed, keeping the installed ones', async () => {
+    const { host, watch } = lab({ auto: false });
+    const installed = watch('/i');
+    await vi.waitFor(() => expect(host.sent).toHaveLength(1));
+    host.sent[0]!.settle({ ok: true, value: STATUS });
+    expect(await installed).toEqual({ ok: true, value: STATUS });
+    const inFlight = watch('/f'); // sent; the crash fails it after the connection ended
+    await vi.waitFor(() => expect(host.sent).toHaveLength(2));
+    host.detach(); // a reconnect under way: what waits keeps waiting
+    const queued = watch('/q');
+    await tick();
+    let settled = 0;
+    void inFlight.then(() => void (settled += 1));
+    void queued.then(() => void (settled += 1));
+    await tick();
+    expect(settled).toBe(0);
+    host.detach('crashed');
+    expect(await inFlight).toEqual(failed('host_unavailable'));
+    expect(await queued).toEqual(failed('host_unavailable'));
+    expect(await watch('/n')).toEqual(failed('host_unavailable'));
+    expect(host.sent).toHaveLength(2);
+    // the host comes back (host.restart): the installed unit is given back, the answered ones are gone
+    host.auto = true;
+    host.stream();
+    await vi.waitFor(() => expect(host.holds()).toBe(1));
+    expect(host.sent.slice(2).map((entry) => entry.input)).toEqual([{ directory: '/i' }]);
+  });
+
+  it('answers timeout to a watch still waiting at its budget through a long reconnect, its unit removed and nothing sent after', async () => {
+    vi.useFakeTimers();
+    try {
+      const { host, watch } = lab();
+      host.detach(); // restarting, never streaming again within the budget
+      let answer: Answer | null = null;
+      void watch().then((result) => void (answer = result));
+      await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS - 1);
+      expect(answer).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answer).toEqual(failed('timeout'));
+      host.stream();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(host.sent).toHaveLength(0);
+      expect(host.holds()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends every unit’s ref when the page ends, so the daemon holds nothing for it', async () => {

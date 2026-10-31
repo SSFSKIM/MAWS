@@ -450,7 +450,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   let cuaSockets: Browser['cua'] | null = null;
   const spine = data === null
     ? // P5 O3-D M5b: the daemon shape's, mawsd's spine through main's mirror and the client port's answers
-      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null), emit: (name, payload) => void emit(name, payload) })
+      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null), emit: (name, payload) => void emit(name, payload), budgetsMs: COMMAND_BUDGETS_MS })
     : startSpine({
         profile: app.getPath('userData'),
         machine: local,

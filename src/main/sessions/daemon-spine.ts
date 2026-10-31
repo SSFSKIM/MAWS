@@ -13,7 +13,7 @@ import { clientOfId } from '../ipc/clients';
 import type { FilesChanged } from '@shared/ipc/schema/files';
 import { createMirrorSpineView } from './spine-mirror';
 import { installDaemonE2eSeams } from './daemon-e2e-seams';
-import { createWatchReplay, type WatchReplay } from './watch-replay';
+import { createWatchReplay, type WatchReplay, type WatchReplayOptions } from './watch-replay';
 
 export interface DaemonSpineOptions {
   hosts: HostSupervisor;
@@ -21,6 +21,7 @@ export interface DaemonSpineOptions {
   port: ClientPort; // main's Electron port
   browserSocket(): string | null; // this app's cua socket directory, once the browser runs
   emit(name: 'files.changed', payload: FilesChanged): void; // P5 O3-E: main's emit, for the watch replay's invalidations
+  budgetsMs?: WatchReplayOptions['budgetsMs']; // the machine host's (COMMAND_BUDGETS_MS): the watch replay answers a page within git.watch's
 }
 
 export interface DaemonSpine {
@@ -33,7 +34,7 @@ export interface DaemonSpine {
   stop(): void;
 }
 
-export function startDaemonSpine({ hosts, daemon, port, browserSocket, emit }: DaemonSpineOptions): DaemonSpine {
+export function startDaemonSpine({ hosts, daemon, port, browserSocket, emit, budgetsMs }: DaemonSpineOptions): DaemonSpine {
   const log = (line: string) => console.log(line);
   const mirror = createMirrorSpineView({ hosts, spineRefused: () => daemon.status()?.spine?.refused ?? null, onDaemonStatus: daemon.onStatus, browserSocket, log });
   const stopAnswers = startPortAnswers({ hosts, port, clientOfId, log });
@@ -43,7 +44,7 @@ export function startDaemonSpine({ hosts, daemon, port, browserSocket, emit }: D
   const stopSeams = installDaemonE2eSeams(hosts, process.env); // M5b fix round 2: the e2e's spine seams, relayed to mawsd
   // P5 O3-E M2 (Interfaces §E; D8): the pages' git and files watches given back at each streaming of mawsd, as the
   // mirror gives back their visibility claims
-  const watches = createWatchReplay({ hosts, emit });
+  const watches = createWatchReplay({ hosts, emit, budgetsMs });
   const offReplay = hosts.onStreaming('machine', () => watches.replay());
   return {
     view: mirror.view,
