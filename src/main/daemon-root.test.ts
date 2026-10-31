@@ -115,7 +115,7 @@ vi.mock('./org/org-session', async (original) => {
 beforeAll(async () => {
   vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
   vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
-  await import('./index');
+  await import('./app');
   await new Promise((resolve) => setImmediate(resolve)); // let `whenReady().then(...)` run, and the start it waits for
 });
 
