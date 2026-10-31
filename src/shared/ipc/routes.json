@@ -310,6 +310,7 @@
   "plugins.marketplaceManifest",
   "plugins.uninstall",
   "plugins.update",
+  "render.answer",
   "session.create",
   "session.projects.add",
   "session.projects.addFolder",

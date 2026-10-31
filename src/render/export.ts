@@ -45,8 +45,8 @@ import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/s
 import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
 import { restrictRequests, type SeamEnv } from './policies';
-import { CommandFailure } from '../ipc/router';
-import type { ContentLookup } from '../../render/scheme'; // P5 O5 M2: the scheme's library moved
+import { HostCommandError } from '@shared/host/runtime';
+import type { ContentLookup } from './scheme'; // P5 O5 M2: the scheme's library moved
 
 export const EXPORT_BUDGET_MS = 55_000; // from main's receipt: inside the host's 60 s (EXPORT_ANSWER_MS) with 5 s to spare
 export const EXPORT_QUEUE_MS = 25_000; // the longest wait for a slot (inside the budget, leaving 30 s to run)
@@ -265,7 +265,7 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
   } catch (error) {
     if (request.inspection) await rm(request.path, { force: true }).catch((error: unknown) => console.error('[artifacts] could not remove an inspection image', error));
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
-    const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
+    const refusal = error instanceof HostCommandError ? artifactRefusalOf(error.ipcError) : null;
     return { ok: false, error: messageOf(error), ...(refusal && { refusal }) };
   } finally {
     time.end(); // the exporter is done or abandoned: anything it still writes is refused
@@ -277,29 +277,76 @@ export interface ExportServiceDeps {
   registry: ExporterRegistry;
   root: string; // `<userData>/artifacts`, the store's directory (the host's own path rule)
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
-  onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
-  answer(input: CommandInput<'maws.artifact.exported'>): Promise<CommandResult<'maws.artifact.exported'>>;
   print?: PdfPrinter; // printHtmlToPdf in the app; a test's stand-in
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b, the restart ruling): how many times the engine
   // host's connection has gone, so a dashboard export whose snapshot holds a restart took captures once more
   hostGeneration?: () => number;
 }
 
-const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
-  new CommandFailure(ipcError('invalid_input', message, { reason, data } satisfies ArtifactRefusal));
+// P5 O5 M3: the export bridge's two ends, the engine host's request in and the answer back, which the embedded root
+// wires to its host's events (`answerExportRequests`); the render host is handed each request by `mawsd` instead.
+export interface ExportBridgeDeps {
+  onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
+  answer(input: CommandInput<'maws.artifact.exported'>): Promise<CommandResult<'maws.artifact.exported'>>;
+}
 
-// Main's side of the export bridge and the library's command over one queue. Answers the library's export and `stop`.
-export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf, hostGeneration }: ExportServiceDeps): {
+export interface ExportService {
+  // `artifact_export`'s request (the bridge's), answered; never rejects
+  export(request: MawsArtifactExport): Promise<MawsArtifactExportAnswer>;
   // P4-B5: `options.dialect`, main's delivery's (the request then always a file of its own)
   exportForLibrary(input: CommandInput<'artifacts.export'>, options?: { dialect?: ExportDialect }): Promise<CommandOutput<'artifacts.export'>>;
-  stop(): void;
-} {
+}
+
+const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
+  new HostCommandError(ipcError('invalid_input', message, { reason, data } satisfies ArtifactRefusal));
+
+export type StartExportServiceDeps = ExportServiceDeps & ExportBridgeDeps;
+
+// Main's side of the export bridge and the library's command over one queue (P5 O5 M3: `createExportService` and
+// `answerExportRequests` composed). Answers the library's export and `stop`.
+export function startExportService(deps: StartExportServiceDeps): Pick<ExportService, 'exportForLibrary'> & { stop(): void } {
+  const service = createExportService(deps);
+  return { exportForLibrary: service.exportForLibrary, stop: answerExportRequests(service, deps) };
+}
+
+// The bridge's requests answered through `answer`; an inspection's file is the engine host's only once it took the
+// answer. Answers the unsubscribe.
+export function answerExportRequests(service: Pick<ExportService, 'export'>, { onEvent, answer }: ExportBridgeDeps): () => void {
+  return onEvent('maws.artifact.export', (request) => {
+    const { appSessionId, requestId } = request;
+    void service
+      .export(request)
+      .then(async (result) => {
+        let delivered = false;
+        try {
+          const acknowledged = await answer({ appSessionId, requestId, answer: result });
+          delivered = acknowledged.ok && acknowledged.value.outcome === 'delivered';
+        } finally {
+          // Inspections have unique files and no cache consumer: ownership passes to the host only on delivery.
+          // A withdrawn, ended or timed-out request cannot remove its late result, so main keeps that responsibility.
+          if (request.inspection && result.ok && !delivered) await rm(result.path, { force: true });
+        }
+      })
+      .catch((error: unknown) => console.error('[artifacts] could not answer an export', error));
+  });
+}
+
+// The bridge's request without whom it answers: the export it asks for.
+function jobOf(request: MawsArtifactExport): ExportRequest {
+  const job: ExportRequest & Partial<Pick<MawsArtifactExport, 'appSessionId' | 'requestId'>> = { ...request };
+  delete job.appSessionId;
+  delete job.requestId;
+  return job;
+}
+
+// The export service over one queue: the bridge's requests and the library's command alike.
+export function createExportService({ registry, root, call, print = printHtmlToPdf, hostGeneration }: ExportServiceDeps): ExportService {
   const slot = slots(EXPORT_CONCURRENCY, EXPORT_QUEUE_MS);
   const busy = (): MawsArtifactExportAnswer => ({ ok: false, error: `MAWS was busy with other exports for ${EXPORT_QUEUE_MS / 1000} s; try again` });
 
   const required = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await call(name, input);
-    if (!result.ok) throw new CommandFailure(result.error);
+    if (!result.ok) throw new HostCommandError(result.error);
     return result.value;
   };
   // The export's snapshot, taken as it starts: its title, and a document's state with the revision it is at (the
@@ -414,24 +461,10 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     return answered;
   };
 
-  const stop = onEvent('maws.artifact.export', (request) => {
-    const { appSessionId, requestId, ...job } = request;
-    void queued(job, new ExportBudget(EXPORT_BUDGET_MS), job.inspection === true)
-      .then(async (result) => {
-        let delivered = false;
-        try {
-          const acknowledged = await answer({ appSessionId, requestId, answer: result });
-          delivered = acknowledged.ok && acknowledged.value.outcome === 'delivered';
-        } finally {
-          // Inspections have unique files and no cache consumer: ownership passes to the host only on delivery.
-          // A withdrawn, ended or timed-out request cannot remove its late result, so main keeps that responsibility.
-          if (job.inspection && result.ok && !delivered) await rm(result.path, { force: true });
-        }
-      })
-      .catch((error: unknown) => console.error('[artifacts] could not answer an export', error));
-  });
-
   return {
+    export(request) {
+      return queued(jobOf(request), new ExportBudget(EXPORT_BUDGET_MS), request.inspection === true);
+    },
     async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }, options = {}) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
@@ -462,11 +495,10 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
       const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */, ...(options.dialect !== undefined && { dialect: options.dialect }) /* P4-B5 */ };
       const result = await queued(request, time, ownFile === true || options.dialect !== undefined); // P3-H: ownFile; P4-B5: a dialect's file is its own, never the format's cache
-      if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
-      if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
+      if (!result.ok && result.refusal) throw new HostCommandError(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
+      if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new HostCommandError(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.commentAuthorName !== undefined && { commentAuthorName: result.commentAuthorName }), ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };
     },
-    stop,
   };
 }
 

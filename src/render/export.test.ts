@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { HostBridge } from '../../engine-host/tool-server/bridge';
+import { HostBridge } from '../engine-host/tool-server/bridge';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +24,7 @@ vi.mock('node:fs/promises', async (original) => {
   return { ...actual, default: { ...actual, rename }, rename };
 });
 
-import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExportBudget, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
+import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExportBudget, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type StartExportServiceDeps, type ExportSources } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -228,10 +228,10 @@ function fakeHost() {
     asset,
     moveTo: (revision: number) => void (liveRevision = revision),
     emit: (req: MawsArtifactExport) => listeners.forEach((listener) => listener(req)),
-    deps: (registry: ExporterRegistry): ExportServiceDeps => ({
+    deps: (registry: ExporterRegistry): StartExportServiceDeps => ({
       registry,
       root,
-      call: call as ExportServiceDeps['call'],
+      call: call as StartExportServiceDeps['call'],
       onEvent: (name, listener) => {
         expect(name).toBe('maws.artifact.export');
         listeners.push(listener);
@@ -414,7 +414,7 @@ describe('the export service', () => {
   it('refuses the library’s export of an unknown artifact or version (notFound) and of a kind no exporter serves (exportUnavailable)', async () => {
     const host = fakeHost();
     const service = startExportService(host.deps(new ExporterRegistry()));
-    const refusal = (input: CommandInput<'artifacts.export'>) => service.exportForLibrary(input).then(() => null, (error: { error?: unknown }) => error.error);
+    const refusal = (input: CommandInput<'artifacts.export'>) => service.exportForLibrary(input).then(() => null, (error: { ipcError?: unknown }) => error.ipcError);
     expect(await refusal({ artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', format: 'pdf' })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
     expect(await refusal({ artifactId: ID, format: 'pdf', versionId: 3 })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
     expect(await refusal({ artifactId: DOC, format: 'docx' })).toMatchObject({
@@ -439,9 +439,9 @@ describe('the export’s one budget (EXPORT_BUDGET_MS from main’s receipt)', {
   };
   const slowHost = (host: ReturnType<typeof fakeHost>, ms: number) => {
     const deps = host.deps;
-    return (registry: ExporterRegistry): ExportServiceDeps => {
+    return (registry: ExporterRegistry): StartExportServiceDeps => {
       const made = deps(registry);
-      return { ...made, call: ((name: CommandName, input: unknown) => new Promise((resolve) => setTimeout(resolve, ms)).then(() => made.call(name as never, input as never))) as ExportServiceDeps['call'] };
+      return { ...made, call: ((name: CommandName, input: unknown) => new Promise((resolve) => setTimeout(resolve, ms)).then(() => made.call(name as never, input as never))) as StartExportServiceDeps['call'] };
     };
   };
 
@@ -548,7 +548,7 @@ describe('the export’s snapshot and its asset reads (fix wave 1, the review’
     const service = startExportService(host.deps(registry));
     expect(JSON.parse(await readFile((await service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).path, 'utf8'))).toBeNull();
     ref = 'assets/down.png';
-    await expect(service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).rejects.toMatchObject({ error: { code: 'internal', message: expect.stringContaining('the engine host is restarting') } });
+    await expect(service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).rejects.toMatchObject({ ipcError: { code: 'internal', message: expect.stringContaining('the engine host is restarting') } });
   });
 });
 

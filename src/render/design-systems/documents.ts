@@ -18,8 +18,8 @@ import { builtinView, snapshotOfDoc } from '@artifacts/design-system/view';
 import type { DesignSystemExport } from '@artifacts/document/export/design-system';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { DocumentExporter } from '../artifacts/export-document';
-import type { HostDispatch } from '../ipc/router';
+import type { DocumentExporter } from '../export-document';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { systemFacesCss, type DeckSystem } from '../presentations/export';
 
 /** An engine-host command as main sends it. */

@@ -24,9 +24,9 @@ vi.mock('electron', () => ({ BrowserWindow: class {} }));
 // the deck window's case: the window a stand-in, the load helpers and the request filter A's own (the filter's entries
 // followed through its answer)
 const filters = vi.hoisted(() => ({ live: new Set<number>() }));
-vi.mock('../artifacts/capture', async (actual) => ({ ...(await actual<typeof import('../artifacts/capture')>()), openCaptureWindow: vi.fn() }));
-vi.mock('../artifacts/policies', async (actual) => {
-  const real = await actual<typeof import('../artifacts/policies')>();
+vi.mock('../capture', async (actual) => ({ ...(await actual<typeof import('../capture')>()), openCaptureWindow: vi.fn() }));
+vi.mock('../policies', async (actual) => {
+  const real = await actual<typeof import('../policies')>();
   return {
     ...real,
     restrictRequests: (id: number, cancel: (url: string) => boolean) => {
@@ -40,8 +40,8 @@ vi.mock('../artifacts/policies', async (actual) => {
   };
 });
 
-import { openCaptureWindow } from '../artifacts/capture';
-import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
+import { openCaptureWindow } from '../capture';
+import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../export';
 import { readZip } from '../design-systems/read-zip.test-support';
 import { deckSystem, renderAllSlidePngs, registerPresentationExporters, STAGE, systemFacesCss, withDeckWindow, type PresentationExportDeps } from './export';
 

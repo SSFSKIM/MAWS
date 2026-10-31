@@ -91,7 +91,9 @@ export function createSchemeHandler(resolve: SchemeResolver, options: { cors?: b
       const status = range ? 206 : 200;
       if (head || bytes || end < start) {
         await file.close();
-        return new Response(head ? null : (bytes?.subarray(start, end + 1) ?? new Uint8Array()), { status, headers });
+        // a Buffer read from a file is backed by an ArrayBuffer; said so for a DOM lib's BodyInit (the render host's e2e
+        // types this file under one, through its fake endpoint)
+        return new Response(head ? null : ((bytes?.subarray(start, end + 1) ?? new Uint8Array()) as Uint8Array<ArrayBuffer>), { status, headers });
       }
       // The descriptor opened above, so the bytes served are the file that was checked; the stream closes it.
       const stream = Readable.toWeb(file.createReadStream({ start, end })) as ReadableStream<Uint8Array>;

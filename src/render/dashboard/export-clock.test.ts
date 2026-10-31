@@ -10,7 +10,7 @@ import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import type { DocumentExportContext, DocumentExporter, DocumentExportFormat, DocumentExportRequest } from '../artifacts/export-document';
+import type { DocumentExportContext, DocumentExporter, DocumentExportFormat, DocumentExportRequest } from '../export-document';
 import { registerDashboardExporters } from './export';
 
 const ID = '00000000-0000-4000-8000-0000000000e3';

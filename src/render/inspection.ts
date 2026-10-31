@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { loadSettled, openCaptureWindow, settled } from './capture';
 import { printRequestAllowed, type Exporter, type ExporterRegistry, type ExportRequest } from './export';
 import { restrictRequests, type SeamEnv } from './policies';
-import { renderPresentationSlide, type PresentationExportDeps } from '../presentations/export';
+import { renderPresentationSlide, type PresentationExportDeps } from './presentations/export';
 
 export type RenderDocument = (html: string, request: ExportRequest, signal: AbortSignal) => Promise<Buffer>;
 

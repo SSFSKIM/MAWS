@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { BrowserWindow } from 'electron';
-import { loadSettled, openCaptureWindow } from '../artifacts/capture';
-import { printRequestAllowed } from '../artifacts/export';
-import { restrictRequests, type SeamEnv } from '../artifacts/policies';
+import { loadSettled, openCaptureWindow } from '../capture';
+import { printRequestAllowed } from '../export';
+import { restrictRequests, type SeamEnv } from '../policies';
 
 const SCALE = 2;
 const SIDE_MAX = 8_192; // EXPORT_SIZE_MAX: what an offscreen window renders

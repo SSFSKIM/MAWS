@@ -1,8 +1,10 @@
 // P5 O5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §E): main's entry, out/main/index.js (package.json's
 // `main`). It runs the bootstrap every mode of the binary shares, then loads the mode's root by a deferred import: the
-// app's composition (./app, out/main/app.js) today; the render host's root joins it on `--render-host` (O5 M3). ESM
-// imports hoist, so a branch inside one module could not run before the app's imports evaluate: the bootstrap's own
-// imports are kept to what it calls, none of which opens a window, touches the profile or loads a host's native module.
+// app's composition (./app, out/main/app.js), or with `--render-host <profile>` (M3) the render host's root
+// (src/render-host/root.ts, a chunk of this build that nothing of the app's loads), which `mawsd` starts windowless to
+// render. ESM imports hoist, so a branch inside one module could not run before the app's imports evaluate: the
+// bootstrap's own imports are kept to what it calls, none of which opens a window, touches the profile or loads a host's
+// native module.
 import { app } from 'electron';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
@@ -28,7 +30,8 @@ registerStoreSchemes();
 
 // The root loads in this script's own turn, before Electron's `ready`. A root that throws while loading fails as it did
 // when its code was this file's: an uncaught exception, never a quietly rejected promise.
-import('./app').catch((error: unknown) => {
+const root = process.argv.includes('--render-host') ? import('../render-host/root').then(({ runRenderHost }) => runRenderHost()) : import('./app');
+root.catch((error: unknown) => {
   setImmediate(() => {
     throw error;
   });

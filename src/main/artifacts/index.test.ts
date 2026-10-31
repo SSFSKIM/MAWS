@@ -60,7 +60,7 @@ describe('startArtifacts', () => {
     expect(streaming).toEqual([]);
   });
 
-  it('serves maws-artifact: on the window’s session and the capture partition, registers artifacts.export and an html artifact’s PDF and PNG, and listens for the host’s exports (M7)', () => {
+  it('serves maws-artifact: on the window’s session and the capture partition, registers artifacts.export and every kind’s exporters through the render library, and listens for the host’s exports and captures (M7; P5 O5 M3)', () => {
     const register = vi.fn();
     const onEvent = vi.fn(() => () => {});
     const hosts = { dispatch: vi.fn(), postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent };
@@ -70,11 +70,13 @@ describe('startArtifacts', () => {
     expect(sessions.partitions).toContain('maws-capture');
     expect(register.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(['artifacts.open', 'artifacts.export']));
     expect(onEvent).toHaveBeenCalledWith('maws.artifact.export', expect.any(Function));
+    expect(onEvent).toHaveBeenCalledWith('maws.artifact.capture', expect.any(Function));
     expect(started.exporters.get('html', 'pdf')).toMatchObject({ kind: 'html', format: 'pdf' });
     expect(started.exporters.get('html', 'png')).toMatchObject({ kind: 'html', format: 'png' });
-    expect(started.exporters.get('document', 'pdf')).toBeUndefined();
+    expect(started.exporters.get('document', 'pdf')).toMatchObject({ kind: 'document', format: 'pdf' }); // P5 O5 M3: composed with the rest, no longer registered by the app's root
     started.stop();
     expect(started.exporters.get('html', 'pdf')).toBeUndefined();
+    expect(started.exporters.get('document', 'pdf')).toBeUndefined();
   });
 });
 

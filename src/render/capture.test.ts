@@ -69,12 +69,12 @@ const electron = vi.hoisted(() => {
 });
 vi.mock('electron', () => ({ app: electron.app, BrowserWindow: electron.BrowserWindow }));
 
-import { followAppPages } from '../attention';
-import { createNavigationRelay } from '../attention/navigation';
-import { registerAppWindow } from '../windows';
+import { followAppPages } from '../main/attention';
+import { createNavigationRelay } from '../main/attention/navigation';
+import { registerAppWindow } from '../main/windows';
 import { CAPTURE_QUEUE_MS, captureArtifact, startCaptureService } from './capture';
 
-vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
+vi.mock('../main/ipc/router', () => ({ registerMainHandler: vi.fn() }));
 
 const A = 'App-A' as AppSessionId;
 const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';

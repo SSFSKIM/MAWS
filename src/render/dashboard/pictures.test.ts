@@ -18,9 +18,9 @@ let destroyed = false;
 const win = { webContents: contents, setBackgroundColor() {}, setContentSize: (w: number, h: number) => void sizes.push([w, h]), isDestroyed: () => destroyed, destroy: () => void (destroyed = true) };
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
-vi.mock('../artifacts/capture', async (actual) => ({ ...(await actual<typeof import('../artifacts/capture')>()), openCaptureWindow: vi.fn(() => win) }));
-vi.mock('../artifacts/policies', async (actual) => ({ ...(await actual<typeof import('../artifacts/policies')>()), restrictRequests: vi.fn(() => () => {}) }));
-import { openCaptureWindow } from '../artifacts/capture';
+vi.mock('../capture', async (actual) => ({ ...(await actual<typeof import('../capture')>()), openCaptureWindow: vi.fn(() => win) }));
+vi.mock('../policies', async (actual) => ({ ...(await actual<typeof import('../policies')>()), restrictRequests: vi.fn(() => () => {}) }));
+import { openCaptureWindow } from '../capture';
 import { openFigurePictures } from './pictures';
 
 const SVG = (i: number) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 ${200 + i}" width="672" height="${200 + i}"></svg>`;

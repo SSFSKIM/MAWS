@@ -21,7 +21,7 @@ import { MawsArtifactExportAnswerSchema } from '@shared/ipc/schema/maws';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { ExporterRegistry, runExport, startExportService, type ExportRequest, type ExportSources } from '../artifacts/export';
+import { ExporterRegistry, runExport, startExportService, type ExportRequest, type ExportSources } from '../export';
 import type { DeckWindow } from '../presentations/export';
 import { registerDesignExporters, type DesignExportDeps } from './export';
 

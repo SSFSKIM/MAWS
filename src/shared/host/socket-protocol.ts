@@ -189,6 +189,9 @@ export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
 // serves the artifact endpoint on `artifacts.sock`, so an app proxies the `maws-artifact:` scheme there; an app attached
 // to a daemon that lists it not serves the scheme itself, as before.
 export const MACHINE_ARTIFACTS_CAPABILITY = 'machine.artifacts';
+// P5 O5 M3 (Interfaces §A): the render host's hello to `machine.sock` lists it: the client renders, so `mawsd` may post it
+// `render.request` and take its `render.answer` (M4's front).
+export const RENDER_CLIENT_CAPABILITY = 'render.client';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
 // its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
@@ -204,6 +207,7 @@ export const PEER_CAPABILITIES = {
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
+  renderClient: [RENDER_CLIENT_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock
 } as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
 const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53

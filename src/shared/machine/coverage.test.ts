@@ -156,6 +156,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.machineSettings.set.input.patch.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.machineSettings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
+  'commands.render.answer.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data), the render host's answer to the bridge's export (P5 O5 M3)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.appEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.session.applyFlagSettings.input.settings': "the engine's flag-settings keys",

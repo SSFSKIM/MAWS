@@ -15,7 +15,7 @@ import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import { createDocument } from '@artifacts/document/tabs';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import type { CommandName } from '@shared/ipc/schema';
-import { DOCUMENT_EXPORTERS, type DocumentExportContext, type DocumentExporter, type DocumentExportRequest } from '../artifacts/export-document';
+import { DOCUMENT_EXPORTERS, type DocumentExportContext, type DocumentExporter, type DocumentExportRequest } from '../export-document';
 import { governDocumentExporter, type HostCall } from './documents';
 
 const DOC = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';

@@ -13,7 +13,7 @@ import { artifactExportName } from '@shared/maws/tools';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
+import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../export';
 import { registerDesignSystemExporters } from './export';
 import { readZip } from './read-zip.test-support';
 

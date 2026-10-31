@@ -19,7 +19,7 @@ import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import type { DocumentExportContext, DocumentExporter, DocumentExportFormat, DocumentExportRequest } from '../artifacts/export-document';
+import type { DocumentExportContext, DocumentExporter, DocumentExportFormat, DocumentExportRequest } from '../export-document';
 import { registerDashboardExporters, type DashboardExportDeps, type OpenPictures } from './export';
 
 const ID = '00000000-0000-4000-8000-0000000000d1';

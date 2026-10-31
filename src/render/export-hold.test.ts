@@ -13,7 +13,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
 import { existsSync } from 'node:fs';
-import { EXPORT_BUDGET_MS, ExporterRegistry, startExportService, type Exporter, type ExportServiceDeps } from './export';
+import { EXPORT_BUDGET_MS, ExporterRegistry, startExportService, type Exporter, type StartExportServiceDeps } from './export';
 
 const BOARD = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const HOLD = '00000000-0000-4000-8000-0000000000a1';
@@ -49,10 +49,10 @@ function world(run: Exporter['run']) {
   };
   const registry = new ExporterRegistry();
   registry.register({ kind: 'dashboard', format: 'md', run });
-  const deps: ExportServiceDeps = {
+  const deps: StartExportServiceDeps = {
     registry,
     root,
-    call: call as ExportServiceDeps['call'],
+    call: call as StartExportServiceDeps['call'],
     onEvent: (_name, listener) => {
       listeners.push(listener);
       return () => {};
@@ -127,7 +127,7 @@ function restarting(run: Exporter['run'], options: { versionGone?: boolean } = {
   };
   const registry = new ExporterRegistry();
   registry.register({ kind: 'dashboard', format: 'md', run });
-  const deps: ExportServiceDeps = { registry, root, call: call as ExportServiceDeps['call'], onEvent: () => () => {}, answer: async () => ({ ok: true, value: { outcome: 'delivered' } }), print: async () => bytes('%PDF'), hostGeneration: () => generation };
+  const deps: StartExportServiceDeps = { registry, root, call: call as StartExportServiceDeps['call'], onEvent: () => () => {}, answer: async () => ({ ok: true, value: { outcome: 'delivered' } }), print: async () => bytes('%PDF'), hostGeneration: () => generation };
   return { deps, log, restart: () => void (generation += 1), captures: () => captures };
 }
 

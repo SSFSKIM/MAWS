@@ -142,7 +142,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['src/{shared,main,services,preload,engine-host,pty-host,endpoint,mawsd}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd; P5 O3-C: src/services
+          include: ['src/{shared,main,services,preload,engine-host,pty-host,endpoint,mawsd,render,render-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd; P5 O3-C: src/services; P5 O5 M3: src/render, src/render-host
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS, ...DISPLAY_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json

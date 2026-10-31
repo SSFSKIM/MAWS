@@ -23,7 +23,7 @@ import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ip
 import { artifactUrl } from '@shared/artifacts/scheme';
 import { ARTIFACT_SCREENSHOT_MAX_BYTES } from '@shared/maws/tools';
 import { guardFrames, type SeamEnv } from './policies';
-import type { ContentLookup } from '../../render/scheme'; // P5 O5 M2: the scheme's library moved
+import type { ContentLookup } from './scheme'; // P5 O5 M2: the scheme's library moved
 
 export const CAPTURE_PARTITION = 'maws-capture';
 export const CAPTURE_GUARD_MS = 20_000;
@@ -173,13 +173,23 @@ export interface CaptureServiceDeps extends CaptureDeps {
   dispatch(input: CommandInput<'maws.artifact.captured'>): Promise<unknown>;
 }
 
-// Main's side of the capture bridge: every `maws.artifact.capture` the engine host emits is captured (two at a time)
-// and answered. Answers the unsubscribe.
-export function startCaptureService({ onEvent, dispatch, ...deps }: CaptureServiceDeps): () => void {
+// `artifact_screenshot`'s captures, two at a time; a request still waiting for a slot after CAPTURE_QUEUE_MS is answered
+// busy. Never rejects. (P5 O5 M3: what both roots compose; the embedded root answers its host's events through it.)
+export function createCaptureService(deps: CaptureDeps): (request: MawsArtifactCapture) => Promise<MawsArtifactCapturedResult> {
   const slot = slots(CAPTURE_CONCURRENCY, CAPTURE_QUEUE_MS);
   const busy = (): MawsArtifactCapturedResult => ({ ok: false, error: `MAWS was busy with other captures for ${CAPTURE_QUEUE_MS / 1000} s; try again` });
+  return (request) => slot(() => captureArtifact(request, deps), busy);
+}
+
+// Main's side of the capture bridge: every `maws.artifact.capture` the engine host emits is captured and answered.
+// Answers the unsubscribe.
+export function startCaptureService({ onEvent, dispatch, ...deps }: CaptureServiceDeps): () => void {
+  return answerCaptureRequests(createCaptureService(deps), { onEvent, dispatch });
+}
+
+export function answerCaptureRequests(capture: (request: MawsArtifactCapture) => Promise<MawsArtifactCapturedResult>, { onEvent, dispatch }: Pick<CaptureServiceDeps, 'onEvent' | 'dispatch'>): () => void {
   return onEvent('maws.artifact.capture', (request) => {
-    void slot(() => captureArtifact(request, deps), busy)
+    void capture(request)
       .then((result) => dispatch({ appSessionId: request.appSessionId, requestId: request.requestId, result }))
       .catch((error: unknown) => console.error('[artifacts] could not answer a capture', error));
   });

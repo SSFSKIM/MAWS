@@ -5,7 +5,7 @@
 // Each reads the design's state as the export took it (the live revision or a retained version's) through the design
 // model, a legacy file state projected on a temporary copy and never migrated, and materializes what it draws at once
 // (src/artifacts/design/export.ts): the selection and the limits are decided there before any window opens, a refusal
-// raised through A's `CommandFailure` with its `ArtifactRefusal` (`exportTooLarge {board, w, h, maxScale}`, `notFound`,
+// raised through A's `HostCommandError` with its `ArtifactRefusal` (`exportTooLarge {board, w, h, maxScale}`, `notFound`,
 // `invalid`), which A's runner, the library's route and the tool carry to the caller. Then, as C's presentation export
 // does (src/main/presentations/export.ts, reused, not copied): the design system governing it as the engine host names
 // it (a version's pin for a version), its tokens in the `document` medium the workbench draws boards in, with the
@@ -25,9 +25,9 @@ import { deckAssetRefs, deckFacesCss, deckPage } from '@artifacts/slides/export/
 import { applyV2, newDoc } from '@artifacts/yjs';
 import { ipcError } from '@shared/ipc/errors';
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
-import { CommandFailure } from '../ipc/router';
-import type { Exporter, ExportContext, ExporterRegistry, ExportRequest } from '../artifacts/export';
-import type { SeamEnv } from '../artifacts/policies';
+import { HostCommandError } from '@shared/host/runtime';
+import type { Exporter, ExportContext, ExporterRegistry, ExportRequest } from '../export';
+import type { SeamEnv } from '../policies';
 import { deckSystem, measurePass, systemFacesCss, withDeckWindow, type DeckWindow, type PresentationExportDeps } from '../presentations/export';
 
 export interface DesignExportDeps extends PresentationExportDeps {
@@ -36,7 +36,7 @@ export interface DesignExportDeps extends PresentationExportDeps {
 }
 
 /** A refusal the caller can act on, through A's command failure (Decision Log 26). */
-const refused = (refusal: DesignExportRefusal) => new CommandFailure(ipcError('invalid_input', refusal.message, { reason: refusal.reason, data: refusal.data } satisfies ArtifactRefusal));
+const refused = (refusal: DesignExportRefusal) => new HostCommandError(ipcError('invalid_input', refusal.message, { reason: refusal.reason, data: refusal.data } satisfies ArtifactRefusal));
 
 const dataUrl = (bytes: Uint8Array, mime: string) => `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
 const pngUrl = (png: Buffer) => `data:image/png;base64,${png.toString('base64')}`;

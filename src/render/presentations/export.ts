@@ -42,9 +42,9 @@ import { deckTokenValues } from '@artifacts/slides/mirror';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { mimeOf } from '@shared/files/mime';
-import { loadSettled, openCaptureWindow, settled } from '../artifacts/capture';
-import { printRequestAllowed, type Exporter, type ExportContext, type ExporterRegistry, type ExportRequest } from '../artifacts/export';
-import { restrictRequests, type SeamEnv } from '../artifacts/policies';
+import { loadSettled, openCaptureWindow, settled } from '../capture';
+import { printRequestAllowed, type Exporter, type ExportContext, type ExporterRegistry, type ExportRequest } from '../export';
+import { restrictRequests, type SeamEnv } from '../policies';
 import { zipFiles } from '../design-systems/zip';
 
 export interface PresentationExportDeps {

@@ -159,6 +159,36 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
   });
 });
 
+// P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M3; Interfaces §E): main's entry loads one of two roots.
+// The render host's root is a chunk the entry requires only on `--render-host`, deferred, which nothing of the app's
+// requires and which is never an `index-<hash>.js` (the host bundles' name, counted above); the app's root is out/main/
+// app.js, beside the entry, because its modules join `__dirname` to the preloads, the renderer's page and mawsd.js. A
+// module of the app's that a chunk shared with the render host took would read chunks/ for out/main/, so every chunk's
+// `__dirname` join names only a host bundle beside the entry (`?modulePath`'s, which the bundler rewrites for chunks/).
+const ENTRY = join(OUT, 'index.js');
+const APP = join(OUT, 'app.js');
+describe.skipIf(!existsSync(ENTRY) || !existsSync(APP))('main’s entry and its two roots (P5 O5 M3)', () => {
+  const entry = existsSync(ENTRY) ? readFileSync(ENTRY, 'utf8') : '';
+  const rootChunk = /\brequire\("\.\/chunks\/(root-[A-Za-z0-9_-]+\.js)"\)/.exec(entry)?.[1] ?? null;
+
+  it('loads the render host’s root only on --render-host, deferred, from a chunk that is no host bundle’s name', () => {
+    expect(rootChunk).not.toBeNull();
+    expect(rootChunk!.startsWith('index-')).toBe(false);
+    expect(code(entry).filter((line) => line.includes(rootChunk!))).toEqual([expect.stringMatching(/process\.argv\.includes\("--render-host"\) \? Promise\.resolve\(\)\.then\(\(\) => require\("\.\/chunks\/root-/)]);
+    expect([...graphOf(APP)!.keys()]).not.toContain(join(OUT, 'chunks', rootChunk!));
+    const renderHost = graphOf(join(OUT, 'chunks', rootChunk!))!;
+    expect([...renderHost.keys()]).not.toContain(APP);
+    expect([...renderHost.values()].some((text) => /\bfunction composeRender\(/.test(text)), 'the render library in its graph').toBe(true);
+  });
+
+  it('keeps every hand-written __dirname join in out/main/app.js: a chunk joins it only to a host bundle beside the entry', () => {
+    const chunks = readdirSync(join(OUT, 'chunks')).filter((name) => name.endsWith('.js'));
+    const joins = chunks.flatMap((name) => [...readFileSync(join(OUT, 'chunks', name), 'utf8').matchAll(/\bjoin\(__dirname,\s*"([^"]+)"\)/g)].map((match) => `${name}: ${match[1]}`));
+    expect(joins.filter((found) => !/: \.\.\/index-[A-Za-z0-9_-]+\.js$/.test(found))).toEqual([]);
+    expect(readFileSync(APP, 'utf8')).toMatch(/\bjoin\(__dirname, "\.\.\/preload\/index\.js"\)/);
+  });
+});
+
 describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
   it('are a guarded entry: Node builtins and the engine host’s externals at start, never electron, and deferred only chunks beside it', () => {
     expect(guardedEntryProblems({ entry: MAWSD, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: true })).toEqual([]);

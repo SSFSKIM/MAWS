@@ -5,7 +5,7 @@
 // (`claudeExportFiles`) as one zip where the request says. Wired by one fenced line in main.
 import { claudeExportFiles } from '@artifacts/design-system/export';
 import { applyV2, newDoc } from '@artifacts/yjs';
-import type { Exporter, ExporterRegistry } from '../artifacts';
+import type { Exporter, ExporterRegistry } from '../export';
 import { zipFiles } from './zip';
 
 const claudeExporter: Exporter = {
