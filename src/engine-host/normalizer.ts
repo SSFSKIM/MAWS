@@ -9,7 +9,7 @@
 // touch turn, lane and correlation state; `normalizer-controls.ts` projects inbound requests and our answers,
 // `normalizer-system.ts` maps the other system subtypes and `normalizer-support.ts` holds the pure projections.
 import * as z from 'zod';
-import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
+import { ExitCauseSchema, PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import { QUEUE_DROP_REASONS, QUEUE_TRANSITION_ACTIONS, type QueueDropReason, type QueueTransitionAction } from '@shared/graph/events'; // P2-C
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
@@ -596,10 +596,12 @@ export class Normalizer {
         const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' /* C12 */ | 'idle' /* E10 */) : code === 0 && signal === null ? 'unknown' : 'crash';
         // C12: a release carries the budget and the sum it was made at (the exit row's `budget`)
         const budget = reason === 'budget' ? budgetOf(meta.budget) : null;
-        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, ...(typeof meta.lostAskCount === 'number' && meta.lostAskCount > 0 ? { lostAskCount: meta.lostAskCount } : {}) /* E1 */, budget }, main);
+        const cause = ExitCauseSchema.safeParse(meta.cause); // P5 O16 M3b (D58a)
+        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, ...(typeof meta.lostAskCount === 'number' && meta.lostAskCount > 0 ? { lostAskCount: meta.lostAskCount } : {}) /* E1 */, budget, ...(cause.success && { cause: cause.data }) }, main);
         return;
       }
       case 'reconnect':
+        if (meta.phase === 'failed' && ExitCauseSchema.safeParse(meta.cause).success) return; // P5 O16 M3b (D58a): told by the exit's cause
         out.emit({
           kind: 'session.reconnect', phase: meta.phase as 'attempting' | 'reconnected' | 'failed', attempt: typeof meta.attempt === 'number' ? meta.attempt : 1,
           maxAttempts: typeof meta.maxAttempts === 'number' ? meta.maxAttempts : null, trigger: RECONNECT_TRIGGERS.has(meta.trigger as string) ? (meta.trigger as ReconnectTrigger) : 'user' /* C12: as recorded */, reason: stringOrNull(meta.reason),
@@ -623,6 +625,7 @@ export class Normalizer {
       case 'transport_error':
       case 'replay_mismatch':
       case 'init_failed':
+        if (meta.event === 'init_failed' && ExitCauseSchema.safeParse(meta.cause).success) return; // P5 O16 M3b (D58a): told by the exit's cause
         out.emit({
           kind: 'error.raised', scope: meta.event === 'init_failed' ? 'process' : 'transport', message: stringOrNull(meta.message) ?? String(meta.event),
           code: stringOrNull(meta.code) ?? String(meta.event), toolUseId: null, taskId: null, requestId: null,

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
+import { HANDOVER_REINIT_FAILED } from '@shared/graph/enums';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -20,7 +21,7 @@ import { autoResponder, scriptedTransport, type Responder, type ScriptedTranspor
 import { handshakeResponder, INIT_RESPONSE, launchSpec } from '../conformance/session-harness';
 import { JournalWriter } from '../journal';
 import { buildLaunch, RELAY_URL, spawnMeta, type LaunchPlan } from '../launch';
-import { EngineSession, type AdoptedLaunch, type EngineSessionOptions } from '../session';
+import { EngineSession, REINITIALIZE_SLOW, type AdoptedLaunch, type EngineSessionOptions } from '../session';
 import { MemorySessionStateStore } from '../store/memory-session-state-store';
 import { ORPHANED_CALL_TEXT } from '../tool-server/server';
 import { launchRows } from './restore';
@@ -427,6 +428,26 @@ describe('an adopted session, fix wave 1', () => {
       expect((a.outcome.settled as Error).message).toMatch(/re-initialize after the handover failed/);
     });
 
+    // D58a: the end exists only because of the handover: its cause rides beside the exit's reason, and the transcript's
+    // events tell it once, at the exit, with no process error or failed reconnect before it
+    it('the end carries its own cause: on the exit row, the status and process.exited, with no error or failed reconnect told', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => ({ error: 'no session to resume' }) } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => ended(a), 'the ladder');
+      a.transport.exit(null, 'SIGTERM');
+      await a.session.exited;
+      const cause = { kind: HANDOVER_REINIT_FAILED, detail: expect.stringMatching(/^re-initialize after the handover failed: .*no session to resume/) };
+      expect(a.rows().find((row) => (row.frame as { event?: string }).event === 'exit')?.frame).toMatchObject({ reason: 'crash', cause });
+      expect(a.session.status().exit).toMatchObject({ reason: 'crash', cause });
+      expect(a.events.filter((e) => e.kind === 'process.exited')).toEqual([expect.objectContaining({ reason: 'crash', cause })]);
+      expect(a.events.filter((e) => e.kind === 'error.raised' && e.scope === 'process')).toEqual([]);
+      expect(a.events.filter((e) => e.kind === 'session.reconnect' && e.phase === 'failed')).toEqual([]);
+      expect(initFailed(a.rows())).toHaveLength(1); // still journaled, for the record
+    });
+
     it('a closed stream ends it the same way', async () => {
       const plan = planOf();
       predecessor(plan, () => {});
@@ -454,6 +475,27 @@ describe('an adopted session, fix wave 1', () => {
       expect(summary.reason).toBe('crash');
       expect(initFailed(a.rows())).toEqual([expect.stringMatching(/^re-initialize after the handover failed: .*exited/)]);
       expect(a.outcome.settled).toBeInstanceOf(Error);
+    });
+
+    // P5 O16 M3b (the architect's ruling on adopted-not-ready): past the bound with the engine alive, the session says so
+    // once, in a notice; the owner's stop ends it through the ladder
+    it('a slow answer past the bound is told once in a notice, and a stop ends the session through the ladder', async () => {
+      const plan = planOf();
+      predecessor(plan, () => {});
+      const a = adopter(plan, {}, undefined, { responder: { initialize: () => null }, session: { reinitializeMs: 20 } });
+      await a.session.start();
+      a.caughtUp();
+      await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
+      await sleep(120); // several renewals
+      expect(a.events.filter((e) => e.kind === 'notice.posted' && e.key === 'holder:reinitialize-slow').map((e) => e.kind === 'notice.posted' && e.text)).toEqual([REINITIALIZE_SLOW]);
+      const stopped = a.session.stop('stop');
+      await until(() => a.transport.calls.length > 0, 'the ladder');
+      a.transport.exit(null, 'SIGTERM');
+      await stopped;
+      const summary = await a.session.exited;
+      expect(summary.reason).toBe('stop');
+      expect(initFailed(a.rows())).toEqual([]); // a stop, not a failure: no cause, nothing resumed
+      expect(a.session.status().exit?.cause).toBeUndefined();
     });
 
     it('a slow answer is waited for past the bound with the process alive, never killed or cancelled', async () => {

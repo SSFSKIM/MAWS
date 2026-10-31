@@ -4,6 +4,7 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
 import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
+import { HANDOVER_REINIT_COPY } from './copy';
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
@@ -1065,3 +1066,29 @@ describe('cross-session rows (E7)', () => {
   });
 });
 // E7 end
+
+// P5 O16 M3b (D58a): an adopted engine whose re-initialize after the handover failed is ended and resumed at once; the
+// transcript tells it as one notice row keyed on the exit's cause, in place of the adoption's open reconnect, with no
+// red session end; the resume's own rows follow as any resume's
+describe('the end of an adopted engine whose re-initialize failed', () => {
+  const CAUSE = { kind: 'handover-reinit-failed', detail: 're-initialize after the handover failed: the process exited before it answered' } as const;
+  it('is one notice row in place of the adoption’s reconnect, never a red end', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Done');
+    b.end(['u1']);
+    b.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'host_restart', reason: null });
+    b.emit('process.exited', { code: null, signal: 'SIGTERM', reason: 'crash', lostAttentionCount: 0, budget: null, cause: CAUSE });
+    const loose = rows(b.events).filter((row) => row.turnId === null && row.kind === 'error');
+    expect(loose.map((row) => row.kind === 'error' && { severity: row.severity, text: row.text, scope: row.scope })).toEqual([
+      { severity: 'notice', text: HANDOVER_REINIT_COPY, scope: 'exit' },
+    ]);
+  });
+
+  it('without an open reconnect is the same one row; a crash without the cause stays the red end', () => {
+    const b = builder();
+    b.emit('process.exited', { code: null, signal: 'SIGTERM', reason: 'crash', lostAttentionCount: 0, budget: null, cause: CAUSE });
+    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    expect(rows(b.events).filter((row) => row.kind === 'error').map((row) => row.kind === 'error' && row.severity)).toEqual(['notice', 'error']);
+  });
+});

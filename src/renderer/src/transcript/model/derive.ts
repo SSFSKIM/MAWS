@@ -18,7 +18,7 @@ import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
-import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
+import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
@@ -1607,6 +1607,15 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         // C4's synthesised end of a holder-less transcript whose last turn never ended (disk-derived, reason unknown)
         // closed that turn in the reducer; nobody witnessed an exit, so it is no notice. C3's exits carry a seq.
         if (event.reason === 'unknown' && event.seq === null) break;
+        // P5 O16 M3b (D58a): an adopted engine whose re-initialize after the handover failed, resumed at once: one notice,
+        // keyed on the cause alone, in place of the adoption's reconnect still open, never a red end
+        if (event.cause !== undefined) {
+          const notice: RowOf<'error'> = { id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'notice', text: HANDOVER_REINIT_COPY, attempt: null, scope: 'exit', lostAttentionCount: null };
+          if (episode) rows[episode.index] = notice;
+          else rows.push(notice);
+          episode = null;
+          break;
+        }
         rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: event.reason === 'crash' ? 'error' : 'notice', text: processExitCopy(event.reason, event.lostAttentionCount, event.lostAskCount /* E1 */), attempt: null, scope: 'exit', lostAttentionCount: event.lostAttentionCount });
         break;
       case 'permission.requested':

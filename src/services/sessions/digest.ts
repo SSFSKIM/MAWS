@@ -212,7 +212,8 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       if (event.reason === 'budget' && event.budget !== null) return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, reason: 'budget', limitKiB: event.budget.limitKiB } };
       if (event.reason === 'idle') return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, reason: 'idle', limitKiB: null } }; // E10
       // The broker retires every pending item on exit (they become one `interrupted` attention item).
-      return { ...d, phase: event.reason === 'crash' ? 'failed' : 'exited', activity: null, pendingRequests: 0 };
+      // P5 O16 M3b (D58a): a crash whose cause is the handover's failed re-initialize is resumed at once: no failure
+      return { ...d, phase: event.reason === 'crash' && event.cause === undefined ? 'failed' : 'exited', activity: null, pendingRequests: 0 };
     case 'session.reconnect':
       return event.phase === 'attempting' ? { ...d, activity: 'Reconnecting' } : d;
     case 'boundary.compaction':

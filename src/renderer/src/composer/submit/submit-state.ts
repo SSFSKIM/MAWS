@@ -44,6 +44,10 @@ export interface SubmitDecision {
 }
 
 export const STARTING = 'Session is starting…';
+// P5 O16 M3b: a session a successor engine host adopted, waiting for its engine's re-initialize (as long as the step the
+// handover found it in may take)
+export const REATTACHING = 'Re-attaching to the engine after the update…';
+export const reattaching = (status: EngineSessionStatus | null): boolean => status?.process === 'initializing' && status.holder?.adopted === true;
 export const MESSAGE_HELD = 'Your first message is with the setup above';
 export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
@@ -102,13 +106,13 @@ export function submitState(i: SubmitInput): SubmitDecision {
     const label = mode === 'bash' ? 'Run' : mode === 'memory' ? 'Save to memory' : 'Send';
     if (i.availability === 'archived') return decide('send', label, false, ARCHIVED);
     if (i.availability === 'foreign_held') return decide('send', label, false, `Held by ${i.heldBy ?? 'another process'}`);
-    if (i.availability === 'starting') return decide('send', 'Starting…', !empty, null, SENDS_WHEN_STARTED);
+    if (i.availability === 'starting') return decide('send', reattaching(status) ? 'Re-attaching…' : 'Starting…', !empty, null, SENDS_WHEN_STARTED);
     return decide('send', label, !empty, null, STARTS);
   }
   // P2-A end
   if (status === null || status.process !== 'ready') {
     const starting = status !== null && (status.process === 'starting' || status.process === 'initializing');
-    return decide('send', 'Send', false, starting ? STARTING : ENDED);
+    return decide('send', 'Send', false, reattaching(status) ? REATTACHING : starting ? STARTING : ENDED);
   }
   const busy = isBusy(status, queue.entries);
   if (mode === 'bash') return decide('send', 'Run', !empty, null, busy ? RUNS_NOW : null);

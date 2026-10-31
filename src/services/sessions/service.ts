@@ -13,6 +13,8 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
+import { HANDOVER_REINIT_FAILED } from '@shared/graph/enums'; // P5 O16 M3b
+import type { EngineSessionStatus } from '@shared/engine/status'; // P5 O16 M3b
 import type { PtyId } from '@shared/ipc/schema/pty';
 import type { SessionRecord } from '@shared/graph/session';
 import { worktreeDirName } from '@shared/sessions/worktree';
@@ -117,6 +119,7 @@ export class SessionService {
   // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
   private readonly rewinds: RewindNotes;
   private offStatus: (() => void) | null = null;
+  private readonly handoverResumes = new Set<string>(); // P5 O16 M3b (D58a): the launch ids already resumed after a failed re-initialize
   private readonly now: () => string;
   private readonly log: (message: string) => void;
 
@@ -161,7 +164,10 @@ export class SessionService {
   // write counted in `work`; the waits for the environment and for the host are not (nothing is written across them,
   // and a host that never streams would hold a release forever).
   private async boot(): Promise<void> {
-    this.offStatus = this.deps.host.onEvent('session.status', ({ status }) => this.rewinds.observe(status)); // P5 O3-D M4: a launch's end through end_session
+    this.offStatus = this.deps.host.onEvent('session.status', ({ status }) => {
+      this.rewinds.observe(status); // P5 O3-D M4: a launch's end through end_session
+      this.resumeAfterHandover(status); // P5 O16 M3b
+    });
     const env = await this.deps.env;
     if (this.disposed) return;
     this.setup = {
@@ -805,6 +811,23 @@ export class SessionService {
     bindTrust: (intent, locationChanged, decision) => this.bindTrust(intent, locationChanged, decision),
     forgetQuietly: (appSessionId) => this.forgetQuietly(appSessionId),
   };
+
+  // P5 O16 M3b (D58, D58a): an adopted engine whose re-initialize after the handover failed was ended through the ladder
+  // only because of the handover, so its session is resumed at once, as resume.ts retries `no_output` once: one resume
+  // per failed launch (the resumed launch is no adoption, so its own end never carries the cause), and a resume that
+  // fails is told as any failed acquisition, never retried
+  private resumeAfterHandover(status: EngineSessionStatus): void {
+    if (status.exit?.cause?.kind !== HANDOVER_REINIT_FAILED || this.handoverResumes.has(status.launchId)) return;
+    this.handoverResumes.add(status.launchId);
+    const { appSessionId } = status;
+    this.log(`resuming ${appSessionId}: ${status.exit.cause.detail}`);
+    void this.work.track(
+      this.acquire(appSessionId, 'resume').then(
+        (outcome) => void (outcome.status !== 'ready' && this.log(`the resume of ${appSessionId} after the handover ended ${outcome.status}`)),
+        (error: unknown) => this.log(`the resume of ${appSessionId} after the handover failed: ${error instanceof Error ? error.message : String(error)}`),
+      ),
+    );
+  }
 
   // ---- acquisition (P2-A, X16; the execution document §5.3) ---------------------------------------------------------
 

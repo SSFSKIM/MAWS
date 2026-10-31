@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'; // P5 O16 M3
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
+import { HANDOVER_REINIT_FAILED, type AutoModeRefusalCode, type ExitCause, type PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
 import type { CronRecord, QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
@@ -167,6 +167,8 @@ export interface EngineSessionOptions {
 // under the load of the handover itself, well above a fresh initialize's 120 s long class. Expiry with the process alive
 // only logs and keeps waiting; a definite failure (an error answer, the output closed, the process gone) ends it.
 export const ADOPTED_REINITIALIZE_MS = 600_000;
+// P5 O16 M3b: told once, at the first renewal, so a session the handover found deep in a step says why it waits
+export const REINITIALIZE_SLOW = 'The engine has not answered since the update; it is still running and may be in a long step. Stop ends it.';
 
 // P5 O16 M3a fix wave 1: why an adoption did not become a served session. `abandoned`: it failed before its first
 // write (the fold or the queue's restore), so its session host and engine were left running for the next start.
@@ -259,6 +261,7 @@ export class EngineSession {
   private hooksBeforeAnswer: Set<string> | null = null; // null until the first hook frame
   private hookBoundMs = SESSION_START_HOOK_MS; // debt wave 6: the launch's configured bound once read
   private initFailed = false;
+  private exitCause: ExitCause | null = null; // P5 O16 M3b (D58a): the adopted re-initialize's failure, carried by the end
   private journalClosed = false;
   private lastEventSeq = 0;
   private lastStatusSignature = '';
@@ -1108,11 +1111,14 @@ export class EngineSession {
   // alive, the wait is logged and its deadline renewed: a slow engine is never a failed one.
   private awaitReinitialize(client: ControlClient, requestId: RequestId, ms: number): void {
     const started = Date.now();
+    let told = false;
     const renew = () => {
       this.reinitializeWait = setTimeout(() => {
         this.reinitializeWait = null;
         if (this.handshakeDone || this.processState !== 'initializing') return;
         this.log(`re-initialize after the handover unanswered after ${Math.round((Date.now() - started) / 1000)} s; the engine is alive, still waiting`);
+        if (!told) this.notice('holder:reinitialize-slow', REINITIALIZE_SLOW); // P5 O16 M3b: once
+        told = true;
         client.extendDeadline(requestId, 2 * ms, 'the last renewal of the adopted re-initialize');
         renew();
       }, ms);
@@ -1923,9 +1929,12 @@ export class EngineSession {
     void this.terminate(false);
   }
 
+  // P5 O16 M3b (D58a): the end's own cause rides its rows (init_failed, the failed reconnect, the exit), so the
+  // normaliser tells it once, at the exit, and the session service resumes it
   private reinitializeFailed(cause: string, code: string | null): void {
     const message = `re-initialize after the handover failed: ${cause}`;
     this.log(message);
+    this.exitCause = { kind: HANDOVER_REINIT_FAILED, detail: message };
     this.writeInitFailed(message, code);
     this.settleAdoption(new AdoptionFailed(message, false));
   }
@@ -1933,8 +1942,9 @@ export class EngineSession {
   private writeInitFailed(message: string, code: string | null): void {
     this.initFailed = true;
     const detail = this.stderrTail.length > 0 ? `${message}\n${this.stderrTail.join('\n')}` : message;
-    this.record('meta', { event: 'init_failed', message: detail, code });
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', ...this.attempt, trigger: this.reconnectTrigger, reason: detail });
+    const cause = this.exitCause ? { cause: this.exitCause } : {}; // P5 O16 M3b (D58a)
+    this.record('meta', { event: 'init_failed', message: detail, code, ...cause });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', ...this.attempt, trigger: this.reconnectTrigger, reason: detail, ...cause });
   }
 
   // The process's one ladder (session-ladder.ts); with no process yet it answers the stop result at once.
@@ -1976,11 +1986,11 @@ export class EngineSession {
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
     const release = reason === 'budget' ? this.release : null; // C12
     try {
-      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, ...(lostAsks > 0 ? { lostAskCount: lostAsks } : {}), peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+      this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, ...(lostAsks > 0 ? { lostAskCount: lostAsks } : {}), peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */, ...(this.exitCause && { cause: this.exitCause }) /* P5 O16 M3b */ });
     } catch (error) {
       this.log(`exit not journaled: ${messageOf(error)}`);
     }
-    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release };
+    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release, ...(this.exitCause && { cause: this.exitCause }) /* P5 O16 M3b */ };
     this.settleAdoption(new AdoptionFailed(`the adopted process exited (${reason}) before it was ready`, false)); // fix wave 1: no-op once ready
     if (this.observed) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status
     this.setProcess('exited');

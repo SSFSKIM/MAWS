@@ -109,6 +109,8 @@ describe('digest fold', () => {
   it('ends on process exit, failed on a crash', () => {
     expect(run([ev('turn.started', {}), ev('process.exited', { reason: 'quit' })])).toMatchObject({ phase: 'exited', activity: null });
     expect(run([ev('process.exited', { reason: 'crash' })]).phase).toBe('failed');
+    // P5 O16 M3b (D58a): the end of an adopted engine whose re-initialize failed is no failure: it is resumed at once
+    expect(run([ev('process.exited', { reason: 'crash', cause: { kind: 'handover-reinit-failed', detail: 'closed' } })]).phase).toBe('exited');
   });
 
   it('takes context and cost samples', () => {

@@ -300,6 +300,8 @@ export const RELEASED_COPY = 'Released to stay under the memory budget · sendin
 export const IDLE_RELEASED_COPY = 'Stopped while idle · sending resumes it'; // E10: the supervisor's idle release (neutral: it also runs with MAWS open after an update)
 export const RESUMING_COPY = 'Resuming…';
 export const RESUMED_COPY = 'Resumed';
+// P5 O16 M3b (D58a): the end of an adopted engine whose re-initialize after the handover failed, resumed at once
+export const HANDOVER_REINIT_COPY = 'The engine could not be re-attached after the update; the session was resumed.';
 // C12 end
 // E1: `lostAskCount` of the lost were blocking `maws` asks, named questions; the rest stay approvals.
 const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {

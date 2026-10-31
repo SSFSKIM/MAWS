@@ -150,6 +150,14 @@ describe('a session with a record and no ready process: its availability decides
     expect(decided({ availability: 'starting', status: null, empty: true })[1]).toBe(false);
   });
 
+  // P5 O16 M3b: a session a successor engine host adopted waits for its engine's re-initialize, which can take as long
+  // as the step it was in; it says so, and a Send joins it as a start's does
+  it('re-attaching: an adopted session not yet ready reads Re-attaching…, and Send joins it', () => {
+    const adopting = { ...idle, process: 'initializing' as const, holder: { pid: 4100, holderId: 'L-1', adopted: true } };
+    expect(decided({ availability: 'starting', status: adopting })).toEqual(['Re-attaching…', true, null, 'Sends once the session has started', false]);
+    expect(row({ status: adopting, availability: null })).toEqual(['send', 'Send', false, 'Re-attaching to the engine after the update…', false]);
+  });
+
   it('foreign_held: disabled with the holder’s words', () => {
     expect(decided({ availability: 'foreign_held', heldBy: 'terminal · 42', status: null })).toEqual(['Send', false, 'Held by terminal · 42', null, false]);
   });

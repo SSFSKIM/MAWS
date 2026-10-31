@@ -2,7 +2,7 @@
 // status"): what `session.status` and `engine.sessions` answer and C8's Session info and C12's budget read, and
 // `toSessionRecordPatch`, what C4's index applies from a status. Strict: an app shape.
 import * as z from 'zod';
-import { AUTO_MODE_REFUSAL_CODES, PermissionModeSchema } from '../graph/enums';
+import { AUTO_MODE_REFUSAL_CODES, ExitCauseSchema, PermissionModeSchema } from '../graph/enums';
 import { AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema, TaskIdSchema } from '../graph/ids';
 import type { SessionRecord } from '../graph/session';
 import { EffortSchema } from './launch-spec';
@@ -24,6 +24,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   exit: z.strictObject({
     code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */, 'idle' /* E10 */]), at: z.string(),
     release: z.strictObject({ limitKiB: z.number().int(), totalKiB: z.number().int() }).nullable(), // C12: the budget and the sum at a release; non-null exactly when the reason is `budget` (E10: an `idle` release, the supervisor's, has none)
+    cause: ExitCauseSchema.optional(), // P5 O16 M3b (D58a): an adopted engine's failed re-initialize after the handover
   }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']), // session_state_changed; 'unknown' before the first frame
   activity: z.enum(['compacting', 'requesting']).nullable(), // system/status
