@@ -331,6 +331,14 @@ None required for execution. One taste call the architect may revisit after M3: 
   Evidence: a probe on git 2.55 with `*.o` ignored listed `build/` and `build/a.o`, `onlyign/`, `onlyign/deep/`, `onlyign/deep/z.o`; `src/services/git/ignored.test.ts`.
 - Observation (M1): the files service's watch is non-recursive (`src/services/files/watch.ts`), so after M1 no recursive `fs.watch` remains in `src/` outside the two watchers' platform default.
   Evidence: the M1 executor's grep over `src/`.
+- Observation (M1, the VM measure, 2026-10-31): three of §G's bounds miss; every watch count, burst, store and exhaustion bound holds. Host `dc-o3ewatch-b9be` (GCE e2-custom-4-8192, us-west1-b, Ubuntu 24.04.5, kernel 7.0.0-1014-gcp, Node 24.22.2), deleted after the run. Run 2's lines (after `0bb46b2af`, the burst directory renamed so the kernel's `.*` ignore rule does not prune it):
+  `MAWS (prune off): watches 6620 (bound 7100) · rss +52.2 MiB (bound 20: miss) · walk lag 3 ms`;
+  `MAWS: watches 1124 (bound 1300) · rss +1.4 MiB · walk lag 12 ms · burst 2000: lag 44/59 ms, named in 192 ms · latency p50/p95 root 0.31/0.57 (create) 0.27/0.32 (modify), deepest 0.29/0.42 (create) 0.35/88.64 (modify: miss, bound 5), largest 0.29/0.39 (create) 0.28/0.36 (modify)`;
+  `linux: watches 6364 (bound 7700) · rss +10.7 MiB · walk lag 35 ms (run 1: 93 ms, a miss) · burst 2000: lag 71/42 ms, named in 218 ms · latency p95 ≤ 0.56 ms everywhere`;
+  `store: watches 3 (expected 3) · rss -3.8 MiB · latency p50/p95 1.32/1.74 ms · rescan of projects/ 279 ms CPU (5,200 transcripts)`;
+  exhaustion at `max_user_watches` 600: `ENOSPC` at a directory under `e2e/fixtures/connectors-direct/…`, the root polling, `git.changed` 4,117 ms after a write; at `max_user_instances` 3: `EMFILE` at the root's first watch, polling, `git.changed` in 4,256 ms.
+  The misses, as diagnosed on the VM: (1) RSS growth over 20 MiB whenever a tree is walked in a fresh process (MAWS prune on +27, the kernel +30 to 32 in fresh processes; the passing arms ran after others in one process, where O3-G ran one process per measure); the live data is 1.4 to 5.7 MiB of heap and about 12 MiB native for the handles, the rest committed heap from the walk's churn; `readdir({withFileTypes})` in a plain loop for `for await` over `opendir` read +31 MiB and walked in 0.67 s for 1.55 s. (2) One modify stall of about 80 ms per run at one MAWS site, not reproducible outside the measure (2.3 ms peak under a `GitService` over the tree alone), read as a collection of the prior arm's churn (unconfirmed). (3) The kernel's walk lag is `gitIgnored`'s: its `ls-files -c -o` output (3.9 MB, about 80k paths) split in one turn holds the loop 44 ms; the tree alone walks the kernel at 2 to 4 ms.
+  Evidence: `.doperpowers/sde/2026-10-30-p5-o3-e-checkout/watch-tree-vm.json` (gitignored; run 2 and the exhaustion arms) and the M1 report's transcript; the lines above are its copy.
 
 ## Decision Log
 
