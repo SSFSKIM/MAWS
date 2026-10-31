@@ -23,7 +23,7 @@ import type { SessionTarget } from './sources';
 export type Resolved =
   /**
    * `unavailable` (P5 O7 M4, fix wave 1): placed by its record's engine session, but the request can't run against it
-   * now (the engine host runs another engine session for it, or can't answer). The refusal is the caller's only once
+   * now (the engine host runs another engine session for it). The refusal is the caller's only once
    * they are known to stand on the recorded engine session, so a caller below the floor hears `grade` for a session
    * that lags as for one that doesn't exist.
    */
@@ -36,7 +36,8 @@ export type Resolved =
 /**
  * How a lane B session is placed: the machine as the request reads it (on behalf of its asker), the log a spine's failure
  * is said to, and whether the engine session placed is checked here against the live row (P5 O7 M2). `live: false` only
- * where the executor checks it itself, against the status it reads anyway (an engine host act's context, actions.ts).
+ * where the executor checks it itself, against the status it reads anyway (an engine host act's context, actions.ts);
+ * the live row is read either way, so an engine host that can't answer meets every request alike (P5 O7 M4, fix wave 2).
  */
 export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean };
 
@@ -72,13 +73,18 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  * appSessionId: where the host holds a live row for the session, its engine session must be the recorded one, else the
  * index lags a change of engine session (a `/clear`), so a member's rank on one engine session never reaches another.
  *
- * P5 O7 M4 (fix wave 1): a session with a recorded engine session is placed on it whatever the live check finds. A
- * failed check (the host runs another engine session for it, or can't answer) is the placement's `unavailable` flag,
- * which authorization answers only to a caller who stands at the floor on the recorded engine session, until the index
- * catches up; a caller who doesn't is `grade`, as for any session they hold nothing on, whichever engine session they
- * own (the record is what the machine says the session is, and a caller below it learns nothing of a lag). Without a
- * recorded engine session the live row is the only placement, and an engine host that can't answer is `unavailable`
- * for every such session, known or not, which a caller may try again.
+ * P5 O7 M4 (fix waves 1 and 2): what placement answers before anyone's rank is read must be the same for every id,
+ * so it says nothing of whether a session exists or lags:
+ *   - A spine that fails, or an engine host that can't answer the live read (`host_unavailable`, `timeout`), is
+ *     `unavailable` for every lane B id, recorded or not, on every path (an engine host act's too: the live row is read
+ *     for it as for any request). Both are the machine's condition, not a session's; a caller may try again, and a held
+ *     subscription's re-check retries rather than ending.
+ *   - With the host answering, a session with a recorded engine session is placed on it whatever the live row runs. A
+ *     live engine session that isn't the recorded one is the placement's `unavailable` flag, which authorization
+ *     answers only to a caller who stands at the floor on the recorded engine session, until the index catches up; a
+ *     caller who doesn't is `grade`, as for any session they hold nothing on, whichever engine session they own (the
+ *     record is what the machine says the session is, and a caller below it learns nothing of a lag).
+ *   - Without a recorded engine session the live row is the only placement, else `unknown` (`grade`).
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
@@ -89,11 +95,10 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
     return unavailable;
   }
   const recorded = field(record.value, 'engineSessionId');
-  const status = !isId(recorded) || live ? await dispatch('engine-host', 'session.status', { appSessionId }) : null;
-  const hostAway = status !== null && !status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout');
-  const running = status?.ok === true ? field(status.value, 'engineSessionId') : undefined;
-  if (isId(recorded)) return hostAway || (status?.ok === true && running !== recorded) ? { ...placed(recorded), unavailable: true } : placed(recorded);
-  if (hostAway) return unavailable;
+  const status = await dispatch('engine-host', 'session.status', { appSessionId });
+  if (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout')) return unavailable;
+  const running = status.ok ? field(status.value, 'engineSessionId') : undefined;
+  if (isId(recorded)) return live && status.ok && running !== recorded ? { ...placed(recorded), unavailable: true } : placed(recorded);
   return isId(running) ? placed(running) : { kind: 'unknown' };
 }
 

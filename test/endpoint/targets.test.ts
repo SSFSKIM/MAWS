@@ -95,6 +95,28 @@ describe('lane B placement', () => {
     expect(await call(a, 'session.queue.list', { appSessionId: 'app-2' })).toMatchObject({ ok: false, error: { code: 'unavailable' } });
   });
 
+  // P5 O7 M4 fix wave 2: the host's absence is the machine's condition, said alike for every id before anyone's rank, so a
+  // caller who holds nothing tells an indexed session from an absent id by no answer: not a call's, a subscription's or an
+  // engine host act's (whose placement reads the live row too).
+  it('answers a caller below view alike for an indexed session and an absent id while the engine host can’t answer', async () => {
+    const f = await startEndpoint(org, started);
+    const s = f.host.add('app-1');
+    f.spine.set('app-1', s.engineSessionId);
+    owned(f, 'app-1', s.engineSessionId!);
+    const b = await openRemote(f, org.b1, org.B);
+    f.host.fail('session.status');
+    const answers = async (app: string) => {
+      const read = await call(b, 'session.queue.list', { appSessionId: app });
+      const sub = await subscribe(b, `s-${app}`, { lane: 'B', id: app });
+      const send = await act(b, b.device.action({ machine: f.ref, action: 'session.send', session: app, context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: app, content: 'hi' } }));
+      return [(read.error as { code: string }).code, sub.t, sub.reason, send];
+    };
+    const indexed = await answers('app-1');
+    expect(indexed).toEqual(['unavailable', 'ended', 'unavailable', 'unavailable']);
+    expect(await answers('app-absent')).toEqual(indexed);
+    expect(f.host.runs).toEqual([]);
+  });
+
   it('places a `machine` act on a released session, and the query of it, by the record', async () => {
     const f = await startEndpoint(org, started);
     f.spine.set('app-r', 'eng-r');
