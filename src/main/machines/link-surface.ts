@@ -23,7 +23,7 @@ const LINK_RULES = {
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
-  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org'],
+  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */],
   // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app
   names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request'],
 };
