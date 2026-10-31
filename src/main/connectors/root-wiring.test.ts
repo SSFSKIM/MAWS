@@ -94,7 +94,7 @@ describe('the application root’s connector composition', () => {
     // the real startup's expected diagnostics: its build line, and the doubled index's unavailability as two services report it
     const banner = captureConsole('log', /^\[main\] MAWS /);
     const unavailable = captureConsole('warn', /^\[(owner|library)\] /);
-    await import('../index');
+    await import('../app');
     await state.ready!();
     expect(banner.lines()).toHaveLength(1);
     expect(unavailable.lines()).toEqual([
