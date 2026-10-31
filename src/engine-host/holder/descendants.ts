@@ -5,7 +5,8 @@
 // question 4), one direct child of `claude` whose command line is the server's as the kernel ran it (`expectedArgv`).
 // A server's binding lasts while that process lives as a child of `claude`; one gone (or re-parented) frees the server
 // for its next process, and a second process matching a server while the first lives is work. The bridge's binding is
-// the process first found at the named pid, never another one there after it, until a hello names another pid.
+// the process first found at the named pid as a child of `claude` (M0 Q4); once it is gone or re-parented, neither it nor
+// another process at that pid is exempt again, until a hello names another pid.
 //
 // D52: the subtree of a bound process is infrastructure too (npx, uvx and their like run the real server as a child of
 // the registered process); the bound process is the only way in, never a process whose parent merely looks like
@@ -108,17 +109,25 @@ export function matchesArgv(command: string, argv: readonly string[]): boolean {
   return head !== '' && !head.includes(' ') && basename(head) === basename(argv0);
 }
 
-interface Identity { pid: number; start: string }
-const same = (identity: Identity, p: TreeProcess | undefined): p is TreeProcess => p !== undefined && p.start === identity.start;
+interface Identity { pid: number; start: string; ppid: number }
+const same = (identity: Identity, p: TreeProcess | undefined): p is TreeProcess => p !== undefined && p.start === identity.start && p.ppid === identity.ppid;
 
-// One engine's registered infrastructure across reads: each registration bound to one process by identity.
+// One engine's registered infrastructure across reads: each registration bound to one process by identity (its pid, its
+// start time and its parent, `claude`), from the read that finds it as claude's child. Reads are numbered at their start
+// (`read`); one older than the newest applied (an asynchronous sample whose `ps` began before a synchronous step's) is a
+// view of the past: it neither binds nor retires anything and is not counted (null), so its caller keeps what it has.
 export class Infrastructure {
   private readonly servers = new Map<number, Identity>(); // a server's index in the registration -> its process
   private serversKey = '';
   private readonly bridges = new Map<number, Identity | null>(); // a named pid -> the process first found there (null: gone)
+  private newest = -Infinity;
 
-  // The processes under `claudePid` that are its work.
-  count(tree: ProcessTree, claudePid: number, registered: Registered): number {
+  // The processes under `claudePid` that are its work; null for a read older than the newest applied.
+  count(tree: ProcessTree, claudePid: number, registered: Registered, read?: number): number | null {
+    if (read !== undefined) {
+      if (read < this.newest) return null;
+      this.newest = read;
+    }
     return walk(tree, claudePid, this.bind(tree, claudePid, registered));
   }
 
@@ -129,9 +138,10 @@ export class Infrastructure {
       const p = tree.get(pid);
       const identity = this.bridges.get(pid);
       if (identity === undefined) {
-        if (p !== undefined) this.bridges.set(pid, { pid, start: p.start }); // bound at the first read that finds it
+        if (p !== undefined && p.ppid === claudePid) this.bridges.set(pid, { pid, start: p.start, ppid: p.ppid }); // bound at the first read that finds it under claude
+      } else if (identity !== null && !same(identity, p)) {
+        this.bridges.set(pid, null); // gone or re-parented: neither it nor a process at its pid later is the bridge
       }
-      else if (identity !== null && !same(identity, p)) this.bridges.set(pid, null); // gone: a process at its pid later is not it
       if (this.bridges.get(pid) && p !== undefined) bound.add(pid);
     }
     const key = JSON.stringify(registered.mcpCommands);
@@ -141,7 +151,7 @@ export class Infrastructure {
     }
     for (const [i, identity] of this.servers) {
       const p = tree.get(identity.pid);
-      if (!same(identity, p) || p.ppid !== claudePid || p.stat.startsWith('Z')) this.servers.delete(i);
+      if (!same(identity, p) || p.stat.startsWith('Z')) this.servers.delete(i);
       else bound.add(p.pid);
     }
     const children = [...tree.values()].filter((p) => p.ppid === claudePid && !p.stat.startsWith('Z'));
@@ -149,7 +159,7 @@ export class Infrastructure {
       if (this.servers.has(i)) return;
       const p = children.find((child) => !bound.has(child.pid) && matchesArgv(child.command, argv));
       if (p === undefined) return;
-      this.servers.set(i, { pid: p.pid, start: p.start });
+      this.servers.set(i, { pid: p.pid, start: p.start, ppid: p.ppid });
       bound.add(p.pid);
     });
     return bound;
@@ -158,7 +168,7 @@ export class Infrastructure {
 
 // The processes under `claudePid` that are its work, from a single read (no binding carried over).
 export function countWork(tree: ProcessTree, claudePid: number, registered: Registered): number {
-  return new Infrastructure().count(tree, claudePid, registered);
+  return new Infrastructure().count(tree, claudePid, registered)!;
 }
 
 // Every descendant but the bound processes and their subtrees, and but zombies. A `claudePid` the tree does not list has

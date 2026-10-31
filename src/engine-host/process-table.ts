@@ -138,6 +138,7 @@ export class ProcessTable {
   private readonly gate: Gate | null;
   private readonly psSync: () => string;
   private lastPs = '';
+  private reads = 0; // each tree read numbered at its start, so a late one cannot undo a newer one's bindings (D52)
   private readonly budgetReleases = new WeakMap<EngineSession, { limitKiB: number; totalKiB: number }>();
   // O16 M5 end
 
@@ -364,7 +365,8 @@ export class ProcessTable {
     if (pid === null) return 0;
     let count: number | 'unreadable';
     try {
-      count = this.countUnder(session, pid, parseTree(this.psSync()));
+      const read = ++this.reads;
+      count = this.countUnder(session, pid, parseTree(this.psSync()), read) ?? 0; // synchronous: never older than another
     } catch (error) {
       this.log(`the process tree under ${session.status().appSessionId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
       count = 'unreadable';
@@ -375,12 +377,13 @@ export class ProcessTable {
 
   // Registered infrastructure, bound by identity across the row's reads (D52): the bridge child the row's observer named,
   // and the launch's stdio MCP servers, asked of the engine once when the tree first shows it a child the row cannot name.
-  private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>): number {
+  // Null for a read that began before the newest the row applied: the caller keeps the newer count.
+  private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>, read: number): number | null {
     const held = this.reaps.get(session);
     const childPid = held?.channel.childPid ?? null;
     const commands = session.mcpCommands();
-    const count = (held?.infrastructure ?? new Infrastructure()).count(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] });
-    if (count > 0 && commands === null) void session.readMcpCommands();
+    const count = (held?.infrastructure ?? new Infrastructure()).count(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] }, read);
+    if (count !== null && count > 0 && commands === null) void session.readMcpCommands();
     return count;
   }
 
@@ -436,6 +439,7 @@ export class ProcessTable {
     const live = this.list().filter((s) => s.pid !== null && s.status().process !== 'exited');
     this.sampling = true;
     try {
+      const read = ++this.reads; // O16 M5: numbered before its ps, which a step's read may overtake
       const output = live.length > 0 ? await this.ps() : null;
       const tree = output === null ? null : parsePsTree(output);
       const processes = output === null ? null : parseTree(output); // O16 M5
@@ -444,7 +448,10 @@ export class ProcessTable {
       for (const session of live) {
         const sample = tree!.sample(session.pid!);
         session.recordMemory({ rssKiB: sample?.rssKiB ?? null, treeRssKiB: sample?.treeRssKiB ?? null, sampledAt });
-        if (session.pid !== null && session.status().process !== 'exited') session.noteDescendants(this.countUnder(session, session.pid, processes!)); // O16 M5
+        if (session.pid !== null && session.status().process !== 'exited') { // O16 M5: a read a newer one overtook changes nothing
+          const count = this.countUnder(session, session.pid, processes!, read);
+          if (count !== null) session.noteDescendants(count);
+        }
       }
       this.sampledAt = sampledAt; // C12
       this.evaluateBudget(true); // C12

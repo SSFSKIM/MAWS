@@ -52,9 +52,9 @@ const until = async (check: () => boolean, what: string, ms = 3_000) => {
 };
 const proc = (pid: number, ppid: number, command: string, stat = 'S') => `${pid} ${ppid} 1024 ${stat} ${command}`;
 
-async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySessionStateStore; psSync?: () => string } = {}) {
+async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySessionStateStore; psSync?: () => string; ps?: () => Promise<string> } = {}) {
   const logs: string[] = [];
-  const table = new ProcessTable({ ps: async () => tree.join('\n'), psSync: opts.psSync, sampleMs: 60_000, gate, log: (line) => void logs.push(line) });
+  const table = new ProcessTable({ ps: opts.ps ?? (async () => tree.join('\n')), psSync: opts.psSync, sampleMs: 60_000, gate, log: (line) => void logs.push(line) });
   tables.push(table);
   const servers = (opts.mcp ?? []).map(([command, ...args], i) => ({ name: `s${i}`, status: 'connected', config: { type: 'stdio', command, args } }));
   const s = Object.fromEntries(names.map((name, i) => {
@@ -220,6 +220,27 @@ describe('the work under the engine', () => {
     expect(s.a!.session.status().work?.descendants).toBe(0);
     await table.sampleMemory();
     expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(1);
+  });
+
+  it('a sample whose ps began before a newer read bound the bridge, applied after it, changes nothing: 0 stays 0', async () => {
+    const live = [proc(ENGINE, 1, 'claude'), proc(821, ENGINE, 'python3 sminos.py bridge --session x')];
+    let late: ((output: string) => void) | null = null;
+    const { table, s } = await rows(['a'], {
+      ps: () => (late === null && tree.length === 0 ? new Promise((resolve) => (late = resolve)) : Promise.resolve(tree.join('\n'))),
+      psSync: () => live.join('\n'),
+    });
+    const o = await observe(s.a!, { childPid: 821 });
+    const older = table.sampleMemory(); // its ps under way
+    await until(() => late !== null, 'the older sample’s ps');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await o.next('arm', IDLE_MS + 1_000); // the due's fresh read bound the bridge: nothing of its work
+    expect(s.a!.session.status().work?.descendants).toBe(0);
+    late!([proc(ENGINE, 1, 'claude'), proc(830, ENGINE, 'node --startup-probe')].join('\n')); // from before the bridge
+    await older;
+    expect(s.a!.session.status().work?.descendants).toBe(0);
+    tree = live;
+    await table.sampleMemory();
+    expect(s.a!.session.status().work?.descendants).toBe(0); // the bridge still bound
   });
 
   it('a sample whose ps fails leaves the work unreadable, never zero, until a read succeeds', async () => {
