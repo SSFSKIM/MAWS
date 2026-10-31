@@ -3,7 +3,9 @@
 // refuses an app's hello that lists no `machine.connectors`, on engine-host.sock and on machine.sock alike, with O3-D's
 // refusal encoding (`refuse` with reason `wire`, its log line naming the capability). An app's hello is one that lists
 // `machine.spine` (main's own list since O3-D M5b); the CLI's lists nothing and the link's `socket.ptyFrames` alone, and
-// both are admitted as before. Over the daemon in this process and stand-in hosts on real sockets
+// both are admitted as before. P5 O4 M4 (D45): the refusal says at least one live session, so an old app waits on it and
+// shows its banner rather than replacing in a loop; pty-host.sock refuses it too, so a refused app holds nothing on
+// mawsd's idle clock; and the refusal's line is logged once a minute per app and socket. Over the daemon in this process and stand-in hosts on real sockets
 // (test/support/mawsd-scene.ts), under the production switches.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { symlinkSync } from 'node:fs';
@@ -41,7 +43,9 @@ const PRE_O4 = [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY]; // an app from
 const CLI: string[] = []; // src/mawsd/machine-client.ts's hello
 const LINK = [...PEER_CAPABILITIES.link]; // O6's link to another profile's machine.sock
 
-const refusal = () => ({ t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: buildIdOf(scene.self), wire: wireFingerprint(), liveSessions: 0 });
+// D45: with nothing live the refusal says one session, so an old app's transport waits on it (its banner) and asks again
+// every 5 s, rather than replacing mawsd every 200 ms (it reads 0 as "replace", and mawsd ignores that exit)
+const refusal = () => ({ t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: buildIdOf(scene.self), wire: wireFingerprint(), liveSessions: 1 });
 const refusedLine = (socket: string) => new RegExp(`^${socket.replace('.', '\\.')}: refuse wire to appPid \\d+ \\(build raw-app\\): its hello lists no machine\\.connectors`);
 
 // The services chunk as the seam loads it: the real lock, and a root that registers one command
@@ -87,6 +91,41 @@ describe('the refusal of an app that lists no machine.connectors (D11)', () => {
     await until(() => scene.logs.some((line) => line.startsWith('machine.sock: exit now on a connection mawsd refused')), 3_000, 'the exit');
     expect(scene.logs.some((line) => line.includes('exit now on machine.sock: restarting'))).toBe(false);
     expect((await daemon.status()).pid).toBe(process.pid); // still serving
+  });
+
+  it('on pty-host.sock: refused with the same line, no pty host woken for it (D45: a refused app holds no socket of mawsd’s)', async () => {
+    await scene.start(PRODUCTION);
+    const app = await scene.app('pty-host', { capabilities: PRE_O4 });
+    expect(app.first).toEqual(refusal());
+    expect(scene.logs).toContainEqual(expect.stringMatching(refusedLine('pty-host.sock')));
+    app.exit('now');
+    await until(() => scene.logs.some((line) => line.startsWith('pty-host.sock: exit now on a connection the relay refused itself')), 3_000, 'the exit');
+    await sleep(100);
+    expect(scene.spawn).not.toHaveBeenCalled();
+  });
+
+  it('logs one refusal line a minute per app and socket however often the app asks (D45)', async () => {
+    await scene.start(PRODUCTION);
+    for (let i = 0; i < 3; i++) for (const socket of ['engine-host', 'machine', 'pty-host'] as const) expect((await scene.app(socket, { capabilities: PRE_O4 })).first).toEqual(refusal());
+    for (const socket of ['engine-host.sock', 'machine.sock', 'pty-host.sock']) expect(scene.logs.filter((line) => refusedLine(socket).test(line)), socket).toHaveLength(1);
+  });
+
+  it('a private daemon whose only client is a refused app exits once idle (D45: the banner’s promise)', async () => {
+    scene.engineSpawn = { onExitIdle: (self) => void self.die() }; // nothing live: it exits once asked
+    await scene.start({ ...PRODUCTION, spine: { load: standInChunk() } });
+    const current = await scene.app('engine-host', { capabilities: POST_O4 });
+    await current.request('host.configure', { idleExitMs: 300 });
+    current.leave();
+    // the refused app asks again on each socket, as its transport does every few seconds, until the daemon has gone (a
+    // hello its stop overtook is no answer)
+    const ask = async (socket: 'engine-host' | 'machine' | 'pty-host') => {
+      const refused = await scene.app(socket, { capabilities: PRE_O4 }).catch(() => null);
+      if (refused?.first) expect(refused.first).toEqual(refusal());
+    };
+    for (const deadline = Date.now() + 5_000; scene.exits.length === 0 && Date.now() < deadline; await sleep(100)) await Promise.all([ask('engine-host'), ask('machine'), ask('pty-host')]);
+    expect(scene.exits).toEqual([0]);
+    expect(scene.logs).toContain('no client, both hosts parked and no hold for the idle time');
+    expect(scene.spawn.mock.calls.filter(([, args]) => (args as string[]).includes(scene.ptyProfile.modulePath))).toEqual([]); // no pty host woken
   });
 
   it('this build’s app is welcomed on both; the CLI’s hello and the link’s, which carry no app’s list, are welcomed on machine.sock', async () => {

@@ -98,6 +98,7 @@ import { createServicesFront, spineTakes } from './front';
 import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
+import { refusalLog } from './refusal-log';
 import { SpineReaders } from './spine-readers';
 import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
@@ -397,29 +398,37 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const lock = readLock(profileDir, fs, SPINE_LOCK_FILE);
     return lock !== null && lock.pid === pid && lock.procStart === procStartOf(pid);
   };
+  // P5 O4 M4 (D45): a refused app asks again on each socket every few seconds while it runs, so its refusal's line is
+  // logged once a minute per app and socket, with the count of those between
+  const logRefusal = refusalLog(log);
   // The first signal: a hello refused for lacking machine.spine. An app from before O3-A holds no spine.lock and is
   // yielded to; one from O3-A to O3-C holds it, and the lock refuses mawsd's spine while it runs.
   const refuseSpineless = (peer: { build: string; capabilities: readonly string[] }, appPid: number): ServerRefuse | null => {
     if (!claimSpine || peer.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return null;
     const holds = holdsSpineLock(appPid);
-    log(`engine-host.sock: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${MACHINE_SPINE_CAPABILITY}, so it runs a spine of its own${holds ? ', and holds spine.lock' : ''}`);
+    logRefusal(`engine-host.sock ${appPid}`, `engine-host.sock: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${MACHINE_SPINE_CAPABILITY}, so it runs a spine of its own${holds ? ', and holds spine.lock' : ''}`);
     if (!holds) spine.yield(appPid);
     return refuseWire();
   };
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D11; OX1's exception): the sealed store and the
   // connectors left the app, so an app's hello that lists no `machine.connectors` (an app from O3-D M5b to before O4 M2,
   // which would run its own broker beside the machine's) is refused on engine-host.sock and on machine.sock alike, with
-  // O3-D's encoding, and the app shows its update banner. An app's hello is one that lists `machine.spine` (main's own
+  // O3-D's encoding, and the app shows its update banner. P5 O4 M4 (D45): on pty-host.sock too, so a refused app holds
+  // no socket of mawsd's and mawsd's idle exit, which its banner promises, still comes. An app's hello is one that lists `machine.spine` (main's own
   // list); the CLI's and the link's list neither and are admitted as before, and an app from before O3-D, which lists
   // neither, is the spine's refusal's above. A refused app runs no spine of its own, so it is announced as a reader of
   // the machine's (never yielded to by the SingletonLock's signal).
   const refuseConnectorless = (socket: string, peer: { build: string; capabilities: readonly string[] }, appPid: number): ServerRefuse | null => {
     if (!peer.capabilities.includes(MACHINE_SPINE_CAPABILITY) || peer.capabilities.includes(CONNECTORS_CLIENT_CAPABILITY)) return null;
     announced(true, peer, appPid);
-    log(`${socket}: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${CONNECTORS_CLIENT_CAPABILITY}, so it runs connectors of its own beside the machine’s; it is told to update`);
+    logRefusal(`${socket} ${appPid}`, `${socket}: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${CONNECTORS_CLIENT_CAPABILITY}, so it runs connectors of its own beside the machine’s; it is told to update`);
     return refuseWire();
   };
-  const refuseWire = (): ServerRefuse => ({ t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: hosts.welcome('engine-host')?.liveSessions ?? 0 });
+  // P5 O4 M4 (D45): at least one live session, whatever the engine host's welcome counted. An old app's transport reads a
+  // refusal with none live as "replace that supervisor": it sends `exit now`, which mawsd ignores from a connection it
+  // refused itself, and says hello again every 200 ms with no banner. With one it waits, shows its banner ("…cannot talk
+  // to the previous supervisor…"), and asks again every 5 s. The count may name a session that is not running.
+  const refuseWire = (): ServerRefuse => ({ t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: Math.max(1, hosts.welcome('engine-host')?.liveSessions ?? 0) });
   // The second signal (D21): the profile's SingletonLock, a symlink `<host>-<pid>` as Chromium writes it, naming a live
   // app of this host that no post-D hello announced and that holds no spine.lock.
   // A lock a crash left behind (a clean quit removes it) is no signal: its pid gone, or alive but known to have started
@@ -686,6 +695,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     hosts,
     log: (line) => log(`pty-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(paths.ptyHost, pid),
+    refuseHello: (peer, appPid) => refuseConnectorless('pty-host.sock', peer, appPid), // P5 O4 M4 (D45): no socket for a refused app
     onExit: (when, refused) => {
       if (when === 'idle' || refused) return log(`exit ${when} from the app on pty-host.sock ignored`);
       log('exit now from the app: the pty host exits now and parks');
