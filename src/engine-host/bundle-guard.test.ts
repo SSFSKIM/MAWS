@@ -131,12 +131,14 @@ describe.skipIf(graph === null)('the built mawsd’s run path', () => {
 
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 9): the checkouts compose inside the
   // spine's root, so git, scm and files load with the spine, never at mawsd's start. P5 O4 M2
-  // (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 9): the connectors and delivery likewise.
+  // (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 9): the connectors and delivery likewise, and at M3
+  // the library's reads and the catalog's machine half.
   it('keep the services library off the run path, in the chunk the spine seam loads', () => {
     const markers = {
       startSpine: /\bfunction startSpine\(/, IndexSessionSource: /\bclass IndexSessionSource\b/,
       GitService: /\bclass GitService\b/, createFilesService: /\bfunction createFilesService\(/, ScmService: /\bclass ScmService\b/, FileLister: /\bclass FileLister\b/,
       ConnectorBroker: /\bclass ConnectorBroker\b/, createConnectorOAuthProvider: /\bfunction createConnectorOAuthProvider\(/, startDelivery: /\bfunction startDelivery\(/,
+      EngineReads: /\bclass EngineReads\b/, // M3: the catalog's machine half
     };
     const run = runPathOf(MAWSD);
     for (const [what, marker] of Object.entries(markers)) {

@@ -81,6 +81,13 @@ describe('machine.op', () => {
     for (const name of ['artifacts.connectorGrants', 'connectors.windowShown', 'connectors.adoptGrant', 'delivery.deliver', 'delivery.send']) expect(claimable(name), name).toBe(false);
   });
 
+  // P5 O4 M3 (acceptance 8): the catalog's machine half takes the namespace's machine-admin grade, its read included; the
+  // library's reads stay view-graded, and its main-owned two are no machine's to claim
+  it('claims the catalog’s machine half, and none of the library’s reads', () => {
+    for (const name of ['catalog.engine', 'catalog.engineRefresh']) expect(claimable(name), name).toBe(true);
+    for (const name of ['library.content', 'library.read', 'library.openExternally', 'library.reveal', 'library.exportFormats', 'library.saveAs', 'catalog.home']) expect(claimable(name), name).toBe(false);
+  });
+
   it('runs a connector grant once and answers a replayed op id with its stored result', async () => {
     const { ops, invoke } = lab(vi.fn<Invoke>(async () => ({ ok: true, value: { ok: true, grant: { server: 'notes', tool: 'search', mode: 'read' } } })));
     const input = { opId: 'op-g', opCreated: now(), claim: CLAIM, name: 'artifacts.grantConnectorTool', input: { artifactId: '11111111-1111-4111-8111-111111111111', tool: { server: 'notes', tool: 'search', mode: 'read' } } };

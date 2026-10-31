@@ -95,9 +95,18 @@ const CONNECTORS_BUDGETS_MS = {
   'delivery.deliver': HOST + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN_MS,
 } as const satisfies Partial<Record<CommandName, number>>;
 
+// P5 O4 M3 (Interfaces §H): the catalog's machine half. One cwd's view as EngineReads.snapshot reads it: the engine's
+// configuration (`plugins.env`, the first read of a load), then the cwd's listings and its inventory beside the configured
+// servers (one round), then the installed directory entries' provenance beside each marketplace's manifest (one round),
+// each a host read. The library's reads (a host read, then a file or the client's answer) stay within the default.
+const CATALOG_BUDGETS_MS = {
+  'catalog.engine': 3 * HOST + MARGIN_MS,
+} as const satisfies Partial<Record<CommandName, number>>;
+
 export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> = {
   ...CHECKOUTS_BUDGETS_MS,
   ...CONNECTORS_BUDGETS_MS,
+  ...CATALOG_BUDGETS_MS,
   // a background job's `claude stop` and the registry's clearing after it, or a terminal pane's pause and resume
   'session.takeOver': Math.max(STOP_TIMEOUT_MS + TAKE_OVER_WAIT_MS, PANE_TAKE_OVER_MS) + MARGIN_MS,
   // a process still exiting, the configure gate, and the launch to ready (the watch fails one silent for WATCHDOG_MS;

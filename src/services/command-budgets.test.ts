@@ -164,6 +164,15 @@ describe('the connectors’ and delivery’s command budgets (P5 O4)', () => {
   });
 });
 
+// P5 O4 M3 (Interfaces §H): one cwd's engine view is three rounds of host reads; the library's reads are one host read
+// and a file or the client's answer
+describe('the catalog’s and the library’s command budgets (P5 O4 M3)', () => {
+  it('names catalog.engine alone, its three rounds of host reads', () => {
+    expect(COMMAND_BUDGETS_MS['catalog.engine']).toBe(3 * HOST + MARGIN);
+    expect(Object.keys(COMMAND_BUDGETS_MS).filter((name) => /^(catalog|library)\./.test(name))).toEqual(['catalog.engine']);
+  });
+});
+
 // P5 O4 M2 (acceptance 9): the table loads with main's import of the services entry and in every chunk that names it,
 // so of the connectors and delivery it reads their deadlines alone, never their services (the custody's backup
 // exclusion among them, whose JXA text the bundle guard reads as a dynamic import)
@@ -174,5 +183,6 @@ describe('what the budgets load of the connectors and delivery', () => {
     const loaded = Object.keys(metafile.inputs).map((path) => relative(root, join(root, path)));
     expect(loaded.filter((path) => /^src\/services\/(connectors|delivery)\//.test(path)).sort()).toEqual(['src/services/connectors/deadlines.ts', 'src/services/delivery/deadlines.ts']);
     expect(loaded.filter((path) => path.includes('backup-exclusion'))).toEqual([]);
+    expect(loaded.filter((path) => /^src\/services\/(catalog|library)\//.test(path))).toEqual([]); // P5 O4 M3
   });
 });
