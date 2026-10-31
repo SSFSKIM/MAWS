@@ -103,6 +103,7 @@ class FakeRoot implements SpineRoot {
       this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}${kinds}`);
     });
     hosts.onEvent('session.brokerItems', ({ appSessionId, items }) => void this.seen.push(`${phase()} brokerItems ${appSessionId} ${items.map((i) => i.summary).join(',') || 'none'}`));
+    hosts.onEvent('maws.artifact.datasetRefresh', ({ requestId }) => void this.seen.push(`${phase()} datasetRefresh ${requestId}`)); // P5 O4 M2
     hosts.onEvent('session.status', ({ status }) => {
       this.seen.push(`${phase()} status ${status.appSessionId} ${status.process}`);
       this.statuses.set(status.appSessionId, status);
@@ -297,6 +298,27 @@ describe('the hold and the barrier', () => {
     ]);
     expect(root.later).toEqual([2, 1]); // the hold's own order, offered to the fold at each held event
     expect(logs).toContainEqual(expect.stringMatching(/^\[spine\] the hold drained: 3 events \(\d+ bytes\)$/));
+  });
+
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §D, D12): the connectors' broker is a part
+  // of the spine, so an agent's refresh announced to a cold daemon must wake it and reach it, never be dropped
+  it('an agent’s dataset refresh while cold is a trigger: held through the barrier and delivered to the loaded spine', async () => {
+    const REQUEST = '00000000-0000-4000-8000-000000000001';
+    const spine = seam();
+    link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+    await vi.waitFor(() => expect(roots).toHaveLength(1));
+    const root = (await spine.ensure('command')) as FakeRoot;
+    link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST.replace(/1$/, '2') });
+    expect(root.seen).toEqual([`held datasetRefresh ${REQUEST}`, `live datasetRefresh ${REQUEST.replace(/1$/, '2')}`]);
+    expect(loads).toBe(1);
+  });
+
+  it('another event while cold is still dropped, waking nothing', async () => {
+    const spine = seam();
+    link.emit('plugins.changed', {});
+    await sleep(10);
+    expect(spine.state()).toBe('cold');
+    expect(loads).toBe(0);
   });
 
   it('a batch while cold wakes nothing when events do not wake the spine (M2 in production)', async () => {

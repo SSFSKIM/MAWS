@@ -74,7 +74,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
@@ -393,8 +393,22 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const holds = holdsSpineLock(appPid);
     log(`engine-host.sock: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${MACHINE_SPINE_CAPABILITY}, so it runs a spine of its own${holds ? ', and holds spine.lock' : ''}`);
     if (!holds) spine.yield(appPid);
-    return { t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: hosts.welcome('engine-host')?.liveSessions ?? 0 };
+    return refuseWire();
   };
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D11; OX1's exception): the sealed store and the
+  // connectors left the app, so an app's hello that lists no `machine.connectors` (an app from O3-D M5b to before O4 M2,
+  // which would run its own broker beside the machine's) is refused on engine-host.sock and on machine.sock alike, with
+  // O3-D's encoding, and the app shows its update banner. An app's hello is one that lists `machine.spine` (main's own
+  // list); the CLI's and the link's list neither and are admitted as before, and an app from before O3-D, which lists
+  // neither, is the spine's refusal's above. A refused app runs no spine of its own, so it is announced as a reader of
+  // the machine's (never yielded to by the SingletonLock's signal).
+  const refuseConnectorless = (socket: string, peer: { build: string; capabilities: readonly string[] }, appPid: number): ServerRefuse | null => {
+    if (!peer.capabilities.includes(MACHINE_SPINE_CAPABILITY) || peer.capabilities.includes(CONNECTORS_CLIENT_CAPABILITY)) return null;
+    announced(true, peer, appPid);
+    log(`${socket}: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${CONNECTORS_CLIENT_CAPABILITY}, so it runs connectors of its own beside the machine’s; it is told to update`);
+    return refuseWire();
+  };
+  const refuseWire = (): ServerRefuse => ({ t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: hosts.welcome('engine-host')?.liveSessions ?? 0 });
   // The second signal (D21): the profile's SingletonLock, a symlink `<host>-<pid>` as Chromium writes it, naming a live
   // app of this host that no post-D hello announced and that holds no spine.lock.
   // A lock a crash left behind (a clean quit removes it) is no signal: its pid gone, or alive but known to have started
@@ -545,7 +559,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
     // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
     intercept: (request, app) => (app.capabilities.includes(MACHINE_SPINE_CAPABILITY) && spineTakes(request.name, request.input) ? throughSpine(request) : interceptEngine(request)),
-    refuseHello: refuseSpineless, // P5 O3-D M5a (§L), under claimSpine
+    refuseHello: (peer, appPid) => refuseSpineless(peer, appPid) ?? refuseConnectorless('engine-host.sock', peer, appPid), // P5 O3-D M5a (§L), under claimSpine; P5 O4 M2 (D11)
     deliverTo: (capabilities) => !capabilities.includes(MACHINE_SPINE_CAPABILITY), // P5 O3-D M5a: a post-D app's events come on machine.sock
     onDocument: (message, end) => {
       // the app's channels are below 2^31; one at or above is the endpoint's range (P5 Decision Log 42: a value rule)
@@ -957,14 +971,20 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       identity: () => identity,
       counts: () => ({ liveSessions: 0, rows: 0 }),
       token: () => token,
-      onExit: (when) => {
+      onExit: (when, from) => {
         if (when === 'idle') return log('exit idle on machine.sock ignored');
+        if (from?.own) return log('machine.sock: exit now on a connection mawsd refused itself: ignored, since an app it refused does not stop it'); // P5 O4 M2
         log('exit now on machine.sock: restarting');
         void stop('exit', EXIT_RESTART);
       },
       onClient: (connected, peer, appPid) => {
         announced(connected, peer, appPid);
         clientsChanged();
+      },
+      // P5 O4 M2 (D11): an app's hello with no machine.connectors is refused here too, so its mirror never loads
+      admitHello: async (peer, appPid) => {
+        const own = refuseConnectorless('machine.sock', peer, appPid);
+        return own ? { kind: 'refuse', line: own, own: true } : { kind: 'welcome', identity, counts: { liveSessions: 0, rows: 0 } };
       },
       log: (line) => log(`machine.sock: ${line}`),
     });

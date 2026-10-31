@@ -44,7 +44,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
+import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
 import type { AttentionItem } from '@shared/graph/attention';
 import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -870,8 +870,9 @@ async function askWithNoApp(s: Scratch, name: string, input: unknown): Promise<u
         buffered = buffered.slice(at + 1);
       }
     });
-    // P5 O3-D: on the daemon shape the stand-in runs no spine of its own, so its hello says so (`mawsd` refuses one that does not)
-    const capabilities = DAEMON ? [MACHINE_SPINE_CAPABILITY] : [];
+    // P5 O3-D: on the daemon shape the stand-in runs no spine of its own, so its hello says so (`mawsd` refuses one that does not);
+    // P5 O4 M2: nor connectors of its own (D11: `mawsd` refuses an app's hello that lists machine.spine without machine.connectors)
+    const capabilities = DAEMON ? [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] : [];
     socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'e2e-session-stand-in', capabilities, appPid: process.pid })}\n`);
     await expect.poll(() => lines[0]?.t, { message: 'the supervisor welcomes a client with no app running' }).toBe('welcome');
     socket.write(`${JSON.stringify({ t: 'req', id: 'm5', name, input })}\n`);
