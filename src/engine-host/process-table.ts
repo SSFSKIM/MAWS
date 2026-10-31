@@ -50,7 +50,7 @@ import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
 import { procStartOf as psProcStart } from './supervisor-files'; // E10
-import { countWork, parseTree, PS_TREE_ARGS, readTreeSync } from './holder/descendants'; // O16 M5
+import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
 
@@ -89,9 +89,10 @@ export function parsePsTree(output: string): { sample(pid: number): { rssKiB: nu
 // C12: the budget state's identity for its event, without `sampledAt` (a sample that moved nothing else is not news)
 const signatureOf = (state: BudgetState): string => JSON.stringify({ ...state, sampledAt: null });
 
-// O16 M5: with each process's state and command line, which the descendant veto reads (parsePsTree reads the first three)
+// O16 M5: with each process's state, start time and command line, which the descendant veto reads (parsePsTree reads the
+// first three)
 const runPs = (): Promise<string> =>
-  new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+  new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { env: PS_TREE_ENV, timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
 
 // O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
 const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
@@ -133,7 +134,7 @@ export class ProcessTable {
   private ledgerWritten: string | null = null; // the rows last written, so an unchanged set is not rewritten
   // E10 end
   // O16 M5 start: each row's reap and gate channel, the gate, the synchronous tree read, a budget release's numbers
-  private readonly reaps = new WeakMap<EngineSession, { reap: Reap; channel: GateChannel }>();
+  private readonly reaps = new WeakMap<EngineSession, { reap: Reap; channel: GateChannel; infrastructure: Infrastructure }>();
   private readonly gate: Gate | null;
   private readonly psSync: () => string;
   private lastPs = '';
@@ -331,18 +332,23 @@ export class ProcessTable {
       },
       now: () => Date.now(),
       log: (line) => this.log(line),
-      cancelled: (reason) => {
-        if (reason === 'idle') return this.idle.restart(session);
-        if (this.releasing !== session) return;
-        this.releasing = null; // the next evaluation may pick another
-        this.budget = { ...this.budget, releasing: null };
-        this.emitBudget(false);
+      cancelled: (reason) => (reason === 'idle' ? this.idle.restart(session) : this.budgetReapEnded(session)),
+      ignored: (reason) => {
+        if (reason === 'budget') this.budgetReapEnded(session);
+        this.idle.restart(session);
       },
-      ignored: () => this.idle.restart(session),
       changed: (view) => session.noteReap(view),
     });
-    this.reaps.set(session, { reap, channel });
+    this.reaps.set(session, { reap, channel, infrastructure: new Infrastructure() });
     session.noteReap({ state: reap.state, observer: reap.observer }, false);
+  }
+
+  // A budget reap ended without the exit: the marker clears, so the next evaluation may pick another.
+  private budgetReapEnded(session: EngineSession): void {
+    if (this.releasing !== session) return;
+    this.releasing = null;
+    this.budget = { ...this.budget, releasing: null };
+    this.emitBudget(false);
   }
 
   private detachReap(session: EngineSession): void {
@@ -367,12 +373,13 @@ export class ProcessTable {
     return count;
   }
 
-  // Registered infrastructure: the bridge child the row's observer named, and the launch's stdio MCP servers, asked of
-  // the engine once when the tree first shows it a child the row cannot name yet.
+  // Registered infrastructure, bound by identity across the row's reads (D52): the bridge child the row's observer named,
+  // and the launch's stdio MCP servers, asked of the engine once when the tree first shows it a child the row cannot name.
   private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>): number {
-    const childPid = this.reaps.get(session)?.channel.childPid ?? null;
+    const held = this.reaps.get(session);
+    const childPid = held?.channel.childPid ?? null;
     const commands = session.mcpCommands();
-    const count = countWork(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] });
+    const count = (held?.infrastructure ?? new Infrastructure()).count(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] });
     if (count > 0 && commands === null) void session.readMcpCommands();
     return count;
   }
@@ -503,10 +510,11 @@ export class ProcessTable {
     if (sample) this.previousOverWithoutCandidate = verdict.over && verdict.candidates === 0;
     if (verdict.release !== null) {
       const session = sessions[statuses.findIndex((s) => s.appSessionId === verdict.release)]!;
-      this.releasing = session;
-      // O16 M5: through the row's reap, which signals (and records `lastRelease`) only once verified empty and armed
+      // O16 M5: through the row's reap, which signals (and records `lastRelease`) only once verified empty and armed. The
+      // row is marked releasing only when the reap took this request: one held at once, or a reap of its own under way
+      // (an idle one), leaves the evaluation free to pick it, or another, at the next sample.
       this.budgetReleases.set(session, { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB });
-      this.reapOf(session)?.due('budget');
+      if (this.reapOf(session)?.due('budget') === true) this.releasing = session;
     }
     this.publishBudget(verdict, verdict.release !== null);
   }

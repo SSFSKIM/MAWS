@@ -32,6 +32,7 @@ import { HostHookRegistry, registerStopHook } from './host-hooks';
 import type { LaunchKind } from './work-state'; // P5 O2 M2
 import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2 M2
 import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
+import { expectedArgv } from './holder/descendants'; // O16 M5, D52
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter, type WriteOptions } from './outbound-writer';
@@ -575,7 +576,8 @@ export class EngineSession {
     return this.durableCrons.ids();
   }
 
-  // The launch's stdio MCP servers as `[command, ...args]`, the registration the descendant veto reads; null until read.
+  // The launch's stdio MCP servers as their processes' argv (holder/descendants.ts `expectedArgv`: `[command, ...args]`, or
+  // a `#!` script's interpreter line before it), the registration the descendant veto reads; null until read.
   mcpCommands(): string[][] | null {
     return this.mcpServerCommands;
   }
@@ -590,7 +592,8 @@ export class EngineSession {
         this.mcpServerCommands = answer.mcpServers.flatMap((server) => {
           const config = (server as { config?: { type?: unknown; command?: unknown; args?: unknown } }).config;
           if (config?.type !== 'stdio' || typeof config.command !== 'string') return [];
-          return [[config.command, ...(Array.isArray(config.args) ? config.args.filter((a): a is string => typeof a === 'string') : [])]];
+          const argv = [config.command, ...(Array.isArray(config.args) ? config.args.filter((a): a is string => typeof a === 'string') : [])];
+          return [expectedArgv(argv, { path: this.plan.env.PATH, cwd: this.plan.cwd })]; // D52: as the kernel runs it, through the launch's PATH
         });
       },
       (error: unknown) => this.log(`mcp_status for the descendant veto failed: ${messageOf(error)}`),

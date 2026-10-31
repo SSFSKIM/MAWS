@@ -164,20 +164,20 @@ describe('no observer ever seen (owner Q1)', () => {
     const s = scene();
     s.interest = true;
     s.status = status({ kept: true });
-    s.reap.due('budget');
+    expect(s.reap.due('budget')).toBe(true);
     expect(s.reaped).toEqual(['budget']);
     const t = scene();
     t.descendants = 1;
-    t.reap.due('budget');
+    expect(t.reap.due('budget')).toBe(false); // held at once: not taken
     expect(t.reaped).toEqual([]);
     expect(t.cancelled).toEqual(['budget']);
   });
 
-  it('a second due while a reap is under way does nothing', () => {
+  it('a second due while a reap is under way does nothing and is not taken', () => {
     const s = scene();
-    s.reap.due('idle');
-    s.reap.due('idle');
-    s.reap.due('budget');
+    expect(s.reap.due('idle')).toBe(true);
+    expect(s.reap.due('idle')).toBe(false);
+    expect(s.reap.due('budget')).toBe(false);
     expect(s.reaped).toEqual(['idle']);
   });
 });
@@ -325,7 +325,7 @@ describe('an observer seen and then silent or gone', () => {
     const o = await observer({ beat: false });
     s.reap.due('idle');
     await o.next('arm');
-    await until(() => s.reap.observer === 'unhealthy', 'the silence');
+    await until(() => s.views.at(-1)?.observer === 'unhealthy', 'the silence, told'); // the getter reads the clock first
     expect(s.reap.state).toBe('idle');
     expect(s.cancelled).toEqual(['idle']);
     o.send({ t: 'armed', fence: 1 });

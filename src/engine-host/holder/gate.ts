@@ -78,11 +78,18 @@ class Row implements GateChannel {
   child: number | null = null;
   listener: GateListener | null = null;
   private silence: ReturnType<typeof setTimeout> | null = null;
+  private lastHeard = 0;
 
-  constructor(readonly match: GateRow, private readonly silenceMs: number, private readonly dropped: (row: Row) => void) {}
+  constructor(readonly match: GateRow, private readonly silenceMs: number, private readonly now: () => number, private readonly dropped: (row: Row) => void) {}
 
+  // Read against the clock, not only the silence timer: a synchronous step (the reap's, its `ps` slow) can outlast the
+  // window before the timer gets to run, and its final read must see the silence.
   get observer(): ObserverState {
-    return !this.seenOnce ? 'absent' : this.healthy ? 'healthy' : 'unhealthy';
+    return !this.seenOnce ? 'absent' : this.healthy && !this.stale() ? 'healthy' : 'unhealthy';
+  }
+
+  private stale(): boolean {
+    return this.now() - this.lastHeard >= this.silenceMs;
   }
 
   get childPid(): number | null {
@@ -133,7 +140,9 @@ class Row implements GateChannel {
 
   // A heartbeat (or the hello): healthy for another silence window. Heard while unhealthy only by a fresh hello.
   heard(hello: boolean): void {
+    if (!hello && this.healthy && this.stale()) this.unhealthy(); // its timer not yet run: the silence came first
     if (!this.healthy && !hello) return;
+    this.lastHeard = this.now();
     this.stopSilence();
     this.silence = setTimeout(() => this.unhealthy(), this.silenceMs);
     (this.silence as { unref?: () => void }).unref?.();
@@ -164,14 +173,14 @@ export class Gate {
   private readonly silenceMs: number;
   private readonly helloWindowMs: number;
 
-  constructor(private readonly opts: { log(line: string): void; silenceMs?: number; helloWindowMs?: number }) {
+  constructor(private readonly opts: { log(line: string): void; silenceMs?: number; helloWindowMs?: number; now?: () => number }) {
     this.silenceMs = opts.silenceMs ?? OBSERVER_SILENCE_MS;
     this.helloWindowMs = opts.helloWindowMs ?? HELLO_WINDOW_MS;
   }
 
   // A row's channel, from its reservation until its exit closes it.
   channel(match: GateRow): GateChannel {
-    const row = new Row(match, this.silenceMs, (gone) => this.rows.delete(gone));
+    const row = new Row(match, this.silenceMs, this.opts.now ?? (() => Date.now()), (gone) => this.rows.delete(gone));
     this.rows.add(row);
     return row;
   }

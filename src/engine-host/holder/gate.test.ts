@@ -144,7 +144,7 @@ describe('health', () => {
     await sleep(300);
     expect(r.channel.observer).toBe('healthy');
     o.stopHeartbeat();
-    await until(() => r.channel.observer === 'unhealthy', 'silence');
+    await until(() => r.health.includes('unhealthy'), 'silence, told'); // the getter reads the clock first
     expect(r.health).toEqual(['healthy', 'unhealthy']);
     o.hb();
     await sleep(30);
@@ -153,6 +153,20 @@ describe('health', () => {
     await o.next('welcome');
     expect(r.channel.observer).toBe('healthy');
     expect(r.seen).toHaveLength(1); // seen once per process
+  });
+
+  it('is read against the clock: past the window it reads unhealthy before the silence timer runs, and a late heartbeat does not revive it', async () => {
+    const r = row(['eng-1']);
+    const o = await connect();
+    o.hello('eng-1');
+    await o.next('welcome');
+    const blockedUntil = Date.now() + 200; // the event loop blocked past the 150 ms window
+    while (Date.now() < blockedUntil) { /* a slow synchronous step */ }
+    expect(r.channel.observer).toBe('unhealthy');
+    o.hb(); // queued behind the silence
+    await sleep(30);
+    expect(r.channel.observer).toBe('unhealthy');
+    expect(r.health).toEqual(['healthy', 'unhealthy']);
   });
 
   it('a connection that closes leaves the observer unhealthy until a reconnect’s hello; the reconnect replaces it', async () => {

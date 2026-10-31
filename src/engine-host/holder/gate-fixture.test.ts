@@ -62,14 +62,14 @@ const IDLE = EngineSessionStatusSchema.parse({
 });
 
 // One case's scene: the row's channel and reap on the gate, the recording, and what the reap signalled.
-function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promise(() => {})) {
+function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promise(() => {}), descendants: () => number = () => 0) {
   const rows: Row[] = [];
   const sink = { push: (row: Exchanged) => rows.push({ case: name, ...row }) };
   const mark = (event: string, detail?: string) => rows.push({ case: name, event, ...(detail && { detail }) });
   const channel = gate.channel({ lineage: () => new Set([SESSION]), pid: () => PID });
   const reaped: ReapReason[] = [];
   const reap = new Reap('app-fixture', {
-    gate: channel, current: () => IDLE, stateful: () => new Set(), interest: () => false, descendants: () => 0,
+    gate: channel, current: () => IDLE, stateful: () => new Set(), interest: () => false, descendants,
     reap: (reason) => {
       reaped.push(reason);
       mark('signal', 'the engine host signals the engine: end_session, then SIGTERM');
@@ -126,6 +126,50 @@ async function cases(): Promise<Row[]> {
     s.reap.dispose();
     s.channel.close();
     await o.closed;
+    all.push(...s.rows);
+  }
+
+  { // the observer has answered armed, and its turn proceeds before any signal: here the host awaits the armed of its
+    // renewal (the first came after the lease less its margin), so the turn cancels the reap
+    const s = scene('armed-renewing-turn-proceed');
+    const o = await s.connect();
+    await s.hello(o);
+    o.beat(50); // throughout; their count is timing, so the recording keeps none of them
+    s.mark('heartbeats', 'the observer beats throughout this case (not recorded)');
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    s.mark('wait', `the observer answers after the lease less its margin (${LEASE_MS - MARGIN_MS} ms)`);
+    await sleep(LEASE_MS - MARGIN_MS + 30);
+    o.send({ t: 'armed', fence: 1 });
+    await o.next('arm'); // the renewal
+    o.send({ t: 'turn', fence: 1, origin: 'query' });
+    expect(await o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+    await o.next('disarm');
+    expect(s.reaped).toEqual([]);
+    await o.close();
+    s.channel.close();
+    all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
+  }
+
+  { // armed and a turn in one chunk, and the step's re-read after armed finds work under the engine: the reap is
+    // cancelled (disarm) and the turn, read next, proceeds; nothing was signalled
+    let work = 0;
+    const s = scene('armed-veto-turn-proceed', undefined, () => work);
+    const o = await s.connect();
+    await s.hello(o);
+    o.hb();
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    work = 1;
+    s.mark('veto', 'a process of the session\'s work starts under the engine before the step');
+    o.sendAll([{ t: 'armed', fence: 1 }, { t: 'turn', fence: 1, origin: 'peer', delivery: 'dlv-2' }]);
+    await o.next('disarm');
+    expect(await o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+    expect(s.reaped).toEqual([]);
+    await o.close();
+    s.channel.close();
     all.push(...s.rows);
   }
 
@@ -241,5 +285,5 @@ it('the recorded exchanges are the gate’s, case by case', async () => {
   if (process.env.MAWS_RECORD_GATE_FIXTURE === '1') writeFileSync(FIXTURE, text);
   const committed = readFileSync(FIXTURE, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as unknown);
   expect(committed).toEqual([header, ...rows]);
-  expect(new Set(rows.map((r) => r.case))).toEqual(new Set(['proceed', 'stop', 'no-answer', 'renew', 'heartbeat-loss', 'server-restart', 'no-row']));
+  expect(new Set(rows.map((r) => r.case))).toEqual(new Set(['proceed', 'stop', 'armed-renewing-turn-proceed', 'armed-veto-turn-proceed', 'no-answer', 'renew', 'heartbeat-loss', 'server-restart', 'no-row']));
 }, 20_000);

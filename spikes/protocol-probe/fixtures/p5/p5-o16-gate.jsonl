@@ -16,6 +16,27 @@
 {"case":"stop","from":"observer","frame":{"t":"turn","fence":1,"origin":"peer","delivery":"dlv-1"}}
 {"case":"stop","from":"host","frame":{"t":"stop","fence":1,"reason":"The holder ended this session; reopening it continues the conversation."}}
 {"case":"stop","event":"exit","detail":"the engine exits; its row closes the observer"}
+{"case":"armed-renewing-turn-proceed","from":"observer","frame":{"t":"hello","protocol":1,"session":"5f0c2a1e-6b7d-4c3e-9a8f-0123456789ab","pid":4711,"childPid":4712}}
+{"case":"armed-renewing-turn-proceed","from":"host","frame":{"t":"welcome","protocol":1}}
+{"case":"armed-renewing-turn-proceed","event":"heartbeats","detail":"the observer beats throughout this case (not recorded)"}
+{"case":"armed-renewing-turn-proceed","event":"due","detail":"the row is due and verified empty"}
+{"case":"armed-renewing-turn-proceed","from":"host","frame":{"t":"arm","fence":1,"leaseMs":400}}
+{"case":"armed-renewing-turn-proceed","event":"wait","detail":"the observer answers after the lease less its margin (300 ms)"}
+{"case":"armed-renewing-turn-proceed","from":"observer","frame":{"t":"armed","fence":1}}
+{"case":"armed-renewing-turn-proceed","from":"host","frame":{"t":"arm","fence":1,"leaseMs":400}}
+{"case":"armed-renewing-turn-proceed","from":"observer","frame":{"t":"turn","fence":1,"origin":"query"}}
+{"case":"armed-renewing-turn-proceed","from":"host","frame":{"t":"proceed","fence":1}}
+{"case":"armed-renewing-turn-proceed","from":"host","frame":{"t":"disarm","fence":1}}
+{"case":"armed-veto-turn-proceed","from":"observer","frame":{"t":"hello","protocol":1,"session":"5f0c2a1e-6b7d-4c3e-9a8f-0123456789ab","pid":4711,"childPid":4712}}
+{"case":"armed-veto-turn-proceed","from":"host","frame":{"t":"welcome","protocol":1}}
+{"case":"armed-veto-turn-proceed","from":"observer","frame":{"t":"hb"}}
+{"case":"armed-veto-turn-proceed","event":"due","detail":"the row is due and verified empty"}
+{"case":"armed-veto-turn-proceed","from":"host","frame":{"t":"arm","fence":1,"leaseMs":400}}
+{"case":"armed-veto-turn-proceed","event":"veto","detail":"a process of the session's work starts under the engine before the step"}
+{"case":"armed-veto-turn-proceed","from":"observer","frame":{"t":"armed","fence":1}}
+{"case":"armed-veto-turn-proceed","from":"observer","frame":{"t":"turn","fence":1,"origin":"peer","delivery":"dlv-2"}}
+{"case":"armed-veto-turn-proceed","from":"host","frame":{"t":"disarm","fence":1}}
+{"case":"armed-veto-turn-proceed","from":"host","frame":{"t":"proceed","fence":1}}
 {"case":"no-answer","from":"observer","frame":{"t":"hello","protocol":1,"session":"5f0c2a1e-6b7d-4c3e-9a8f-0123456789ab","pid":4711,"childPid":4712}}
 {"case":"no-answer","from":"host","frame":{"t":"welcome","protocol":1}}
 {"case":"no-answer","event":"due","detail":"the row is due and verified empty"}

@@ -135,6 +135,27 @@ describe('the idle release through the gate', () => {
     expect(await o.next('arm', IDLE_MS + 1_000)).toMatchObject({ t: 'arm' }); // heard again: its clock ran from the hello
   });
 
+  it('the step’s final health read is against the clock: a slow tree read that outlasts the silence window holds the row', async () => {
+    let slow = false;
+    const { table, s, logs } = await rows(['a'], {
+      psSync: () => {
+        if (slow) {
+          const until = Date.now() + SILENCE_MS + 60; // the event loop blocked: no heartbeat read, no silence timer run
+          while (Date.now() < until) { /* a slow ps */ }
+        }
+        return proc(ENGINE, 1, 'claude');
+      },
+    });
+    const o = await observe(s.a!);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await o.next('arm', IDLE_MS + 1_000);
+    slow = true;
+    o.send({ t: 'armed', fence: 1 });
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    expect(releasing(s.a!)).toBe(false);
+    expect(logs.some((l) => /idle reap of a cancelled at the step: the observer is unhealthy/.test(l))).toBe(true);
+  });
+
   it('a row on which no observer was ever seen is released on verified-empty alone; a hello for no row is closed', async () => {
     const { table, s } = await rows(['a']);
     const stray = await FakeObserver.connect(path);
@@ -235,5 +256,26 @@ describe('the budget release through the gate', () => {
     await o.next('proceed');
     await until(() => table.budgetState().releasing === null, 'releasing cleared');
     expect(table.budgetState().lastRelease).toBeNull(); // nothing was released
+  });
+
+  it('a row whose idle reap is under way is not marked releasing; once that reap ends, the budget may pick it', async () => {
+    const { table, s } = await rows(['a']);
+    const o = await observe(s.a!);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    expect(await o.next('arm', IDLE_MS + 1_000)).toEqual({ t: 'arm', fence: 1, leaseMs: 10_000 }); // the idle reap's
+    tree = [proc(ENGINE, 1, 'claude')];
+    table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
+    await table.sampleMemory();
+    await table.sampleMemory(); // the budget picks a: its reap is the idle one, under way
+    expect(table.budgetState().releasing).toBeNull();
+    expect(o.pending().filter((f) => f.t === 'arm')).toEqual([]);
+    o.send({ t: 'turn', fence: 1, origin: 'cron' }); // the idle reap ends without a signal
+    await o.next('disarm');
+    await table.sampleMemory();
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 2, leaseMs: 10_000 }); // the budget's own
+    expect(table.budgetState().releasing).toBe('a');
+    o.send({ t: 'turn', fence: 2, origin: 'cron' });
+    await o.next('disarm');
+    await until(() => table.budgetState().releasing === null, 'the budget reap’s marker cleared');
   });
 });

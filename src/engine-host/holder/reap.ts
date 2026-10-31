@@ -44,7 +44,7 @@ export interface ReapDeps {
   now(): number;
   log(line: string): void;
   cancelled(reason: ReapReason): void; // the reap ended without a signal: the row's clock restarts, the budget's `releasing` clears
-  ignored(): void; // the engine ignored an idle reap: the row's clock restarts
+  ignored(reason: ReapReason): void; // the engine ignored the reap: the row's clock restarts, the budget's `releasing` clears
   changed(view: ReapView): void; // the session's status carries it
   leaseMs?: number;
   leaseMarginMs?: number;
@@ -87,14 +87,20 @@ export class Reap {
     return this.deps.gate.observer;
   }
 
-  // The row's clock ran out (`idle`), or the budget picked it (`budget`).
-  due(reason: ReapReason): void {
-    if (this.current !== 'idle' || this.disposed) return; // a reap under way
+  // The row's clock ran out (`idle`), or the budget picked it (`budget`). True when this request is the reap now under
+  // way (armed or signalled); false when another was already under way (it keeps its own reason) or the row was held at
+  // once, so the budget marks a row releasing only for a reap that carries its request.
+  due(reason: ReapReason): boolean {
+    if (this.current !== 'idle' || this.disposed) return false; // a reap under way
     this.reason = reason;
     const veto = this.veto();
-    if (veto !== null) return this.end(`${reason} reap of ${this.label} held: ${veto}`);
-    if (this.observer === 'absent') return this.signal();
-    this.arm();
+    if (veto !== null) {
+      this.end(`${reason} reap of ${this.label} held: ${veto}`);
+      return false;
+    }
+    if (this.observer === 'absent') this.signal();
+    else this.arm();
+    return true;
   }
 
   // From outside (an explicit stop, say): a reap not yet signalled ends, disarmed.
@@ -165,7 +171,7 @@ export class Reap {
     if (this.observer !== 'absent') this.deps.gate.disarm(this.fence);
     this.deps.log(`${this.reason} reap of ${this.label}: the engine ignored it; the session goes on`);
     this.set('idle');
-    this.deps.ignored();
+    this.deps.ignored(this.reason);
   }
 
   private turn(fence: number): TurnAnswer {

@@ -4,6 +4,9 @@
 // afterwards runs the ladder whole; a `budget` reap keeps the ladder. And what the reap reads off the session: its
 // status's `reap` and `work.descendants`, the observer's state as unknown work, its lineage for the gate's hello, the
 // stdio MCP servers' command lines from `mcp_status`, and the observer seen on this launch kept in the state file.
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { handshakeResponder, scriptedSession } from '../conformance/session-harness';
@@ -184,6 +187,28 @@ describe('what the reap reads off the session', () => {
     expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx']]);
     await s.session.readMcpCommands();
     expect(s.transport.requestsOf('mcp_status')).toHaveLength(2); // once read, never again for the launch
+  });
+
+  it('D52: a `#!` server is registered as the kernel runs it, resolved through the launch’s PATH, never the host’s', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'maws-reap-argv-'));
+    const hostPath = process.env.PATH;
+    try {
+      writeFileSync(join(dir, 'o16-script'), '#!/usr/bin/env node\n');
+      writeFileSync(join(dir, 'o16-host-only'), '#!/bin/sh\n');
+      chmodSync(join(dir, 'o16-script'), 0o755);
+      chmodSync(join(dir, 'o16-host-only'), 0o755);
+      process.env.PATH = `${dir}:${hostPath ?? ''}`; // the host's PATH finds it; the launch's (the harness's /usr/bin) does not
+      const servers = [
+        { name: 'a', status: 'connected', config: { type: 'stdio', command: join(dir, 'o16-script'), args: ['--stdio'] } },
+        { name: 'b', status: 'connected', config: { type: 'stdio', command: 'o16-host-only', args: [] } },
+      ];
+      const s = await ready({ responder: handshakeResponder({ mcp_status: () => ({ response: { mcpServers: servers } }) }) });
+      await s.session.readMcpCommands();
+      expect(s.session.mcpCommands()).toEqual([['node', join(dir, 'o16-script'), '--stdio'], ['o16-host-only']]);
+    } finally {
+      process.env.PATH = hostPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('the first observer seen on the launch is kept in the state file as observerSeenLaunch', async () => {
