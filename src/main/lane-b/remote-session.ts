@@ -16,7 +16,11 @@
 //   wire's major: its unknown keys are dropped), and an event that still doesn't read is left out, logged.
 // - Gaps. The first `subbed` of a subscription says nothing, nor does a later `replay`. A later `snapshot` (a relaunch, a
 //   `/clear`) or `missing` (a range the journal lost), a fresh subscription's `missing` from a cursor this session held,
-//   and an event too large to carry (`omitted`) each emit `remote.gap {appSessionId, launchId}` before what follows.
+//   and an event too large to carry (`omitted`) each emit `remote.gap {appSessionId, launchId, at?}` before what follows.
+//   A snapshot's is told at its `subbed`, before the launch's first event. A `missing` stream goes on from what the
+//   machine still has of the launch (lane B's streams from the launch's start), so its hole ends at the first event it
+//   delivers: its gap is told just before that event, with its place (`at`), or with none when the stream ends or answers
+//   another `subbed` first; an omitted event's names its own place.
 // - Idle. An `ended('unavailable')` is a placed session that isn't live (released as idle, or the host parked): the stream
 //   is `idle`, its status forgotten, and it is subscribed again from its cursor on a backoff from 1 s doubling to 30 s
 //   while the tab is open, so a session resumed by anyone streams within the backoff (`kick` subscribes at once, after a
@@ -89,6 +93,7 @@ export class RemoteSession {
   #sub: Subscription | null = null;
   /** The position this session's stream stood at, kept across fresh subscriptions. */
   #cursor: Cursor | null = null;
+  #pendingGap: string | null = null; // the launch of a `missing` gap not told yet: its place is the next event's
   #timer: ReturnType<typeof setTimeout> | null = null;
   #backoffMs: number;
   #batch: SessionEvent[] = [];
@@ -247,7 +252,13 @@ export class RemoteSession {
         first = false;
         this.#backoffMs = this.#deps.timing.idleRetryMs[0];
         this.state.launch = at.epoch;
-        if (gap) this.#gap(at.epoch);
+        this.#tellPendingGap();
+        // A `missing` stream goes on from what the machine still has of the launch: the hole ends at the first event it
+        // delivers, so its gap is told there, with that place
+        if (gap && mode === 'missing') {
+          this.state.stream = 'gap';
+          this.#pendingGap = at.epoch;
+        } else if (gap) this.#gap(at.epoch);
         else this.state.stream = 'live';
         this.publish();
       },
@@ -261,9 +272,11 @@ export class RemoteSession {
       },
       event: (at, body) => {
         if (!mine()) return;
+        const place = { seq: at.seq, ...(at.idx !== undefined && { idx: at.idx }) };
+        if (this.#pendingGap !== null) this.#tellPendingGap(at.epoch === this.#pendingGap ? place : undefined);
         if (isObject(body) && body.omitted !== undefined) {
           this.#flush();
-          this.#gap(at.epoch);
+          this.#gap(at.epoch, place);
           this.publish();
           return;
         }
@@ -287,6 +300,7 @@ export class RemoteSession {
       ended: (reason) => {
         if (!mine()) return;
         this.#flush();
+        this.#tellPendingGap();
         this.#cursor = this.#sub?.cursor() ?? this.#cursor;
         this.#sub = null;
         if (reason === 'removed' || reason === 'closed') return this.stop(reason);
@@ -340,9 +354,20 @@ export class RemoteSession {
     this.#deps.emit(this.state.machine, name, read.value as never);
   }
 
-  #gap(launchId: string): void {
+  #gap(launchId: string, at?: EventPayload<'remote.gap'>['at']): void {
     this.state.stream = 'gap';
-    this.#deps.emit(this.state.machine, 'remote.gap', { appSessionId: this.state.app as EventPayload<'remote.gap'>['appSessionId'], launchId });
+    this.#deps.emit(this.state.machine, 'remote.gap', { appSessionId: this.state.app as EventPayload<'remote.gap'>['appSessionId'], launchId, ...(at !== undefined && { at }) });
+  }
+
+  /** A `missing` gap still waiting for its place, told now: at `at`, or with none (the stream went on without an event). */
+  #tellPendingGap(at?: EventPayload<'remote.gap'>['at']): void {
+    const launchId = this.#pendingGap;
+    if (launchId === null) return;
+    this.#pendingGap = null;
+    this.#flush();
+    const stream = this.state.stream;
+    this.#gap(launchId, at);
+    this.state.stream = stream; // the stream's state is the subscription's own by now
   }
 
   #flush(): void {
@@ -368,6 +393,7 @@ export class RemoteSession {
   /** Every timer, subscription and wait of the run before. */
   #halt(): void {
     this.#token = {};
+    this.#pendingGap = null; // the next subscription's opening from the cursor says it again
     if (this.#sub !== null) this.#cursor = this.#sub.cursor() ?? this.#cursor;
     this.#sub?.close();
     this.#sub = null;
