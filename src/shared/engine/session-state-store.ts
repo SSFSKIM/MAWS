@@ -137,4 +137,8 @@ export interface SessionStateStore {
   // record stays missing across a restart until a save succeeds)
   loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
   saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
+  // P5 O16 M2 (D12): an interrupt written to a hosted process and not yet answered (set before the write, cleared at the
+  // answer or a failed write), which an adopter sends first; false when never set
+  loadOwedInterrupt(appSessionId: AppSessionId): Promise<boolean>;
+  saveOwedInterrupt(appSessionId: AppSessionId, owed: boolean): Promise<void>;
 }

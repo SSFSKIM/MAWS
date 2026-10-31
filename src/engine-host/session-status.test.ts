@@ -117,3 +117,27 @@ describe('SessionStatusTracker: the cron record', () => {
     expect(sent).toEqual([clean, clean]);
   });
 });
+
+// P5 O16 M2 (D48: M0's question 3): the Stop callback's `background_tasks`, read as a task list (every entry non-ambient
+// unless it says so, since 2.1.283 and 2.1.316 carry no `ambient` there), so an adopted process whose re-initialize sent
+// no snapshot learns its tasks at its next Stop
+describe('SessionStatusTracker: the Stop\'s background tasks', () => {
+  const shell = { id: 'b0h7ylxs0', type: 'shell', status: 'running', description: 'o16 background sleep', command: 'sleep 300' };
+
+  it('takes the Stop\'s list as the tasks, non-ambient unless the entry says so, and makes an adopted process\'s tasks known', () => {
+    const tracker = new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
+    tracker.stopped({ hook_event_name: 'Stop', session_crons: [], background_tasks: [shell, { id: 'm1', type: 'monitor', description: 'tail', ambient: true }] });
+    expect(tracker.snapshot().backgroundTasks).toEqual([
+      { taskId: 'b0h7ylxs0', taskType: 'shell', description: 'o16 background sleep', ambient: false },
+      { taskId: 'm1', taskType: 'monitor', description: 'tail', ambient: true },
+    ]);
+    expect(tracker.snapshot().work.unknown).toBeNull();
+  });
+
+  it('a Stop without the field leaves the tasks as they were', () => {
+    const tracker = new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
+    tracker.observe({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'shell', description: 'x' }] }, '2026-10-31T00:00:00.000Z');
+    tracker.stopped({ hook_event_name: 'Stop', session_crons: [] });
+    expect(tracker.snapshot().backgroundTasks.map((t) => t.taskId)).toEqual(['t1']);
+  });
+});

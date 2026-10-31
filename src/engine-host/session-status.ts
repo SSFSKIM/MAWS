@@ -171,6 +171,12 @@ export class SessionStatusTracker {
 
   stopped(input: Record<string, unknown>): void {
     this.work.stopped(sessionCronsOf(input, this.log), this.durableCrons());
+    // P5 O16 M2 (D48): the Stop's `background_tasks` is a task list too (`id`, `type`, `description`; no `ambient` on the
+    // engines measured, so an entry is ambient only when it says so); absent, the tasks stay as the last snapshot left them
+    if (Array.isArray(input.background_tasks)) {
+      this.backgroundTasks = list(input.background_tasks).map((t) => ({ taskId: String(t.id) as TaskId, taskType: String(t.type), description: String(t.description ?? ''), ambient: t.ambient === true }));
+      this.work.tasksChanged();
+    }
     this.record();
   }
 

@@ -13,6 +13,7 @@ export class MemorySessionStateStore implements SessionStateStore {
   readonly keeps = new Map<AppSessionId, boolean>(); // P5 O2 M2
   readonly engineSessionIds = new Map<AppSessionId, string[]>(); // P5 O2 M2
   readonly cronRecords = new Map<AppSessionId, CronRecord>(); // P5 O2 M2
+  readonly owedInterrupts = new Map<AppSessionId, boolean>(); // P5 O16 M2
 
   async exists(id: AppSessionId): Promise<boolean> {
     return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id);
@@ -40,6 +41,12 @@ export class MemorySessionStateStore implements SessionStateStore {
   }
   async saveKeep(id: AppSessionId, keep: boolean): Promise<void> {
     this.keeps.set(id, keep);
+  }
+  async loadOwedInterrupt(id: AppSessionId): Promise<boolean> {
+    return this.owedInterrupts.get(id) ?? false;
+  }
+  async saveOwedInterrupt(id: AppSessionId, owed: boolean): Promise<void> {
+    this.owedInterrupts.set(id, owed);
   }
   async loadEngineSessionIds(id: AppSessionId): Promise<string[]> {
     return [...(this.engineSessionIds.get(id) ?? [])];
@@ -70,6 +77,7 @@ export class MemorySessionStateStore implements SessionStateStore {
     this.grants.delete(id);
     this.specs.delete(id);
     this.keeps.delete(id);
+    this.owedInterrupts.delete(id);
     this.engineSessionIds.delete(id);
     this.cronRecords.delete(id);
   }

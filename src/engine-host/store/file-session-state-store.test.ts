@@ -364,3 +364,21 @@ describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)'
     expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toBeNull();
   });
 });
+
+// P5 O16 M2 (D12): the owed interrupt, a mark set before an interrupt is written and cleared at its answer, which an
+// adopter reads to send the interrupt first
+describe('FileSessionStateStore: the owed interrupt (P5 O16 M2)', () => {
+  it('round-trips through a new instance beside the other saves, and reads false from a file without it', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null }));
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadOwedInterrupt(ID)).toBe(false);
+    await Promise.all([store.saveOwedInterrupt(ID, true), store.saveKeep(ID, true)]);
+    const after = new FileSessionStateStore(userData);
+    expect(await after.loadOwedInterrupt(ID)).toBe(true);
+    expect(await after.loadKeep(ID)).toBe(true);
+    await after.saveOwedInterrupt(ID, false);
+    expect(await new FileSessionStateStore(userData).loadOwedInterrupt(ID)).toBe(false);
+  });
+});
