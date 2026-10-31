@@ -21,7 +21,7 @@ import { FrameOpener, rekeyDirection, sealFrame, type DirectionKeys } from '../s
 import { importSigningKey, verifyInput, type Sig } from '../src/keys.ts';
 import { memoryOrgView } from '../src/org-view.ts';
 import type { SignedOrgState } from '../src/types.ts';
-import type { ChannelVectors, HandshakeConnection, HandshakeRun, KeysVector } from './scenario-remote.ts';
+import { VECTOR_PROTOCOL, type ChannelVectors, type HandshakeConnection, type HandshakeRun, type KeysVector } from './scenario-remote.ts';
 
 const REPLAY_TIMEOUT_MS = 5_000;
 const keysOf = (k: KeysVector): DirectionKeys => ({ key: base64urlDecode(k.key), iv: base64urlDecode(k.iv) });
@@ -89,7 +89,7 @@ function sameMessage(got: Uint8Array, expected: string): boolean {
 async function runConnection(run: HandshakeRun, view: ReturnType<typeof memoryOrgView>, c: HandshakeConnection): Promise<string[]> {
   const { io, sent } = scripted(run.side, c.inbound.map(base64urlDecode));
   const key = await importSigningKey(run.key);
-  const options = { now: () => new Date(run.now), timeoutMs: REPLAY_TIMEOUT_MS, pageBytes: run.pageBytes, ephemeral: await importEphemeral(c.ephemeral), nonce: c.nonce };
+  const options = { now: () => new Date(run.now), timeoutMs: REPLAY_TIMEOUT_MS, pageBytes: run.pageBytes, ephemeral: await importEphemeral(c.ephemeral), nonce: c.nonce, protocol: VECTOR_PROTOCOL };
   let got: HandshakeConnection['expect'];
   try {
     if ('ref' in run.identity) {
