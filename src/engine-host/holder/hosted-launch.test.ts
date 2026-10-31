@@ -139,6 +139,15 @@ describe.skipIf(!existsSync(BINARY))('a live launch under a session host', () =>
     await until(() => host.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended');
     expect(host.events(id).find((e) => e.kind === 'turn.ended')).toMatchObject({ terminalReason: 'completed' });
 
+    // after a quiet moment (the post-turn re-read's answers arrive after turn.ended) the frontier has been acknowledged:
+    // the host's ring holds nothing, every record is acked, and only then are the journal and its map read, since a map
+    // line is on disk before its record's ack
+    await sleep(500);
+    const token = readFileSync(started!.paths.token, 'utf8');
+    const { connection, hello } = await HostConnection.open(started!.paths.socket, token, { deadline: Date.now() + 5_000, log: () => {} });
+    connection.close();
+    expect(hello.ring).toMatchObject({ bytes: 0, firstSeq: hello.ring.lastSeq + 1 });
+
     const journal = status.journalPath;
     const rows = rowsOf(journal);
     expect(rows.find((r) => r.frame.event === 'spawn')?.frame).toMatchObject({ bin: stub, holder: { pid: started!.pid, holderId: started!.holderId, binary: BINARY } });
@@ -146,18 +155,12 @@ describe.skipIf(!existsSync(BINARY))('a live launch under a session host', () =>
     expect(stderr).toContain(`stub-engine env SMNS_MEMBER=${started!.pid}`);
     expect(stderr).toContain(`stub-engine env MAWS_HOLDER_SOCKET=${join(userData, 'supervisor', 'gate.sock')}`);
 
-    // every hosted row (each `in` and `stderr` row) is named by exactly one map line, in host order
+    // every hosted row (each `in` and `stderr` row) is named by exactly one map line, in host order; this fixture writes
+    // no blank line (D44: such a record is acked with no row and no line), so the map's last sequence is the ring's last
     const lines = readFileSync(mapFileOf(journal), 'utf8').trim().split('\n').map((line) => line.split(' ').map(Number) as [number, number]);
     const hostedSeqs = rows.filter((r) => r.direction === 'in' || r.direction === 'stderr').map((r) => r.seq);
     expect(lines.map(([, j]) => j)).toEqual(hostedSeqs);
-    expect(lines.map(([h]) => h)).toEqual([...lines.map(([h]) => h)].sort((a, b) => a - b));
-
-    // after a quiet moment the frontier has been acknowledged: the host's ring holds nothing
-    await sleep(500);
-    const token = readFileSync(started!.paths.token, 'utf8');
-    const { connection, hello } = await HostConnection.open(started!.paths.socket, token, { deadline: Date.now() + 5_000, log: () => {} });
-    connection.close();
-    expect(hello.ring.bytes).toBe(0);
+    expect(lines.map(([h]) => h)).toEqual(Array.from({ length: lines.length }, (_, i) => i + 1));
     expect(hello.ring.lastSeq).toBe(lines.at(-1)![0]);
 
     expect(await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' })).toEqual({ exited: true, code: 0, signal: null });
