@@ -3,7 +3,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { PR_STATE_POLL, prStateKey } from '../tools/scm/queries';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { TEST_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useGit } from '../stores/git';
 import { connectPanelEvents } from './events';
 import { queryClient } from './query';
@@ -33,6 +33,22 @@ describe('panel events', () => {
     expect(applyChanged).toHaveBeenCalledTimes(1);
     expect(invalidate).toHaveBeenCalledTimes(1);
     useGit.setState({ applyChanged: original });
+  });
+
+  // P5 O3-E final review: main's host.status, which it emits after re-reading the daemon at each ready of the machine
+  // host, has the git store re-ask the watches that machine could not answer.
+  it('has the git store re-ask its unanswered watches on host.status from that machine, until disconnected', () => {
+    const fake = fakeClient();
+    const retryUnanswered = vi.fn();
+    const original = useGit.getState().retryUnanswered;
+    useGit.setState({ retryUnanswered });
+    const disconnect = connectPanelEvents(fake.client);
+    fake.event('host.status', {}, OTHER_MACHINE);
+    expect(retryUnanswered).toHaveBeenCalledWith(OTHER_MACHINE);
+    disconnect();
+    fake.event('host.status', {});
+    expect(retryUnanswered).toHaveBeenCalledTimes(1);
+    useGit.setState({ retryUnanswered: original });
   });
 
   // P5 E312: a session's status, with the change it last published (the status's `published`, from the engine's

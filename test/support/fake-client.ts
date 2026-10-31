@@ -1,6 +1,7 @@
 // A `MawsBridge` for renderer store tests (P5 O6 M2: on `TEST_MACHINE`, so the ids it carries are addresses on it): records the order of subscriptions and invocations, lets a test answer each
 // command when it chooses (so snapshot/event races can be staged in either order), and delivers events by name.
 import type { CommandName, CommandResult, EventName, MawsBridge } from '../../src/shared/ipc/schema';
+import type { IpcError } from '../../src/shared/ipc/errors';
 import type { MachineRef } from '../../src/shared/machine/ref';
 import { TEST_MACHINE } from './machine';
 
@@ -10,7 +11,7 @@ export interface FakeClient {
   // Answers the oldest unanswered invocation of `name`, or the `nth` of those still unanswered (from 0, so a later one can
   // be answered first), and lets the promise chain settle.
   reply(name: CommandName, value: unknown, nth?: number): Promise<void>;
-  fail(name: CommandName, message?: string): Promise<void>;
+  fail(name: CommandName, message?: string, code?: IpcError['code']): Promise<void>; // `internal` unless named
   // P5 O6 M4: a listener hears the machine the event came from, `TEST_MACHINE` unless the test names another.
   event(name: EventName, payload: unknown, machine?: MachineRef): void;
   pending(name: CommandName): number;
@@ -63,7 +64,7 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
     client,
     calls,
     reply: (name, value, nth) => answer(name, { ok: true, value } as CommandResult<CommandName>, nth),
-    fail: (name, message = 'failed') => answer(name, { ok: false, error: { code: 'internal', message } }),
+    fail: (name, message = 'failed', code = 'internal') => answer(name, { ok: false, error: { code, message } }),
     event: (name, payload, machine = TEST_MACHINE) => listeners.get(name)?.forEach((listener) => listener(payload, { machine })),
     pending: (name) => waiting.get(name)?.length ?? 0,
     invoked: (name) => inputs.get(name) ?? [],

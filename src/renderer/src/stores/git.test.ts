@@ -200,4 +200,50 @@ describe('git store', () => {
     expect(fake.machines('git.unwatch')).toEqual([M]);
     expect(entryOn(OTHER_MACHINE)).toBeDefined();
   });
+
+  // P5 O3-E final review, fix 1's follow-up: main's watch replay answers a page's git.watch host_unavailable when the
+  // machine host is crashed, and timeout at the command's budget, where before it held the request until the host came
+  // back. So the store re-asks such a watch when that machine's host.status is heard again (main emits one after it
+  // re-reads the daemon at each ready of the machine host), and the panel recovers with the restart.
+  it('re-asks a watch the machine could not answer when its host is heard again, and takes the git.changed that follows', async () => {
+    const { fake, store, entry } = setup();
+    store.getState().watch(M, DIR);
+    await fake.fail('git.watch', 'machine is crashed; cannot answer git.watch', 'host_unavailable');
+    expect(entry()).toMatchObject({ root: null, status: null, error: 'machine is crashed; cannot answer git.watch' });
+    store.getState().retryUnanswered(M); // host.status: the host restarted and is ready again
+    expect(fake.invoked('git.watch')).toEqual([{ directory: DIR }, { directory: DIR }]);
+    store.getState().retryUnanswered(M); // heard again while the re-ask is out: not doubled
+    expect(fake.invoked('git.watch')).toHaveLength(2);
+    await fake.reply('git.watch', status({ dirty: false, files: [] }));
+    expect(entry()).toMatchObject({ root: '/work/repo', error: null });
+    store.getState().applyChanged({ repoRoot: '/work/repo', status: status({ branch: 'next', dirty: false, files: [] }), reason: 'head' }, M);
+    expect(entry()!.status!.branch).toBe('next');
+    store.getState().retryUnanswered(M); // answered now: nothing more to ask
+    expect(fake.invoked('git.watch')).toHaveLength(2);
+  });
+
+  it('re-asks after a timeout too, and never a watch refused otherwise, nor one of another machine', async () => {
+    const { fake, store } = setup();
+    store.getState().watch(M, DIR);
+    store.getState().watch(M, '/work/other');
+    await fake.fail('git.watch', 'machine did not answer git.watch within 40 s', 'timeout');
+    await fake.fail('git.watch', 'not a git repository: /work/other');
+    store.getState().retryUnanswered(OTHER_MACHINE);
+    expect(fake.invoked('git.watch')).toHaveLength(2);
+    store.getState().retryUnanswered(M);
+    expect(fake.invoked('git.watch')).toEqual([{ directory: DIR }, { directory: '/work/other' }, { directory: DIR }]);
+  });
+
+  it('unwatches after the re-ask lands when released while it is out', async () => {
+    const { fake, store } = setup();
+    const release = store.getState().watch(M, DIR);
+    await fake.fail('git.watch', 'machine is crashed; cannot answer git.watch', 'host_unavailable');
+    store.getState().retryUnanswered(M);
+    release();
+    await wait();
+    expect(fake.invoked('git.unwatch')).toEqual([]);
+    await fake.reply('git.watch', status());
+    await wait();
+    expect(fake.invoked('git.unwatch')).toEqual([{ directory: DIR }]);
+  });
 });
