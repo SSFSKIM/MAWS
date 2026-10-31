@@ -53,6 +53,8 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
 
 const status = (repoRoot: string) => ({ repoRoot, branch: 'main', files: [] });
 const names = (r: Remote, sub: string): Array<[string, Record<string, unknown>]> => evs(r, sub).map((e) => [(e.body as { name: string }).name, (e.body as { payload: Record<string, unknown> }).payload]);
+/** The feed's `git.changed`s alone (a change of roots is a `session.changed`, which the feed carries too). */
+const gits = (r: Remote, sub: string) => names(r, sub).filter(([name]) => name === 'git.changed');
 
 describe('a session’s checkout feed', () => {
   it('opens as a snapshot with nothing to snap, then carries its session’s files and scm changes and its repositories’ git changes, each at the next seq', async () => {
@@ -124,8 +126,8 @@ describe('a session’s checkout feed', () => {
     await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === added), 'the new root’s repository read');
     await new Promise((resolve) => setTimeout(resolve, 20));
     f.host.emitMachine('git.changed', { repoRoot: added, status: status(added), reason: 'fs' });
-    await until(() => evs(a, 'f1').length === 2, 'the added repository’s change');
-    expect(names(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: added, status: status(added), reason: 'fs' }]);
+    await until(() => gits(a, 'f1').length === 2, 'the added repository’s change');
+    expect(gits(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: added, status: status(added), reason: 'fs' }]);
   });
 
   // Fix wave 1: while a change of roots is read, the old bounds no longer stand and the new ones don't yet.
@@ -154,10 +156,10 @@ describe('a session’s checkout feed', () => {
     changed(repoB, 'during');
     await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoB), 'B’s read begun');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(evs(a, 'f1')).toHaveLength(1);
+    expect(gits(a, 'f1')).toHaveLength(1);
     open.get(repoB)!();
-    await until(() => evs(a, 'f1').length === 2, 'B’s held change');
-    expect(names(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: repoB, status: status(repoB), reason: 'during' }]);
+    await until(() => gits(a, 'f1').length === 2, 'B’s held change');
+    expect(gits(a, 'f1')[1]).toEqual(['git.changed', { repoRoot: repoB, status: status(repoB), reason: 'during' }]);
 
     // Two changes in a row: the older read (to D, held) lands after the newer (to C): the bounds are C's.
     gate(repoD);
@@ -172,9 +174,31 @@ describe('a session’s checkout feed', () => {
     changed(repoA, 'after');
     changed(repoB, 'after');
     changed(repoC, 'after');
-    await until(() => evs(a, 'f1').length === 3, 'C’s change');
+    await until(() => gits(a, 'f1').length === 3, 'C’s change');
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(names(a, 'f1').slice(2)).toEqual([['git.changed', { repoRoot: repoC, status: status(repoC), reason: 'after' }]]);
+    expect(gits(a, 'f1').slice(2)).toEqual([['git.changed', { repoRoot: repoC, status: status(repoC), reason: 'after' }]]);
+  });
+
+  // P5 O7 M4 (O5's landing audit): the record is how a device learns that a session it holds no live stream of runs again
+  // (its holder `self`, a new engine session), without placing it on the engine host or reporting interest.
+  it('carries its session’s record changes, and no other session’s, without reading the engine host or reporting interest', async () => {
+    const repo = scratch();
+    const f = await startEndpoint(org, started);
+    const record = session(f, 'app-1', repo);
+    session(f, 'app-2', repo);
+    f.spine.handle('git.status', () => status(repo));
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'f1', { lane: 'B', id: 'app-1' });
+    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
+    const engineReads = f.host.calls.filter((c) => c.name === 'session.status').length;
+    const live = { record: { ...record, holder: { kind: 'self' } }, cause: 'live', revision: 2 };
+    f.host.emitMachine('session.changed', { record: { ...record, appId: 'app-2', holder: { kind: 'self' } }, cause: 'live', revision: 2 });
+    f.host.emitMachine('session.changed', live);
+    await until(() => evs(a, 'f1').length >= 1, 'the record’s change');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(names(a, 'f1')).toEqual([['session.changed', live]]);
+    expect(f.host.calls.filter((c) => c.name === 'session.status')).toHaveLength(engineReads);
+    expect(f.interest.filter(([kind, , sessions]) => kind === 'report' && (sessions ?? []).includes('app-1'))).toEqual([]);
   });
 
   it('is refused to a caller who can’t view the session, for a lane A session, and as an attention feed (not offered until M6)', async () => {

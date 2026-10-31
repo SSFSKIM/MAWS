@@ -9,6 +9,7 @@ import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { FakeLink, MINI, type FakeSub } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import { record } from '../../../test/support/builders';
 import { createRemoteCheckout } from './remote-checkout';
 
 beforeEach(() => vi.useFakeTimers());
@@ -25,6 +26,8 @@ function lab() {
   for (const name of ['git.unwatch', 'files.watch', 'files.unwatch']) link.answers.set(name, () => ({ ok: true, output: undefined }));
   const emitted: Array<{ name: EventName; payload: Record<string, unknown> }> = [];
   const logs: string[] = [];
+  const records: unknown[] = [];
+  const followings: string[] = [];
   const checkout = createRemoteCheckout({
     remote: (machine) => (machine === MINI ? link : null),
     emit: (machine, name, payload) => {
@@ -33,6 +36,8 @@ function lab() {
       if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
       emitted.push({ name, payload: payload as Record<string, unknown> });
     },
+    recordChanged: (machine, app, record) => void records.push([machine, app, record]),
+    following: (machine, app) => void followings.push(`${machine}/${app}`),
     log: (line) => void logs.push(line),
   });
   const page = endableClientRef('page-1');
@@ -42,6 +47,8 @@ function lab() {
   return {
     link,
     checkout,
+    records,
+    followings,
     emitted,
     logs,
     page,
@@ -72,6 +79,31 @@ describe('the checkout feed', () => {
       { name: 'git.changed', payload: git },
     ]);
     expect(l.sent()).toEqual([]); // the first opening gives nothing back: nothing was let go
+  });
+
+  // O5's landing audit: the record is how an idle stream learns its session runs again, without a try on the machine.
+  it('hands its session’s record to the session rather than telling it, says each opening, and follows while open', async () => {
+    const l = lab();
+    expect(l.checkout.follows(MINI, APP)).toBe(false);
+    l.checkout.open(l.link, APP);
+    expect(l.checkout.follows(MINI, APP)).toBe(false); // asked, not yet open: what changes meanwhile is not carried
+    l.opened();
+    expect(l.followings).toEqual([`${MINI}/${APP}`]);
+    expect(l.checkout.follows(MINI, APP)).toBe(true);
+    const live = { ...record(APP), holder: { kind: 'self' } };
+    l.feed().sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: live, cause: 'live', revision: 7 } });
+    l.feed().sink.event({ epoch: 'checkout:boot', seq: 2 }, { name: 'session.changed', payload: { record: { ...live, appId: 'app-2' }, cause: 'live', revision: 8 } });
+    l.feed().sink.event({ epoch: 'checkout:boot', seq: 3 }, { name: 'session.changed', payload: { record: { appId: APP }, cause: 'live', revision: 9 } });
+    expect(l.records).toEqual([[MINI, APP, live]]);
+    expect(l.of('session.changed')).toEqual([]);
+    l.feed().sink.ended('behind');
+    expect(l.checkout.follows(MINI, APP)).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    l.opened();
+    expect(l.followings).toHaveLength(2);
+    expect(l.checkout.follows(MINI, APP)).toBe(true);
+    l.checkout.close(MINI, APP);
+    expect(l.checkout.follows(MINI, APP)).toBe(false);
   });
 
   it('asks no feed of a peer that did not list `rl2.feeds`, and leaves the asking to the link while no channel is current', () => {

@@ -8,8 +8,11 @@
 // reads a reconnect as a fresh start (its watches replayed or invalidated, src/main/sessions/watch-replay.ts's rules).
 // Each later event is `ev {body: {name, payload}}` at the next `seq`: every `files.changed` and `scm.remote.output` naming
 // the session, and every `git.changed` whose `repoRoot` lies in the session's checkout bounds, as the `checkout` target
-// rule reads them (targets.ts), so the device hears every repository it may watch and no other. The bounds are read at
-// the opening and again at each `session.changed` of the session (its roots may move). While a read is out the bounds
+// rule reads them (targets.ts), so the device hears every repository it may watch and no other. Each `session.changed`
+// of the session is carried too (O5's landing audit): the record says when the session runs again (its holder `self`, a
+// new engine session), which is how a device holding no live stream of it learns so without placing it on the engine
+// host or reporting interest, either of which keeps a parked host from parking. The bounds are read at the opening and
+// again at each `session.changed` of the session (its roots may move). While a read is out the bounds
 // are unknown: a `git.changed` waits for the latest read's answer, the latest per repository, and is sent only if the
 // new bounds take it, so a root's change neither leaks the old repository's changes nor drops the new one's (fix wave 1).
 //
@@ -90,7 +93,11 @@ export class PlaneFeeds implements Plane {
       }
     } else if (name === 'session.changed' && isObject(payload.record)) {
       const record = payload.record;
-      for (const open of this.#open.values()) if (open.sub.session.id === record.appId) void this.#readBounds(open, record);
+      for (const open of this.#open.values()) {
+        if (open.sub.session.id !== record.appId) continue;
+        this.#send(open, name, payload);
+        void this.#readBounds(open, record);
+      }
     }
   }
 

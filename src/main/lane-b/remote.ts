@@ -75,6 +75,8 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   unsubscribeLingerMs: 10_000,
   recordRetryMs: [500, 1000, 2000, 4000],
   idleRetryMs: [1000, 30_000],
+  // past the machine's park window (10 min by default) and its first tries: a try wakes a parked host (O5's audit)
+  idleProbeMaxMs: 30 * 60_000,
   sendPendingMs: 60_000,
   sendQueueMax: 8,
   batchMax: 500,
@@ -172,7 +174,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const now = deps.now ?? Date.now;
   const machines = new Map<MachineRef, { link: RemoteLink; lanes: Map<string, Lane> }>();
   let revision = 0;
-  const checkout = createRemoteCheckout({ remote: deps.remote, emit: deps.emit, timing, log: deps.log });
+  const sessionOf = (machine: MachineRef, app: string) => machines.get(machine)?.lanes.get(app)?.session;
+  const checkout = createRemoteCheckout({
+    remote: deps.remote,
+    emit: deps.emit,
+    timing,
+    recordChanged: (machine, app, record) => sessionOf(machine, app)?.recordChanged(record),
+    following: (machine, app) => sessionOf(machine, app)?.kick(),
+    log: deps.log,
+  });
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
 
@@ -202,6 +212,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         timing,
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
+        followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));

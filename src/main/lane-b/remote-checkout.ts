@@ -20,10 +20,15 @@
 //   (session, directory), on which the renderer's files store lists and watches again. The release is a no-op on a new
 //   channel (its ref holds nothing) and keeps the machine's count right on the same one. `removed`, `grade` and any other
 //   end leave the feed closed until the stream opens again.
+// - The record (O5's landing audit). The feed carries the session's `session.changed` too, handed to the session
+//   (`recordChanged`) rather than told: it is how a stream that isn't live learns the session runs again, without a try
+//   on the machine. While a feed is open (`follows`) the session waits for it; each opening is said (`following`), since
+//   what changed before it went untold.
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { SessionRecord } from '@shared/graph/session';
 import { codecOf } from '@shared/ipc/validate';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
@@ -33,7 +38,7 @@ import type { RemoteLink, Subscription } from '../machines/remote/link';
 
 /** The watches main keeps for a remote session: a page's call goes on to the machine, and is remembered once it answers. */
 export const WATCH_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>(['git.watch', 'git.unwatch', 'files.watch', 'files.unwatch']);
-/** What a checkout feed carries (§R). */
+/** What a checkout feed carries that is told as the machine's own (§R); its `session.changed` goes to the session. */
 export const FEED_EVENTS: ReadonlySet<string> = new Set(['files.changed', 'scm.remote.output', 'git.changed']);
 
 export interface RemoteCheckoutTiming {
@@ -47,6 +52,10 @@ export interface RemoteCheckoutDeps {
   remote(machine: MachineRef): RemoteLink | null;
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
   timing?: Partial<RemoteCheckoutTiming>;
+  /** The session's record as the machine changed it, from its feed. */
+  recordChanged?(machine: MachineRef, app: string, record: SessionRecord): void;
+  /** The session's feed opened (again): what changed before it went untold. */
+  following?(machine: MachineRef, app: string): void;
   log(line: string): void;
 }
 
@@ -57,12 +66,14 @@ export interface RemoteCheckout {
   open(link: RemoteLink, app: string): void;
   /** The session's stream was let go: its feed with it. */
   close(machine: MachineRef, app: string): void;
+  /** Whether the session's feed is open now, carrying its record. */
+  follows(machine: MachineRef, app: string): boolean;
   stop(): void;
 }
 
 type Watch = { kind: 'git' | 'files'; machine: MachineRef; app: string; target: string; input: Record<string, unknown>; count: number };
 type Page = { watches: Map<string, Watch>; off(): void };
-type Feed = { link: RemoteLink; app: string; sub: Subscription | null; opened: boolean; timer: ReturnType<typeof setTimeout> | null; backoffMs: number; replay: Promise<void>; refusal: string | null };
+type Feed = { link: RemoteLink; app: string; sub: Subscription | null; opened: boolean; live: boolean; timer: ReturnType<typeof setTimeout> | null; backoffMs: number; replay: Promise<void>; refusal: string | null };
 
 const events = codecOf(REGISTRY);
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -174,13 +185,22 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
           if (!mine()) return;
           feed.backoffMs = timing.feedRetryMs[0];
           feed.refusal = null;
+          feed.live = true;
+          deps.following?.(link.machine, app);
           if (!feed.opened) return void (feed.opened = true);
           // A new channel, or the feed opened again after the endpoint ended it: what changed meanwhile went untold.
           feed.replay = feed.replay.then(() => replay(link, app)).catch((error: unknown) => deps.log(`lane B: the checkout of ${link.name}/${app} could not be given back: ${(error as Error).message}`));
         },
         snapshot: () => {},
         event: (_at, body) => {
-          if (!mine() || !isObject(body) || typeof body.name !== 'string' || !FEED_EVENTS.has(body.name)) return;
+          if (!mine() || !isObject(body) || typeof body.name !== 'string') return;
+          if (body.name === 'session.changed') {
+            const read = events.readEventPayload('session.changed', body.payload);
+            if (!read.ok) return deps.log(`lane B: ${link.name}/${app}: a session.changed on the checkout feed doesn't read; left out`);
+            if (read.value.record.appId === app) deps.recordChanged?.(link.machine, app, read.value.record);
+            return;
+          }
+          if (!FEED_EVENTS.has(body.name)) return;
           const read = events.readEventPayload(body.name as EventName, body.payload);
           if (!read.ok) return deps.log(`lane B: ${link.name}/${app}: a ${body.name} on the checkout feed doesn't read; left out`);
           deps.emit(link.machine, body.name as EventName, read.value as never);
@@ -190,6 +210,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
         ended: (reason) => {
           if (!mine()) return;
           feed.sub = null;
+          feed.live = false;
           if (reason === 'behind' || reason === 'unavailable') {
             const delay = reason === 'behind' ? 0 : feed.backoffMs;
             feed.backoffMs = Math.min(feed.backoffMs * 2, timing.feedRetryMs[1]);
@@ -227,11 +248,12 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
       const held = feeds.get(key);
       if (held !== undefined && held.link === link && (held.sub !== null || held.timer !== null)) return;
       if (held !== undefined && held.link !== link) close(link.machine, app);
-      const feed: Feed = held?.link === link ? held : { link, app, sub: null, opened: false, timer: null, backoffMs: timing.feedRetryMs[0], replay: Promise.resolve(), refusal: null };
+      const feed: Feed = held?.link === link ? held : { link, app, sub: null, opened: false, live: false, timer: null, backoffMs: timing.feedRetryMs[0], replay: Promise.resolve(), refusal: null };
       feeds.set(key, feed);
       subscribe(feed);
     },
     close,
+    follows: (machine, app) => feeds.get(feedKey(machine, app))?.live === true,
     stop() {
       stopped = true;
       for (const key of [...feeds.keys()]) {

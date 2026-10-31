@@ -22,7 +22,7 @@ const catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [
 
 type Emitted = { machine: MachineRef; name: EventName; payload: Record<string, unknown> };
 
-function lab(options: { record?: () => unknown } = {}) {
+function lab(options: { record?: () => unknown; followed?: () => boolean } = {}) {
   const link = new FakeLink();
   const emitted: Emitted[] = [];
   const logs: string[] = [];
@@ -37,8 +37,9 @@ function lab(options: { record?: () => unknown } = {}) {
       if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
       emitted.push({ machine, name, payload: payload as Record<string, unknown> });
     },
-    timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], batchMax: 500 },
+    timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 30 * 60_000, batchMax: 500 },
     revision: () => ++revision,
+    ...(options.followed && { followed: options.followed }),
     log: (line) => void logs.push(line),
   });
   const names = () => emitted.map((e) => e.name);
@@ -214,6 +215,57 @@ describe('an idle session', () => {
     const again = l.link.open()[0];
     again.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
     expect(l.of('remote.gap')).toEqual([]);
+  });
+
+  // O5's landing audit: each try places the session on the machine's engine host (waking a parked one) and reports
+  // interest, which restarts the machine's park clock; so an open tab on a session that isn't live tries again only when
+  // its record says it runs, carried by the checkout feed.
+  it('with its record followed, waits for it: no try in 15 min; a record that says it runs, or names another engine session, subscribes at once', async () => {
+    const l = lab({ followed: () => true });
+    const sub = await opened(l);
+    sub.sink.ended('unavailable');
+    expect(l.session.state.stream).toBe('idle');
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(l.link.subs).toHaveLength(1);
+
+    // A change that says nothing of its running (a title) is told, and tries nothing.
+    const titled = { ...record(APP), holder: { kind: 'none' as const }, title: { text: 'renamed', source: 'user' as const } };
+    l.session.recordChanged(titled);
+    expect(l.of('session.changed').at(-1)).toMatchObject({ record: titled, cause: 'live' });
+    expect(l.session.state.record).toEqual(titled);
+    expect(l.link.subs).toHaveLength(1);
+
+    l.session.recordChanged({ ...titled, holder: { kind: 'self' } });
+    expect(l.link.open()).toHaveLength(1);
+    l.link.open()[0].sink.ended('unavailable'); // it went again before the stream opened: wait again
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(l.link.subs).toHaveLength(2);
+    l.session.recordChanged({ ...titled, engineSessionId: 'eng-2' as never }); // a `/clear` elsewhere
+    expect(l.link.subs).toHaveLength(3);
+    // While the stream is open, a record is told and tries nothing.
+    l.link.open()[0].sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    l.session.recordChanged({ ...titled, holder: { kind: 'self' } });
+    expect(l.link.subs).toHaveLength(3);
+  });
+
+  it('without a feed carrying its record, tries again on a backoff that grows past the machine’s park window (10 min) and stays there', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('unavailable');
+    const tries: number[] = [];
+    const start = Date.now();
+    for (let waited = 0; waited < 2 * 60 * 60_000; waited += 1000) {
+      await vi.advanceTimersByTimeAsync(1000);
+      const open = l.link.open();
+      if (open.length === 0) continue;
+      tries.push(Date.now() - start);
+      open[0].sink.ended('unavailable');
+    }
+    const gaps = tries.map((at, i) => at - (tries[i - 1] ?? 0));
+    expect(gaps.slice(0, 4)).toEqual([1000, 2000, 4000, 8000]);
+    expect(gaps.filter((gap) => gap < 10 * 60_000).length).toBe(10); // 1 s to 512 s, then each well past the window
+    expect(gaps.slice(10).every((gap) => gap >= 17 * 60_000 && gap <= 30 * 60_000)).toBe(true);
+    expect(tries.length).toBeLessThan(15);
   });
 
   it('ends for good on `removed`, and stops on its own at `stop`', async () => {

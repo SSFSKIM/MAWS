@@ -22,9 +22,14 @@
 //   delivers: its gap is told just before that event, with its place (`at`), or with none when the stream ends or answers
 //   another `subbed` first; an omitted event's names its own place.
 // - Idle. An `ended('unavailable')` is a placed session that isn't live (released as idle, or the host parked): the stream
-//   is `idle`, its status forgotten, and it is subscribed again from its cursor on a backoff from 1 s doubling to 30 s
-//   while the tab is open, so a session resumed by anyone streams within the backoff (`kick` subscribes at once, after a
-//   resume this app asked for). `removed` and `closed` end it for good; any other end ends the stream with its reason.
+//   is `idle`, its status forgotten. Each try of a subscription places the session on the machine's engine host (waking a
+//   parked one) and reports the session as watched, which restarts the machine's park clock (O5's landing audit), so it
+//   is not tried again blindly. While the session's checkout feed carries its record (`followed`, P5 O7 M4), it is
+//   subscribed again from its cursor only when the record says it runs (its holder `self`) or names another engine
+//   session (`recordChanged`), or when the feed opens again (`kick`: what changed meanwhile went untold). Without such a
+//   feed (a peer without `rl2.feeds`) it is tried on a backoff from 1 s doubling to `idleProbeMaxMs`, well past the
+//   machine's park window, so the host parks between tries. `kick` subscribes at once (a resume this app asked for, the
+//   feed's opening). `removed` and `closed` end it for good; any other end ends the stream with its reason.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
@@ -61,7 +66,10 @@ export interface RemoteSessionState {
 
 export interface RemoteSessionTiming {
   recordRetryMs: readonly number[];
+  /** A record read the link couldn't carry is asked again after the first, doubling to the second. */
   idleRetryMs: readonly [number, number];
+  /** With no feed carrying the record, an idle stream is tried again on the idle backoff doubling to this. */
+  idleProbeMaxMs: number;
   batchMax: number;
 }
 
@@ -75,6 +83,8 @@ export interface RemoteSessionDeps {
   revision(): number;
   /** P5 O7 M4: the stream was subscribed (the session is placed): what follows it beside the stream opens now. */
   subscribed?(): void;
+  /** Whether the session's checkout feed carries its record now (`recordChanged`): an idle stream waits for it. */
+  followed?(): boolean;
   log(line: string): void;
 }
 
@@ -149,6 +159,19 @@ export class RemoteSession {
     this.#timer = null;
     this.#backoffMs = this.#deps.timing.idleRetryMs[0];
     this.#subscribe();
+  }
+
+  /**
+   * The session's record as the machine changed it (its checkout feed): told, and an idle stream subscribed again at once
+   * when it says the session runs (its holder `self`) or names another engine session.
+   */
+  recordChanged(record: SessionRecord): void {
+    if (!this.#running) return;
+    const before = this.state.record;
+    this.state.record = record;
+    this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
+    if (this.state.stream !== 'idle') return;
+    if (record.holder.kind === 'self' || record.engineSessionId !== before?.engineSessionId) this.kick();
   }
 
   /**
@@ -326,7 +349,7 @@ export class RemoteSession {
         }
         this.state.stream = 'idle';
         this.publish();
-        this.#later(() => this.#subscribe());
+        if (!this.#deps.followed?.()) this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
       },
     };
     this.#sub = this.link.subscribe({ session: { lane: 'B', id: this.state.app }, view: 'full', cursor: this.#cursor }, sink);
@@ -394,10 +417,10 @@ export class RemoteSession {
     for (let i = 0; i < batch.length; i += batchMax) this.#emit('session.eventBatch', { appSessionId: this.state.app, events: batch.slice(i, i + batchMax) });
   }
 
-  /** Runs `again` on the idle backoff, doubling up to its cap. */
-  #later(again: () => void): void {
+  /** Runs `again` on the idle backoff, doubling up to `cap`. */
+  #later(again: () => void, cap = this.#deps.timing.idleRetryMs[1]): void {
     const delay = this.#backoffMs;
-    this.#backoffMs = Math.min(this.#backoffMs * 2, this.#deps.timing.idleRetryMs[1]);
+    this.#backoffMs = Math.min(this.#backoffMs * 2, cap);
     this.#timer = setTimeout(() => {
       this.#timer = null;
       if (this.#running) again();

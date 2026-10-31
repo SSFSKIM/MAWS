@@ -429,7 +429,7 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(ids(((await l.a.cmd('session.events', { appSessionId: 'app-1', afterSeq: null, limit: 100 })) as { events: SessionEvent[] }).events)).toEqual(ids([...before, ...live]));
   });
 
-  it('opens a released session (a record, no host row): its history read, its stream idle and retried, then resumed by a send’s acquire and streaming the new launch', async () => {
+  it('opens a released session (a record, no host row): its history read, its stream idle, then resumed by a send’s acquire and streaming the new launch', async () => {
     const l = await lab();
     const old = l.host.add('app-r', 'eng-r');
     const history = l.host.row('app-r', 2, { live: false });
@@ -438,9 +438,6 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     l.place('app-r', 'eng-r');
     l.a.tabs('app-r');
     await until(() => sessionOf(l.a, 'app-r')?.stream === 'idle', 'the stream ended unavailable: not live');
-    const statusReads = () => l.host.calls.filter((c) => c.name === 'session.status' && (c.input as { appSessionId: string }).appSessionId === 'app-r').length;
-    const first = statusReads();
-    await until(() => statusReads() >= first + 2, 'the subscription retried on the backoff');
     expect(sessionOf(l.a, 'app-r')).toMatchObject({ stream: 'idle', reason: null, controls: { send: { available: true } } });
     expect(ids(((await l.a.cmd('session.events', { appSessionId: 'app-r', afterSeq: null, limit: 100 })) as { events: SessionEvent[] }).events)).toEqual(ids(history));
 
@@ -453,6 +450,47 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(sessionOf(l.a, 'app-r')?.stream).toBe('live');
     // The send's row streams on the new launch.
     await until(() => eventsOf(l.a, 'app-r').some((e) => e.id.startsWith(`app-r:${resumed}:1:`)), 'the new launch’s first row');
+  });
+
+  // O5's landing audit: a try of an idle stream places the session on the engine host (`session.status`, which wakes a
+  // parked one) and reports interest, which restarts the park clock; with the checkout feed carrying the record, an open
+  // tab tries only when the record says the session runs. The adapter's backoff here is 50 ms doubling to 400 ms, so a
+  // blind retry would show several times over the wait.
+  it('keeps an open tab on a session that isn’t live from placing it or reporting interest again, and picks it up once the machine says it runs', async () => {
+    const l = await lab();
+    l.host.stored.set('app-r', []);
+    l.place('app-r', 'eng-r'); // a record and no host row: released as idle, or the host parked since
+    l.a.tabs('app-r');
+    await until(() => sessionOf(l.a, 'app-r')?.stream === 'idle', 'the stream ended unavailable: not live');
+    // The checkout feed opens beside the first try; its opening is said to the session, one more try at most.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const placements = () => l.host.calls.filter((c) => c.name === 'session.status' && (c.input as { appSessionId: string }).appSessionId === 'app-r').length;
+    const [placed, interest] = [placements(), l.f.interest.length];
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(placements()).toBe(placed);
+    expect(l.f.interest).toHaveLength(interest);
+    expect(sessionOf(l.a, 'app-r')).toMatchObject({ stream: 'idle', reason: null });
+
+    // Someone else runs it (a send from another device, the machine's own app): its record's holder becomes `self`.
+    const run = l.host.add('app-r', 'eng-r');
+    const started = Date.now();
+    l.f.host.emitMachine('session.changed', { record: { ...record('app-r', { engineSessionId: 'eng-r' as never, directory: CHECKOUT }), holder: { kind: 'self' } }, cause: 'live', revision: 2 });
+    await opened(l.a, 'app-r', run.launchId);
+    expect(Date.now() - started).toBeLessThan(2000);
+    const row = l.host.row('app-r', 1);
+    await until(() => eventsOf(l.a, 'app-r').some((e) => e.id === row[0].id), 'the new launch’s row');
+  });
+
+  it('still tries an idle stream on the backoff for an endpoint without feeds, which carries no record', async () => {
+    endpointWithout('rl2.feeds');
+    const l = await lab();
+    l.host.stored.set('app-r', []);
+    l.place('app-r', 'eng-r');
+    l.a.tabs('app-r');
+    await until(() => sessionOf(l.a, 'app-r')?.stream === 'idle', 'the stream ended unavailable: not live');
+    const placements = () => l.host.calls.filter((c) => c.name === 'session.status' && (c.input as { appSessionId: string }).appSessionId === 'app-r').length;
+    const first = placements();
+    await until(() => placements() >= first + 2, 'the subscription tried again on the backoff');
   });
 
   it('hydrates a launch whose history is over the channel’s 4 MiB in pages, a row too large to cross left out with a gap at its place (an endpoint without the byte budget)', async () => {
