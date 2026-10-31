@@ -416,3 +416,103 @@ describe('the tabs and the links', () => {
     expect(sub.closed).toBe(true);
   });
 });
+
+// P5 O7 M4: the checkout's writes, uploads in parts, the spawn, and the byte budget, each from the adapter's side.
+describe('the checkout and the spawn (M4)', () => {
+  const MiB = 1024 * 1024;
+  const UPLOADS = '/work/app-1/.claude/desk-uploads/app-1';
+
+  it('takes the checkout’s writes, the spawn and the watches; the checkout’s reads stay the manager’s', () => {
+    const l = lab();
+    for (const name of ['files.write', 'files.upload', 'scm.stage', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel', 'session.spawn', 'git.watch', 'git.unwatch', 'files.watch', 'files.unwatch'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+    for (const name of ['git.status', 'git.diff', 'files.list', 'files.read', 'scm.status', 'session.projects.list', 'fs.agentEvents'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+  });
+
+  it('builds a checkout write as a `machine` act with neither a session nor a context, on a session no tab holds and with no status', async () => {
+    const l = lab({ tabs: [] });
+    l.link.onAct = settleWith({ state: 'refused', reason: 'grade' });
+    const write = { appSessionId: APP, path: 'README.md', content: 'hello\n', expectedHash: '0'.repeat(64) };
+    expect(await l.cmd('files.write', write)).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'files.write', args: write, executor: 'machine', sendBy: expect.any(Number) }]);
+    expect(l.link.acts.some((a) => a.request.action === 'session.acquire')).toBe(false); // not resumed
+  });
+
+  it('uploads a 5 MiB file in three parts, each its own act in order, telling the chip how far it has come, and answers the machine’s path', async () => {
+    const l = lab();
+    l.link.onAct = (act) => {
+      const { part } = act.request.args as { part: { index: number; last: boolean } };
+      act.settle({ state: 'done', result: { status: 'ok', paths: part.last ? [`${UPLOADS}/u.0.pdf`] : [] } });
+    };
+    const bytes = Buffer.alloc(5 * MiB, 3);
+    expect(await l.cmd('files.upload', { appSessionId: APP, files: [{ name: 'spec.pdf', bytes: bytes.toString('base64') }] })).toEqual({ ok: true, value: { status: 'ok', paths: [`${UPLOADS}/u.0.pdf`] } });
+    const parts = l.link.acts.map((a) => a.request);
+    expect(parts.map((p) => [p.action, p.executor, p.session, p.context])).toEqual(Array(3).fill(['files.upload', 'machine', undefined, undefined]));
+    const args = parts.map((p) => p.args as { part: { upload: string; index: number; last: boolean }; files: Array<{ name: string; bytes: string }> });
+    expect(args.map((a) => [a.part.index, a.part.last])).toEqual([[0, false], [1, false], [2, true]]);
+    expect(new Set(args.map((a) => a.part.upload)).size).toBe(1);
+    expect(Buffer.concat(args.map((a) => Buffer.from(a.files[0].bytes, 'base64'))).equals(bytes)).toBe(true);
+    expect(args.map((a) => Buffer.from(a.files[0].bytes, 'base64').length)).toEqual([2 * MiB, 2 * MiB, MiB]);
+    expect(l.of('remote.upload')).toEqual([0, 1, 2, 3].map((sent) => ({ appSessionId: APP, file: 0, name: 'spec.pdf', sent, parts: 3 })));
+  });
+
+  it('ends an upload at a part the machine refused, sending no part after it, and runs one upload at a time per session', async () => {
+    const l = lab();
+    const held: FakeAct[] = [];
+    l.link.onAct = (act) => void held.push(act);
+    const file = (name: string) => ({ appSessionId: APP, files: [{ name, bytes: Buffer.alloc(3 * MiB, 1).toString('base64') }] });
+    const first = l.cmd('files.upload', file('a.bin'));
+    const second = l.cmd('files.upload', file('b.bin'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held.map((a) => (a.request.args as { files: Array<{ name: string }> }).files[0].name)).toEqual(['a.bin']);
+    held[0].settle({ state: 'done', result: { status: 'refused', reason: 'part out of order' } });
+    expect(await first).toEqual({ ok: true, value: { status: 'refused', reason: 'part out of order' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held.map((a) => (a.request.args as { files: Array<{ name: string }> }).files[0].name)).toEqual(['a.bin', 'b.bin']);
+    held[1].settle({ state: 'refused', reason: 'not-offered' });
+    expect(await second).toMatchObject({ ok: false, error: { issues: { refusal: 'not-offered' } } });
+    expect(held).toHaveLength(2);
+  });
+
+  it('builds the spawn as a stepped-up `machine` act on the machine, its bound running only from the moment it went out', async () => {
+    const l = lab({ tabs: [] });
+    let act!: FakeAct;
+    l.link.onAct = (a) => {
+      act = a;
+      a.move('waiting'); // at the sheet and Touch ID
+    };
+    const spawn = { checkout: '/work/repo', permission_mode: 'default', brief: 'go' };
+    let answer: unknown = null;
+    void l.cmd('session.spawn', spawn).then((r) => (answer = r));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(act.request).toEqual({ action: 'session.spawn', args: spawn, executor: 'machine', stepUp: 'required' });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(answer).toBeNull(); // the person's time at the sheet is not the machine's
+    act.move('sent');
+    await vi.advanceTimersByTimeAsync(209_999);
+    expect(answer).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(answer).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+    expect(await l.cmd('session.spawn', spawn)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+  });
+
+  it('reads `session.events` within the byte budget only from a machine whose endpoint listed `rl2.events-budget`', async () => {
+    const l = lab();
+    await live(l);
+    l.link.answers.set('session.events', (input) => ({ ok: true, output: { events: [], lastSeq: (input.afterSeq as number | null) ?? 0, complete: true } }));
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    l.link.peers = ['rl2.executor.machine', 'rl2.events-budget'];
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(l.link.calls.filter((c) => c.name === 'session.events').map((c) => (c.input as { maxBytes?: number }).maxBytes)).toEqual([undefined, expect.any(Number)]);
+  });
+
+  it('opens the session’s checkout feed beside its stream for a machine whose endpoint lists `rl2.feeds`, and closes it with the stream', async () => {
+    const l = lab({ timing: { unsubscribeLingerMs: 100 } });
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await live(l);
+    expect(l.link.open().map((s) => s.request.feed ?? 'stream')).toEqual(['stream', 'checkout']);
+    l.setTabs();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(l.link.open()).toEqual([]);
+  });
+});

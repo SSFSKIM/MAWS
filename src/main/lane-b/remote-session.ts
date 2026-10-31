@@ -73,6 +73,8 @@ export interface RemoteSessionDeps {
   timing: RemoteSessionTiming;
   /** The revision a `session.changed` carries: rising across the app's run. */
   revision(): number;
+  /** P5 O7 M4: the stream was subscribed (the session is placed): what follows it beside the stream opens now. */
+  subscribed?(): void;
   log(line: string): void;
 }
 
@@ -328,6 +330,7 @@ export class RemoteSession {
       },
     };
     this.#sub = this.link.subscribe({ session: { lane: 'B', id: this.state.app }, view: 'full', cursor: this.#cursor }, sink);
+    this.#deps.subscribed?.();
   }
 
   /** The replace-whole parts of a snapshot, the status first. */

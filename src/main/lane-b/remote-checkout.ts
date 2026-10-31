@@ -1,0 +1,245 @@
+// A remote lane B session's checkout as the panel tools follow it (P5 O7 M4, docs/doperpowers/plans/
+// 2026-10-28-p5-o7-remote-lane-b.md, "Changes cross as a feed, and a reconnect invalidates"; Interfaces §J, §R). The
+// machine's `git.changed`, `files.changed` and `scm.remote.output` reach this app on the session's `checkout` feed, and
+// are told to the renderer as a local machine's are (`emitFrom`), so its stores follow a remote checkout unchanged.
+//
+// - The feed. One per session whose stream main holds (M2's tabs rule), opened beside that stream and closed with it. Its
+//   `ev`s are `{name, payload}`, emitted for the machine once they read as this build reads the event. A feed goes only
+//   to a peer that listed `rl2.feeds`: none is asked of a peer known not to, and the link ends one `not-offered` that
+//   would reach such a peer on its next channel; the next opening of the stream asks again.
+// - The watches. The machine counts a `git.watch` or `files.watch` per asking client, and the endpoint makes every request
+//   of one channel the same client (its `ClientRef`), which it ends with the channel. So main keeps what each page watches
+//   on each remote session (its `ClientRef`, the session, the directory, how many times), gives a page's watches back to
+//   the machine when the page ends (a reload, a closed window: the channel's ref outlives it), and puts them back when the
+//   machine may have let them go (`src/main/sessions/watch-replay.ts`'s two rules).
+// - A reopening. Every opening of a feed is a snapshot of nothing, so a `subbed` after the first is a new channel (the old
+//   one's ref, and every watch it held, ended), and a feed the endpoint ended `behind` or `unavailable` (its channel
+//   still up) is opened again: either way what changed meanwhile went untold. At each, for the session: each git watch is
+//   released and made again, as many times as it is held, and the status its last watch answers is told as `git.changed`
+//   (`initial`); each files watch is released and forgotten, and `files.changed {kind: 'invalidated'}` told once per
+//   (session, directory), on which the renderer's files store lists and watches again. The release is a no-op on a new
+//   channel (its ref holds nothing) and keeps the machine's count right on the same one. `removed`, `grade` and any other
+//   end leave the feed closed until the stream opens again.
+import type { ClientId, ClientRef } from '@shared/ipc/client';
+import { REGISTRY } from '@shared/ipc/registry';
+import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
+import type { GitStatus } from '@shared/ipc/schema/git';
+import { codecOf } from '@shared/ipc/validate';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
+import type { MainContext } from '../ipc/router';
+import { dispatchOverLink } from '../machines/remote/dispatch';
+import type { RemoteLink, Subscription } from '../machines/remote/link';
+
+/** The watches main keeps for a remote session: a page's call goes on to the machine, and is remembered once it answers. */
+export const WATCH_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>(['git.watch', 'git.unwatch', 'files.watch', 'files.unwatch']);
+/** What a checkout feed carries (§R). */
+export const FEED_EVENTS: ReadonlySet<string> = new Set(['files.changed', 'scm.remote.output', 'git.changed']);
+
+export interface RemoteCheckoutTiming {
+  /** A feed ended `unavailable` is opened again after this, doubling to the cap; `behind` at once. */
+  feedRetryMs: readonly [number, number];
+}
+export const REMOTE_CHECKOUT_TIMING: RemoteCheckoutTiming = { feedRetryMs: [1000, 30_000] };
+
+export interface RemoteCheckoutDeps {
+  /** Machines.remote: the link a page's watches are given back over when the page ends. */
+  remote(machine: MachineRef): RemoteLink | null;
+  emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
+  timing?: Partial<RemoteCheckoutTiming>;
+  log(line: string): void;
+}
+
+export interface RemoteCheckout {
+  /** A page's watch or unwatch on a session of an RL2 machine: sent on, and kept. */
+  dispatch(link: RemoteLink, name: CommandName, input: Record<string, unknown>, ctx: MainContext): Promise<CommandResult<CommandName>>;
+  /** The session's feed, beside its stream; a no-op while one is open or about to open again. */
+  open(link: RemoteLink, app: string): void;
+  /** The session's stream was let go: its feed with it. */
+  close(machine: MachineRef, app: string): void;
+  stop(): void;
+}
+
+type Watch = { kind: 'git' | 'files'; machine: MachineRef; app: string; target: string; input: Record<string, unknown>; count: number };
+type Page = { watches: Map<string, Watch>; off(): void };
+type Feed = { link: RemoteLink; app: string; sub: Subscription | null; opened: boolean; timer: ReturnType<typeof setTimeout> | null; backoffMs: number; replay: Promise<void>; refusal: string | null };
+
+const events = codecOf(REGISTRY);
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+const feedKey = (machine: MachineRef, app: string) => `${machine}\n${app}`;
+
+export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
+  const timing: RemoteCheckoutTiming = { ...REMOTE_CHECKOUT_TIMING, ...deps.timing };
+  const feeds = new Map<string, Feed>();
+  const pages = new Map<ClientId, Page>();
+  let stopped = false;
+
+  // ---- The watches ---------------------------------------------------------------------------------------------------
+
+  /** The session a watch is on: git's names it in the call (`call.session`), files' in its input. */
+  const sessionOf = (name: CommandName, input: Record<string, unknown>, ctx: MainContext): string | undefined =>
+    name.startsWith('git.') ? ctx.session : typeof input.appSessionId === 'string' ? input.appSessionId : undefined;
+
+  function pageOf(client: ClientRef): Page | null {
+    const held = pages.get(client.id);
+    if (held !== undefined) return held;
+    const page: Page = { watches: new Map(), off: () => {} };
+    pages.set(client.id, page);
+    page.off = client.onGone(() => gone(client.id, page));
+    return pages.get(client.id) === page ? page : null; // a page already gone ended at once
+  }
+
+  /** A page that ended can no longer unwatch: what it held on each machine is given back there. */
+  function gone(id: ClientId, page: Page): void {
+    if (pages.get(id) !== page) return;
+    pages.delete(id);
+    for (const watch of page.watches.values()) {
+      const link = deps.remote(watch.machine);
+      if (link !== null) void release(link, watch, watch.count);
+    }
+    page.watches.clear();
+  }
+
+  /** `count` unwatches of the watch on the machine, one at a time, so a watch made after them is counted after. */
+  async function release(link: RemoteLink, watch: Watch, count: number): Promise<void> {
+    const name = watch.kind === 'git' ? 'git.unwatch' : 'files.unwatch';
+    for (let i = 0; i < count; i++) {
+      const result = await dispatchOverLink(link, name, watch.input, watch.kind === 'git' ? (watch.app as AppSessionId) : undefined);
+      if (!result.ok) deps.log(`lane B: ${name} of ${link.name}/${watch.app} ${watch.target} failed: ${result.error.message}`);
+    }
+  }
+
+  async function dispatch(link: RemoteLink, name: CommandName, input: Record<string, unknown>, ctx: MainContext): Promise<CommandResult<CommandName>> {
+    const app = sessionOf(name, input, ctx);
+    const result = await dispatchOverLink(link, name, input, ctx.session);
+    if (app === undefined || stopped) return result;
+    const kind = name.startsWith('git.') ? 'git' : 'files';
+    const target = String(kind === 'git' ? input.directory : input.path);
+    const key = `${kind}\n${link.machine}\n${app}\n${target}`;
+    if (name === 'git.watch' || name === 'files.watch') {
+      if (!result.ok) return result;
+      const page = pageOf(ctx.client);
+      if (page === null) {
+        void release(link, { kind, machine: link.machine, app, target, input, count: 1 }, 1);
+        return result;
+      }
+      const held = page.watches.get(key);
+      if (held !== undefined) held.count += 1;
+      else page.watches.set(key, { kind, machine: link.machine, app, target, input, count: 1 });
+      return result;
+    }
+    const watches = pages.get(ctx.client.id)?.watches;
+    const held = watches?.get(key);
+    if (held !== undefined && --held.count <= 0) watches!.delete(key);
+    return result;
+  }
+
+  /** The session's watches given back to the machine: git's made again and its status told, files' invalidated. */
+  async function replay(link: RemoteLink, app: string): Promise<void> {
+    const machine = link.machine;
+    const held = [...pages.values()].flatMap((page) => [...page.watches].map(([key, watch]) => ({ page, key, watch }))).filter(({ watch }) => watch.machine === machine && watch.app === app);
+    const told = new Set<string>();
+    const invalidated = new Map<string, EventPayload<'files.changed'>>();
+    for (const { page, key, watch } of held) {
+      await release(link, watch, watch.count);
+      if (watch.kind === 'files') {
+        // The renderer's files store lists and watches again on the invalidation: that watch is what this opening counts.
+        if (page.watches.get(key) === watch) page.watches.delete(key);
+        invalidated.set(watch.target, { appSessionId: app as AppSessionId, path: watch.target, kind: 'invalidated' });
+        continue;
+      }
+      let status: GitStatus | null = null;
+      for (let i = 0; i < watch.count; i++) {
+        const result = await dispatchOverLink(link, 'git.watch', watch.input, app as AppSessionId);
+        if (result.ok) status = result.value as GitStatus;
+        else deps.log(`lane B: git.watch of ${link.name}/${app} ${watch.target} again failed: ${result.error.message}`);
+      }
+      if (status !== null && !told.has(status.repoRoot)) {
+        told.add(status.repoRoot);
+        deps.emit(machine, 'git.changed', { repoRoot: status.repoRoot, status, reason: 'initial' });
+      }
+    }
+    for (const payload of invalidated.values()) deps.emit(machine, 'files.changed', payload);
+  }
+
+  // ---- The feeds -----------------------------------------------------------------------------------------------------
+
+  function subscribe(feed: Feed): void {
+    const { link, app } = feed;
+    const mine = () => feeds.get(feedKey(link.machine, app)) === feed && !stopped;
+    feed.sub = link.subscribe(
+      { session: { lane: 'B', id: app }, feed: 'checkout' },
+      {
+        subbed: () => {
+          if (!mine()) return;
+          feed.backoffMs = timing.feedRetryMs[0];
+          feed.refusal = null;
+          if (!feed.opened) return void (feed.opened = true);
+          // A new channel, or the feed opened again after the endpoint ended it: what changed meanwhile went untold.
+          feed.replay = feed.replay.then(() => replay(link, app)).catch((error: unknown) => deps.log(`lane B: the checkout of ${link.name}/${app} could not be given back: ${(error as Error).message}`));
+        },
+        snapshot: () => {},
+        event: (_at, body) => {
+          if (!mine() || !isObject(body) || typeof body.name !== 'string' || !FEED_EVENTS.has(body.name)) return;
+          const read = events.readEventPayload(body.name as EventName, body.payload);
+          if (!read.ok) return deps.log(`lane B: ${link.name}/${app}: a ${body.name} on the checkout feed doesn't read; left out`);
+          deps.emit(link.machine, body.name as EventName, read.value as never);
+        },
+        paused: () => {},
+        resumed: () => {},
+        ended: (reason) => {
+          if (!mine()) return;
+          feed.sub = null;
+          if (reason === 'behind' || reason === 'unavailable') {
+            const delay = reason === 'behind' ? 0 : feed.backoffMs;
+            feed.backoffMs = Math.min(feed.backoffMs * 2, timing.feedRetryMs[1]);
+            feed.timer = setTimeout(() => {
+              feed.timer = null;
+              if (mine()) subscribe(feed);
+            }, delay);
+            return;
+          }
+          if (feed.refusal !== reason) deps.log(`lane B: the checkout feed of ${link.name}/${app} ended ${reason}`);
+          feed.refusal = reason;
+        },
+      },
+    );
+  }
+
+  function close(machine: MachineRef, app: string): void {
+    const key = feedKey(machine, app);
+    const feed = feeds.get(key);
+    if (feed === undefined) return;
+    feeds.delete(key);
+    if (feed.timer !== null) clearTimeout(feed.timer);
+    feed.sub?.close();
+  }
+
+  return {
+    dispatch,
+    open(link, app) {
+      if (stopped) return;
+      // A peer known not to read feeds is asked for none (while no channel is current, the link holds the feed and asks
+      // the next channel's peer itself).
+      const peers = link.peerCapabilities();
+      if (peers !== null && !peers.includes('rl2.feeds')) return;
+      const key = feedKey(link.machine, app);
+      const held = feeds.get(key);
+      if (held !== undefined && held.link === link && (held.sub !== null || held.timer !== null)) return;
+      if (held !== undefined && held.link !== link) close(link.machine, app);
+      const feed: Feed = held?.link === link ? held : { link, app, sub: null, opened: false, timer: null, backoffMs: timing.feedRetryMs[0], replay: Promise.resolve(), refusal: null };
+      feeds.set(key, feed);
+      subscribe(feed);
+    },
+    close,
+    stop() {
+      stopped = true;
+      for (const key of [...feeds.keys()]) {
+        const [machine, app] = key.split('\n') as [MachineRef, string];
+        close(machine, app);
+      }
+      for (const page of pages.values()) page.off();
+      pages.clear();
+    },
+  };
+}

@@ -5,14 +5,18 @@
 // (test/machines/remote-link.test.ts's pattern); and the adapter reached as the router reaches it, `routeLaneB` over the
 // manager's path, which here is `dispatchOverLink` on the same link (how the pane's reads reach the machine). The tabs
 // are a `main.tabs` value the suite moves.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { memoryOrgView, type ByteDuplex, type SignedOrgState } from 'org-protocol';
+import { join, relative } from 'node:path';
+import { keyId, memoryOrgView, signRecord, SIGNING_DOMAINS, type Action, type ByteDuplex, type Grant, type SignedOrgState } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { endableClientRef, type ClientRef } from '@shared/ipc/client';
+import type { SessionRecord } from '@shared/graph/session';
+import { endableClientRef, type ClientRef, type HandlerOp } from '@shared/ipc/client';
+import type { FilesListOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
+import type { GitStatus } from '@shared/ipc/schema/git';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
@@ -22,6 +26,8 @@ import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { loadDeviceKeys } from '../../src/main/device/keys';
 import { createStepUp } from '../../src/main/device/step-up';
+import { harnessConfirmation } from '../../src/main/device/step-up-sheet';
+import { DEVICE_CAPABILITIES } from '../../src/main/machines/remote/capabilities';
 import type { MainContext } from '../../src/main/ipc/router';
 import { createRemoteLaneB, ENGINE_HOST_ACTS, MACHINE_ACTS, routeLaneB, type RemoteLaneB, type RemoteLaneBTiming } from '../../src/main/lane-b/remote';
 import { dialDirect } from '../../src/main/machines/remote/carriers';
@@ -30,13 +36,30 @@ import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remot
 import type { RemoteTiming } from '../../src/main/machines/remote/timing';
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { OFFERS } from '../../src/endpoint/offers';
+import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
+import { createUpload } from '../../src/services/files/upload';
+import { registerGitHandlers } from '../../src/services/git/register';
+import { createGitRunner } from '../../src/services/git/runner';
+import { GitService } from '../../src/services/git/service';
+import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
-import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org } from '../endpoint/sub-harness';
+import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org } from '../endpoint/sub-harness';
 import { record, status } from '../support/builders';
 
-// The endpoint's `h2` list, which one case empties: an endpoint of a build before the `machine` executor.
-const endpointCaps = vi.hoisted(() => ({ list: ['rl2.executor.machine'] as string[] }));
-vi.mock('../../src/endpoint/capabilities', () => ({ ENDPOINT_CAPABILITIES: endpointCaps.list }));
+// The endpoint's `h2` list, the build's own by default, which a case narrows to an endpoint of an earlier build (before the
+// `machine` executor, before M4's byte budget); each case starts from the whole list again.
+const endpointCaps = vi.hoisted(() => ({ list: [] as string[], full: [] as string[] }));
+vi.mock('../../src/endpoint/capabilities', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/endpoint/capabilities')>();
+  endpointCaps.full = [...real.ENDPOINT_CAPABILITIES];
+  endpointCaps.list.splice(0, Infinity, ...endpointCaps.full);
+  return { ENDPOINT_CAPABILITIES: endpointCaps.list };
+});
+/** This case's endpoint lists none of `dropped`. */
+function endpointWithout(...dropped: string[]): void {
+  endpointCaps.list.splice(0, Infinity, ...endpointCaps.full.filter((c) => !dropped.includes(c)));
+  cleanups.push(() => void endpointCaps.list.splice(0, Infinity, ...endpointCaps.full));
+}
 
 let org: Org;
 const started: Fixture[] = [];
@@ -98,9 +121,12 @@ class LaneBHost extends FakeEngineHost {
   }
 
   override answer(owner: string, name: string, input: unknown): HostResponse {
-    const app = (input as { appSessionId?: string } | null | undefined)?.appSessionId;
+    const fields = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; before?: string; maxBytes?: number };
+    const app = fields.appSessionId;
     const history = app === undefined || this.sessions.has(app) ? undefined : this.stored.get(app);
-    if (name === 'session.events' && history !== undefined) return { t: 'res', id: '0', ok: true, value: { events: history, lastSeq: history.at(-1)?.seq ?? 0, complete: true } };
+    if (name === 'session.events' && history !== undefined) return { t: 'res', id: '0', ok: true, value: diskWindow(history, fields.before, fields.limit ?? null, fields.maxBytes) };
+    // P5 O7 M4: a live launch's page within a byte budget, as the engine host's stream answers one
+    if (name === 'session.events' && app !== undefined && fields.maxBytes !== undefined) return { t: 'res', id: '0', ok: true, value: livePage(this.session(app).rows, fields.afterSeq ?? null, fields.maxBytes) };
     return super.answer(owner, name, input);
   }
 
@@ -121,6 +147,46 @@ class LaneBHost extends FakeEngineHost {
     this.#holding.delete(name);
     for (const go of this.#held.splice(0)) go();
   }
+}
+
+const utf8 = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
+/**
+ * A released session's history as the engine host reads it from the transcript: without a budget the whole window
+ * before `before` (the default window keeps whole turns, past any channel), or with `limit` N its first N events; within
+ * one (P5 O7 M4) the newest events before `before` that fit with the answer's envelope, `earlier` reaching the rest, an
+ * event alone past it left out.
+ */
+function diskWindow(history: SessionEvent[], before: string | undefined, limit: number | null, maxBytes: number | undefined): Record<string, unknown> {
+  const end = before === undefined ? history.length : history.findIndex((e) => e.id === before);
+  if (maxBytes === undefined && before === undefined && limit !== null) return { events: history.slice(0, limit), lastSeq: 0, complete: true };
+  if (maxBytes === undefined) return { events: history.slice(0, end), lastSeq: history.at(-1)?.seq ?? 0, complete: true };
+  let start = end;
+  let bytes = 1024; // the envelope and the cursor
+  while (start > 0) {
+    const next = utf8(history[start - 1]) + 1;
+    if (bytes + next > maxBytes) break;
+    bytes += next;
+    start -= 1;
+  }
+  if (start === end && end > 0) return { events: [], lastSeq: 0, complete: true, earlier: history[end - 1].id, omitted: { events: 1, bytes: utf8(history[end - 1]), seq: null } };
+  return { events: history.slice(start, end), lastSeq: 0, complete: true, ...(start > 0 && { earlier: history[start].id }) };
+}
+
+/** A live launch's events after `afterSeq` within `maxBytes`: whole rows while they fit, a row alone past it left out. */
+function livePage(rows: SessionEvent[][], afterSeq: number | null, maxBytes: number): Record<string, unknown> {
+  const after = rows.filter((row) => row.length > 0 && (afterSeq === null || row[0].seq! > afterSeq));
+  const events: SessionEvent[] = [];
+  let bytes = 256;
+  for (const row of after) {
+    if (bytes + utf8(row) > maxBytes) {
+      if (events.length > 0) return { events, lastSeq: events.at(-1)!.seq, complete: false };
+      return { events: [], lastSeq: row[0].seq, complete: false, omitted: { events: row.length, bytes: utf8(row), seq: row[0].seq } };
+    }
+    bytes += utf8(row);
+    events.push(...row);
+  }
+  return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete: true };
 }
 
 /** A carrier the test can cut, or mute (its inbound bytes dropped: a lost answer). */
@@ -145,12 +211,16 @@ type Device = {
   logs: string[];
   carriers: Array<{ carrier: ByteDuplex; tap: Tap }>;
   direct: { dead: boolean };
+  /** What step-up was asked to confirm, by summary. */
+  confirmed: string[];
   tabs(...apps: string[]): void;
-  route(name: string, input: unknown): Promise<CommandResult<CommandName>>;
-  cmd(name: string, input: unknown): Promise<unknown>;
+  /** `from`: the page and the session a path-class command is made from (MainContext's `client` and `session`). */
+  route(name: string, input: unknown, from?: Partial<MainContext>): Promise<CommandResult<CommandName>>;
+  cmd(name: string, input: unknown, from?: Partial<MainContext>): Promise<unknown>;
 };
-type Lab = { f: Fixture; host: LaneBHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string): void };
-type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming> };
+type Lab = { f: Fixture; host: LaneBHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
+/** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
+type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B' };
 
 /** The endpoint with the suite's engine host, and device `mac1` of its owner (A) up on it. */
 async function lab(options: DeviceOptions = {}): Promise<Lab> {
@@ -163,8 +233,8 @@ async function lab(options: DeviceOptions = {}): Promise<Lab> {
     chain: [...f.chain],
     device: (id: string, o: DeviceOptions = {}) => device(l, id, o),
     // A session the machine's owners own, its record in the spine's index under `engine`.
-    place: (app: string, engine = `eng-${app}`) => {
-      f.spine.set(app, engine, { ...record(app, { engineSessionId: engine as never, directory: CHECKOUT }) });
+    place: (app: string, engine = `eng-${app}`, fields: Record<string, unknown> = {}) => {
+      f.spine.set(app, engine, { ...record(app, { engineSessionId: engine as never, directory: CHECKOUT, ...fields }) });
       f.records.set({ lane: 'B', session: engine, owners: ['@machine'] }, app);
     },
   } as Lab;
@@ -178,15 +248,18 @@ async function device(l: Lab, id: string, options: DeviceOptions): Promise<Devic
   const profile = mkdtempSync(join(tmpdir(), `maws-o7-lane-b-${id}-`));
   cleanups.push(() => rmSync(profile, { recursive: true, force: true }));
   const keys = await loadDeviceKeys(profile, { excludeFromBackup: async () => true });
-  const mac = await endorsed(ORG, org.A, { device: { id, class: 'native-mac', keyStorage: 'software', channelPub: keys.channel.pub, stepUpPub: keys.stepUp.pub }, channel: keys.channel, stepUp: keys.stepUp }, org.a1);
-  const listed = await successor(l.chain.at(-1)!, [org.a1], (st) => void st.members.find((m) => m.id === org.A)!.devices.push(mac.device));
+  const [member, by] = options.member === 'B' ? [org.B, org.b1] : [org.A, org.a1];
+  const mac = await endorsed(ORG, member, { device: { id, class: 'native-mac', keyStorage: 'software', channelPub: keys.channel.pub, stepUpPub: keys.stepUp.pub }, channel: keys.channel, stepUp: keys.stepUp }, by);
+  const listed = await successor(l.chain.at(-1)!, [org.a1], (st) => void st.members.find((m) => m.id === member)!.devices.push(mac.device));
   await deliver(f, [listed]);
   l.chain.push(listed);
   const session = heldOrgSession();
+  const confirmed: string[] = [];
   const signedIn: SignedIn = {
-    identity: { org: ORG, member: org.A, device: id, clientClass: 'native-mac', channelKey: keys.channel, build: 'o7-m2', capabilities: [] },
+    identity: { org: ORG, member, device: id, clientClass: 'native-mac', channelKey: keys.channel, build: 'o7-m4', capabilities: [...DEVICE_CAPABILITIES] },
     view: watchedView(memoryOrgView({ chain: [...l.chain] }), () => session.changed()),
-    stepUp: createStepUp({ device: { org: ORG, device: id }, key: keys.stepUp, confirm: async () => ({ ok: true }) }),
+    // the harness's confirmation in place of the sheet and Touch ID (§P), the signature and its check real
+    stepUp: createStepUp({ device: { org: ORG, device: id }, key: keys.stepUp, confirm: (prompt) => (confirmed.push(prompt.summary), harnessConfirmation({ MAWS_E2E: '1', MAWS_E2E_STEP_UP: 'accept' }, false)!(prompt)) }),
     hub: null,
   };
   session.set(signedIn);
@@ -234,7 +307,8 @@ async function device(l: Lab, id: string, options: DeviceOptions): Promise<Devic
     log: (line) => void logs.push(line),
   });
   cleanups.push(() => adapter.stop());
-  const route = routeLaneB((_m, name, input) => dispatchOverLink(link, name, input), (ref) => (ref === machine ? link : null), adapter);
+  // The manager's path, as the RL2 link's `dispatch` takes it: the session a path-class read was made from as `call.session`
+  const route = routeLaneB((_m, name, input, c) => dispatchOverLink(link, name, input, c.session), (ref) => (ref === machine ? link : null), adapter);
   const ctx: MainContext = { client: endableClientRef(`page-${id}`), target: machine };
   return {
     id,
@@ -250,9 +324,10 @@ async function device(l: Lab, id: string, options: DeviceOptions): Promise<Devic
       tabs = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { panes: [{ tabs: list, activeTabId: list[0]?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
       for (const listener of layoutListeners) listener('main.tabs');
     },
-    route: (name, input) => route(machine, name as CommandName, input, ctx),
-    async cmd(name, input) {
-      const result = await route(machine, name as CommandName, input, ctx);
+    confirmed,
+    route: (name, input, from) => route(machine, name as CommandName, input, { ...ctx, ...from }),
+    async cmd(name, input, from) {
+      const result = await route(machine, name as CommandName, input, { ...ctx, ...from });
       if (!result.ok) throw new Error(`${name}: ${result.error.code} ${result.error.message}`);
       return result.value;
     },
@@ -280,6 +355,50 @@ async function opened(d: Device, app: string, launch: string): Promise<void> {
   d.tabs(app);
   await until(() => sessionOf(d, app)?.stream === 'live' && of(d, 'session.status', app).some((p) => (p.status as { launchId: string }).launchId === launch), `${app} live on ${d.id}`, 5000);
 }
+
+const MiB = 1024 * 1024;
+type Events = { events: SessionEvent[]; lastSeq: number; complete: boolean; earlier?: string; historyUnavailable?: true; omitted?: unknown };
+const repos: GitFixture[] = [];
+afterEach(() => {
+  for (const repo of repos.splice(0)) repo.dispose();
+});
+
+/** A git repository on this machine, standing in for the remote machine's checkout. */
+async function gitRepo(): Promise<GitFixture> {
+  const repo = await GitFixture.create();
+  repos.push(repo);
+  return repo;
+}
+
+/**
+ * The machine's real checkout services behind the endpoint's spine (P5 O7 M4): files (with uploads) over each session's
+ * record in the spine's index, and git, their changes the machine's own events, which the checkout feed carries.
+ */
+function checkoutServices(l: Lab, repo: GitFixture): FilesHandlers {
+  const { f } = l;
+  const recordOf = (id: string) => (f.spine.records.get(id) as SessionRecord | undefined) ?? null;
+  const upload = createUpload({ sessions: { record: recordOf, intent: () => null } as never, roots: { record: () => {}, sweep: () => 0 }, git: createGitRunner({ env: repo.serviceEnv() }), log: () => {} });
+  registerGitHandlers(new GitService({ env: repo.serviceEnv(), emit: (change) => f.host.emitMachine('git.changed', change) }), f.spine.bus as never);
+  const files = registerFilesHandlers((id) => recordOf(id), {
+    bus: f.spine.bus as never,
+    emit: (payload) => f.host.emitMachine('files.changed', payload),
+    port: { openExternal: async () => ({ opened: false, message: null }), reveal: async () => ({ revealed: false }) } as never,
+    env: repo.serviceEnv(),
+    upload,
+  });
+  cleanups.push(() => files.dispose());
+  return files;
+}
+
+/** A grant of `spawn` on the machine to `member`, signed by its admin (A). */
+async function grantSpawn(f: Fixture, member: string): Promise<string> {
+  const body: Grant = { org: ORG, machine: f.ref, machineKey: await keyId(f.key.pub), member, rights: ['spawn'], version: 1, issued: iso(Date.now()) };
+  return (await f.endpoint.cli('grant', ['-'], JSON.stringify(await signRecord(SIGNING_DOMAINS.grant, body, org.a1.stepUp.privateKey, org.a1.stepUp.pub)))).out;
+}
+
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const gitChanges = (d: Device) => d.emitted.filter((e) => e.name === 'git.changed').map((e) => e.payload as { repoRoot: string; status: GitStatus; reason: string });
+const filesChanges = (d: Device, app: string) => of(d, 'files.changed', app) as Array<{ path: string; kind: string }>;
 
 describe('remote lane B over a real link', { timeout: 30_000 }, () => {
   it('builds only acts the endpoint offers, each as the act its row names', () => {
@@ -336,7 +455,8 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await until(() => eventsOf(l.a, 'app-r').some((e) => e.id.startsWith(`app-r:${resumed}:1:`)), 'the new launch’s first row');
   });
 
-  it('hydrates a launch whose history is over the channel’s 4 MiB in pages, a row too large to cross left out with a gap at its place', async () => {
+  it('hydrates a launch whose history is over the channel’s 4 MiB in pages, a row too large to cross left out with a gap at its place (an endpoint without the byte budget)', async () => {
+    endpointWithout('rl2.events-budget');
     const l = await lab();
     const s = l.host.add('app-1');
     l.place('app-1');
@@ -483,11 +603,10 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
   });
 
   it('refuses `session.acquire` locally `not-offered` against an endpoint that lists no `rl2.executor.machine`', async () => {
-    endpointCaps.list.splice(0);
-    cleanups.push(() => void endpointCaps.list.splice(0, Infinity, 'rl2.executor.machine'));
+    endpointWithout('rl2.executor.machine');
     const l = await lab();
     l.place('app-r', 'eng-r');
-    expect(l.a.link.peerCapabilities()).toEqual([]);
+    expect(l.a.link.peerCapabilities()).not.toContain('rl2.executor.machine');
     expect(await l.a.route('session.acquire', { appSessionId: 'app-r', reason: 'send' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
     expect(l.f.spine.acquired).toEqual([]);
     expect(l.host.calls.filter((c) => c.name === 'machine.op')).toEqual([]);
@@ -568,5 +687,213 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await sleep(50);
     expect(dropped()).toBe(false); // the linger
     await until(dropped, 'the subscription closed past the linger', 3000);
+  });
+
+  // ---- P5 O7 M4 ------------------------------------------------------------------------------------------------------
+
+  it('uploads a 5 MiB file in three parts, each its own act, across a forced drop, writing it once', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    // The second part runs on the machine, then its answer is lost and its channel cut.
+    let cut = 0;
+    const upload = l.f.spine.handlers.get('files.upload')!;
+    l.f.spine.handle('files.upload', async (input, context) => {
+      const answer = await upload(input, context);
+      if ((input as FilesUploadInput).part?.index === 1 && cut++ === 0) {
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        setTimeout(() => carrier.close('dropped'), 20);
+      }
+      return answer;
+    });
+    const bytes = Buffer.concat([Buffer.from('%PDF-1.7\n'), randomBytes(5 * MiB - 9)]);
+    const answer = (await l.a.cmd('files.upload', { appSessionId: 'app-1', files: [{ name: 'spec.pdf', bytes: bytes.toString('base64') }] })) as FilesUploadOutput;
+    expect(cut).toBe(1);
+    expect(l.a.carriers.length).toBeGreaterThan(1); // the rest went on the next channel
+    if (answer.status !== 'ok') throw new Error(`refused: ${answer.reason}`);
+    expect(answer.paths).toHaveLength(1);
+    expect(relative(join(repo.root, '.claude', 'desk-uploads', 'app-1'), answer.paths[0])).not.toMatch(/^\.\./);
+    expect(readFileSync(answer.paths[0]).equals(bytes)).toBe(true);
+    // each part ran once: the lost one's resend answered from the machine's ledger, under its own opId
+    expect(l.f.spine.claimed.filter((c) => c.name === 'files.upload').map((c) => (c.input as FilesUploadInput).part)).toEqual([0, 1, 2].map((index) => ({ upload: expect.any(String), index, last: index === 2 })));
+    expect(new Set(l.f.spine.claimed.map((c) => c.op?.opId)).size).toBe(3);
+    expect(of(l.a, 'remote.upload', 'app-1').map((p) => p.sent)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('saves a file on an idle session as a `machine` act, without resuming it', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    l.place('app-r', 'eng-r', { directory: repo.root }); // a record and no host row: released as idle
+    checkoutServices(l, repo);
+    l.a.tabs('app-r');
+    await until(() => sessionOf(l.a, 'app-r')?.stream === 'idle', 'the session open and idle');
+    const readme = repo.path('README.md');
+    expect(await l.a.cmd('files.write', { appSessionId: 'app-r', path: readme, content: 'bye\n', expectedHash: sha256('hello\n') })).toEqual({ status: 'ok', hash: sha256('bye\n') });
+    expect(readFileSync(readme, 'utf8')).toBe('bye\n');
+    expect(l.f.spine.claimed.map((c) => c.name)).toEqual(['files.write']);
+    expect(l.f.spine.acquired).toEqual([]);
+    expect(l.host.sessions.has('app-r')).toBe(false);
+  });
+
+  it('follows git and files watches over the checkout feed, and after a drop makes the git watch again and invalidates the files watch, which the renderer’s path installs anew', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    const s = l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    const files = checkoutServices(l, repo);
+    await opened(l.a, 'app-1', s.launchId);
+    await until(() => l.host.calls.some((c) => c.name === 'git.status'), 'the feed’s bounds read');
+    const page = { client: endableClientRef('page-panel'), session: 'app-1' as AppSessionId };
+    expect(((await l.a.cmd('git.watch', { directory: repo.root }, page)) as GitStatus).repoRoot).toBe(repo.root);
+    await l.a.cmd('files.watch', { appSessionId: 'app-1', path: repo.root }, page);
+    expect(files.watching()).toEqual([repo.root]);
+    const untracked = (name: string) => (c: { status: GitStatus }) => c.status.files.some((x) => x.path === name && x.untracked);
+
+    writeFileSync(repo.path('one.ts'), 'export {};\n');
+    await until(() => filesChanges(l.a, 'app-1').some((c) => c.path === repo.path('one.ts')), 'the files change on the feed', 10_000);
+    await until(() => gitChanges(l.a).some((c) => c.repoRoot === repo.root && untracked('one.ts')(c)), 'the git change on the feed', 10_000);
+
+    // The channel drops: the machine releases what it held for it, and a file is made meanwhile.
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => files.watching().length === 0 && files.followed.size === 0, 'the old channel’s watches released');
+    writeFileSync(repo.path('two.ts'), 'export {};\n');
+    const said = l.a.emitted.length;
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    await until(() => filesChanges(l.a, 'app-1').some((c) => c.kind === 'invalidated' && c.path === repo.root), 'the files watch invalidated', 15_000);
+    await until(() => gitChanges(l.a).some((c) => c.reason === 'initial' && untracked('two.ts')(c)), 'the git watch made again, its status told', 15_000);
+    expect(l.a.emitted.slice(said).filter((e) => e.name === 'files.changed' && e.payload.kind === 'invalidated')).toHaveLength(1);
+
+    // The renderer's files store lists and watches again on the invalidation.
+    const listing = (await l.a.cmd('files.list', { appSessionId: 'app-1', path: repo.root }, page)) as FilesListOutput;
+    expect(listing.entries.map((e) => e.name)).toEqual(expect.arrayContaining(['one.ts', 'two.ts']));
+    await l.a.cmd('files.watch', { appSessionId: 'app-1', path: repo.root }, page);
+    expect(files.watching()).toEqual([repo.root]);
+    expect(files.followed.size).toBe(1); // the new channel's ref only
+    writeFileSync(repo.path('three.ts'), 'export {};\n');
+    await until(() => filesChanges(l.a, 'app-1').some((c) => c.path === repo.path('three.ts')), 'a change on the reinstalled watch', 10_000);
+  });
+
+  it('spawns as a member who owns nothing there once a grant gives them `spawn`, stepped up; the new session streams, takes a PDF’s upload, then one message naming its path', async () => {
+    const l = await lab();
+    await sminos(l.f); // the machine's presence names CHECKOUT
+    const b = await l.device('macb', { member: 'B' });
+    const repo = await gitRepo();
+    checkoutServices(l, repo);
+    const spawned: Array<{ input: unknown; op?: HandlerOp }> = [];
+    l.f.spine.handle('session.spawn', (input, context) => {
+      spawned.push({ input, ...(context.op && { op: context.op }) });
+      l.host.add('app-new');
+      l.f.spine.set('app-new', 'eng-app-new', { ...record('app-new', { engineSessionId: 'eng-app-new' as never, directory: repo.root }) });
+      // what O12's observer will claim from `launchedBy`: the requester owns what they launched
+      l.f.records.set({ lane: 'B', session: 'eng-app-new', owners: [context.op!.member] }, 'app-new');
+      return { status: 'ok', appSessionId: 'app-new' };
+    });
+    const spawn = { checkout: CHECKOUT, permission_mode: 'default' }; // no brief: the attachment goes first
+    expect(await b.route('session.spawn', spawn)).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } });
+    expect(await grantSpawn(l.f, org.B)).toBe(`kept: version 1 for member ${org.B}, spawn`);
+    const confirmed = b.confirmed.length;
+    expect(await b.cmd('session.spawn', spawn)).toEqual({ status: 'ok', appSessionId: 'app-new' });
+    expect(b.confirmed).toHaveLength(confirmed + 1); // asked at the sheet before it was sent
+    expect(spawned).toEqual([{ input: spawn, op: expect.objectContaining({ member: org.B, device: 'macb' }) }]);
+    expect((spawned[0].op!.action as Action).stepUp).toEqual(expect.any(String));
+
+    // The tab moves to the new session, which streams.
+    await opened(b, 'app-new', l.host.session('app-new').launchId);
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), randomBytes(3 * MiB)]);
+    const uploaded = (await b.cmd('files.upload', { appSessionId: 'app-new', files: [{ name: 'brief.pdf', bytes: pdf.toString('base64') }] })) as FilesUploadOutput;
+    if (uploaded.status !== 'ok') throw new Error(`refused: ${uploaded.reason}`);
+    expect(readFileSync(uploaded.paths[0]).equals(pdf)).toBe(true);
+    const text = `Read @${relative(repo.root, uploaded.paths[0])}`;
+    expect(await b.cmd('session.send', { appSessionId: 'app-new', content: text })).toMatchObject({ disposition: 'queued' });
+    expect(l.host.runs).toEqual([{ appSessionId: 'app-new', content: text, launchId: l.host.session('app-new').launchId }]);
+    await until(() => eventsOf(b, 'app-new').length > 0, 'the send’s row streamed');
+  });
+
+  it('opens a parked session whose newest window, and an older page, are each over 4 MiB with paged rows and a working cursor, never the bar (acceptance 12)', async () => {
+    const l = await lab();
+    const s = l.host.add('app-p');
+    // The transcript the engine host reads from disk: its events carry no seq. Fourteen of 700 KiB, about 9.6 MiB.
+    const history = Array.from({ length: 14 }, (_, i) => ({ ...l.host.event(s, i + 1, 0, { kind: 'note', text: `${i + 1}:${'p'.repeat(700 * 1024)}` }), id: `app-p:disk:${i + 1}`, seq: null }) as unknown as SessionEvent);
+    l.host.stored.set('app-p', history);
+    l.host.sessions.delete('app-p');
+    l.place('app-p');
+    l.a.tabs('app-p');
+    await until(() => sessionOf(l.a, 'app-p')?.stream === 'idle', 'the parked session open');
+    expect(utf8(history)).toBeGreaterThan(4 * MiB); // the newest window, unbounded, is past the channel
+
+    const newest = (await l.a.cmd('session.events', { appSessionId: 'app-p', afterSeq: null, limit: null })) as Events;
+    expect(newest.historyUnavailable).toBeUndefined();
+    expect(newest.events.at(-1)!.id).toBe(history.at(-1)!.id);
+    expect(newest.earlier).toBe(newest.events[0].id);
+    const first = history.findIndex((e) => e.id === newest.events[0].id);
+    expect(utf8(history.slice(0, first))).toBeGreaterThan(4 * MiB); // and so is the page before it
+    const pages = [newest.events];
+    for (let cursor = newest.earlier; cursor !== undefined; ) {
+      const older = (await l.a.cmd('session.events', { appSessionId: 'app-p', afterSeq: null, limit: null, before: cursor })) as Events;
+      expect(older.events.length).toBeGreaterThan(0);
+      expect(older.historyUnavailable).toBeUndefined();
+      pages.unshift(older.events);
+      cursor = older.earlier;
+    }
+    expect(pages.length).toBeGreaterThan(2);
+    expect(ids(pages.flat())).toEqual(ids(history));
+    expect(of(l.a, 'remote.historyTooLarge', 'app-p')).toEqual([]);
+    expect(gapsOf(l.a, 'app-p')).toEqual([]);
+    expect(l.host.calls.filter((c) => c.name === 'session.events').every((c) => (c.input as { maxBytes?: number }).maxBytes !== undefined)).toBe(true);
+  });
+
+  it('keeps M2’s bar for a parked session’s window too large for the channel on an endpoint without the byte budget, sending it no budget', async () => {
+    endpointWithout('rl2.events-budget');
+    const l = await lab();
+    const s = l.host.add('app-p');
+    const history = Array.from({ length: 8 }, (_, i) => ({ ...l.host.event(s, i + 1, 0, { kind: 'note', text: 'p'.repeat(700 * 1024) }), id: `app-p:disk:${i + 1}`, seq: null }) as unknown as SessionEvent);
+    l.host.stored.set('app-p', history);
+    l.host.sessions.delete('app-p');
+    l.place('app-p');
+    expect(await l.a.cmd('session.events', { appSessionId: 'app-p', afterSeq: null, limit: null })).toEqual({ events: [], lastSeq: 0, complete: true, historyUnavailable: true });
+    expect(of(l.a, 'remote.historyTooLarge', 'app-p')).toEqual([{ appSessionId: 'app-p', window: 'newest' }]);
+    expect(l.host.calls.filter((c) => c.name === 'session.events').some((c) => (c.input as { maxBytes?: number }).maxBytes !== undefined)).toBe(false);
+  });
+
+  it('hydrates a live launch over 4 MiB in budgeted pages, a row alone past the budget a gap at its place', async () => {
+    const l = await lab();
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    const small = l.host.row('app-1', 2);
+    await opened(l.a, 'app-1', s.launchId);
+    const big = (bytes: number) => {
+      const row = [l.host.event(s, s.rows.length + 1, 0, { kind: 'note', text: 'x'.repeat(bytes) })];
+      s.rows.push(row);
+      return row;
+    };
+    const fits = [big(1.5 * MiB), big(1.5 * MiB), big(1.5 * MiB)];
+    const huge = big(5 * MiB);
+    const answer = (await l.a.cmd('session.events', { appSessionId: 'app-1', afterSeq: null, limit: null })) as Events;
+    expect(ids(answer.events)).toEqual(ids([...small, ...fits.flat()]));
+    expect(answer).toMatchObject({ lastSeq: huge[0].seq, complete: true });
+    expect(answer.historyUnavailable).toBeUndefined();
+    expect(gapsOf(l.a, 'app-1')).toEqual([{ appSessionId: 'app-1', launchId: s.launchId, at: { seq: huge[0].seq } }]);
+    const asked = l.host.calls.filter((c) => c.name === 'session.events').map((c) => c.input as { limit: number | null; maxBytes?: number });
+    expect(asked.length).toBeGreaterThan(2);
+    expect(asked.every((a) => a.maxBytes !== undefined && a.limit === null)).toBe(true);
+  });
+
+  it('sends no call session and opens no feed to an endpoint that lists neither: its checkout read is refused, its changes never arrive', async () => {
+    endpointWithout('rl2.call-session', 'rl2.feeds');
+    const l = await lab();
+    const repo = await gitRepo();
+    const s = l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    await opened(l.a, 'app-1', s.launchId);
+    expect(await l.a.route('git.status', { directory: repo.root }, { session: 'app-1' as AppSessionId })).toMatchObject({ ok: false, error: { issues: { refusal: 'no-target' } } });
+    l.host.emitMachine('files.changed', { appSessionId: 'app-1', path: repo.path('a.ts'), kind: 'created' });
+    await sleep(200);
+    expect(filesChanges(l.a, 'app-1')).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@
 // subscription's messages) and moves the link's state and caps.
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
-import type { Cursor } from 'org-protocol';
+import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
 import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallResult, DeviceCaps, RemoteLink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
@@ -54,7 +54,8 @@ export class FakeLink implements RemoteLink {
   #refusal: string | null = null;
   #caps: DeviceCaps | null = { member: 'member-a', device: 'mac1', clientClass: 'native-mac', machine: { grades: ['spawn'] }, stateVersion: 2 };
   peers: string[] = ['rl2.executor.machine'];
-  readonly calls: Array<{ name: string; input: unknown }> = [];
+  /** Each call, with the session it named (P5 O7 M4's `call.session`) when it named one. */
+  readonly calls: Array<{ name: string; input: unknown; session?: SessionRef }> = [];
   readonly answers = new Map<string, (input: Record<string, unknown>) => CallResult | Promise<CallResult>>();
   readonly acts: FakeAct[] = [];
   /** The progress a new act starts in, and an outcome to settle it with at once, if any. */
@@ -113,8 +114,8 @@ export class FakeLink implements RemoteLink {
     for (const listener of [...this.#capsListeners]) listener(caps);
   }
 
-  async call(name: string, input: unknown): Promise<CallResult> {
-    this.calls.push({ name, input });
+  async call(name: string, input: unknown, options?: { session?: SessionRef }): Promise<CallResult> {
+    this.calls.push({ name, input, ...(options?.session !== undefined && { session: options.session }) });
     const answer = this.answers.get(name);
     if (answer === undefined) return { ok: false, error: { code: 'not-offered' } };
     return answer((input ?? {}) as Record<string, unknown>);
