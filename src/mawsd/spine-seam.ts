@@ -17,10 +17,16 @@
 //
 // P5 O3-D M5 (Interfaces §L, D21): `yieldCandidate`, read at each load attempt, names a pid to yield to before the load
 // (the second signal, the profile's `SingletonLock`, daemon.ts); `yieldedTo` says whom the spine yields to now.
+// The cross-build flake's ruling (B): that second signal can name the app being launched before its hello has come, so
+// a yield on it is provisional: what arrives is held as a load's hold is and nothing is delivered. The app's hello
+// listing machine.spine lifts it and resumes the load, which replays the coalesced parts, resyncs and drains the hold;
+// a hello without machine.spine, the app gone or no hello within the relay's hello hold (`provisionalYieldMs`) confirms
+// it, and the hold is discarded as any yield's.
 import type { SpineData, SpineDeps, SpineRoot } from '../services/spine-root';
 import type { SpineLock } from '../services/settings/spine-lock';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { isAlive, procStartOf } from '../engine-host/supervisor-files';
+import { HELLO_HOLD_MS } from './relay';
 import { SpineEvents, SpineHostsAdapter, type EngineIntercept, type EngineLink } from './spine-hosts';
 
 export type SpineState = 'cold' | 'loading' | 'loaded' | 'refused' | 'releasing' | 'yielded';
@@ -43,8 +49,9 @@ export interface SpineTiming {
   yieldSettleMs: number; // a yield whose writers have not settled by then ends the process
   settleLogMs: number; // a release still waiting for the root's work logs again after this
   stopSettleMs: number; // the daemon's exit waits this long in all for a load, a release or the root's work, then leaves them to the exit
+  provisionalYieldMs: number; // a yield on D21's second signal is confirmed when the named app's hello has not come by then
 }
-export const SPINE_TIMING: SpineTiming = { refusalRetryMs: 60_000, yieldCheckMs: 5_000, yieldSettleMs: 60_000, settleLogMs: 30_000, stopSettleMs: 5_000 };
+export const SPINE_TIMING: SpineTiming = { refusalRetryMs: 60_000, yieldCheckMs: 5_000, yieldSettleMs: 60_000, settleLogMs: 30_000, stopSettleMs: 5_000, provisionalYieldMs: HELLO_HOLD_MS };
 
 export interface LazySpineOptions {
   profileDir: string;
@@ -133,7 +140,8 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   let loaded: Loaded | null = null;
   let loading: Promise<SpineRoot> | null = null;
   let releasing: Promise<void> | null = null;
-  let yieldTo: { pid: number; procStart: string | null; check: ReturnType<typeof setInterval> } | null = null;
+  // `provisional`: a yield on D21's second signal that no hello has confirmed yet (its confirmation deadline), else null
+  let yieldTo: { pid: number; procStart: string | null; check: ReturnType<typeof setInterval>; provisional: ReturnType<typeof setTimeout> | null } | null = null;
   const yieldDeadlines = new Set<ReturnType<typeof setTimeout>>(); // the yields' settle deadlines; a lift cancels them
   let quietFact = false;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
@@ -172,7 +180,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       if (state === 'refused' && !loadable()) throw new SpineUnavailable(refusal!.reason, 'refused');
       const candidate = options.yieldCandidate?.() ?? null; // P5 O3-D M5 (D21): read at each load attempt
       if (candidate !== null) {
-        yieldSpine(candidate);
+        yieldSpine(candidate, true);
         continue;
       }
       loading = load(reason).finally(() => {
@@ -357,28 +365,54 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // --- the yield --------------------------------------------------------------------------------------------------------
   function lift(): void {
     if (!yieldTo) return;
+    const provisional = yieldTo.provisional !== null;
     clearInterval(yieldTo.check);
+    if (yieldTo.provisional) clearTimeout(yieldTo.provisional);
     for (const timer of yieldDeadlines) clearTimeout(timer); // nobody left to yield to: the writers settle in their own time
     yieldDeadlines.clear();
     log(`[spine] the yield to pid ${yieldTo.pid} lifted`);
     yieldTo = null;
     if (state === 'loading') events.beginHold(true); // the load goes on: its barrier drains what arrives from here
     if (state === 'yielded') {
-      events.cold();
+      if (!provisional) events.cold();
       set('cold', 'the yield lifted');
+      if (provisional) void ensure('event').catch(() => {}); // the hold resumes in a load: coalesced parts, resync, then the hold
     }
   }
 
-  function yieldSpine(pid: number | null): void {
+  // A provisional yield confirmed (the app's hello lists no machine.spine, the app is gone, or no hello came in time):
+  // a yield as any other from here, its hold discarded, counted and logged.
+  function confirm(why: string): void {
+    if (!yieldTo?.provisional) return;
+    clearTimeout(yieldTo.provisional);
+    yieldTo.provisional = null;
+    log(`[spine] the yield to pid ${yieldTo.pid} confirmed: ${why}`);
+    if (state === 'yielded') events.discard('the yield was confirmed', 'off');
+  }
+
+  // `provisional` (P5, the cross-build flake's ruling): a yield on D21's second signal, read at a load attempt, which names
+  // an app whose hello may not have come yet. Until a hello or its deadline settles it, what arrives is held as a load's
+  // hold is and nothing is delivered; a lift (the hello lists machine.spine) resumes the load and folds it.
+  function yieldSpine(pid: number | null, provisional = false): void {
     if (pid === null) return lift();
-    if (yieldTo?.pid === pid || stopped) return;
-    if (yieldTo) clearInterval(yieldTo.check);
+    if (stopped) return;
+    if (yieldTo?.pid === pid) {
+      if (!provisional) confirm(`pid ${pid}'s hello lists no machine.spine`);
+      return;
+    }
+    if (yieldTo) {
+      confirm(`a yield to pid ${pid} follows it`);
+      clearInterval(yieldTo.check);
+    }
     const procStart = processes.procStartOf(pid);
     const check = setInterval(() => {
-      if (!processes.isAlive(pid) || processes.procStartOf(pid) !== procStart) lift();
+      if (processes.isAlive(pid) && processes.procStartOf(pid) === procStart) return;
+      confirm(`pid ${pid} is gone`);
+      lift();
     }, timing.yieldCheckMs);
-    yieldTo = { pid, procStart, check };
-    log(`[spine] yielding to pid ${pid}, an app that runs its own spine`);
+    const confirmBy = provisional ? setTimeout(() => confirm(`no hello from pid ${pid} within ${timing.provisionalYieldMs / 1000} s`), timing.provisionalYieldMs) : null;
+    yieldTo = { pid, procStart, check, provisional: confirmBy };
+    log(provisional ? `[spine] yielding to pid ${pid}, provisionally: what arrives is held until its hello` : `[spine] yielding to pid ${pid}, an app that runs its own spine`);
     if (quietTimer) clearTimeout(quietTimer);
     quietTimer = null;
     const deadline = () => {
@@ -408,7 +442,8 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // cold or refused, or a release that ended cold: nothing loaded; the lock goes, and every load is refused
   function afterRelease(): void {
     if (!yieldTo || loaded) return;
-    events.off();
+    if (yieldTo.provisional) events.beginHold(); // held as a load's hold is, its coalesced parts replayed at its barrier
+    else events.off();
     giveLockUp();
     set('yielded', `pid ${yieldTo.pid}`);
   }
@@ -429,6 +464,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       stopped = true;
       if (quietTimer) clearTimeout(quietTimer);
       if (yieldTo) clearInterval(yieldTo.check);
+      if (yieldTo?.provisional) clearTimeout(yieldTo.provisional);
       // one deadline for the whole exit (D34): a load, a release or the root's work still running when it passes is
       // left to the process's exit, which ends every writer and frees spine.lock; nothing is closed or handed over
       let expire!: () => void;

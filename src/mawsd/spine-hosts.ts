@@ -5,11 +5,12 @@
 //   the spine is cold it keeps the coalesced parts (the latest per session and name, `engine.budget` once), so a
 //   periodic status wakes nothing, and offers a `session.eventBatch` to the seam as a trigger; from a trigger until a
 //   load's barrier has passed it holds every event in arrival order; once a load's barrier passed it delivers each event
-//   to the loaded spine's listeners; once the seam is off (yielded) it drops every other event and keeps the coalesced
-//   parts as cold does, since a yield lifts (the app it yielded to departs, or its hello lists `machine.spine`) and the
-//   next load's barrier replays them: a permission raised while no app ran reaches attention only as the coalesced
-//   `session.brokerItems` of the connect burst, which may arrive in the yield before the app's hello lifts it. The parts
-//   are one link's state, voided when it leaves `ready`; a load the lift resumes past its replay holds them first.
+//   to the loaded spine's listeners. A provisional yield (spine-seam.ts) holds as a load does. Once the seam is off (a
+//   confirmed yield) it drops every other event and keeps the coalesced parts as cold does, since a yield lifts (the
+//   app it yielded to departs) and the next load's barrier replays them: a permission raised while no app ran reaches
+//   attention only as the coalesced `session.brokerItems` of a connect burst. The parts are one link's state: a link that
+//   leaves `ready` voids them, kept or held, and what it delivers until the next link is ready is not kept; a load the
+//   lift resumes past its replay holds them first.
 // - `SpineHostsAdapter`, one per load: the `SpineHosts` the spine's root is given. Its `onEvent` listens on the core, its
 //   `dispatch` reaches the engine host through the daemon's intercepts first (so `host.configure`, `host.stopAll` and
 //   `host.exitWhenIdle` from the spine reach the clocks as the app's do), its `setResync` is run by the adapter itself at
@@ -54,21 +55,34 @@ export class SpineEvents {
   private heldBytes = 0;
   private delivering = -1; // the drain's index into `held`
   private replayOwed = false; // a load began and its barrier has not replayed the coalesced parts yet
+  private linkReady: boolean; // the link is `ready`: its whole-state parts are the current link's
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly offs: (() => void)[];
   dropped = 0; // held events discarded since the seam started (daemon.status.spine.heldDropped)
 
   constructor(
-    link: Pick<EngineLink, 'onEvent' | 'onState'>,
+    link: Pick<EngineLink, 'onEvent' | 'onState' | 'snapshot'>,
     private readonly options: SpineEventsOptions,
   ) {
     this.offs = HOST_EVENTS.map((name) => link.onEvent(name, (payload: unknown) => this.receive(name, payload)));
-    // The coalesced parts are one link's whole state: a link that leaves `ready` voids them (its successor's connect
-    // burst republishes every row it holds, and a row it lacks must not come back from the old host's parts)
-    this.offs.push(link.onState('engine-host', (state) => void (state.state !== 'ready' && this.coalesced.clear())));
+    // The coalesced parts are one link's whole state: a link that leaves `ready` voids them, kept or held, and what it
+    // still delivers (a recycled connection drains after its `restarting`) is none of the next link's (its successor's
+    // connect burst republishes every row it holds, and a row it lacks must not come back from the old host's parts)
+    this.linkReady = link.snapshot('engine-host').state === 'ready';
+    this.offs.push(link.onState('engine-host', (state) => this.linkState(state.state === 'ready')));
+  }
+
+  private linkState(ready: boolean): void {
+    this.linkReady = ready;
+    if (ready) return;
+    this.coalesced.clear();
+    if (this.delivering >= 0 || !this.held.some((h) => COALESCED_EVENTS.has(h.name))) return; // a drain's own order stays
+    this.held = this.held.filter((h) => !COALESCED_EVENTS.has(h.name));
+    this.heldBytes = this.held.reduce((bytes, h) => bytes + sizeOf(h.payload), 0);
   }
 
   private receive(name: string, payload: unknown): void {
+    if (!this.linkReady && COALESCED_EVENTS.has(name)) return; // a voided link's whole state
     switch (this.mode) {
       case 'live':
         return this.deliver(name, payload);

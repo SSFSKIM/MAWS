@@ -362,7 +362,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
     },
     log,
-    ...(options.spine?.timing && { timing: options.spine.timing }),
+    // a provisional yield waits as long as a hello may wait for its upstream (the relay's hold)
+    timing: { ...(options.helloHoldMs !== undefined && { provisionalYieldMs: options.helloHoldMs }), ...options.spine?.timing },
     ...(options.spine?.lockWaitMs !== undefined && { lockWaitMs: options.spine.lockWaitMs }),
   });
 
