@@ -1003,6 +1003,9 @@ const LIVENESS_BOUNDS = {
   'e2e/sessions.spec.ts': {
     'expect(failedAfterMs).toBeLessThan(110_000);': 'two of the product\'s first-output bounds (58 s or more), read before the long class\'s 120 s',
   },
+  'e2e/supervisor.spec.ts': {
+    "expect(Date.now() - started, 'within the host’s launch and the boot').toBeLessThan(DISCOVERY_WAKE_BOUND_MS);": 'a parked engine host woken by a command that waits on the session service\'s boot (P5, case (n)): the host\'s launch and the boot, against the 8 s a discovery read keeps for the same callers (the tightest caller deadline, 10 s, less the answer\'s way back)',
+  },
   'e2e/smoke.spec.ts': {
     "expect(Date.now() - launchedAt, 'the window shows its regions within ten seconds').toBeLessThan(10_000);": 'a launch\'s liveness: the regions visible within 10 s',
   },
@@ -1925,14 +1928,54 @@ test('a full hosted queue overflows only to the EC2 labels, with exclusive wait 
   assert.match(summary, /EC2 overflow.*e2e:document.*e2e:settings/);
   assert.deepEqual([outputs.e2e_hosted, outputs.e2e_vm, outputs.e2e_build], ['[]', '[]', '[]']);
 });
-test('greedy placement charges each newly placed group to its own queue', () => {
-  const { outputs } = overflowPlan(overflowSample({ hostedQueued: 10 }));
-  assert.deepEqual(JSON.parse(outputs.e2e).map((e) => e.overflow || false), [true, true, false, false]);
+test('weighted expected start charges each placement to its own queue in gate order', () => {
+  for (const [hostedQueued, expected] of [
+    [1, [true, false, false, true]], // idle EC2 takes the first job, then waits for hosted to fall behind again
+    [4, [true, true, false, true]],
+    [5, [true, true, true, false]], // three EC2 starts fit before one hosted round
+    [10, [true, true, true, true]],
+  ]) {
+    const { outputs } = overflowPlan(overflowSample({ hostedQueued }));
+    assert.deepEqual(JSON.parse(outputs.e2e).map((e) => e.overflow || false), expected, `hosted queued: ${hostedQueued}`);
+  }
+});
+test('busy EC2 with one queued stays hosted behind five busy hosted slots and one queued', () => {
+  const { outputs } = overflowPlan(overflowSample({ hostedQueued: 1, ec2: 'busy', ec2Queued: 1 }));
+  assert.ok(JSON.parse(outputs.e2e).every((e) => e.hosted && !e.overflow));
+});
+test('ties stay hosted, but an earlier weighted EC2 start overflows', () => {
+  for (const [hostedQueued, ec2Queued, expected] of [[0, 0, false], [23, 10, false], [24, 10, true]]) {
+    const { outputs } = overflowPlan(overflowSample({ hostedQueued, ec2Queued }));
+    assert.equal(JSON.parse(outputs.e2e)[0].overflow || false, expected);
+  }
+});
+// API contract: the plan check's annotations expose this count without downloading its logs.
+const shadowCount = (result) => {
+  const notices = [...result.stdout.matchAll(/^::notice title=EC2 overflow shadow::old_rule_count=(\d+)$/gm)];
+  assert.equal(notices.length, 1, 'one machine-readable shadow count per plan');
+  return Number(notices[0][1]);
+};
+test('the old-rule shadow charges its own placements, not the weighted rule\'s queues', () => {
+  // Old placements, in order: HHHH, HEHH, EHHH, EEHH, EEEE.
+  for (const [hostedQueued, count] of [[1, 0], [4, 1], [5, 1], [10, 2], [20, 4]]) {
+    assert.equal(shadowCount(overflowPlan(overflowSample({ hostedQueued }))), count, `hosted queued: ${hostedQueued}`);
+  }
+  // Busy + queued counts as two EC2 jobs ahead: at three full hosted rounds only the first can overflow.
+  assert.equal(shadowCount(overflowPlan(overflowSample({ hostedQueued: 15, ec2: 'busy', ec2Queued: 1 }))), 1);
+  // Hosted-only groups still charge the shadow's hosted queue: HHHHHE, not HHHHHH.
+  assert.equal(shadowCount(overflowPlan(overflowSample({ hostedQueued: 0 }), {
+    HOSTED_MAC_E2E: 'document settings tools library side panel', HOSTED_MAC_ONLY_E2E: 'document settings tools library side',
+    HEAD_MESSAGE: `Runner: macos\nGates: e2e:document,e2e:settings,e2e:tools,e2e:library,e2e:side,e2e:panel\nMac-Backlog: ${overflowSample({ hostedQueued: 0 })}`,
+  })), 1);
 });
 test('empty hosted backlog, busy EC2 queue and offline EC2 preserve hosted placement', () => {
   for (const sample of [
-    { hostedQueued: 0, hostedRunning: 0 }, { ec2: 'busy', ec2Queued: 4 }, { ec2: 'offline' },
-  ]) assert.ok(JSON.parse(overflowPlan(overflowSample(sample)).outputs.e2e).every((e) => e.runner === '"macos-26"' && e.retry && !e.overflow));
+    { hostedQueued: 0, hostedRunning: 0 }, { ec2: 'busy', ec2Queued: 10 }, { ec2: 'offline' },
+  ]) {
+    const result = overflowPlan(overflowSample(sample));
+    assert.ok(JSON.parse(result.outputs.e2e).every((e) => e.runner === '"macos-26"' && e.retry && !e.overflow));
+    assert.equal(shadowCount(result), 0);
+  }
 });
 test('absent, invalid, failed, future and stale backlog samples fail open byte for byte', () => {
   const original = overflowPlan('').outputs;
@@ -1940,11 +1983,17 @@ test('absent, invalid, failed, future and stale backlog samples fail open byte f
     overflowSample({ at: new Date(Date.now() - 301_000).toISOString() }),
     overflowSample({ at: new Date(Date.now() + 60_000).toISOString() }),
     overflowSample({ hostedQueued: -1 }), overflowSample({ ec2Queued: null }), overflowSample({ v: 2 }),
-  ]) assert.deepEqual(overflowPlan(sample).outputs, original, sample);
+  ]) {
+    const result = overflowPlan(sample);
+    assert.deepEqual(result.outputs, original, sample);
+    assert.equal(shadowCount(result), 0, sample);
+  }
 });
 test('hosted-only groups stay hosted and still count toward that queue', () => {
-  const entries = JSON.parse(overflowPlan(overflowSample(), { HOSTED_MAC_ONLY_E2E: 'document settings' }).outputs.e2e);
+  const result = overflowPlan(overflowSample(), { HOSTED_MAC_ONLY_E2E: 'document settings' });
+  const entries = JSON.parse(result.outputs.e2e);
   assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, true, true]);
+  assert.equal(shadowCount(result), 2);
 });
 test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hosted, final, mirror or dispatched groups', () => {
   const message = `Runner: macos\nGates: e2e:discover,e2e:artifacts-perf,e2e:default,e2e:document\nMac-Backlog: ${overflowSample()}`;
@@ -1954,12 +2003,21 @@ test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hoste
   assert.ok(entries.slice(0, 2).every((e) => JSON.parse(e.runner).includes('ci-kit-mac-home')));
   for (const extra of [
     { HOSTED_MAC_ROUTE: 'mirror' }, { HOSTED_MAC_E2E: '' },
+    { HOSTED_MAC_E2E: '', MAC_SECRET_E2E: 'document settings tools library' },
+    { HOSTED_MAC_E2E: '', POOL_E2E: 'document settings tools library' },
+    { HEAD_MESSAGE: `Runner: linux\nGates: e2e:document\nMac-Backlog: ${overflowSample()}`, LINUX_E2E: 'document' },
+    { HEAD_MESSAGE: `${message}\nLane: vm`, MAC_VM_E2E: 'document' },
+    { HEAD_MESSAGE: `${message}\nLane: vm-trial`, MAC_VM_E2E: 'document' },
     { GITHUB_REF: 'refs/heads/ci/h-final-test' },
     { HEAD_MESSAGE: `${message}\nLane: no-hosted` },
     { HEAD_MESSAGE: `${message}\nLane: hosted` },
     { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' },
     { HEAD_MESSAGE: `Runner: macos\nGates: e2e:design-live\nLive: yes\nMac-Backlog: ${overflowSample()}`, LIVE_E2E: 'design-live' },
-  ]) assert.ok(JSON.parse(overflowPlan(overflowSample(), extra).outputs.e2e).every((e) => !e.overflow));
+  ]) {
+    const result = overflowPlan(overflowSample(), extra);
+    assert.ok(JSON.parse(result.outputs.e2e).every((e) => !e.overflow));
+    assert.equal(shadowCount(result), 0);
+  }
 });
 
 test('e2e uploads green flaky reports and every measured JSON set, but never a prior checkout’s evidence', () => {
@@ -2014,5 +2072,19 @@ test('the workflow runs the same retry and flaky notice on hosted and overflow, 
     const rendered = name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => Function('matrix', `return (${expression})`)(matrix));
     assert.equal(rendered, `e2e:document${overflow ? ' (EC2 overflow)' : ''}`);
     assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)({ ...matrix, retry: false }, runner, github), '');
+  }
+});
+
+test('the hosted quota defaults to five, but fifty keeps the same backlog hosted', () => {
+  const sample = overflowSample();
+  const placements = (extra) => JSON.parse(overflowPlan(sample, extra).outputs.e2e).map((e) => e.runner);
+  assert.deepEqual(placements({ HOSTED_MAC_CAP: '' }), placements({ HOSTED_MAC_CAP: '5' }));
+  assert.ok(placements({ HOSTED_MAC_CAP: '' }).some((runner) => runner.includes('ci-kit-mac-ec2')));
+  assert.deepEqual(placements({ HOSTED_MAC_CAP: '50' }), Array(4).fill('"macos-26"'));
+});
+
+test('a configured hosted quota must be a positive whole number', () => {
+  for (const HOSTED_MAC_CAP of ['0', '-1', '1.5', 'no', 'Infinity', '1e2', '9007199254740992']) {
+    assert.throws(() => overflowPlan(undefined, { HOSTED_MAC_CAP }), /HOSTED_MAC_CAP/, HOSTED_MAC_CAP);
   }
 });

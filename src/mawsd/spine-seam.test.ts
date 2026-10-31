@@ -372,6 +372,30 @@ describe('the hold and the barrier', () => {
     expect(intercepted).toEqual(['host.stopAll']);
     expect(link.calls.map((call) => call.name)).not.toContain('host.stopAll');
   });
+
+  // The supervisor holds a request for an engine host that is not ready and launches a parked one for it (the race over
+  // the supervisor core and the real parts is spine-event-wake.test.ts's)
+  it('an event’s load sends an engine host that is not ready nothing until a need reaches it; a command’s load sends it all', async () => {
+    const spine = seam();
+    link.leave(); // parked: the supervisor reports it restarting
+    link.batch('s1', 1); // its last release's events
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    const ping = () => roots.at(-1)!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+    expect(await ping()).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('engine.ping not sent') } });
+    expect(link.calls).toEqual([]);
+    link.arrive(); // a host that is ready is sent what the parts send it
+    await ping();
+    link.leave();
+    await spine.ensure('command'); // a need: a client's command reaches the loaded spine
+    await ping();
+    expect(link.calls.map((call) => call.name)).toEqual(['engine.ping', 'engine.ping']);
+    spine.quiet(true);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    spine.quiet(false);
+    await spine.ensure('command');
+    await ping();
+    expect(link.calls.map((call) => call.name)).toEqual(['engine.ping', 'engine.ping', 'engine.ping']);
+  });
 });
 
 describe('the release', () => {

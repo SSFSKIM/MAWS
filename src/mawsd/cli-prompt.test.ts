@@ -89,16 +89,16 @@ describe.skipIf(!existsSync(MAWSD))('mawsd enroll at a terminal', () => {
     const endpoint = new FakeEndpoint();
     await scene.start({ endpoint });
     const run = enrollAtTerminal();
-    await until(() => run.output().includes('Enrollment code: '), 15_000, `the prompt:\n${run.output()}`);
+    await until(() => run.output().includes('Enrollment code: '), 15_000, () => `the prompt:\n${run.output()}`);
     const during = modesOf(run.pty);
     expect(during.has('-echo') && during.has('-icanon'), [...during].join(' ')).toBe(true); // the prompt's raw mode
     run.pty.write('CODE-TYPED-SECRET');
     run.pty.write('\r');
-    await until(() => endpoint.calls.length === 1, 15_000, `the code to arrive:\n${run.output()}`);
+    await until(() => endpoint.calls.length === 1, 15_000, () => `the code to arrive:\n${run.output()}`);
     const answered = modesOf(run.pty); // the command still runs, awaiting the module
     expect(cooked(answered), [...answered].join(' ')).toBe(true);
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, `the command's end:\n${run.output()}`);
+    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
     await run.exited;
     expect(run.output()).not.toContain('CODE-TYPED-SECRET');
     expect(run.output()).toContain('EXIT=0');
@@ -109,10 +109,12 @@ describe.skipIf(!existsSync(MAWSD))('mawsd enroll at a terminal', () => {
     const endpoint = new FakeEndpoint();
     await scene.start({ endpoint });
     const run = enrollAtTerminal();
-    await until(() => run.output().includes('Enrollment code: '), 15_000, `the prompt:\n${run.output()}`);
+    await until(() => run.output().includes('Enrollment code: '), 15_000, () => `the prompt:\n${run.output()}`);
+    const during = modesOf(run.pty); // raw once the prompt shows, so ^C is a character to the prompt, not a signal
+    expect(during.has('-echo') && during.has('-icanon') && during.has('-isig'), [...during].join(' ')).toBe(true);
     run.pty.write('CODE-PART');
     run.pty.write('\x03');
-    await until(() => run.output().includes('DONE'), 15_000, `the command's end:\n${run.output()}`);
+    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
     await run.exited;
     expect(run.output()).not.toContain('CODE-PART');
     expect(run.output()).toContain('EXIT=1');
@@ -129,16 +131,16 @@ describe.skipIf(!existsSync(MAWSD))('mawsd endpoint provision at a terminal', ()
     const endpoint = new FakeEndpoint();
     await scene.start({ endpoint });
     const run = enrollAtTerminal('endpoint provision --wait 30');
-    await until(() => run.output().includes('Provisioning code: '), 15_000, `the prompt:\n${run.output()}`);
+    await until(() => run.output().includes('Provisioning code: '), 15_000, () => `the prompt:\n${run.output()}`);
     const during = modesOf(run.pty);
     expect(during.has('-echo') && during.has('-icanon'), [...during].join(' ')).toBe(true);
     run.pty.write('smns-provision-v2.TYPED-SECRET');
     run.pty.write('\r');
-    await until(() => endpoint.calls.length === 1, 15_000, `the code to arrive:\n${run.output()}`);
+    await until(() => endpoint.calls.length === 1, 15_000, () => `the code to arrive:\n${run.output()}`);
     await new Promise((done) => setTimeout(done, PAST_DEFAULT_MS));
     expect(run.output()).not.toContain('EXIT='); // still waiting for the module, past the 10 s a request gets by default
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, `the command's end:\n${run.output()}`);
+    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
     await run.exited;
     expect(run.output()).not.toContain('TYPED-SECRET');
     expect(run.output()).toContain('EXIT=0');
@@ -149,11 +151,11 @@ describe.skipIf(!existsSync(MAWSD))('mawsd endpoint provision at a terminal', ()
     const endpoint = new FakeEndpoint();
     await scene.start({ endpoint });
     const run = enrollAtTerminal('endpoint provision --json', 'smns-provision-v2.PIPED-SECRET');
-    await until(() => endpoint.calls.length === 1, 15_000, `the code to arrive:\n${run.output()}`);
+    await until(() => endpoint.calls.length === 1, 15_000, () => `the code to arrive:\n${run.output()}`);
     await new Promise((done) => setTimeout(done, PAST_DEFAULT_MS));
     expect(run.output()).not.toContain('EXIT=');
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, `the command's end:\n${run.output()}`);
+    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
     await run.exited;
     expect(run.output()).not.toContain('Provisioning code: '); // a pipe is read, not prompted for
     expect(run.output()).toContain('EXIT=0');

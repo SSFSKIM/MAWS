@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { workflowEnv } from './ci-gate-alerts.mjs';
+import { plannerVariables, workflowEnv } from './ci-gate-alerts.mjs';
 
 // Count jobs, not distinct sizes: each unit shard, each e2e-build variant and each pool e2e group takes its own box.
 function poolDemand(outputs) {
@@ -43,9 +43,7 @@ export function targetOutputs(gitDir, sha, message = process.env.HEAD_MESSAGE ??
       ...workflowEnv(readFileSync(join(dir, '.github/workflows/gate.yml'), 'utf8')),
       EVENT: 'push',
       HEAD_MESSAGE: message,
-      GATE_RUNNER: process.env.GATE_RUNNER ?? '',
-      GATE_E2E_RUNNER: process.env.GATE_E2E_RUNNER ?? '',
-      HOSTED_MAC_ROUTE: process.env.HOSTED_MAC_ROUTE ?? '',
+      ...Object.fromEntries(plannerVariables.map((key) => [key, process.env[key] ?? ''])),
     };
     return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', `
       import { readFileSync } from 'node:fs';

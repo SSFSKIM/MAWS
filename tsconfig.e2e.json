@@ -64,6 +64,7 @@
     "src/engine-host/relay-health.ts",
     "src/engine-host/supervisor-files.ts", // P5 O2 M3: src/shared/host's detached transport and identity read the supervisor's files
     "src/mawsd/machine-client.ts", // P5 O3-D M2: the mawsd-with-the-spine reading's bare machine.sock client
+    "src/mawsd/discovery-wake.ts", // P5: e2e:supervisor-daemon case (n)'s bound, the one a discovery read keeps
     "src/pty-host/files.ts", // P5 O3-B: a launch's cleanup removes the pty host's socket fallback with the profile's processes
     "src/engine-host/transport.ts",
     "src/services/git/runner.ts",
