@@ -638,3 +638,19 @@ test('the configured hosted quota keeps a hosted-only run clear of an open EC2 a
   assert.equal(ask('5').stop, true);
   assert.deepEqual(ask('50'), { stop: false, lines: [] });
 });
+
+
+test('MAC_EC2 off keeps optional hosted work clear of an EC2 alert in preflight', () => {
+  const candidate = tree(envOf('  HOSTED_MAC_E2E: tools\n  HOSTED_MAC_ONLY_E2E: ""\n'));
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [] };
+  const ask = (macEc2) => {
+    const { gh } = fakeGh({
+      variables: [...Object.entries(today), ['HOSTED_MAC_ROUTE', 'direct'], ['MAC_EC2', macEc2]],
+      issues: [{ number: 99, title: 'ci-kit alert: ec2: SecurityAgent since 2026-10-29T02:00Z' }],
+      runners: [{ name: 'ci-kit-mac-ec2', status: 'online', labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'] }],
+    });
+    return check({ ...candidate, gh, gates: 'e2e:tools', runner: 'macos', trailers: `Mac-Backlog: ${JSON.stringify(sample)}` });
+  };
+  assert.equal(ask('').stop, true);
+  assert.deepEqual(ask('off'), { stop: false, lines: [] });
+});

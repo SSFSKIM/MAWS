@@ -120,6 +120,42 @@ const refuse = (message) => {
   throw new Error(message);
 };
 
+const trailerOf = (env, key) =>
+  (env.HEAD_MESSAGE ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.toLowerCase().startsWith(`${key.toLowerCase()}:`))
+    .at(-1)
+    ?.slice(key.length + 1)
+    .trim();
+
+// Peer eligibility precedes placement: a reusable holder can remove the only EC2 job before final planning.
+// The default gate set always includes unit; explicit gates join the check only when they test code.
+function peerOf(env, scripts) {
+  const dispatched = env.EVENT === 'workflow_dispatch';
+  const trailer = (key) => trailerOf(env, key);
+  const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
+  const gates = words(dispatched ? env.INPUT_GATES : trailer('Gates'));
+  const peerGroups = new Set(words(env.PEER_E2E));
+  const peer = (dispatched ? '' : trailer('Peer')) || '';
+  if (peer && !/^[0-9a-f]{40}$/.test(peer)) refuse(`no such peer: ${peer} (a commit's full sha, as ci-gate.sh writes it)`);
+  const wireOf = (key) => {
+    const value = dispatched ? undefined : trailer(key);
+    if (!value) return null;
+    const [, major, minor] = /^(\d+)\.(\d+)$/.exec(value) ?? refuse(`no such wire: ${key}: ${value} (major.minor, as ci-gate.sh writes it)`);
+    return { major: Number(major), minor: Number(minor), text: value };
+  };
+  const [treeWire, peerWire] = [wireOf('Wire'), wireOf('Peer-Wire')];
+  const minorApart = peer !== '' && treeWire !== null && peerWire !== null && treeWire.major === peerWire.major && treeWire.minor !== peerWire.minor;
+  const testsCode = gates.length === 0 || gates.some((gate) => gate === 'unit' || gate === 'unit:darwin' || gate.startsWith('e2e:'));
+  // Expose eligibility before deduplication to gate-peer-held: a candidate uses this same rule, including when it
+  // explicitly requested a peer group. PEER_HELD_BY suppresses only additions, never a group already in Gates.
+  const peerCheck = { peer, minorApart, groups: minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts) : [] };
+  return { peerGroups, peer, treeWire, peerWire, minorApart, testsCode, peerCheck };
+}
+
+export const peerCheckOf = (env, scripts) => peerOf(env, scripts).peerCheck;
+
 // Pure planning boundary: all workflow inputs (including its env lists and repository variables), and package scripts.
 // The caller supplies now (epoch milliseconds) for snapshot freshness; absent time makes the advisory fail open.
 // Output values are the exact strings GitHub receives; property order preserves GITHUB_OUTPUT byte for byte.
@@ -128,14 +164,7 @@ export function planOf(env, scripts, now) {
   if (!/^[0-9]+$/.test(cap) || !Number.isSafeInteger(Number(cap)) || Number(cap) <= 0) refuse('HOSTED_MAC_CAP must be a positive whole number');
   const hostedCap = Number(cap);
   const dispatched = env.EVENT === 'workflow_dispatch';
-  const trailer = (key) =>
-    (env.HEAD_MESSAGE ?? '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.toLowerCase().startsWith(`${key.toLowerCase()}:`))
-      .at(-1)
-      ?.slice(key.length + 1)
-      .trim();
+  const trailer = (key) => trailerOf(env, key);
 
   // The shared label alone: ci-kit registers the shared instances with nothing else, so no job asking for `self-hosted`
   // (today's, an old commit's) can reach one.
@@ -206,21 +235,7 @@ export function planOf(env, scripts, now) {
   // LIVE_E2E groups that spend nothing), so every gate that runs live specs holds the heaviest known cases under the bound.
   if (live) for (const group of words(env.LIVE_GUARD_E2E)) gates.add(`e2e:${group}`);
   // The peer groups, and the trailers that name their peer: a full sha (it reaches the job's `git fetch`) and two wires.
-  const peerGroups = new Set(words(env.PEER_E2E));
-  const peer = (dispatched ? '' : trailer('Peer')) || '';
-  if (peer && !/^[0-9a-f]{40}$/.test(peer)) refuse(`no such peer: ${peer} (a commit's full sha, as ci-gate.sh writes it)`);
-  const wireOf = (key) => {
-    const value = dispatched ? undefined : trailer(key);
-    if (!value) return null;
-    const [, major, minor] = /^(\d+)\.(\d+)$/.exec(value) ?? refuse(`no such wire: ${key}: ${value} (major.minor, as ci-gate.sh writes it)`);
-    return { major: Number(major), minor: Number(minor), text: value };
-  };
-  const [treeWire, peerWire] = [wireOf('Wire'), wireOf('Peer-Wire')];
-  const minorApart = peer !== '' && treeWire !== null && peerWire !== null && treeWire.major === peerWire.major && treeWire.minor !== peerWire.minor;
-  const testsCode = [...gates].some((gate) => gate === 'unit' || gate === 'unit:darwin' || gate.startsWith('e2e:'));
-  // Expose eligibility before deduplication to gate-peer-held: a candidate uses this same rule, including when it
-  // explicitly requested a peer group. PEER_HELD_BY suppresses only additions, never a group already in Gates.
-  const peerCheck = { peer, minorApart, groups: minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts) : [] };
+  const { peerGroups, peer, treeWire, peerWire, minorApart, testsCode, peerCheck } = peerOf(env, scripts);
   const peerAdditions = peerCheck.groups.filter((group) => !gates.has(`e2e:${group}`));
   const heldBy = /^(\d+) (queued|in_progress|waiting|succeeded|plan (?:queued|in_progress|waiting|pending|requested))$/.exec(env.PEER_HELD_BY ?? '');
   const peerJoined = heldBy ? [] : peerAdditions;

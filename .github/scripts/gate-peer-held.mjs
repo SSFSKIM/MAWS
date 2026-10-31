@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import process from 'node:process';
 import { URLSearchParams, fileURLToPath } from 'node:url';
 import console from 'node:console';
-import { planOf } from './gate-plan.mjs';
+import { peerCheckOf } from './gate-plan.mjs';
 import { githubApi, jobsOf } from './gate-peer-api.mjs';
 
 const active = new Set(['queued', 'in_progress', 'waiting']);
@@ -34,7 +34,7 @@ export async function peerHeldBy({ env, scripts, event, api, now = new Date(), w
     if (env.EVENT !== 'push') return '';
     const head = headOf(event.head_commit);
     const planning = { ...env, HEAD_MESSAGE: head.message, PEER_HELD_BY: '' };
-    const check = planOf(planning, scripts).peerCheck;
+    const check = peerCheckOf(planning, scripts);
     if (!check.minorApart || check.groups.length === 0) return '';
     const current = runId(env.GITHUB_RUN_ID);
     const root = `/repos/${env.GITHUB_REPOSITORY}/actions`;
@@ -52,7 +52,7 @@ export async function peerHeldBy({ env, scripts, event, api, now = new Date(), w
     for (const run of candidates) {
       const candidateHead = headOf(run.head_commit);
       if (run.event !== 'push' || candidateHead.tree_id !== head.tree_id) continue;
-      const candidate = planOf({ ...planning, HEAD_MESSAGE: candidateHead.message, GITHUB_REF: `refs/heads/${run.head_branch}`, GITHUB_REF_NAME: run.head_branch }, scripts).peerCheck;
+      const candidate = peerCheckOf({ ...planning, HEAD_MESSAGE: candidateHead.message }, scripts);
       if (candidate.peer !== check.peer || !check.groups.every((group) => candidate.groups.includes(group))) continue;
       const jobs = await jobsOf(api, `${root}/runs/${run.id}`);
       const state = heldState(jobs, check.groups);
