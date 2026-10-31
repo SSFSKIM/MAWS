@@ -48,6 +48,7 @@
     "e2e:deliverables": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/deliverables.spec.ts",
     "e2e:scm": "scripts/e2e-build.sh plain && MAWS_SCM_E2E=1 playwright test e2e/scm.spec.ts",
     "e2e:artifacts": "scripts/e2e-build.sh plain && playwright test e2e/artifacts-store.spec.ts",
+    "e2e:render-host": "scripts/e2e-build.sh plain && playwright test e2e/render-host.spec.ts",
     "e2e:artifacts-perf": "scripts/e2e-build.sh plain && MAWS_ARTIFACTS_PERF=1 playwright test e2e/artifacts-store.spec.ts",
     "e2e:local-latency": "scripts/e2e-build.sh plain && MAWS_LOCAL_LATENCY_PERF=1 MAWS_HOST_MODE=detached playwright test e2e/local-latency.spec.ts",
     "e2e:local-latency-daemon": "scripts/e2e-build.sh plain && MAWS_LOCAL_LATENCY_PERF=1 MAWS_HOST_MODE=daemon playwright test e2e/local-latency.spec.ts",

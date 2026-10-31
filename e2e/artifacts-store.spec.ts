@@ -9,8 +9,6 @@
 // every `maws-artifact:` load, the app's and the capture window's, goes through the scheme proxy to `mawsd`'s artifact
 // endpoint on artifacts.sock, and asserts what they asserted of main's handler.
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -328,11 +326,11 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
 
 // M7 fix wave 1 (Decision Log 44a, 44b): the scheme's reach. Only the app's own session and the capture partition serve
 // it, never the browser pane's; an artifact frame's XHR to the scheme is refused (its own policy's `connect-src`), its
-// navigation to another artifact is prevented (the frame policies) while the app may point it anywhere; and the PDF
-// printer refuses a page's remote requests and counts them.
+// navigation to another artifact is prevented (the frame policies) while the app may point it anywhere. P5 O5 M3: the
+// PDF printer's request filter moved to the render host's e2e (e2e/render-host.spec.ts), where the render library runs.
 const postTo = (message: string) => `parent.postMessage({ m7: ${JSON.stringify(message)} }, '*')`;
 
-test('maws-artifact: reaches the app and the capture partition only, an artifact frame its own artifact only, and the PDF printer nothing remote', async () => {
+test('maws-artifact: reaches the app and the capture partition only, and an artifact frame its own artifact only', async () => {
   profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
   launch = await launchMaws({ userData: profile, env: DAEMON_SHAPE }); // P5 O5 M2: through mawsd's artifact endpoint
   const { app, page } = launch;
@@ -386,26 +384,6 @@ test('maws-artifact: reaches the app and the capture partition only, an artifact
   await expect.poll(heard, { message: 'the app’s own navigation of the frame to Y' }).toContain('Y');
   expect(endpointLog(profile), "mawsd's log: the frames' loads came through its endpoint").toContain('[artifacts] the artifact endpoint’s handler loaded at its first use'); // P5 O5 M2
 
-  // The PDF printer: a page naming remote resources prints, and none of them is fetched.
-  const hits: string[] = [];
-  const server = createServer((request, response) => {
-    hits.push(request.url ?? '');
-    response.end('x');
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const { port } = server.address() as AddressInfo;
-    const remote = `http://127.0.0.1:${port}`;
-    const printed = await app.evaluate(
-      (_electron, html) => (globalThis as unknown as { __maws_exports: { print(html: string): Promise<{ head: string; blocked: string[] }> } }).__maws_exports.print(html),
-      `<!doctype html><html><head><link rel="stylesheet" href="${remote}/style.css"></head><body><h1>printed</h1><img src="${remote}/a.png"><img src="data:image/png;base64,${PIXEL.toString('base64')}"></body></html>`,
-    );
-    expect(printed.head).toBe('%PDF-');
-    expect(printed.blocked).toEqual(expect.arrayContaining([`${remote}/style.css`, `${remote}/a.png`]));
-    expect(hits).toEqual([]);
-  } finally {
-    server.close();
-  }
 });
 
 // M9 (the execution document's M9 Decisions; parent §5 P3-A): S2's numbers in the product, measured in real Electron over
