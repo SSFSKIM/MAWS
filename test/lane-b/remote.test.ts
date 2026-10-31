@@ -873,12 +873,14 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     };
     const fits = [big(1.5 * MiB), big(1.5 * MiB), big(1.5 * MiB)];
     const huge = big(5 * MiB);
+    // The machine's stream catch-up reads its own engine host in process (stream-catchup.ts); only the command's reads cross.
+    const opening = l.host.calls.length;
     const answer = (await l.a.cmd('session.events', { appSessionId: 'app-1', afterSeq: null, limit: null })) as Events;
     expect(ids(answer.events)).toEqual(ids([...small, ...fits.flat()]));
     expect(answer).toMatchObject({ lastSeq: huge[0].seq, complete: true });
     expect(answer.historyUnavailable).toBeUndefined();
     expect(gapsOf(l.a, 'app-1')).toEqual([{ appSessionId: 'app-1', launchId: s.launchId, at: { seq: huge[0].seq } }]);
-    const asked = l.host.calls.filter((c) => c.name === 'session.events').map((c) => c.input as { limit: number | null; maxBytes?: number });
+    const asked = l.host.calls.slice(opening).filter((c) => c.name === 'session.events').map((c) => c.input as { limit: number | null; maxBytes?: number });
     expect(asked.length).toBeGreaterThan(2);
     expect(asked.every((a) => a.maxBytes !== undefined && a.limit === null)).toBe(true);
   });

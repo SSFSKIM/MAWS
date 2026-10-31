@@ -22,6 +22,12 @@ describe('dispatch over an RL2 link', () => {
     expect(bad).toMatchObject({ ok: false, error: { code: 'internal' } });
   });
 
+  // JSON has no undefined: the endpoint answers a void command's output as null (calls.ts), which is the void it ran.
+  it('reads a null output as the undefined of a command whose output takes no null', async () => {
+    expect(await dispatchOverLink(link({ ok: true, output: null }), 'files.watch' as CommandName, { appSessionId: 'a', path: '/r' })).toEqual({ ok: true, value: undefined });
+    expect(await dispatchOverLink(link({ ok: true, output: null }), 'engine.ping' as CommandName, undefined)).toMatchObject({ ok: false, error: { code: 'internal' } });
+  });
+
   it('refuses an act-graded command locally, `act-required`, without a round trip', async () => {
     const l = link({ ok: true, output: null });
     expect(await dispatchOverLink(l, 'session.send' as CommandName, {})).toEqual({ ok: false, error: { code: 'internal', message: 'session.send: refused act-required by machine mini', issues: { refusal: 'act-required' } } });

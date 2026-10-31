@@ -33,6 +33,16 @@ export function refusalError(name: string, machine: string, error: { code: strin
   return { ok: false, error: ipcError('internal', `${name}: refused ${code} by machine ${machine}`, { refusal: code }) };
 }
 
+/**
+ * JSON has no undefined: the endpoint answers a command that returned nothing as `output: null` (calls.ts), so a null
+ * where the command's output takes no null but takes undefined is that nothing.
+ */
+function voidAsUndefined(name: CommandName, output: unknown): unknown {
+  if (output !== null) return output;
+  const schema = LINK_REGISTRY.commands[name]!.output;
+  return !schema.safeParse(null).success && schema.safeParse(undefined).success ? undefined : output;
+}
+
 type Caller = { readonly name: string; call(name: string, input: unknown, options?: { session?: SessionRef }): Promise<CallResult> };
 
 export async function dispatchOverLink(link: Caller, name: CommandName, input: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
@@ -42,7 +52,7 @@ export async function dispatchOverLink(link: Caller, name: CommandName, input: u
   // A remote session's checkout is lane B's: lane A's roots are sminos's, which no `checkout` row reads.
   const result = await (session === undefined ? link.call(name, input) : link.call(name, input, { session: { lane: 'B', id: session } }));
   if (!result.ok) return refusalError(name, link.name, result.error);
-  const output = codec.readCommandOutput(name, result.output);
+  const output = codec.readCommandOutput(name, voidAsUndefined(name, result.output));
   if (!output.ok) return { ok: false, error: ipcError('internal', output.error.message, output.error.issues) };
   return { ok: true, value: output.value } as CommandResult<CommandName>;
 }
