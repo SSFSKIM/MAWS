@@ -571,7 +571,7 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
 // The successor tells nothing its fold read (D24); the launch's events before the adoption are answered from its
 // journal: the engine asked once (one `in` row), and the launch holds one request event.
 async function adoptedThenCompleted(s: Scratch, page: Page, id: AppSessionId, engine: number, requestId: string): Promise<void> {
-  await expect.poll(async () => (await statusOf(page, id)).holder?.adopted, { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+  await expect.poll(() => adoptedOf(page, id), { timeout: 30_000, message: 'the session adopted' }).toBe(true);
   // its re-initialize first (`starting`, then ready), the turn restored with it
   await expect.poll(async () => (await statusOf(page, id)).process, { timeout: 30_000, message: 'the adopted session re-initialized' }).toBe('ready');
   expect(await statusOf(page, id), 'the session live mid-turn, the same engine process').toMatchObject({ process: 'ready', pid: engine, turn: expect.anything() });
@@ -864,13 +864,21 @@ const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating th
 
 // After a deferred or waited handover: the successor adopted `id` with the same engine process, the held call was
 // answered once by the old host before it detached, the turn played on to its end, and nothing was told as a crash.
+// P5 O16 M3c fix wave 3: whether the successor adopted `id`; a session it has not adopted yet is unknown to it, which a
+// poll reads as not yet (hosted run o16m3cfw3-2: the status was asked once the successor served, before its adoption)
+async function adoptedOf(page: Page, id: AppSessionId): Promise<boolean | undefined> {
+  const status = await invoke(page, 'session.status', { appSessionId: id });
+  if (!status.ok && status.error.message.includes('unknown session')) return undefined;
+  return value(status).holder?.adopted;
+}
+
 async function heldCallAdopted(s: Scratch, run: Run, id: AppSessionId, engine: number | null): Promise<void> {
   const rows = s.journal(id);
   const answered = rows.findIndex(isToolAnswer);
   const detached = rows.findIndex((r) => r.direction === 'meta' && r.frame.event === 'host_detach');
   expect(answered, 'the old host answered the call').toBeGreaterThanOrEqual(0);
   expect(detached, 'before it detached the session').toBeGreaterThan(answered);
-  await expect.poll(async () => (await statusOf(run.page, id)).holder?.adopted, { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+  await expect.poll(() => adoptedOf(run.page, id), { timeout: 30_000, message: 'the session adopted' }).toBe(true);
   expect((await statusOf(run.page, id)).pid, 'the same engine process').toBe(engine);
   await expect.poll(async () => (await statusOf(run.page, id)).turn === null && (await eventsOf(run.page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn plays on and ends' }).toBe(true);
   expect(s.journal(id).filter(isToolAnswer), 'the call answered once').toHaveLength(1);
@@ -927,7 +935,7 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(s.log(), 'host.log: drained at once').toContain('handover armed: 2 hosted rows frozen, 0 calls in flight');
     await heldCallAdopted(s, run, a, engines.a);
-    await expect.poll(async () => (await statusOf(run.page, b)).holder?.adopted, { timeout: 30_000, message: 'B adopted' }).toBe(true);
+    await expect.poll(() => adoptedOf(run.page, b), { timeout: 30_000, message: 'B adopted' }).toBe(true);
     expect((await statusOf(run.page, b)).pid, 'B’s engine process kept').toBe(engines.b);
     await expect(banner(run.page, WAITING_FOR_LIST)).toHaveCount(0);
     await noCrashTold(s, run);
