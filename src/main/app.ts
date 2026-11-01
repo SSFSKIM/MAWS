@@ -630,10 +630,18 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   cuaSockets = browser.cua; // E13
   // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
   // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
-  // socket admits that relay by the attached daemon's exact instance: the machine welcome's pid, its start read through
-  // the addon now and at each reconnect (none while the machine link is down)
+  // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read
+  // through the addon at each change of the link (none while it is down), never a pid remembered from a welcome; the pass
+  // holds once mawsd answers a request sent on that same link after the read (machine.identity, the front's own, cold)
   if (launch.mode === 'daemon') {
-    const tellRelay = () => browser.cua.relay(hosts.snapshot('machine').state === 'ready' ? (hosts.welcome('machine')?.pid ?? null) : null);
+    let told = 0; // each change of the link: a confirmation counts only for the link it was sent on
+    const tellRelay = () => {
+      const link = ++told;
+      const fd = hosts.snapshot('machine').state === 'ready' ? hosts.servedFd('machine') : null;
+      if (fd === null) return browser.cua.relay(null);
+      const current = () => link === told && hosts.snapshot('machine').state === 'ready' && hosts.servedFd('machine') === fd;
+      browser.cua.relay({ fd, confirm: async () => (await hosts.dispatch('machine', 'machine.identity', undefined)).ok && current() });
+    };
     tellRelay();
     shutdown.add('cua relay', hosts.onState('machine', tellRelay));
   }

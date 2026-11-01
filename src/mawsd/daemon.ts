@@ -77,7 +77,7 @@
 // while the attached app's `machine.client` names its own cua directory (the relay's target) and relays each checked
 // connection there; a raw `session.status` names the session's engine for the peer check (and sets up the socket of an
 // engine that outlived a daemon, D-16); a removed session's socket goes. The peer identity addon loads from the app's
-// Resources as the app loads it. `session.capabilities` is the front's, answered from the render handle's and the cua
+// Resources as the app loads it, at the first session's socket (never at an idle start, acceptance 14). `session.capabilities` is the front's, answered from the render handle's and the cua
 // sockets' readings; `session.capabilitiesChanged` follows each flip of a session the daemon holds a socket for.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -188,7 +188,7 @@ export interface DaemonOptions {
   // P5 O5 M4: the render seam's chunk, the render host's spawn and the runtime's report (a fake host and platform)
   // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's), and the watch itself (a double)
   render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string; watchCache?: typeof watchRenderCache };
-  cua?: { addon?: PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon (a double), the relay's wait
+  cua?: { loadAddon?: () => PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon's load (a double), the relay's wait
 }
 
 export interface RunningDaemon {
@@ -966,7 +966,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
-    browser: (appSessionId) => browserCapability({ machine, path: daemonCuaSocketPath(cuaDir, appSessionId), targeted: cua?.targeted() ?? false }),
+    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
     tracking: (any) => ((tracked = any), syncCacheWatch()),
   });
@@ -1022,7 +1022,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
     render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady()) },
-    capabilities: (appSessionId) => sessionCapabilities.of(appSessionId), // P5 O5 M5
+    // P5 O5 M5: a session asked about is followed from then on, so the asker hears its next flip (forgotten at its removal)
+    capabilities: (appSessionId) => (sessionCapabilities.track(appSessionId), sessionCapabilities.of(appSessionId)),
     browserChanged: followTabEngine, // P5 O5 M5
     log,
   });
@@ -1159,13 +1160,18 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   try {
     if (paths.socketDir !== dir) makePrivateDirectory(paths.socketDir);
     // P5 O5 M5: the cua sockets' directory (in the fallback directory when its own paths would not fit), and the peer
-    // check's addon from the app's Resources as the app loads it (process.resourcesPath is Electron's, absent here)
+    // check's addon from the app's Resources as the app loads it (process.resourcesPath is Electron's, absent here),
+    // loaded at the first session's socket, never at start: an idle mawsd holds no native addon (acceptance 14)
     const appPath = join(dirname(options.modules.self), '..', '..');
-    const peerAddon = options.cua?.addon !== undefined ? options.cua.addon : loadPeerAddon(peerAddonPath({ packaged, resourcesPath: dirname(appPath), appRoot: appPath }));
-    if (peerAddon === null) log(platform === 'darwin' ? '[cua] the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)' : '[cua] no peer identity addon on this platform: the uid is the cua sockets\' boundary');
+    const loadAddon = options.cua?.loadAddon ?? (() => loadPeerAddon(peerAddonPath({ packaged, resourcesPath: dirname(appPath), appRoot: appPath })));
     cua = createCuaSockets({
       dir: cuaDir,
-      addon: peerAddon,
+      loadAddon: () => {
+        const addon = loadAddon();
+        if (addon === null) log(platform === 'darwin' ? '[cua] the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)' : '[cua] no peer identity addon on this platform: the uid is the cua sockets\' boundary');
+        else log('[cua] the peer identity addon loaded');
+        return addon;
+      },
       uidBoundary: platform !== 'darwin',
       log,
       onChange: () => sessionCapabilities.refresh(),

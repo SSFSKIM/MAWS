@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -38,14 +38,14 @@ afterEach(() => {
 });
 
 // A scratch profile's cua directory and an app's directory beside it (the relay's target).
-function stand(options: Partial<CuaSocketsOptions> = {}) {
+function stand({ addon = null, ...options }: Partial<CuaSocketsOptions> & { addon?: PeerAddon | null } = {}) {
   const root = mkdtempSync('/tmp/mcuad-');
   roots.push(root);
   const appDir = join(root, 'app');
   mkdirSync(appDir, { mode: 0o700 });
   const logs: string[] = [];
   const changes: number[] = [];
-  const sockets = createCuaSockets({ dir: join(root, 'mawsd', 'cua'), addon: null, uidBoundary: false, log: (line) => void logs.push(line), onChange: () => void changes.push(1), ...options });
+  const sockets = createCuaSockets({ dir: join(root, 'mawsd', 'cua'), loadAddon: () => addon, uidBoundary: false, log: (line) => void logs.push(line), onChange: () => void changes.push(1), ...options });
   closers.push(() => sockets.close());
   return { root, appDir, sockets, logs, changes };
 }
@@ -88,16 +88,40 @@ const until = async (done: () => boolean, ms = 2000) => {
 const exists = (path: string) => statSync(path, { throwIfNoEntry: false }) !== undefined;
 
 describe('the directory', () => {
-  it('is made 0700 at start and swept of a dead daemon\'s sockets', () => {
+  it('is made 0700 at start', () => {
     const root = mkdtempSync('/tmp/mcuad-');
     roots.push(root);
     const dir = join(root, 'mawsd', 'cua');
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'old.sock'), '');
-    const sockets = createCuaSockets({ dir, addon: null, uidBoundary: true, log: () => {} });
+    const sockets = createCuaSockets({ dir, loadAddon: () => null, uidBoundary: true, log: () => {} });
     closers.push(() => sockets.close());
     expect(statSync(dir).mode & 0o777).toBe(0o700);
-    expect(existsSync(join(dir, 'old.sock'))).toBe(false);
+    expect(existsSync(join(dir, 'old.sock'))).toBe(true); // not a socket: refused in place, never unlinked
+  });
+
+  it('sweeps a dead daemon\'s socket, and leaves a symlink or a non-socket in place with a line', async () => {
+    const root = mkdtempSync('/tmp/mcuad-');
+    roots.push(root);
+    const dir = join(root, 'mawsd', 'cua');
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(join(root, 'mawsd'), 0o700);
+    // a socket file nothing listens on, as a crashed daemon leaves it: a second name of a listener's, which outlives it
+    const dead = createServer();
+    await new Promise<void>((resolve) => dead.listen(join(root, 'live.sock'), resolve));
+    linkSync(join(root, 'live.sock'), join(dir, 'dead.sock'));
+    await new Promise<void>((resolve) => dead.close(() => resolve()));
+    expect(lstatSync(join(dir, 'dead.sock')).isSocket()).toBe(true);
+    writeFileSync(join(root, 'elsewhere'), '');
+    symlinkSync(join(root, 'elsewhere'), join(dir, 'link.sock'));
+    writeFileSync(join(dir, 'plain.sock'), '');
+    const logs: string[] = [];
+    const sockets = createCuaSockets({ dir, loadAddon: () => null, uidBoundary: true, log: (line) => void logs.push(line) });
+    closers.push(() => sockets.close());
+    expect(existsSync(join(dir, 'dead.sock'))).toBe(false);
+    expect(lstatSync(join(dir, 'link.sock')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(dir, 'plain.sock'))).toBe(true);
+    expect(logs.filter((line) => line.includes('left in place'))).toHaveLength(2);
   });
 
   it('refuses a directory of a wider mode rather than adopting it', () => {
@@ -105,7 +129,69 @@ describe('the directory', () => {
     roots.push(root);
     const dir = join(root, 'cua');
     mkdirSync(dir, { mode: 0o755 });
-    expect(() => createCuaSockets({ dir, addon: null, uidBoundary: true, log: () => {} })).toThrow(/mode|0755|group|other/i);
+    expect(() => createCuaSockets({ dir, loadAddon: () => null, uidBoundary: true, log: () => {} })).toThrow(/mode|0755|group|other/i);
+  });
+});
+
+// Acceptance 14: nothing O5 adds runs at an idle mawsd's start, a native addon included; the addon loads at the first
+// socket a session creates, once
+describe('the peer identity addon loads lazily', () => {
+  it('not at start nor at a tab engine\'s attachment; at the first session\'s socket, once for every socket after it', () => {
+    let loads = 0;
+    const { sockets, appDir } = stand({ loadAddon: () => (loads++, null), uidBoundary: true });
+    sockets.target(appDir);
+    sockets.engineProcess(A, null);
+    expect(loads).toBe(0);
+    sockets.ensure(A);
+    expect(loads).toBe(1);
+    sockets.ensure(B);
+    sockets.engineProcess(B, 4_321);
+    expect(loads).toBe(1);
+  });
+
+  it('a path past sun_path creates no socket and loads nothing', () => {
+    const root = mkdtempSync('/tmp/mcuad-');
+    roots.push(root);
+    let loads = 0;
+    const sockets = createCuaSockets({ dir: join(root, 'd'.repeat(90)), loadAddon: () => (loads++, null), uidBoundary: true, log: () => {} });
+    closers.push(() => sockets.close());
+    expect(sockets.ensure(A)).toBeNull();
+    expect(loads).toBe(0);
+  });
+});
+
+// Connections whose engine is not known yet are held unread, each with a descriptor and a timer: a bounded number, per
+// session and across the daemon; the excess is refused at once, and a held one's place comes back at its verdict
+describe('the sockets waiting for their engine', () => {
+  it('are bounded per session: the excess refused at once, the places back once the wait is out', async () => {
+    const addon = fakeAddon();
+    const { sockets, appDir } = stand({ addon, pendingBudget: { session: 2, total: 10 } });
+    sockets.target(appDir);
+    const path = sockets.ensure(A)!;
+    const held = [engineClient(path), engineClient(path)];
+    await until(() => sockets.inspect().A!.waiting === 2);
+    const third = engineClient(path);
+    await until(third.closed, 1000);
+    expect(sockets.inspect().A).toMatchObject({ waiting: 2, refused: 1 });
+    await until(() => held.every((client) => client.closed()), PEER_ROOT_WAIT_MS + 1000); // no_root, each
+    expect(sockets.inspect().A).toMatchObject({ waiting: 0, refused: 3 });
+    engineClient(path);
+    await until(() => sockets.inspect().A!.waiting === 1);
+  });
+
+  it('are bounded across the daemon', async () => {
+    const addon = fakeAddon();
+    const { sockets, appDir } = stand({ addon, pendingBudget: { session: 5, total: 3 } });
+    sockets.target(appDir);
+    const a = sockets.ensure(A)!;
+    const b = sockets.ensure(B)!;
+    engineClient(a);
+    engineClient(a);
+    engineClient(b);
+    await until(() => sockets.inspect().A!.waiting + sockets.inspect().B!.waiting === 3);
+    const fourth = engineClient(b);
+    await until(fourth.closed, 1000);
+    expect(sockets.inspect().B).toMatchObject({ waiting: 1, refused: 1 });
   });
 });
 
@@ -116,7 +202,7 @@ describe('listening follows the attached tab engine', () => {
     expect(path.endsWith('/mawsd/cua/A.sock')).toBe(true);
     expect(sockets.ensure(A)).toBe(path); // stable: the next launch is told the same path
     expect(exists(path)).toBe(false);
-    expect(sockets.inspect()).toEqual({ A: { listening: false, relayed: 0, refused: 0 } });
+    expect(sockets.inspect()).toEqual({ A: { listening: false, relayed: 0, refused: 0, waiting: 0 } });
 
     sockets.target(appDir);
     await until(() => exists(path));
@@ -148,7 +234,7 @@ describe('listening follows the attached tab engine', () => {
     const root = mkdtempSync('/tmp/mcuad-');
     roots.push(root);
     const logs: string[] = [];
-    const sockets = createCuaSockets({ dir: join(root, 'd'.repeat(90)), addon: null, uidBoundary: true, log: (line) => void logs.push(line) });
+    const sockets = createCuaSockets({ dir: join(root, 'd'.repeat(90)), loadAddon: () => null, uidBoundary: true, log: (line) => void logs.push(line) });
     closers.push(() => sockets.close());
     expect(sockets.ensure(A)).toBeNull();
     expect(sockets.ensure(A)).toBeNull();
@@ -170,7 +256,7 @@ describe('the peer check, before anything is read', () => {
     await until(client.closed);
     expect(client.heard().length).toBe(0);
     expect(app.peers).toHaveLength(0);
-    expect(sockets.inspect().A).toEqual({ listening: true, relayed: 0, refused: 1 });
+    expect(sockets.inspect().A).toEqual({ listening: true, relayed: 0, refused: 1, waiting: 0 });
     expect(logs).toContain(`cua socket of A: refused peer pid ${STRANGER} (not_descendant)`);
   });
 
@@ -250,7 +336,7 @@ describe('the relay', () => {
     app.peers[0]!.write(toEngine);
     await until(() => client.heard().length === toEngine.length, 5000);
     expect(client.heard().equals(toEngine)).toBe(true);
-    expect(sockets.inspect().A).toEqual({ listening: true, relayed: 1, refused: 0 });
+    expect(sockets.inspect().A).toEqual({ listening: true, relayed: 1, refused: 0, waiting: 0 });
 
     app.peers[0]!.destroy(); // the app ended it: the engine side ends too
     await until(client.closed);
@@ -283,6 +369,36 @@ describe('the relay', () => {
     const client = engineClient(sockets.ensure(A)!);
     await until(client.closed);
     expect(logs.some((line) => line.startsWith('cua socket of A: the attached app\'s socket did not answer'))).toBe(true);
+  });
+
+  // The relay's target is checked as every local socket a host connects to is (private-path.ts): an absent socket is
+  // waited for, anything else is refused
+  it.each([
+    ['a symlink', (appDir: string, path: string) => (writeFileSync(join(appDir, 'x'), ''), symlinkSync(join(appDir, 'x'), path)), 'symlink'],
+    ['a non-socket', (_appDir: string, path: string) => writeFileSync(path, ''), 'not a socket'],
+  ])('refuses to relay to %s at the tab engine\'s path', async (_, make, said) => {
+    const addon = fakeAddon();
+    const { sockets, appDir, logs } = stand({ addon, relayConnectWaitMs: 2000 });
+    make(appDir, join(appDir, `${A}.sock`));
+    sockets.target(appDir);
+    sockets.engineProcess(A, ENGINE);
+    const client = engineClient(sockets.ensure(A)!);
+    await until(client.closed, 1000); // at once, not after the wait
+    expect(logs.some((line) => line.startsWith('cua socket of A: the attached app\'s socket is refused') && line.includes(said))).toBe(true);
+  });
+
+  it('refuses to relay to a socket in a directory others can enter', async () => {
+    const addon = fakeAddon();
+    const { sockets, appDir, logs } = stand({ addon, relayConnectWaitMs: 2000 });
+    const app = appSocket(appDir, A);
+    await app.listening;
+    chmodSync(appDir, 0o755);
+    sockets.target(appDir);
+    sockets.engineProcess(A, ENGINE);
+    const client = engineClient(sockets.ensure(A)!);
+    await until(client.closed, 1000);
+    expect(app.peers).toHaveLength(0);
+    expect(logs.some((line) => line.startsWith('cua socket of A: the attached app\'s socket is refused') && line.includes('0755'))).toBe(true);
   });
 
   it('the tab engine\'s departure ends every relayed connection, and stops the listener', async () => {

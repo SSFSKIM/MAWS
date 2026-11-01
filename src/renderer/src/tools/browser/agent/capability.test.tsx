@@ -28,6 +28,18 @@ describe('the agent\'s browser capability', () => {
     expect(result.current).toEqual({ available: true });
   });
 
+  it('a view that moves A, B, then back to A takes A\'s fresh answer, not the reading it had of A before', async () => {
+    const fake = fakeClient();
+    const { result, rerender } = renderHook(({ id }) => useAgentBrowser(id, fake.client), { initialProps: { id: A } });
+    await act(() => fake.reply('session.capabilities', { browser: NONE }));
+    rerender({ id: B });
+    rerender({ id: A });
+    await act(() => fake.reply('session.capabilities', { browser: { available: true } }, 1)); // A's second asking
+    expect(result.current).toEqual({ available: true });
+    await act(() => fake.reply('session.capabilities', { browser: NONE })); // B's, answered late: not A's
+    expect(result.current).toEqual({ available: true });
+  });
+
   it('is unknown where the machine answers no capabilities', async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useAgentBrowser(A, fake.client));

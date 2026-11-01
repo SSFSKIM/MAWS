@@ -573,12 +573,12 @@ test('with no trusted root, a live session\'s own engine tree is let in: the con
 // app admits `mawsd` by its exact instance. The engine is the stub above, its connector in retry mode
 // (MAWS_CUA_CONNECTOR_RETRY=1), which retries an unreachable or lost socket as cua's host does. Nothing is trusted: only
 // each session's engine is a root.
-type RetryingReport = ConnectorReport & { refused: number; hellos: number; closes: number; connected: boolean };
+type RetryingReport = ConnectorReport & { socket: string; refused: number; hellos: number; closes: number; connected: boolean; leases?: number };
 const retryingOf = (path: string) => reportOf(path) as RetryingReport | null;
 const quoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
 
 // A scratch root with a repository, an engine store seeded with `titles`' transcripts and the stub engine's wrapper
-function liveRoot(titles: string[], { retry }: { retry: boolean }) {
+function liveRoot(titles: string[], { retry, lease = false }: { retry: boolean; lease?: boolean }) {
   const root = realpathSync(mkdtempSync('/tmp/mcua-d-'));
   const repo = join(root, 'repo');
   const config = join(root, 'claude-config');
@@ -587,7 +587,7 @@ function liveRoot(titles: string[], { retry }: { retry: boolean }) {
   mkdirSync(userData);
   const engineSessionIds = seedTranscripts(config, repo, titles);
   const bin = join(root, 'cua-engine');
-  writeFileSync(bin, `#!/bin/sh\nMAWS_CUA_STUB_VERSION=${quoted(FIXTURE_ENGINE_VERSION)}${retry ? ' MAWS_CUA_CONNECTOR_RETRY=1' : ''} exec ${quoted(process.execPath)} ${quoted(ENGINE_STUB)} "$@"\n`, { mode: 0o755 });
+  writeFileSync(bin, `#!/bin/sh\nMAWS_CUA_STUB_VERSION=${quoted(FIXTURE_ENGINE_VERSION)}${retry ? ' MAWS_CUA_CONNECTOR_RETRY=1' : ''}${lease ? ' MAWS_CUA_CONNECTOR_LEASE=1' : ''} exec ${quoted(process.execPath)} ${quoted(ENGINE_STUB)} "$@"\n`, { mode: 0o755 });
   return { root, repo, config, userData, engineSessionIds, bin };
 }
 // a seeded transcript's session, once the index lists it
@@ -610,11 +610,13 @@ test('on the daemon shape the engine\'s connector reaches the app through mawsd\
     const path = daemonSocketOf(live.userData, id);
     expect(path.startsWith(`${live.userData}/mawsd/cua/`), 'the daemon\'s cua directory').toBe(true);
     expect(value(await invoke(maws.page, 'session.capabilities', { appSessionId: id }))).toMatchObject({ browser: { available: true } });
+    // session.launch is the engine host's raw command: the spec names the socket, as the spine's start and resume name
+    // its browserSocket (spine-root.ts, launch-mapping.ts; daemon-cua.test.ts pins the daemon's path there)
     expect(value(await invoke(maws.page, 'session.launch', { spec: launchSpec(id, live.repo, path) }))).toMatchObject({ status: 'launching' });
 
     const report = join(live.repo, 'cua-connector.json');
     await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'the connector hears the hello through the relay' }).toBeGreaterThan(0);
-    expect(retryingOf(report)).toMatchObject({ hello: { extensionInstanceId: `maws:${id}` }, connected: true });
+    expect(retryingOf(report)).toMatchObject({ socket: path, hello: { extensionInstanceId: `maws:${id}` }, connected: true });
     expect((await app.inspect())[id]).toMatchObject({ connections: 1, refused: 0 }); // the app let mawsd's relay in
     const enginePid = value(await invoke(maws.page, 'session.status', { appSessionId: id })).pid;
     expect(Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(retryingOf(report)!.pid)], { encoding: 'utf8' }).trim()), 'the connector is the engine\'s child').toBe(enginePid);
@@ -625,9 +627,9 @@ test('on the daemon shape the engine\'s connector reaches the app through mawsd\
   }
 });
 
-test('a session launched with no app is refused by capability until the app attaches, then served; the app\'s quit cuts it cleanly, and its relaunch serves it again on the same socket', async () => {
+test('a session launched with no app is refused by capability until the app attaches, then served; the app\'s quit mid-lease cuts it cleanly, and its relaunch serves it again on the same socket', async () => {
   test.setTimeout(240_000);
-  const live = liveRoot([], { retry: true });
+  const live = liveRoot([], { retry: true, lease: true });
   // the daemon reads its own scratch engine store (<profile>/claude-config): the transcript is seeded there before it starts
   let seeded = '';
   const daemon = await startProfileDaemon({ userData: live.userData, env: { MAWS_E2E_ENGINE_BIN: live.bin }, prepare: ({ claudeConfigDir }) => void ([seeded] = seedTranscripts(claudeConfigDir, live.repo, ['the cua engine stub, before any app'])) });
@@ -646,12 +648,15 @@ test('a session launched with no app is refused by capability until the app atta
     launches.push(first);
     await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'served once the app attaches' }).toBe(1);
     expect(value(await invoke(first.page, 'session.capabilities', { appSessionId: id }))).toMatchObject({ browser: { available: true } });
-    expect((await seam(first).inspect())[id]).toMatchObject({ connections: 1, refused: 0 });
+    // mid-lease: cua's host holds a tab of the session's browser with its debugger attached
+    await expect.poll(() => retryingOf(report)?.leases ?? 0, { timeout: 20_000, message: 'the lease taken through the relay' }).toBe(1);
+    expect((await seam(first).inspect())[id]).toMatchObject({ connections: 1, refused: 0, leased: [expect.any(String)] });
 
+    // the app quits mid-lease: its quit completes, and cua's host loses the connection within the poll (no hang)
     const exited = new Promise<void>((done) => first.app.process().once('exit', () => done()));
     await first.app.evaluate(({ app: electron }) => electron.quit());
     await exited;
-    await expect.poll(() => retryingOf(report)?.closes ?? 0, { timeout: 10_000, message: 'the relayed connection ends with the app' }).toBe(1);
+    await expect.poll(() => retryingOf(report)?.closes ?? 0, { timeout: 10_000, message: 'the relayed connection ends with the app, the lease with it' }).toBe(1);
     expect(retryingOf(report)).toMatchObject({ connected: false });
     await expect.poll(() => existsSync(path), { timeout: 5_000, message: 'the socket stops listening' }).toBe(false);
     expect(await daemon.request('session.capabilities', { appSessionId: id })).toMatchObject({ browser: { available: false } });
@@ -660,6 +665,8 @@ test('a session launched with no app is refused by capability until the app atta
     launches.push(second);
     await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'served again after the relaunch, on the path the engine was told at its launch' }).toBe(2);
     expect(retryingOf(report)).toMatchObject({ connected: true, hello: { extensionInstanceId: `maws:${id}` } });
+    await expect.poll(() => retryingOf(report)?.leases ?? 0, { timeout: 20_000, message: 'a lease again, in the relaunched app' }).toBe(2);
+    expect((await seam(second).inspect())[id]).toMatchObject({ connections: 1, leased: [expect.any(String)] });
     expect(mawsdLogOf(live.userData)).not.toContain(`cua socket of ${id}: refused`);
   } finally {
     for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
