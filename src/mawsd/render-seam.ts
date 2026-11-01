@@ -26,25 +26,24 @@
 // starts beside it.
 //
 // `stop()` (the daemon's exit order, before the spine's stop ends the engine-host link): admission closes, every request
-// in the table is answered `ok: false` over the still-live link, then the host is ended. A request the seam answered
+// in the table is answered `ok: false` over the still-live link, then the host is ended (render.exit and SIGTERM
+// together, SIGKILL at the grace) and its exit awaited, bounded past the SIGKILL's settle. A request the seam answered
 // itself after handing it over (its answer deadline, or the stop) is remembered until the host exits, so the host's late
 // answer is taken (not refused as unknown) and an inspection export's file it names is removed: nobody will read it.
-import { spawn as spawnProcess, type ChildProcess } from 'node:child_process';
+import { spawn as spawnProcess, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { DaemonRender } from '@shared/ipc/schema/daemon';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { RENDER_AUTHOR_SESSIONS_MAX, type RenderAuthors, type RenderRequest } from '@shared/ipc/schema/render';
+import { renderCapabilities, type RenderCapabilities } from './session-capabilities'; // P5 O5 M5
 
 export type RenderState = 'off' | 'starting' | 'ready' | 'ending' | 'unavailable';
 export type RenderRuntime = { available: true } | { available: false; reason: string };
-export interface SessionCapability {
-  available: boolean;
-  reason?: string;
-}
 
 // The render host's process as the seam holds it.
 export interface RenderChild {
@@ -63,7 +62,7 @@ export interface RenderSeamOptions {
   answerEngine(name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown): Promise<'delivered' | 'not_pending' | null>;
   quietMs(): number; // MAWS_RENDER_QUIET_MS, else DEFAULT_QUIET_MS
   runtime(): RenderRuntime; // whether this machine can run the render host (a Mac with the app binary always can; M6 reads Linux's cache)
-  engineHostRenders(): boolean; // the engine host's welcome lists host.render: its bridges send with no app attached
+  engineHostRenders(): boolean; // none is connected (a cold one starts as this build), or its welcome lists host.render: its bridges send with no app attached
   appAttached(): boolean; // an app is attached to the engine host (an older host's bridges send then)
   // the Word comment authors, sent with each export: the request waits for them before it is handed over (its deadlines
   // running from its admission), the host's start meanwhile; the daemon bounds what it waits for them
@@ -93,7 +92,7 @@ export interface RenderSeam extends RenderService {
   clientReady(): void; // the front's: a render.client said ready
   clientGone(): void; // the front's: a ready render.client's connection ended
   answer(input: { id: string; answer: unknown }): boolean; // the front's: false for an id the seam did not post
-  capabilities(): { artifact_screenshot: SessionCapability; artifact_export: SessionCapability };
+  capabilities(): RenderCapabilities;
   status(): DaemonRender;
   stop(): Promise<void>;
 }
@@ -114,6 +113,7 @@ export const START_WATCHDOG_MS = 30_000;
 export const FAILURE_WINDOW_MS = 60_000;
 export const EXIT_GRACE_MS = 5_000;
 const DELIVERY_BOUND_MS = 2_000; // stop()'s wait for its refusals' answers from the engine host
+const STOP_MARGIN_MS = 1_000; // stop()'s wait past its SIGKILL's settle: the exit's way to the seam
 const RESTART_BACKOFF_MS = [500, 2_000, 5_000] as const; // @shared/host/host-supervisor's, which this chunk does not load
 
 type Kind = RenderRequest['kind'];
@@ -477,15 +477,15 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       answerWith(entry, answer);
       return true;
     },
-    capabilities() {
-      const runtime = options.runtime();
-      const unavailable = (reason: string): SessionCapability => ({ available: false, reason });
-      let entry: SessionCapability = { available: true };
-      if (!runtime.available) entry = unavailable(`the render service is unavailable on ${machine}: ${runtime.reason}`);
-      else if (state === 'unavailable' && Date.now() < unavailableUntil) entry = unavailable(`the render service is unavailable on ${machine}: ${lastFailure ?? 'it failed twice'}`);
-      else if (!options.engineHostRenders() && !options.appAttached()) entry = unavailable(`the engine host on ${machine} predates the render service; it is replaced when idle`);
-      return { artifact_screenshot: entry, artifact_export: entry };
-    },
+    // P5 O5 M5: the reasons are session-capabilities.ts's, shared with the render handle's reading while this is not loaded
+    capabilities: () =>
+      renderCapabilities({
+        machine,
+        runtime: options.runtime(),
+        failure: state === 'unavailable' && Date.now() < unavailableUntil ? (lastFailure ?? 'it failed twice') : null,
+        engineHostRenders: options.engineHostRenders(),
+        appAttached: options.appAttached(),
+      }),
     status: () => ({ state, detail, pid: child?.pid ?? null, starts, requests: table.size }),
     async stop() {
       if (stopped) return;
@@ -498,20 +498,26 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       if (deliveries.size > 0) await Promise.race([Promise.allSettled([...deliveries]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
       if (child === null) set('off');
       else {
-        // a host being ended for its start watchdog is not asked: it was sent SIGTERM, and is SIGKILLed at the grace
+        // A daemon stop is no quiet exit: render.exit and SIGTERM together, SIGKILL at the grace (a host being ended for
+        // its start watchdog is not asked: it was sent SIGTERM already). The wait covers the SIGKILL and the settle after
+        // it (a group's retirement reports its exit within KILL_SETTLE_MS of its SIGKILL), so mawsd never exits while
+        // the escalation is still pending: nothing would retire a detached group after it (KillMode=process).
         const going = child;
         const hungStart = retiring;
         const gone = new Promise<void>((resolve) => (exited = resolve));
         set('ending');
-        if (!hungStart) options.postExit();
-        const timer = setTimeout(() => {
-          if (child === going) {
-            log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: ${hungStart ? 'SIGKILL' : 'SIGTERM'}`);
-            going.kill(hungStart ? 'SIGKILL' : 'SIGTERM');
-          }
+        if (!hungStart) {
+          options.postExit();
+          going.kill('SIGTERM');
+        }
+        const kill = setTimeout(() => {
+          if (child !== going) return;
+          log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: SIGKILL`);
+          going.kill('SIGKILL');
         }, exitGraceMs);
-        await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, exitGraceMs + 1_000))]);
-        clearTimeout(timer);
+        let bound: ReturnType<typeof setTimeout> | null = null;
+        await Promise.race([gone, new Promise((resolve) => (bound = setTimeout(resolve, exitGraceMs + KILL_SETTLE_MS + STOP_MARGIN_MS)))]);
+        for (const timer of [kill, bound]) clear(timer);
       }
       // an undelivered or late inspection answer's file removal, whichever branch (bounded)
       if (removals.size > 0) await Promise.race([Promise.allSettled([...removals]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
@@ -546,6 +552,8 @@ export function exitReason(code: number | null, signal: string | null, line: str
       return `the render host could not reach mawsd${said ? `: ${said}` : ''}`;
     case 70:
       return `the render host failed${said ? `: ${said}` : ''}`;
+    case 3: // P5 O5 M6: src/render-host/host.ts's EXIT_NO_SANDBOX
+      return `the render host refused to run without Chromium’s sandbox${said ? `: ${said}` : ''}`;
     case 0:
       return 'the render host exited before it was ready';
     default:
@@ -594,9 +602,10 @@ export interface RenderCommandFacts {
   platform: NodeJS.Platform;
   packaged: boolean;
   execPath: string; // the binary `mawsd` runs as (Electron run as Node on a Mac: the app's own, or a checkout's Electron)
-  appRoot: string; // a checkout's app root (out/main/../..), the script argument a checkout's Electron needs
+  appRoot: string; // a checkout's app root (out/main/../..), the script argument a checkout's Electron needs; on Linux the release's root
   profile: string;
   env: NodeJS.ProcessEnv;
+  linux?: { electron: string; xvfbRun: string }; // P5 O5 M6: the render runtime's reading (render-runtime.ts)
 }
 
 export interface RenderCommand {
@@ -604,23 +613,49 @@ export interface RenderCommand {
   args: string[];
   env: NodeJS.ProcessEnv;
   cwd: string;
-  argv0: string;
+  argv0?: string;
+  group?: boolean; // P5 O5 M6: a process group of its own, every kill addressed to it whole
 }
 
-// The render host's command line on a Mac: the app's binary without ELECTRON_RUN_AS_NODE (the unit's environment sets it
-// for `mawsd`), its profile named, from a checkout the app root as the script argument. Linux is M6's.
-export function renderCommand({ platform, packaged, execPath, appRoot, profile, env }: RenderCommandFacts): RenderCommand {
-  if (platform !== 'darwin') throw new Error(`the render runtime is not installed on this ${platform} machine`);
+// The display the render host's GTK needs on Linux (FINDINGS §1.2): one Xvfb per render host's life, its own display
+// number (-a), no TCP listener
+export const XVFB_SERVER_ARGS = '-screen 0 1280x800x24 -nolisten tcp';
+
+// The render host's command line (Interfaces §E). On a Mac: the app's binary without ELECTRON_RUN_AS_NODE (the unit's
+// environment sets it for `mawsd`), its profile named, from a checkout the app root as the script argument. On Linux
+// (P5 O5 M6): the release's entry (the dispatcher, whose bootstrap loads no native module of the hosts') under the render
+// cache's Electron, inside xvfb-run, `--headless` for Chromium's software compositing and `--hide-scrollbars` for the
+// captures; never `--no-sandbox` (the render host refuses it, and Chromium aborts without its helper configured). Its own
+// process group, since a SIGTERM to xvfb-run's shell does not reliably reach Electron and Xvfb must end with it.
+export function renderCommand({ platform, packaged, execPath, appRoot, profile, env, linux }: RenderCommandFacts): RenderCommand {
+  if (platform !== 'darwin' && (platform !== 'linux' || linux === undefined)) throw new Error(`the render runtime is not installed on this ${platform} machine`);
   const childEnv: NodeJS.ProcessEnv = { ...env, MAWS_USER_DATA: profile };
   delete childEnv.ELECTRON_RUN_AS_NODE;
   delete childEnv.NODE_OPTIONS;
+  if (platform === 'linux' && linux !== undefined) {
+    const args = ['-a', '-s', XVFB_SERVER_ARGS, linux.electron, '--headless', '--hide-scrollbars', join(appRoot, 'out', 'main', 'index.js'), '--render-host', profile];
+    return { command: linux.xvfbRun, args, env: childEnv, cwd: profile, group: true };
+  }
   return { command: execPath, args: [...(packaged ? [] : [appRoot]), '--render-host', profile], env: childEnv, cwd: profile, argv0: 'maws-render-host' };
 }
 
 // The render host started: its stderr read line by line into the daemon's log (its stdout too), its last `[render-host]`
-// line kept as its own reason for an exit.
-export function spawnRenderHost(command: RenderCommand, log: (line: string) => void): RenderChild {
-  const process: ChildProcess = spawnProcess(command.command, command.args, { env: command.env, cwd: command.cwd, argv0: command.argv0, stdio: ['ignore', 'pipe', 'pipe'], detached: false });
+// line kept as its own reason for an exit. For a group (Linux: xvfb-run's shell, Electron and its helpers, the Xvfb), the
+// wrapper's exit is not the host's: the rest of the group is ended (SIGTERM, then SIGKILL at `groupGraceMs`) and the exit
+// is reported only once no member of the group remains, so the seam's escalation and its successor wait for all of it
+// (fix wave 1: a member ignoring SIGTERM outlived the wrapper). After the group's SIGKILL (the retirement's or the
+// seam's) the wait is bounded by KILL_SETTLE_MS: a group that still answers then holds only zombies nobody reaps, and
+// waiting on them would keep the seam's child forever (PR #428's panel).
+export const GROUP_POLL_MS = 50;
+export const KILL_SETTLE_MS = 1_000;
+export interface SpawnRenderHostOptions {
+  groupGraceMs?: number;
+  spawn?: (command: string, args: string[], options: SpawnOptions) => ChildProcess; // tests: a fake wrapper
+  signal?: (pid: number, signal: NodeJS.Signals | 0) => void; // tests: a fake group (process.kill's contract)
+}
+export function spawnRenderHost(command: RenderCommand, log: (line: string) => void, { groupGraceMs = EXIT_GRACE_MS, spawn = spawnProcess, signal: sendSignal = (pid, sent) => void globalThis.process.kill(pid, sent) }: SpawnRenderHostOptions = {}): RenderChild {
+  const group = command.group === true;
+  const process: ChildProcess = spawn(command.command, command.args, { env: command.env, cwd: command.cwd, ...(command.argv0 !== undefined && { argv0: command.argv0 }), stdio: ['ignore', 'pipe', 'pipe'], detached: group });
   let last: string | null = null;
   const read = (stream: NodeJS.ReadableStream | null) => {
     if (!stream) return;
@@ -644,14 +679,64 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
     ended = { code, signal };
     for (const listener of listeners) listener(code, signal);
   };
-  process.on('exit', (code, signal) => finish(code, signal));
+  // Whether any member of the group is still there (EPERM: one is, under another identity)
+  const groupAlive = (pgid: number): boolean => {
+    try {
+      sendSignal(-pgid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
+  const signalGroup = (pgid: number, sent: NodeJS.Signals) => {
+    try {
+      sendSignal(-pgid, sent);
+    } catch {
+      // the group is gone already
+    }
+  };
+  let killedAt: number | null = null; // when the group was first sent SIGKILL, by the retirement or by the seam
+  const killGroup = (pgid: number) => {
+    killedAt ??= Date.now();
+    signalGroup(pgid, 'SIGKILL');
+  };
+  // The wrapper exited: the rest of its group retired before the exit is reported. Once the group has been sent SIGKILL
+  // nothing of it runs code; what still answers `kill(-pgid, 0)` KILL_SETTLE_MS later is a zombie nobody reaps (an
+  // adopter that does not reap), and the exit is reported regardless
+  const retireGroup = (pgid: number, code: number | null, signal: string | null) => {
+    if (!groupAlive(pgid)) return finish(code, signal);
+    if (killedAt === null) signalGroup(pgid, 'SIGTERM');
+    const since = Date.now();
+    const poll = setInterval(() => {
+      if (!groupAlive(pgid)) {
+        clearInterval(poll);
+        return finish(code, signal);
+      }
+      if (killedAt === null) {
+        if (Date.now() - since < groupGraceMs) return;
+        log(`[render] the render host's process group outlived its wrapper by ${groupGraceMs / 1000} s: SIGKILL`);
+        return killGroup(pgid);
+      }
+      if (Date.now() - killedAt >= KILL_SETTLE_MS) {
+        clearInterval(poll);
+        log(`[render] the render host's process group still answered ${KILL_SETTLE_MS / 1000} s after SIGKILL (members nobody reaped): its exit reported`);
+        finish(code, signal);
+      }
+    }, GROUP_POLL_MS);
+  };
+  process.on('exit', (code, signal) => (group && process.pid !== undefined ? retireGroup(process.pid, code, signal) : finish(code, signal)));
   process.on('error', (error) => {
     last = `[render-host] ${error.message}`;
     finish(null, null);
   });
   return {
     pid: process.pid ?? null,
-    kill: (signal) => void process.kill(signal),
+    kill: (signal) => {
+      if (!group || process.pid === undefined) return void process.kill(signal);
+      // the group: Electron, its helpers, xvfb-run and its Xvfb
+      if (signal === 'SIGKILL') killGroup(process.pid);
+      else signalGroup(process.pid, signal);
+    },
     onExit(listener) {
       if (ended) return listener(ended.code, ended.signal);
       listeners.push(listener);

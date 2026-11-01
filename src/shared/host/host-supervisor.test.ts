@@ -621,6 +621,18 @@ describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
     await until(() => supervisor.welcome('engine-host') === null);
   });
 
+  // P5 O5 M5: the app's cua sockets admit the daemon connected on the machine link, read from this descriptor's peer
+  it('servedFd(owner) is the served link\'s socket descriptor until the link goes', async () => {
+    const fake = await startFake();
+    const supervisor = makeSupervisor();
+    expect(supervisor.servedFd('engine-host')).toBeNull();
+    await supervisor.start();
+    expect(supervisor.servedFd('engine-host')).toEqual(expect.any(Number));
+    expect(supervisor.servedFd('engine-host')).toBeGreaterThan(2);
+    fake.dropClient();
+    await until(() => supervisor.servedFd('engine-host') === null);
+  });
+
   it('disarmExit: once taken back, an exit-when-idle’s close is no longer read as deliberate', async () => {
     const fake = await startFake();
     const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });

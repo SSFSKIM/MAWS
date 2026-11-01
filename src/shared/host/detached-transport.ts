@@ -175,6 +175,7 @@ export interface HostLink {
   onMessage(listener: (data: unknown) => void): void;
   postDoc(channel: number, frame: Uint8Array): boolean; // P3-A M5
   onDoc(listener: (channel: number, frame: Uint8Array) => void): void; // P3-A M5
+  socketFd?(): number | null; // P5 O5 M5: the connected socket's descriptor, for a peer identity read; null once closed
 }
 
 export interface ExitInfo {
@@ -798,6 +799,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
           onMessage: (listener) => void listeners.push(listener),
           postDoc: (channel, frame) => port.postDoc(channel, frame), // P3-A M5
           onDoc: (listener) => port.onDoc(listener), // P3-A M5
+          socketFd: () => {
+            const fd = (socket as unknown as { _handle?: { fd?: unknown } | null })._handle?.fd; // libuv's pipe handle
+            return typeof fd === 'number' && fd >= 0 ? fd : null;
+          },
         },
         welcome,
         draining ? { updatePending: false, draining } : { updatePending },

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { canonicalize } from 'org-protocol';
+import type { LaunchedBySpec, LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
+import type { AppSessionId } from '@shared/graph/ids';
 import { parseJournalRow } from '@shared/wire/journal';
 import {
   buildLaunch,
@@ -260,6 +262,21 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.MAWS_LANE).toBe('B');
     });
 
+    // P5 O12 M11 (Interfaces §H): the spawner of a session a remote member spawned, beside the lane B marker, as the
+    // canonical JSON sminos's record parses; only the spec names one, so a capture taken inside a MAWS-launched session
+    // (a mawsd started from its shell) never hands that session's spawner to another
+    it('sets MAWS_LAUNCHED_BY from spec.launchedBy under both gateway modes, over any value the capture holds, and never from the capture', () => {
+      const launchedBy: LaunchedBySpec = { appSessionId: 'app-1' as AppSessionId, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/sessions/launched-by/app-1.json' };
+      const captured = { ...CAPTURED, MAWS_LAUNCHED_BY: JSON.stringify({ ...launchedBy, member: 'mallory' }) };
+      for (const gateway of ['gateway', 'direct'] as const) {
+        const { env } = buildLaunch(spec({ gateway, launchedBy }), captured, OPTS);
+        expect(env.MAWS_LAUNCHED_BY).toBe(canonicalize(launchedBy));
+        expect(JSON.parse(env.MAWS_LAUNCHED_BY!)).toEqual(launchedBy);
+        expect(env).toMatchObject({ MAWS_LANE: 'B', SMNS_MEMBER: String(SPAWNER_PID) });
+        expect(buildLaunch(spec({ gateway }), captured, OPTS).env).not.toHaveProperty('MAWS_LAUNCHED_BY');
+      }
+    });
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({
@@ -384,6 +401,14 @@ describe('LaunchSpecSchema', () => {
     expect(() => spec({ maxBudgetUsd: 0 })).toThrow();
     expect(() => spec({ trust: { accepted: false, directory: '/x' } as unknown as LaunchSpec['trust'] })).toThrow();
     expect(spec({ trust: { accepted: true, directory: '/x' } }).trust).toEqual({ accepted: true, directory: '/x' });
+  });
+
+  // P5 O12 M11: the spawner carries its five fields, no more (the sealed action stays in the proof file), none empty
+  it('takes launchedBy as exactly its five non-empty fields', () => {
+    const launchedBy: LaunchedBySpec = { appSessionId: 'app-1' as AppSessionId, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/app-1.json' };
+    expect(spec({ launchedBy }).launchedBy).toEqual(launchedBy);
+    expect(() => spec({ launchedBy: { ...launchedBy, action: {} } as LaunchedBySpec })).toThrow();
+    expect(() => spec({ launchedBy: { ...launchedBy, member: '' } })).toThrow();
   });
 });
 

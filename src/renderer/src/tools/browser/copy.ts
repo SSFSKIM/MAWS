@@ -9,6 +9,8 @@ export const BROWSER_COPY = {
   title: 'Browser',
   newTab: 'New tab',
   noSession: 'Open a session to browse beside it',
+  // P5 O5 M5: the session's agent has no browser on its machine (the session's capabilities), with mawsd's reason
+  agentUnavailable: (reason: string | null) => (reason === null ? 'The agent has no browser here' : `The agent has no browser here: ${reason}`),
   tabGone: 'That tab was closed',
   empty: { title: 'Start browsing', body: 'Enter a URL to open a page' },
   suspended: { open: (url: string) => `Open ${url}`, note: 'Tabs are restored unloaded' },
@@ -120,6 +122,19 @@ export const BROWSER_COPY = {
   // the acting dot on the chip of the tab the agent holds (Design §9)
   acting: 'The agent is using this tab',
   agentBadge: 'Opened by an agent', // E13: the badge on a tab an agent created through cua
+  // P5 O7 M3: a loopback page of another machine's session, through a port forwarded over the machine's link
+  forwarded: {
+    mark: (machine: string) => `forwarded from ${machine}`,
+    markTitle: (machine: string, port: number) => `Port ${port} on ${machine}, forwarded to this Mac`,
+    failedHeading: (port: number, machine: string) => `Couldn’t open port ${port} on ${machine}`,
+    unreachable: (machine: string) => `${machine} isn’t reachable from this Mac right now`,
+    notAllowed: (machine: string) => `This Mac isn’t allowed to open ports on ${machine}`,
+    notOffered: (machine: string) => `${machine} runs a version of MAWS that can’t forward ports`,
+    cancelled: 'Opening the port was cancelled',
+    refused: (machine: string) => `This link points at ${machine}’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1, 0.0.0.0, [::] or [::1])`,
+    tryAgain: 'Try again',
+    dismiss: 'Dismiss',
+  },
   // E4c end
 
   // cua #90 start: the bookmarks bar (Chrome's words) and the address field's bookmark rows

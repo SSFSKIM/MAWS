@@ -26,7 +26,8 @@ function fakeSeam(taken: string[]): RenderSeam {
   };
 }
 
-function scene(loadResults: ('ok' | string)[]) {
+type Facts = { machine: string; runtime: { available: true } | { available: false; reason: string }; engineHostRenders: boolean; appAttached: boolean };
+function scene(loadResults: ('ok' | string)[], facts: Facts = { machine: 'mini', runtime: { available: true }, engineHostRenders: true, appAttached: false }) {
   const taken: string[] = [];
   const engine: { name: string; input: unknown }[] = [];
   const logs: string[] = [];
@@ -40,6 +41,7 @@ function scene(loadResults: ('ok' | string)[]) {
     },
     compose: () => ({}) as never,
     answerEngine: async (name, input) => (engine.push({ name, input }), 'delivered'),
+    facts: () => facts,
     log: (line) => void logs.push(line),
   });
   return { handle, taken, engine, logs, loads: () => loads };
@@ -94,5 +96,20 @@ describe('the render seam’s handle (P5 O5 M4)', () => {
     await settle();
     expect(cold.loads()).toBe(0);
     expect(cold.engine).toEqual([{ name: 'maws.artifact.captured', input: { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'the render service is restarting on mini' } } }]);
+  });
+});
+
+describe('the render entries of a session’s capabilities (P5 O5 M5)', () => {
+  it('are read from the facts without loading the seam, and from the seam once it is loaded', async () => {
+    const facts: Facts = { machine: 'mini', runtime: { available: false, reason: 'the render runtime is not installed on mini' }, engineHostRenders: true, appAttached: false };
+    const s = scene(['ok'], facts);
+    expect(s.handle.capabilities().artifact_export).toEqual({ available: false, reason: 'the render service is unavailable on mini: the render runtime is not installed on mini' });
+    facts.runtime = { available: true };
+    expect(s.handle.capabilities()).toEqual({ artifact_screenshot: { available: true }, artifact_export: { available: true } });
+    expect(s.loads()).toBe(0);
+    s.handle.event('maws.artifact.capture', capture);
+    await settle();
+    facts.runtime = { available: false, reason: 'unread' };
+    expect(s.handle.capabilities().artifact_screenshot).toEqual({ available: true }); // the loaded seam's own reading
   });
 });

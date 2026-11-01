@@ -17,7 +17,8 @@
 // `-` is read from stdin here and travels as the same `secret`, and a relative path is made absolute against the
 // caller's working directory, since the daemon's is its own.
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { hostname } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
 import { defaultProfileDir } from '@shared/daemon/profile';
 import type { HostResponse } from '@shared/ipc/host-protocol';
@@ -26,11 +27,14 @@ import type { CommandOutput } from '@shared/ipc/schema';
 import { SupervisorStatusSchema, type SupervisorStatus } from '@shared/ipc/schema/host'; // O16 M5
 import { readTolerant } from '@shared/ipc/tolerant';
 import { IDENTITY_FILE, readMachineRef } from '@shared/machine/identity-file';
+import { machineName } from '@shared/machine/identity';
 import { SUPERVISOR_FILES } from '../engine-host/supervisor-files';
 import { PTY_HOST_FILES } from '../pty-host/files';
 import { installDaemon, resolveLabel, uninstallDaemon, unitFor, type InstallDeps } from './install';
 import { reachMachine, REQUEST_TIMEOUT_MS, type MachineLink } from './machine-client';
-import { releasesRoot, type InstalledRelease } from './release';
+import { packOf, procProcesses, releasesRoot, type InstalledRelease, type RunningProcess } from './release';
+import { downloadTo, installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type FileLock, type RenderInstallDeps } from './render-install'; // P5 O5 M6
+import { readElectronPin, readRenderRuntime, zipName } from './render-runtime';
 import { USAGE as RUN_USAGE } from './run-args';
 import { DEFAULT_LABEL, UnitError, type CommandRunner, type UnitProgram } from './units/unit';
 
@@ -61,6 +65,8 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   install [--delegation-id <id>] [--runtime <node>] [--entry <mawsd.js>]
                                    on Linux the default profile's unit installs the pack it runs from (pnpm mawsd:pack)
   uninstall
+  render install|uninstall|status [--json]
+                                   the render runtime on Linux: the pinned Electron, its sandbox helper set with sudo -n
   ${RUN_USAGE.replace(/^usage: mawsd /, '')}
 exit codes: 0 done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state`;
 
@@ -81,6 +87,11 @@ export interface CliDeps {
   build: string; // this command line's build id, for its hello
   tmp?: string;
   follow?: { intervalMs?: number; signal?: AbortSignal }; // `logs --follow`: its poll, and what ends it
+  // P5 O5 M6: `render`'s facts beyond the unit's: the architecture, the runtime's download, /proc's processes
+  arch?: string;
+  download?(url: string, to: string): Promise<void>;
+  processes?(): RunningProcess[];
+  renderLock?: FileLock; // the render cache's lock (flock(1) unless a test gives its own)
 }
 
 interface Context {
@@ -119,6 +130,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       case 'uninstall':
         flags(args, []);
         return await uninstall(context);
+      case 'render':
+        return await render(context, args);
       default:
         throw new Usage(`mawsd has no command ${command}`);
     }
@@ -257,6 +270,7 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
     `pty host     ${hostText(status.hosts['pty-host'])}`,
     `clients      ${clients.length > 0 ? clients.join(' · ') : 'none'}`,
     `endpoint     ${JSON.stringify(status.endpoint.detail)}`,
+    ...(status.render ? [`render       ${renderText(status.render)}`] : []), // P5 O5 M6
     '',
   ].join('\n');
 }
@@ -264,6 +278,11 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
 // P5 O16 M2: the engine host's session hosts, under its line (absent while it is parked or from an older one)
 export function sessionHostsLine(hosts: NonNullable<DaemonStatus['sessionHosts']>): string {
   return `session hosts  ${hosts.hosts} (adopted ${hosts.adopted}, failed ${hosts.failed})`;
+}
+
+// The render seam's state: `off` while no render host runs
+function renderText(render: NonNullable<DaemonStatus['render']>): string {
+  return [render.state, render.pid !== null && `pid ${render.pid}`, render.detail, render.requests > 0 && `${render.requests} in flight`, render.starts > 0 && `${render.starts} start${render.starts === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
 }
 
 function hostText(host: DaemonHost): string {
@@ -572,6 +591,63 @@ async function uninstall(context: Context): Promise<number> {
   const { deps, profileDir } = context;
   const result = await uninstallDaemon({ profileDir, label: requiredLabel(context) }, installDeps(deps));
   deps.out(`unit ${result.unit.name} ${result.removed ? 'removed; the hosts and their sessions keep running' : 'was not installed'}\n`);
+  return EXIT.done;
+}
+
+// --- the render runtime (P5 O5 M6; render-install.ts) -------------------------------------------------------------------
+
+async function render(context: Context, args: readonly string[]): Promise<number> {
+  const { deps } = context;
+  const [command, ...rest] = args;
+  if (command !== 'install' && command !== 'uninstall' && command !== 'status') throw new Usage('mawsd render takes install, uninstall or status');
+  const json = flags(rest, command === 'status' ? ['--json'] : []).has('--json');
+  if (deps.platform !== 'linux') throw new UnitError(`the render runtime is installed on Linux; on ${deps.platform === 'darwin' ? 'a Mac the app’s own binary renders' : deps.platform}, there is nothing to install`, EXIT.unavailable);
+  const arch = deps.arch ?? process.arch;
+  const appRoot = join(dirname(deps.self.entry), '..', '..'); // the build this command line is: a pack, a release, or a checkout
+  const pin = readElectronPin(appRoot, arch);
+  const pack = packOf(deps.self.entry);
+  const install: RenderInstallDeps = {
+    home: deps.home,
+    arch,
+    uid: deps.uid,
+    pin,
+    packZip: pack !== null && pin !== null ? join(dirname(pack.root), zipName(pin)) : null, // `pnpm mawsd:pack --render` leaves it beside the pack
+    run: deps.run,
+    download: deps.download ?? downloadTo,
+    processes: deps.processes ?? procProcesses,
+    now: deps.now,
+    lock: deps.renderLock,
+    notice: (line) => deps.err(`${line}\n`), // fix wave (PR #428 panel): a wait for another install's lock shows
+  };
+  if (command === 'install') {
+    const outcome = await installRenderRuntime(install);
+    const pruned = 'pruned' in outcome && outcome.pruned.length > 0 ? ` · pruned ${outcome.pruned.join(', ')}` : '';
+    if (outcome.state === 'staged') {
+      // fix wave 1: never "with sudo" (it refuses root): sudo -n made to work for this user, then this command again
+      deps.err(`sandbox missing: setting Chromium's sandbox helper needs sudo -n to work for ${deps.user} (${outcome.why}); make it work (sudo -v, or a NOPASSWD rule for chown and chmod), then run mawsd render install again as ${deps.user}, not as root. The runtime waits, verified, at ${outcome.staging}\n`);
+      return EXIT.failed;
+    }
+    const how = outcome.state === 'present' ? 'is installed' : outcome.source === 'pack' ? 'installed from the pack’s zip' : outcome.source === 'download' ? 'downloaded and installed' : 'installed';
+    deps.out(`render runtime ${pin!.version} ${how} (${outcome.entry})${pruned}\n`);
+    return EXIT.done;
+  }
+  if (command === 'uninstall') {
+    const { removed } = await uninstallRenderRuntime(install);
+    deps.out(removed.length > 0 ? `removed ${removed.join(', ')}\n` : 'nothing to remove\n');
+    return EXIT.done;
+  }
+  const status = renderRuntimeStatus(install);
+  const reading = readRenderRuntime({ appRoot, home: deps.home, arch, machine: machineName(deps.env, hostname()), path: deps.env.PATH });
+  if (json) {
+    deps.out(`${JSON.stringify({ ...status, reading })}\n`);
+    return EXIT.done;
+  }
+  const head = status.pin === null ? `render runtime: none pinned for linux-${arch} by this build` : `render runtime ${status.pin.version} (${status.pin.target}) · ${status.state === 'absent' ? 'not installed' : status.state === 'staged' ? 'staged, waiting for its sandbox helper' : `installed ${status.installedAt}`}${status.dir ? ` · ${status.dir}` : ''}`;
+  const lines = [head];
+  if (status.sandbox !== null) lines.push(`sandbox      ${status.sandbox === 'configured' ? 'configured (chrome-sandbox root-owned, mode 4755)' : 'not configured: make sudo -n work for this user, then run mawsd render install'}`);
+  if (status.missingLibraries !== null) lines.push(`libraries    ${status.missingLibraries.length === 0 ? 'nothing missing' : `missing ${status.missingLibraries.join(', ')}`}`);
+  lines.push(`the render service: ${reading.available ? 'available' : `unavailable: ${reading.reason}`}`);
+  deps.out(`${lines.join('\n')}\n`);
   return EXIT.done;
 }
 

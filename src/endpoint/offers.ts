@@ -16,9 +16,10 @@ import type { GradeSpec } from '@shared/ipc/grades';
  * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), none: the machine itself, or
  * `checkout` (P5 O7 M4: a path-class read of a lane B session's checkout: the call's own `session` names the session,
  * placed as an `appSessionId`, and the input's `directory` or `repoRoot` must lie in that session's roots or their
- * repositories: targets.ts).
+ * repositories: targets.ts), or `each-session` (P5 O7 M6: a machine-wide read whose answer is per session, admitted at the
+ * row's own grade, `list`, and cut by `calls.ts` to the sessions the caller holds the registry's declared grade on).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -29,11 +30,17 @@ export type OfferRow = {
   target: TargetRule;
   /** The grade, for a name outside the registry; `null` for the endpoint's signed actions. Absent: the registry's. */
   grade?: GradeSpec | null;
+  /**
+   * The input a name outside the registry takes (P5 O7 M3: `forward.open`), held to it at authorization's step 2 as a
+   * registry command's is to its schema (`malformed`). Absent for such a name: its executor reads its input (sminos's RPCs,
+   * the endpoint's signed actions).
+   */
+  accepts?(input: unknown): boolean;
 };
 
 /**
  * The table, the lanes a `sub` may name (M8: `full` or `cards` on either), and the feeds it may name (P5 O7 M4, §R: a
- * session's `checkout` feed; M6 adds the machine's `attention`).
+ * session's `checkout` feed; M6: the machine's `attention`).
  */
 export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[]; feeds: readonly Feed[] };
 
@@ -43,6 +50,13 @@ const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'mac
 /** A read of a lane B session's checkout by a path (`git.*`): the call names its session, the input a directory in it. */
 const checkout: OfferRow = { kind: 'call', executor: 'machine', target: 'checkout' };
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
+/** A machine-wide read answered per session (P5 O7 M6): admitted at `list`, its answer cut per session (calls.ts). */
+const eachSession: OfferRow = { kind: 'call', executor: 'machine', target: 'each-session', grade: 'list' };
+/** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
+const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
+/** `forward.open`'s args: exactly a port. */
+const isForwardArgs = (input: unknown): boolean =>
+  typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
 
 export const OFFERS: Offers = {
   commands: {
@@ -132,6 +146,16 @@ export const OFFERS: Offers = {
     // and the projects "+ Session"'s machine menu lists (`list`).
     'session.spawn': { kind: 'act', executor: 'machine', target: 'machine' },
     'session.projects.list': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M3: a remote terminal's acts, each `shell` on the machine, under the pty host's ledger; the terminal's bytes go
+    // over a stream opened under the spawn or the attach (streams.ts). `pty.listFor` is `pty.list` for one session, since an
+    // act's args are an object and `pty.list` takes none.
+    'pty.spawn': pty,
+    'pty.attach': pty,
+    'pty.kill': pty,
+    'pty.listFor': pty,
+    // A port of the machine's loopback forwarded to the device: the endpoint's own act (no registry name), `shell` on the
+    // machine; its result names the forward, which a `tcp` stream names (forwards.ts).
+    'forward.open': { kind: 'act', executor: 'endpoint', target: 'machine', grade: 'shell', accepts: isForwardArgs },
     // Lane A's bridge-fenced RPCs and spawn, through RL10 (M6); `resume`, `retire` and `stop` run outside the bridge's
     // fence and are not offered.
     'sminos.steer': laneA('act', 'converse'),
@@ -158,7 +182,11 @@ export const OFFERS: Offers = {
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
     'daemon.status': { kind: 'call', executor: 'machine', target: 'machine' },
     'machine.identity': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M6: the machine's attention items and conversation search, each answering for every session. `list` admits any
+    // member (as `endpoint.listings`); the answer keeps only the sessions the caller holds the registry's grade (`view`) on.
+    'attention.list': eachSession,
+    'session.search': eachSession,
   },
   subscriptions: ['A', 'B'],
-  feeds: ['checkout'],
+  feeds: ['checkout', 'attention'],
 };

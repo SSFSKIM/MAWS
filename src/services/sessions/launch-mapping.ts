@@ -3,8 +3,8 @@
 // spawns the engine; everything here ends in C3's `session.launch`.
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { PermissionMode } from '@shared/graph/enums';
-import type { SessionRecord } from '@shared/graph/session';
-import { EffortSchema, type Effort, type LaunchSpec } from '@shared/engine/launch-spec';
+import type { LaunchedBy, SessionRecord } from '@shared/graph/session';
+import { EffortSchema, type Effort, type LaunchedBySpec, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
@@ -53,6 +53,9 @@ export interface LaunchInput {
   // E13 (the in-app browser spec of 2026-10-08, "Socket and lifecycle"): the session's cua socket, which the engine, its
   // subagents and the cua_repl shims they start inherit as CUA_BROWSER_BACKENDS; null when there is none
   browserBackend?: string | null;
+  // P5 O12 M11 (Interfaces §H): the launched session's own spawner, with the file its proof is written to; null for every
+  // session a remote member did not spawn, a fork and the trust bootstrap
+  launchedBy?: LaunchedBySpec | null;
 }
 
 export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSettings()): LaunchSpec {
@@ -74,7 +77,16 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     maxBudgetUsd: null,
     replay: input.replay,
     inheritGrantsFrom: input.inheritGrantsFrom,
+    ...(input.launchedBy ? { launchedBy: input.launchedBy } : {}), // P5 O12 M11
   };
+}
+
+// P5 O12 M11 (Interfaces §H): a launch's `launchedBy`, from its own session's (the intent's at the start, the record's at
+// a resume) less the sealed action, which goes to `proofFile`, the file the spine writes before the launch; none when the
+// session has none or the caller names no file.
+function spawnerOf(appSessionId: AppSessionId, launchedBy: LaunchedBy | undefined, proofFile: string | null | undefined): LaunchedBySpec | null {
+  if (launchedBy === undefined || !proofFile) return null;
+  return { appSessionId, member: launchedBy.member, device: launchedBy.device, opId: launchedBy.opId, proofFile };
 }
 
 // The launch's own `--settings` keys before the host's: the launch profile's (P4-A2: flag-level keys, none for the user
@@ -134,7 +146,8 @@ export function trustMapping(
 // ---- the three launches -------------------------------------------------------------------------------------------
 // An intent's real launch: its chips, the id pinned at its first attempt, and for a fork the source it resumes with
 // `--fork-session` (pinned too: C3's buildLaunch emits `--session-id` beside a fork's resume) and the grants it inherits.
-export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+// P5 O12 M11: `ctx.proofFile`, where the spine writes the session's proof; the spec names its spawner only with it.
+export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const fork = intent.kind === 'fork' ? intent.source : null;
   return toLaunchSpec(
     {
@@ -151,6 +164,7 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
       inheritGrantsFrom: fork?.appSessionId ?? null,
       replay: ctx.replay,
       browserBackend: ctx.browserBackend ?? null,
+      launchedBy: spawnerOf(intent.appSessionId, intent.launchedBy, ctx.proofFile), // P5 O12 M11: a fork's intent carries none
     },
     settings,
   );
@@ -163,7 +177,8 @@ export type ResumeOptions = Partial<{ gateway: Gateway; model: string | null; ef
 // are re-passed. The route is the record's last one unless the caller says otherwise, and a record whose route was
 // never verified (every discovered session) takes D-19's default rather than reading null as a routing fact. `model`
 // and `effort` are C11's route-switch overrides for this launch; C3 re-applies the session's own grants by app id.
-export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+// P5 O12 M11: the record's spawner, as at its start, with `ctx.proofFile`.
+export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const routed = record.gateway.routed;
   const recordEffort = EffortSchema.safeParse(record.effort);
   return toLaunchSpec(
@@ -181,6 +196,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       inheritGrantsFrom: null,
       replay: ctx.replay,
       browserBackend: ctx.browserBackend ?? null,
+      launchedBy: spawnerOf(record.appId, record.launchedBy, ctx.proofFile),
     },
     settings,
   );
@@ -188,7 +204,8 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
 
 // The trust bootstrap (Trust, "Trust bootstrap"): an initialize-only launch that records trust for the key, under a
 // bootstrap id minted for it alone, never the conversation's, so no index record ever hears of it. C3 mints its pin.
-// P4-R8: it serves no turn, so it connects none of the app's MCP servers.
+// P4-R8: it serves no turn, so it connects none of the app's MCP servers. P5 O12 M11: nor does it name a spawner, whatever
+// its conversation's record carries: it is no session of anyone's.
 export function bootstrapSpec(
   input: { bootstrapId: AppSessionId; cwd: string; additionalDirectories: readonly string[]; gateway: Gateway; trustKey: string; replay: string | null },
   settings: C10Settings = readSettings(),

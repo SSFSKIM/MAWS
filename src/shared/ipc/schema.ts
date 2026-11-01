@@ -84,7 +84,7 @@ export {
   type Namespace,
   type Owner,
 } from './schema/common';
-export { PtyIdSchema, type PtyAttach, type PtyCheckpoint, type PtyExit, type PtyId, type PtyInfo } from './schema/pty';
+export { PtyIdSchema, PtyOpAttachSchema, type PtyAttach, type PtyCheckpoint, type PtyExit, type PtyId, type PtyInfo, type PtyOpAttach, type PtyReplay } from './schema/pty'; // P5 O7 M3: PtyOpAttach, PtyReplay
 export {
   SettingsPatchSchema,
   SettingsSchema,
@@ -295,6 +295,7 @@ export const MACHINE_EVENTS = [
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
   'render.request', 'render.exit', // P5 O5 M3: the render host's work, posted to it alone
   'render.hostGeneration', // P5 O5 M4: the engine host's link generation, to the render host alone
+  'session.capabilitiesChanged', // P5 O5 M5: the front's own, at each flip of a session's capabilities
   'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
   'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
   'daemon.engineHandover', // P5 O16 M3c fix wave 2: `mawsd`'s engine host update under way (the front's own)

@@ -7,10 +7,13 @@
 //   session's stream (`stream`), and every control of the session's port with the remote overlay (`controls`), closed with
 //   a reason where the session on another machine can't take it yet; `reason`, when set, closes every control (the
 //   machine refused this device, the link closed, the session isn't placed yet or can't be).
+// - `remote.attention` (M6): the machine's attention feed, its snapshot and whether the machine is greyed.
 // - `remote.gap`: the stream went on past events it could not deliver (a relaunch's snapshot, a range the machine's
 //   journal lost, an event too large to carry): the transcript draws "Earlier history isn't available" here.
 import * as z from 'zod';
+import { AttentionItemSchema } from '../../graph/attention';
 import { AppSessionIdSchema } from '../../graph/ids';
+import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
 
 // Every control a session's port names (the renderer's `session/controls/types.ts` keeps the same list), so main can say
@@ -61,7 +64,16 @@ export const RemoteSessionSchema = z.strictObject({
 });
 export type RemoteSession = z.infer<typeof RemoteSessionSchema>;
 
-export const commands = {} as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P5 O7 M3 ("Forwarding", Interfaces §K): a port of a machine's loopback forwarded to a listener on this Mac's
+// (`127.0.0.1:<localPort>`), over the machine's link, for the in-app browser to load a loopback link of a session there.
+// Open is idempotent per machine and port (the listener and its forward are kept); close ends the listener and its
+// connections. The renderer names the machine in the input and invokes it on this app (a `client` command).
+const ForwardTargetSchema = z.strictObject({ machine: MachineRefSchema, port: z.number().int().min(1).max(65535) });
+
+export const commands = {
+  'remote.forward.open': { input: ForwardTargetSchema, output: z.strictObject({ localPort: z.number().int().min(1).max(65535) }), owner: 'main' },
+  'remote.forward.close': { input: ForwardTargetSchema, output: z.void(), owner: 'main' },
+} as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'remote.session': RemoteSessionSchema,
@@ -77,4 +89,10 @@ export const events = {
   // after each lands (and once before the first), how far one file of the call has come: `file`, its index in the call's
   // `files`; `sent` of `parts` landed. The composer's chip for that file shows it.
   'remote.upload': z.strictObject({ appSessionId: AppSessionIdSchema, file: z.number().int().nonnegative(), name: z.string(), sent: z.number().int().nonnegative(), parts: z.number().int().positive() }),
+  // P5 O7 M6 ("The feed"): every item of the machine's sessions this member views, as its `attention` feed says them,
+  // replacing the machine's whole partition; each change after it is the session's `attention.changed` from the machine.
+  // `greyed`: the machine is offline (its link `down`), so these are its items as last known, out of the badge; said
+  // again at the link's `down` with the items it holds, and false from the next snapshot on. A machine whose feed ended
+  // for good (the roster dropped it, an endpoint without the feed) is said once with no items.
+  'remote.attention': z.strictObject({ machine: MachineRefSchema, items: z.array(AttentionItemSchema), greyed: z.boolean() }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

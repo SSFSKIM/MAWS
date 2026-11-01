@@ -17,6 +17,9 @@ import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
+import { startNotifier } from '../attention/notifier';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -82,7 +85,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
 /** The session's stream live on `launch`: its record read, its subscription's snapshot delivered. */
 async function live(l: ReturnType<typeof lab>, app = APP, launch = 'L1') {
   await vi.advanceTimersByTimeAsync(0);
-  const sub = l.link.open().find((s) => s.request.session.id === app)!;
+  const sub = l.link.open().find((s) => s.request.session?.id === app)!;
   sub.sink.subbed('snapshot', { epoch: launch, seq: 0 });
   sub.sink.snapshot({ epoch: launch, seq: 0 }, { status: statusOf(app, launch) });
   return sub;
@@ -394,7 +397,7 @@ describe('the tabs and the links', () => {
     const l = lab({ tabs: ['la-1', APP], laneA: ['la-1'] });
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.calls.map((c) => (c.input as { appSessionId: string }).appSessionId)).toEqual([APP]);
-    expect(l.link.open().map((s) => s.request.session.id)).toEqual([APP]);
+    expect(l.link.open().map((s) => s.request.session?.id)).toEqual([APP]);
   });
 
   it('says a held session’s state again after a page’s `session.get` of it, for a page that just subscribed (a reload, a second window)', async () => {
@@ -497,28 +500,21 @@ describe('the checkout and the spawn (M4)', () => {
     expect(answer).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
   });
 
-  // The architect's ruling on M4d's gap: a session this app spawned waits a minute for the machine to list it.
-  it('opens a session this app spawned waiting for the machine to list it, lets the wait go at its first open, and leaves another session as it was', async () => {
+  // O12 M11: B's endpoint ranks the spawner as owner, so a session spawned here is placed at once; one that isn't follows
+  // the ordinary record retries, then "can't place", as any session does (the main-side listing wait is gone).
+  it('opens a session this app spawned as any session: placed when the machine answers, else "can’t place" after the retries', async () => {
     const l = lab({ tabs: [] });
-    let listed = false;
-    l.link.answers.set('session.get', (input) => (input.appSessionId === 'app-new' && listed ? { ok: true, output: record('app-new') } : { ok: false, error: { code: 'grade' } }));
+    l.link.answers.set('session.get', (input) => (input.appSessionId === 'app-new' ? { ok: true, output: record('app-new') } : { ok: false, error: { code: 'grade' } }));
     l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
     expect(await l.cmd('session.spawn', { checkout: '/work/repo', permission_mode: 'default' })).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-unplaced' } });
+    expect(await l.cmd('session.spawn', { checkout: '/work/repo', permission_mode: 'default' })).toMatchObject({ ok: true });
     const reasonOf = (app: string) => l.of('remote.session').filter((p) => p.address === app).at(-1)?.reason;
-    l.setTabs('app-new', 'app-other');
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(reasonOf('app-new')).toBe('Waiting for mini to list the new session…');
-    expect(reasonOf('app-other')).toBe('mini can’t place this session'); // not spawned here: given up after 7.5 s
-    listed = true;
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(reasonOf('app-new')).toBeNull();
-    // the wait let go: a later open of it is any session's
-    listed = false;
-    l.setTabs();
-    await vi.advanceTimersByTimeAsync(60_000);
-    l.setTabs('app-new');
+    l.setTabs('app-new', 'app-unplaced');
     await vi.advanceTimersByTimeAsync(0);
-    expect(reasonOf('app-new')).toBe('Opening on mini…');
+    expect(reasonOf('app-new')).toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reasonOf('app-unplaced')).toBe('mini can’t place this session');
   });
 
   // M4c fix wave 2 (the architect's rulings): a New chat tab's spawn is one attempt, kept by the tab it is made from (the
@@ -749,3 +745,220 @@ describe('the checkout and the spawn (M4)', () => {
     expect(l.link.open()).toEqual([]);
   });
 });
+
+// P5 O7 M6 fix wave 1: the machine's attention feed against a session's stream. The feed's items are the machine's whole
+// list (derived errors among them), the stream's the broker's alone, and both are `attention.changed`, which replaces: while
+// the feed follows, it alone speaks for the machine's sessions.
+describe('the attention feed beside a session’s stream', () => {
+  const T = '2026-10-31T00:00:00.000Z';
+  const itemOf = (app: string, kind: 'error' | 'permission', id: string) => ({
+    id, appSessionId: app, sessionId: null, kind, request: { requestId: kind === 'permission' ? 'req-1' : null, toolUseId: null, taskId: null, agentId: null },
+    summary: kind, createdAt: T, state: 'pending', stateChangedAt: T, expiresAt: null,
+  });
+  const error = itemOf(APP, 'error', 'att-err');
+  const asked = itemOf(APP, 'permission', 'att-req-1');
+  const parts = (pendingItems: unknown[]) => ({ queue: { entries: [], paused: false, pauseReason: null }, pendingItems, catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 } });
+  /** The machine's feed open and its first snapshot delivered. */
+  function fed(l: ReturnType<typeof lab>, items: unknown[]) {
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    l.setLinks(new Map([[MINI, l.link]]));
+    const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+    feed.sink.subbed('snapshot', { epoch: 'attention:boot', seq: 0 });
+    feed.sink.snapshot({ epoch: 'attention:boot', seq: 0 }, items);
+    return feed;
+  }
+  const attentionOf = (l: ReturnType<typeof lab>) => l.of('attention.changed').filter((p) => p.appSessionId === APP).map((p) => (p.items as Array<{ id: string }>).map((i) => i.id));
+
+  it('keeps a feed item the broker doesn’t hold through the stream’s opening and a page’s replay, which tells the feed’s items', async () => {
+    const l = lab();
+    fed(l, [error]);
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+    expect(attentionOf(l)).toEqual([]);
+    await l.cmd('session.get', { appSessionId: APP });
+    expect(attentionOf(l)).toEqual([['att-err']]);
+    expect(l.adapter.attention.machine(MINI)!.sessions.get(APP)).toEqual([error]);
+  });
+
+  it('never brings back an item the feed cleared with a late stream snapshot', async () => {
+    const l = lab();
+    const feed = fed(l, [asked]);
+    const sub = await live(l);
+    feed.sink.event({ epoch: 'attention:boot', seq: 1 }, { appSessionId: APP, items: [] });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toEqual([[]]);
+  });
+
+  it('leaves the stream the session’s attention against an endpoint without the feed, and gives it back when the feed ends `not-offered`', async () => {
+    const l = lab();
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toEqual([['att-req-1']]); // no rl2.feeds: no feed, the stream speaks
+
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    l.setLinks(new Map([[MINI, l.link]]));
+    const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toHaveLength(2); // fix wave 5: the feed is opening, not fed: the stream still speaks
+    feed.sink.ended('not-offered'); // an endpoint older than M6
+    expect(attentionOf(l)).toEqual([['att-req-1'], ['att-req-1'], ['att-req-1']]);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+    expect(attentionOf(l).at(-1)).toEqual([]);
+  });
+
+  // fix wave 2: a page's announcement re-says a machine's attention only while its feed follows
+  it('keeps the stream’s items after the feed ended `not-offered` through a page’s announcement and its `session.get`', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    feed.sink.ended('not-offered');
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+    const said = l.emitted.length;
+    l.adapter.attention.sayAgain(); // attention.pendingNavigate
+    await l.cmd('session.get', { appSessionId: APP });
+    // fix wave 3: the machine's state is the streams' items, never the ended feed's emptied cache
+    expect(l.emitted.slice(said).filter((e) => e.name === 'remote.attention').map((e) => e.payload)).toEqual([{ machine: MINI, items: [asked], greyed: false }]);
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+  });
+
+  // fix wave 3 (the milestone review's repro): the fallback items survive the next disconnect, greyed, and come back at `up`
+  it('greys the stream’s fallback items at the link’s `down` after the feed ended, rather than erasing them', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    feed.sink.ended('not-offered');
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    l.link.set('down', null);
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: true });
+    l.link.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds: the streams stay the machine's
+    l.link.set('up');
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
+  });
+
+  // fix wave 4 (the milestone re-check): the dock counts what Needs you shows, and the handover raises nothing again
+  it('counts a live fallback item in the dock badge and raises it once across the handover from the feed to the stream', async () => {
+    const l = lab();
+    const badges: number[] = [];
+    const raised: string[] = [];
+    let clock = 0;
+    const stop = startNotifier(fakeSpineView(), {
+      port: { notify: (_c, request) => (raised.push(request.body), { close: () => {} }), badge: (_c, count) => void badges.push(count), focus: () => ({}) as never },
+      isFocused: () => false, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: () => true, emitFrom: () => true,
+      remote: l.adapter.attention, now: () => clock,
+    });
+    clock = 60_000; // the machine first reached past the startup window: its first snapshot is raised
+    try {
+      const sub = await live(l);
+      const feed = fed(l, [asked]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      expect(badges.at(-1)).toBe(1);
+      feed.sink.ended('not-offered'); // the link stays up
+      expect(badges.at(-1)).toBe(1);
+      expect(raised).toHaveLength(1);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([])); // the stream says it answered
+      expect(badges.at(-1)).toBe(0);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked, error]));
+      expect(badges.at(-1)).toBe(1);
+      expect(raised).toHaveLength(2); // the error, new; the permission seen before
+    } finally {
+      stop();
+    }
+  });
+
+  // fix wave 5: one predicate (`fed`) for who speaks, so what the renderer is told and what the dock counts agree
+  /** The renderer's partition for the machine, as the store applies what main says: `remote.attention` replaces it whole, `attention.changed` one session. */
+  function shown(l: ReturnType<typeof lab>) {
+    let at = 0;
+    const sessions = new Map<string, Array<{ id: string }>>();
+    return () => {
+      for (const e of l.emitted.slice(at)) {
+        if (e.name === 'remote.attention') {
+          sessions.clear();
+          for (const i of e.payload.items as Array<{ id: string; appSessionId: string }>) sessions.set(i.appSessionId, [...(sessions.get(i.appSessionId) ?? []), i]);
+        }
+        if (e.name === 'attention.changed') sessions.set(e.payload.appSessionId as string, e.payload.items as Array<{ id: string }>);
+      }
+      at = l.emitted.length;
+      return [...sessions.values()].flat().map((i) => i.id);
+    };
+  }
+  function badgeOf(l: ReturnType<typeof lab>) {
+    const badges: number[] = [];
+    const stop = startNotifier(fakeSpineView(), {
+      port: { notify: () => ({ close: () => {} }), badge: (_c, count) => void badges.push(count), focus: () => ({}) as never },
+      isFocused: () => false, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: () => true, emitFrom: () => true,
+      remote: l.adapter.attention,
+    });
+    return { badge: () => badges.at(-1), stop };
+  }
+
+  it('agrees with the dock before a feed’s first snapshot: the stream’s permission is shown and counted', async () => {
+    const l = lab();
+    const view = shown(l);
+    const dock = badgeOf(l);
+    try {
+      l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+      l.setLinks(new Map([[MINI, l.link]])); // the feed opens; its snapshot is held
+      const sub = await live(l);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      l.adapter.attention.sayAgain();
+      expect(dock.badge()).toBe(1);
+      expect(view()).toEqual(['att-req-1']);
+      // its snapshot takes the partition; from then on the feed alone speaks
+      const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+      feed.sink.subbed('snapshot', { epoch: 'attention:boot', seq: 0 });
+      feed.sink.snapshot({ epoch: 'attention:boot', seq: 0 }, [error]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      expect(view()).toEqual(['att-err']);
+      expect(dock.badge()).toBe(1);
+    } finally {
+      dock.stop();
+    }
+  });
+
+  it('agrees with the dock when a feed returns on a new channel with the link staying up and the stream clears before its snapshot', async () => {
+    const l = lab();
+    const view = shown(l);
+    const dock = badgeOf(l);
+    try {
+      const sub = await live(l);
+      const feed = fed(l, [asked]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      feed.sink.ended('not-offered');
+      expect(view()).toEqual(['att-req-1']);
+      expect(dock.badge()).toBe(1);
+      l.link.peers = ['rl2.executor.machine', 'rl2.feeds']; // a reconnect within the grace: a new h2 list, the state still up
+      l.link.setCaps({ ...l.link.caps()! });
+      expect(l.link.open().filter((s) => s.request.feed === 'attention')).toHaveLength(1);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+      expect(dock.badge()).toBe(0);
+      expect(view()).toEqual([]);
+    } finally {
+      dock.stop();
+    }
+  });
+
+  it('gives a machine’s sessions back to their streams when the feed couldn’t carry a change (`omitted`)', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked])); // held, unsaid while the feed follows
+    feed.sink.event({ epoch: 'attention:boot', seq: 1 }, { omitted: 'too-large', bytes: 5 * 1024 * 1024 });
+    expect([...l.adapter.attention.machine(MINI)!.sessions]).toEqual([[APP, [asked]]]); // fix wave 4: the streams' items, effective
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+    expect(feed.closed).toBe(true);
+  });
+
+  it('answers `session.search` of a machine whose endpoint offers none (older than M6) `host_unavailable`, as an offline one', async () => {
+    const l = lab();
+    const refused = routeLaneB(async () => ({ ok: false, error: { code: 'internal', message: 'session.search: refused not-offered by machine mini', issues: { refusal: 'not-offered' } } }) as CommandResult<CommandName>, (m) => (m === MINI ? l.link : null), l.adapter);
+    const ctx: MainContext = { client: endableClientRef('page-1'), target: MINI };
+    expect(await refused(MINI, 'session.search', { query: 'bisect' }, ctx)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    // any other refusal, and any other name, keeps the machine's word
+    const other = routeLaneB(async () => ({ ok: false, error: { code: 'internal', message: 'x', issues: { refusal: 'not-offered' } } }) as CommandResult<CommandName>, (m) => (m === MINI ? l.link : null), l.adapter);
+    expect(await other(MINI, 'session.list', {}, ctx)).toMatchObject({ ok: false, error: { code: 'internal' } });
+  });
+});
+

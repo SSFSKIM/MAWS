@@ -232,11 +232,12 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
     const decided = await ownerChannelLaunch(
       s,
-      intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings()),
+      intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */ }, s.settings()),
       { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent },
     );
     const spec = decided.spec;
     // P2-C end
+    await writeSpawnerProof(s, appSessionId, run.intent.launchedBy); // P5 O12 M11: before the launch that names it
     watch = new LaunchWatch(s, appSessionId);
     const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
@@ -265,6 +266,16 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     await rollbackIntent(s, run, cwd, error);
   } finally {
     watch?.dispose();
+  }
+}
+
+// P5 O12 M11 (Interfaces §H): the proof of a remote spawn (`launchedBy`, the session's own) written whole before each launch
+// whose spec names it, so the session's first SessionStart finds it; a launch that can't have it doesn't go.
+export async function writeSpawnerProof(s: Setup, appSessionId: AppSessionId, launchedBy: SessionRecord['launchedBy']): Promise<void> {
+  try {
+    await s.spawnerProofs.write(appSessionId, launchedBy);
+  } catch (error) {
+    throw new SetupFailure('launching', `the spawner's proof could not be written: ${messageOf(error)}`);
   }
 }
 
@@ -417,6 +428,7 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
     if (s.sessions.get(appSessionId) !== null) {
       s.sessions.remove(appSessionId);
       record = 'removed';
+      await s.spawnerProofs.remove(appSessionId); // P5 O12 M11: with the record; a retry writes it again
     }
 
     // (3) the worktree: kept on a relay failure (the retry reuses it); else a checkout created here is removed only

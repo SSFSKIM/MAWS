@@ -41,15 +41,15 @@ const ANY = { input: z.unknown(), output: z.unknown(), owner: 'engine-host' as c
 export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'host.handover' /* P5 O16 M3b */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */, 'artifacts.content' /* P5 O5 M2: the artifact endpoint's lookup */, 'maws.artifact.captured', 'maws.artifact.exported' /* P5 O5 M4: the render seam's answers */, 'artifacts.get' /* P5 O5 M4: a render host's snapshot read */, 'maws.pane.answer', 'maws.artifact.datasetRefreshed', 'artifacts.datasetRefreshRequest' /* P5 O16 M3b fix wave 2: the completions a drain waits for */] as const;
 const ENGINE_REGISTRY = {
   commands: Object.fromEntries(ENGINE_COMMANDS.map((name) => [name, ANY])),
-  events: { 'probe.event': z.unknown(), 'maws.artifact.capture': z.unknown(), 'maws.artifact.export': z.unknown() /* P5 O5 M4: the bridges' requests */, 'maws.pane.show': z.unknown() /* P5 O16 M3b fix wave 2 */, 'host.supervisorStatus': z.unknown() /* M3c fix wave 3: handOver's */ },
-  hostEvents: ['probe.event', 'maws.artifact.capture', 'maws.artifact.export', 'maws.pane.show', 'host.supervisorStatus'],
+  events: { 'probe.event': z.unknown(), 'maws.artifact.capture': z.unknown(), 'maws.artifact.export': z.unknown() /* P5 O5 M4: the bridges' requests */, 'session.status': z.unknown() /* P5 O5 M5: the cua socket's peer check reads it raw */, 'maws.pane.show': z.unknown() /* P5 O16 M3b fix wave 2 */, 'host.supervisorStatus': z.unknown() /* M3c fix wave 3: handOver's */ },
+  hostEvents: ['probe.event', 'maws.artifact.capture', 'maws.artifact.export', 'session.status', 'maws.pane.show', 'host.supervisorStatus'],
   ptyHostEvents: [],
   machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
 const PTY_ANY = { input: z.unknown(), output: z.unknown(), owner: 'pty-host' as const };
-export const PTY_COMMANDS = ['pty.ping', 'pty.list', 'pty.ack', 'pty.attach', 'pty.recaptureEnv', 'pty.checkpoint'] as const;
+export const PTY_COMMANDS = ['pty.ping', 'pty.list', 'pty.ack', 'pty.attach', 'pty.recaptureEnv', 'pty.checkpoint', 'pty.op' /* P5 O7 M3: the seam's inner-name guard */] as const;
 const PTY_REGISTRY = {
   commands: Object.fromEntries(PTY_COMMANDS.map((name) => [name, PTY_ANY])),
   events: { 'pty.exit': z.unknown() },

@@ -12,6 +12,8 @@
 // lane B session it streams from another machine, into that store (lane-b/remote-session.ts). Subscribed here with the
 // events main says alongside it, so a remote pane's opening read (lane-b/remote-connect.ts, mounted after) comes after
 // them all and what main says again for it is heard.
+// P5 O7 M6 (the same document, M6 "The feed"): `remote.attention`, another machine's attention feed, into the attention
+// store's partition of that machine; the feed's per-session changes arrive as that machine's `attention.changed`.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -177,6 +179,9 @@ export function connectShell(
     on('session.status', (e, { machine }) => sessions().applyStatus(e, machine)),
     on('attention.changed', (e, { machine }) => attention().applyChanged(e, machine)),
     on('attention.notified', (e) => attention().applyNotified(e)),
+    // P5 O7 M6: another machine's attention feed as main holds it, the whole partition and whether it is greyed (main's
+    // word alone: an `up` in the roster un-greys nothing before the feed's next snapshot)
+    on('remote.attention', (e) => attention().applyRemote(e)),
     // E10: after a reconnect with windows open (a supervisor's crash and restart, Stop all, Restart now) the process
     // table is read again when the engine host regains ready, once per transition (X13 "Main's resync"). A host leaving
     // ready takes its statuses along, as in main: the successor's table (and its connect burst, which main relays after

@@ -14,6 +14,10 @@ export const DEVICE_CAPABILITIES = [
   'rl2.feeds',
   // M4 (acceptance 12): `session.events` may carry `maxBytes`, and answers `omitted` for an item alone past it.
   'rl2.events-budget',
+  // M3: `query.executor` may be `pty-host`, the pty host's ledger, which a remote terminal's acts go to.
+  'rl2.executor.pty-host',
+  // M3: the stream kinds (§N), a terminal's bytes and a forwarded port's connections, opened under their acts.
+  'rl2.streams',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 
@@ -23,7 +27,7 @@ export function peerLists(link: { peerCapabilities(): readonly string[] | null }
 }
 
 /** The capability a peer must list before an act or a query names `executor`; RL2's first three need none. */
-const EXECUTOR_CAPABILITY: Readonly<Partial<Record<Executor, string>>> = { machine: 'rl2.executor.machine' };
+const EXECUTOR_CAPABILITY: Readonly<Partial<Record<Executor, string>>> = { machine: 'rl2.executor.machine', 'pty-host': 'rl2.executor.pty-host' };
 
 /** Whether a peer that listed `capabilities` reads acts and queries for `executor`. */
 export function peerTakesExecutor(executor: Executor, capabilities: readonly string[]): boolean {

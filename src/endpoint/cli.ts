@@ -245,6 +245,8 @@ function policy(endpoint: Endpoint, args: readonly string[]): Out {
   if (readOnly !== undefined || values.ceiling !== undefined) {
     if (endpoint.parts!.state.refusing !== null) return { code: EXIT.failed, out: `the endpoint's state is refused (${endpoint.parts!.state.refusing}): nothing is written` };
     endpoint.policy.set({ ...(readOnly === undefined ? {} : { read_only: readOnly === 'on' }), ...(values.ceiling === undefined || !isCeiling(values.ceiling) ? {} : { ceiling: values.ceiling }) });
+    // P5 O7 M3: a machine made read-only ends the terminals and forwards its devices hold open (`removed`).
+    endpoint.streams.recheck();
   }
   return { code: EXIT.done, out: policyAnswer(endpoint.policy.current(), values.json === true) };
 }

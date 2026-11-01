@@ -19,7 +19,7 @@ import { startSettings, type SettingsService } from './client/settings'; // P5 O
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
-import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
+import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket'; // P5 O3-D M5b; P5 O5 M5: cuaSocketPath
 import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
@@ -389,6 +389,17 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     emit: (machine, name, payload) => void emitFrom(machine, name, payload),
     log: (line) => console.log(`[lane-b] ${line}`),
   });
+  // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
+  // close with remote lane B's `stop`, a shutdown step below
+  registerMainHandler('remote.forward.open', async (input) => {
+    const result = await remoteLaneB.forward.open(input);
+    if (!result.ok) throw new CommandFailure(result.error);
+    return result.value;
+  });
+  registerMainHandler('remote.forward.close', async (input) => {
+    const result = await remoteLaneB.forward.close(input);
+    if (!result.ok) throw new CommandFailure(result.error);
+  });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §E): a page's git.watch and git.unwatch
@@ -639,9 +650,47 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
     hosts,
     // E4c end
+    // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
+    // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
+    remote: {
+      local,
+      emitFrom: (machine, name, payload) => emitFrom(machine, name, payload),
+      forwards: {
+        open: (machine, port) => remoteLaneB.forward.open({ machine, port }),
+        listening: (machine, port) => remoteLaneB.forward.listening(machine, port),
+        at: (localPort) => remoteLaneB.forward.at(localPort),
+      },
+    },
   });
   shutdown.add('browser', browser.stop);
   cuaSockets = browser.cua; // E13
+  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
+  // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
+  // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read
+  // through the addon at each change of the link (none while it is down), never a pid remembered from a welcome; the pass
+  // holds once mawsd answers a request sent on that same link after the read (machine.identity, the front's own, cold)
+  if (launch.mode === 'daemon') {
+    let told = 0; // each change of the link: a confirmation counts only for the link it was sent on
+    const tellRelay = () => {
+      const link = ++told;
+      const fd = hosts.snapshot('machine').state === 'ready' ? hosts.servedFd('machine') : null;
+      if (fd === null) return browser.cua.relay(null);
+      const current = () => link === told && hosts.snapshot('machine').state === 'ready' && hosts.servedFd('machine') === fd;
+      browser.cua.relay({ fd, confirm: async () => (await hosts.dispatch('machine', 'machine.identity', undefined)).ok && current() });
+    };
+    tellRelay();
+    shutdown.add('cua relay', hosts.onState('machine', tellRelay));
+  }
+  // P5 O5 M5 (Interfaces §I): on the embedded shape this app is the session's machine, its renderer and its tab engine,
+  // so a session's capabilities hold but for a socket path too long for its browser (mawsd answers them on the daemon's)
+  if (data !== null) {
+    const appCuaDir = join(app.getPath('userData'), ...CUA_SOCKET_DIR);
+    registerMachineHandler('session.capabilities', ({ appSessionId }) => ({
+      artifact_screenshot: { available: true },
+      artifact_export: { available: true },
+      browser: cuaSocketPath(appCuaDir, appSessionId) === null ? { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${localName}` } : { available: true },
+    }));
+  }
   // E4a end
   // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
   // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is
@@ -773,7 +822,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(view, { actions: notificationActions({ dispatch: hosts.dispatch, view }), settings: () => settings.state().settings, port: clientPort }); // P5 O3-C (readers R1, R2)
+  startAttention(view, {
+    actions: notificationActions({ dispatch: hosts.dispatch, view }),
+    settings: () => settings.state().settings,
+    port: clientPort,
+    // P5 O7 M6: other machines' items, from remote lane B's attention feeds, titled by their listed rows
+    remote: remoteLaneB.attention,
+    remoteTitle: (machine, app) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === app)?.title ?? null,
+  }); // P5 O3-C (readers R1, R2)
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(view, { // P5 O3-C (reader R3)
     // C12 start

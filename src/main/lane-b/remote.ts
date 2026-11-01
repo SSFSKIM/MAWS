@@ -40,29 +40,41 @@
 //   changes arrive on the session's feed and its watches are kept and given back across a reconnect
 //   (./remote-checkout.ts). Every read of the checkout (`git.*`, `files.*`, `scm.*` reads) takes the manager's path as a
 //   call, carrying the session it was made from (`MainContext.session`, sent as `call.session`).
+// - P5 O7 M3: terminals and forwarded ports. A terminal of a session on the machine is a shell of its pty host: its acts
+//   and its byte stream (./remote-pty.ts), across the link's channels; `pty.hostState` of the machine is its link's. A
+//   loopback port of the machine is forwarded to a listener on this Mac's (./remote-forward.ts, `remote.forward.open`
+//   and `.close`, which main's handlers bring here), each connection a stream.
+// - P5 O7 M6: each machine's attention, on one machine-wide feed per link (./remote-attention.ts), which the badge and
+//   the notifier read beside this Mac's (`attention`).
+import type { Socket } from 'node:net';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
-import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FilesUploadInput } from '@shared/ipc/schema/files';
+import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
+import { createRemoteAttention, type RemoteAttention } from './remote-attention';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult } from './remote-outcomes';
-import { LIST_WAIT_MS, RemoteSession, type RemoteSessionTiming } from './remote-session';
+import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
+import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
+import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
 
-export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming {
+export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming, RemotePtyTiming, RemoteForwardsTiming {
   /** A closed tab's subscription outlives it this long. */
   unsubscribeLingerMs: number;
   /** An act answers the renderer by then: its outcome, or `timeout` with the pending words while it goes on querying. */
@@ -81,7 +93,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   idleRetryMs: [1000, 30_000],
   // past the machine's park window (10 min by default) and its first tries: a try wakes a parked host (O5's audit)
   idleProbeMaxMs: 30 * 60_000,
-  sendPendingMs: 60_000,
+  sendPendingMs: REMOTE_ACT_PENDING_MS, // shared with the renderer, whose waits are bounded above it
   sendQueueMax: 8,
   batchMax: 500,
   // the machine's own bound on a spawn (`session.spawn`'s command budget, 200 s: the configure gate, a git call, the
@@ -90,6 +102,8 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   // a day: a tombstone is a few bytes, and one let go too soon could let the tab's next Send start a second session
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
+  ...REMOTE_PTY_TIMING, // P5 O7 M3
+  ...REMOTE_FORWARDS_TIMING,
 };
 
 export interface RemoteLaneBDeps {
@@ -108,6 +122,8 @@ export interface RemoteLaneBDeps {
    * spawned may be listed later). `refresh` reads the tabs again once the rows changed.
    */
   laneOf?(machine: MachineRef, session: string): 'A' | 'B' | null;
+  /** P5 O7 M3: a forwarded port's local listener; src/main/forwards.ts's by default. */
+  listen?(onConnection: (socket: Socket) => void): Promise<LocalListener>;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -124,7 +140,17 @@ export interface RemoteLaneB {
    * own `session.get` is that page's announcement (`routeLaneB`), made after it subscribed (C1's subscribe-then-read).
    */
   replay(machine: MachineRef, app: string): void;
-  /** Every subscription closed: before the links, in the shutdown order. */
+  /** P5 O7 M3: `remote.forward.open` and `.close`, main's handlers' (Interfaces §K). */
+  forward: {
+    open(input: CommandInput<'remote.forward.open'>): Promise<CommandResult<'remote.forward.open'>>;
+    close(input: CommandInput<'remote.forward.close'>): Promise<CommandResult<'remote.forward.close'>>;
+    /** The in-app browser's reads of the listeners (src/main/browser/forwarded.ts). */
+    listening: RemoteForwards['listening'];
+    at: RemoteForwards['at'];
+  };
+  /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
+  attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
+  /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
   spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
@@ -154,7 +180,7 @@ export const NOT_OPEN = 'open the session to drive it';
 
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
- * `base`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
+ * `base`; `session.search` refused `not-offered` (an endpoint older than M6) is answered `host_unavailable`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
  * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
@@ -164,6 +190,11 @@ export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) =
     const result = await base(machine, name, input, ctx);
     const app = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
     if (name === 'session.get' && typeof app === 'string' && remote(machine) !== null) laneB.replay(machine, app);
+    // P5 O7 M6 fix wave 1: an endpoint older than M6 offers no search; to the renderer's merge it is a machine left out, as
+    // an offline one is
+    if (name === 'session.search' && !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'not-offered' && remote(machine) !== null) {
+      return { ok: false, error: ipcError('host_unavailable', `session.search: machine ${remote(machine)!.name} offers no search`) };
+    }
     return result;
   };
 }
@@ -183,6 +214,19 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const machines = new Map<MachineRef, { link: RemoteLink; lanes: Map<string, Lane> }>();
   let revision = 0;
   const sessionOf = (machine: MachineRef, app: string) => machines.get(machine)?.lanes.get(app)?.session;
+  // P5 O7 M6: one machine-wide attention feed per link; once it is fed (fix wave 5), the sessions' streams say no attention of
+  // their own, and when it stops (no feed on the channel) they say theirs again (fix wave 1)
+  const attention = createRemoteAttention({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    emit: deps.emit,
+    timing,
+    unfed: (machine) => {
+      for (const lane of machines.get(machine)?.lanes.values() ?? []) lane.session.replayAttention();
+    },
+    streamItems: (machine) => [...(machines.get(machine)?.lanes.values() ?? [])].flatMap((lane) => lane.session.attentionItems()), // fix wave 3
+    log: deps.log,
+  });
   const checkout = createRemoteCheckout({
     remote: deps.remote,
     emit: deps.emit,
@@ -195,18 +239,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
   /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
-  /**
-   * P5 O7 M4 (the architect's ruling on M4d's gap): the sessions this app spawned, by machine and appSessionId, and when
-   * their spawn settled: their open waits a minute for the machine to list them (remote-session.ts). Let go at the first
-   * record had, at the minute's end, and at stop.
-   */
-  const spawned = new Map<string, number>();
-  const listWaitMs = timing.listWaitMs ?? LIST_WAIT_MS;
-  const spawnedAt = (key: string): number | null => {
-    for (const [held, at] of spawned) if (now() - at >= listWaitMs) spawned.delete(held);
-    return spawned.get(key) ?? null;
-  };
   const spawns = createSpawnAttempts({ now, log: deps.log, pendingMs: timing.spawnPendingMs, tombstoneMs: timing.spawnKeptMs, bounded: (handle, deadline) => bounded(handle, deadline) });
+  // P5 O7 M3: terminals and forwarded ports
+  const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
+  const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -235,9 +271,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
-        spawnedAt: () => spawnedAt(`${machine}\n${app}`), // spawned here: its open waits for the machine to list it
-        spawnWaitOver: () => void spawned.delete(`${machine}\n${app}`),
-        now,
+        attentionFed: () => attention.fed(machine), // fix waves 1, 5: the feed's items are the session's attention once fed
+        attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
@@ -265,7 +300,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   function forget(machine: MachineRef, app: string, lane: Lane): void {
     if (lane.open || lane.sending || lane.sends.length > 0) return;
     const lanes = machines.get(machine)?.lanes;
-    if (lanes?.get(app) === lane) lanes.delete(app);
+    if (lanes?.get(app) !== lane) return;
+    lanes.delete(app);
+    if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
   const interest = createRemoteInterest({
@@ -279,6 +316,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   });
   const offRemote = deps.onRemote(() => {
     spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
+    ptys.linksChanged(); // P5 O7 M3: a terminal or a forward on a link that ended ends
+    forwards.linksChanged();
     for (const [machine, { link, lanes }] of [...machines]) {
       if (deps.remote(machine) === link) continue;
       for (const [app, lane] of lanes) end(machine, app, lane, 'closed');
@@ -434,18 +473,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   async function run(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const deadline = now() + timing.sendPendingMs;
+    if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
     if (name === 'files.upload') return upload(link, fields);
-    if (name === 'session.spawn') {
-      // the tab it is made from (the envelope's session); a session it started is one this app spawned
-      const result = await spawns.spawn(link, fields, ctx.session, ctx.client); // the page asking: an answer to a page gone isn't taken
-      const output = result.ok ? (result.value as { status?: unknown; appSessionId?: unknown }) : null;
-      if (output?.status === 'ok' && typeof output.appSessionId === 'string') {
-        spawnedAt(''); // the sweep
-        spawned.set(`${link.machine}\n${output.appSessionId}`, now());
-      }
-      return result;
-    }
+    // the tab it is made from (the envelope's session), and the page asking: an answer to a page gone isn't taken
+    if (name === 'session.spawn') return spawns.spawn(link, fields, ctx.session, ctx.client);
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
@@ -467,7 +499,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -477,17 +509,34 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       }
     },
     refresh: () => interest.refresh(),
+    forward: {
+      open: async (input) => {
+        try {
+          return await forwards.open(input);
+        } catch (error) {
+          deps.log(`lane B: remote.forward.open of port ${input.port} on ${input.machine} failed: ${(error as Error).message}`);
+          return failure('internal', (error as Error).message) as CommandResult<'remote.forward.open'>;
+        }
+      },
+      close: async (input) => (forwards.close(input), { ok: true, value: undefined }),
+      listening: (machine, port) => forwards.listening(machine, port),
+      at: (localPort) => forwards.at(localPort),
+    },
     spawnsKept: () => spawns.kept(),
+    attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
+      attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
     },
     stop() {
       interest.stop();
       offRemote();
       checkout.stop();
+      attention.stop();
       spawns.stop();
-      spawned.clear();
+      ptys.stop();
+      forwards.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
     },

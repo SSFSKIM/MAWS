@@ -23,7 +23,7 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
 }
-export type CommandRunner = (command: string, args: readonly string[]) => CommandResult;
+export type CommandRunner = (command: string, args: readonly string[], options?: { timeoutMs?: number }) => CommandResult; // P5 O5 M6: a longer timeout for render install's unzip
 
 export interface UnitDeps {
   run: CommandRunner;

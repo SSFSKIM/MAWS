@@ -6,7 +6,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
-import { bareOf, machineOf } from '@shared/machine/address';
+import { bareOf, isAddress, machineOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -758,8 +758,12 @@ export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill, app
 
 export const ipcLoadSpill = ipcLoadSpillOver(ipc);
 
-export const ipcOpenExternalOver = (client: MawsBridge) => (url: string) => {
-  void client.invoke('layout.openExternal', { url }).then((result) => {
+// P5 O7 M3: a link out of another machine's session goes to main told that machine, which refuses a loopback link of it
+// there (it would open this Mac's localhost) and opens any other as before; a forward never reaches here (App.tsx's E4d).
+export const ipcOpenExternalOver = (client: MawsBridge) => (url: string, appSessionId: AppSessionId | null = null) => {
+  const machine = appSessionId !== null && isAddress(appSessionId) ? machineOf(appSessionId) : client.localMachine;
+  const opened = machine === client.localMachine ? client.invoke('layout.openExternal', { url }) : client.invoke('layout.openExternal', { url }, { machine });
+  void opened.then((result) => {
     if (!result.ok) console.warn(`[transcript] could not open ${url}: ${result.error.message}`);
   });
 };

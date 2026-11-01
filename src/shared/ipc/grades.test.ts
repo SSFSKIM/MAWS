@@ -84,7 +84,7 @@ describe('the routing classes', () => {
     expect(graded('client')).toEqual([
       ...whole('layout'), ...whole('voice'), ...whole('browser'),
       'attention.viewing', 'attention.pendingNavigate', 'host.status', 'host.restart', 'host.openLog',
-      'presentations.present', 'artifacts.downloadAsset', 'library.saveAs', 'pty.openLink', 'pty.hostState',
+      'presentations.present', 'artifacts.downloadAsset', 'library.saveAs', 'pty.openLink', 'pty.hostState', 'remote.forward.open', 'remote.forward.close' /* P5 O7 M3 */,
       // the rubric's row leaves it out; survey §2 keeps it with the client, as pty.hostState (the report's decisions)
       'engine.hostState',
       'machines.list', // P5 O6 M3: the app's own connection manager

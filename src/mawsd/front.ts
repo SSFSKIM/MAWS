@@ -39,6 +39,11 @@
 // engine host keys what it holds for the asker (a dashboard export's dataset holds) to it, and the connection's end
 // reaches the host as the link's clientGone.
 //
+// P5 O5 M5 (Interfaces §H, §I): `session.capabilities` is the front's own, answered cold from the daemon's reading of its
+// render seam and cua sockets (`capabilities`), to a client and the endpoint alike; `browserChanged` tells the daemon the
+// attached app's browser socket may have changed (a `machine.client`, the end of a connection that sent one), so the
+// cua sockets listen or stop.
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
@@ -59,6 +64,8 @@ import { HostClientGoneSchema, HostReadySchema, HostRequestSchema, type HostDoc,
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
+import type { SessionCapabilities } from '@shared/ipc/schema/session-capabilities';
+import type { AppSessionId } from '@shared/graph/ids';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -70,7 +77,8 @@ import type { EngineIntercept } from './spine-hosts';
 
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
-export const FRONT_COMMANDS = ['artifacts.export', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.follow'] as const;
+// P5 O5 M5: a session's capabilities (session.capabilities).
+export const FRONT_COMMANDS = ['artifacts.export', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears
@@ -122,6 +130,8 @@ export interface FrontOptions {
   // `arrivedAt` is when the front took the request, before the load (the panel's sweep#4: the wait is bounded from it)
   beforeSpineCommand?(name: CommandName, app: boolean, arrivedAt: number): Promise<void>;
   render?: FrontRender; // P5 O5 M4: none, a front that renders nothing (NO_RENDER)
+  capabilities?(appSessionId: AppSessionId): SessionCapabilities; // P5 O5 M5: session.capabilities, cold (none: no entry)
+  browserChanged?(): void; // P5 O5 M5: the attached app's browser socket may have changed
 }
 
 export interface ServicesFront {
@@ -142,6 +152,7 @@ export interface ServicesFront {
   appReady(): boolean;
   clients(): number;
   renderClients(): number; // P5 O5 M4: the render clients among them, which the daemon's clocks do not count
+  eventClients(): number; // P5 O5 M6: the ready clients the bus's events reach (render clients never do); `readiness` follows each change
   postRender(name: 'render.request' | 'render.exit' | 'render.hostGeneration', payload: unknown): boolean; // P5 O5 M4: to the newest ready render client; false with none
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go
@@ -207,9 +218,13 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     'daemon.restart': async () => void (await options.daemon('daemon.restart', undefined)),
     'daemon.restartEngineHost': () => options.daemon('daemon.restartEngineHost', undefined), // P5 O16 M3b
     'daemon.status': () => options.daemon('daemon.status', undefined),
-    'machine.client': (input, _context, from) => void (from!.browserSocket = (input as CommandInput<'machine.client'>).browserSocket),
+    'machine.client': (input, _context, from) => {
+      from!.browserSocket = (input as CommandInput<'machine.client'>).browserSocket;
+      options.browserChanged?.(); // P5 O5 M5
+    },
     'machine.identity': () => options.identity(),
     'session.follow': (input, _context, from) => from!.follower.follow(input as CommandInput<'session.follow'>),
+    'session.capabilities': (input) => options.capabilities?.((input as CommandInput<'session.capabilities'>).appSessionId as AppSessionId) ?? {}, // P5 O5 M5
   };
   const endpointClient = endableClientRef('endpoint'); // the endpoint's requests that name no device
 
@@ -429,6 +444,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.delete(this);
       this.follower.end();
       clientPort.gone(this);
+      if (this.browserSocket !== null) options.browserChanged?.(); // P5 O5 M5: the app that told it is gone
       if (wasReady && this.renders) return void render.clientGone(); // P5 O5 M4
       if (wasReady) options.readiness?.();
     }
@@ -464,6 +480,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
     renderClients: () => [...clients].filter((client) => client.renders).length,
+    eventClients: () => [...clients].filter((client) => !client.renders && client.isReady()).length,
     postRender(name, payload) {
       const newest = [...clients].filter((client) => client.renders && client.isReady()).sort((a, b) => b.readyAt - a.readyAt)[0];
       return newest?.send(name, payload) ?? false;

@@ -1475,6 +1475,54 @@ describe('listed rows from another machine', () => {
     expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle']);
   });
 
+  // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item with no tab open has
+  // no record; its listed row stands in, in Needs you, in the count and in the tree's glyph. A greyed machine's (main's
+  // word, its link down until the next snapshot) is drawn, readable, and counted nowhere.
+  describe('its attention', () => {
+    const waitOn = (id: string, createdAt = '2026-10-28T08:00:00Z') => item(studio(id), 'permission', createdAt, { id: addressOf(OTHER_MACHINE, `att-${id}`) as never });
+    const needsYou = () => within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button');
+    afterEach(() => act(() => useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false })));
+
+    it('draws an item of a session with no record under its listed row, counts it, and opens it through its lane’s opener', async () => {
+      const opened: string[] = [];
+      offs.push(registerRemoteOpener('B', (listed) => opened.push(listed.appId)));
+      fill([listedOn('b1', { title: 'Studio build', state: 'idle' })]);
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: false });
+      expandAll();
+      render(<><Toolbar /><Sidebar /></>);
+      expect(screen.getByRole('heading', { name: 'Needs you · 1' })).toBeTruthy();
+      expect(needsYou().map((b) => b.getAttribute('aria-label'))).toEqual(['Studio · Studio build · Approval needed']);
+      expect(needsYou()[0].dataset.needsYou).toBe(studio('b1'));
+      expect(needsYou()[0].querySelector('[data-machine-chip]')?.textContent).toBe('@Studio');
+      expect(screen.getByRole('button', { name: 'Overview, 1 waiting' })).toBeTruthy();
+      expect(within(row('Studio build')).getByRole('img').getAttribute('aria-label')).toBe('Needs approval'); // its listing says idle
+      await userEvent.click(needsYou()[0]);
+      expect(opened).toEqual([studio('b1')]);
+    });
+
+    it('a greyed machine’s item is drawn after the live rows, readable and marked, and leaves every count until its snapshot', () => {
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useAttention.setState({ loaded: true, bySession: new Map([[here.appId, [pageItem('here', 'question', '2026-10-28T09:00:00Z')]]]), version: useAttention.getState().version + 1 });
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: true }); // the older wait
+      roster('down');
+      render(<><Toolbar /><Sidebar /></>);
+      expect(screen.getByRole('heading', { name: 'Needs you · 1' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Overview, 1 waiting' })).toBeTruthy();
+      expect(needsYou().map((b) => [b.getAttribute('aria-label'), b.dataset.greyed ?? null])).toEqual([
+        ['MAWS · Sidebar pass · Question', null],
+        ['Studio · Studio build · Approval needed, machine offline', 'true'],
+      ]);
+      expect(within(needsYou()[1]).getByText('Studio build').className).toContain('text-fg-muted');
+      act(() => roster('up'));
+      expect(needsYou()[1].getAttribute('aria-label')).toBe('Studio · Studio build · Approval needed, reconnecting'); // up is not the snapshot
+      expect(screen.getByRole('heading', { name: 'Needs you · 1' })).toBeTruthy();
+      act(() => useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: false }));
+      expect(screen.getByRole('heading', { name: 'Needs you · 2' })).toBeTruthy();
+      expect(needsYou().map((b) => b.dataset.greyed ?? null)).toEqual([null, null]);
+      expect(screen.getByRole('button', { name: 'Overview, 2 waiting' })).toBeTruthy();
+    });
+  });
+
   it('caps an expanded project at five over both kinds, then eight after Show more', async () => {
     const records = Array.from({ length: 5 }, (_, i) => record(at(`r${i}`), { projectId: maws.id, title: { text: `local ${i}`, source: 'user' }, updatedAt: `2026-10-28T09:${10 + 2 * i}:00Z` }));
     const listed = Array.from({ length: 5 }, (_, i) => listedOn(`l${i}`, { title: `remote ${i}`, issued: `2026-10-28T09:${11 + 2 * i}:00Z` }));

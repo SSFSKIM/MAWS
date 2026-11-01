@@ -32,7 +32,13 @@
 // plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
 // authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
 // device's lane B subscriptions are interest (OX5). P5 O7 M4: a `sub` may name a session's `checkout` feed, streamed by
-// the feeds' plane from the spine's events, within the same checkout bounds the `checkout` target rule reads.
+// the feeds' plane from the spine's events, within the same checkout bounds the `checkout` target rule reads. P5 O7 M6:
+// or the machine's `attention` feed, cut to the sessions the member views as its rights stand (`Authorizer.ranks`, read
+// again at every record change and new head), as `attention.list` and `session.search` are cut when called.
+//
+// P5 O7 M3: a device's streams (streams.ts) open under its acts: a terminal's bytes, read from the pty host's ring and its
+// `onFrame` output, and a forwarded port's connections, each naming a forward the endpoint keeps per device for the resume
+// window (forwards.ts). Both are authorized again at every refresh of the members' rights.
 //
 // `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
 // every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
@@ -47,6 +53,7 @@ import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
 import { EndpointActions, type EffectResult } from './endpoint-actions';
+import { Forwards } from './forwards';
 import { current, speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
@@ -69,6 +76,7 @@ import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
 import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
+import { Streams } from './streams';
 import { Subscriptions } from './subscriptions';
 import { CheckoutBounds } from './targets';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
@@ -134,9 +142,12 @@ export class Endpoint implements EndpointModule {
   readonly queries: Queries;
   /** Subscriptions (M8): the table, lane A's and lane B's planes, and the interest they report. */
   readonly subscriptions: Subscriptions;
+  /** P5 O7 M3: the devices' streams (a terminal's bytes, a forwarded port's connections) and the forwards they name. */
+  readonly streams: Streams;
+  readonly forwards: Forwards;
   readonly planeA: PlaneA;
   readonly planeB: PlaneB;
-  /** The feeds (P5 O7 M4): a session's `checkout` feed. */
+  /** The feeds (P5 O7 M4): a session's `checkout` feed; the machine's `attention` feed (M6). */
   readonly planeFeeds: PlaneFeeds;
   /** Lane B sessions' checkout bounds, which the `checkout` rule and the `checkout` feed both read. */
   readonly checkoutBounds = new CheckoutBounds();
@@ -282,6 +293,7 @@ export class Endpoint implements EndpointModule {
       log,
       now: this.deps.now,
       pingMs: options.pingMs,
+      refreshed: () => this.streams.recheck(),
     });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
@@ -326,6 +338,15 @@ export class Endpoint implements EndpointModule {
       },
       grant: (value) => this.#grant(value),
       deliver: (states, transitions) => this.#deliver(states, transitions),
+      openForward: async (who, port) => {
+        // The act was decided before this ran: the sender's `shell` is decided again now, and the forward made in the same
+        // step as that answer, so a grant ended meanwhile makes none (a later end removes it at its re-check).
+        const made = await this.streams.decide('forward.open', who, { ...who, clientClass: 'native-mac' }, () => this.forwards.open(who, port));
+        if (!made.ok) return { ok: false, error: { code: made.reason } };
+        if (made.value === null) return { ok: false, error: { code: 'busy' } };
+        return { ok: true, value: { forward: made.value.id, port } };
+      },
+      holdForward: (device, forward, channel) => void this.forwards.hold(device, forward, channel),
       now: this.deps.now,
       log: (line) => log(line),
     });
@@ -351,6 +372,18 @@ export class Endpoint implements EndpointModule {
     });
     this.rl10.onResult((result) => this.actions.result(result));
     const seams = options.subscriptions ?? {};
+    this.forwards = new Forwards({ log, resumeMs: seams.resumeMs });
+    this.streams = new Streams({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      dispatch,
+      own: this.own,
+      forwards: this.forwards,
+      now: this.deps.now,
+      log,
+      resumeMs: seams.resumeMs,
+      recheckRetryMs: seams.recheckRetryMs,
+      transmitDeadlineMs: seams.transmitDeadlineMs,
+    });
     const recordSource = authorization.records ?? this.rl10.members;
     this.interest = new Interest({ interest: () => this.#services?.interest ?? null, log, resumeMs: seams.resumeMs });
     this.planeA = new PlaneA({
@@ -366,7 +399,7 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
-    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), log, backlogBytes: seams.backlogBytes });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
@@ -400,6 +433,7 @@ export class Endpoint implements EndpointModule {
         return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
       },
       recordFor: (report) => this.listings.recordFor(report),
+      ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       offers: authorization.offers,
       log,
     });
@@ -417,6 +451,7 @@ export class Endpoint implements EndpointModule {
       sub: (channel, m) => this.subscriptions.receive(channel, m, gatedSub),
       credit: (channel, m) => this.subscriptions.credit(channel, m),
       unsub: (channel, m) => this.subscriptions.unsub(channel, m),
+      stream: (channel, m) => this.streams.receive(channel, m),
     });
   }
 
@@ -440,8 +475,12 @@ export class Endpoint implements EndpointModule {
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
+        this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
         this.laneB.event(owner, message);
+        this.streams.event(owner, message);
       }),
+      // P5 O7 M3: a pty's output, for the terminal streams reading it.
+      services.onFrame((frame) => frame.owner === 'pty-host' && this.streams.frame(frame)),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
       services.onUpstream((link) => {
         if (!link.connected) return;
@@ -485,6 +524,8 @@ export class Endpoint implements EndpointModule {
     // No action more; those in flight record their results first (up to 2 s), then the subscriptions and channels close.
     await this.actions.stop();
     this.subscriptions.stop();
+    this.streams.stop();
+    this.forwards.stop();
     for (const off of this.#unseam.splice(0)) off();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');

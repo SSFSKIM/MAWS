@@ -3,12 +3,17 @@
 // which shows its own tab, a chip opens that tab's own main tab, so one tab of a session is reachable from another.
 // Chips shrink to a minimum and the strip then scrolls sideways; a suspended tab's chip is muted, a loading one's title
 // shimmers. Closing a chip closes the browser tab. P3-G (M2): `trailing` sits at the row's right end (the floating
-// card's pill while the card is closed over this page in the panel).
+// card's pill while the card is closed over this page in the panel). P5 O7 M3: a tab whose page is on a forward's local
+// listener carries "forwarded from <machine>" after its title.
 import type { KeyboardEvent, ReactNode } from 'react';
-import type { BrowserTab } from '@shared/browser/tab';
+import type { BrowserTab, BrowserTabForward } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ipc } from '../../../ipc/client';
+import { useMachines } from '../../../stores/machines';
+import { machineName } from '../../../stores/org-projects';
 import { closeTab, openMainTab, openTab, selectTab } from '../actions';
 import { BROWSER_COPY } from '../copy';
+import { forwardMarkOf } from '../forward';
 import { BrowserIcon, CloseIcon, PlusIcon } from '../icons';
 import { tabTitle } from '../store';
 import './chrome.css';
@@ -86,6 +91,7 @@ function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean;
         {tab.control === 'agent' && <ActingDot /> /* E4c */}
         <span className={`min-w-0 truncate ${tab.loading ? 'browser-chip-loading' : ''}`}>{title}</span>
         {tab.agentBadge !== null && <AgentBadge text={tab.agentBadge} /> /* E13 */}
+        {<ForwardMark tab={tab} /> /* P5 O7 M3 */}
       </button>
       <button
         type="button"
@@ -117,3 +123,20 @@ function AgentBadge({ text }: { text: string }) {
   );
 }
 // E13 end
+
+// P5 O7 M3 start: the forwarded mark (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Forwarding"): the page is
+// another machine's loopback, served through a port forwarded over its link, so the strip says whose it is.
+function ForwardMark({ tab }: { tab: BrowserTab }) {
+  const forward = forwardMarkOf(tab);
+  return forward === null ? null : <ForwardMarkOf forward={forward} />;
+}
+
+function ForwardMarkOf({ forward }: { forward: BrowserTabForward }) {
+  const name = useMachines((s) => machineName(s.machines, forward.machine, ipc.localMachine));
+  return (
+    <span data-forward-mark="" title={BROWSER_COPY.forwarded.markTitle(name, forward.port)} className="max-w-24 shrink-0 truncate rounded-sm bg-bg-raised px-1 text-fg-muted">
+      {BROWSER_COPY.forwarded.mark(name)}
+    </span>
+  );
+}
+// P5 O7 M3 end

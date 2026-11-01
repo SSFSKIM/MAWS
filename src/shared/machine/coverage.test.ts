@@ -128,6 +128,7 @@ const PASTED = "a paste placeholder's number, as a string (the terminal's key)";
 const SURFACE_PROPS = "an engine surface's prop names";
 const PINS = 'an engine session id → the account uuid it is pinned to';
 const BRIDGE_CONTROLS = "a control's key in the bridge's capabilities.controls (desk-hub/protocol's CONTROL_KEYS)"; // P5 O9 M2
+const SESSION_TOOLS = "a tool name (artifact_screenshot, artifact_export, browser; O4's own), never an id"; // P5 O5 M5
 // P5 O4 M2: a grant's OAuth documents as the legacy reader hands them to the machine; the store validates each with the
 // SDK's own schema before it keeps them
 const OAUTH_DOCUMENT = "an OAuth document's own fields (RFC 8414 server metadata, RFC 7591 client information): no MAWS id";
@@ -190,6 +191,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.settings.usage.output.pinsFor': PINS,
   'events.connectors.watchUpdate.update.result': JSON_OBJECT,
   'events.laneA.changed.state.controls': BRIDGE_CONTROLS, // P5 O9 M2
+  'commands.session.capabilities.output': SESSION_TOOLS, // P5 O5 M5
+  'events.session.capabilitiesChanged.capabilities': SESSION_TOOLS, // P5 O5 M5
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'events.plugins.operation.outcome.result': ENGINE_JSON,
@@ -206,6 +209,10 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   // P5 O7 M4: the sealed action a device sent, beside machine.op's claim and as a remote spawn's launchedBy (free data, RL9's
   // proof for O12's observer, never read for an id)
   'commands.machine.op.input.action': JSON_OBJECT,
+  // P5 O7 M3: pty.op has machine.op's shape: a remote act's args (validated by the pty host against the act's own schema)
+  // and the sealed action, which the pty host does not keep
+  'commands.pty.op.input.input': JSON_OBJECT,
+  'commands.pty.op.input.action': JSON_OBJECT,
   'commands.session.create.output.intent.launchedBy.action': JSON_OBJECT,
   'commands.session.get.output.launchedBy.action': JSON_OBJECT,
   'commands.session.intent.get.output.launchedBy.action': JSON_OBJECT,

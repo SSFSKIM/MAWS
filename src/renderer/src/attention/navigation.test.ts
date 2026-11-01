@@ -5,8 +5,12 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
+import { addressOf } from '@shared/machine/address';
+import { item, remoteRow } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { registerRemoteOpener } from '../sessions/remote-openers';
+import { useSessions, type ListedSession } from '../stores/sessions';
 import { runAction } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -83,6 +87,55 @@ describe('attention.navigate', () => {
     const other = idOf('Quota reset recovery');
     fake.event('attention.navigate', { appSessionId: other, attentionId: null, source: 'menu' });
     expect(active()).toBe(`session:${other}`);
+  });
+});
+
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item, with no tab open and
+// no record, opens through its lane's opener (M2's pane) from ⌘⇧J, a notification click and a fallback toast; a greyed
+// machine's item is never ⌘⇧J's answer.
+describe('another machine’s items', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const listedB = (id: string): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { title: `Studio ${id}` }), appId: onB(id) });
+  const b1 = item(onB('b1'), 'permission', '2026-09-28T01:00:00Z', { id: addressOf(OTHER_MACHINE, 'att-b1' as AttentionId) }); // older than every local item
+  let opened: ListedSession[];
+  let offOpener: () => void;
+  beforeEach(() => {
+    opened = [];
+    offOpener = registerRemoteOpener('B', (listed) => opened.push(listed));
+    useSessions.setState({ listed: new Map([[onB('b1'), listedB('b1')]]), listedMachines: new Set([OTHER_MACHINE]) });
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: false });
+  });
+  afterEach(() => {
+    offOpener();
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+  });
+
+  it('⌘⇧J opens the oldest, a listed session with no record, through its lane’s opener', () => {
+    runAction('attention.next');
+    expect(opened.map((l) => l.appId)).toEqual([onB('b1')]);
+  });
+
+  it('⌘⇧J skips a greyed machine’s item, oldest or not', () => {
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: true });
+    runAction('attention.next');
+    expect(opened).toEqual([]);
+    expect(active()).toBe(`session:${idOf('Fix sidebar drag')}`);
+  });
+
+  it('a notification click from the machine opens its item through the opener', () => {
+    fake.event('attention.navigate', { appSessionId: onB('b1'), attentionId: b1.id, source: 'notification' }, OTHER_MACHINE);
+    expect(opened.map((l) => l.appId)).toEqual([onB('b1')]);
+    expect(active()).toBeUndefined(); // the opener opens the tab (M2's), not the page's own path
+  });
+
+  it('a fallback toast names the listed row, and its action opens through the opener; it leaves with its item', () => {
+    fake.event('attention.notified', { appSessionId: onB('b1'), attentionId: b1.id, delivery: 'fallback', at: b1.createdAt }, OTHER_MACHINE);
+    const [toast] = useNotices.getState().notices;
+    expect(toast).toMatchObject({ text: `Studio b1 needs you · ${b1.summary}` });
+    toast.actions[0].run();
+    expect(opened.map((l) => l.appId)).toEqual([onB('b1')]);
+    act(() => useAttention.getState().applyChanged({ appSessionId: onB('b1'), items: [] }, OTHER_MACHINE));
+    expect(useNotices.getState().notices).toEqual([]);
   });
 });
 

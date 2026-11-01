@@ -13,6 +13,7 @@ export const grades = {
   'session.stop': 'manage',
   'session.pendingRequest': 'view',
   'session.pendingItems': 'view', // P5 O10 M8: the broker's items, as `session.pendingRequest` reads one
+  'session.capabilities': 'view', // P5 O5 M5: what the session's agent can do on its machine (OX9)
   'session.catalog': 'view',
   // the composer
   'session.send': words,

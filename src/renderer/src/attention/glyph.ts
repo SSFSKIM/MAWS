@@ -30,15 +30,8 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
   // W7: MAWS runs it and a foreign process resumed it too (contested); MAWS yields once that process writes
   if (holder.kind === 'self' && holder.contestedBy !== undefined) return glyph('⇄', 'warning', holder.contestedBy.kind === 'terminal' ? 'Contested: also live in terminal' : 'Contested: also live as background job');
 
-  if (open.some((i) => i.kind === 'question')) return glyph('?', 'warning', 'Question');
-  // P2-C start (2026-10-10; the P2-C document, M6): the owner channel's question an agent can wait on, then its must-read
-  if (open.some((i) => i.kind === 'async_input')) return glyph(ATTENTION_HEADINGS.async_input.char, 'info', ATTENTION_HEADINGS.async_input.text);
-  if (open.some((i) => i.kind === 'essential_unread')) return glyph(ATTENTION_HEADINGS.essential_unread.char, 'accent', ATTENTION_HEADINGS.essential_unread.text);
-  // P2-C end
-  if (open.some((i) => i.kind === 'plan')) return glyph('◇', 'info', 'Plan review');
-  const trouble = open.find((i) => TROUBLE[i.kind] !== undefined);
-  if (trouble) return glyph('!', 'danger', TROUBLE[trouble.kind]!);
-  if (open.length > 0) return glyph('◐', 'warning', 'Needs approval');
+  const waiting = waitingGlyph(open);
+  if (waiting !== null) return waiting;
 
   switch (digest?.phase) {
     case 'working':
@@ -51,10 +44,27 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
   return record.unread ? glyph('●', 'faint', 'Idle, unread') : glyph('○', 'faint', 'Idle');
 }
 
+// What the open actionable items ask for, the first matching row of the table; null with none.
+function waitingGlyph(open: AttentionItem[]): Glyph | null {
+  if (open.some((i) => i.kind === 'question')) return glyph('?', 'warning', 'Question');
+  // P2-C start (2026-10-10; the P2-C document, M6): the owner channel's question an agent can wait on, then its must-read
+  if (open.some((i) => i.kind === 'async_input')) return glyph(ATTENTION_HEADINGS.async_input.char, 'info', ATTENTION_HEADINGS.async_input.text);
+  if (open.some((i) => i.kind === 'essential_unread')) return glyph(ATTENTION_HEADINGS.essential_unread.char, 'accent', ATTENTION_HEADINGS.essential_unread.text);
+  // P2-C end
+  if (open.some((i) => i.kind === 'plan')) return glyph('◇', 'info', 'Plan review');
+  const trouble = open.find((i) => TROUBLE[i.kind] !== undefined);
+  if (trouble) return glyph('!', 'danger', TROUBLE[trouble.kind]!);
+  if (open.length > 0) return glyph('◐', 'warning', 'Needs approval');
+  return null;
+}
+
 // P5 O8 M2 ("Drawing", the state table): another machine's listed session, by its listing's state word (sminos's), drawn
 // with the glyphs above. O9's Q1 (how a terminal session's glyph reads) governs lane A rows too; until it is answered they
-// read these live glyphs.
-export function listedGlyph(state: string): Glyph {
+// read these live glyphs. P5 O7 M6: its machine's attention feed, when it holds open items for it, says what it waits for
+// (the record's rows above), whatever the listing's word.
+export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph {
+  const waiting = waitingGlyph(pending.filter((i) => isOpen(i) && isActionable(i)));
+  if (waiting !== null) return waiting;
   switch (state) {
     case 'busy':
       return glyph('●', 'accent', 'Working', true);

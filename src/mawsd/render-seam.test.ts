@@ -5,7 +5,9 @@
 // never spawns; the host is ended after the quiet period and a request after that starts it again; its stop answers the
 // table and ends the host; the answers reach the asker in its own shape (an undelivered inspection's file removed, a
 // library refusal with its IPC error).
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import type { ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,8 +18,17 @@ import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
 import { EXPORT_BUDGET_MS } from '../render/export';
-import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, renderAuthors, renderCommand, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
+import { until } from '../../test/support/mawsd-scene';
+import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, GROUP_POLL_MS, KILL_SETTLE_MS, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
 
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
 const PNG = { ok: true, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErrors: [] };
 const capture = (requestId: string): MawsArtifactCapture => ({ appSessionId: 'app-1' as never, requestId: requestId as never, artifactId: ARTIFACT, revision: 2, width: 640, height: 480 });
@@ -518,7 +529,7 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.posted[1]).toMatchObject({ kind: 'export', authors });
   });
 
-  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit, SIGTERM after the grace)', async () => {
+  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit and SIGTERM together, SIGKILL at the grace)', async () => {
     const s = scene();
     s.seam.capture(capture('cap-1'));
     s.seam.clientReady();
@@ -532,9 +543,12 @@ describe('the render seam (P5 O5 M4)', () => {
     ]);
     expect(((await library) as HostCommandError).ipcError).toMatchObject({ code: 'host_unavailable', message: 'the render service is restarting on mini' });
     expect(s.exits.count).toBe(1);
-    await vi.advanceTimersByTimeAsync(5_000);
+    expect(s.children[0]!.killed, 'a daemon stop is no quiet exit: SIGTERM with render.exit').toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_999);
     expect(s.children[0]!.killed).toEqual(['SIGTERM']);
-    s.children[0]!.exit(null, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.children[0]!.killed).toEqual(['SIGTERM', 'SIGKILL']);
+    s.children[0]!.exit(null, 'SIGKILL');
     await stopped;
     expect(s.seam.state()).toBe('off');
     s.seam.capture(capture('cap-3'));
@@ -556,6 +570,102 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.seam.capabilities().artifact_screenshot).toEqual({ available: false, reason: 'the engine host on mini predates the render service; it is replaced when idle' });
     s.renders.app = true; // its events reach the seam while an app is attached
     expect(s.seam.capabilities().artifact_screenshot).toEqual({ available: true });
+  });
+});
+
+// PR #428's panel (scalpel-3): a Linux render host's process group under fake time, through spawnRenderHost's injected
+// spawn and signal. The wrapper (xvfb-run's shell) exits at the group's SIGTERM; one member ignores it and dies only at
+// SIGKILL. `zombies` keeps the group answering `kill(-pgid, 0)` after the SIGKILL, as orphans no subreaper reaps do.
+describe('the render host’s process group (Linux) under the seam', () => {
+  const WRAPPER = 4242;
+  class FakeWrapper extends EventEmitter {
+    readonly pid = WRAPPER;
+    readonly stdout = null;
+    readonly stderr = null;
+  }
+  const esrch = () => Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+  const groupScene = ({ zombies = false } = {}) => {
+    const events: string[] = [];
+    const logs: string[] = [];
+    const wrappers: FakeWrapper[] = [];
+    const group = { members: 0, killed: false };
+    const signal = (pid: number, sent: NodeJS.Signals | 0) => {
+      expect(pid, 'every signal addresses the group').toBe(-WRAPPER);
+      if (sent === 0) {
+        if (group.members === 0 && !(zombies && group.killed)) throw esrch();
+        return;
+      }
+      if (group.members === 0) throw esrch();
+      events.push(sent);
+      if (sent === 'SIGKILL') {
+        group.members = 0;
+        group.killed = true;
+      } else if (sent === 'SIGTERM' && group.members === 2) {
+        group.members = 1; // the wrapper goes; the member that ignores TERM stays
+        const wrapper = wrappers.at(-1)!;
+        queueMicrotask(() => wrapper.emit('exit', null, 'SIGTERM'));
+      }
+    };
+    const spawn = () => {
+      const wrapper = new FakeWrapper();
+      wrappers.push(wrapper);
+      group.members = 2;
+      group.killed = false;
+      return wrapper as unknown as ChildProcess;
+    };
+    const command = { command: '/usr/bin/xvfb-run', args: [], env: {}, cwd: '/p', group: true };
+    const seam = createRenderSeam({
+      machine: 'linux-box',
+      spawn: () => {
+        const child = spawnRenderHost(command, (line) => void logs.push(line), { spawn, signal });
+        child.onExit((code, sig) => void events.push(`exit ${code ?? sig}`));
+        return child;
+      },
+      post: () => true,
+      postExit: () => true,
+      answerEngine: async () => 'delivered',
+      quietMs: () => 30_000,
+      runtime: () => ({ available: true }),
+      engineHostRenders: () => true,
+      appAttached: () => false,
+      hold: () => () => undefined,
+      log: (line) => void logs.push(line),
+      restartBackoffMs: [500, 2_000, 5_000],
+    });
+    return { seam, events, logs, wrappers, group };
+  };
+
+  it('stop with a member that ignores SIGTERM resolves only after the SIGKILL and the host’s exit', async () => {
+    const g = groupScene();
+    g.seam.capture(capture('cap-1'));
+    g.seam.clientReady();
+    let done = false;
+    const stopped = g.seam.stop().then(() => void (done = true));
+    await flush();
+    expect(g.events, 'the group is sent SIGTERM at once; its wrapper exits, the rest is sent SIGTERM again').toEqual(['SIGTERM', 'SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(done, 'the TERM-ignoring member is still there').toBe(false);
+    expect(g.events).not.toContain('SIGKILL');
+    await vi.advanceTimersByTimeAsync(100 + GROUP_POLL_MS);
+    await stopped;
+    expect(g.events, 'SIGKILL, then the exit, before stop returns').toEqual(['SIGTERM', 'SIGTERM', 'SIGKILL', 'exit SIGTERM']);
+    expect(g.group.members).toBe(0);
+    expect(g.seam.state()).toBe('off');
+  });
+
+  it('a group left with zombies after its SIGKILL still reports its exit within a bounded settle, and a replacement starts', async () => {
+    const g = groupScene({ zombies: true });
+    g.seam.capture(capture('cap-1'));
+    expect(g.wrappers).toHaveLength(1);
+    g.group.members = 1;
+    g.wrappers[0]!.emit('exit', 70, null); // the wrapper exits before its ready, a member left behind
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(g.events).toEqual(['SIGTERM', 'SIGKILL']);
+    await vi.advanceTimersByTimeAsync(KILL_SETTLE_MS);
+    expect(g.events.at(-1), 'the exit is reported though the group still answers').toBe('exit 70');
+    expect(g.logs).toContain(`[render] the render host's process group still answered ${KILL_SETTLE_MS / 1000} s after SIGKILL (members nobody reaped): its exit reported`);
+    await vi.advanceTimersByTimeAsync(500); // the failed start's backoff
+    expect(g.wrappers, 'a replacement host started').toHaveLength(2);
   });
 });
 
@@ -620,7 +730,8 @@ describe('the render host’s exit before its ready (exitReason)', () => {
     expect(exitReason(2, null, null)).toBe('the render host was started without a profile');
     expect(exitReason(null, 'SIGKILL', null)).toBe('the render host was ended by SIGKILL');
     expect(exitReason(0, null, null)).toBe('the render host exited before it was ready');
-    expect(exitReason(3, null, '[render-host] cannot start: Chromium’s sandbox is not configured')).toBe('the render host exited 3: Chromium’s sandbox is not configured');
+    // P5 O5 M6: 3 is the render host's refusal to run without Chromium's sandbox (src/render-host/host.ts)
+    expect(exitReason(3, null, '[render-host] cannot start: --no-sandbox was passed')).toBe('the render host refused to run without Chromium’s sandbox: --no-sandbox was passed');
   });
 });
 
@@ -634,7 +745,92 @@ describe('the render host’s command line on a Mac (Interfaces §E)', () => {
     expect(checkout.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
   });
 
-  it('refuses on another platform (the Linux runtime is M6’s)', () => {
+  it('refuses on a platform with no render runtime, and on Linux without the cache’s Electron', () => {
+    expect(() => renderCommand({ platform: 'win32', packaged: false, execPath: '/node', appRoot: '/repo', profile: '/p', env })).toThrow(/not installed/);
     expect(() => renderCommand({ platform: 'linux', packaged: false, execPath: '/node', appRoot: '/repo', profile: '/p', env })).toThrow(/not installed/);
+  });
+});
+
+// P5 O5 M6 (Interfaces §E, FINDINGS §1.2, §1.3): on Linux the release's entry under the render cache's Electron, inside a
+// virtual display of its own, Chromium compositing in software, never without its sandbox; in a process group of its
+// own, which every kill addresses whole (a SIGTERM to xvfb-run's shell does not reliably reach Electron)
+describe('the render host’s command line on Linux (Interfaces §E)', () => {
+  const env = { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--max-old-space-size=64', PATH: '/usr/bin:/bin', MAWS_USER_DATA: '/old' };
+  const linux = { electron: '/home/u/.local/share/maws/mawsd/render/44.4.5-04586a0ec46c/electron', xvfbRun: '/usr/bin/xvfb-run' };
+  beforeEach(() => vi.useRealTimers()); // real processes, real waits
+
+  it('runs the release’s out/main/index.js under the cache’s Electron in xvfb-run, --headless and --hide-scrollbars, never --no-sandbox, as a group', () => {
+    const command = renderCommand({ platform: 'linux', packaged: false, execPath: '/release/runtime/bin/node', appRoot: '/release', profile: '/home/u/.config/MAWS', env, linux });
+    expect(command).toEqual({
+      command: '/usr/bin/xvfb-run',
+      args: ['-a', '-s', '-screen 0 1280x800x24 -nolisten tcp', linux.electron, '--headless', '--hide-scrollbars', '/release/out/main/index.js', '--render-host', '/home/u/.config/MAWS'],
+      env: { PATH: '/usr/bin:/bin', MAWS_USER_DATA: '/home/u/.config/MAWS' },
+      cwd: '/home/u/.config/MAWS',
+      group: true,
+    });
+    expect(command.args).not.toContain('--no-sandbox');
+  });
+
+  it('kills the whole group: Electron, its helpers and the Xvfb beside it', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-group-'));
+    try {
+      // a shell standing in for xvfb-run: a child of its own (the display) beside the command it runs, which ignores TERM
+      // the way a shell waiting on its child does not pass it on
+      const script = join(at, 'xvfb-run');
+      writeFileSync(script, `#!/bin/sh\nsleep 60 &\necho $! > ${join(at, 'display.pid')}\n"$@"\n`, { mode: 0o755 });
+      const lines: string[] = [];
+      const child = spawnRenderHost({ command: script, args: ['sh', '-c', 'echo "[render-host] ready: stand-in"; exec sleep 60'], env: { PATH: process.env.PATH }, cwd: at, group: true }, (line) => lines.push(line));
+      await until(() => existsSync(join(at, 'display.pid')) && lines.length > 0, 5_000, 'the stand-in started');
+      const display = Number(readFileSync(join(at, 'display.pid'), 'utf8'));
+      const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.onExit((code, signal) => resolve({ code, signal })));
+      child.kill('SIGTERM');
+      await exited;
+      await until(() => !isAlive(display), 5_000, 'the display ended with the group');
+      expect(lines).toContain('[render-host] ready: stand-in');
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
+  });
+
+  // Fix wave 1: the wrapper's exit is not the group's. A member that ignores SIGTERM (the stand-in's `trap '' TERM`)
+  // outlives the wrapper; the exit is reported only once it is gone, SIGKILLed at the grace, so the seam's escalation and
+  // its successor never run beside a survivor
+  const survivorScene = (at: string, command: string[]) => {
+    const script = join(at, 'xvfb-run');
+    writeFileSync(script, `#!/bin/sh\n(trap '' TERM; exec sleep 60) &\necho $! > ${join(at, 'member.pid')}\n"$@"\n`, { mode: 0o755 });
+    const lines: string[] = [];
+    const child = spawnRenderHost({ command: script, args: command, env: { PATH: process.env.PATH }, cwd: at, group: true }, (line) => lines.push(line), { groupGraceMs: 300 });
+    const exit = new Promise<{ memberAliveAtExit: boolean; at: number }>((resolve) => child.onExit(() => resolve({ memberAliveAtExit: isAlive(Number(readFileSync(join(at, 'member.pid'), 'utf8'))), at: Date.now() })));
+    return { child, lines, exit, member: () => Number(readFileSync(join(at, 'member.pid'), 'utf8')) };
+  };
+
+  it('a group member ignoring SIGTERM: the kill’s exit is reported only after it is SIGKILLed at the grace', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-survivor-'));
+    try {
+      const scene = survivorScene(at, ['sh', '-c', 'echo "[render-host] ready: stand-in"; exec sleep 60']);
+      await until(() => existsSync(join(at, 'member.pid')) && scene.lines.length > 0, 5_000, 'the stand-in started');
+      const member = scene.member();
+      const killedAt = Date.now();
+      scene.child.kill('SIGTERM');
+      const exited = await scene.exit;
+      expect(exited.memberAliveAtExit, 'no member of the group is left when the exit is reported').toBe(false);
+      expect(exited.at - killedAt).toBeGreaterThanOrEqual(300);
+      expect(isAlive(member)).toBe(false);
+      expect(scene.lines).toContain("[render] the render host's process group outlived its wrapper by 0.3 s: SIGKILL");
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
+  });
+
+  it('a wrapper that exits by itself leaving a member: the group is retired before its exit is reported', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-survivor-'));
+    try {
+      const scene = survivorScene(at, ['sh', '-c', 'echo "[render-host] ready: stand-in"; exit 0']);
+      const exited = await scene.exit;
+      expect(exited.memberAliveAtExit).toBe(false);
+      expect(isAlive(scene.member())).toBe(false);
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
   });
 });

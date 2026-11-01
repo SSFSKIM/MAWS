@@ -1,0 +1,536 @@
+{
+  "mode": "hidden",
+  "platform": "linux",
+  "startedAt": "2026-10-31T23:13:29.913Z",
+  "phases": {
+    "cua primitives": {
+      "helloMs": 3,
+      "hello": {
+        "extensionId": "maws",
+        "extensionInstanceId": "maws:7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f",
+        "version": "u3-probe",
+        "protocolVersion": 1,
+        "profileName": "MAWS"
+      },
+      "tabs": [
+        {
+          "id": 1,
+          "url": "http://127.0.0.1:40481/",
+          "title": "U3 text page",
+          "status": "complete"
+        }
+      ],
+      "attach": {
+        "ms": 5
+      },
+      "title": {
+        "ms": 4,
+        "value": "U3 text page"
+      },
+      "visibility": {
+        "ms": 2,
+        "value": "hidden"
+      },
+      "captureScreenshot": {
+        "ms": 8010,
+        "failed": "Command cancelled: deadline"
+      },
+      "vendorScreenshot": {
+        "ms": 122,
+        "value": {
+          "ms": 118,
+          "bytes": 193125
+        }
+      },
+      "cuaClick": {
+        "ms": 7
+      },
+      "cuaClickLanded": {
+        "ms": 2,
+        "value": 1
+      },
+      "createdTab": {
+        "create": {
+          "ms": 21,
+          "value": 2
+        },
+        "loaded": {
+          "ms": 79
+        },
+        "attach": {
+          "ms": 2
+        },
+        "captureScreenshot": {
+          "ms": 8010,
+          "failed": "Command cancelled: deadline"
+        },
+        "detach": {
+          "ms": 3
+        },
+        "remove": {
+          "ms": 2
+        }
+      },
+      "windows": {
+        "ms": 7,
+        "value": [
+          {
+            "id": 1,
+            "focused": false,
+            "type": "normal"
+          }
+        ]
+      },
+      "ms": 16285
+    },
+    "screencast static": {
+      "frames": 1,
+      "firstFrameMs": 39,
+      "bytes": 138420,
+      "firstFrameBytes": 138420,
+      "widths": [
+        1280
+      ],
+      "ms": 4009
+    },
+    "click to paint (cdp)": {
+      "clicks": 20,
+      "missing": 20,
+      "samples": [],
+      "medianMs": null,
+      "p95Ms": null,
+      "minMs": null,
+      "maxMs": null,
+      "landed": 20,
+      "lastClickTrusted": true,
+      "dispatchMedianMs": 5005,
+      "ms": 102149
+    },
+    "text page ticking at 10 Hz (cdp)": {
+      "frames": 0,
+      "windowMs": 10006,
+      "fps": 0,
+      "medianIntervalMs": null,
+      "p95IntervalMs": null,
+      "bytesPerSecond": 0,
+      "medianFrameBytes": null,
+      "maxFrameBytes": null,
+      "bytesPerSecondAt10fps": null,
+      "pageTicksPerSecond": 0.6,
+      "hostToViewerMedianMs": null,
+      "frameWidths": [],
+      "ms": 11019
+    },
+    "text page scrolling (cdp)": {
+      "frames": 0,
+      "windowMs": 8008,
+      "fps": 0,
+      "medianIntervalMs": null,
+      "p95IntervalMs": null,
+      "bytesPerSecond": 0,
+      "medianFrameBytes": null,
+      "maxFrameBytes": null,
+      "bytesPerSecondAt10fps": null,
+      "pageTicksPerSecond": 0.6,
+      "hostToViewerMedianMs": null,
+      "frameWidths": [],
+      "ms": 9016
+    },
+    "memory while streaming": {
+      "reading": {
+        "label": "one tab, screencast streaming",
+        "treeRssKiB": 555304,
+        "treeWorkingSetKiB": 555204,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 175956,
+            "rssKiB": 176056,
+            "footprintKiB": null
+          },
+          {
+            "type": "GPU",
+            "pid": 12253,
+            "serviceName": "GPU",
+            "workingSetKiB": 164032,
+            "rssKiB": 164032,
+            "footprintKiB": null
+          },
+          {
+            "type": "Utility",
+            "pid": 12257,
+            "serviceName": "network.mojom.NetworkService",
+            "workingSetKiB": 91644,
+            "rssKiB": 91644,
+            "footprintKiB": null
+          },
+          {
+            "type": "Tab",
+            "pid": 12273,
+            "serviceName": null,
+            "workingSetKiB": 123572,
+            "rssKiB": 123572,
+            "footprintKiB": null
+          }
+        ]
+      },
+      "ms": 79
+    },
+    "collision with the agent screenshot": {
+      "viewerFpsBefore": 0,
+      "agentScreenshot": {
+        "ms": 81,
+        "bytes": 193125
+      },
+      "viewerFpsAfterAgentStop": 0,
+      "viewerFpsAfterRestart": 0,
+      "cuaNotificationsDuringScreencast": {
+        "debugger.event Page.screencastVisibilityChanged": {
+          "n": 3,
+          "bytes": 444
+        },
+        "debugger.event Page.screencastFrame": {
+          "n": 3,
+          "bytes": 627504
+        }
+      },
+      "ms": 6596
+    },
+    "screencast stopped, idle": {
+      "reading": {
+        "label": "one tab, idle 10 s after the screencast",
+        "treeRssKiB": 554212,
+        "treeWorkingSetKiB": 554160,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 178916,
+            "rssKiB": 178968,
+            "footprintKiB": null
+          },
+          {
+            "type": "GPU",
+            "pid": 12253,
+            "serviceName": "GPU",
+            "workingSetKiB": 160024,
+            "rssKiB": 160024,
+            "footprintKiB": null
+          },
+          {
+            "type": "Utility",
+            "pid": 12257,
+            "serviceName": "network.mojom.NetworkService",
+            "workingSetKiB": 91644,
+            "rssKiB": 91644,
+            "footprintKiB": null
+          },
+          {
+            "type": "Tab",
+            "pid": 12273,
+            "serviceName": null,
+            "workingSetKiB": 123576,
+            "rssKiB": 123576,
+            "footprintKiB": null
+          }
+        ]
+      },
+      "ms": 10076
+    },
+    "subscription: text page ticking at 10 Hz": {
+      "frames": 0,
+      "windowMs": 8001,
+      "fps": 0,
+      "medianIntervalMs": null,
+      "p95IntervalMs": null,
+      "bytesPerSecond": 0,
+      "medianFrameBytes": null,
+      "maxFrameBytes": null,
+      "bytesPerSecondAt10fps": null,
+      "pageTicksPerSecond": 0.6,
+      "hostToViewerMedianMs": null,
+      "frameWidths": [],
+      "ms": 9011
+    },
+    "subscription: click to paint": {
+      "clicks": 10,
+      "missing": 10,
+      "samples": [],
+      "medianMs": null,
+      "p95Ms": null,
+      "minMs": null,
+      "maxMs": null,
+      "landed": 10,
+      "lastClickTrusted": true,
+      "dispatchMedianMs": 5005,
+      "ms": 52083
+    },
+    "cua release": {
+      "inspect": {
+        "cua": {
+          "peerModule": "loaded",
+          "sessions": {
+            "7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f": {
+              "path": "/tmp/u3-gKSbJE/ud/browser/cua/7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f.sock",
+              "connections": 1,
+              "held": 0,
+              "leased": [],
+              "refused": 0
+            }
+          }
+        },
+        "emitted": {
+          "browser.tabs.changed": 9
+        },
+        "cuaLog": []
+      },
+      "ms": 3
+    }
+  },
+  "errors": [],
+  "ready": {
+    "cuaSocket": "/tmp/u3-gKSbJE/ud/browser/cua/7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f.sock",
+    "screencastSocket": "/tmp/u3-gKSbJE/sc.sock",
+    "tabId": "b_d1466414ae82",
+    "pid": 12220,
+    "msFromSpawn": 812
+  },
+  "hostExit": {
+    "code": 0,
+    "signal": null
+  },
+  "hostStderrTail": [],
+  "host": {
+    "mode": "hidden",
+    "steps": [
+      {
+        "name": "ready",
+        "atMs": 90,
+        "versions": {
+          "electron": "44.4.5",
+          "chrome": "152.0.7977.130",
+          "node": "24.21.0"
+        },
+        "platform": "linux",
+        "headless": true,
+        "noSandbox": false,
+        "dockVisible": null
+      },
+      {
+        "name": "memory at ready, no tab",
+        "atMs": 117,
+        "label": "at ready, no tab",
+        "treeRssKiB": 138672,
+        "treeWorkingSetKiB": 138612,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 138612,
+            "rssKiB": 138672,
+            "footprintKiB": null
+          }
+        ]
+      },
+      {
+        "name": "cua socket",
+        "atMs": 123,
+        "path": "/tmp/u3-gKSbJE/ud/browser/cua/7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f.sock",
+        "peer": "linux: uid-only stand-in addon (the socket is 0600 in a 0700 directory)",
+        "trustedRoots": [
+          {
+            "pid": 12199,
+            "start": 1793488409240000
+          }
+        ]
+      },
+      {
+        "name": "views",
+        "atMs": 198,
+        "line": "tab b_d1466414ae82: hidden window 1, content 1280x800"
+      },
+      {
+        "name": "tab loaded",
+        "atMs": 445,
+        "tabId": "b_d1466414ae82",
+        "url": "http://127.0.0.1:40481/",
+        "title": "U3 text page",
+        "loading": false,
+        "pageState": {
+          "visibility": "hidden",
+          "hidden": true,
+          "w": 1280,
+          "h": 800,
+          "dpr": 1,
+          "title": "U3 text page"
+        },
+        "osr": false
+      },
+      {
+        "name": "memory one tab loaded, idle",
+        "atMs": 516,
+        "label": "one tab loaded, idle",
+        "treeRssKiB": 512952,
+        "treeWorkingSetKiB": 513112,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 171428,
+            "rssKiB": 171268,
+            "footprintKiB": null
+          },
+          {
+            "type": "GPU",
+            "pid": 12253,
+            "serviceName": "GPU",
+            "workingSetKiB": 147128,
+            "rssKiB": 147128,
+            "footprintKiB": null
+          },
+          {
+            "type": "Utility",
+            "pid": 12257,
+            "serviceName": "network.mojom.NetworkService",
+            "workingSetKiB": 91732,
+            "rssKiB": 91732,
+            "footprintKiB": null
+          },
+          {
+            "type": "Tab",
+            "pid": 12273,
+            "serviceName": null,
+            "workingSetKiB": 102824,
+            "rssKiB": 102824,
+            "footprintKiB": null
+          }
+        ]
+      },
+      {
+        "name": "serving",
+        "atMs": 518,
+        "cuaSocket": "/tmp/u3-gKSbJE/ud/browser/cua/7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f.sock",
+        "screencastSocket": "/tmp/u3-gKSbJE/sc.sock",
+        "tabId": "b_d1466414ae82",
+        "pid": 12220
+      },
+      {
+        "name": "viewer connected",
+        "atMs": 525
+      },
+      {
+        "name": "views",
+        "atMs": 8691,
+        "line": "tab b_ff871127cb1b: hidden window 2, content 1280x800"
+      },
+      {
+        "name": "memory one tab, screencast streaming",
+        "atMs": 143080,
+        "label": "one tab, screencast streaming",
+        "treeRssKiB": 555304,
+        "treeWorkingSetKiB": 555204,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 175956,
+            "rssKiB": 176056,
+            "footprintKiB": null
+          },
+          {
+            "type": "GPU",
+            "pid": 12253,
+            "serviceName": "GPU",
+            "workingSetKiB": 164032,
+            "rssKiB": 164032,
+            "footprintKiB": null
+          },
+          {
+            "type": "Utility",
+            "pid": 12257,
+            "serviceName": "network.mojom.NetworkService",
+            "workingSetKiB": 91644,
+            "rssKiB": 91644,
+            "footprintKiB": null
+          },
+          {
+            "type": "Tab",
+            "pid": 12273,
+            "serviceName": null,
+            "workingSetKiB": 123572,
+            "rssKiB": 123572,
+            "footprintKiB": null
+          }
+        ]
+      },
+      {
+        "name": "memory one tab, idle 10 s after the screencast",
+        "atMs": 159753,
+        "label": "one tab, idle 10 s after the screencast",
+        "treeRssKiB": 554212,
+        "treeWorkingSetKiB": 554160,
+        "treeFootprintKiB": null,
+        "processes": [
+          {
+            "type": "Browser",
+            "pid": 12220,
+            "serviceName": null,
+            "workingSetKiB": 178916,
+            "rssKiB": 178968,
+            "footprintKiB": null
+          },
+          {
+            "type": "GPU",
+            "pid": 12253,
+            "serviceName": "GPU",
+            "workingSetKiB": 160024,
+            "rssKiB": 160024,
+            "footprintKiB": null
+          },
+          {
+            "type": "Utility",
+            "pid": 12257,
+            "serviceName": "network.mojom.NetworkService",
+            "workingSetKiB": 91644,
+            "rssKiB": 91644,
+            "footprintKiB": null
+          },
+          {
+            "type": "Tab",
+            "pid": 12273,
+            "serviceName": null,
+            "workingSetKiB": 123576,
+            "rssKiB": 123576,
+            "footprintKiB": null
+          }
+        ]
+      },
+      {
+        "name": "exit asked",
+        "atMs": 220905
+      },
+      {
+        "name": "cua log",
+        "atMs": 220914,
+        "line": "a cua host's connection on 7c1e5a2e-3b4f-4c6d-9e8f-0a1b2c3d4e5f's socket closed after 220387 ms: MAWS stopped its server"
+      },
+      {
+        "name": "viewer gone",
+        "atMs": 220915
+      }
+    ],
+    "errors": []
+  },
+  "finishedAt": "2026-10-31T23:17:11.373Z"
+}

@@ -12,7 +12,7 @@ import { hostStatus } from '../test-support/host-status';
 import { preloadOf } from '../test-support/preload-of';
 import { createClient } from './client';
 import { registerTabRetention } from '../keymap/actions-runtime';
-import { createAttentionStore } from '../stores/attention';
+import { createAttentionStore, selectGreyedNeedsYou, selectNeedsYou } from '../stores/attention';
 import { createLayoutStore } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { createMachinesStore, selectOffline } from '../stores/machines';
@@ -64,7 +64,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.rows.changed', 'remote.session', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -733,6 +733,53 @@ describe('the org rows', () => {
     fake.event('engine.hostState', { state: 'ready' }, OTHER_MACHINE);
     for (const name of SNAPSHOT_READS) expect(fake.machines(name), name).toEqual([TEST_MACHINE]);
     expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(false);
+  });
+
+  // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "The feed"; M6b's `remote.attention`): main's
+  // feed of the machine, lifted to its addresses, replaces its partition; greyed from the link's `down` through an `up`
+  // until the next snapshot, which the roster never says.
+  it('applies remote.attention to the machine’s partition, greyed through an up until the next snapshot', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)] });
+    await answerSnapshots(fake);
+    await fake.reply('org.rows', rowsOf({ sessions: ['b1', 'b2'] }));
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 1)] }); // listed: no snapshot of its own
+    const sessions = () => stores.sessions.getState();
+    const live = () => selectNeedsYou(stores.attention.getState(), sessions()).map((r) => r.appSessionId);
+    const greyed = () => selectGreyedNeedsYou(stores.attention.getState(), sessions()).map((r) => r.appSessionId);
+    const b1 = item('b1', 'permission', '2026-09-28T08:00:00Z');
+    const b2 = item('b2', 'question', '2026-09-28T09:00:00Z');
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [b1, b2], greyed: false }, OTHER_MACHINE);
+    expect(live()).toEqual([onB('b1'), onB('b2'), A]); // no record for either: their listed rows stand in
+    fake.event('attention.changed', { appSessionId: 'b2', items: [] }, OTHER_MACHINE); // left the feed (answered, or unshared)
+    expect(live()).toEqual([onB('b1'), A]);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('down', 1)] });
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [b1], greyed: true }, OTHER_MACHINE);
+    expect([live(), greyed()]).toEqual([[A], [onB('b1')]]);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] });
+    expect([live(), greyed()], 'up is not the snapshot').toEqual([[A], [onB('b1')]]);
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [b2], greyed: false }, OTHER_MACHINE);
+    expect([live(), greyed()]).toEqual([[onB('b2'), A], []]);
+    expect(stores.attention.getState().bySession.has(onB('b1'))).toBe(false);
+  });
+
+  // M6c fix wave 1: the roster brings B up before the org rows name it, so B is snapshotted as a socket machine; main's
+  // feed then speaks for it, and that list's late answer changes nothing
+  it('a late attention.list of a machine the feed speaks for neither resurrects nor erases its items', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await fake.reply('org.rows', rowsOf({ sessions: ['b1', 'b2'] }));
+    const live = () => selectNeedsYou(stores.attention.getState(), stores.sessions.getState()).map((r) => r.appSessionId);
+    const b1 = item('b1', 'permission', '2026-09-28T08:00:00Z');
+    fake.event('attention.changed', { appSessionId: 'b1', items: [] }, OTHER_MACHINE); // answered: buffered behind B's list
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [], greyed: false }, OTHER_MACHINE);
+    await fake.reply('session.list', { sessions: [], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await fake.reply('attention.list', [b1]); // read before the answer
+    expect(live()).toEqual([A]);
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [b1], greyed: false }, OTHER_MACHINE);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] }); // listed now: no read
+    expect(live()).toEqual([onB('b1'), A]);
   });
 
   it('a machine the rows do not name yet is read as before', async () => {

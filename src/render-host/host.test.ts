@@ -13,7 +13,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import { RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { startFakeFront, type FakeFront, type FakeFrontClient } from '../../test/support/fake-front';
-import { EXIT_UNREACHABLE, EXIT_USAGE, renderHostProfile, startRenderHost, type RenderHostDeps, type RenderLibrary } from './host';
+import { EXIT_NO_SANDBOX, EXIT_UNREACHABLE, EXIT_USAGE, renderHostProfile, sandboxRefusal, startRenderHost, type RenderHostDeps, type RenderLibrary } from './host';
 
 const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
 const capture = (requestId: string) => ({ appSessionId: 'app-1', requestId, artifactId: ARTIFACT, revision: 2, width: 640, height: 480 });
@@ -107,6 +107,25 @@ describe('the render host (src/render-host/host.ts)', () => {
     expect(await socketless.exit).toBe(EXIT_UNREACHABLE);
     expect(socketless.lines[0]).toMatch(/^\[render-host\] cannot start: no mawsd has served this profile, or it has exited \(.*machine\.sock is missing\)$/);
     expect(socketless.steps, 'Electron never reached ready').not.toContain('ready');
+  });
+
+  // P5 O5 M6 (Interfaces §E; owner question Q2): on Linux the render host never runs without Chromium's sandbox; a start
+  // with it turned off is refused first, before anything is read or written, with exit 3 and the reason
+  it('refuses to start without Chromium’s sandbox on Linux, exit 3 with the reason, before anything else', async () => {
+    const profile = scratch();
+    const off = host(profile, heldLibrary().library, ['electron', '--no-sandbox', 'out/main/index.js', '--render-host', profile]);
+    off.deps.sandbox = () => sandboxRefusal({ platform: 'linux', argv: off.deps.argv, hasSwitch: () => false });
+    await startRenderHost(off.deps);
+    expect(await off.exit).toBe(EXIT_NO_SANDBOX);
+    expect(off.lines).toEqual(['[render-host] cannot start: --no-sandbox was passed, and the render host never runs without Chromium’s sandbox']);
+    expect(off.steps).toEqual([]);
+    expect(existsSync(join(profile, 'mawsd')), 'nothing written').toBe(false);
+  });
+
+  it('reads the sandbox off from the argument or the switch, on Linux alone', () => {
+    expect(sandboxRefusal({ platform: 'linux', argv: ['electron', 'index.js', '--render-host', '/p'], hasSwitch: () => false })).toBeNull();
+    expect(sandboxRefusal({ platform: 'linux', argv: ['electron', 'index.js'], hasSwitch: (name) => name === 'no-sandbox' })).toMatch(/^--no-sandbox was passed/);
+    expect(sandboxRefusal({ platform: 'darwin', argv: ['MAWS', '--no-sandbox'], hasSwitch: () => true }), 'Linux’s check alone (Interfaces §E)').toBeNull();
   });
 
   it('clears and sets its own userData before ready, says hello with render.client, and says ready only once composed', async () => {

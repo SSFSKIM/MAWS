@@ -108,6 +108,10 @@ import { openBrowserUrl } from './tools/browser/comment/actions';
 import { registerChromeExtra } from './tools/browser/extras';
 import { registerTranscriptActions as registerBrowserTranscriptActions } from './transcript';
 // E4d end
+// P5 O7 M3 start
+import { openForwardedLink } from './tools/browser/comment/actions';
+import { terminals } from './terminal/registry';
+// P5 O7 M3 end
 // E4b start
 import { connectBrowserImport } from './tools/browser/import/store';
 // E4b end
@@ -312,6 +316,20 @@ export function App() {
   useEffect(() => connectBrowserComment(), []);
   useEffect(() => registerBrowserTranscriptActions({ openBrowserUrl }), []);
   // E4d end
+  // P5 O7 M3 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Forwarding"): a loopback link out of another
+  // machine's session, in its transcript or its terminal, opens in the in-app browser through a forwarded port; any other
+  // link opens as before (main told the session's machine)
+  useEffect(
+    () =>
+      registerBrowserTranscriptActions({
+        openExternal: (url, appSessionId) => {
+          if (appSessionId == null || !openForwardedLink(appSessionId, url)) DEFAULT_ACTIONS.openExternal(url, appSessionId);
+        },
+      }),
+    [],
+  );
+  useEffect(() => terminals.forwardLinksWith(openForwardedLink), []);
+  // P5 O7 M3 end
   // E4b start: the Chrome profile import's mirror (the run's progress and end, the imported records), app-wide so a run
   // that ends with no sheet mounted still makes its profile the active one
   useEffect(() => connectBrowserImport(), []);

@@ -13,9 +13,18 @@
 // reader gets is so the repository, with its worktrees, not the root alone: a session opened on a subfolder of a
 // repository reads that repository's status and diff, as its transcript already spans it. The checkout feed filters
 // git's changes by the same bounds (plane-feeds.ts).
+//
+// P5 O7 M6: `each-session`, a machine-wide read whose answer is per session (`attention.list`, `session.search`): it names
+// no target (the machine), and its answer is cut per session against each one's placement by its record alone
+// (`recordedPlacement`), with no read of the engine host, which would wake a parked one for every session listed.
+//
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): a lane B session's placement
+// also answers who spawned it, the `launchedBy` of the spine record it read, beside the target and never inside it, so the
+// decision's bridge (authorize.ts) rests on the read that placed it.
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
+import type { LaunchedBy } from '@shared/graph/session';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -27,11 +36,14 @@ export type Resolved =
    * they are known to stand on the recorded engine session, so a caller below the floor hears `grade` for a session
    * that lags as for one that doesn't exist.
    */
-  | { kind: 'session'; target: SessionTarget; unavailable?: true }
+  | { kind: 'session'; target: SessionTarget; unavailable?: true; launchedBy?: Spawner }
   /** A session the input names that this machine can't place: no record can be found for it, so nobody holds a rank. */
   | { kind: 'unknown' }
   | { kind: 'machine' }
   | { kind: 'refused'; reason: 'no-target' | 'malformed' | 'unavailable' };
+
+/** P5 O12 M11: the spine record's `launchedBy`, as far as the bridge reads it: the member who spawned the session. */
+export type Spawner = Pick<LaunchedBy, 'member'>;
 
 /**
  * How a lane B session is placed: the machine as the request reads it (on behalf of its asker), the log a spine's failure
@@ -46,7 +58,7 @@ const field = (input: unknown, name: string): unknown => (typeof input === 'obje
 
 /** The target `rule` reads from `input` (an action's `args`, or a call's input), or from the call's `session` (`checkout`). */
 export async function resolveTarget(rule: TargetRule, input: unknown, action: Action | undefined, placing: Placing, session?: SessionRef): Promise<Resolved> {
-  if (rule === 'machine') return action?.session === undefined ? { kind: 'machine' } : { kind: 'refused', reason: 'malformed' };
+  if (rule === 'machine' || rule === 'each-session') return action?.session === undefined ? { kind: 'machine' } : { kind: 'refused', reason: 'malformed' };
   // A checkout is a lane B session's, named by the call (its rows are calls); lane A's checkouts are sminos's.
   if (rule === 'checkout') return action === undefined && session?.lane === 'B' && isId(session.id) ? laneB(session.id, placing) : { kind: 'refused', reason: 'no-target' };
   const id = field(input, rule);
@@ -88,18 +100,41 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
-  const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId } });
   const record = await dispatch('machine', 'session.get', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
   if (!record.ok) {
     log(`endpoint: lane B session ${appSessionId} not placed: the spine answered ${record.error.code} (${record.error.message})`);
     return unavailable;
   }
+  const spawner = field(field(record.value, 'launchedBy'), 'member'); // P5 O12 M11
+  const launchedBy = isId(spawner) ? { launchedBy: { member: spawner } } : {};
+  const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId }, ...launchedBy });
   const recorded = field(record.value, 'engineSessionId');
   const status = await dispatch('engine-host', 'session.status', { appSessionId });
   if (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout')) return unavailable;
   const running = status.ok ? field(status.value, 'engineSessionId') : undefined;
   if (isId(recorded)) return live && status.ok && running !== recorded ? { ...placed(recorded), unavailable: true } : placed(recorded);
   return isId(running) ? placed(running) : { kind: 'unknown' };
+}
+
+/**
+ * P5 O7 M6: a lane B session as its record in the machine's index places it (`session.get`'s or a `session.changed`'s
+ * record): the engine session the record names, and its spawner (P5 O12 M11's bridge). Null when the record names no
+ * engine session (none recorded, or none said yet): nobody holds a rank on it.
+ */
+export type Placement = { target: Extract<SessionTarget, { lane: 'B' }>; launchedBy?: Spawner } | null;
+
+export function recordedPlacement(appSessionId: string, record: unknown): Placement {
+  const engine = field(record, 'engineSessionId');
+  if (!isId(engine)) return null;
+  const spawner = field(field(record, 'launchedBy'), 'member');
+  return { target: { lane: 'B', session: engine, appSessionId }, ...(isId(spawner) ? { launchedBy: { member: spawner } } : {}) };
+}
+
+/** The session's placement by its record, read from the spine through `dispatch`; throws when the spine can't answer. */
+export async function placeRecorded(appSessionId: string, dispatch: EndpointServices['dispatch']): Promise<Placement> {
+  const record = await dispatch('machine', 'session.get', { appSessionId });
+  if (!record.ok) throw new Error(`the spine answered ${record.error.code} for ${appSessionId}`);
+  return recordedPlacement(appSessionId, record.value);
 }
 
 /** How many sessions' checkout bounds are kept: one entry per distinct set of roots. */

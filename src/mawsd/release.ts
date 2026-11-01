@@ -136,7 +136,7 @@ function releasesInUse(dir: string, running: RunningProcess[]): Set<string> {
   return used;
 }
 
-function procProcesses(): RunningProcess[] {
+export function procProcesses(): RunningProcess[] { // P5 O5 M6: render-install.ts reads the render hosts' too
   let pids: string[];
   try {
     pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name));

@@ -28,6 +28,7 @@ export const RENDER_HOST_DIR = 'render-host'; // under the daemon's directory
 export const EXIT_USAGE = 2; // no profile named
 export const EXIT_UNREACHABLE = 1; // no mawsd to serve
 export const EXIT_FAILED = 70; // the render host itself failed (EX_SOFTWARE): root.ts's `fatal`
+export const EXIT_NO_SANDBOX = 3; // P5 O5 M6: started without Chromium's sandbox on Linux (the seam's exitReason reads it)
 
 // What the render host asks of the render library (src/render/compose.ts's `Render`)
 // P5 O5 M4: an export is handed the Word comment authors its request carries (`mawsd`'s), beside the request
@@ -49,8 +50,19 @@ export interface RenderHostDeps {
   // (render.hostGeneration), the library's one recapture of a dashboard across an engine host's restart
   compose(call: EngineCall, profile: string, hostGeneration: () => number): RenderLibrary;
   connect?: (paths: DaemonPaths, options: RenderClientOptions) => ReturnType<typeof connectRenderClient>;
+  sandbox?(): string | null; // P5 O5 M6: why Chromium's sandbox is off (sandboxRefusal), or null
   log(line: string): void;
   exit(code: number): void;
+}
+
+// P5 O5 M6 (Interfaces §E; owner question Q2): artifact HTML is model-authored and runs scripts, so on Linux the render
+// host never runs with Chromium's sandbox off. `mawsd` never passes `--no-sandbox`, and Chromium itself aborts at start
+// when its SUID helper is not configured on a machine that restricts user namespaces (FINDINGS §1.3); this refuses the
+// one way left to turn it off, the switch, from the command line or appended before `ready`.
+export function sandboxRefusal({ platform, argv, hasSwitch }: { platform: NodeJS.Platform; argv: readonly string[]; hasSwitch(name: string): boolean }): string | null {
+  if (platform !== 'linux') return null;
+  if (argv.includes('--no-sandbox') || hasSwitch('no-sandbox')) return '--no-sandbox was passed, and the render host never runs without Chromium’s sandbox';
+  return null;
 }
 
 // `--render-host <profile>`'s profile, or null
@@ -66,6 +78,8 @@ export async function startRenderHost(deps: RenderHostDeps): Promise<void> {
     log(`[render-host] cannot start: ${why}`);
     deps.exit(code);
   };
+  const unsandboxed = deps.sandbox?.() ?? null; // P5 O5 M6: before anything is read or written
+  if (unsandboxed !== null) return refuse(EXIT_NO_SANDBOX, unsandboxed);
   const profile = renderHostProfile(deps.argv);
   if (profile === null) return refuse(EXIT_USAGE, `${RENDER_HOST_FLAG} names no profile directory`);
   const paths = daemonPaths(profile);

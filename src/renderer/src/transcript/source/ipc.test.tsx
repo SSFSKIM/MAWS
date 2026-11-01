@@ -19,7 +19,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
+import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
@@ -1349,6 +1349,23 @@ describe('default loadSpill', () => {
     const refused = load(spill);
     fake.calls[1].answer({ ok: false, error: { code: 'internal', message: 'path outside the engine store' } });
     await expect(refused).rejects.toThrow('path outside the engine store');
+  });
+});
+
+// P5 O7 M3: a link out of another machine's session that is not a forward opens through main told that machine, so main
+// refuses a loopback link of it (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Forwarding", main's backstop)
+describe('default openExternal', () => {
+  it('opens through layout.openExternal, told the machine of a row session on another machine', () => {
+    const fake = fakeClient();
+    const open = ipcOpenExternalOver(fake.client);
+    open('https://example.com/a');
+    open('https://example.com/b', at('session-l' as AppSessionId));
+    open('https://example.com/c', addressOf(OTHER_MACHINE, 'session-r' as AppSessionId));
+    expect(fake.calls.map(({ name, input, machine }) => [name, input, machine])).toEqual([
+      ['layout.openExternal', { url: 'https://example.com/a' }, undefined],
+      ['layout.openExternal', { url: 'https://example.com/b' }, undefined],
+      ['layout.openExternal', { url: 'https://example.com/c' }, OTHER_MACHINE],
+    ]);
   });
 });
 

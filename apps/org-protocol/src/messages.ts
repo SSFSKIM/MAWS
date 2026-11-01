@@ -4,6 +4,7 @@
 // kind this version doesn't know (a newer peer of the same major: ignored, OX1), or a malformed one (which closes).
 // A known message's named fields are checked; others it carries pass, as additions within a major do.
 import { isAction, type Action } from './action.ts';
+import { isBase64urlOf } from './base64url.ts';
 import { isIsoMillis } from './names.ts';
 import type { Right, DeviceClass, RootTransition, Signed, SignedOrgState } from './types.ts';
 
@@ -19,9 +20,10 @@ export const isRefusalReason = (value: unknown): value is RefusalReason => typeo
 /** The largest byte credit a subscription holds (M8). */
 export const SUB_CREDIT_MAX = 4 * 1024 * 1024;
 /** Who runs an act, as a query names it. `machine` (`mawsd`'s services' ledger, `machine.op`) is sent only to a peer whose
- * handshake listed `rl2.executor.machine` (P5 O7 M2; RL2_PROTOCOL 1.1): an older endpoint finds it malformed. */
-export type Executor = 'sminos' | 'engine-host' | 'endpoint' | 'machine';
-const EXECUTORS: readonly string[] = ['sminos', 'engine-host', 'endpoint', 'machine'] satisfies readonly Executor[];
+ * handshake listed `rl2.executor.machine` (P5 O7 M2; RL2_PROTOCOL 1.1), `pty-host` (the pty host's ledger, `pty.op`)
+ * only to one that listed `rl2.executor.pty-host` (P5 O7 M3; 1.3): an older endpoint finds either malformed. */
+export type Executor = 'sminos' | 'engine-host' | 'endpoint' | 'machine' | 'pty-host';
+const EXECUTORS: readonly string[] = ['sminos', 'engine-host', 'endpoint', 'machine', 'pty-host'] satisfies readonly Executor[];
 export type SessionRef = { lane: 'A' | 'B'; id: string };
 /** A subscription's cursor: lane A's epoch is the endpoint's upstream subscription, lane B's the launch; `idx`, lane B's
  * only, is the event's index within its journal row. */
@@ -64,6 +66,49 @@ export type PausedMessage = { t: 'paused'; sub: string; reason: string };
 export type ResumedMessage = { t: 'resumed'; sub: string };
 export type EndedMessage = { t: 'ended'; sub: string; reason: string };
 
+/**
+ * Streams (P5 O7 M3, behind `rl2.streams`; RL2_PROTOCOL 1.3; O7's Interfaces §N): a byte flow inside the channel, opened
+ * by the device under an act it sent (`op`, the act's opId), its bytes base64url (RFC 4648 §5, unpadded) in chunks of at
+ * most STREAM_CHUNK_BYTES, each direction within the other side's credit (`streamCredit`, at most STREAM_CREDIT_MAX at
+ * once). `id` is the device's, 16 random bytes base64url, unique on its channel. A device opens one only on a channel
+ * whose endpoint listed the capability, and the endpoint sends stream kinds only on a stream the device opened, so a
+ * device that never listed it never receives one. An older reader would ignore the kinds as unknown (`readMessage`); what
+ * closes a channel is a known kind out of shape, which a peer reading these at 1.3 holds them to.
+ */
+export type StreamKind = 'pty' | 'tcp';
+const STREAM_KINDS: readonly string[] = ['pty', 'tcp'] satisfies readonly StreamKind[];
+/** Why an open is refused: the act doesn't authorize it (`grade`), names nothing the machine still holds (`unknown`: a
+ * fresh act may), the port answers no connection (`unreachable`), the channel holds MAX_STREAMS (`busy`), the open is out
+ * of shape (`malformed`), or the machine can't say now (`unavailable`: ask again). */
+export const STREAM_REFUSALS = ['grade', 'unknown', 'unreachable', 'busy', 'malformed', 'unavailable'] as const;
+export type StreamRefusal = (typeof STREAM_REFUSALS)[number];
+/** The most a `streamData` carries, decoded. */
+export const STREAM_CHUNK_BYTES = 64 * 1024;
+/** The most credit either side grants a stream at once. */
+export const STREAM_CREDIT_MAX = 4 * 1024 * 1024;
+/** The most streams one channel holds at once (`busy` past it). */
+export const MAX_STREAMS = 32;
+/**
+ * A pty stream's start: the output offset it reads from (the pty host's), and its input's epoch and offset (the device's).
+ * `inputFrom`: the device's earliest input not yet refunded, resent from there. `inputSent`: the end of the input the
+ * device already sent in this epoch (absent: `inputFrom`); an endpoint holding no record of the epoch (it restarted, or
+ * forgot it) can't tell what of `[inputFrom, inputSent)` it wrote, and drops it: input is at most once.
+ */
+export type StreamPtyOpen = { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
+export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string } };
+/** `pty.ringStart`: where the output this opening delivers starts, max(from, the ring's start); a value past `from` says
+ * the ring moved past it. `credit`: the endpoint's, for the device's bytes. */
+export type StreamOpenedMessage = { t: 'streamOpened'; id: string; pty?: { info: Record<string, unknown>; ringStart: number; nextOffset: number }; credit: number };
+export type StreamRefusedMessage = { t: 'streamRefused'; id: string; reason: StreamRefusal };
+/** `offset`: the sender's byte count on this stream (a pty's output: the pty host's; its input: the device's, per epoch) before this chunk. */
+export type StreamDataMessage = { t: 'streamData'; id: string; offset: number; data: string };
+export type StreamControlMessage = { t: 'streamControl'; id: string; control: Record<string, unknown> };
+export type StreamCreditMessage = { t: 'streamCredit'; id: string; bytes: number };
+/** `reason`: `closed`, `behind`, `exit`, `removed`, `malformed`, or another short word. */
+export type StreamCloseMessage = { t: 'streamClose'; id: string; reason: string };
+export type DeviceStreamMessage = StreamOpenMessage | StreamDataMessage | StreamControlMessage | StreamCreditMessage | StreamCloseMessage;
+export type EndpointStreamMessage = StreamOpenedMessage | StreamRefusedMessage | StreamDataMessage | StreamCreditMessage | StreamCloseMessage;
+
 export type StateMessage = { t: 'state'; states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
 export type PingMessage = { t: 'ping'; at: number };
 export type PongMessage = { t: 'pong'; at: number };
@@ -71,7 +116,7 @@ export type PongMessage = { t: 'pong'; at: number };
 export type CloseMessage = { t: 'close'; reason: string; stateVersion?: number };
 
 export type EitherMessage = StateMessage | PingMessage | PongMessage | CloseMessage;
-export type DeviceMessage = CallMessage | ActMessage | QueryMessage | SubMessage | CreditMessage | UnsubMessage | EitherMessage;
+export type DeviceMessage = CallMessage | ActMessage | QueryMessage | SubMessage | CreditMessage | UnsubMessage | DeviceStreamMessage | EitherMessage;
 export type EndpointMessage =
   | CapsMessage
   | ResultMessage
@@ -84,6 +129,7 @@ export type EndpointMessage =
   | PausedMessage
   | ResumedMessage
   | EndedMessage
+  | EndpointStreamMessage
   | EitherMessage;
 
 type Fields = Record<string, unknown>;
@@ -101,6 +147,28 @@ function isCursor(v: unknown, lane: 'A' | 'B'): boolean {
 }
 
 const isSessionRef = (v: unknown): v is SessionRef => isObject(v) && (v.lane === 'A' || v.lane === 'B') && isText(v.id);
+
+// A stream's fields, read whole: an id or an epoch is exactly 16 bytes' canonical base64url, a chunk 1 to
+// STREAM_CHUNK_BYTES bytes of base64url (its alphabet and a length some encoding has; the receiver decodes it), credit
+// within STREAM_CREDIT_MAX, a pty open's start and a tcp open's forward each present for their kind only.
+const isStreamId = (v: unknown) => isBase64urlOf(v, 16);
+const CHUNK_TEXT = /^[A-Za-z0-9_-]+$/;
+const CHUNK_TEXT_MAX = Math.ceil((STREAM_CHUNK_BYTES * 4) / 3);
+const isChunk = (v: unknown) => typeof v === 'string' && v.length >= 2 && v.length <= CHUNK_TEXT_MAX && v.length % 4 !== 1 && CHUNK_TEXT.test(v);
+const isPtyOpen = (v: unknown) =>
+  isObject(v) && isText(v.ptyId, 128) && isCount(v.from) && isStreamId(v.inputEpoch) && isCount(v.inputFrom) && (v.inputSent === undefined || (isCount(v.inputSent) && v.inputSent >= v.inputFrom));
+const isTcpOpen = (v: unknown) => isObject(v) && isText(v.forward, 128);
+const streamOpen = (m: Fields) =>
+  isStreamId(m.id) &&
+  STREAM_KINDS.includes(m.kind as string) &&
+  isOpId(m.op) &&
+  isPositive(m.credit, STREAM_CREDIT_MAX) &&
+  (m.kind === 'pty' ? isPtyOpen(m.pty) && m.tcp === undefined : isTcpOpen(m.tcp) && m.pty === undefined);
+const STREAM_EITHER: Record<string, (m: Fields) => boolean> = {
+  streamData: (m) => isStreamId(m.id) && isCount(m.offset) && isChunk(m.data),
+  streamCredit: (m) => isStreamId(m.id) && isPositive(m.bytes, STREAM_CREDIT_MAX),
+  streamClose: (m) => isStreamId(m.id) && isText(m.reason, 64),
+};
 
 const EITHER: Record<string, (m: Fields) => boolean> = {
   state: (m) => Array.isArray(m.states) && Array.isArray(m.transitions),
@@ -123,6 +191,9 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
         FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (m.feed === 'attention' ? m.session === undefined : isSessionRef(m.session))),
   credit: (m) => isText(m.sub, 128) && isPositive(m.bytes, SUB_CREDIT_MAX),
   unsub: (m) => isText(m.sub, 128),
+  ...STREAM_EITHER,
+  streamOpen,
+  streamControl: (m) => isStreamId(m.id) && isObject(m.control),
 };
 
 const GRADES = ['spawn', 'shell', 'machine-admin'];
@@ -146,6 +217,10 @@ const FROM_ENDPOINT: Record<string, (m: Fields) => boolean> = {
   paused: (m) => isText(m.sub, 128) && isText(m.reason, 64),
   resumed: (m) => isText(m.sub, 128),
   ended: (m) => isText(m.sub, 128) && isText(m.reason, 64),
+  ...STREAM_EITHER,
+  streamOpened: (m) =>
+    isStreamId(m.id) && isPositive(m.credit, STREAM_CREDIT_MAX) && optional(m.pty, (v) => isObject(v) && isObject(v.info) && isCount(v.ringStart) && isCount(v.nextOffset)),
+  streamRefused: (m) => isStreamId(m.id) && (STREAM_REFUSALS as readonly string[]).includes(m.reason as string),
 };
 
 /**

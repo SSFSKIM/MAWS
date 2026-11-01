@@ -613,9 +613,9 @@ jobs:
 
   # The unsigned packaged app (Decision Log 35): HOSTED_MAC_JOBS admits two jobs on direct macos-26, each building dist/
   # and checking its fuses before half the bare suite, and there the default set holds it. Shard 1 alone runs the small
-  # checks (supervisor, daemon shape and voice), in their existing order. Every job sweeps launchd, even after a failed
-  # check. Mirror, an unlisted job or a reserved final ref keeps one unsharded build and all checks on the mini, only by
-  # `Gates: packaged`.
+  # checks (supervisor, daemon shape, voice and, on a hosted Mac, the packaged unit), in their existing order. Every job
+  # sweeps launchd, even after a failed check. Mirror, an unlisted job or a reserved final ref keeps one unsharded build and
+  # all checks on the mini, only by `Gates: packaged`.
   packaged:
     name: ${{ matrix.shard && format('packaged {0}', matrix.shard) || 'packaged' }}
     needs: plan
@@ -673,7 +673,18 @@ jobs:
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
-      # As the e2e job's after e2e:daemon-unit: whatever the daemon-shape check did (it loads no agent), every
+      # P5 O5 landing 2 (acceptance 6): mawsd's unit starts the packaged app's own binary as a render host (the bundle's
+      # dispatcher, Info.plist and single-instance lock). It loads a dev.maws.mawsd.e2e-* agent, so it runs on a hosted
+      # Mac only: a self-hosted packaged job may be the mini's home instance, whose launchd holds the owner's unit (the
+      # #412 ruling; the spec's homeInstanceRefusal stops it there too). The sweep below boots its agent out regardless.
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks && runner.environment == 'github-hosted' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/daemon-unit-packaged
+          MAWS_RENDER_HOST_EXECUTABLE: ${{ github.workspace }}/dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:daemon-unit:packaged
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks && runner.environment != 'github-hosted' }}
+        run: "echo '::notice::packaged: e2e:daemon-unit:packaged runs on hosted Macs only (it loads a LaunchAgent, and a self-hosted Mac may be the mini home instance)'"
+      # As the e2e job's after e2e:daemon-unit: whatever the daemon-shape check (which loads no agent) and the packaged unit check did, every
       # `dev.maws.mawsd.e2e-*` agent and plist in this Mac's account is booted out and removed, and one left loaded fails.
       - if: always() && steps.build.outcome == 'success'
         run: .github/scripts/launchd-sweep.sh

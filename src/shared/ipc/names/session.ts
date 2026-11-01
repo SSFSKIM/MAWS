@@ -34,6 +34,7 @@ export const commands = [
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
   'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
+  'session.capabilities', // P5 O5 M5: the session's agent capabilities on its machine
   'session.spawn', // P5 O7 M4: a lane B session started here at another machine's request
 ] as const;
 
@@ -46,4 +47,5 @@ export const events = [
   'session.forgotten', 'session.changed', 'session.removed', 'session.projects.changed', 'session.replay.progress',
   'session.digest', 'session.catalogChanged', 'session.setup', 'session.intent.changed',
   'session.visibleChanged', // P5 O3-D
+  'session.capabilitiesChanged', // P5 O5 M5
 ] as const;

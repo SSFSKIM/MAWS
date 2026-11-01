@@ -94,6 +94,7 @@
     "e2e:supervisor-daemon": "scripts/e2e-build.sh plain && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=daemon MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",
     "e2e:supervisor-daemon:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=daemon playwright test e2e/supervisor-packaged.spec.ts",
     "e2e:daemon-unit": "scripts/e2e-build.sh plain && node e2e/support/daemon-unit-guard.mjs && MAWS_DAEMON_UNIT_E2E=1 playwright test e2e/daemon-unit.spec.ts",
+    "e2e:daemon-unit:packaged": "node e2e/support/daemon-unit-guard.mjs && vitest run src/main/index.test.ts src/render-host/root.test.ts && MAWS_RENDER_HOST_EXECUTABLE=${MAWS_RENDER_HOST_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_DAEMON_UNIT_E2E=1 playwright test e2e/daemon-unit.spec.ts --grep packaged:",
     "e2e:cross-build": "scripts/e2e-build.sh plain && MAWS_CROSS_BUILD_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/cross-build.spec.ts",
     "e2e:machines": "scripts/e2e-build.sh plain && MAWS_MACHINES_E2E=1 playwright test e2e/machines.spec.ts",
     "e2e:remote": "scripts/e2e-build.sh plain && MAWS_REMOTE_E2E=1 playwright test e2e/remote.spec.ts",

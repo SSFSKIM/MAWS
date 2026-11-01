@@ -6,12 +6,14 @@
 // together to `$TMPDIR/maws-mawsd-<12 hex of the profile's sha1>/`, as the supervisor's socket does (socketPathFor), so
 // they never split between two directories. P5 O5 M2: the sockets are the three a host's transport reaches (`sockets`)
 // and the artifact endpoint's `artifacts.sock` (`artifactsSocket`, HTTP: docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md,
-// Interfaces §C), which no transport reaches.
+// Interfaces §C), which no transport reaches. P5 O5 M5 (Interfaces §H): the per-session cua sockets in `cuaSocketDir`,
+// chosen by their own length rather than with the others, since a cua path is about 45 bytes longer.
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostFiles } from '../host/detached-transport';
 import { SOCKET_PATH_MAX_BYTES } from '../../engine-host/supervisor-files';
+import { DAEMON_CUA_DIR } from '../browser/cua-socket';
 
 export const DAEMON_FILES = {
   dir: 'mawsd', lock: 'mawsd.lock', token: 'mawsd.token', log: 'mawsd.log', out: 'mawsd.out', // the identity file is the profile's (identity-file.ts)
@@ -43,6 +45,15 @@ export function daemonPaths(profileDir: string, tmp: string = tmpdir()): DaemonP
   const socketDir = longest <= SOCKET_PATH_MAX_BYTES ? dir : socketFallbackDir(profileDir, tmp);
   const sockets = Object.fromEntries(Object.entries(SOCKET_NAMES).map(([socket, name]) => [socket, join(socketDir, name)])) as Record<DaemonSocket, string>;
   return { profileDir, dir, socketDir, sockets, artifactsSocket: join(socketDir, DAEMON_FILES.artifactsSocket), log: join(dir, DAEMON_FILES.log), endpoint: join(dir, DAEMON_FILES.endpoint), ptyHost: join(dir, DAEMON_FILES.ptyHost) };
+}
+
+// P5 O5 M5: the directory of `mawsd`'s per-session cua sockets: `<profile>/mawsd/cua` when a session's socket there
+// (`<uuid>.sock`) fits sun_path, else `cua` in the fallback directory (which may still be too long: a session's path is
+// then none, @shared/browser/cua-socket's daemonCuaSocketPath).
+const CUA_SOCKET_NAME = `${'0'.repeat(36)}.sock`; // an app session id, a uuid
+export function cuaSocketDir(profileDir: string, tmp: string = tmpdir()): string {
+  const inDaemon = join(profileDir, DAEMON_FILES.dir, DAEMON_CUA_DIR);
+  return Buffer.byteLength(join(inDaemon, CUA_SOCKET_NAME), 'utf8') <= SOCKET_PATH_MAX_BYTES ? inDaemon : join(socketFallbackDir(profileDir, tmp), DAEMON_CUA_DIR);
 }
 
 // The directory a profile's sockets fall back to when `<profile>/mawsd/` is too long for them (also what the packaged

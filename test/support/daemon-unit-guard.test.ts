@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ciRefusal, e2eLabel, E2E_LABEL_PREFIX, homeInstanceRefusal, runIdOf } from '../../e2e/support/daemon-unit-guard.mjs';
+import { ciRefusal, e2eLabel, E2E_LABEL_PREFIX, HOME_INSTANCE_RUNNER, homeInstanceRefusal, runIdOf } from '../../e2e/support/daemon-unit-guard.mjs';
 
 const ROOT = join(__dirname, '../..');
 const GUARD = join(ROOT, 'e2e/support/daemon-unit-guard.mjs');
@@ -31,6 +31,8 @@ describe('the CI guard', () => {
     expect([outside.status, outside.stdout, outside.stderr]).toEqual([1, '', `${ciRefusal({})}\n`]);
     const inside = run({ GITHUB_ACTIONS: 'true' });
     expect([inside.status, inside.stdout, inside.stderr]).toEqual([0, '', '']);
+    const home = run({ GITHUB_ACTIONS: 'true', RUNNER_NAME: HOME_INSTANCE_RUNNER }); // P5 O5 M6: the mini's home instance
+    expect([home.status, home.stdout, home.stderr]).toEqual([1, '', `${homeInstanceRefusal({ RUNNER_NAME: HOME_INSTANCE_RUNNER }, false)}\n`]);
   });
 
   it('is the package script’s step before Playwright, after the build (whose leading step the gate reads as the variant)', () => {

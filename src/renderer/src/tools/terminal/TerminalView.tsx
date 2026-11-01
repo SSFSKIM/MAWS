@@ -2,15 +2,21 @@
 // registry a box to mount the terminal's container into while the tab is shown and gives it back when it is not, so
 // the emulator is never re-created; above the terminal it shows the bars of the lifecycle (exited, lost, could not
 // start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation, and over it a note while
-// the shell starts. Tokens only.
+// the shell starts. Tokens only. P5 O7 M3: a terminal of another machine's session reads its readiness from that machine
+// and names it where its shell was lost.
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useStore } from 'zustand';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { ipc } from '../../ipc/client';
 import type { PanelToolContext } from '../../panel/tool';
+import { useMachines } from '../../stores/machines';
+import { machineName } from '../../stores/org-projects';
 import { useTerminals } from '../../stores/terminals';
+import { terminalMachine } from '../../terminal/machine';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
 import { TERMINAL } from './copy';
-import { ensureTerminal, takeFocusRequest, type TerminalTabState } from './index';
+import { ensureTerminal, hostReadyOf, takeFocusRequest, type TerminalTabState } from './index';
 
 // Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
 export const sessionDirectory = (session: SessionRecord): string => session.worktree?.path ?? session.directory;
@@ -18,11 +24,19 @@ export const sessionDirectory = (session: SessionRecord): string => session.work
 const bar = 'flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-bg-raised px-2 py-1 text-ui-sm';
 const barButton = 'rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent';
 
+// The name of another machine a terminal runs on; null for this machine's.
+function useRemoteMachineName(appSessionId: AppSessionId | null): string | null {
+  const local = ipc.localMachine;
+  const machine = appSessionId === null ? local : terminalMachine(appSessionId, local);
+  return useMachines((s) => (machine === local ? null : machineName(s.machines, machine, local)));
+}
+
 export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: PanelToolContext }) {
   const confirm = useStore(state.ui);
   const id = confirm.terminalId;
   const info = useTerminals((s) => s.terminals.find((terminal) => terminal.id === id)) ?? null;
-  const hostReady = useTerminals((s) => s.host?.state === 'ready');
+  const hostReady = useTerminals((s) => info !== null && hostReadyOf(s.hosts, info.appSessionId));
+  const remoteName = useRemoteMachineName(info?.appSessionId ?? null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { setTitle, visible, focusRequest, appSessionId, session } = ctx;
@@ -105,13 +119,13 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
       ) : null}
       {id ? null : (
         <div role="status" aria-label="terminal pending" className={`${bar} text-fg-muted`}>
-          Open a session to start a terminal
+          {confirm.adopting ? TERMINAL.reconnecting : TERMINAL.pending}
         </div>
       )}
       {confirm.lostAtQuit ? (
         // E10: the shell already respawned; the line only says what happened to the one before it
         <div role="status" aria-label={TERMINAL.lostAtQuitLabel} className={`${bar} text-fg-muted`}>
-          <span className="min-w-0 flex-1">{TERMINAL.lostAtQuit}</span>
+          <span className="min-w-0 flex-1">{remoteName === null ? TERMINAL.lostAtQuit : TERMINAL.lostOnMachine(remoteName)}</span>
           <button
             type="button"
             aria-label={TERMINAL.dismiss}
@@ -122,7 +136,7 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
           </button>
         </div>
       ) : null}
-      {info ? <StatusBar info={info} hostReady={hostReady} close={ctx.close} /> : null}
+      {info ? <StatusBar info={info} hostReady={hostReady} remoteName={remoteName} close={ctx.close} /> : null}
       {info?.reconnect === 'lossy' ? (
         <div role="status" aria-label="reconnect notice" className={`${bar} text-fg-muted`}>
           Reconnected; earlier output was not kept
@@ -153,11 +167,12 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
   );
 }
 
-function StatusBar({ info, hostReady, close }: { info: TerminalInfo; hostReady: boolean; close(): void }) {
+function StatusBar({ info, hostReady, remoteName, close }: { info: TerminalInfo; hostReady: boolean; remoteName: string | null; close(): void }) {
   const dead = info.status === 'exited' || info.status === 'lost';
   if (!dead && !info.error) return null;
   let message: ReactNode;
-  if (info.status === 'lost') message = 'Terminal lost, the terminal service restarted';
+  // P5 O7 M3: another machine's terminal is lost only to this app (its pty host never restarts under it here)
+  if (info.status === 'lost') message = remoteName === null ? 'Terminal lost, the terminal service restarted' : TERMINAL.lostRemote(remoteName);
   else if (info.error) message = info.error.charAt(0).toUpperCase() + info.error.slice(1);
   else if (info.exit?.exitCode != null) message = `Process exited (code ${info.exit.exitCode})`;
   else if (info.exit?.signal != null) message = `Process exited (signal ${info.exit.signal})`;

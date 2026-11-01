@@ -203,6 +203,9 @@ export interface HostSupervisor {
   // P5 O2 M3 end
   // P5 O2 M5 start (above)
   welcome(owner: HostOwner): Welcomed | null; // the served detached link's welcome; null while none is served
+  // P5 O5 M5: the served detached link's socket descriptor (its peer is the supervisor actually connected); null while
+  // none is served
+  servedFd(owner: HostOwner): number | null;
   disarmExit(owner: HostOwner): boolean; // the transport's disarmIdle
   expectIdleExit(owner: HostOwner): boolean; // the transport's expectIdleExit: a host.exitWhenIdle {armed: true} it answered
   // P5 O2 M5 end
@@ -305,6 +308,7 @@ interface Host {
   gone: ClientGoneRelay | null; // P5 O1 M5: the current link's clientGone relay
   peer: WirePeer | null; // P5 O1 M6: the served link's welcome, until it detaches
   welcome: Welcomed | null; // P5 O2 M5: the whole of it
+  link: HostLink | null; // P5 O5 M5: the served detached link, until it detaches
   // P5 O2 M3 start
   parked: boolean; // an on-demand host with no launch under way
   readyAsked: boolean; // an external host's sayReady with no connection to say it on yet
@@ -378,6 +382,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       gone: null, // P5 O1 M5
       peer: null, // P5 O1 M6
       welcome: null, // P5 O2 M5
+      link: null, // P5 O5 M5
       parked: false, // P5 O2 M3
       readyAsked: false,
       raw: new Set(),
@@ -562,6 +567,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     host.gone = null;
     host.peer = null; // P5 O1 M6
     host.welcome = null; // P5 O2 M5
+    host.link = null; // P5 O5 M5
   }
 
   // P5 O16 M3b: once no request sent on the host's link waits for its answer, or `ms` has passed
@@ -717,6 +723,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         [host.drainStopped, host.drainHears] = [null, false]; // M3c fix wave 3
         host.peer = welcome.peer; // P5 O1 M6
         host.welcome = welcome; // P5 O2 M5
+        host.link = link; // P5 O5 M5
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
         host.gone = clientGoneRelay((message) => link.postMessage(message));
         // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
@@ -1341,6 +1348,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     },
     // P5 O2 M3 end
     welcome: (owner) => hostOf(owner).welcome, // P5 O2 M5
+    servedFd: (owner) => hostOf(owner).link?.socketFd?.() ?? null, // P5 O5 M5
     disarmExit: (owner) => hosts[owner]?.transport?.disarmIdle() ?? false, // P5 O2 M5
     expectIdleExit: (owner) => hosts[owner]?.transport?.expectIdleExit() ?? false, // P5 O2 M5
     // P5 O16 M3b

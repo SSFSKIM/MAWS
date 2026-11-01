@@ -4,6 +4,7 @@
 // else; and the Linux runtime, whose download is faked: refused on a wrong sha256 before it is unpacked, and on a right
 // one unpacked and put through the smoke checks (the fixture's `node` is a shell script answering them).
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -43,6 +44,7 @@ beforeEach(() => {
   pkg('node_modules/node-addon-api', { name: 'node-addon-api' });
   pkg('node_modules/react', { name: 'react' }); // the app's, not mawsd's
   pkg('node_modules/vitest', { name: 'vitest' });
+  write(join(root, 'packaging/mawsd/electron.json'), JSON.stringify({ version: '44.4.5', sha256: { 'linux-x64': '0'.repeat(64) } })); // P5 O5 M6
   write(join(root, 'node_modules/.bin/vitest'), '#!/bin/sh\n');
   // P5 O16: each prebuild a script answering `--version` as the binary does, with the version the engine host expects
   write(join(root, 'src/engine-host/holder/protocol.ts'), "export const SESSION_HOST_PROTOCOL = 1;\nexport const SESSION_HOST_VERSION = '1.0.0'; // a comment\n");
@@ -86,6 +88,7 @@ test('the pack holds out/main, the closure and a package.json naming its release
   assert.equal(readFileSync(join(at, 'bin/maws-session-host'), 'utf8'), hostScript('darwin host')); // P5 O16 M1
   assert.equal(statSync(join(at, 'bin/maws-session-host')).mode & 0o777, 0o755);
   for (const absent of ['node_modules/react', 'node_modules/vitest', 'node_modules/.bin', 'node_modules/fast-deep-equal', 'runtime']) assert.ok(!existsSync(join(at, absent)), absent);
+  assert.equal(readFileSync(join(at, 'packaging/mawsd/electron.json'), 'utf8'), readFileSync(join(root, 'packaging/mawsd/electron.json'), 'utf8')); // P5 O5 M6: the render runtime's pin
   assert.deepEqual(JSON.parse(readFileSync(join(at, 'package.json'), 'utf8')), {
     name: 'maws-mawsd',
     version: '1.2.3',
@@ -236,4 +239,36 @@ test('the session host is put through a smoke check: `--version` must print the 
   write(join(root, 'native/session-host/prebuilds/linux-x64/maws-session-host'), '#!/bin/sh\nexit 3\n');
   await assert.rejects(pack({ ...options, out }), /smoke check session host failed \(3\)/);
   assert.deepEqual(packs(out), []);
+});
+
+// ---- the render runtime beside the pack (P5 O5 M6, --render) ------------------------------------------------------------
+
+test('--render leaves the pinned Electron zip, checked, beside the pack and never in it; a cached zip is reused', async () => {
+  const archive = fixtureArchive('24.21.0', GOOD_NODE);
+  const zip = Buffer.from('electron-v44.4.5-linux-x64.zip, standing in');
+  write(join(root, 'packaging/mawsd/electron.json'), JSON.stringify({ version: '44.4.5', sha256: { 'linux-x64': createHash('sha256').update(zip).digest('hex') } }));
+  const fetched = [];
+  const download = async (url, to) => {
+    fetched.push(url);
+    if (url.endsWith('.zip')) writeFileSync(to, zip);
+    else cpSync(archive, to);
+  };
+  const out = join(dir, 'dist');
+  const options = { root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), render: true, download, ...quiet };
+  const at = await pack(options);
+  assert.deepEqual(packs(out).sort(), [basename(at), 'electron-v44.4.5-linux-x64.zip'].sort());
+  assert.deepEqual(readFileSync(join(out, 'electron-v44.4.5-linux-x64.zip')), zip);
+  assert.ok(!listing(at).some((path) => path.endsWith('.zip')), 'the release carries no zip');
+  assert.equal(basename(await pack({ ...options, render: false })), basename(at), 'the zip beside it changes nothing of the release');
+  await pack(options);
+  assert.deepEqual(fetched.filter((url) => url.endsWith('.zip')), ['https://github.com/electron/electron/releases/download/v44.4.5/electron-v44.4.5-linux-x64.zip']);
+});
+
+test('--render refuses a zip that is not the pin’s, leaving no pack, and refuses off Linux', async () => {
+  const archive = fixtureArchive('24.21.0', GOOD_NODE);
+  const download = async (url, to) => (url.endsWith('.zip') ? writeFileSync(to, 'tampered') : cpSync(archive, to));
+  const out = join(dir, 'dist');
+  await assert.rejects(pack({ root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), render: true, download, ...quiet }), /electron-v44\.4\.5-linux-x64\.zip has sha256 [0-9a-f]{64}, not the pinned 0{64}/);
+  assert.deepEqual(packs(out), []);
+  await assert.rejects(pack({ root, out, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, render: true, ...quiet }), /--render packs the Linux render runtime/);
 });

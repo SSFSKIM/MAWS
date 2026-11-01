@@ -21,7 +21,7 @@ import { composeRender } from '../render/compose';
 import { installRenderSeams } from '../render/e2e-seams';
 import { guardPermissions, installFramePolicies } from '../render/policies';
 import { serveArtifactsThrough, type ContentLookup } from '../render/scheme';
-import { EXIT_FAILED, startRenderHost } from './host';
+import { EXIT_FAILED, sandboxRefusal, startRenderHost } from './host';
 
 // A windowless process must never raise Electron's error dialog, which an uncaught exception in main shows, modal: it
 // would hold the render host (before `ready`, Chromium's start with it) with nothing said. The failure is written to
@@ -35,6 +35,7 @@ export function runRenderHost(entryDir: string): Promise<void> {
   process.on('uncaughtException', fatal);
   return startRenderHost({
     argv: process.argv,
+    sandbox: () => sandboxRefusal({ platform: process.platform, argv: process.argv, hasSwitch: (name) => app.commandLine.hasSwitch(name) }), // P5 O5 M6
     // main's hello names its build by mawsd.js beside the entry (src/main/hosts/index.ts), so the render host does too.
     // The entry names its directory: `require.main` is unset under Playwright's loader, and the build id read from a
     // relative 'mawsd.js' failed there (P5 O5 M3's first gate run)

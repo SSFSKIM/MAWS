@@ -9,7 +9,7 @@ import { bindChord } from '../keymap/useKeyChord';
 import { useSettings } from '../stores/settings';
 import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
-import { TerminalRegistry, type Adopting } from './registry';
+import { OUTPUT_LOST, TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { addressOf } from '@shared/machine/address';
@@ -30,7 +30,7 @@ const theme = (background: string): TerminalTheme => ({
   ansi: Array.from({ length: 16 }, (_, i) => `ansi-${i}`),
 });
 
-type Handler = (input: unknown) => unknown;
+type Handler = (input: unknown, options?: { machine?: MachineRef }) => unknown;
 
 // A handler returning this answers the command with an error, as the router or a host would.
 class Failure {
@@ -41,7 +41,7 @@ const fail = (code: Failure['code'], message: string) => new Failure(code, messa
 // A bridge whose commands answer from handlers (a returned promise holds the reply) and whose events the test emits.
 function fakeBridge() {
   const listeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
-  const calls: { name: string; input: unknown }[] = [];
+  const calls: { name: string; input: unknown; options?: { machine?: MachineRef } }[] = [];
   let ptys = 0;
   const handlers: Record<string, Handler> = {
     'pty.spawn': () => ({ ptyId: `pty-${++ptys}`, pid: 1000 + ptys }),
@@ -51,10 +51,10 @@ function fakeBridge() {
   };
   const bridge = {
     localMachine: TEST_MACHINE,
-    async invoke(name: CommandName, input: unknown) {
-      calls.push({ name, input });
+    async invoke(name: CommandName, input: unknown, options?: { machine?: MachineRef }) {
+      calls.push({ name, input, ...(options ? { options } : {}) });
       const handler = handlers[name];
-      const value = handler ? await handler(input) : undefined;
+      const value = handler ? await handler(input, options) : undefined;
       if (value instanceof Failure) return { ok: false, error: { code: value.code, message: value.message } };
       return { ok: true, value };
     },
@@ -70,6 +70,8 @@ function fakeBridge() {
     handlers,
     calls,
     inputs: (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.input as Record<string, unknown>),
+    // P5 O7 M3: the machine each invocation of `name` was sent to (its options' `machine`), undefined for none named
+    targets: (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.options?.machine),
     emit<N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) {
       listeners.get(name)?.forEach((cb) => cb(payload, { machine }));
     },
@@ -1125,3 +1127,116 @@ describe('terminal font from the root --font-mono', () => {
 });
 // C11 end
 
+
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The terminal's machine"): a terminal of another
+// machine's session lists through `pty.listFor` (every call an act a non-owner confirms, so asked again only after a
+// spawn or an exit there), asks that machine's pty host state through its link, and routes its links through the page's
+// forwarder first; a chunk that starts past the screen says output was lost.
+describe('terminal registry for another machine’s session', () => {
+  const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+  const remotePty = (overrides: Partial<PtyInfo> = {}) => ptyInfo({ ptyId: addressOf(OTHER_MACHINE, 'pty-r' as PtyId), appSessionId: R, label: 'terminal:r', cwd: '/srv/r', ...overrides });
+  const STARTING: HostState = { state: 'starting', pid: null, restarts: 0, revision: 3 };
+
+  beforeEach(() => {
+    ipc.handlers['pty.hostState'] = (_input, options) => (options?.machine === OTHER_MACHINE ? STARTING : { state: 'ready', pid: 42, restarts: 0, revision: 1 });
+    ipc.handlers['pty.listFor'] = () => ({ ptys: [] });
+  });
+
+  async function openRemote(registry: TerminalRegistry, label = 'terminal:r') {
+    const id = registry.open({ appSessionId: R, label, cwd: '/srv/r' });
+    registry.mount(id, parent());
+    await settle();
+    return { id, ptyId: registry.get(id)!.info.ptyId!, renderer: registry.get(id)!.renderer as FakeRenderer };
+  }
+
+  it('lists a remote session’s ptys through pty.listFor and adopts what the page accepts; the local host still lists through pty.list', async () => {
+    const registry = makeRegistry();
+    const mine = remotePty();
+    const theirs = remotePty({ ptyId: addressOf(OTHER_MACHINE, 'pty-their' as PtyId), label: 'their-tab' }); // the machine's own app's tab
+    ipc.handlers['pty.listFor'] = () => ({ ptys: [mine, theirs] });
+    ipc.handlers['pty.attach'] = () => ({ info: mine, checkpoint: null, replay: bytes('earlier\r\nprompt$ '), replayFrom: 0, nextOffset: 17 });
+    const ids = await registry.adopt((info) => info.label === 'terminal:r', undefined, R);
+    expect(ipc.inputs('pty.listFor')).toEqual([{ appSessionId: R }]);
+    expect(ipc.targets('pty.listFor'), 'the session’s address names its machine').toEqual([undefined]);
+    expect(ipc.inputs('pty.list')).toEqual([]);
+    expect(ipc.inputs('pty.attach')).toEqual([{ ptyId: mine.ptyId }]);
+    expect(registry.get(ids[0]!)!.info).toMatchObject({ appSessionId: R, label: 'terminal:r', status: 'running', reconnect: 'lossy' });
+    await registry.adopt();
+    expect(ipc.inputs('pty.list')).toHaveLength(1);
+    expect(ipc.inputs('pty.listFor')).toHaveLength(1);
+  });
+
+  it('asks pty.listFor once per remote session, again only after a spawn or a pty.exit there or a failed list', async () => {
+    const registry = makeRegistry();
+    const none = () => false;
+    await registry.adopt(none, undefined, R);
+    await registry.adopt(none, undefined, R);
+    expect(ipc.inputs('pty.listFor'), 'a second tab’s open reads the same list').toHaveLength(1);
+    const { ptyId } = await openRemote(registry);
+    await registry.adopt(none, undefined, R);
+    expect(ipc.inputs('pty.listFor'), 'after a spawn').toHaveLength(2);
+    await registry.adopt(none, undefined, R);
+    expect(ipc.inputs('pty.listFor')).toHaveLength(2);
+    ipc.emit('pty.exit', { ptyId, exitCode: 0, signal: null }, OTHER_MACHINE);
+    await registry.adopt(none, undefined, R);
+    expect(ipc.inputs('pty.listFor'), 'after an exit').toHaveLength(3);
+    ipc.handlers['pty.listFor'] = () => fail('timeout', 'waiting for the owner to confirm');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ipc.emit('pty.exit', { ptyId: 'pty-gone' as PtyId, exitCode: 0, signal: null }, OTHER_MACHINE); // an exit of no terminal here, on R's machine
+    const onListed = vi.fn();
+    await registry.adopt(none, onListed, R);
+    expect(onListed).toHaveBeenCalledExactlyOnceWith([], false);
+    ipc.handlers['pty.listFor'] = () => ({ ptys: [] });
+    await registry.adopt(none, undefined, R);
+    expect(ipc.inputs('pty.listFor'), 'a failed list is not kept').toHaveLength(5);
+    log.mockRestore();
+  });
+
+  it('asks a remote machine’s pty host state through its link once, and keeps each machine’s apart', async () => {
+    const registry = makeRegistry();
+    await openRunning(registry);
+    await openRemote(registry);
+    await openRemote(registry, 'terminal:r2');
+    expect(ipc.targets('pty.hostState')).toEqual([undefined, OTHER_MACHINE]);
+    expect(registry.hosts().get(OTHER_MACHINE)).toEqual(STARTING);
+    expect(registry.host()).toMatchObject({ state: 'ready', pid: 42 });
+    ipc.emit('pty.hostState', { state: 'ready', pid: null, restarts: 0, revision: 4 }, OTHER_MACHINE);
+    expect(registry.hosts().get(OTHER_MACHINE)?.state).toBe('ready');
+  });
+
+  it('spawns in the session’s directory on its machine and keeps acks and checkpoints addressed to the remote pty', async () => {
+    ipc.handlers['pty.spawn'] = () => ({ ptyId: addressOf(OTHER_MACHINE, 'pty-1' as PtyId), pid: 9 });
+    const registry = makeRegistry();
+    const { ptyId } = await openRemote(registry);
+    expect(ipc.inputs('pty.spawn')).toEqual([{ appSessionId: R, label: 'terminal:r', cwd: '/srv/r', cols: 80, rows: 24 }]);
+    ipc.data(ptyId, 0, filled(40 * KiB));
+    expect(ipc.inputs('pty.ack')).toEqual([{ ptyId, offset: 40 * KiB }]);
+  });
+
+  it('draws “[output lost]” where a chunk starts past what the screen has, then the chunk from its first whole line, and nudges a repaint', async () => {
+    const registry = makeRegistry();
+    const { renderer, ptyId } = await openRemote(registry);
+    ipc.data(ptyId, 0, bytes('one\r\n'));
+    ipc.data(ptyId, 900, bytes('rest of a line\r\nnext\r\n'));
+    ipc.data(ptyId, 922, bytes('after'));
+    expect(renderer.writes).toEqual(['one\r\n', OUTPUT_LOST, 'next\r\n', 'after']);
+    expect(ipc.inputs('pty.resize')).toEqual([{ ptyId, cols: 80, rows: 23 }]);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(ipc.inputs('pty.resize')).toEqual([{ ptyId, cols: 80, rows: 23 }, { ptyId, cols: 80, rows: 24 }]);
+  });
+
+  it('routes a ⌘-clicked link through the page’s forwarder first; one it leaves opens through pty.openLink on the terminal’s machine', async () => {
+    const registry = makeRegistry();
+    const forwarded: [AppSessionId, string][] = [];
+    registry.forwardLinksWith((appSessionId, url) => (forwarded.push([appSessionId, url]), url.startsWith('http://localhost')));
+    const remote = await openRemote(registry);
+    const local = await openRunning(registry);
+    remote.renderer.clickLink('http://localhost:5173/app', { metaKey: true });
+    expect(forwarded).toEqual([[R, 'http://localhost:5173/app']]);
+    expect(ipc.inputs('pty.openLink')).toEqual([]);
+    remote.renderer.clickLink('https://example.com', { metaKey: true });
+    local.renderer.clickLink('https://example.org', { metaKey: true });
+    expect(ipc.inputs('pty.openLink')).toEqual([{ url: 'https://example.com' }, { url: 'https://example.org' }]);
+    expect(ipc.targets('pty.openLink'), 'main refuses a loopback link of another machine there, as a backstop').toEqual([OTHER_MACHINE, undefined]);
+  });
+});

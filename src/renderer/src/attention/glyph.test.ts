@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { digest, item, record } from '../../../../test/support/builders';
-import { glyphFor } from './glyph';
+import { glyphFor, listedGlyph } from './glyph';
 
 const at = '2026-09-28T10:00:00Z';
 
@@ -61,5 +61,15 @@ describe('session glyphs', () => {
       expect(glyphFor(record('s'), digest('s'), [item('s', 'error', at, { state })]).label).toBe('Idle');
       expect(glyphFor(record('s'), digest('s', { phase: 'exited' }), [item('s', 'error', at, { state })]).label).toBe('Done');
     }
+  });
+});
+
+// P5 O7 M6: a listed session's machine feed holds its open items; they say what it waits for over the listing's word.
+describe('listed glyphs', () => {
+  it('reads the open actionable items first, then the listing’s state', () => {
+    expect(listedGlyph('busy', [item('b', 'question', '2026-09-28T10:00:00Z')]).label).toBe('Question');
+    expect(listedGlyph('idle', [item('b', 'permission', '2026-09-28T10:00:00Z')]).label).toBe('Needs approval');
+    expect(listedGlyph('busy', [item('b', 'permission', '2026-09-28T10:00:00Z', { state: 'retired' }), item('b', 'held_peer_message', '2026-09-28T10:00:00Z')]).label).toBe('Working');
+    expect(listedGlyph('waiting').label).toBe('Needs you');
   });
 });

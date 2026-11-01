@@ -1150,3 +1150,37 @@ describe('a start that requires no message (P3-H, Decision Log 88)', () => {
     expect(h.host.calledWith('session.send')).toHaveLength(1); // the retained message, still there for the owner's start
   });
 });
+
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, Interfaces §H): every launch of a record a remote
+// member spawned names its spawner with its proof in place, an acquisition's and a no-output retry's included, the proof
+// written again before each launch (here, after the first attempt lost it)
+describe('P5 O12 M11: the spawner named at every launch of a spawned record', () => {
+  let h: SessionHarness;
+  beforeEach(async () => {
+    h = await new SessionHarness().start();
+  });
+  afterEach(() => h.dispose());
+
+  it('an acquisition’s resume and its no-output retry each find the proof before their launch', async () => {
+    h.trustDirectory(h.work);
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', action: { action: 'session.spawn', device: 'dev-1', opId: 'op-0123456789abcdef' } };
+    const permissionMode = { requested: 'default' as const, effective: 'default' as const, refusal: null };
+    const record = h.index.sessions.createForLaunch({ directory: h.work, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode, launchedBy }).record;
+    h.index.sessions.bindEngineId(record.appId, sessionIdFor(0xa11));
+    const proofFile = join(h.userData, 'sessions', 'launched-by', `${record.appId}.json`);
+    const found: boolean[] = [];
+    let n = 0;
+    h.host.script = (spec) => {
+      found.push(spec.launchedBy !== undefined && existsSync(spec.launchedBy.proofFile));
+      n += 1;
+      if (n > 1) return {};
+      rmSync(proofFile); // lost after the first launch: the retry writes it again
+      return { exit: { error: NO_OUTPUT_TEXT, code: 'no_output' } };
+    };
+    expect(await h.service.acquire(record.appId, 'send', {})).toMatchObject({ status: 'ready', launched: true });
+    const named = { appSessionId: record.appId, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile };
+    expect(h.host.launches.map((spec) => [spec.launchedBy, spec.retry])).toEqual([[named, undefined], [named, { attempt: 2, maxAttempts: 2, reason: RETRY_REASON }]]);
+    expect(found).toEqual([true, true]);
+    expect(JSON.parse(readFileSync(proofFile, 'utf8'))).toEqual(launchedBy);
+  });
+});
