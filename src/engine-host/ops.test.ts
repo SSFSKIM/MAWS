@@ -159,8 +159,7 @@ describe('host.op', () => {
 // P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): an engine host leaving (a handover's exit, any
 // exit order) waits, within the exit order's own bound, for the runs claimed so far, so a run in flight when the rows
 // froze keeps its result in this host's ledger before the process exits; a run that outlasts the bound is left open,
-// its claim `in-progress` to the successor that reopens the ledger (an `expired` reading of it is O7's orphanAtOpen,
-// not on master at this landing).
+// and the successor, which reopens the ledger with O7 M4's `orphanAtOpen`, answers it `expired` and runs nothing.
 describe('the runs in flight when the engine host leaves', () => {
   const lines = () => readFileSync(join(dir, 'ops.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { opId: string; result?: unknown });
 
@@ -180,13 +179,18 @@ describe('the runs in flight when the engine host leaves', () => {
     await h.settled(); // nothing in flight: at once
   });
 
-  it('keeps a run that never ends waiting, so the exit order’s bound leaves its claim open, in-progress to the successor', async () => {
+  it('keeps a run that never ends waiting, so the exit order’s bound leaves its claim open: the successor answers it expired and runs nothing', async () => {
     const h = ops();
-    void h.op(op({ name: 'session.interrupt', input: { appSessionId: 'app-1', cancelEngineQueued: false } }), CTX);
+    const interrupt = op({ name: 'session.interrupt', input: { appSessionId: 'app-1', cancelEngineQueued: false } });
+    void h.op(interrupt, CTX);
     const bound = new Promise<'bound'>((resolve) => setTimeout(() => resolve('bound'), 50));
     expect(await Promise.race([h.settled().then(() => 'settled' as const), bound])).toBe('bound');
-    const successor = ops({ ledger: OpLedger.open(dir, 'ops.jsonl') });
-    expect(successor.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toMatchObject({ state: 'in-progress', name: 'session.interrupt' });
+    // the engine host's ledger opens with `orphanAtOpen` (ipc.ts; O7 M4's option): a claim the last host left is expired
+    const ran = vi.fn(async () => undefined);
+    const successor = ops({ ledger: OpLedger.open(dir, 'ops.jsonl', { orphanAtOpen: true }), handler: () => ran });
+    expect(successor.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'expired' });
+    expect(await successor.op(interrupt, CTX), 'a replay is answered, never run').toEqual({ state: 'in-progress' });
+    expect(ran).not.toHaveBeenCalled();
   });
 });
 
@@ -239,6 +243,16 @@ function engineHost() {
 }
 
 describe('through the engine host’s handlers (a replayed session)', () => {
+  // P5 O16 M3c: an engine host killed, or handed over, between a claim and its result leaves the claim with no result;
+  // its successor opens the same ledger with `orphanAtOpen`, so the claim answers `expired` and a replay runs nothing
+  it('answers a claim the last engine host left without a result expired', async () => {
+    const left = OpLedger.open(join(dir, 'supervisor'), SUPERVISOR_FILES.ops);
+    expect(left.begin('op-left-000000001', iso(Date.now()), { member: 'm-a', device: 'd-a', fingerprint: 'fp-1', target: 'app-gone', name: 'session.send', context: { launchId: 'launch-1', engineSessionId: 'eng-1' } }, () => null)).toEqual({ kind: 'claimed' });
+    const host = engineHost();
+    expect(await host.call('host.opQuery', { opId: 'op-left-000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'expired' });
+    expect(await host.call('host.op', op({ opId: 'op-left-000000001', input: { appSessionId: 'app-gone', content: 'hello' } }))).toEqual({ state: 'in-progress' });
+  });
+
   it('registers both commands; an answer is bound to its request and its context, and resealed shows one effect', async () => {
     const host = engineHost();
     expect(host.handlers.has('host.op') && host.handlers.has('host.opQuery')).toBe(true);

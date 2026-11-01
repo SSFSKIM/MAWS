@@ -944,7 +944,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P5 O10 M7: lane B's operation ledger, compacted at the host's start, and the endpoint's two commands over the
   // handlers registered above (registered on the host's own `on`: host.op never runs itself)
   ops.settled = registerOps(hostOn, {
-    ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log }),
+    // P5 O16 M3c: `orphanAtOpen` (O7 M4's option): a claim the last engine host left without a result (killed, or a run
+    // that outlasted its exit order's bound across a handover) answers `expired`, and a replay runs nothing
+    ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log, orphanAtOpen: true }),
     handler: (name) => own.get(name),
     status: (id) => {
       const status = table.get(id as AppSessionId)?.status();

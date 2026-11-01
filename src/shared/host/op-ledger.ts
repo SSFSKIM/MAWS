@@ -27,8 +27,9 @@
 // RL4 state for an op whose outcome the executor can no longer say (a device settles it unknown and stops asking). It is
 // never run again (its id still answers `in-progress` to a new act), and its outcome, if it arrives later (a run that
 // outlived the process, read back by its owner and given to `finish`), replaces it: a query then answers `done`. Nothing
-// of this is written; each open derives it from the file. Without the option (the engine host's `host.op`, the
-// endpoint's own) such a claim stays `in-progress`.
+// of this is written; each open derives it from the file. The engine host's `host.op` opens with it too (P5 O16 M3c: a
+// claim its predecessor left, killed or past its handover's exit bound). Without the option (the endpoint's own) such a
+// claim stays `in-progress`.
 //
 // What the file holds may have reached only the page cache (an fsync that failed in the last process), and a restart
 // does not flush it: the open fsyncs the file and its directory before it serves a record, and one that can't stays
