@@ -710,6 +710,59 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     expect(s.seam.browserEngine('U' as AppSessionId)).toBeNull();
   });
 
+  it('a connection lost during the lineage read ends the session’s period at once and fails its demand; no prepare follows the read', async () => {
+    const s = browserScene();
+    let lineage!: (parent: AppSessionId | null) => void;
+    s.parents.set('S', new Promise((resolve) => (lineage = resolve)));
+    const ensured = s.seam.ensureBrowser(demand()).catch((error: Error) => error.message);
+    s.seam.clientReady(ENGINE);
+    await flush();
+    s.seam.clientGone(ENGINE);
+    expect(s.ended, 'the route told: §B’s render host’s end').toEqual(['S']);
+    expect(await ensured, 'failed now, not at its deadline').toBe('the render host on mini ended');
+    lineage('P' as AppSessionId);
+    await flush();
+    expect(s.posts).toEqual([]);
+    expect(s.seam.browserEngine('S' as AppSessionId)).toBeNull();
+  });
+
+  it('a connection lost while a new prepare waits behind the session’s retiring drop resolves the drop and fails the demand, its period ended', async () => {
+    const s = browserScene();
+    s.seam.ensureBrowser(demand()).catch(() => {});
+    s.seam.clientReady(ENGINE);
+    await flush();
+    s.answer(0);
+    await flush();
+    const drop = s.seam.dropBrowser('S' as AppSessionId);
+    const again = s.seam.ensureBrowser(demand('S', { epoch: 'e2' })).catch((error: Error) => error.message);
+    await flush();
+    expect(s.ops()).toEqual(['prepare S', 'drop S']);
+    s.seam.clientGone(ENGINE);
+    await drop;
+    expect(s.dropped).toEqual(['S']);
+    expect(s.ended, 'e2’s period ended: the route told').toEqual(['S']);
+    expect(await again).toBe('the render host on mini ended');
+    await flush();
+    expect(s.ops(), 'nothing sent after the end').toEqual(['prepare S', 'drop S']);
+  });
+
+  it('two demands for a session at once send one prepare and both resolve at its answer', async () => {
+    const s = browserScene();
+    s.seam.clientReady(ENGINE);
+    s.seam.ensureBrowser(demand('T')).catch(() => {}); // starts the host
+    s.seam.clientReady(ENGINE);
+    await flush();
+    const first = s.seam.ensureBrowser(demand('S'));
+    const second = s.seam.ensureBrowser(demand('S', { epoch: 'e1' }));
+    await flush();
+    expect(s.ops()).toEqual(['prepare T', 'prepare S']);
+    s.answer(1);
+    expect(await Promise.all([first, second])).toEqual([
+      { epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' },
+      { epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' },
+    ]);
+  });
+
   it('browser holds keep the host past its quiet period; once none stands it ends, and a demand meanwhile waits for the next host', async () => {
     const s = browserScene();
     const ensured = s.seam.ensureBrowser(demand('S', { deadline: performance.now() + 120_000 })); // a long one, to watch the quiet period

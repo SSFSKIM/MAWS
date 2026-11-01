@@ -85,6 +85,9 @@ export interface CuaSockets {
   target(dir: string | null): void; // the attached tab engine's cua directory (the app's, from machine.client), or null: listen or stop
   tabEngine(): string | null; // the attached tab engine's cua directory; null while none is attached
   engineProcess(appSessionId: AppSessionId, pid: number | null): void; // the peer check's root, from the session's status
+  // P5 O17 M5 (§B's exit): the session's kept root has this pid but the process running it now started at another time
+  // (a reused pid: another engine), as the peer check reads it; read before `engineProcess` takes the new root
+  incarnationChanged(appSessionId: AppSessionId, pid: number): boolean;
   remove(appSessionId: AppSessionId): void; // the session was removed: its socket and its connections go
   routeChanged(appSessionId: AppSessionId): void; // P5 O17 M1: the session's route was read anew: an older epoch's connections end; listen or stop
   sessions(): AppSessionId[];
@@ -432,6 +435,13 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       if (had !== (next !== null)) options.onChange?.();
     },
     tabEngine: () => tabEngine,
+    incarnationChanged(appSessionId, pid) {
+      const was = engineRoots.get(appSessionId);
+      if (was?.pid !== pid) return false; // none kept, or another pid (the route sees that one itself)
+      const addon = peerAddon();
+      const root = addon ? rootOf(pid, addon) : null;
+      return root !== null && root.start !== was.start;
+    },
     engineProcess(appSessionId, pid) {
       const addon = pid === null ? null : peerAddon();
       const root = pid === null || !addon ? null : rootOf(pid, addon);

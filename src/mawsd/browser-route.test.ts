@@ -218,7 +218,7 @@ describe('the route’s state and epoch (§B)', () => {
     expect(t.ends).toHaveLength(2);
   });
 
-  it('headless → cold at the engine’s exit (exited, or another pid), its tabs dropped; no exit at a missing pid or a lost link', async () => {
+  it('headless → cold at the engine’s exit (exited, another pid, or the same pid running another engine), its tabs dropped; no exit at a missing pid or a lost link', async () => {
     const t = stand();
     t.live(S, 100);
     await t.promote();
@@ -236,6 +236,13 @@ describe('the route’s state and epoch (§B)', () => {
     expect(t.route.reading(S).state).toBe('cold');
     expect(t.route.live(S), 'a released session’s listener stops').toBe(false);
     expect(t.drops).toEqual([S, S]);
+    t.live(S, 100);
+    await t.promote();
+    const before = t.route.reading(S).epoch;
+    t.route.statusSeen(S, { process: 'ready', pid: 100, replaced: true }); // the same pid running another engine: an exit
+    expect(t.route.reading(S).state).toBe('cold');
+    expect(t.route.reading(S).epoch).not.toBe(before);
+    expect(t.drops).toEqual([S, S, S]);
   });
 
   it('a start under way when the engine exits is dropped too: no prepared session outlives its engine', () => {
@@ -312,6 +319,15 @@ describe('the inventory cache (§G, read by M6)', () => {
     t.inputs.headless = 'the reason';
     t.route.inputsChanged();
     expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, tabs: [], selected: null, state: 'unavailable', reason: 'the reason' });
+    // still `none`, for another reason: told, in the same period; an unchanged reason tells nothing
+    const { epoch } = t.route.reading(S);
+    const before = seen.length;
+    t.inputs.headless = 'another reason';
+    t.route.inputsChanged();
+    expect(seen.slice(before)).toEqual([{ epoch, tabs: [], selected: null, state: 'unavailable', reason: 'another reason' }]);
+    expect(t.route.reading(S).epoch, 'no epoch minted').toBe(epoch);
+    t.route.inputsChanged();
+    expect(seen).toHaveLength(before + 1);
     stop();
     const count = seen.length;
     t.inputs.headless = null;

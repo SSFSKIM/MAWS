@@ -1114,7 +1114,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const id = appSessionId as AppSessionId;
     const running = status.process !== 'exited';
     const pid = typeof status.pid === 'number' ? status.pid : null;
-    route.statusSeen(id, { process: String(status.process), pid }); // P5 O17 M5: live, or the engine's exit
+    // P5 O17 M5: live, or the engine's exit (another pid, or the same pid running another engine: read before the peer
+    // check's root moves to it below)
+    const replaced = running && pid !== null && cua.incarnationChanged(id, pid);
+    route.statusSeen(id, { process: String(status.process), pid, replaced });
     if (running && cua.ensure(id) !== null) sessionCapabilities.track(id);
     // P5 O17 M5 (§B): a running reading with no pid (an adoption's first, after an engine-host restart) names no new
     // engine, so the peer check's root stays and what was checked against it (relayed, cold and spliced) goes on; the

@@ -10,7 +10,8 @@
 // The epoch is opaque and per session, minted each time its tab engine changes: at an app's arrival or departure, the
 // headless browser becoming usable or not, the render host's end, the engine's exit (`exited`, or a different non-null
 // pid; never a missing pid or a lost link, so an engine-host restart or an O16 handover ends no tab) and the engine
-// host's `host.browserIdle` (D20). It is minted before anything of the old route is torn down, so every waiter and reply
+// host's `host.browserIdle` (D20). A reused pid running another engine (the same pid, another start, as the peer check
+// reads it) is an exit too (§B, amended at M5's review). It is minted before anything of the old route is torn down, so every waiter and reply
 // bound to the old one is refused from that instant; `cold` → `starting` → `headless` keep it, and a start that fails
 // returns to `cold` in the same epoch. Nothing migrates: the old route's drop (`dropBrowser`) closes its tabs.
 //
@@ -46,7 +47,7 @@ export interface BrowserRoute {
   ensureBrowser(demand: BrowserDemand): Promise<BrowserTarget>; // the broker's demand: `cold` → `starting` → `headless`
   selection(appSessionId: AppSessionId): FrontSelection | null; // the front's: the selected engine connection and its period
   inputsChanged(between?: () => void): void; // the app or the headless browser's usability may have changed; `between`, after the epochs are minted and before any teardown
-  statusSeen(appSessionId: AppSessionId, reading: { process: string; pid: number | null }): void; // a raw session.status
+  statusSeen(appSessionId: AppSessionId, reading: { process: string; pid: number | null; replaced?: boolean }): void; // a raw session.status; `replaced`: its pid now runs another engine (the peer check's start)
   removed(appSessionId: AppSessionId): void; // session.removed, or a session mawsd stops following: its entry goes
   engineEnded(appSessionId: AppSessionId): void; // the render host serving or preparing the session ended
   browserIdle(appSessionId: AppSessionId, held: boolean): void; // host.browserIdle (D20); `held`: browser work is held for it
@@ -62,6 +63,7 @@ interface Entry {
   epoch: string;
   live: boolean;
   pid: number | null; // the engine's, kept across a reading with none
+  reason: string | null; // `none`'s reason as published: a reason that changes with the state unchanged is told, no epoch minted
   inventory: EngineInventory | null; // the selected engine's last push in this epoch
   watchers: Set<(inventory: BrowserInventory) => void>;
 }
@@ -79,14 +81,19 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
   const base = (app: boolean, headless: string | null): BrowserRouteState => (app ? 'relay' : headless === null ? 'cold' : 'none');
   const entry = (appSessionId: AppSessionId): Entry => {
     let found = entries.get(appSessionId);
-    if (!found) entries.set(appSessionId, (found = { state: base(options.app(), options.headless()), epoch: mint(), live: false, pid: null, inventory: null, watchers: new Set() }));
+    if (!found) {
+      const app = options.app();
+      const headless = options.headless();
+      const state = base(app, headless);
+      entries.set(appSessionId, (found = { state, epoch: mint(), live: false, pid: null, reason: state === 'none' ? headless : null, inventory: null, watchers: new Set() }));
+    }
     return found;
   };
 
   const inventoryOf = (current: Entry): BrowserInventory => {
     const unavailable = (reason: string): BrowserInventory => ({ epoch: current.epoch, tabs: [], selected: null, state: 'unavailable', reason });
     if (current.state === 'relay') return unavailable(`the agent's browser is in the MAWS app on ${machine}`);
-    if (current.state === 'none') return unavailable(options.headless() ?? `the agent's browser is unavailable on ${machine}`);
+    if (current.state === 'none') return unavailable(current.reason ?? `the agent's browser is unavailable on ${machine}`);
     if (HEADLESS_STATES.has(current.state) && current.inventory) return { epoch: current.epoch, ...current.inventory };
     return { epoch: current.epoch, tabs: [], selected: null, state: 'ready' };
   };
@@ -102,10 +109,11 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
     void options.dropBrowser(appSessionId).catch((error: unknown) => log(`[browser] the drop of ${appSessionId}'s headless browser failed: ${error instanceof Error ? error.message : String(error)}`));
 
   // A new period: the epoch minted and the cache reset, nothing torn down yet
-  const move = (current: Entry, to: BrowserRouteState) => {
+  const move = (current: Entry, to: BrowserRouteState, reason: string | null = null) => {
     current.state = to;
     current.epoch = mint();
     current.inventory = null;
+    current.reason = to === 'none' ? reason : null;
   };
   // The old period's teardown, after the mint: its subscriptions ended, its render-host service dropped when it had one,
   // the sockets told (an older epoch's connections end; listening follows), the watchers told
@@ -164,9 +172,16 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       for (const [appSessionId, current] of entries) {
         const want = base(app, headless);
         const to = want === 'cold' && (current.state === 'starting' || current.state === 'headless') ? current.state : want;
-        if (to === current.state) continue;
+        if (to === current.state) {
+          // still `none`, for another reason: the same period, its watchers told
+          if (to === 'none' && current.reason !== headless) {
+            current.reason = headless;
+            told(current);
+          }
+          continue;
+        }
         moved.push({ appSessionId, current, from: current.state });
-        move(current, to);
+        move(current, to, headless);
       }
       between?.();
       for (const { appSessionId, current, from } of moved) {
@@ -174,10 +189,10 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
         teardown(appSessionId, current, from, 'engine_changed');
       }
     },
-    statusSeen(appSessionId, { process, pid }) {
+    statusSeen(appSessionId, { process, pid, replaced = false }) {
       const current = entry(appSessionId);
       const exited = process === 'exited';
-      const exit = exited || (pid !== null && current.pid !== null && pid !== current.pid);
+      const exit = exited || replaced || (pid !== null && current.pid !== null && pid !== current.pid);
       const wasLive = current.live;
       current.live = !exited;
       if (exited) current.pid = null;
@@ -197,7 +212,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       const current = entries.get(appSessionId);
       if (!current || !HEADLESS_STATES.has(current.state)) return;
       const headless = options.headless();
-      move(current, headless === null ? 'cold' : 'none');
+      move(current, headless === null ? 'cold' : 'none', headless);
       log(`[browser] ${appSessionId}: the render host serving it ended → ${current.state}`);
       ended(appSessionId, 'engine_changed');
       options.routeChanged(appSessionId);

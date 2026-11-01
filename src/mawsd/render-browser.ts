@@ -6,7 +6,9 @@
 // `prepare` naming the parent, resolved at its answer with the socket `mawsd` computed. A session the ready host serves
 // resolves at once; one it is preparing joins that prepare. A demand ends at its deadline or its signal; one that ends
 // after its prepare was sent, with no other demand waiting on that prepare, is undone with `drop` (the render host's drop
-// cancels a running prepare), so a promotion that expires leaves no prepared session behind.
+// cancels a running prepare), so a promotion that expires leaves no prepared session behind. A demand is its connection's
+// from the moment it proceeds on it (before the retiring drop's and the lineage's waits): that connection's end fails it
+// at once and tells its session's route (`ended`), as for a session prepared or served there.
 //
 // `drop` ends the session's service on its connection: the connection is *retiring* for the session until the drop's
 // answer or the connection's end, its hold on the session ending then (`dropped`), and a new prepare of the session on
@@ -44,6 +46,7 @@ export interface RenderBrowser {
 interface Demand {
   demand: BrowserDemand;
   parent: Promise<AppSessionId | null>;
+  on: EngineConnection | null; // the connection it proceeds on, from its assignment (before its waits) to its prepare
   settled: boolean;
   resolve(target: BrowserTarget): void;
   fail(reason: string): void;
@@ -101,6 +104,7 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
       const entry: Demand = {
         demand,
         parent: Promise.resolve(null),
+        on: null,
         settled: false,
         resolve(target) {
           if (entry.settled) return;
@@ -127,23 +131,32 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
     });
   }
 
-  // On the ready host's connection: behind the session's retiring drop there, with its lineage, the prepare
+  // The demands assigned to a connection that ended (or stopped being the host's) before their prepare was sent: their
+  // routes told first (`ended`: §B's render host's end, the epoch minted), then each failed, never left to wait
+  const lose = (lost: Demand[], ended: Set<AppSessionId>) => {
+    for (const entry of lost) proceeding.delete(entry);
+    for (const appSessionId of new Set(lost.map((entry) => entry.demand.appSessionId))) {
+      if (!ended.has(appSessionId)) options.ended(appSessionId);
+      ended.add(appSessionId);
+    }
+    for (const entry of lost) entry.fail(`the render host on ${machine} ended`);
+  };
+
+  // On the ready host's connection: behind the session's retiring drop there, with its lineage, the prepare. The demand
+  // is the connection's from here (`on`), so the connection's end reaches it during either wait
   async function proceed(entry: Demand, on: EngineConnection): Promise<void> {
     const { appSessionId } = entry.demand;
     waiting.delete(entry);
     proceeding.add(entry);
+    entry.on = on;
+    let parent: AppSessionId | null;
     for (;;) {
-      await Promise.all([retiring.get(on)?.get(appSessionId), entry.parent]);
-      if (entry.settled) return;
-      if (engine !== on) {
-        // the host changed meanwhile: the demand waits for the next one
-        proceeding.delete(entry);
-        waiting.add(entry);
-        if (engine) void proceed(entry, engine);
-        return;
-      }
+      [, parent] = await Promise.all([retiring.get(on)?.get(appSessionId), entry.parent]);
+      if (entry.settled) return; // failed meanwhile: the connection's end among the reasons
+      if (engine !== on) return lose([entry], new Set()); // the host's connection no more, though not ended yet
       if (!retiring.get(on)?.has(appSessionId)) break; // a drop sent meanwhile: wait for it too
     }
+    // from here to the prepare's post no turn passes, so a second demand finds the session reserved and joins it
     proceeding.delete(entry);
     const socketPath = options.socketPath(appSessionId)!;
     const current = sessions.get(appSessionId);
@@ -152,7 +165,6 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
       current.demands.add(entry);
       return;
     }
-    const parent = await entry.parent; // settled above: no turn passes
     const session: Session = { engine: on, phase: 'preparing', demands: new Set([entry]) };
     sessions.set(appSessionId, session);
     const id = `browser-${++next}`;
@@ -241,6 +253,7 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
         pending.delete(id);
         request.settle(null);
       }
+      const ended = new Set<AppSessionId>();
       for (const appSessionId of lost) {
         const current = sessions.get(appSessionId);
         if (current) {
@@ -248,7 +261,10 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
           for (const entry of [...current.demands]) entry.fail(`the render host on ${machine} ended`);
         }
         options.ended(appSessionId);
+        ended.add(appSessionId);
       }
+      // assigned to it and still waiting for a retiring drop or the lineage: no prepare sent yet, so no session above
+      lose([...proceeding].filter((entry) => entry.on === on), ended);
       retiring.delete(on);
       options.changed();
     },

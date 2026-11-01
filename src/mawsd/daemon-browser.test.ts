@@ -142,6 +142,7 @@ class RenderHost {
   readonly tabs = new Map<string, number>(); // per session
   readonly works: string[] = []; // its browserEngine.work answers: `S held ok`, `S zero ok`, `S held forbidden_sender`…
   readonly peers: Socket[] = [];
+  readonly stalled: { socket: Socket; id: number | string }[] = []; // `debugger.sendCommand`s it holds unanswered (a command in flight)
   private readonly servers = new Map<string, Server>();
   private seen = 0;
   private exited = false;
@@ -228,6 +229,7 @@ class RenderHost {
             await this.state(appSessionId);
             return reply({ result: { id: count + 1 } });
           }
+          if (message.method === 'debugger.sendCommand') return void this.stalled.push({ socket, id: message.id! });
           if (message.method === 'tabs.remove') {
             this.tabs.set(appSessionId, Math.max(0, count - 1));
             await this.state(appSessionId);
@@ -421,6 +423,42 @@ describe('the handover (acceptance 3)', () => {
     expect(t.hosts, 'the same render host serves the next period').toHaveLength(1);
   });
 
+  // M5's Proves: an app arriving during an active lease, a browser command in flight on the splice, beside an export
+  it('an app arriving during an active lease ends the in-flight command’s connection unanswered, then drops, the hold kept to the answer, and an export beside it completes', async () => {
+    const t = await stand();
+    const cua = await firstTab();
+    await until(() => JSON.stringify(t.snapshots().at(-1)) === JSON.stringify([S]), 3_000, 'the lease: a tab held');
+    cua.socket.write(frame({ jsonrpc: '2.0', id: 9, method: 'debugger.sendCommand', params: { target: { tabId: 1 }, method: 'Runtime.evaluate' } }));
+    await until(() => t.host().stalled.length === 1, 3_000, 'the command in flight at the render host');
+    const [inFlight] = t.host().stalled;
+    t.host().holdBack.add('drop');
+    const exported = t.daemon.render.exportForLibrary({ artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', revision: 1, format: 'pdf' } as never);
+    exported.catch(() => {});
+    const app = await attachApp();
+
+    // teardown first: the spliced connection ends, its command unanswered, the render host's end of it closed
+    await until(() => cua.closed && inFlight!.socket.destroyed, 3_000, 'the splice ended at the handover');
+    await until(() => t.host().heldBack.length === 1, 3_000, 'then the drop');
+    expect(t.host().ops()).toEqual(['prepare', 'drop']);
+    expect(t.snapshots().at(-1), 'the hold kept while the drop is unanswered').toEqual([S]);
+    inFlight!.socket.write(frame({ jsonrpc: '2.0', id: 9, result: { late: true } })); // a late answer reaches nobody
+    await sleep(100);
+    expect(cua.heard.filter((message) => message.id === 9), 'never answered, never twice').toEqual([]);
+
+    // the export beside it completes on the same render host
+    await until(() => t.host().link.events('render.request').length === 1, 3_000, 'the export handed over');
+    const [request] = t.host().link.events('render.request') as { id: string }[];
+    const path = `${scene.root}/artifacts/2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f/exports/1.pdf`;
+    expect(await t.host().link.request('render.answer', { id: request!.id, answer: { path, revision: 1 } })).toMatchObject({ ok: true });
+    expect(await exported).toEqual({ path, revision: 1 });
+
+    // the drop's answer, then the hold settles
+    await t.host().release('drop');
+    await until(() => JSON.stringify(t.snapshots().at(-1)) === '[]', 3_000, 'the hold settled at the drop’s answer');
+    expect(t.host().ops(), 'nothing more sent for the old period').toEqual(['prepare', 'drop']);
+    app.leave();
+  });
+
   it('an app arriving during a start settles every waiter once, prepares nothing, and an artifact export beside it completes', async () => {
     const t = await stand({ connect: false });
     const cua = Connector.open();
@@ -481,9 +519,10 @@ describe('the engine’s exit and the engine host’s restart (acceptance 4, 5)'
     expect(t.hosts, 'prepared again in the running render host').toHaveLength(1);
   });
 
-  // The peer check's root is the pid with its start: the same pid with another start is another engine, and what was
-  // checked against the old one ends, as O5 M5 holds it
-  it('a reused pid with another start ends what was checked against the old engine; the new one’s cua is checked against it', async () => {
+  // The peer check's root is the pid with its start: the same pid with another start is another engine (§B's exit, as
+  // amended at M5's review): what was checked against the old one ends, as O5 M5 holds it, and its headless period too:
+  // a new epoch, the drop and its hold settled, and the new engine's first tab prepared again
+  it('a reused pid with another start is the engine’s exit: its connections and headless period end, and the new engine’s cua is prepared again', async () => {
     const t = await stand();
     await t.status(null, 'exited');
     const table = t.addon as unknown as { process(pid: number): { ppid: number; start: number } | null };
@@ -493,9 +532,21 @@ describe('the engine’s exit and the engine host’s restart (acceptance 4, 5)'
     await listening();
     const cua = await firstTab();
     expect(cua.closed).toBe(false);
-    table.process = (pid) => (pid === ENGINE ? { ppid: 1, start: 199 } : original(pid)); // reused again, with no exit seen
+    await until(() => JSON.stringify(t.snapshots().at(-1)) === JSON.stringify([S]), 3_000, 'the tab held');
+    t.host().holdBack.add('drop');
+    table.process = (pid) => (pid === ENGINE ? { ppid: 1, start: 199 } : pid === CUA ? { ppid: ENGINE, start: 200 } : original(pid)); // reused again, with no exit seen
     await t.status(ENGINE);
     await until(() => cua.closed, 3_000, 'the connection checked against the replaced engine ended');
+    expect(scene.logs.filter((line) => line.includes(`[browser] ${S}: headless → cold (its engine exited)`)), 'a new epoch').toHaveLength(1);
+    await until(() => t.host().heldBack.length === 1, 3_000, 'the drop sent');
+    expect(t.host().ops()).toEqual(['prepare', 'drop']);
+    expect(t.snapshots().at(-1), 'the retiring connection keeps its hold until the drop answers').toEqual([S]);
+    await t.host().release('drop');
+    await until(() => JSON.stringify(t.snapshots().at(-1)) === '[]', 3_000, 'the hold settled at the drop’s answer');
+    const next = await firstTab(); // the new engine's cua, checked against the new root
+    expect(next.closed).toBe(false);
+    expect(t.host().ops(), 'prepared again').toEqual(['prepare', 'drop', 'prepare']);
+    expect(t.hosts, 'in the running render host').toHaveLength(1);
   });
 
   it('an engine-host restart (the link lost, the status re-read with no pid first) keeps the held tab, both holds and cua’s connection', async () => {
