@@ -624,11 +624,15 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         const processes = run('ps', ['-axo', 'pid,ppid,etime,stat,command']).split('\n').filter((line) => line.includes('http.server'));
         return `the http.server processes: ${processes.join('\n') || 'none'}\nport ${devPort}: ${run('lsof', ['-nP', `-iTCP:${devPort}`])}`;
       };
+      // Before it prints its line, http.server looks up the name of the address it bound (`socket.getfqdn('::')` in
+      // HTTPServer.server_bind), a reverse lookup a hosted runner's resolver answers only after its timeouts: 72 s on
+      // run 41321392450, against nothing measurable with `--bind 127.0.0.1`. The wait sits well above that; the time it
+      // took is logged.
       const typedAt = Date.now();
       await typeInTerminal(page, id, `python3 -m http.server ${devPort}`);
       await expect
         .poll(async () => printedAnywhere(await terminalRows(page, id), `Serving HTTP on :: port ${devPort} (${devServerUrl(devPort)})`), {
-          timeout: 150_000,
+          timeout: 180_000,
           message: 'B’s dev server listens dual-stack and prints the link B’s reply names',
         })
         .toBe(true)
