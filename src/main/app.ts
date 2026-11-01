@@ -654,7 +654,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {
       local,
-      emitFrom,
+      emitFrom: (machine, name, payload) => emitFrom(machine, name, payload),
       forwards: {
         open: (machine, port) => remoteLaneB.forward.open({ machine, port }),
         listening: (machine, port) => remoteLaneB.forward.listening(machine, port),
