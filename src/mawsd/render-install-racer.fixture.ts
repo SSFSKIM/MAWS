@@ -1,8 +1,9 @@
 // One installer of render-install.test.ts's two-process race (P5 O5 M6, fix wave 1): `installRenderRuntime` in a process
-// of its own, from the zip a pack carries, with `unzip` and `sudo` faked (the helper's root ownership a marker file
-// beside it, since a test cannot chown to root) and each checkpoint a barrier the parent releases over IPC, so the two
-// installers reach each step together. Bundled by the test with esbuild and forked twice.
-import { existsSync, writeFileSync } from 'node:fs';
+// of its own, from the zip a pack carries, with `unzip` and `sudo` faked (the helper's set-user-ID mode a marker file
+// beside it, since a test cannot chown to root: chmod writes it and chown clears it, as Linux's chown clears the bit)
+// and each checkpoint a barrier the parent releases over IPC; the cache lock is the real one (flock), and a wait for it
+// is reported to the parent. Bundled by the test with esbuild and forked twice.
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installRenderRuntime } from './render-install';
 import type { ElectronPin } from './render-runtime';
@@ -36,6 +37,7 @@ installRenderRuntime({
     if (command === 'sudo') {
       const helper = args[3]!;
       if (!existsSync(helper)) return gone;
+      if (args[1] === 'chown') rmSync(`${helper}.suid`, { force: true });
       if (args[1] === 'chmod') writeFileSync(`${helper}.suid`, '');
       return ok;
     }
@@ -46,6 +48,7 @@ installRenderRuntime({
   helperConfigured: (path) => existsSync(`${path}.suid`),
   now: () => Date.parse('2026-10-31T12:00:00Z'),
   checkpoint: barrier,
+  notice: () => process.send!({ at: 'lock' }), // waiting for the lock: the kernel holds it there
 }).then(
   (outcome) => process.send!({ outcome }),
   (error: unknown) => process.send!({ error: error instanceof Error ? error.message : String(error) }),

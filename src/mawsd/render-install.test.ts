@@ -6,16 +6,16 @@
 // left is verified and completed, or cleaned; two installers at once leave one entry; an entry nothing pins and nothing
 // runs from is pruned. Each case runs in a scratch home with the downloads, `unzip`, `sudo`, `ldd` and /proc faked, and
 // the helper's ownership read from what the fake `sudo` did (a test cannot chown to root).
-import { fork } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningProcess } from './release';
 import { releasesRoot } from './release';
-import { installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type RenderInstallDeps } from './render-install';
+import { flockFile, installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type FileLock, type RenderInstallDeps } from './render-install';
 import { readRenderRuntime, renderCacheRoot, runtimeName, stagingName, type ElectronPin } from './render-runtime';
 
 let dir: string;
@@ -29,6 +29,10 @@ let privileged: boolean;
 let configured: Set<string>;
 let running: RunningProcess[];
 let unzipped: number;
+let lockHeld: boolean;
+let lockWaiters: (() => void)[];
+let waitsExpected: boolean;
+let lockLost: string | null;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-render-install-'));
@@ -44,8 +48,39 @@ beforeEach(() => {
   configured = new Set();
   running = [];
   unzipped = 0;
+  lockHeld = false;
+  lockWaiters = [];
+  waitsExpected = false;
+  lockLost = null;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+// The cache root's lock as flock holds it, in this process (a Mac has no flock): exclusive, handed to the next waiter at
+// release. A wait throws unless the case runs two at once on purpose, so no case can hang on a lock nobody releases.
+// `loseLock` is its holder ending before the release (flock's child killed): `check` says so from then on.
+const lock: FileLock = async (_path, waiting) => {
+  if (lockHeld) {
+    if (!waitsExpected) throw new Error('an unexpected wait for the cache lock');
+    waiting();
+    await new Promise<void>((resolve) => lockWaiters.push(resolve));
+  }
+  lockHeld = true;
+  return {
+    check: () => {
+      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
+    },
+    release: async () => {
+      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
+      const next = lockWaiters.shift();
+      if (next !== undefined) next();
+      else lockHeld = false;
+    },
+  };
+};
+const loseLock = (status: string) => {
+  lockLost = status;
+  lockHeld = false; // the kernel let it go
+};
 
 const ok = { status: 0, stdout: '', stderr: '' };
 function deps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
@@ -65,6 +100,7 @@ function deps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
       }
       if (command === 'sudo') {
         if (!privileged) return { status: 1, stdout: '', stderr: 'sudo: a password is required' };
+        if (args[1] === 'chown') configured.delete(args[3]!); // Linux's chown clears the set-user-ID bit
         if (args[1] === 'chmod') configured.add(args[3]!);
         return ok;
       }
@@ -79,7 +115,62 @@ function deps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
     processes: () => running,
     helperConfigured: (path) => configured.has(path),
     now: () => Date.parse('2026-10-31T12:00:00Z'),
+    lock,
     ...over,
+  };
+}
+
+// The helper's set-user-ID mode as a marker file beside it (`<helper>.suid`), so it moves with its directory as the mode
+// does: `chmod 4755` writes it, `chown` clears it (Linux's chown clears the set-user-ID bit), and either fails once the
+// helper is gone (its staging renamed into place)
+function markerDeps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
+  const base = deps();
+  return deps({
+    run: (command, args) => {
+      if (command !== 'sudo') return base.run(command, args);
+      calls.push([command, ...args].join(' '));
+      const helper = args[3]!;
+      if (!existsSync(helper)) return { status: 1, stdout: '', stderr: `${args[1]}: cannot access '${helper}': No such file or directory` };
+      if (args[1] === 'chown') rmSync(`${helper}.suid`, { force: true });
+      if (args[1] === 'chmod') writeFileSync(`${helper}.suid`, '');
+      return ok;
+    },
+    helperConfigured: (path) => existsSync(`${path}.suid`),
+    ...over,
+  });
+}
+
+// One installer's steps, driven by the test: it pauses at the steps named in `holds` (its checkpoints, and `lock` for
+// a wait on the install lock) until released, and passes the rest; `free()` lets it run on without pausing
+function stepper(holds: string[]) {
+  const paused = new Map<string, () => void>();
+  let arrival: ((step: string) => void) | null = null;
+  let running = false;
+  const at = (): Promise<string> => (paused.size > 0 ? Promise.resolve([...paused.keys()][0]!) : new Promise((resolve) => (arrival = resolve)));
+  const reached = async (step: string): Promise<void> => {
+    while (!paused.has(step)) await new Promise<string>((resolve) => (arrival = resolve));
+  };
+  return {
+    pass: (step: string): Promise<void> => {
+      if (running || !holds.includes(step)) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        paused.set(step, resolve);
+        arrival?.(step);
+      });
+    },
+    at,
+    reached,
+    release: async (step: string) => {
+      await reached(step);
+      const resume = paused.get(step)!;
+      paused.delete(step);
+      resume();
+    },
+    free: () => {
+      running = true;
+      for (const resume of paused.values()) resume();
+      paused.clear();
+    },
   };
 }
 
@@ -154,10 +245,10 @@ describe('an install', () => {
     expect(unzipped).toBe(2); // the whole one completed, not unpacked again
   });
 
-  // Two installers as two processes (render-install-racer.fixture.ts), each step released to both at once: both unpack
-  // their own copy, both rename it to the staging (one wins, the other finds it whole), both set its helper and write its
-  // manifest, both rename it into place (one wins, the other finds the published entry and checks it as its own)
-  it('two processes at once leave one entry and nothing else', async () => {
+  // Two installers as two processes (render-install-racer.fixture.ts) holding the real lock (flock, so Linux's): started
+  // together, one takes the lock and goes through every step, each released once the other is known to be waiting for
+  // it; the other gets the lock once the first has finished, and finds the published entry
+  it.runIf(process.platform === 'linux')('two processes at once leave one entry and nothing else', async () => {
     const bundle = join(dir, 'racer.mjs');
     buildSync({ entryPoints: [join(__dirname, 'render-install-racer.fixture.ts')], bundle: true, platform: 'node', format: 'esm', outfile: bundle, logLevel: 'silent' });
     const zip = join(dir, 'electron-v44.4.5-linux-x64.zip');
@@ -168,14 +259,20 @@ describe('an install', () => {
     const steps: string[] = [];
     await new Promise<void>((done, fail) => {
       const timer = setTimeout(() => fail(new Error(`the racers did not finish: ${JSON.stringify({ at, results })}`)), 20_000);
-      // a step is released once every racer still running has reached it
+      // a step is released once every racer still running and not waiting for the lock has reached it; a racer waiting
+      // for the lock (the kernel holds it there) is marked through once no other racer runs
       const release = () => {
-        const waiting = at.filter((step, k) => results[k] === undefined && step !== null);
-        const running = results.filter((result) => result === undefined).length;
-        if (running === 0) return clearTimeout(timer), done();
-        if (waiting.length < running || new Set(waiting).size !== 1) return;
-        steps.push(waiting[0]!);
-        racers.forEach((racer, k) => results[k] === undefined && (at[k] = null, racer.send({ go: waiting[0] })));
+        const running = [0, 1].filter((k) => results[k] === undefined);
+        if (running.length === 0) return clearTimeout(timer), done();
+        if (running.some((k) => at[k] === null)) return;
+        const stepping = running.filter((k) => at[k] !== 'lock');
+        const go = stepping.length === 0 ? running : stepping;
+        if (new Set(go.map((k) => at[k])).size !== 1) return;
+        steps.push(at[go[0]!]!);
+        for (const k of go) {
+          racers[k]!.send({ go: at[k] });
+          at[k] = null;
+        }
       };
       racers.forEach((racer, k) => {
         racer.on('message', (message: { at?: string; outcome?: unknown; error?: string }) => {
@@ -186,9 +283,9 @@ describe('an install', () => {
         racer.on('exit', () => results[k] === undefined && fail(new Error(`racer ${k} exited without an outcome`)));
       });
     }).finally(() => racers.forEach((racer) => racer.kill()));
-    expect(steps).toEqual(['unpacked', 'publishing']); // each step reached by both together
+    expect(steps).toEqual(['unpacked', 'chown', 'chmod', 'publishing', 'lock']); // the second held at the lock throughout
     expect(results.map((result) => (result as { state?: string }).state).sort()).toEqual(['installed', 'present']);
-    expect(listing()).toEqual([runtimeName(pin)]);
+    expect(listing()).toEqual(['.install-lock', runtimeName(pin)]); // the lock's file stays: a lock is on the file
     expect(readdirSync(entry()).sort()).toEqual(['.maws-unpacked', 'chrome-sandbox', 'chrome-sandbox.suid', 'electron', 'manifest.json']);
   });
 
@@ -224,6 +321,159 @@ describe('an install', () => {
     await expect(installRenderRuntime(deps({ download }))).rejects.toThrow(/cannot publish .*: an entry another install left there is not usable; run mawsd render install again/);
     expect(listing()).toEqual([stagingName(pin), runtimeName(pin)]);
     expect(await installRenderRuntime(deps())).toMatchObject({ state: 'installed', source: 'staging' });
+    expect(listing()).toEqual([runtimeName(pin)]);
+  });
+
+  // The panel's interleaving (PR #428, scalpel-2#1): B finds the staging A unpacked with its helper unset, and B's chown
+  // lands after A's final helper check, clearing the set-user-ID bit A set, before A renames the staging into place.
+  // The install lock, held from the staging through publication, keeps B off the staging until A has published.
+  it('a second installer never touches a staging another is publishing: no entry is published with its helper cleared', async () => {
+    waitsExpected = true;
+    const a = stepper(['chown', 'chmod', 'publishing']);
+    const b = stepper(['chown', 'chmod', 'lock']);
+    const said: string[] = [];
+    const installedA = installRenderRuntime(markerDeps({ checkpoint: a.pass }));
+    await a.reached('chown'); // A owns the staging, found its helper unset; its chown next
+    const installedB = installRenderRuntime(markerDeps({ checkpoint: b.pass, notice: (line) => (said.push(line), void b.pass('lock')) }));
+    const bAt = await b.at(); // held off at the lock, or (with nothing excluding it) at its own chown of A's staging
+    await a.release('chown');
+    await a.release('chmod');
+    await a.reached('publishing'); // A's helper set and checked; its rename next
+    if (bAt === 'chown') {
+      await b.release('chown'); // B's delayed chown lands now
+      await b.reached('chmod');
+    }
+    await a.release('publishing');
+    const outcomeA = await installedA;
+    b.free();
+    const outcomeB = await installedB;
+    expect(outcomeA).toMatchObject({ state: 'installed', entry: entry() });
+    expect(existsSync(join(entry(), 'chrome-sandbox.suid')), 'the published helper keeps the mode A set').toBe(true);
+    expect(outcomeB).toEqual({ state: 'present', entry: entry(), pruned: [] });
+    expect(said).toEqual(['waiting for another runtime install to finish']); // once
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`, `sudo -n chmod 4755 ${join(staging(), 'chrome-sandbox')}`]); // A's alone
+    expect(listing()).toEqual([runtimeName(pin)]);
+  });
+
+  // The panel's second interleaving (PR #428, scalpel-2#2): A finds the entry unusable; B replaces it with a verified one
+  // while A reads the processes running from it; A must not then retire B's entry (its own download then failing would
+  // leave nothing published)
+  it('a replacement never retires an entry published, usable, after it found the old one unusable', async () => {
+    await installRenderRuntime(markerDeps());
+    rmSync(join(entry(), 'chrome-sandbox.suid')); // the entry's helper lost its mode
+    let published = false;
+    const publishVerified = () => {
+      rmSync(entry(), { recursive: true });
+      mkdirSync(entry());
+      for (const name of ['electron', 'chrome-sandbox', 'chrome-sandbox.suid']) writeFileSync(join(entry(), name), name);
+      writeFileSync(join(entry(), 'manifest.json'), JSON.stringify({ version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: 'by B' }));
+      published = true;
+    };
+    const outcome = installRenderRuntime(
+      markerDeps({
+        processes: () => (published || publishVerified(), running),
+        download: () => Promise.reject(new Error('offline')),
+      }),
+    );
+    await expect(outcome).resolves.toEqual({ state: 'present', entry: entry(), pruned: [] });
+    expect(JSON.parse(readFileSync(join(entry(), 'manifest.json'), 'utf8'))).toMatchObject({ installedAt: 'by B' });
+    expect(listing()).toEqual([runtimeName(pin)]);
+  });
+
+  // The panel's third interleaving (PR #428 task review): an uninstall's removal of the staging lands while an installer
+  // that has checked its helper renames the staging into place. The uninstall holds the same lock, so it runs once the
+  // entry is published whole.
+  it('an uninstall while an install publishes waits for it: no entry is published without its helper', async () => {
+    waitsExpected = true;
+    const a = stepper(['publishing']);
+    const installed = installRenderRuntime(markerDeps({ checkpoint: a.pass }));
+    await a.reached('publishing'); // A's helper set and checked, its manifest written; its rename next
+    let whole: boolean | null = null;
+    const uninstalled = uninstallRenderRuntime(
+      markerDeps({
+        processes: () => {
+          whole ??= existsSync(join(entry(), 'chrome-sandbox.suid')) && existsSync(join(entry(), 'manifest.json'));
+          return running;
+        },
+      }),
+    );
+    await a.release('publishing');
+    await expect(installed).resolves.toMatchObject({ state: 'installed', entry: entry() });
+    await expect(uninstalled).resolves.toEqual({ removed: [runtimeName(pin)] });
+    expect(whole, 'the uninstall began on the entry as published, helper and all').toBe(true);
+    expect(listing()).toEqual([]);
+  });
+
+  // The real lock where flock(1) cannot run (here a PATH without it): a named refusal before anything is fetched or
+  // unpacked, never an install without the lock
+  it('refuses, naming flock, where flock cannot run: never an unlocked install', async () => {
+    const path = process.env.PATH;
+    process.env.PATH = bin; // xvfb-run alone
+    try {
+      await expect(installRenderRuntime(deps({ lock: undefined }))).rejects.toThrow(/cannot lock .*\.install-lock: flock \(util-linux\) did not run/);
+      await expect(uninstallRenderRuntime(deps({ lock: undefined }))).rejects.toThrow(/flock \(util-linux\) did not run/);
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(downloads).toEqual([]);
+    expect(unzipped).toBe(0);
+    expect(listing()).toEqual([]);
+  });
+
+  // The lock lost midway (its holder ended while the installer lives: PR #428 re-review): nothing that no rerun undoes is
+  // done after the loss, nothing is published, and a whole staging is left for the next run
+  it('stops when the lock is lost during the download: no helper set, nothing published, the staging left', async () => {
+    const download = async (_url: string, to: string) => {
+      writeFileSync(to, zipBytes);
+      loseLock('9');
+    };
+    await expect(installRenderRuntime(markerDeps({ download }))).rejects.toThrow(/lost the install lock: its holder exited \(status 9\)/);
+    expect(sudoCalls()).toEqual([]);
+    expect(listing()).toEqual([stagingName(pin)]);
+  });
+
+  it('stops when the lock is lost at the helper step or before the rename: nothing published', async () => {
+    for (const step of ['chown', 'chmod', 'publishing']) {
+      rmSync(root(), { recursive: true, force: true });
+      lockLost = null;
+      calls = [];
+      const checkpoint = (at: string) => void (at === step && loseLock('SIGKILL'));
+      await expect(installRenderRuntime(markerDeps({ checkpoint })), step).rejects.toThrow(/lost the install lock/);
+      expect(existsSync(entry()), `lost at ${step}`).toBe(false);
+      expect(sudoCalls(), `lost at ${step}`).toEqual(step === 'chown' ? [] : step === 'chmod' ? [`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`] : expect.any(Array));
+      expect(listing(), `lost at ${step}`).toEqual([stagingName(pin)]);
+    }
+  });
+
+  // The holder ending while a synchronous step runs (the sudo): node reads no exit until the step returns, so the check
+  // reads the holder itself. flockFile's own hold, with flock(1) a stand-in that runs its command without locking (a
+  // Mac has none) and the holder's state given by the test.
+  it('stops when the lock’s holder ends inside a synchronous step: the next check sees it, and nothing is published', async () => {
+    writeFileSync(join(bin, 'flock'), '#!/bin/sh\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = --conflict-exit-code ] && shift; shift; done\nshift\nexec "$@"\n');
+    chmodSync(join(bin, 'flock'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ''}`;
+    let holderRuns = true;
+    const base = markerDeps();
+    try {
+      const run: RenderInstallDeps['run'] = (command, args, options) => {
+        const done = base.run(command, args, options);
+        if (args[1] === 'chown') holderRuns = false; // the holder killed while the chown ran
+        return done;
+      };
+      await expect(installRenderRuntime(markerDeps({ lock: (at, waiting) => flockFile(at, waiting, () => holderRuns), run }))).rejects.toThrow(/lost the install lock .*: its holder exited \(status unreaped\)/);
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
+    expect(existsSync(entry())).toBe(false);
+    expect(listing()).toEqual([stagingName(pin)]);
+  });
+
+  it('an uninstall stops when the lock is lost before it removes anything', async () => {
+    await installRenderRuntime(markerDeps());
+    const outcome = uninstallRenderRuntime(markerDeps({ processes: () => (loseLock('9'), running) }));
+    await expect(outcome).rejects.toThrow(/lost the install lock/);
     expect(listing()).toEqual([runtimeName(pin)]);
   });
 
@@ -266,10 +516,10 @@ describe('an uninstall', () => {
   it('refuses while a render host runs from the entry; otherwise removes it, and the runtime reads absent', async () => {
     await installRenderRuntime(deps());
     running = [{ exe: join(entry(), 'electron'), cmdline: 'electron --headless' }];
-    expect(() => uninstallRenderRuntime(deps())).toThrow(/a render host runs from .* \(1 process\)/);
+    await expect(uninstallRenderRuntime(deps())).rejects.toThrow(/a render host runs from .* \(1 process\)/);
     expect(existsSync(entry())).toBe(true);
     running = [];
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [runtimeName(pin)] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [runtimeName(pin)] });
     expect(listing()).toEqual([]);
     expect(reading()).toEqual({ available: false, reason: 'the render runtime 44.4.5 is not installed on vm-1: run mawsd render install' });
   });
@@ -277,8 +527,76 @@ describe('an uninstall', () => {
   it('removes a staging that waits for privilege, and with nothing installed removes nothing', async () => {
     privileged = false;
     await installRenderRuntime(deps());
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [stagingName(pin)] });
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [stagingName(pin)] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [] });
+  });
+});
+
+// The real lock (flock(1), util-linux: Linux's)
+describe.runIf(process.platform === 'linux')('the cache lock', () => {
+  it('is exclusive: a second taker waits, says so once, and holds it once the first lets go', async () => {
+    const path = join(dir, '.install-lock');
+    const first = await flockFile(path, () => expect.unreachable('the first taker waited'));
+    let said = 0;
+    let saidOnce: () => void = () => {};
+    const waiting = new Promise<void>((resolve) => (saidOnce = resolve));
+    let secondHolds = false;
+    const second = flockFile(path, () => (said += 1, saidOnce())).then((hold) => ((secondHolds = true), hold));
+    await waiting; // its try without blocking found the lock held
+    expect(secondHolds).toBe(false);
+    await first.release();
+    await (await second).release();
+    expect(secondHolds).toBe(true);
+    expect(said).toBe(1);
+  });
+
+  it('says it is lost when its holder child ends before the release', async () => {
+    const hold = await flockFile(join(dir, '.install-lock'), () => expect.unreachable('waited'));
+    hold.check();
+    expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
+    const lost = () => {
+      try {
+        hold.check();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    expect(lost()).toBe(true); // read from /proc at once (a zombie until node reaps it), before any exit event
+    expect(() => hold.check()).toThrow(/lost the install lock .*: its holder exited \(status (?:unreaped|SIGKILL)\)/);
+    await expect(hold.release()).rejects.toThrow(/lost the install lock/); // said at the release too
+  });
+
+  it('a holder killed inside a synchronous step of an install: the next check sees it, and nothing is published', async () => {
+    const base = markerDeps();
+    const run: RenderInstallDeps['run'] = (command, args, options) => {
+      const done = base.run(command, args, options);
+      if (args[1] === 'chown') expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
+      return done;
+    };
+    await expect(installRenderRuntime(markerDeps({ lock: undefined, run }))).rejects.toThrow(/lost the install lock .*: its holder exited/);
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
+    expect(existsSync(entry())).toBe(false);
+  });
+
+  it('is let go when its holder dies, however it dies', async () => {
+    const path = join(dir, '.install-lock');
+    const bundle = join(dir, 'holder.mjs');
+    buildSync({
+      stdin: { contents: `import { flockFile } from './render-install';\nawait flockFile(process.argv[2], () => {});\nprocess.send('held');\nsetInterval(() => {}, 60_000);\n`, resolveDir: __dirname, loader: 'ts' },
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      outfile: bundle,
+      logLevel: 'silent',
+    });
+    const holder = fork(bundle, [path], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    await new Promise<void>((resolve) => holder.once('message', () => resolve()));
+    let said = 0;
+    const taken = flockFile(path, () => (said += 1));
+    holder.kill('SIGKILL'); // no release ran: its pipe to the flock ends with it
+    await (await taken).release();
+    expect(said).toBeLessThanOrEqual(1);
   });
 });
 

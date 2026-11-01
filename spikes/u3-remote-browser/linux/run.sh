@@ -8,6 +8,19 @@
 #
 #   cd ~/Developer/GitHub/MAWS && bash spikes/u3-remote-browser/linux/run.sh
 set -uo pipefail
+
+# fetch_electron <dir> <zip> <url>: <url>/<zip> and <url>/SHASUMS256.txt into <dir>, the zip checked against the sums,
+# then unpacked into <dir>/electron; any failure returns before the unzip (the script has no errexit: a mode's failure
+# must not stop the others). test/spikes/u3-linux-run.test.ts sources this file for it, with a file:// url.
+fetch_electron() {
+  local dir=$1 zip=$2 url=$3
+  curl -fsSL -o "$dir/$zip" "$url/$zip" || return
+  curl -fsSL -o "$dir/SHASUMS256.txt" "$url/SHASUMS256.txt" || return
+  (cd "$dir" && grep " \*$zip\$" SHASUMS256.txt | sha256sum -c -) || return
+  mkdir -p "$dir/electron" && (cd "$dir/electron" && unzip -oq "../$zip")
+}
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0 # sourced for its functions
+
 here=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "$here/../.." && pwd)
 results=$here/results
@@ -22,10 +35,10 @@ if [[ ! -x $electron ]]; then
   zip="electron-v$version-linux-x64.zip"
   if [[ ! -x $root/electron/electron ]]; then
     log "downloading $zip"
-    curl -fsSL -o "$root/$zip" "https://github.com/electron/electron/releases/download/v$version/$zip"
-    curl -fsSL -o "$root/SHASUMS256.txt" "https://github.com/electron/electron/releases/download/v$version/SHASUMS256.txt"
-    (cd "$root" && grep " \*$zip\$" SHASUMS256.txt | sha256sum -c -) | tee -a "$results/run.log"
-    mkdir -p "$root/electron" && (cd "$root/electron" && unzip -oq "../$zip")
+    fetch_electron "$root" "$zip" "https://github.com/electron/electron/releases/download/v$version" 2>&1 | tee -a "$results/run.log" || {
+      log "$zip: the fetch or its sha256 check failed; stopping before anything runs from it"
+      exit 1
+    }
   fi
   electron=$root/electron/electron
 fi
@@ -33,7 +46,9 @@ fi
 packages=(xvfb libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 libpango-1.0-0 libcairo2 libatspi2.0-0t64 libxshmfence1 fontconfig fonts-dejavu-core fonts-noto-core unzip)
 if ! command -v xvfb-run >/dev/null || ldd "$electron" | grep -q 'not found'; then
   log "installing packages"
+  # shellcheck disable=SC2024 # apt.txt is this user's log: only apt-get runs as root, the redirect is meant to be ours
   sudo -n apt-get update -q >"$results/apt.txt" 2>&1
+  # shellcheck disable=SC2024 # as above
   sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -yq "${packages[@]}" >>"$results/apt.txt" 2>&1 || log "apt-get install failed (see apt.txt)"
 fi
 ldd "$electron" | grep 'not found' >"$results/ldd-missing.txt" || true
@@ -45,7 +60,7 @@ node "$here/build.mjs" 2>&1 | tee -a "$results/run.log"
 xvfb=(xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp")
 modes=${U3_MODES:-hidden,hidden-unthrottled,offscreen,shown} # the tab modes to run, comma-separated (host/main.ts VARIANTS names them all)
 for mode in ${modes//,/ }; do
-  rm -rf "$results/$mode"
+  rm -rf "${results:?}/${mode:?}"
   log "mode $mode"
   timeout -k 10 300 node "$here/driver.mjs" --out "$results/$mode" --mode "$mode" --repo "$repo" -- "${xvfb[@]}" "$electron" --headless --hide-scrollbars "$here/build/host.cjs" 2>"$results/$mode.driver-stderr.txt"
   log "mode $mode: driver exit $?"
