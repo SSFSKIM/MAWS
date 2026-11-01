@@ -590,13 +590,33 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       }
       await expect.poll(() => tabIdOf('/child'), { timeout: 10_000, message: 'the popup adopted as a tab of the session' }).not.toBeNull();
       expect(await viewFacts(tabIdOf('/child')!), 'the adopted popup renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
-      // what the real Electron made of the adopted child, beside the reading (M4's open question for this run)
-      const childFacts = async () => app.evaluate(({ webContents }, id) => {
-        const contents = id === null ? undefined : webContents.fromId(id);
-        return contents ? { type: contents.getType(), offscreen: contents.isOffscreen(), painting: contents.isPainting(), frameRate: contents.getFrameRate() } : null;
-      }, await contentsIdOf(tabIdOf('/child')!));
+      // the opener relation survives adoption: the child posts to its opener as it loads, as a sign-in popup posts back
+      expect(await inPage<boolean>('/child', 'window.opener !== null'), 'the adopted popup keeps window.opener').toBe(true);
+      await expect.poll(() => inPage<unknown[]>('/popup', '__messages'), { message: 'the opener heard its popup' }).toEqual(['from the child']);
+      // what the real Electron made of a tab's view and page, the child's beside its opener's (whose view the engine made
+      // itself), so a failure below says which step of the sizing differs
+      const sizingFacts = async (path: string) => {
+        const id = await contentsIdOf(tabIdOf(path)!);
+        const main = await app.evaluate(({ BaseWindow, webContents }, contentsId) => {
+          const contents = contentsId === null ? undefined : webContents.fromId(contentsId);
+          if (!contents) return null;
+          const viewOf = (window: Electron.BaseWindow) => window.contentView.children.find((view) => (view as Partial<Electron.WebContentsView>).webContents?.id === contentsId) as Electron.WebContentsView | undefined;
+          const holder = BaseWindow.getAllWindows().find((window) => viewOf(window) !== undefined);
+          return {
+            type: contents.getType(), offscreen: contents.isOffscreen(), painting: contents.isPainting(), frameRate: contents.getFrameRate(),
+            viewBounds: holder ? viewOf(holder)!.getBounds() : null,
+            sizingWindow: holder ? { id: holder.id, size: holder.getSize(), contentSize: holder.getContentSize() } : null,
+            // Electron's internal reading of the window its page is sized from (no longer in its typings)
+            ownerBrowserWindowId: (contents as unknown as { getOwnerBrowserWindow?(): { id: number } | null }).getOwnerBrowserWindow?.()?.id ?? null,
+            windows: BaseWindow.getAllWindows().map((window) => window.id),
+          };
+        }, id);
+        const page = await readPage(path, '({ inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], devicePixelRatio })').catch((error: unknown) => ({ missing: String(error) }));
+        return { ...main, page };
+      };
       await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { timeout: 15_000, message: 'the popup at the agent’s viewport, once it commits and is placed' }).toEqual([1280, 800]).catch(async (error: unknown) => {
-        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe adopted child: ${JSON.stringify(await childFacts())}`, { cause: error });
+        const facts = { child: await sizingFacts('/child'), opener: await sizingFacts('/popup') };
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe sizing facts: ${JSON.stringify(facts)}`, { cause: error });
       });
       const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
       await host!.request('tabs.remove', { tabId: child.id });

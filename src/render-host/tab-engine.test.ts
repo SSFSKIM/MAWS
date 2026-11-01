@@ -210,17 +210,22 @@ describe('the tab engine under a stand-in Electron', () => {
     await t.ask(A, 'prepare');
     const host = await t.host(A);
     await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
-    const answer = popup(activated(newestPage()), 'http://127.0.0.1:4000/popup');
-    // P5 O17 M8 fix 6: Chromium makes the child before it is adopted, at the size the open's window options give it: the
-    // agent's viewport, so the offscreen child never reads its page at 0×0 before its placement
-    expect(answer).toMatchObject({ action: 'allow', overrideBrowserWindowOptions: { width: HEADLESS_VIEWPORT.width, height: HEADLESS_VIEWPORT.height, useContentSize: true, show: false, webPreferences: offscreenPreferences() } });
+    const opener = newestPage();
+    const answer = popup(activated(opener), 'http://127.0.0.1:4000/popup');
+    expect(answer).toMatchObject({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: offscreenPreferences() } });
     const child = new (await import('./electron.fake')).FakePage();
-    (answer as { createWindow(options: unknown): unknown }).createWindow({ webContents: child });
+    // Chromium's own child is what Electron gets back, so the relation the open made (`window.opener`) is the tab's
+    expect((answer as { createWindow(options: unknown): unknown }).createWindow({ webContents: child })).toBe(child);
     expect(made.views).toHaveLength(2);
     expect(made.views[1]!.webContents).toBe(child);
     expect(made.windows).toHaveLength(1);
     expect(made.windows[0]!.children).toEqual(made.views);
     expect(made.views[1]!.bounds).toEqual({ x: 0, y: 0, ...HEADLESS_VIEWPORT });
+    // M8 fix 7: Electron 44 never resizes an offscreen child's page to its window (offscreen-views.ts), so the child's page
+    // is sized to the viewport through its own debugger, under a lease it gives back
+    await expect.poll(() => child.debugger.sent).toContainEqual({ method: 'Emulation.setVisibleSize', params: { ...HEADLESS_VIEWPORT }, sessionId: undefined });
+    await expect.poll(() => child.debugger.attached, { message: 'the sizing lease given back' }).toBe(false);
+    expect(opener.debugger.methods(), 'a tab whose own view made its page is sized by its window').not.toContain('Emulation.setVisibleSize');
     expect(t.works()).toEqual(['A held']); // the opener's acquire alone
     expect(t.engine.inspect().sessions.A).toMatchObject({ tabs: 2, held: 'held' });
   });

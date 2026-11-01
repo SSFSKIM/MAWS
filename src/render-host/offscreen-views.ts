@@ -11,6 +11,18 @@
 // its WebRTC policy is view.ts's; both are restated, held equal by offscreen-views.test.ts, since view.ts reads
 // `__dirname` at load (its preload's path) and the render host's chunk reads none (bundle-guard.test.ts). An adopted
 // popup is Chromium's child, made with `childPreferences` (window-open.ts's override), offscreen too.
+//
+// An adopted popup's page is sized through its debugger as well (P5 O17 M8 fix 7). Electron 44.4.5 sizes an offscreen page
+// from its view's window, by `OffScreenWebContentsView::OnWindowResize`, which reaches the page's widget only through the
+// webContents it was given (`GetView()`, shell/browser/osr/osr_web_contents_view.cc:206-211). The view Electron makes for
+// a `window.open` child is never given it (`MaybeOverrideCreateParamsForNewWindow` and `AddNewContents`,
+// shell/browser/api/electron_api_web_contents.cc:1433-1514, call no `SetWebContents`, which the other two offscreen paths
+// do at :986 and :1009). Chromium makes the child's widget in `CreateNewWindow` (content/browser/web_contents/
+// web_contents_impl.cc:5668), before `createWindow` runs and while that view has no window: at 0×0. So placing the child
+// in the sizing window moves nothing, and the page reads 0×0 until something else creates a new widget for it. Chromium's
+// own resize of that widget, `WebContentsImpl::SetDeviceEmulationSize` (web_contents_impl.cc:11978), is reached by CDP's
+// `Emulation.setVisibleSize` (content/browser/devtools/protocol/emulation_handler.cc:869) and outlives the attachment
+// (its `Disable` leaves it). A widget made later, by a cross-site navigation, is made at the window's size.
 import { BaseWindow, WebContentsView, type WebContents, type WebPreferences } from 'electron';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { Partitions } from '../main/browser/partition';
@@ -26,11 +38,9 @@ export function offscreenPreferences(): WebPreferences {
 
 export class OffscreenViews {
   readonly childPreferences: WebPreferences = offscreenPreferences();
-  // P5 O17 M8 fix 6: Chromium makes a popup's child before it is adopted, at the size the open's window options give it; an
-  // offscreen child made at Chromium's default reads its page at 0×0 (pass 3's real run): it is made at the viewport
-  readonly childSize = { ...HEADLESS_VIEWPORT };
   private window: BaseWindow | null = null;
   private readonly placed = new Set<TabEntry>();
+  private readonly adopted = new WeakSet<WebContents>(); // Chromium's children, sized through their debugger
 
   constructor(private readonly partitions: Pick<Partitions, 'session'>) {}
 
@@ -39,6 +49,7 @@ export class OffscreenViews {
     this.partitions.session(tab.partition);
     const view = adopted ? new WebContentsView({ webContents: adopted }) : new WebContentsView({ webPreferences: { partition: tab.partition, ...offscreenPreferences() } });
     view.webContents.setWebRTCIPHandlingPolicy(HEADLESS_WEBRTC_IP_POLICY);
+    if (adopted) this.adopted.add(adopted);
     return view;
   };
 
@@ -51,6 +62,25 @@ export class OffscreenViews {
     this.window.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width, height });
     this.placed.add(entry);
+    // after Electron's `createWindow` has the child back: nothing attaches to it inside Electron's own open
+    if (this.adopted.has(view.webContents)) setImmediate(() => void this.sizeAdopted(entry, view));
+  }
+
+  // An adopted popup's page at the viewport (see the head): one command under a lease, given back at once, so the
+  // attachment ends unless the agent holds one too
+  private async sizeAdopted(entry: TabEntry, view: WebContentsView): Promise<void> {
+    const tabDebugger = entry.debugger;
+    if (entry.view !== view || !tabDebugger || view.webContents.isDestroyed()) return;
+    try {
+      const lease = await tabDebugger.lease();
+      try {
+        await tabDebugger.send('Emulation.setVisibleSize', { ...HEADLESS_VIEWPORT });
+      } finally {
+        lease.release();
+      }
+    } catch (error) {
+      console.error('[render-host] an adopted popup could not be sized to the viewport:', error);
+    }
   }
 
   // The store's `onViewDestroying`: out of the window, which goes with the last view
