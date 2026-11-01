@@ -173,6 +173,19 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
     }
     expect([...run].some(([, text]) => /\bfunction createRenderHandle\(/.test(text)), 'the handle is on the run path').toBe(true);
   });
+
+  // P5 O17 M1 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §C; acceptance 1 and 14): the cold broker
+  // is a chunk the cua sockets load at the first peer they admit on a cold route, never at start; the sockets, which
+  // are, hold none of it
+  it('keep the cold broker off the run path, in the chunk the cua sockets load at the first admitted cold peer', () => {
+    const markers = { createCuaBroker: /\bfunction createCuaBroker\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createCuaSockets\(/.test(text)), 'the sockets are on the run path').toBe(true);
+  });
 });
 
 // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M3; Interfaces §E): main's entry loads one of two roots.

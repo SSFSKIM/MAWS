@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { PEER_AUTH_VERSION, PEER_ROOT_WAIT_MS, type PeerAddon } from '../main/browser/cua/peer';
-import { createCuaSockets, type CuaSocketsOptions } from './cua-socket';
+import { createCuaSockets, loadCuaBroker, PENDING_BUDGET, type CuaSocketsOptions } from './cua-socket';
+import type { BrowserDemand, BrowserRouteReading, BrowserTarget } from './cua-broker'; // P5 O17 M1
+import { browserCapability } from './session-capabilities'; // P5 O17 M1
 
 // The daemon's per-session cua sockets (P5 O5 M5; docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H;
 // acceptance 3): listening only while a tab engine is attached, each accepted peer checked against the session's
@@ -499,5 +501,176 @@ describe('the relay', () => {
     expect(waiting.closed()).toBe(false);
     sockets.close();
     await until(waiting.closed);
+  });
+});
+
+// P5 O17 M1 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §B, §C; acceptance 1's cold half and 2):
+// with no app attached and the session's route cold (the route's readings a stub until M5's browser-route.ts), the
+// socket listens while the session's engine is live; a peer the check admits is handed to the cold broker, a chunk
+// loaded only then; the pending budget counts the broker's promotions beside the peer-root waits, one counter.
+describe('the cold route (P5 O17 M1)', () => {
+  const frame = (message: unknown) => {
+    const body = Buffer.from(JSON.stringify(message));
+    const header = Buffer.alloc(4);
+    header.writeUInt32LE(body.length, 0);
+    return Buffer.concat([header, body]);
+  };
+  const messagesOf = (bytes: Buffer) => {
+    const out: { id?: unknown; method?: string; result?: unknown; error?: { message: string } }[] = [];
+    for (let at = 0; at + 4 <= bytes.length; ) {
+      const length = bytes.readUInt32LE(at);
+      if (at + 4 + length > bytes.length) break;
+      out.push(JSON.parse(bytes.subarray(at + 4, at + 4 + length).toString('utf8')));
+      at += 4 + length;
+    }
+    return out;
+  };
+
+  // The route's stub: every session cold at epoch e1 and live unless told otherwise; ensureBrowser held open
+  function coldStand(options: Partial<CuaSocketsOptions> & { addon?: PeerAddon | null } = {}) {
+    const readings = new Map<AppSessionId, BrowserRouteReading>();
+    const live = new Map<AppSessionId, boolean>();
+    const demands: BrowserDemand[] = [];
+    let loads = 0;
+    const stood = stand({
+      cold: {
+        machine: 'mini',
+        version: 'test',
+        reading: (appSessionId) => readings.get(appSessionId) ?? { state: 'cold', epoch: 'e1' },
+        live: (appSessionId) => live.get(appSessionId) ?? true,
+        ensureBrowser: (demand) => (demands.push(demand), new Promise<BrowserTarget>(() => {})),
+      },
+      loadBroker: () => (loads++, loadCuaBroker()),
+      ...options,
+    });
+    return { ...stood, readings, live, demands, loads: () => loads };
+  }
+
+  it('listens with no app while the route is cold and the engine live, stops when it is not, and listens while starting', async () => {
+    const { sockets, readings, live } = coldStand({ uidBoundary: true });
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    expect(sockets.inspect().A!.listening).toBe(true);
+    live.set(A, false);
+    sockets.routeChanged(A);
+    expect(exists(path)).toBe(false);
+    readings.set(A, { state: 'starting', epoch: 'e1' });
+    sockets.routeChanged(A);
+    await until(() => exists(path));
+    readings.set(A, { state: 'none', epoch: 'e2' });
+    sockets.routeChanged(A);
+    expect(exists(path)).toBe(false);
+    expect(sockets.inspect().A!.listening).toBe(false);
+  });
+
+  it('an admitted peer is greeted by the broker and answered cold; the chunk loads once, at the first admitted peer', async () => {
+    const addon = fakeAddon();
+    const { sockets, loads, demands } = coldStand({ addon });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    expect(loads()).toBe(0);
+    const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.query', params: {} }));
+    await until(() => messagesOf(client.heard()).length === 2);
+    expect(messagesOf(client.heard())).toEqual([
+      { jsonrpc: '2.0', method: 'hello', params: { extensionId: 'maws', extensionInstanceId: 'maws:A', version: 'test', protocolVersion: 1, profileName: 'MAWS' } },
+      { jsonrpc: '2.0', id: 1, result: [] },
+    ]);
+    engineClient(path);
+    await until(() => sockets.inspect().A!.relayed === 0 && loads() === 1);
+    expect(demands).toHaveLength(0);
+  });
+
+  it('a rejected peer gets no hello and nothing is imported; nor does a capability read, a listener or the inspection import anything', async () => {
+    const addon = fakeAddon();
+    const { sockets, loads } = coldStand({ addon });
+    sockets.engineProcess(A, ENGINE);
+    addon.peerPid = STRANGER;
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    browserCapability({ machine: 'mini', appSessionId: A, path, tabEngine: sockets.tabEngine() });
+    sockets.inspect();
+    const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.query', params: {} }));
+    await until(client.closed);
+    expect(client.heard().length).toBe(0);
+    expect(sockets.inspect().A!.refused).toBe(1);
+    expect(loads()).toBe(0);
+  });
+
+  it('the pending budget counts promotions and peer-root waits together, per session and across the daemon', async () => {
+    expect(PENDING_BUDGET).toEqual({ session: 8, total: 64 });
+    const table = new Map([
+      [ENGINE, { ppid: 1, start: 10 }],
+      [CHILD, { ppid: ENGINE, start: 20 }],
+    ]);
+    const addon: PeerAddon = { version: PEER_AUTH_VERSION, peer: () => ({ pid: CHILD, uid }), process: (pid: number) => table.get(pid) ?? null };
+    const { sockets, demands } = coldStand({ addon, pendingBudget: { session: 2, total: 3 } });
+    sockets.engineProcess(A, ENGINE);
+    const a = sockets.ensure(A)!;
+    await until(() => exists(a));
+    const promoting = engineClient(a, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.create', params: {} }));
+    await until(() => demands.length === 1); // a promotion holds A's first place
+    table.delete(ENGINE); // A's engine no longer reads live: the next peers wait for it
+    engineClient(a);
+    await until(() => sockets.inspect().A!.waiting === 1); // A's second place
+    const pastA = engineClient(a);
+    await until(pastA.closed, 1000);
+    expect(sockets.inspect().A).toMatchObject({ waiting: 1, refused: 1 });
+    table.set(ENGINE, { ppid: 1, start: 10 }); // admitted again, but its trigger finds A's places taken
+    const refusedTrigger = engineClient(a, frame({ jsonrpc: '2.0', id: 2, method: 'tabs.create', params: {} }));
+    await until(refusedTrigger.closed, 1000);
+    expect(messagesOf(refusedTrigger.heard()).find((message) => message.id === 2)?.error?.message).toMatch(/too many connections waiting/);
+    expect(demands).toHaveLength(1);
+    // across the daemon: A's two and B's root wait are the three
+    const b = sockets.ensure(B)!;
+    await until(() => exists(b));
+    engineClient(b);
+    await until(() => sockets.inspect().B!.waiting === 1);
+    const pastTotal = engineClient(b);
+    await until(pastTotal.closed, 1000);
+    expect(sockets.inspect().B).toMatchObject({ waiting: 1, refused: 1 });
+    expect(promoting.closed()).toBe(false);
+  });
+
+  it('an app’s attachment ends the cold connections and relays the next; its departure leaves the socket cold', async () => {
+    const addon = fakeAddon();
+    const { sockets, appDir } = coldStand({ addon });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const cold = engineClient(path);
+    await until(() => messagesOf(cold.heard()).length === 1);
+    const app = appSocket(appDir, A);
+    await app.listening;
+    sockets.target(appDir);
+    await until(cold.closed);
+    engineClient(path, Buffer.from('relayed'));
+    await until(() => app.heard().toString() === 'relayed');
+    sockets.target(null);
+    expect(exists(path)).toBe(true); // still listening, cold
+    const again = engineClient(path);
+    await until(() => messagesOf(again.heard()).length === 1);
+  });
+
+  it('a new epoch ends what the old one admitted; a replaced engine and a removed session end the cold connections too', async () => {
+    const addon = fakeAddon();
+    const { sockets, readings } = coldStand({ addon });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const first = engineClient(path);
+    await until(() => messagesOf(first.heard()).length === 1);
+    readings.set(A, { state: 'cold', epoch: 'e2' });
+    sockets.routeChanged(A);
+    await until(first.closed);
+    const second = engineClient(path);
+    await until(() => messagesOf(second.heard()).length === 1);
+    sockets.engineProcess(A, NEXT_ENGINE);
+    await until(second.closed);
+    addon.peerPid = NEXT_CHILD;
+    const third = engineClient(path);
+    await until(() => messagesOf(third.heard()).length === 1);
+    sockets.remove(A);
+    await until(third.closed);
   });
 });
