@@ -238,11 +238,17 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     let first: HostConnection | null = null;
     const host = await start({ ...deps, hostArgs: ['--ring-cap-bytes', '65536'], onConnection: (c) => (first ??= c) });
     const lines = 40_000;
-    const t = host.transport(plan(['/bin/sh', '-c', `read go; i=0; while [ $i -lt ${lines} ]; do echo "{\\"n\\":$i,\\"pad\\":\\"${'x'.repeat(100)}\\"}"; i=$((i+1)); done; read done; exit 0`]), { appSessionId: 'app-1', maxLineChars: 1024 });
+    // the burst's end, marked by the shell once its loop has written every line: the reader resumes only then, so a slow
+    // runner's shell still writing never makes the live stream lag the ring again (hosted class 1a: 8 gaps, not 1)
+    const marks = mkdtempSync(join(tmpdir(), 'msh-burst-'));
+    scratch.push(marks);
+    const written = join(marks, 'written');
+    const t = host.transport(plan(['/bin/sh', '-c', `read go; i=0; while [ $i -lt ${lines} ]; do echo "{\\"n\\":$i,\\"pad\\":\\"${'x'.repeat(100)}\\"}"; i=$((i+1)); done; : > '${written}'; read done; exit 0`]), { appSessionId: 'app-1', maxLineChars: 1024 });
     await t.write({ type: 'go' } as never);
     const socket = (first as unknown as { socket: import('node:net').Socket }).socket;
     socket.pause(); // the writer stops reading: the burst (about 5 MB, past any socket buffer) outruns the ring, and the host closes the lagging connection
-    await sleep(1_500);
+    for (const until = Date.now() + 20_000; !existsSync(written) && Date.now() < until; ) await sleep(50);
+    expect(existsSync(written), 'the burst written whole before the reader resumes').toBe(true);
     socket.resume();
     const items: TransportItem[] = [];
     const all = (async () => {

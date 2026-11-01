@@ -1324,8 +1324,8 @@ describe('the detached transport: the handover', () => {
   });
 
   // fix wave 3d: a deliberate stop-all sent while a drain's close awaits the exit's settle is held for the draining
-  // process, as a completion is: the same process met draining again is sent it (D61(4)); one known gone leaves it to
-  // the successor, which has adopted the sessions
+  // process, as a completion is: the same process met draining again is sent it (D61(4)). Fix wave 3e: one known gone
+  // fails it host_unavailable, as before 3d; a successor that read ready may not have reserved its adoptions yet
   it('a stop-all sent in a drain’s exit settle reaches the same host when it is met draining again: it stops, and its close is no crash', { timeout: 15_000 }, async () => {
     const { fake: old, asked, stops } = await paneDrainingFake();
     old.dropClient(); // the host lives on, draining
@@ -1339,7 +1339,7 @@ describe('the detached transport: the handover', () => {
     expect(spawn).toHaveBeenCalledOnce();
   });
 
-  it('a stop-all sent in a drain’s exit settle whose host then dies goes to the successor once it is ready', { timeout: 15_000 }, async () => {
+  it('a stop-all sent in a drain’s exit settle whose host then dies fails host_unavailable; the successor is sent nothing', { timeout: 15_000 }, async () => {
     const successorStops: unknown[] = [];
     onSpawn = (candidate) => void startFake({ pid: candidate.pid!, register: (on) => on('host.stopAll', async (input) => (successorStops.push(input), { stopped: 1, forced: 0 })) });
     const { fake: old, stops } = await paneDrainingFake();
@@ -1347,10 +1347,11 @@ describe('the detached transport: the handover', () => {
     await sleep(50); // inside the settle
     const stopped = supervisor.dispatch('engine-host', 'host.stopAll', { graceMs: 1 });
     await old.die({ keepLock: true }); // gone before the settle ends
-    await expect(stopped).resolves.toEqual({ ok: true, value: { stopped: 1, forced: 0 } });
-    expect(successorStops).toEqual([{ graceMs: 1 }]);
+    await expect(stopped).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await until(() => state().state === 'ready' && state().pid === candidates[0]?.pid);
+    await sleep(100);
+    expect(successorStops).toEqual([]);
     expect(stops).toEqual([]);
-    expect(states.filter((s) => s.state === 'ready').map((s) => s.pid)).toEqual([old.pid, candidates[0]!.pid]); // sent once the successor read ready
   });
 
   it('a host that said its rows detached, then exited, handed over as planned: no crash count, no backoff, no toast', async () => {

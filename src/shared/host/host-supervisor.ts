@@ -257,7 +257,7 @@ interface Pending {
   client: ClientRef | null; // P5 O1 M5: the asker a `machine` request names, whose end the link relays once it is sent
   forwardedClient: string | null; // P5 O2 M3: a forwarded request's `client`, kept off a protocol-2 link
   forwardedRef: ClientRef | null; // P5 O7 M2: that client as a ref, whose end the link relays once the request carried it
-  issuer: number | null; // P5 O16 M3b fix wave 3: a held completion's raising pid: sent to that process alone, failed once it is gone (fix wave 3d: a held stop-all's draining pid, left to the successor once it is gone)
+  issuer: number | null; // P5 O16 M3b fix wave 3: a held completion's raising pid: sent to that process alone, failed once it is gone (fix wave 3d: a held stop-all's draining pid, likewise)
 }
 
 // E10: the port a host is spoken to through, a utility host's channel or the detached transport's socket link.
@@ -627,11 +627,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   function processGone(host: Host, pids: readonly number[]): void {
     for (const pid of pids) host.routes.gone(pid);
-    for (const [id, pending] of host.pending) {
-      if (pending.sent || pending.issuer === null || !pids.includes(pending.issuer)) continue;
-      if (pending.name === 'host.stopAll') pending.issuer = null; // fix wave 3d: the successor, which adopted its sessions
-      else failCompletion(host, id, pending);
-    }
+    for (const [id, pending] of host.pending) if (!pending.sent && pending.issuer !== null && pids.includes(pending.issuer)) failCompletion(host, id, pending);
   }
 
   // A link to `pid` opened (fix wave 3c: whether it serves or meets the host draining): every other process reconnecting
@@ -1144,7 +1140,8 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       const asker = owner === 'machine' && client ? client : null;
       const message: HostMessage = asker ? { t: 'req', id, name: name as CommandName, input, client: asker.id } : { t: 'req', id, name: name as CommandName, input };
       // fix wave 3d: a deliberate stop while a drain's link is down (its close told, its exit not yet judged) is held for
-      // that process as a completion is: sent if it is met again (D61(4)), else left to the successor
+      // that process as a completion is: sent if it is met again (D61(4)); fix wave 3e: failed once it is known gone, never
+      // left to the successor, whose adoption a stop-all before its reservations would break (the caller retries)
       const drainStop = name === 'host.stopAll' && !host.port && host.draining ? host.routes.route(null, [host.draining]) : undefined;
       const bound = completion ?? drainStop;
       const issuer = bound && 'hold' in bound ? bound.hold : null; // fix wave 3: bound to its raiser
