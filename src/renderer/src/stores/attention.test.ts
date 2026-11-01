@@ -128,6 +128,33 @@ describe('another machine’s attention feed', () => {
     expect([live(store), greyed(store)]).toEqual([[], []]);
   });
 
+  // M6c fix wave 1: an RL2 machine the roster brought up before the org rows named it was snapshotted as a socket
+  // machine; once main's feed speaks for it, that list's late answer (or its failure) changes nothing, either way
+  it('a late attention.list does not resurrect an item the feed answered', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyChanged({ appSessionId: onB('b1'), items: [] }, OTHER_MACHINE); // buffered
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(store.getState().pendingReplacements).toBeNull();
+    store.getState().applySnapshot([b1], OTHER_MACHINE); // read before the answer
+    expect(store.getState().bySession.has(onB('b1'))).toBe(false);
+    expect([live(store), greyed(store)]).toEqual([[], []]);
+  });
+
+  it('a late attention.list does not erase a current feed item, nor does its failure replay anything', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: false });
+    store.getState().applySnapshot([], OTHER_MACHINE);
+    expect(live(store)).toEqual([onB('b1')]);
+    store.getState().beginSnapshot(OTHER_MACHINE); // a new generation of its link: the feed still speaks for it
+    store.getState().applyChanged({ appSessionId: onB('b2'), items: [b2] }, OTHER_MACHINE); // applied, not buffered
+    expect(live(store)).toEqual([onB('b2'), onB('b1')]);
+    store.getState().cancelSnapshot(OTHER_MACHINE);
+    expect(live(store)).toEqual([onB('b2'), onB('b1')]);
+    expect(store.getState().pendingReplacements).toBeNull();
+  });
+
   it('memoises on the listed rows too: a session listed later gains its row', () => {
     const store = createAttentionStore();
     store.getState().applyRemote({ machine: OTHER_MACHINE, items: [bItem('b3', '2026-09-28T08:00:00Z')], greyed: false });

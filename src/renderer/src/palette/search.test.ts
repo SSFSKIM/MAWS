@@ -44,13 +44,15 @@ describe('a search across machines', () => {
     });
   });
 
-  it('leaves out, with no error, a machine that answers host_unavailable or an endpoint that offers no search', async () => {
+  // M6b's fix wave 1: main answers an endpoint with no search row host_unavailable, so that is the one omission; an
+  // internal failure, whatever its issues, is named like any other
+  it('leaves out, with no error, a machine that answers host_unavailable; an internal failure is named', async () => {
     const fake = fakeClient();
     const search = searchConversations(fake.client, 'deploy', [OTHER_MACHINE, THIRD]);
     await fake.reply('session.search', answer([hit(at('a1'))]));
     await fake.fail('session.search', 'Studio is offline', 'host_unavailable');
-    await fake.fail('session.search', 'not offered', 'internal', { refusal: 'not-offered' }); // before main maps it to host_unavailable
-    expect(await search).toEqual({ groups: [{ machine: TEST_MACHINE, hits: [hit(at('a1'))] }], indexing: false, incomplete: false, errors: [] });
+    await fake.fail('session.search', 'not offered', 'internal', { refusal: 'not-offered' });
+    expect(await search).toEqual({ groups: [{ machine: TEST_MACHINE, hits: [hit(at('a1'))] }], indexing: false, incomplete: false, errors: [{ machine: THIRD, message: 'not offered' }] });
   });
 
   it('names any other failure with its machine, this Mac’s included, and keeps every answer it has', async () => {

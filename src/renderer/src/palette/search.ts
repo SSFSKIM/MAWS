@@ -1,11 +1,10 @@
 // Conversation search across machines (P5 O7 M6, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Search"):
 // the palette's query goes to this Mac and to each RL2 machine that is up, whose endpoint answers `session.search` for
 // the sessions this member may view; the hits come back under their machine, this Mac's first, then the roster's order.
-// A machine that can't answer is left out with no error: `host_unavailable` (offline or unreachable, and, from M6b's fix
-// wave, an endpoint older than M6), or the `internal` refusal `not-offered` main answered for such an endpoint before.
-// This Mac's own failure, and any other machine's, is said with its machine.
-import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
+// A machine that can't answer is left out with no error: `host_unavailable` (offline or unreachable, or an endpoint older
+// than M6, whose refusal main answers so). This Mac's own failure, and any other machine's, is said with its machine.
 import type { IpcError } from '@shared/ipc/errors';
+import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { MachineRef } from '@shared/machine/ref';
 
@@ -23,8 +22,7 @@ export function searchedMachines(rl2: ReadonlySet<MachineRef>, roster: ReadonlyM
   return [...roster].filter(([ref, entry]) => rl2.has(ref) && entry.state === 'up').map(([ref]) => ref);
 }
 
-const leftOut = (error: IpcError): boolean =>
-  error.code === 'host_unavailable' || (error.code === 'internal' && (error.issues as { refusal?: unknown } | undefined)?.refusal === 'not-offered');
+const leftOut = (error: IpcError): boolean => error.code === 'host_unavailable';
 
 export async function searchConversations(client: MawsBridge, query: string, machines: readonly MachineRef[]): Promise<ConversationSearch> {
   const local = client.localMachine;

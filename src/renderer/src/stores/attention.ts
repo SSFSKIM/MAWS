@@ -81,6 +81,10 @@ interface Partition {
   sessions: Set<AppSessionId>;
   buffer: Map<AppSessionId, AttentionItem[]> | null;
   greyed: boolean; // P5 O7 M6: as main last said it in `remote.attention`
+  // P5 O7 M6 (M6c fix wave 1): main's feed speaks for this machine (a first `remote.attention` came), for the page's life:
+  // a snapshot begun for it (an RL2 machine the roster brought up before the org rows named it) buffers nothing, and its
+  // answer, late or failed, writes nothing, so it can neither bring back an item the feed cleared nor erase one it holds.
+  fed: boolean;
 }
 
 export function createAttentionStore() {
@@ -88,7 +92,7 @@ export function createAttentionStore() {
   const partitions = new Map<MachineRef, Partition>();
   const partition = (machine: MachineRef): Partition => {
     let p = partitions.get(machine);
-    if (!p) partitions.set(machine, (p = { sessions: new Set(), buffer: null, greyed: false }));
+    if (!p) partitions.set(machine, (p = { sessions: new Set(), buffer: null, greyed: false, fed: false }));
     return p;
   };
   // Every outstanding snapshot's buffer, as the state shows them.
@@ -116,6 +120,7 @@ export function createAttentionStore() {
     // The machine's snapshot over its own sessions: `items` null keeps what it holds; its buffer replays over it.
     const settle = (machine: MachineRef, items: AttentionItem[] | null) => {
       const p = partition(machine);
+      if (p.fed) return; // the feed's partition (fix wave 1): it buffered nothing, and its answer is older than the feed
       const before = [...p.sessions];
       const bySession = new Map(get().bySession);
       if (items !== null) replace(p, bySession, items);
@@ -137,7 +142,9 @@ export function createAttentionStore() {
       drafts: new Map(),
       greyed: new Set(),
       beginSnapshot(machine) {
-        partition(machine).buffer = new Map();
+        const p = partition(machine);
+        if (p.fed) return; // fix wave 1: the feed's changes apply as they come
+        p.buffer = new Map();
         set({ pendingReplacements: buffered() });
       },
       applySnapshot: (items, machine) => settle(machine, items),
@@ -154,14 +161,16 @@ export function createAttentionStore() {
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
         set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
       },
-      // Main's word, newer than any change still buffered for an `attention.list` of the machine outstanding (an RL2
-      // machine's roster can come up before its rows say it is listed): those are dropped, the buffer kept for its answer.
+      // Main's word, newer than anything an `attention.list` of the machine still outstanding could say (an RL2 machine's
+      // roster can come up before its rows say it is listed): from here the feed alone speaks for the partition (`fed`),
+      // so that list's buffered changes are dropped and its answer will write nothing.
       applyRemote({ machine, items, greyed: grey }) {
         const p = partition(machine);
         const before = [...p.sessions];
         const bySession = new Map(get().bySession);
         replace(p, bySession, items);
-        if (p.buffer) p.buffer = new Map();
+        p.buffer = null;
+        p.fed = true;
         p.greyed = grey;
         set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
       },

@@ -15,10 +15,17 @@ import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
 import { useLayout } from '../stores/layout';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
+import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { CardGroup } from './CardGroup';
 import { overviewGroups } from './derive';
 
 type PaneIndex = 0 | 1;
+
+// P5 O7 M6: Enter opens a card's session; another machine's listed one through its lane's opener (M2's pane), unless split.
+function openCard(appSessionId: AppSessionId, split: boolean): void {
+  if (!split && openListed(appSessionId)) return;
+  useLayout.getState().openSession(appSessionId, { split });
+}
 
 const NEXT = new Set(['ArrowDown', 'ArrowRight']);
 const PREVIOUS = new Set(['ArrowUp', 'ArrowLeft']);
@@ -31,7 +38,7 @@ export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex
   const rows = selectNeedsYou(attention, sessions);
   const machines = useMachines((s) => s.machines);
   const local = ipc.localMachine;
-  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local) });
+  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local), listed: sessions.listed });
   const order = groups.flatMap((g) => g.sessions);
 
   const board = useRef<HTMLDivElement>(null);
@@ -47,7 +54,7 @@ export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex
     else if (PREVIOUS.has(event.key)) focusCard(Math.max(at - 1, 0));
     else if (event.key === 'Home') focusCard(0);
     else if (event.key === 'End') focusCard(order.length - 1);
-    else if (event.key === 'Enter') useLayout.getState().openSession(appSessionId, { split: event.metaKey });
+    else if (event.key === 'Enter') openCard(appSessionId, event.metaKey);
     else return;
     event.preventDefault();
   };

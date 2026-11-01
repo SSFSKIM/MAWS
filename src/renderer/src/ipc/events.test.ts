@@ -762,6 +762,26 @@ describe('the org rows', () => {
     expect(stores.attention.getState().bySession.has(onB('b1'))).toBe(false);
   });
 
+  // M6c fix wave 1: the roster brings B up before the org rows name it, so B is snapshotted as a socket machine; main's
+  // feed then speaks for it, and that list's late answer changes nothing
+  it('a late attention.list of a machine the feed speaks for neither resurrects nor erases its items', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await fake.reply('org.rows', rowsOf({ sessions: ['b1', 'b2'] }));
+    const live = () => selectNeedsYou(stores.attention.getState(), stores.sessions.getState()).map((r) => r.appSessionId);
+    const b1 = item('b1', 'permission', '2026-09-28T08:00:00Z');
+    fake.event('attention.changed', { appSessionId: 'b1', items: [] }, OTHER_MACHINE); // answered: buffered behind B's list
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [], greyed: false }, OTHER_MACHINE);
+    await fake.reply('session.list', { sessions: [], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await fake.reply('attention.list', [b1]); // read before the answer
+    expect(live()).toEqual([A]);
+    fake.event('remote.attention', { machine: OTHER_MACHINE, items: [b1], greyed: false }, OTHER_MACHINE);
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] }); // listed now: no read
+    expect(live()).toEqual([onB('b1'), A]);
+  });
+
   it('a machine the rows do not name yet is read as before', async () => {
     const { fake } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
     await answerSnapshots(fake);
