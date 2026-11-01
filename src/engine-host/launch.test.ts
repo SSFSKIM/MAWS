@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { canonicalize } from 'org-protocol';
-import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { LaunchedBySpec, LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
+import type { AppSessionId } from '@shared/graph/ids';
 import { parseJournalRow } from '@shared/wire/journal';
 import {
   buildLaunch,
@@ -265,7 +266,7 @@ describe('launch contract builds the X6 command line and environment', () => {
     // canonical JSON sminos's record parses; only the spec names one, so a capture taken inside a MAWS-launched session
     // (a mawsd started from its shell) never hands that session's spawner to another
     it('sets MAWS_LAUNCHED_BY from spec.launchedBy under both gateway modes, over any value the capture holds, and never from the capture', () => {
-      const launchedBy = { appSessionId: 'app-1', member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/sessions/launched-by/app-1.json' };
+      const launchedBy: LaunchedBySpec = { appSessionId: 'app-1' as AppSessionId, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/sessions/launched-by/app-1.json' };
       const captured = { ...CAPTURED, MAWS_LAUNCHED_BY: JSON.stringify({ ...launchedBy, member: 'mallory' }) };
       for (const gateway of ['gateway', 'direct'] as const) {
         const { env } = buildLaunch(spec({ gateway, launchedBy }), captured, OPTS);
@@ -404,9 +405,9 @@ describe('LaunchSpecSchema', () => {
 
   // P5 O12 M11: the spawner carries its five fields, no more (the sealed action stays in the proof file), none empty
   it('takes launchedBy as exactly its five non-empty fields', () => {
-    const launchedBy = { appSessionId: 'app-1', member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/app-1.json' };
+    const launchedBy: LaunchedBySpec = { appSessionId: 'app-1' as AppSessionId, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/app-1.json' };
     expect(spec({ launchedBy }).launchedBy).toEqual(launchedBy);
-    expect(() => spec({ launchedBy: { ...launchedBy, action: {} } as LaunchSpec['launchedBy'] })).toThrow();
+    expect(() => spec({ launchedBy: { ...launchedBy, action: {} } as LaunchedBySpec })).toThrow();
     expect(() => spec({ launchedBy: { ...launchedBy, member: '' } })).toThrow();
   });
 });

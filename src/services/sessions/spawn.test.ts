@@ -27,6 +27,7 @@ import { tempDir } from '../../../test/support/index-fixture';
 import { OpLedger } from '@shared/host/op-ledger';
 import { Index } from '../index/index';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from '../spine-root';
+import { buildEnvironment } from '../../engine-host/launch';
 import { transcriptPathOf } from './context';
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
@@ -252,6 +253,8 @@ describe('session.spawn on the spine', () => {
     return signStepUp(action, await generateSigningKey());
   };
   const phases = (bus: FakeBus, appSessionId: string) => bus.emittedOf('session.setup').filter((event) => event.appSessionId === appSessionId).map((event) => event.phase);
+  // the variable the engine host gives the launch, over a capture that holds another
+  const variableOf = (spec: LaunchSpec | undefined) => buildEnvironment(spec!, { MAWS_LAUNCHED_BY: '{"member":"captured"}' }, 'http://127.0.0.1:9', 4242).MAWS_LAUNCHED_BY;
 
   it('starts a spawned session naming its spawner, the genuine sealed action’s proof written 0600 before the launch', async () => {
     trust(checkout);
@@ -264,6 +267,7 @@ describe('session.spawn on the spine', () => {
     const appSessionId = (spawned as { value: { result: { value: { appSessionId: string } } } }).value.result.value.appSessionId;
     await expect.poll(() => launched.length).toBe(1);
     expect(launched[0]!.launchedBy).toEqual({ appSessionId, member: 'mem-a', device: 'dev-1', opId, proofFile: proofOf(appSessionId) });
+    expect(variableOf(launched[0])).toBe(canonicalize(launched[0]!.launchedBy));
     // as the launch found it: whole, private, the envelope sminos's record checks (its member, device and opId the
     // variable's, the action's own device and opId the same), the action unchanged
     const proof = proofs[0];
@@ -309,12 +313,14 @@ describe('session.spawn on the spine', () => {
     await expect.poll(() => phases(bus, forkId)).toContain('ready');
     expect(launched).toEqual([expect.objectContaining({ appSessionId: forkId, resume: { sessionId: engine, fork: true } })]);
     expect(launched[0]).not.toHaveProperty('launchedBy');
+    expect(variableOf(launched[0])).toBeUndefined();
     expect(existsSync(proofOf(forkId))).toBe(false);
 
     // the resume, with no proof on disk: written before the launch, from the record
     expect(existsSync(proofOf(spawnedId))).toBe(false);
     await resumed({}, 1);
     expect(launched[1]).toMatchObject({ appSessionId: spawnedId, launchedBy: named });
+    expect(variableOf(launched[1])).toBe(canonicalize(named));
     expect(proofs[1]).toEqual({ mode: 0o600, text: canonicalize({ member: 'mem-a', device: 'dev-1', opId: action.opId, action }) });
 
     // a resume whose trust bootstrap runs first: the bootstrap, under an id of its own, names nobody; the resume does
@@ -324,8 +330,10 @@ describe('session.spawn on the spine', () => {
     expect(bootstrap).toMatchObject({ trust: { accepted: true }, resume: null });
     expect(bootstrap!.appSessionId).not.toBe(spawnedId);
     expect(bootstrap).not.toHaveProperty('launchedBy');
+    expect(variableOf(bootstrap)).toBeUndefined();
     expect(proofs[2]).toBeNull();
     expect(resume).toMatchObject({ appSessionId: spawnedId, launchedBy: named });
+    expect(variableOf(resume)).toBe(canonicalize(named));
     trust(checkout);
 
     // a session nobody spawned names nobody and leaves no proof
@@ -333,6 +341,7 @@ describe('session.spawn on the spine', () => {
     await expect.poll(() => phases(bus, localId)).toContain('ready');
     expect(launched.at(-1)).toMatchObject({ appSessionId: localId });
     expect(launched.at(-1)).not.toHaveProperty('launchedBy');
+    expect(variableOf(launched.at(-1))).toBeUndefined();
     expect(existsSync(proofOf(localId))).toBe(false);
 
     // the delete takes the proof with the record
