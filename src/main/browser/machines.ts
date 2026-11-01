@@ -41,6 +41,11 @@ export class SessionMachines {
     return this.#machines.get(appSessionId) ?? this.local;
   }
 
+  /** The session's machine when it is another machine's, else null. */
+  elsewhere(appSessionId: string): MachineRef | null {
+    return this.#machines.get(appSessionId) ?? null;
+  }
+
   /** What tabs.json keeps: the sessions of another machine among those with tabs kept; nothing when there are none. */
   kept(sessions: Iterable<string>): { machines?: Record<AppSessionId, MachineRef> } {
     const machines: Record<AppSessionId, MachineRef> = {};
@@ -55,8 +60,8 @@ export class SessionMachines {
   stamped(emit: BrowserEmit, emitFrom: EmitFrom): BrowserEmit {
     return (name, payload) => {
       const appSessionId = (payload as { appSessionId?: unknown }).appSessionId;
-      const machine = typeof appSessionId === 'string' ? this.#machines.get(appSessionId) : undefined;
-      return machine === undefined ? emit(name, payload) : emitFrom(machine, name, payload);
+      const machine = typeof appSessionId === 'string' ? this.elsewhere(appSessionId) : null;
+      return machine === null ? emit(name, payload) : emitFrom(machine, name, payload);
     };
   }
 }

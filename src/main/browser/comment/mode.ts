@@ -22,6 +22,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import { browserElementAnchor, PickArmedSchema, PreloadMessageSchema, type CommentDisarmReason } from '@shared/browser/comment';
 import { ARM_ACK_MS, COMMENT_CHANNEL, PICK_AT_MS, type PickRect, type ToPreload } from '@shared/browser/comment-protocol';
 import type { BrowserCommentSetResult } from '@shared/ipc/schema/browser';
+import type { MachineRef } from '@shared/machine/ref';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { Crop } from './crop';
 import { pickPosition } from './position';
@@ -35,6 +36,8 @@ export interface CommentModeDeps {
   // The pick's picture (crop.ts `captureCrop` over the entry's view), and a written crop let go when its pick is not sent.
   capture(entry: TabEntry, rect: PickRect): Promise<Crop>;
   discard(path: string): void;
+  // P5 O7 M3: the machine of a session on another machine (machines.ts's `elsewhere`), which its tab's pick is said from
+  elsewhere?(appSessionId: string): MachineRef | null;
   now?(): number;
   requestId?(): string;
 }
@@ -204,7 +207,7 @@ export class CommentMode {
       return;
     }
     if (via === 'arm') this.disarm(tabId, 'picked');
-    sendPicked(owner, payload);
+    sendPicked(owner, payload, this.deps.elsewhere?.(entry.tab.appSessionId) ?? null);
   }
 
   // ---- reads (the e2e seam) ----------------------------------------------------------------------------------------------

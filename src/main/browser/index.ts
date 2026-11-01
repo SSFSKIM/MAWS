@@ -277,7 +277,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
-  const commentMode = startCommentMode({ store, emit, register, userData, env });
+  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { elsewhere: (appSessionId: string) => machines.elsewhere(appSessionId) }) });
   // E4d end
   // E4c start: the agent's presence (the dialogs' wrap, parking, the e2e seam's `agent`), re-homed from E4c's browser
   // tools when they left (the in-app browser spec of 2026-10-08, M4)
