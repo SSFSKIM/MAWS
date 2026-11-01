@@ -494,6 +494,24 @@ describe('the daemon\'s relay', () => {
       expect(client.heard()).toBe(0);
     });
 
+    // the engine's status arriving meanwhile judges the sockets waiting for the engine, not the daemon's
+    it('a relayed socket waiting for the confirmation keeps waiting through the session\'s engine status', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      let answer!: (ok: boolean) => void;
+      await attach(h.backend, addon, DAEMON, uid, () => new Promise((resolve) => (answer = resolve)));
+      addon.peerPid = DAEMON;
+      const hosting = connectFakeHost(h.backend.socketPathFor(A)!);
+      await settled();
+      h.backend.engineProcess(A, ENGINE);
+      await settled();
+      answer(true);
+      const host = await hosting;
+      tracked.hosts.push(host);
+      expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
+      expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, refused: 0 });
+    });
+
     it('a relayed socket accepted while the confirmation is under way is let in once it comes', async () => {
       const addon = fakeAddon();
       const h = harness({ peer: { addon } });

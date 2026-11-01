@@ -298,6 +298,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       const listening = sessions.get(appSessionId);
       if (!root || !listening) return;
       for (const [socket, { acceptedAt, timer }] of [...listening.pending]) {
+        if (fromRelay(socket, confirming)) continue; // the daemon's waits for its confirmation, not for the engine
         clearTimeout(timer);
         decide(appSessionId, listening, socket, acceptedAt);
       }
