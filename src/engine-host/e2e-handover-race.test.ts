@@ -35,6 +35,13 @@ describe('handoverRaceFor: the e2e race of a call into a handover', () => {
     expect(calls).toEqual(['inFlight 0', 'sleep 100', 'inFlight 0', 'sleep 100', 'inFlight 1']);
   });
 
+  it('ends at once when another ask armed the drain meanwhile, so its own answer never holds the exit', async () => {
+    const { deps, count } = harness([0, 0, 0, 0]);
+    let asked = 0;
+    const race = handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!(count, () => ++asked > 1); // armed after the first poll
+    expect(await race).toBe(100);
+  });
+
   it('gives up at its bound, so a scene that never calls cannot hold a handover for good', async () => {
     const { deps, count } = harness([]);
     expect(await handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!(count)).toBe(HANDOVER_RACE_MAX_MS);

@@ -906,7 +906,7 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     await expect.poll(async () => (await eventsOf(first.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s first turn ends' }).toBe(1);
     const engines = { a: (await statusOf(first.page, a)).pid, b: (await statusOf(first.page, b)).pid };
     await s.quit(first);
-    expect(first.quitLines()).toContain(keptQuitLine());
+    expect(first.quitLines()).toContain(DAEMON ? keptQuitLine() : 'quit-guard: 1 mid-turn, auto-answered keep, 2 sessions kept'); // A mid-turn, B idle
     if (DAEMON) {
       process.kill(status.daemon!.pid, 'SIGKILL'); // the next launch starts a `mawsd` of its own build (the update's)
       await expect.poll(() => isAlive(status.daemon!.pid)).toBe(false);

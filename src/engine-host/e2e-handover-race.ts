@@ -16,14 +16,14 @@ export interface HandoverRaceDeps {
 
 const SYSTEM: HandoverRaceDeps = { sleep: (ms) => sleep(ms), now: () => Date.now() };
 
-// Resolves with how long it waited.
-export type HandoverRace = (inFlight: () => number) => Promise<number>;
+// Resolves with how long it waited; at once when `over` (another ask armed the drain meanwhile).
+export type HandoverRace = (inFlight: () => number, over?: () => boolean) => Promise<number>;
 
 export function handoverRaceFor(env: NodeJS.ProcessEnv, deps: HandoverRaceDeps = SYSTEM): HandoverRace | undefined {
   if (env.MAWS_E2E !== '1' || env.MAWS_E2E_HANDOVER_RACE !== '1') return undefined;
-  return async (inFlight) => {
+  return async (inFlight, over = () => false) => {
     const from = deps.now();
-    while (inFlight() === 0 && deps.now() - from < HANDOVER_RACE_MAX_MS) await deps.sleep(RACE_POLL_MS);
+    while (inFlight() === 0 && !over() && deps.now() - from < HANDOVER_RACE_MAX_MS) await deps.sleep(RACE_POLL_MS);
     return deps.now() - from;
   };
 }

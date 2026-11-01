@@ -159,7 +159,12 @@ void (async () => {
       if (item.error.kind === 'replay_mismatch') mismatch ??= item.error.message;
       continue; // a stand-in's note (an unrecorded read): its answer follows as a frame
     }
-    if (gate !== undefined && isToolCall(item.frame)) while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 50)); // P5 O16 M3c fix wave 2
+    if (gate !== undefined && isToolCall(item.frame) && !existsSync(gate)) {
+      // P5 O16 M3c fix wave 2: said on stderr, which the scene reads from the journal
+      process.stderr.write(`stub-engine gate: a tools/call waits for ${gate}\n`);
+      while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 50));
+      process.stderr.write('stub-engine gate: open\n');
+    }
     process.stdout.write(`${JSON.stringify(item.frame)}\n`);
   }
   await stderr;
