@@ -95,8 +95,10 @@ const ContentAt = z.strictObject({ artifactId: Id, revision: Seq.optional() });
 
 // M5b: what Save as… copies out of MAWS: a file `artifacts.export` wrote (its revision and format name it under the
 // store's directory), or a byte kind's stored file at a revision (a File artifact's "Save a copy…").
+// An export by what names its file (`artifactExportName`): the revision and format, and an own file's `exportId`.
+const ExportAtSchema = z.strictObject({ revision: Seq, format: z.enum(ARTIFACT_EXPORT_FORMATS), exportId: z.uuid().optional() /* P3-E (E1 M5; Decision Log 33): a design export's own file */ });
 export const LibrarySaveSourceSchema = z.union([
-  z.strictObject({ export: z.strictObject({ revision: Seq, format: z.enum(ARTIFACT_EXPORT_FORMATS), exportId: z.uuid().optional() /* P3-E (E1 M5; Decision Log 33): a design export's own file */ }) }),
+  z.strictObject({ export: ExportAtSchema }),
   z.strictObject({ content: z.strictObject({ revision: Seq.optional() }) }),
 ]);
 export type LibrarySaveSource = z.infer<typeof LibrarySaveSourceSchema>;
@@ -127,7 +129,11 @@ export const commands = {
   // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file read as `files.read` reads a session's, by the
   // artifact alone: its path resolved through the host (`artifacts.content`) and read by the files service in process,
   // so the owner's file reads in its viewer with no session, and a window names no path.
-  'library.read': machine(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
+  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): with `export`, the file
+  // `artifacts.export` wrote instead, under `<profile>/artifacts/<artifactId>/exports/` by the export grammar's name (as
+  // `library.saveAs` resolves it), a regular file with no link on the way, so another machine's app pages an export here
+  // (its Save As, its open-a-copy); `revision` is then the export's, inside `export`.
+  'library.read': machine(ContentAt.extend({ ...FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape, export: ExportAtSchema.optional() }), FilesReadOutputSchema),
   // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
   // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
   // P4 (W1, L302): saving an export by its `exportId` uses it up, main removing that file once the save returns,

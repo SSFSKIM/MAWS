@@ -46,7 +46,7 @@ async function lab() {
     if (name !== 'artifacts.content') throw new Error(`unexpected ${name}`);
     return { ok: true, value: { revision: 1, kind: 'file', name: 'report.pdf', size: 8, sha256: 'x', path: stored } };
   }) as never;
-  registerLibraryReads(front.bus.register, { hosts: { dispatch }, files: { readResolved: vi.fn() }, port: front.port, env: {} });
+  registerLibraryReads(front.bus.register, { hosts: { dispatch }, files: { readResolved: vi.fn() }, port: front.port, env: {}, artifactsRoot: '/no-exports-here' });
   const server: Server = createServer();
   serveSocketClients(server, {
     many: { runtimeFor: (client) => front.runtimeFor(client) },

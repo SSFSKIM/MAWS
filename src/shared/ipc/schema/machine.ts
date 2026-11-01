@@ -9,7 +9,7 @@
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
 import { JsonValueSchema, type CommandSpec } from './common';
-import { HostOpOutputSchema, HostOpQueryOutputSchema, OpBindingShape, OpIdSchema } from './host';
+import { HostOpOutputSchema, HostOpQueryOutputSchema, OpBindingShape, OpIdSchema, OpTargetSchema } from './host';
 
 // The machine's own project, where its sessions with no checkout sit (OX3). `key` is `machine:<ref>`; `smnsId` is
 // sminos's machine project id once the machine is enrolled (M5; none is until O10).
@@ -25,7 +25,11 @@ export type MachineIdentity = z.infer<typeof MachineIdentitySchema>;
 // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `action`, the sealed action as the
 // device sent it (its step-up signature included), kept with the claim and handed to the command's handler
 // (`HandlerContext.op`), so a handler can record who asked and keep the proof (`session.spawn`'s `launchedBy`).
-export const MachineOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated: z.string(), claim: z.strictObject(OpBindingShape), name: z.string().min(1), input: JsonValueSchema, action: JsonValueSchema.optional() });
+// P5 O7 M5a: the claim's `target`, the artifact the endpoint resolved an artifact-targeted act to (host.ts' `OpTargetSchema`);
+// `input` and `action` may hold bytes in json-bytes' tagged form, which the ledger decodes for the run and keeps as sent.
+// `ClaimedOpInputSchema` is that shape before M5a, which `pty.op` keeps (its ledger names its own target).
+export const ClaimedOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated: z.string(), claim: z.strictObject(OpBindingShape), name: z.string().min(1), input: JsonValueSchema, action: JsonValueSchema.optional() });
+export const MachineOpInputSchema = ClaimedOpInputSchema.extend({ claim: z.strictObject({ ...OpBindingShape, target: OpTargetSchema.optional() /* P5 O7 M5a */ }) });
 
 export const commands = {
   'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' },

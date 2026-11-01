@@ -84,7 +84,7 @@ function library(stored: { kind: 'file' | 'presentation'; name: string; path: st
 // P5 O4 M3: the library's reads of that stored file, the machine's half (src/services/library/files.ts)
 function libraryReads(stored: { kind: 'file'; name: string; path: string }) {
   const dispatch = (async () => ({ ok: true, value: { revision: 3, kind: stored.kind, name: stored.name, size: 1, sha256: 'x', path: stored.path } })) as never;
-  return createLibraryReads({ hosts: { dispatch }, files: { readResolved: vi.fn() }, port, env: {} });
+  return createLibraryReads({ hosts: { dispatch }, files: { readResolved: vi.fn() }, port, env: {}, artifactsRoot: '/no-exports-here' });
 }
 
 describe('dialogs answer as cancelled', () => {

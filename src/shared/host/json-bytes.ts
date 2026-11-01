@@ -45,7 +45,9 @@ function needsCodec(value: unknown): boolean {
   return false;
 }
 
-function toWire(value: unknown): unknown {
+/** The tagged form of `value`: each Uint8Array as `{"$bytes": "<base64>"}` and each look-alike escaped; a JSON value.
+ * P5 O7 M5a: exported for RL2, which carries a call's and an act's bytes in this form. */
+export function toWire(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value;
   if (value instanceof Uint8Array) return { [BYTES_KEY]: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64') };
   if (Array.isArray(value)) return value.map(toWire);
@@ -55,7 +57,9 @@ function toWire(value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).map(([name, child]) => [name, toWire(child)])); // own keys, `__proto__` too
 }
 
-function fromWire(value: unknown): unknown {
+/** `toWire`'s inverse, as a new value (its argument untouched); a malformed `$bytes` stays the object it was.
+ * P5 O7 M5a: exported for the two operation ledgers and RL2. */
+export function fromWire(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value;
   if (Array.isArray(value)) return value.map(fromWire);
   const record = value as Record<string, unknown>;

@@ -78,6 +78,11 @@ export type HostStatus = z.infer<typeof HostStatusSchema>;
 export const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
 export const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
 export const OpRequestDigestSchema = z.strictObject({ session: z.string(), request: z.string(), tool: z.string(), input_sha256: z.string().regex(/^[0-9a-f]{64}$/) });
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule", Interfaces §O):
+// the artifact the endpoint resolved an artifact-targeted act to, `artifact:<id>`, or `artifact:` alone for the orphan
+// form (`artifacts.create`, which names none yet). Kept beside the claim and answered by the ledger's query as the
+// binding's `target` in place of a session id, so a query re-places the artifact through the endpoint's rule.
+export const OpTargetSchema = z.string().regex(/^artifact:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$/);
 export const HostOpInputSchema = z.strictObject({
   opId: OpIdSchema,
   opCreated: z.string(),
@@ -101,7 +106,7 @@ export const HostOpQueryOutputSchema = z.strictObject({
   member: z.string().optional(),
   device: z.string().optional(),
   fingerprint: z.string().optional(),
-  target: z.string().nullable().optional(), // the appSessionId the op acts on
+  target: z.string().nullable().optional(), // the appSessionId the op acts on; P5 O7 M5a: or the claim's `artifact:` target
   name: z.string().optional(), // the command it ran
   ledger: z.string().optional(), // on any state: why the ledger is closed (op-ledger.ts's word)
 });

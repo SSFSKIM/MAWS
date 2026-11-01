@@ -3,7 +3,7 @@
 // engine host's `artifacts.content`, a File artifact's bytes read through the files service in process, a document
 // opened and any file revealed on the asking client through the client port (or the e2e seam's log), a program never
 // opened. Over the bus, as the spine registers them.
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { endableClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
+import { createFilesService } from '../files/service';
 import { registerLibraryReads, type LibraryReadsDeps } from './files';
 
 const ID = '00000000-0000-4000-8000-000000000001';
@@ -45,7 +46,7 @@ function reads(stored: Stored, over: Partial<LibraryReadsDeps> = {}) {
   const openExternal = vi.fn(async (): Promise<Awaited<ReturnType<LibraryReadsDeps['port']['openExternal']>>> => ({ opened: true }));
   const reveal = vi.fn(async (): Promise<Awaited<ReturnType<LibraryReadsDeps['port']['reveal']>>> => ({ revealed: true }));
   const bus = fakeBus();
-  registerLibraryReads(bus.register, { hosts: { dispatch: dispatch as never }, files: { readResolved }, port: { openExternal, reveal }, env: {}, ...over });
+  registerLibraryReads(bus.register, { hosts: { dispatch: dispatch as never }, files: { readResolved }, port: { openExternal, reveal }, env: {}, artifactsRoot: join(dir, 'artifacts'), ...over });
   return { bus, dispatch, readResolved, openExternal, reveal };
 }
 
@@ -129,3 +130,79 @@ describe('the library’s reads of a stored file', () => {
     expect(gone.reveal).not.toHaveBeenCalled();
   });
 });
+
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Open a copy, and Save As of a remote artifact",
+// Interfaces §O): `library.read`'s export form reads a file `artifacts.export` wrote, its path resolved here as
+// `library.saveAs` resolves it (the export grammar's name under `<root>/<artifactId>/exports/`), a regular file with no link
+// on the way below the root, through the files service's own read (the real one here)
+describe('library.read’s export form', () => {
+  const EXPORT_ID = '00000000-0000-4000-8000-0000000000e1';
+  const exportsOf = (root: string, id = ID) => join(root, id, 'exports');
+  function exported(root = join(dir, 'artifacts')) {
+    mkdirSync(exportsOf(root), { recursive: true });
+    writeFileSync(join(exportsOf(root), '3-pdf.pdf'), '%PDF-1.7 cache');
+    writeFileSync(join(exportsOf(root), `3-pdf-${EXPORT_ID}.pdf`), '%PDF-1.7 own');
+    writeFileSync(join(exportsOf(root), '4-md.md'), '# Notes\n');
+    return root;
+  }
+  const real = (artifactsRoot = join(dir, 'artifacts')) => {
+    const files = createFilesService({ records: () => null, env: {} });
+    return reads({ kind: 'html', files: {} }, { files, artifactsRoot });
+  };
+
+  it('reads an export under the artifact’s exports directory, the cache name or an own file’s, in chunks, with no host call', async () => {
+    exported();
+    const { bus, dispatch } = real();
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 3, format: 'pdf' } })).toMatchObject({ ok: true, value: { encoding: 'base64', content: Buffer.from('%PDF-1.7 cache').toString('base64'), bytes: 14, truncated: false } });
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 3, format: 'pdf', exportId: EXPORT_ID }, offset: 9, length: 3, hash: true })).toMatchObject({
+      ok: true,
+      value: { content: Buffer.from('own').toString('base64'), offset: 9, length: 3, bytes: 12, hash: expect.any(String) },
+    });
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 4, format: 'md' } })).toMatchObject({ ok: true, value: { encoding: 'utf8', content: '# Notes\n' } });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('reads through a link above the artifacts root, which is the profile’s own location', async () => {
+    exported();
+    symlinkSync(join(dir, 'artifacts'), join(dir, 'profile-link'));
+    const { bus } = real(join(dir, 'profile-link'));
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 4, format: 'md' } })).toMatchObject({ ok: true, value: { content: '# Notes\n' } });
+  });
+
+  it('refuses a name outside the export grammar at the schema, and a top-level revision beside the export', async () => {
+    exported();
+    const { bus, readResolved } = reads({ kind: 'html', files: {} });
+    for (const export_ of [
+      { revision: 3, format: 'exe' },
+      { revision: -1, format: 'pdf' },
+      { revision: 3, format: 'pdf', exportId: '../../../etc/passwd' },
+      { revision: 3, format: 'pdf', path: '/etc/passwd' },
+      { revision: '3-pdf.pdf/../../x', format: 'pdf' },
+    ]) {
+      expect(await answer(bus, 'library.read', { artifactId: ID, export: export_ }), JSON.stringify(export_)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    }
+    expect(await answer(bus, 'library.read', { artifactId: '../x', export: { revision: 3, format: 'pdf' } })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await answer(bus, 'library.read', { artifactId: ID, revision: 3, export: { revision: 3, format: 'pdf' } })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(readResolved).not.toHaveBeenCalled();
+  });
+
+  it('refuses a path elsewhere: an exports directory or an export that is a link, a directory in its place, one missing', async () => {
+    const root = exported();
+    const elsewhere = join(dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, '3-pdf.pdf'), 'secret');
+    writeFileSync(join(elsewhere, '5-md.md'), 'secret');
+    symlinkSync(join(elsewhere, '5-md.md'), join(exportsOf(root), '5-md.md')); // the export itself a link
+    mkdirSync(join(exportsOf(root), '6-md.md')); // a directory where the export would be
+    const OTHER = '00000000-0000-4000-8000-000000000002';
+    mkdirSync(join(root, OTHER));
+    symlinkSync(elsewhere, exportsOf(root, OTHER)); // another artifact's exports directory a link
+    const { bus } = real();
+    const refused = { ok: false, error: { code: 'invalid_input' } };
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 5, format: 'md' } })).toMatchObject(refused);
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 6, format: 'md' } })).toMatchObject(refused);
+    expect(await answer(bus, 'library.read', { artifactId: OTHER, export: { revision: 3, format: 'pdf' } })).toMatchObject(refused);
+    expect(await answer(bus, 'library.read', { artifactId: ID, export: { revision: 7, format: 'pdf' } })).toMatchObject({ ok: false, error: { code: 'invalid_input', message: `no export 7-pdf.pdf of ${ID}; export it again` } });
+  });
+});
+

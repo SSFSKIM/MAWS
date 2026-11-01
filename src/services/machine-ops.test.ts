@@ -5,7 +5,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toWire } from '@shared/host/json-bytes';
 import { OpLedger } from '@shared/host/op-ledger';
+import { validateCommandInput } from '@shared/ipc/validate';
 import type { HandlerContext } from '@shared/ipc/client';
 import { claimable, machineOps, registerMachineOps, type LateOutcome } from './machine-ops';
 
@@ -130,6 +132,62 @@ describe('machine.op', () => {
     expect(await ops.op({ opId: 'op-3', opCreated: created, claim: { ...CLAIM, member: 'mem-b' }, name: 'session.rename', input: { appSessionId: 'app-1', title: 'A' } }, CONTEXT)).toEqual({ state: 'refused', reason: 'op-conflict' });
     expect(ops.opQuery({ opId: 'op-4', opCreated: created, tombstoneIfAbsent: true })).toEqual({ state: 'not-received' });
     expect(await ops.op({ opId: 'op-4', opCreated: created, claim: CLAIM, name: 'session.rename', input: { appSessionId: 'app-1', title: 'B' } }, CONTEXT)).toEqual({ state: 'refused', reason: 'tombstoned' });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule" and "What crosses,
+// as what", Interfaces §O): the claim names the artifact the endpoint resolved, which a query answers as the binding's
+// target; bytes cross in json-bytes' tagged form, decoded for the run and kept as sent
+describe('machine.op for an artifact-targeted act', () => {
+  const ARTIFACT = '11111111-1111-4111-8111-111111111111';
+  const GRANT = { artifactId: ARTIFACT, tool: { server: 'notes', tool: 'search', mode: 'read' } };
+
+  it('keeps the claim’s target beside it and answers it from a query, across a reopen; the orphan form too', async () => {
+    const { ops, reopen, invoke, file } = lab(vi.fn<Invoke>(async () => ({ ok: true, value: { ok: true, grant: GRANT.tool } })));
+    const opCreated = now();
+    const input = { opId: 'op-target-00000001', opCreated, claim: { ...CLAIM, target: `artifact:${ARTIFACT}` }, name: 'artifacts.grantConnectorTool', input: GRANT };
+    expect(await ops.op(input, CONTEXT)).toMatchObject({ state: 'done' });
+    // the handler's claim is the binding the endpoint verified; the target is the ledger's
+    expect(invoke).toHaveBeenCalledWith('artifacts.grantConnectorTool', GRANT, { ...CONTEXT, op: { opId: input.opId, opCreated, ...CLAIM } });
+    const [claimed] = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { claim?: unknown });
+    expect(claimed?.claim).toEqual({ ...CLAIM, target: `artifact:${ARTIFACT}`, name: 'artifacts.grantConnectorTool' });
+    const binding = { ...CLAIM, target: `artifact:${ARTIFACT}`, name: 'artifacts.grantConnectorTool' };
+    expect(ops.opQuery({ opId: input.opId, opCreated, tombstoneIfAbsent: false })).toEqual({ state: 'done', outcome: { ok: true, value: { ok: true, grant: GRANT.tool } }, ...binding });
+    expect(reopen().opQuery({ opId: input.opId, opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: `artifact:${ARTIFACT}` });
+    await ops.op({ ...input, opId: 'op-target-00000002', claim: { ...CLAIM, target: 'artifact:' } }, CONTEXT);
+    expect(ops.opQuery({ opId: 'op-target-00000002', opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: 'artifact:' });
+    // with no target, the binding's is the session the input names, or none
+    await ops.op({ ...input, opId: 'op-target-00000003', claim: CLAIM }, CONTEXT);
+    expect(ops.opQuery({ opId: 'op-target-00000003', opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: null });
+  });
+
+  it('refuses a claim whose target names no artifact at the schema', () => {
+    const input = { opId: 'op-target-00000001', opCreated: now(), name: 'artifacts.grantConnectorTool', input: GRANT };
+    expect(validateCommandInput('machine.op', { ...input, claim: { ...CLAIM, target: `artifact:${ARTIFACT}` } }).ok).toBe(true);
+    for (const target of ['app-1', 'artifact:x', '']) expect(validateCommandInput('machine.op', { ...input, claim: { ...CLAIM, target } }).ok, target).toBe(false);
+  });
+
+  it('decodes tagged bytes for the run before the command’s validation, and keeps the claim and the action as sent', async () => {
+    const invoke = vi.fn<Invoke>(async () => ({ ok: true, value: { ok: false, reason: 'unknown-lease' } }));
+    const { ops, reopen, file } = lab(invoke);
+    const bytes = new Uint8Array([0, 1, 2, 253, 254, 255]);
+    // a look-alike of the tagged form in plain data crosses escaped and arrives as it was
+    const args = toWire({ leaseId: '33333333-3333-4333-8333-333333333333', request: { tool: 'upload', payload: bytes, literal: { $bytes: 'plain text' } } }) as Record<string, unknown>;
+    const action = { v: 1, opId: 'op-bytes-000000001', action: 'connectors.call', args };
+    const opCreated = now();
+    const input = { opId: 'op-bytes-000000001', opCreated, claim: { ...CLAIM, target: `artifact:${ARTIFACT}` }, name: 'connectors.call', input: args, action };
+    expect(validateCommandInput('machine.op', input).ok).toBe(true);
+    const done = await ops.op(input, CONTEXT);
+    expect(done).toEqual({ state: 'done', result: { ok: true, value: { ok: false, reason: 'unknown-lease' } } });
+    const ran = invoke.mock.calls[0]?.[1] as { request: { payload: unknown; literal: unknown } };
+    expect(ran.request.payload).toBeInstanceOf(Uint8Array);
+    expect([...(ran.request.payload as Uint8Array)]).toEqual([...bytes]);
+    expect(ran.request.literal).toEqual({ $bytes: 'plain text' });
+    // the ledger holds the action as the endpoint sent it, tagged, and a reopen answers the reseal from it
+    const lines = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { claim?: { action?: unknown } });
+    expect(lines[0]?.claim?.action).toEqual(action);
+    expect(await reopen().op(input, CONTEXT)).toEqual(done);
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

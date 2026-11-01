@@ -95,7 +95,9 @@ export interface FilesService {
   // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
   // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
-  readResolved(input: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput>;
+  // P5 O7 M5a: `linkFree`, the path must be its own real path (no link anywhere on it) or the read is refused, so a caller
+  // that resolved a path inside a directory it owns reads that file and nothing a link leads to (`library.read`'s export).
+  readResolved(input: Omit<FilesReadInput, 'appSessionId'>, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
   write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
   watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
@@ -271,7 +273,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   }
 
   // P3-L (M6b fix wave 2): see `FilesService.readResolved`.
-  async function readResolved({ path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput> {
+  async function readResolved({ path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: Omit<FilesReadInput, 'appSessionId'>, options: { linkFree?: boolean } = {}): Promise<FilesReadOutput> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     let real: string;
     try {
@@ -279,6 +281,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     } catch (error) {
       throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
     }
+    if (options.linkFree && real !== path) throw new Refusal(); // P5 O7 M5a: a link on the way; the open below refuses one made after this
     await at('before-open', path);
     let handle: FileHandle;
     try {
