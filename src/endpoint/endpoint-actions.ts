@@ -6,6 +6,11 @@
 //     `done` only after the new head is on disk (the org view adopts, then answers).
 // Their authority is their own signatures (M5 grades them none), so the binding a query checks is the sender's member
 // with the machine as its target.
+//
+// P5 O12 M11 (with the architect, 2026-11-01): the ledger opens with `orphanAtOpen`. Both actions are idempotent (a grant
+// kept twice is kept once; a delivered state already adopted adopts nothing), so a claim the last process left unfinished
+// answers a query `expired`, the outcome nobody can say any more, with no read-back, and a new act under its id stays
+// `in-progress`, never run again; a device that wants the effect seals a new operation.
 import type { Action } from 'org-protocol';
 import { OpLedger, type OpAnswer, type OpQueryAnswer } from '@shared/host/op-ledger';
 
@@ -32,7 +37,7 @@ export class EndpointActions {
 
   /** The ledger read and compacted (the endpoint's start). */
   open(): void {
-    this.#ledger = OpLedger.open(this.ctx.stateDir(), 'ops.jsonl', { now: this.ctx.now, log: (line) => this.ctx.log(`endpoint: ${line}`) });
+    this.#ledger = OpLedger.open(this.ctx.stateDir(), 'ops.jsonl', { now: this.ctx.now, log: (line) => this.ctx.log(`endpoint: ${line}`), orphanAtOpen: true });
   }
 
   /** Why its ledger answers nothing until mawsd restarts, or null (the status shows it). */
