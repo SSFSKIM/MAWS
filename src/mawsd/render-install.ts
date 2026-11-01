@@ -262,15 +262,27 @@ function lockCache(root: string, deps: RenderInstallDeps): Promise<LockHold> {
 // The lock as flock(1) holds it (util-linux; the runtime is Linux's): a child `flock` holding the lock runs a `cat` on a
 // pipe from this process, so it is held until the pipe ends, which this process's release does and its exit, however it
 // exits, does too; the kernel then drops the lock. Tried without blocking first, so a wait is said once. The child
-// ending before the release is the lock lost, which `check` then says.
-export async function flockFile(path: string, waiting: () => void): Promise<LockHold> {
-  const held = await holdFlock(path, true);
+// ending before the release is the lock lost, which `check` and the release then say: read from the child's exit once
+// node has seen it, and from /proc at each check, since the exit is not seen while synchronous work (a sudo) runs.
+export async function flockFile(path: string, waiting: () => void, running: (pid: number) => boolean = procRunning): Promise<LockHold> {
+  const held = await holdFlock(path, true, running);
   if (held !== null) return held;
   waiting();
-  return (await holdFlock(path, false))!;
+  return (await holdFlock(path, false, running))!;
 }
 
-function holdFlock(path: string, nonblock: boolean): Promise<LockHold | null> {
+// Whether a child of this process still runs: its /proc/<pid>/stat there and its state not Z (exited, not yet reaped)
+function procRunning(pid: number): boolean {
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+  } catch {
+    return false;
+  }
+  return stat[stat.lastIndexOf(')') + 2] !== 'Z';
+}
+
+function holdFlock(path: string, nonblock: boolean, running: (pid: number) => boolean): Promise<LockHold | null> {
   return new Promise((resolve, reject) => {
     const args = ['--exclusive', ...(nonblock ? ['--nonblock', '--conflict-exit-code', String(CONTENDED)] : []), path, 'sh', '-c', `echo ${LOCKED}; exec cat`];
     const child = spawn('flock', args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -285,14 +297,23 @@ function holdFlock(path: string, nonblock: boolean): Promise<LockHold | null> {
       out += chunk;
       if (holding || !out.includes(`${LOCKED}\n`)) return;
       holding = true;
+      const check = () => {
+        if (lost === null && !released && !running(child.pid!)) lost = 'unreaped';
+        if (lost !== null) throw new Error(`lost the install lock ${path}: its holder exited (status ${lost}); run mawsd render install again`);
+      };
       resolve({
-        check: () => {
-          if (lost !== null) throw new Error(`lost the install lock ${path}: its holder exited (status ${lost}); run mawsd render install again`);
-        },
+        check,
         release: async () => {
+          let loss: unknown = null;
+          try {
+            check(); // a loss found only now is said, not let go with the lock
+          } catch (error) {
+            loss = error;
+          }
           released = true;
           child.stdin.end();
           await exited;
+          if (loss !== null) throw loss;
         },
       });
     });

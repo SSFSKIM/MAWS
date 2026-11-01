@@ -8,7 +8,7 @@
 // the helper's ownership read from what the fake `sudo` did (a test cannot chown to root).
 import { fork, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSync } from 'esbuild';
@@ -70,6 +70,7 @@ const lock: FileLock = async (_path, waiting) => {
       if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
     },
     release: async () => {
+      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
       const next = lockWaiters.shift();
       if (next !== undefined) next();
       else lockHeld = false;
@@ -444,6 +445,31 @@ describe('an install', () => {
     }
   });
 
+  // The holder ending while a synchronous step runs (the sudo): node reads no exit until the step returns, so the check
+  // reads the holder itself. flockFile's own hold, with flock(1) a stand-in that runs its command without locking (a
+  // Mac has none) and the holder's state given by the test.
+  it('stops when the lock’s holder ends inside a synchronous step: the next check sees it, and nothing is published', async () => {
+    writeFileSync(join(bin, 'flock'), '#!/bin/sh\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = --conflict-exit-code ] && shift; shift; done\nshift\nexec "$@"\n');
+    chmodSync(join(bin, 'flock'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ''}`;
+    let holderRuns = true;
+    const base = markerDeps();
+    try {
+      const run: RenderInstallDeps['run'] = (command, args, options) => {
+        const done = base.run(command, args, options);
+        if (args[1] === 'chown') holderRuns = false; // the holder killed while the chown ran
+        return done;
+      };
+      await expect(installRenderRuntime(markerDeps({ lock: (at, waiting) => flockFile(at, waiting, () => holderRuns), run }))).rejects.toThrow(/lost the install lock .*: its holder exited \(status unreaped\)/);
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
+    expect(existsSync(entry())).toBe(false);
+    expect(listing()).toEqual([stagingName(pin)]);
+  });
+
   it('an uninstall stops when the lock is lost before it removes anything', async () => {
     await installRenderRuntime(markerDeps());
     const outcome = uninstallRenderRuntime(markerDeps({ processes: () => (loseLock('9'), running) }));
@@ -536,9 +562,21 @@ describe.runIf(process.platform === 'linux')('the cache lock', () => {
         return true;
       }
     };
-    while (!lost()) await new Promise((resolve) => setImmediate(resolve)); // the child's exit, once node has read it
-    expect(() => hold.check()).toThrow(/lost the install lock .*: its holder exited \(status SIGKILL\)/);
-    await hold.release();
+    expect(lost()).toBe(true); // read from /proc at once (a zombie until node reaps it), before any exit event
+    expect(() => hold.check()).toThrow(/lost the install lock .*: its holder exited \(status (?:unreaped|SIGKILL)\)/);
+    await expect(hold.release()).rejects.toThrow(/lost the install lock/); // said at the release too
+  });
+
+  it('a holder killed inside a synchronous step of an install: the next check sees it, and nothing is published', async () => {
+    const base = markerDeps();
+    const run: RenderInstallDeps['run'] = (command, args, options) => {
+      const done = base.run(command, args, options);
+      if (args[1] === 'chown') expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
+      return done;
+    };
+    await expect(installRenderRuntime(markerDeps({ lock: undefined, run }))).rejects.toThrow(/lost the install lock .*: its holder exited/);
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
+    expect(existsSync(entry())).toBe(false);
   });
 
   it('is let go when its holder dies, however it dies', async () => {
