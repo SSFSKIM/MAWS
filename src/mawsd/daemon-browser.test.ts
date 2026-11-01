@@ -26,6 +26,7 @@ import { PEER_AUTH_VERSION, type PeerAddon } from '../main/browser/cua/peer';
 import type { RunningDaemon } from './daemon';
 import type { RenderChild } from './render-seam';
 import { MawsdScene, sleep, until, type RawApp, type StandIn } from '../../test/support/mawsd-scene';
+import { CUA_BROWSER_START_MS } from './cua-broker'; // P5 O17 M8 fix 2: the ordinary start deadline a hold outlasts
 
 const MACHINE = machineName({}, hostname());
 const S = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
@@ -521,6 +522,22 @@ describe('the handover (acceptance 3)', () => {
     expect(t.hosts, 'the released start began nothing').toEqual([]);
     expect((await renderStatus(t.daemon)).starts).toBe(0);
     expect(cua.heard.filter((message) => message.id === 7), 'the trigger never answered').toHaveLength(0);
+    app.leave();
+  });
+
+  it('a hold longer than the broker’s ordinary start deadline answers no timeout: the attachment still settles the trigger', { timeout: 20_000 }, async () => {
+    const t = await stand({ env: { MAWS_E2E: '1', MAWS_E2E_BROWSER_START_HOLD: '1' } });
+    const cua = Connector.open();
+    await until(() => cua.hellos() === 1, 3_000, 'the broker’s hello');
+    cua.socket.write(frame({ jsonrpc: '2.0', id: 7, method: 'tabs.create', params: { url: 'http://127.0.0.1:4000/' } }));
+    await until(() => scene.logs.some((line) => line.includes(`[browser] e2e: the start of ${S} held until an app attaches`)), 3_000, 'the start held');
+    await sleep(CUA_BROWSER_START_MS + 1_000); // past cua's ordinary 4 s
+    expect(cua.heard.filter((message) => message.id === 7), 'no timeout answered while held').toHaveLength(0);
+    expect(cua.closed, 'the trigger’s connection still open').toBe(false);
+    const app = await attachApp();
+    await until(() => cua.closed, 3_000, 'the waiting trigger ended with its epoch');
+    expect(cua.heard.filter((message) => message.id === 7), 'the trigger never answered').toHaveLength(0);
+    expect(t.hosts, 'nothing started').toEqual([]);
     app.leave();
   });
 

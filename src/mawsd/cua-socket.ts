@@ -35,7 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { clearSocketPath, makePrivateDirectory } from '@shared/host/private-listen';
 import { assertPrivateSocket } from '@shared/host/private-path';
 import { authorizePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from '../main/browser/cua/peer';
-import type { BrowserDemand, BrowserRouteReading, BrowserTarget, CuaBroker, CuaBrokerInspection } from './cua-broker'; // types alone: the chunk loads at the first admitted cold peer
+import type { BrowserDemand, BrowserRouteReading, BrowserTarget, CuaBroker, CuaBrokerInspection, CuaBrokerLimits } from './cua-broker'; // types alone: the chunk loads at the first admitted cold peer
 
 export type CuaBrokerChunk = typeof import('./cua-broker');
 export const loadCuaBroker = (): Promise<CuaBrokerChunk> => import('./cua-broker');
@@ -57,6 +57,7 @@ export interface CuaColdRoute {
   live(appSessionId: AppSessionId): boolean; // §B's *live*: the session's engine process is live
   ensureBrowser(demand: BrowserDemand): Promise<BrowserTarget>;
   target?(appSessionId: AppSessionId): string | null; // P5 O17 M5: in `headless`, the render host's socket for the session (§D)
+  brokerLimits?: Partial<CuaBrokerLimits>; // P5 O17 M8: the e2e start hold's longer start deadline; production passes none
 }
 
 export interface CuaSocketsOptions {
@@ -257,6 +258,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
             return () => void (freed || ((freed = true), (session.promoting -= 1)));
           },
           log,
+          ...(cold.brokerLimits && { limits: cold.brokerLimits }),
         });
         log('[cua] the cold broker loaded');
         return broker;

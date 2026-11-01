@@ -102,6 +102,7 @@ export interface TabEngineDeps {
 export interface TabEngineInspection {
   sessions: Record<string, { tabs: number; creating: number; held: 'none' | 'acquiring' | 'held' }>;
   screencast: ScreencastInspection; // P5 O17 M8: the producer's counters (pass 3 reads them through the e2e seam, root.ts)
+  views: { tabId: string; appSessionId: string; contentsId: number | null }[]; // P5 O17 M8: each tab's view by its webContents id
 }
 
 export interface TabEngine {
@@ -470,6 +471,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
         [...served].map(([appSessionId, session]) => [appSessionId, { tabs: tabsOf(appSessionId).length, creating: session.creating, held: session.fence === 'none' || session.fence === 'held' ? session.fence : 'acquiring' }]),
       ),
       screencast: screencast.inspect(),
+      views: store.all().map(({ tab, view }) => ({ tabId: tab.tabId, appSessionId: tab.appSessionId, contentsId: view?.webContents.id ?? null })),
     }),
     dispose() {
       for (const appSessionId of [...cancels.keys()]) cancelPrepares(appSessionId, `the headless browser on ${machine} is ending`);

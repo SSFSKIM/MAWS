@@ -713,6 +713,8 @@ describe('a viewer’s subscription', () => {
     expect(await t.op(A, { op: 'ack', subscriptionId: 'v1', seq: 9 })).toMatchObject({ ok: false, error: expect.stringContaining('future') });
     // P5 O17 M8: the producer's counters, read by pass 3 through the render host's e2e seam
     expect(t.engine.inspect().screencast).toMatchObject({ tabs: 1, images: 1, viewers: [{ id: 'v1', tabId: t.tabId, control: false, inFlight: 1 }] });
+    // P5 O17 M8 fix 2: each tab's view, by its webContents id, so pass 3 reads the very view the engine holds
+    expect(t.engine.inspect().views).toEqual([{ tabId: t.tabId, appSessionId: A, contentsId: expect.any(Number) }]);
     expect(await t.op(A, { op: 'close', subscriptionId: 'v1' })).toEqual({ ok: true, value: null });
     expect(t.engine.inspect().screencast).toEqual({ tabs: 0, images: 0, viewers: [] });
     expect(t.frames.live.size, 'the source stopped with its last viewer').toBe(0);

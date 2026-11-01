@@ -221,6 +221,10 @@ export interface RunningDaemon {
 type FrameListener = Parameters<DaemonServices['onFrame']>[0];
 type ClosedListener = Parameters<DaemonServices['documents']['onClosed']>[0];
 
+// P5 O17 M8: the broker's start deadline while the e2e start hold is armed (MAWS_E2E_BROWSER_START_HOLD): an app's launch
+// and attachment fit inside it on a loaded runner
+const E2E_HELD_START_MS = 120_000;
+
 // Starts the daemon; null when it exited instead (a refused directory, a held lock, a malformed identity, a socket it
 // could not make).
 export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon | null> {
@@ -1053,7 +1057,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   // P5 O17 M8 (e2e only, MAWS_E2E=1 with MAWS_E2E_BROWSER_START_HOLD=1, read once here): every headless start waits,
   // before it begins, for the first app's attachment, so a scene can attach during a start deterministically; the start
-  // then goes on under the demand it was given, which the handover has ended. Nothing is armed otherwise
+  // then goes on under the demand it was given, which the handover has ended. So that the app's own launch is never
+  // inside a 4 s deadline, the broker's start deadline (its trigger's and its start's) is E2E_HELD_START_MS while armed.
+  // Nothing is armed otherwise, and production's deadlines are the broker's own
   let releaseStarts = () => {};
   const startHold = env.MAWS_E2E === '1' && env.MAWS_E2E_BROWSER_START_HOLD === '1' ? new Promise<void>((resolve) => (releaseStarts = resolve)) : null;
   let startHeld = startHold !== null;
@@ -1384,7 +1390,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       uidBoundary: platform !== 'darwin',
       log,
       // P5 O17 M5: with no app, a session's route (browser-route.ts): the broker cold, the render host's socket headless
-      cold: { machine, version: options.build.version, reading: (id) => route.reading(id), live: (id) => route.live(id), ensureBrowser: (demand) => route.ensureBrowser(demand), target: (id) => route.target(id) },
+      cold: { machine, version: options.build.version, reading: (id) => route.reading(id), live: (id) => route.live(id), ensureBrowser: (demand) => route.ensureBrowser(demand), target: (id) => route.target(id), ...(startHold !== null && { brokerLimits: { startMs: E2E_HELD_START_MS } }) },
       onChange: () => sessionCapabilities.refresh(),
       ...(options.cua?.relayConnectWaitMs !== undefined && { relayConnectWaitMs: options.cua.relayConnectWaitMs }),
     });

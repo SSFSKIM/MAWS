@@ -9,6 +9,7 @@ import { FakeContents } from '../main/browser/cua/server.fake';
 let frames = 0;
 
 export class FakePage extends FakeContents {
+  readonly id = 1_000 + frames; // a webContents id, as Electron's (P5 O17 M8's inspection names each view by it)
   webRtcPolicy: string | null = null;
   openHandler: ((details: Record<string, unknown>) => WindowOpenHandlerResponse) | null = null;
   constructor() {
