@@ -159,6 +159,11 @@ export function createRemoteForwards(deps: RemoteForwardsDeps): RemoteForwards {
     deps.log(`lane B: the forward of port ${fwd.port} on ${fwd.link.name} was forgotten by the machine: opening it again`);
     const generation = fwd.generation;
     const grant = await granted(fwd, stale);
+    if ('ok' in grant && fwd.generation === generation && fwd.grant === stale) {
+      // the fresh act didn't make a forward (no `shell` now, or it was withdrawn before the forward was made): it is over
+      deps.log(`lane B: the forward of port ${fwd.port} on ${fwd.link.name} could not be opened again`);
+      closeForward(fwd, true);
+    }
     if ('ok' in grant || fwd.generation !== generation || socket.destroyed) return void socket.resetAndDestroy();
     dial(fwd, socket, grant, true);
   }

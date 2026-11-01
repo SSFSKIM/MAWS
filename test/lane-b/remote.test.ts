@@ -1256,6 +1256,15 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await expect(get(localPort, '/closed')).rejects.toThrow();
   });
 
+  it('answers a forward a member without `shell` asks for as the machine’s refusal, running nothing again', async () => {
+    const l = await lab();
+    const server = await httpServer();
+    const b = await l.device('macb', { member: 'B' });
+    expect(await b.forward('open', server.port)).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } });
+    expect(l.f.endpoint.forwards.list()).toEqual([]);
+    expect(server.sockets).toEqual([]);
+  });
+
   it('resets a connection to a port nothing listens on, and keeps the forward', async () => {
     const l = await lab();
     const server = await httpServer();

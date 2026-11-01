@@ -181,7 +181,6 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
 
   function onOpened(pty: Pty, opened: StreamOpened): void {
     pty.live = true;
-    pty.retries = 0;
     const ring = opened.pty ?? null;
     pty.credited = ring?.ringStart ?? pty.next;
     if (pty.phase === 'exiting') {
@@ -213,6 +212,7 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     if (end <= pty.next) return;
     const start = Math.max(offset, pty.next);
     const cuts = boundary !== undefined && start < boundary && boundary < end ? [start, boundary, end] : [start, end];
+    pty.retries = 0; // progress: the backoff starts over (an open that only closes again keeps doubling)
     for (let i = 0; i + 1 < cuts.length; i++) deps.emit(pty.machine, 'pty.data', { ptyId: pty.ptyId as PtyId, offset: cuts[i], data: bytes.slice(cuts[i] - offset, cuts[i + 1] - offset) });
     pty.next = end;
   }
