@@ -572,6 +572,44 @@ describe('the each-session calls', () => {
     expect(engineReads(f)).toBe(engine);
   });
 
+  // Fix wave 2: the index's live read can be ahead of the record changes it published (they wait for its coalescing
+  // tick), so no placement the call saw may widen the caller's rights: each must allow the session.
+  for (const [command, input, kept, cut] of [
+    ['attention.list', null, [att('app-1', 'r1')], []],
+    ['session.search', { query: 'word' }, { hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }, { hits: [], indexing: false, incomplete: false }],
+  ] as const) {
+    for (const [moved, last] of [
+      ['to a viewed engine session, heard, then to a private one whose notification waits', 'private'],
+      ['twice, between engine sessions the caller views', 'view'],
+    ] as const) {
+      it(`${command}: a session that moved ${moved} while the call was out ${last === 'private' ? 'is left out' : 'stays in'}`, async () => {
+        const f = await startEndpoint(org, started);
+        const machine = machineAttention(f);
+        shared(f, 'app-1', 'view');
+        machine.seed('app-1', [att('app-1', 'r1')]);
+        f.spine.handle('session.search', () => ({ hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }));
+        f.records.set({ lane: 'B', session: 'eng-2', owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, 'app-1');
+        f.records.set({ lane: 'B', session: 'eng-3', owners: ['@machine'], ...(last === 'private' ? { access: 'private' as const } : { shares: [{ member: org.B, grade: 'view' as const }] }) }, 'app-1');
+        const b = await openRemote(f, org.b1, org.B);
+        // `session.get` of app-1 held; answered from the index as it stands at the release.
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const dispatch = f.spine.dispatch.bind(f.spine);
+        f.spine.dispatch = async (name, inputOf, client) => {
+          if (name === 'session.get') await held;
+          return dispatch(name, inputOf, client);
+        };
+        const reads = f.host.calls.filter((c) => c.name === 'session.get').length;
+        const asked = call(b, command, input);
+        await until(() => f.host.calls.filter((c) => c.name === 'session.get').length > reads, 'the held placement read');
+        f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-1')!, engineSessionId: 'eng-2' }, cause: 'update', revision: 2 });
+        f.spine.set('app-1', 'eng-3', { appId: 'app-1' }); // the second move: in the index, its notification not yet out
+        release();
+        expect(await asked).toMatchObject({ ok: true, output: last === 'private' ? cut : kept });
+      });
+    }
+  }
+
   // Fix wave 1: the placement a call read is not the one its answer is cut by once the session's record moved meanwhile.
   it('cut by the session’s record as it stands when the answer goes, though `session.get` answered an older one', async () => {
     const f = await startEndpoint(org, started);

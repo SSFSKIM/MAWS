@@ -14,7 +14,7 @@
 // How. The feed keeps the machine's items as `attention.list` answered them and each `attention.changed` replaced them
 // since (the changes heard while that read is out are laid over its answer), each session's placement by its record
 // (`session.get`, then each `session.changed`; targets.ts' `recordedPlacement`, never the engine host, which a read would
-// wake), what the device was given of each session, and the one output queued and not yet taken (`pending`).
+// wake; a read during which records were heard keeps all of them, each of which must allow the member: fix wave 2), what the device was given of each session, and the one output queued and not yet taken (`pending`).
 //
 // Output crosses no change of rights (fix wave 1). The device's credit can hold what is queued for as long as it likes, so
 // a decision made when a message was queued is not one about when it leaves. The feed queues one output at a time (the
@@ -60,10 +60,14 @@ type Feed = {
   items: Map<string, Items> | null;
   /** The changes heard while `attention.list` is out, the latest per session, laid over its answer. */
   early: Map<string, Items>;
-  /** Each session's placement once read or heard (null: nobody's to rank). */
-  placed: Map<string, Placement>;
-  /** The placement reads out, by session, numbered: a `session.changed` heard meanwhile supersedes the read. */
-  placing: Map<string, number>;
+  /**
+   * Each session's placements once read or heard, every one of which the member must view (a null one: nobody's to
+   * rank): the latest record heard, or, for a read during which records were heard, the read's and theirs, since neither
+   * is known to be the newer (fix wave 2: the index's live read can be ahead of its coalesced notifications).
+   */
+  placed: Map<string, readonly Placement[]>;
+  /** The placement read out per session (only the latest one's answer is taken), with the placements heard meanwhile. */
+  placing: Map<string, { heard: Placement[] }>;
   /** What the device was given of each session, as taken (a session it holds none of is absent). */
   given: Map<string, Items>;
   pending: Pending | null;
@@ -81,7 +85,6 @@ export class AttentionFeeds {
   readonly #ctx: AttentionFeedsContext;
   readonly #epoch = `attention:${randomBytes(9).toString('base64url')}`;
   readonly #feeds = new Map<Subscription, Feed>();
-  #placeReads = 0;
 
   constructor(ctx: AttentionFeedsContext) {
     this.#ctx = ctx;
@@ -122,17 +125,19 @@ export class AttentionFeeds {
         else if (items.length === 0) feed.items.delete(id);
         else feed.items.set(id, items);
         // A session nobody could rank is placed again at its next change (its record may name its engine session now).
-        if (feed.placed.get(id) === null) feed.placed.delete(id);
+        if (feed.placed.get(id)?.includes(null) === true) feed.placed.delete(id);
         this.#settle(feed);
       }
     } else if (name === 'session.changed' && isObject(payload.record) && isId(payload.record.appId)) {
       const id = payload.record.appId;
       const placement = recordedPlacement(id, payload.record);
       for (const feed of this.#feeds.values()) {
-        if (!feed.placed.has(id) && !feed.placing.has(id)) continue;
-        feed.placing.delete(id);
-        feed.placed.set(id, placement);
-        this.#settle(feed);
+        const reading = feed.placing.get(id);
+        if (reading !== undefined) reading.heard.push(placement); // weighed with the read's answer when it lands
+        else if (feed.placed.has(id)) {
+          feed.placed.set(id, [placement]);
+          this.#settle(feed);
+        }
       }
     }
   }
@@ -145,10 +150,15 @@ export class AttentionFeeds {
       return void feed.sub.end('unavailable');
     }
     const items = new Map<string, Items>();
+    const grouped = new Map<string, unknown[]>();
     for (const item of answer.value as unknown[]) {
       const id = isObject(item) ? item.appSessionId : undefined;
-      if (isId(id)) items.set(id, [...(items.get(id) ?? []), item]);
+      if (!isId(id)) continue;
+      const list = grouped.get(id);
+      if (list === undefined) grouped.set(id, [item]);
+      else list.push(item);
     }
+    for (const [id, list] of grouped) items.set(id, list);
     for (const [id, list] of feed.early) {
       if (list.length === 0) items.delete(id);
       else items.set(id, list);
@@ -180,19 +190,19 @@ export class AttentionFeeds {
    * device's reopening reads it again.
    */
   async #place(feed: Feed, id: string): Promise<void> {
-    const n = ++this.#placeReads;
-    feed.placing.set(id, n);
+    const reading = { heard: [] as Placement[] };
+    feed.placing.set(id, reading);
     let placement: Placement;
     try {
       placement = await placeRecorded(id, dispatchAs(this.#ctx.dispatch, feed.sub.channel.client));
     } catch (error) {
-      if (feed.placing.get(id) !== n || this.#feeds.get(feed.sub) !== feed) return;
+      if (feed.placing.get(id) !== reading || this.#feeds.get(feed.sub) !== feed) return;
       this.#ctx.log(`endpoint: an attention feed could not place a session: ${(error as Error).message}`);
       return void feed.sub.end('unavailable');
     }
-    if (feed.placing.get(id) !== n || this.#feeds.get(feed.sub) !== feed) return;
+    if (feed.placing.get(id) !== reading || this.#feeds.get(feed.sub) !== feed) return;
     feed.placing.delete(id);
-    feed.placed.set(id, placement);
+    feed.placed.set(id, [...reading.heard, placement]);
     this.#settle(feed);
   }
 
@@ -234,7 +244,8 @@ export class AttentionFeeds {
 
   /** Whether the member views the session now (false while its placement is unknown). */
   #views(feed: Feed, id: string): boolean {
-    return feed.ranks !== null && feed.placed.has(id) && feed.ranks.holds(feed.placed.get(id)!, 'view');
+    const ranks = feed.ranks;
+    return ranks !== null && feed.placed.has(id) && feed.placed.get(id)!.every((placement) => ranks.holds(placement, 'view'));
   }
 
   /** Whether the queued output still stands under the rights now: `unknown` while the ranks or a placement are read. */

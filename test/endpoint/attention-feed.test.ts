@@ -64,8 +64,8 @@ function scene(options: { backlogBytes?: number; getFails?: (id: string) => bool
       }
       if (name === 'session.get') {
         const id = (input as { appSessionId: string }).appSessionId;
-        const record = records.get(id) ?? null;
         await holds.get.get(id);
+        const record = records.get(id) ?? null; // the index as it stands when the read is answered
         if (options.getFails?.(id) === true) return { t: 'res', id: '0', ok: false, error: { code: 'timeout', message: 'slow' } };
         return ok(record);
       }
@@ -163,7 +163,7 @@ describe('the attention feed’s transitions', () => {
     expect(s.ended()).toEqual([]);
   });
 
-  it('takes a session’s record heard while its placement is read over the read’s older answer', async () => {
+  it('weighs a session’s record heard while its placement is read with the read’s answer: each must allow the member', async () => {
     const s = scene();
     s.record('app-1');
     s.state.views.add('eng-app-1');
@@ -180,6 +180,47 @@ describe('the attention feed’s transitions', () => {
     await settle();
     expect(s.bodies()).toEqual([]);
     s.feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', engineSessionId: 'eng-app-1' }, cause: 'update', revision: 3 } });
+    expect(s.bodies()).toEqual([{ appSessionId: 'app-1', items: [item('app-1', 'r1')] }]);
+  });
+
+  // Fix wave 2: the index's live read can be ahead of the record changes it has published (they wait for its tick).
+  it('shows nothing of a session whose read places it where the member can’t see, though a record heard meanwhile could', async () => {
+    const s = scene();
+    s.record('app-1');
+    s.state.views = new Set(['eng-app-1', 'eng-2']);
+    s.open();
+    await settle();
+    const read = gate();
+    s.holds.get.set('app-1', read.wait);
+    s.change('app-1', [item('app-1', 'r1')]);
+    await settle();
+    // Two moves: to eng-2 (viewed), heard; then to the private eng-3, whose notification waits for the index's tick.
+    s.feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', engineSessionId: 'eng-2' }, cause: 'update', revision: 2 } });
+    s.record('app-1', 'eng-3');
+    read.open();
+    await settle();
+    expect(s.bodies()).toEqual([]);
+    // The notification of eng-3 comes: still nothing; a move back to a viewed engine session shows it.
+    s.feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', engineSessionId: 'eng-3' }, cause: 'update', revision: 3 } });
+    expect(s.bodies()).toEqual([]);
+    s.feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', engineSessionId: 'eng-2' }, cause: 'update', revision: 4 } });
+    expect(s.bodies()).toEqual([{ appSessionId: 'app-1', items: [item('app-1', 'r1')] }]);
+  });
+
+  it('shows a session that moved twice while its placement was read, between engine sessions the member views', async () => {
+    const s = scene();
+    s.record('app-1');
+    s.state.views = new Set(['eng-app-1', 'eng-2', 'eng-3']);
+    s.open();
+    await settle();
+    const read = gate();
+    s.holds.get.set('app-1', read.wait);
+    s.change('app-1', [item('app-1', 'r1')]);
+    await settle();
+    s.feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', engineSessionId: 'eng-2' }, cause: 'update', revision: 2 } });
+    s.record('app-1', 'eng-3');
+    read.open();
+    await settle();
     expect(s.bodies()).toEqual([{ appSessionId: 'app-1', items: [item('app-1', 'r1')] }]);
   });
 

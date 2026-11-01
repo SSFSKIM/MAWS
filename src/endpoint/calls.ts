@@ -18,9 +18,11 @@
 //     every session: its input is held to the registry's schema here (authorization's step 2 skips a row that carries its
 //     own grade), the machine's services answer it, and the answer keeps only the sessions the caller holds the
 //     registry's grade on (`view`), each placed by its record. The cut is made as the answer goes, in one synchronous
-//     step, against the records as they stand then and each session's placement as its latest record gives it (a
-//     `session.changed` heard while the reads were out supersedes what `session.get` answered: fix wave 1): a caller
-//     below the floor learns nothing of another session. A session the spine can't place answers `unavailable`.
+//     step, against the records as they stand then. No placement widens a caller's rights (fix wave 2): a session is kept
+//     only when the caller holds the grade on every placement the call saw of it, `session.get`'s answer and each one a
+//     `session.changed` gave while the call was out, since neither is known to be the newer (the index publishes its
+//     changes on a coalescing tick, so its live read can be ahead of what was heard). A caller below the floor learns
+//     nothing of another session. A session the spine can't place answers `unavailable`.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
@@ -124,8 +126,8 @@ const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(o
 };
 
 export class Calls {
-  /** Each `each-session` call in flight: the placements its sessions' records gave since its reads began (fix wave 1). */
-  readonly #heard = new Set<Map<string, Placement>>();
+  /** Each `each-session` call in flight: every placement its sessions' records gave since its reads began. */
+  readonly #heard = new Set<Map<string, Placement[]>>();
 
   constructor(private readonly ctx: CallsContext) {}
 
@@ -135,7 +137,7 @@ export class Calls {
     const record = isObject(message.payload) ? message.payload.record : undefined;
     if (!isObject(record) || !isText(record.appId, 512)) return;
     const placement = recordedPlacement(record.appId, record);
-    for (const heard of this.#heard) heard.set(record.appId, placement);
+    for (const heard of this.#heard) heard.set(record.appId, [...(heard.get(record.appId) ?? []), placement]);
   }
 
   /** An authorized call, answered by its executor. */
@@ -184,8 +186,8 @@ export class Calls {
     if (!response.ok) return { ok: false, code: response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code };
     const output = response.value ?? null;
     const sessions = [...new Set(filter.sessions(output))];
-    // A record heard from here on places its session over what `session.get` answers (which it is at least as new as).
-    const heard = new Map<string, Placement>();
+    // Every record heard from here on is one more placement the caller must hold the grade on, beside `session.get`'s.
+    const heard = new Map<string, Placement[]>();
     this.#heard.add(heard);
     let placed: Map<string, Placement>;
     let ranks: SessionRanks;
@@ -200,8 +202,8 @@ export class Calls {
     return () => {
       this.#heard.delete(heard);
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
-      const placement = (id: string): Placement => (heard.has(id) ? heard.get(id)! : (placed.get(id) ?? null));
-      return { ok: true, output: filter.keep(output, (id) => id !== null && ranks.holds(placement(id), grade)) };
+      const holds = (id: string): boolean => [placed.get(id) ?? null, ...(heard.get(id) ?? [])].every((placement) => ranks.holds(placement, grade));
+      return { ok: true, output: filter.keep(output, (id) => id !== null && holds(id)) };
     };
   }
 
