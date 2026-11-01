@@ -233,13 +233,19 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     await expectGone(child, 5_000);
   });
 
-  it('a reconnect whose replay starts past the ring\'s loss reports the gap before the survivors, and the frontier passes it to the release (D45)', { timeout: LONG }, async () => {
-    const { deps } = profile();
+  // D45 under a burst that outruns the ring. The first connection is held unread until the burst is written whole (the
+  // marker), so at least one loss is certain. How many reconnects and gaps follow is the runner's speed, not a rule: a
+  // runner may notice the held connection's close while the burst still runs (the class 1a pool did: 15 reconnects, 12
+  // gaps), and each reconnect then reads on a fresh socket that a 64 KiB ring can outrun again, the host closing it at
+  // the loss (D43). So the test pins what holds whatever the count: every loss reported once as a gap at the point the
+  // stream reached, the gaps and the survivors covering every sequence once in order, one fence per reconnect, the release.
+  it('a reconnect whose replay starts past the ring\'s loss reports each gap at its place before the survivors, and the frontier passes them to the release (D45)', { timeout: LONG }, async () => {
+    const { deps, logs } = profile();
     let first: HostConnection | null = null;
     const host = await start({ ...deps, hostArgs: ['--ring-cap-bytes', '65536'], onConnection: (c) => (first ??= c) });
     const lines = 40_000;
-    // the burst's end, marked by the shell once its loop has written every line: the reader resumes only then, so a slow
-    // runner's shell still writing never makes the live stream lag the ring again (hosted class 1a: 8 gaps, not 1)
+    // the burst's end, marked by the shell once its loop has written every line: the first connection is held until
+    // then, so the ring has lost what that connection had not read whatever the runner's speed
     const marks = mkdtempSync(join(tmpdir(), 'msh-burst-'));
     scratch.push(marks);
     const written = join(marks, 'written');
@@ -261,14 +267,28 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     })();
     await all;
     expect(await t.exited).toEqual({ code: 0, signal: null });
-    const gaps = items.filter((i) => i.error?.kind === 'host_gap');
-    expect(gaps).toHaveLength(1);
-    const { lostFrom, firstSeq } = gaps[0]!.error!.gap!;
-    const at = items.indexOf(gaps[0]!);
-    expect(items[at - 1]?.hseq).toBe(lostFrom - 1); // the last record read before the loss
-    expect(items[at + 1]?.hseq).toBe(firstSeq); // the first survivor, after the gap
-    expect(items.slice(at + 1).map((i) => i.hseq)).toEqual(Array.from({ length: items.length - at - 1 }, (_, i) => firstSeq + i));
-    expect(t.holder!.fence).toBe(2);
+    const gaps = items.filter((i) => i.error?.kind === 'host_gap').map((i) => i.error!.gap!);
+    const reconnects = logs.filter((line) => / reconnected as writer at fence \d+, reading from \d+$/.test(line)).length;
+    const shape = JSON.stringify({ gaps: gaps.map((g) => [g.lostFrom, g.firstSeq, g.fence]), reconnects }); // the failure's evidence
+    expect(gaps.length, shape).toBeGreaterThanOrEqual(1);
+    // every sequence once, in order: a gap starts where the stream had reached, its survivors start at its firstSeq
+    let next = 1;
+    for (const item of items) {
+      if (item.error?.kind === 'host_gap') {
+        const { lostFrom, firstSeq } = item.error.gap!;
+        expect([lostFrom, firstSeq > lostFrom], shape).toEqual([next, true]);
+        next = firstSeq;
+      } else if (item.hseq !== undefined) {
+        expect(item.hseq, shape).toBe(next);
+        next += 1;
+      }
+    }
+    expect((items.findLast((i) => i.hseq !== undefined)?.frame as { n?: number } | null)?.n, shape).toBe(lines - 1); // the burst's last line
+    // one fence per reconnect, each gap reported at the fence of the read that found it
+    expect(reconnects, shape).toBeGreaterThanOrEqual(gaps.length);
+    expect(t.holder!.fence, shape).toBe(1 + reconnects);
+    const fences = gaps.map((g) => g.fence);
+    expect(fences.every((fence, i) => fence >= 2 && fence <= t.holder!.fence && (i === 0 || fence > fences[i - 1]!)), shape).toBe(true);
     await expectGone(host.pid); // every record journaled or lost: the frontier reached the end and the host was released
   });
 
