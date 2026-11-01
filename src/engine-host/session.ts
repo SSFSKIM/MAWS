@@ -282,7 +282,10 @@ export class EngineSession {
   private reapView: ReapView | null = null;
   private descendants: number | null = 0;
   private reapIgnored = false;
-  private reaping = false; // P5 O16 M3b fix wave 2: an idle reap between its end_session and its verdict
+  // P5 O16 M3b fix waves 2 and 3: an idle reap between its end_session and its verdict (settled at the verdict), and a
+  // handover's freeze waiting for that verdict
+  private reapVerdict: Promise<void> | null = null;
+  private freezeDue = false;
   private mcpServerCommands: string[][] | null = null;
   private mcpRead: Promise<void> | null = null;
   private observerSaved = false;
@@ -613,6 +616,16 @@ export class EngineSession {
         return Promise.resolve(this.stopResult());
       }
     }
+    // fix wave 3: a row whose freeze waits for its idle reap's verdict is the handover's as a frozen one is
+    if (this.freezeDue) {
+      if (reason === 'idle' || reason === 'budget') {
+        this.log(`stop (${reason}) asked during the handover: left to the successor`);
+        return Promise.resolve(this.stopResult());
+      }
+      this.freezeDue = false;
+      this.leftHandover = true;
+      this.log(`taken back from the handover: stop (${reason})`);
+    }
     if (reason === 'budget' || reason === 'idle') {
       if (this.stopReason === null) {
         this.stopReason = reason;
@@ -651,7 +664,8 @@ export class EngineSession {
       if (this.processState === 'exiting') await this.exited; // an explicit stop took over through the ladder
       return this.processState === 'exited' ? 'exited' : null;
     };
-    this.reaping = true;
+    let verdict!: () => void;
+    this.reapVerdict = new Promise<void>((resolve) => (verdict = resolve));
     try {
       this.reapRow('end_session');
       endSession(client, { reason: 'stop' }).catch(() => {}); // the exit is the answer that matters
@@ -665,7 +679,13 @@ export class EngineSession {
       this.touch();
       return 'ignored';
     } finally {
-      this.reaping = false;
+      // fix wave 3: a handover asked meanwhile froze nothing; the engine the reap left running is frozen now
+      this.reapVerdict = null;
+      if (this.freezeDue) {
+        this.freezeDue = false;
+        this.freeze();
+      }
+      verdict();
     }
   }
 
@@ -1160,6 +1180,13 @@ export class EngineSession {
   // (a call's result, a hook's or a human's answer already on its way), so the engine's requests in flight still settle.
   freeze(): void {
     if (this.frozen || this.leftHandover || this.processState === 'exited') return;
+    // P5 O16 M3b fix wave 3: an idle reap under way keeps its own path to its verdict (never upgraded to a ladder); the
+    // freeze follows it, if the engine is still there (the drain and the detach wait for it)
+    if (this.reapVerdict !== null) {
+      if (!this.freezeDue) this.log('the handover freezes this row once its idle reap has its verdict');
+      this.freezeDue = true;
+      return;
+    }
     this.frozen = true;
     this.held.length = 0;
     // fix wave 1: the adopted handshake's gate is dropped with it: a held request was journaled, so the successor's fold
@@ -1179,6 +1206,8 @@ export class EngineSession {
   // Resolves at the first moment the frozen row holds no call in flight (checked at each retirement), or once its engine
   // has exited (nothing more can be answered).
   drained(): Promise<void> {
+    if (this.freezeDue) return (this.reapVerdict ?? Promise.resolve()).then(() => this.drained()); // fix wave 3
+    if (!this.frozen && (this.leftHandover || this.processState === 'exited')) return Promise.resolve(); // nothing held for the successor
     if (this.isDrained()) return Promise.resolve();
     return new Promise((resolve) => this.drainWaiters.push(resolve));
   }
@@ -1214,9 +1243,10 @@ export class EngineSession {
 
   // Fix wave 1: a stop or release whose ladder is under way: a handover freezes nothing that is ending. Fix wave 2: the
   // termination itself, not the reason it keeps: an idle reap both of whose signals were ignored keeps `idle` for a later
-  // exit while its engine runs on, ready, so it is frozen and detached like any other row.
+  // exit while its engine runs on, ready, so it is frozen and detached like any other row. Fix wave 3: an idle reap under
+  // way is not ending either (its freeze waits for its verdict, `freeze`); a budget reap runs the ladder, so it is.
   get ending(): boolean {
-    return this.processState === 'exiting' || this.reaping;
+    return this.processState === 'exiting';
   }
 
   // The row let go for the successor: the writer's in-flight writes awaited (bounded by EOF_WRITE_WAIT_MS), the
@@ -1225,6 +1255,7 @@ export class EngineSession {
   // still the old manager's). The process has not exited: no exit row, no `exited`.
   detach(reason: 'handover' | 'exit'): Promise<void> {
     if (this.leftHandover) return Promise.resolve(); // fix wave 1: taken back for a stop; the exit order stops it
+    if (this.freezeDue) return (this.reapVerdict ?? Promise.resolve()).then(() => this.detach(reason)); // fix wave 3
     this.freeze();
     if (!this.frozen) return Promise.resolve(); // exited already
     this.detaching ??= this.detachNow(reason);

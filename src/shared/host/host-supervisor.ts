@@ -43,6 +43,7 @@ import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
 import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
+import { CompletionRoutes, type CompletionRoute } from './completion-routes'; // P5 O16 M3b fix wave 3
 import { DocumentsClosedSchema, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
 
 // The hosts a client reaches, and how a command is sent to one (main's router re-exports both).
@@ -223,12 +224,12 @@ export const HANDOVER_SENT_WAIT_MS = 5_000;
 // drain waits for (show_pane's answer, the capture's, the export's, the dataset refresh's, and the refresh's read of
 // what it asks, which only the host that raised it can answer). Fix wave 2: each goes to the host that raised its
 // request (`requestId`, recorded from the event that announced it, by the pid of the link it came on): its served link
-// or its draining one, whichever it is; held only while that same process is reconnected to (a recycle); answered
+// or its draining one, whichever it is. Fix wave 3 (completion-routes.ts): held, bound to that process, while it
+// reconnects (a recycle, a quiet loss), failed the moment it is known gone and never sent to another; answered
 // `host_unavailable` at once when that host is gone, which is no need (nothing is woken, held or launched for it: a
 // stale completion has no call left to settle). An allowlist, pinned against the command table
 // (test/endpoint/drain-replies.test.ts).
 export const DRAIN_REPLIES: ReadonlySet<string> = new Set(['maws.pane.answer', 'maws.artifact.captured', 'maws.artifact.exported', 'maws.artifact.datasetRefreshed', 'artifacts.datasetRefreshRequest']);
-const ISSUERS_KEPT = 1_024; // the requests whose raising host is remembered, newest first
 const HANDOVER_SENT_POLL_MS = 10;
 
 interface Pending {
@@ -241,6 +242,7 @@ interface Pending {
   client: ClientRef | null; // P5 O1 M5: the asker a `machine` request names, whose end the link relays once it is sent
   forwardedClient: string | null; // P5 O2 M3: a forwarded request's `client`, kept off a protocol-2 link
   forwardedRef: ClientRef | null; // P5 O7 M2: that client as a ref, whose end the link relays once the request carried it
+  issuer: number | null; // P5 O16 M3b fix wave 3: a held completion's raising pid: sent to that process alone, failed once it is gone
 }
 
 // E10: the port a host is spoken to through, a utility host's channel or the detached transport's socket link.
@@ -259,9 +261,9 @@ interface Host {
   // the calls it raised still reach it (DRAIN_REPLIES), and (fix wave 2) a stop-all; every other request is held for the
   // successor. Never the served link (`port`), so nothing reading the served link's socket sees this one.
   draining: MainPort | null;
-  // P5 O16 M3b fix wave 2: the pid of the host that raised each request a DRAIN_REPLIES name answers, by its requestId
-  issuers: Map<string, number>;
-  recycling: number | null; // the pid a recycle reconnects to, until it is welcomed or lost
+  // P5 O16 M3b fix waves 2 and 3: which process raised each request a DRAIN_REPLIES name answers, and each process's links
+  routes: CompletionRoutes<MainPort>;
+  closedPid: number | null; // the process whose link closed last, for the loss that follows
   pending: Map<string, Pending>;
   exits: number[]; // times of unexpected exits inside the crash window
   restartTimer: ReturnType<typeof setTimeout> | null;
@@ -320,8 +322,8 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       utility: null,
       port: null,
       draining: null,
-      issuers: new Map(),
-      recycling: null,
+      routes: new CompletionRoutes(),
+      closedPid: null,
       pending: new Map(),
       exits: [],
       restartTimer: null,
@@ -379,8 +381,6 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   }
   // C3 end
   let nextRequestId = 0;
-  // P5 O16 M3b fix wave 2: the pid each link was welcomed (or, a utility host's, spawned) with
-  const linkPids = new WeakMap<MainPort, number>();
 
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
     cancelResync(host, 'transition'); // E10: the connection it pulled through is gone (or replaced)
@@ -425,7 +425,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
     child.on('spawn', () => {
       if (host.utility !== link) return;
-      if (child.pid !== undefined) linkPids.set(port, child.pid); // P5 O16 M3b fix wave 2
+      if (child.pid !== undefined) opened(host, port, child.pid); // P5 O16 M3b fix wave 3
       transition(host, { state: 'ready', pid: child.pid ?? null, restarts: host.state.restarts });
       host.settleFirstLaunch();
       if (external(host)) readyIfAsked(host); // P5 O2 M3
@@ -506,6 +506,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   // Fails the requests the host was sent; E10: the ones still held wait for the next connect.
   function detach(host: Host, reason: string): void {
+    if (host.port) host.closedPid = host.routes.closed(host.port); // P5 O16 M3b fix wave 3: its process reconnects until known gone
     unlink(host);
     host.utility = null;
     host.port?.close();
@@ -560,16 +561,41 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     port.postMessage(request);
     // P5 O16 M3b fix wave 2: a stop-all ends the host it is written to whatever it answers, so that link's close is
     // deliberate; a draining link keeps its `replace` (its host may have detached rows only a successor can reach)
-    if (pending.name === 'host.stopAll' && port === host.port) host.transport?.expectExit();
+    // (fix wave 3: the engine host's link alone; one carried by main's machine link marks nothing there)
+    if (pending.name === 'host.stopAll' && host.owner === 'engine-host' && port === host.port) host.transport?.expectExit();
     const asker = pending.client ?? (forwarded ? pending.forwardedRef : null);
     if (asker) host.gone?.carry(asker); // P5 O1 M5: after the request, so a gone client's line follows it
   }
 
-  function sendHeld(host: Host): void {
-    for (const pending of host.pending.values()) if (!pending.sent) send(host, pending);
+  // P5 O16 M3b fix wave 3: a held completion goes to its raising process alone (`pid`: the fresh link's, null when unknown)
+  function sendHeld(host: Host, pid: number | null = null): void {
+    for (const [id, pending] of host.pending) {
+      if (pending.sent) continue;
+      if (pending.issuer !== null && pending.issuer !== pid) failCompletion(host, id, pending);
+      else send(host, pending);
+    }
   }
 
-  const holdsAny = (host: Host) => [...host.pending.values()].some((pending) => !pending.sent);
+  // Held work that needs a host: a held completion needs only its own process, never another (fix wave 3)
+  const holdsAny = (host: Host) => [...host.pending.values()].some((pending) => !pending.sent && pending.issuer === null);
+
+  // P5 O16 M3b fix wave 3 start: a process's links and its end, for the completions it raised
+  function failCompletion(host: Host, id: string, pending: Pending): void {
+    clearTimeout(pending.timer);
+    host.pending.delete(id);
+    pending.resolve({ ok: false, error: ipcError('host_unavailable', `the ${host.owner} that raised this request is gone; ${pending.name} not sent`) });
+  }
+
+  function processGone(host: Host, pids: readonly number[]): void {
+    for (const pid of pids) host.routes.gone(pid);
+    for (const [id, pending] of host.pending) if (!pending.sent && pending.issuer !== null && pids.includes(pending.issuer)) failCompletion(host, id, pending);
+  }
+
+  function opened(host: Host, link: MainPort, pid: number): void {
+    host.closedPid = null;
+    processGone(host, host.routes.opened(link, pid));
+  }
+  // P5 O16 M3b fix wave 3 end
 
   // An unexpected exit, counted in the crash window: at the limit (three within 60 s) the host stays crashed for good;
   // else the wait before the next start, by the restarts so far.
@@ -621,8 +647,8 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     // host.status reports it.
     const crashed = (why: string, facts: Partial<Pick<HostFacts, 'reason' | 'refused' | 'waitingLiveSessions'> & { refusal: ServerRefuse }> = {}) => {
       console.error(`[hosts] ${host.owner} ${why}`);
-      host.recycling = null; // P5 O16 M3b fix wave 2
       detach(host, 'is unreachable');
+      processGone(host, host.routes.allReconnectingGone()); // P5 O16 M3b fix wave 3
       const { reason = null, refused = null, waitingLiveSessions = null, refusal = null } = facts;
       const changed = host.reason !== reason || host.refused !== refused || host.waitingLiveSessions !== waitingLiveSessions || JSON.stringify(host.refusal) !== JSON.stringify(refusal);
       [host.reason, host.refused, host.waitingLiveSessions, host.refusal] = [reason, refused, waitingLiveSessions, refusal];
@@ -644,8 +670,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         park(host, false); // P5 O2 M3: an adoption, or a launch, reached it
         host.port = link;
         host.draining = null; // P5 O16 M3b fix wave 1: the successor's link (the old one closed before it)
-        host.recycling = null; // fix wave 2
-        linkPids.set(link, welcome.pid);
+        opened(host, link, welcome.pid); // fix wave 3: a process still reconnecting is gone, its completions failed
         host.peer = welcome.peer; // P5 O1 M6
         host.welcome = welcome; // P5 O2 M5
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
@@ -663,7 +688,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           host.relay?.closed(closed.value.channel, closed.value.reason); // P5 O2 M5: with its reason
         });
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
-        sendHeld(host);
+        sendHeld(host, welcome.pid);
         host.settleFirstLaunch();
         if (external(host)) readyIfAsked(host); // P5 O2 M3
         else sayReady(host, link);
@@ -674,14 +699,19 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         disconnected();
       },
       lost(loss) {
-        host.draining = null; // P5 O16 M3b fix wave 1: the old link closed: its host's completions have no one to settle
-        host.recycling = null; // fix wave 2
+        // P5 O16 M3b fix wave 1: the old link closed: its host's completions have no one to settle (fix wave 3: refused)
+        const drained = host.draining ? host.routes.closed(host.draining) : null;
+        host.draining = null;
         if (stopped) return;
         if (loss === 'replaced') {
           crashed('was taken over by another client of its supervisor; not reconnecting');
           return options.onReplaced?.(host.owner); // P5 O2 M5
         }
         disconnected();
+        // fix wave 3: the closed link's process is gone unless the loss was quiet (it lives; reconnected to), before
+        // anything below reads what is held
+        const closed = drained ?? host.closedPid;
+        if (loss !== 'quiet' && closed !== null) processGone(host, [closed]);
         // P5 O16 M3b (D40): a handover's close: the successor at once, whatever is held (a deferral's caller may be gone)
         if (loss === 'replace') {
           failSent(host, 'handed its sessions over');
@@ -693,7 +723,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         unexpected(loss.crash);
       },
       exited(exit) {
-        if (!stopped) unexpected(exit);
+        if (stopped) return;
+        processGone(host, host.routes.allReconnectingGone()); // P5 O16 M3b fix wave 3
+        unexpected(exit);
       },
       failed(reason, message) {
         if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`, { reason: reason === 'held_lock' ? 'held_lock' : null });
@@ -722,6 +754,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   function exited(host: Host, code: number | null): void {
     detach(host, 'exited');
+    if (host.closedPid !== null) processGone(host, [host.closedPid]); // P5 O16 M3b fix wave 3
     if (stopped) return;
     console.error(`[hosts] ${host.owner} exited unexpectedly (code ${code})`);
     ptysGone(host);
@@ -886,25 +919,15 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     return typeof id === 'string' ? id : null;
   };
 
-  // An event that announces a request (its payload names a `requestId`): the pid of the link it came on, for its answer
+  // An event that announces a request (its payload names a `requestId`): the process of the link it came on
   function remember(host: Host, payload: unknown, from: MainPort): void {
     const requestId = requestIdOf(payload);
-    const pid = linkPids.get(from);
-    if (requestId === null || pid === undefined) return;
-    host.issuers.delete(requestId);
-    host.issuers.set(requestId, pid);
-    if (host.issuers.size > ISSUERS_KEPT) host.issuers.delete(host.issuers.keys().next().value!);
+    if (requestId !== null) host.routes.raised(requestId, from);
   }
 
-  // Where a completion goes: the open link of the host that raised its request (any open link when this process never
-  // saw it raised, the served one first), `hold` while that process is reconnected to, null once it is gone
-  function completionLink(host: Host, input: unknown): MainPort | 'hold' | null {
-    const requestId = requestIdOf(input);
-    const issuer = requestId === null ? undefined : host.issuers.get(requestId);
-    for (const link of [host.port, host.draining]) if (link && (issuer === undefined || linkPids.get(link) === issuer)) return link;
-    if (host.recycling !== null && (issuer === undefined || issuer === host.recycling)) return 'hold';
-    return null;
-  }
+  // Where a completion goes (completion-routes.ts): its raiser's open link, held for its raiser while it reconnects, null
+  // once it is gone; one this process never saw raised, the served link first
+  const completionRoute = (host: Host, input: unknown): CompletionRoute<MainPort> => host.routes.route(requestIdOf(input), [host.port, host.draining]);
 
   // Main's daemon shape: while its engine-host link is down (`mawsd` closes it the moment its engine host leaves ready,
   // a handover's drain included), a completion or a stop goes by its link to `mawsd`'s machine.sock, whose front forwards
@@ -928,11 +951,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const budgetMs = budget ?? host.spec.requestBudgetsMs?.[name] ?? REQUEST_TIMEOUT_MS;
     // P5 O16 M3b fix wave 2: a completion goes to the engine host that raised its request, never waits for another (one
     // carried by the machine link is an ordinary request of that link's, routed again by `mawsd`)
-    const completion = owner === 'engine-host' && DRAIN_REPLIES.has(name) ? completionLink(host, input) : undefined;
-    if (completion === null) {
-      if (viaMachine(host)) return request('machine', name, input, client, forwarded, budgetMs);
-      return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `the ${owner} that raised request ${requestIdOf(input) ?? '(none)'} is gone; ${name} not sent`) });
-    }
+    const completion = owner === 'engine-host' && DRAIN_REPLIES.has(name) ? completionRoute(host, input) : undefined;
+    // main's daemon shape: with no open link here, `mawsd` routes it (its own record of the raiser is the one that counts)
+    if (completion !== undefined && (completion === null || 'hold' in completion) && viaMachine(host)) return request('machine', name, input, client, forwarded, budgetMs);
+    if (completion === null) return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `the ${owner} that raised request ${requestIdOf(input) ?? '(none)'} is gone; ${name} not sent`) });
     // E10: once started, a request made while the host starts or restarts is held and sent when it is ready
     const holds = started !== null && !stopped && !host.quitting && (host.state.state === 'starting' || host.state.state === 'restarting');
     if (!host.port && !holds) {
@@ -948,10 +970,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       // reads strictly) never carries it
       const asker = owner === 'machine' && client ? client : null;
       const message: HostMessage = asker ? { t: 'req', id, name: name as CommandName, input, client: asker.id } : { t: 'req', id, name: name as CommandName, input };
-      const pending: Pending = { name, resolve, raw: forwarded?.raw ?? null, timer, request: message, sent: false, client: asker, ...forwardedAs(forwarded?.client ?? null) };
+      const issuer = completion && 'hold' in completion ? completion.hold : null; // fix wave 3: bound to its raiser
+      const pending: Pending = { name, resolve, raw: forwarded?.raw ?? null, timer, request: message, sent: false, client: asker, ...forwardedAs(forwarded?.client ?? null), issuer };
       host.pending.set(id, pending);
-      if (completion !== undefined && completion !== 'hold') send(host, pending, completion); // P5 O16 M3b fix wave 2
-      else if (completion === 'hold') return; // the same process, reconnected to: sent on its fresh link
+      if (completion && 'link' in completion) send(host, pending, completion.link); // P5 O16 M3b fix wave 2
+      else if (issuer !== null) return; // its raiser, reconnected to: sent on its fresh link, failed if it is gone
       else if (host.port) send(host, pending);
       else if (host.draining && name === 'host.stopAll') send(host, pending, host.draining); // fix wave 2: a deliberate stop reaches the host that still owns the drain
       else if (host.parked) launch(host); // P5 O2 M3: a request wakes a parked host
@@ -1109,7 +1132,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       const welcomed = new Promise<void>((resolve) => host.settled.add(resolve));
       // From here nothing is written on the old link (requests are held for the fresh one), and what the host wrote
       // before it saw the end still arrives through the link's listeners.
-      host.recycling = linkPids.get(host.port) ?? null; // P5 O16 M3b fix wave 2: its completions wait for the fresh link
+      host.closedPid = host.routes.closed(host.port); // P5 O16 M3b fix wave 3: its completions wait for its fresh link
       unlink(host);
       host.port = null;
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
@@ -1159,7 +1182,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       const answer: HandoverAnswer = await transport.handover(graceMs, () => sentAnswered(host, HANDOVER_SENT_WAIT_MS));
       if (answer.state === 'failed') {
         // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
-        host.recycling = host.draining ? (linkPids.get(host.draining) ?? null) : null; // fix wave 2: the same process, reconnected to
+        if (host.draining) host.closedPid = host.routes.closed(host.draining); // fix wave 3: the same process, reconnected to
         host.draining = null;
         transport.recycle(() => failSent(host, 'was recycled'));
         return { ok: false, error: ipcError('internal', `${owner} did not hand over: ${answer.why}`) };
@@ -1168,7 +1191,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     },
     completionGone(owner, name, input) {
       const host = hosts[owner];
-      return owner === 'engine-host' && host !== undefined && DRAIN_REPLIES.has(name) && completionLink(host, input) === null && !viaMachine(host);
+      return owner === 'engine-host' && host !== undefined && DRAIN_REPLIES.has(name) && completionRoute(host, input) === null && !viaMachine(host);
     },
   };
 }

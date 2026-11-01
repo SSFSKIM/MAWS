@@ -77,6 +77,29 @@ describe('an ignored idle reap, then the handover', () => {
   });
 });
 
+// fix wave 3 (#2): a handover asked while an idle reap waits for its verdict does not upgrade the reap to the quit
+// ladder: the reap runs its own path (its end_session, its one SIGTERM, its wait), and an engine that ignored both is
+// then frozen and detached for the successor
+describe('a handover during an idle reap', () => {
+  it('waits for the reap’s verdict; an engine that ignored it is detached: no stdin close, no SIGKILL, one end_session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setImmediate', 'Date'] });
+    const host = await engineHost(['app-reaping']);
+    const [row] = host.rows as [typeof host.rows[0]];
+    const reaped = row.session.reap('idle');
+    await vi.advanceTimersByTimeAsync(LADDER_MS.endSession / 2); // its grace still pending
+    const answer = host.call('host.handover', { graceMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(LADDER_MS.endSession + REAP_TERM_MS);
+    expect(await reaped).toBe('ignored');
+    expect(await answer).toEqual({ state: 'detaching' });
+    await vi.advanceTimersByTimeAsync(EXIT_GRACE_MS + LADDER_MS.term + LADDER_MS.kill);
+    await Promise.all(host.exitOrders);
+    expect(host.exits).toEqual(['handover']);
+    expect(row.transport.calls).toEqual(['kill:SIGTERM', 'detach:ack']); // the reap's own signal, then the detach
+    expect(row.transport.requestsOf('end_session')).toHaveLength(1);
+    expect(row.session.lifecycle).toBe('ready');
+  });
+});
+
 // fix wave 2 (#2, Interfaces §D: a stop-all stays deliberate): a stop-all that reaches the draining host takes every
 // frozen row back and stops it through the ladder, and the host's exit is the stop-all's; once the drain has settled the
 // rows are the successor's, and a stop-all is refused rather than answered as if it had stopped them

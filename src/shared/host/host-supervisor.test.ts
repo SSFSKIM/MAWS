@@ -717,3 +717,101 @@ describe('a completion of an engine host’s request', () => {
     expect(machineSeen).toEqual([]);
   });
 });
+
+// P5 O16 M3b fix wave 3: a held completion is its raiser's alone. Held while that process reconnects (a recycle, a
+// quiet loss), sent on its fresh link; failed host_unavailable the moment the process is known gone, never flushed to
+// whatever process is welcomed next, and never counted as work that needs another host.
+describe('a held completion and its raiser', () => {
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+  const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+
+  // A host that announces pane requests (`show`) and records the answers it gets
+  function paneHost(seen: unknown[]) {
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, hostEmit) => {
+      emit = hostEmit;
+      on('maws.pane.answer', async (input) => (seen.push(input), { outcome: 'delivered' as const }));
+    });
+    return { runtime, show: () => emit('maws.pane.show', PANE as never) };
+  }
+
+  async function raised(host: ReturnType<typeof paneHost>) {
+    await until(() => host.show());
+    await until(() => heard('maws.pane.show') === 1);
+  }
+
+  it('its raiser killed during a recycle, a successor welcomed: refused, never sent to the successor', async () => {
+    const oldSeen: unknown[] = [];
+    const old = paneHost(oldSeen);
+    const fake = await startFake({ runtime: old.runtime });
+    const successorSeen: unknown[] = [];
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid, runtime: paneHost(successorSeen).runtime });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    await raised(old);
+    fake.connections.at(-1)!.allowHalfOpen = true; // its side stays open while the drain runs
+    setTimeout(() => void fake.die(), 100); // it dies before the recycle reconnects
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER); // held for its raiser
+    await expect(answered).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await recycled;
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && supervisor.snapshot('engine-host').pid !== fake.pid);
+    await sleep(50);
+    expect(successorSeen).toEqual([]);
+    expect(oldSeen).toEqual([]);
+  });
+
+  it('its raiser, armed to exit when idle, exits during a recycle with only that completion held: a park, not a launch', async () => {
+    const old = paneHost([]);
+    const fake = await startFake({ runtime: old.runtime });
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    await raised(old);
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    fake.connections.at(-1)!.allowHalfOpen = true;
+    setTimeout(() => void fake.die(), 100); // it exits once idle, 100 ms into the drain
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    await recycled;
+    await expect(answered).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await until(() => supervisor.parked('engine-host'));
+    await sleep(200);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.parked('engine-host')).toBe(true);
+  });
+
+  it('during a quiet reconnect to the same live process: held, then delivered on the fresh link', async () => {
+    const seen: unknown[] = [];
+    const host = paneHost(seen);
+    const fake = await startFake({ runtime: host.runtime });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    await raised(host);
+    fake.dropClient(); // the link closes; the process lives on
+    await until(() => supervisor.snapshot('engine-host').state !== 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(seen).toEqual([ANSWER]);
+    expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(fake.connections).toHaveLength(2);
+  });
+});
+
+// P5 O16 M3b fix wave 3: a stop-all main sends by its machine link (its engine-host link down) marks nothing on that link:
+// a later quiet close of machine.sock, `mawsd` alive, reconnects as any quiet loss does
+describe('a stop-all by the machine link', () => {
+  it('leaves the machine link’s close a quiet loss: it reconnects', async () => {
+    const at = siblingProfile('machine');
+    const stops: unknown[] = [];
+    const machine = await startFake({ runtime: createHostRuntime((on) => on('host.stopAll', async (input) => (stops.push(input), { stopped: 0, forced: 0 }))) }, at);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    expect(stops).toHaveLength(1);
+    machine.dropClient(); // a quiet close: mawsd lives on
+    await until(() => machine.connections.length === 2 && supervisor.snapshot('machine').state === 'ready', 5_000);
+    expect(supervisor.facts('machine').reason).toBeNull();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
