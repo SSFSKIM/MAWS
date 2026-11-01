@@ -17,16 +17,27 @@ const ENGINE = 5000;
 const CHILD = 5001; // the engine's cua serve
 const STRANGER = 6000; // a same-user process under launchd
 const OTHER_ENGINE = 7000; // session B's engine
+const NEXT_ENGINE = 5100; // an engine that replaced session A's
+const NEXT_CHILD = 5101; // its cua serve
 const uid = process.getuid!();
 
-function fakeAddon(): PeerAddon & { peerPid: number } {
+// `peerReads` counts the peer check's reads of a socket's peer: the check runs, and its verdict acts, in one turn
+function fakeAddon(): PeerAddon & { peerPid: number; peerReads: number } {
   const table = new Map([
     [ENGINE, { ppid: 1, start: 10 }],
     [CHILD, { ppid: ENGINE, start: 20 }],
     [STRANGER, { ppid: 1, start: 30 }],
     [OTHER_ENGINE, { ppid: 1, start: 40 }],
+    [NEXT_ENGINE, { ppid: 1, start: 50 }],
+    [NEXT_CHILD, { ppid: NEXT_ENGINE, start: 60 }],
   ]);
-  const addon = { peerPid: CHILD, version: PEER_AUTH_VERSION, peer: () => ({ pid: addon.peerPid, uid }), process: (pid: number) => table.get(pid) ?? null };
+  const addon = {
+    peerPid: CHILD,
+    peerReads: 0,
+    version: PEER_AUTH_VERSION,
+    peer: () => (addon.peerReads++, { pid: addon.peerPid, uid }),
+    process: (pid: number) => table.get(pid) ?? null,
+  };
   return addon;
 }
 
@@ -431,6 +442,46 @@ describe('the relay', () => {
     await until(client.closed);
     engineClient(sockets.ensure(A)!, Buffer.from('new'));
     await until(() => nextApp.heard().toString() === 'new');
+  });
+
+  // what was checked against one engine is that engine's: the app sees only the daemon, so it cannot hold a replacement
+  // engine's boundary itself (panel scalpel-1#1)
+  it.each([
+    ['replaced by another', NEXT_ENGINE],
+    ['gone', null],
+  ])('a peer checked under the session\'s engine is never relayed once that engine is %s, even while its connect is still retrying', async (_, next) => {
+    const addon = fakeAddon();
+    const { sockets, appDir } = stand({ addon, relayConnectWaitMs: 2000 });
+    sockets.target(appDir); // the app's socket for A does not listen yet: the relay's connect retries
+    sockets.engineProcess(A, ENGINE);
+    const client = engineClient(sockets.ensure(A)!, Buffer.from('OLD_ENGINE'));
+    await until(() => addon.peerReads > 0); // checked against ENGINE and let in
+    sockets.engineProcess(A, next);
+    const app = appSocket(appDir, A);
+    await app.listening;
+    await until(() => client.closed() || app.heard().length > 0);
+    expect(app.heard().toString()).toBe('');
+    expect(client.closed()).toBe(true);
+    expect(app.peers).toHaveLength(0);
+  });
+
+  it('a relayed pair ends when its engine is replaced, and lives through a repeated status of the same engine', async () => {
+    const addon = fakeAddon();
+    const { sockets, appDir } = stand({ addon });
+    const app = appSocket(appDir, A);
+    await app.listening;
+    sockets.target(appDir);
+    sockets.engineProcess(A, ENGINE);
+    const client = engineClient(sockets.ensure(A)!, Buffer.from('a'));
+    await until(() => app.heard().toString() === 'a');
+    sockets.engineProcess(A, ENGINE); // the same engine's next status
+    client.socket.write('b');
+    await until(() => app.heard().toString() === 'ab');
+    sockets.engineProcess(A, NEXT_ENGINE);
+    await until(client.closed);
+    addon.peerPid = NEXT_CHILD;
+    engineClient(sockets.ensure(A)!, Buffer.from('next'));
+    await until(() => app.heard().toString() === 'abnext');
   });
 
   it('remove and close end the relayed connections and the sockets waiting', async () => {

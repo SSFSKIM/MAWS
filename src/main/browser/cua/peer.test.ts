@@ -264,4 +264,14 @@ describe('the relay peer (doubles)', () => {
     expect(authorizePeer(7, [], { addon: fakeAddon(table, [20, 41]), now: ACCEPT, uid, relay })).toEqual({ reason: 'not_descendant', pid: 20 });
     expect(authorizePeer(7, [], { addon: fakeAddon(table, [20], uid + 1), now: ACCEPT, uid, relay })).toEqual({ reason: 'uid_mismatch', pid: 20 });
   });
+
+  // a socket accepted before the daemon started was another process's, whose pid the daemon now holds: its buffered
+  // requests are not the daemon's (panel scalpel-1#3)
+  it('refuses the daemon\'s exact instance when it started after the socket was accepted', () => {
+    const later = { ...table, 20: { ppid: 1, start: ACCEPT * 1000 + 1 } };
+    const reborn: ProcessRoot = { pid: 20, start: ACCEPT * 1000 + 1 };
+    expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [engineA], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT + 1, uid, relay: reborn })).toBeNull(); // accepted after it started
+  });
 });

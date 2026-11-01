@@ -13,7 +13,8 @@
 // so; where it should exist and did not load, every peer is refused, one line per socket. A peer let in is relayed: the
 // daemon connects, from its own process (the app admits it by the daemon's exact instance), to the app's socket for the
 // session, waiting a bounded while for it to listen, and pipes bytes both ways unparsed; the pair ends together. A tab
-// engine's departure or replacement ends every relayed connection, so cua's host sees the loss and retries.
+// engine's departure or replacement ends every relayed connection, so cua's host sees the loss and retries; so does the
+// session's engine's, for the pairs checked against it (a connect still retrying among them).
 import { chmodSync, readdirSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -274,9 +275,13 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     engineProcess(appSessionId, pid) {
       const addon = pid === null ? null : peerAddon();
       const root = pid === null || !addon ? null : rootOf(pid, addon);
+      const was = engineRoots.get(appSessionId);
       if (root) engineRoots.set(appSessionId, root);
       else engineRoots.delete(appSessionId);
       const session = sessions.get(appSessionId);
+      // what was checked against the engine is that engine's: its pairs, a connect still retrying among them, end with it
+      // (the app sees only the daemon, so it cannot hold the next engine's boundary itself)
+      if (session && was && (root?.pid !== was.pid || root.start !== was.start)) for (const pair of [...session.pairs]) endPair(pair);
       if (!root || !session) return;
       for (const [socket, { acceptedAt, timer }] of [...session.pending]) {
         clearTimeout(timer);

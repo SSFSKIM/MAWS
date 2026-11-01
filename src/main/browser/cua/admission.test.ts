@@ -512,6 +512,41 @@ describe('the daemon\'s relay', () => {
       expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, refused: 0 });
     });
 
+    // nothing queued under one link is served under the next, even when the next reaches the same daemon (panel
+    // scalpel-1#2): its old confirmation's waiting sockets go with the link
+    it('a relayed socket waiting for a confirmation is destroyed unread when the link goes, and the next link\'s confirmation never serves it', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      await attach(h.backend, addon, DAEMON, uid, () => new Promise(() => {}));
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!); // its tabs.query sits unread while the confirmation is under way
+      await until(() => accepted.length === 1);
+      await settled();
+      h.backend.relay(null); // the link went down
+      await attach(h.backend, addon, DAEMON); // and came back to the same daemon, confirmed at once
+      await until(() => client.closed() || client.heard() > 0);
+      expect(client.heard()).toBe(0);
+      expect(client.closed()).toBe(true);
+      expect(accepted[0]!.bytesRead).toBe(0);
+      expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 0 });
+    });
+
+    it('a socket from the daemon\'s pid accepted while no link was up is not admitted as the relay of a later link', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!); // no link: it waits for the session's engine
+      await until(() => accepted.length === 1);
+      await settled();
+      await attach(h.backend, addon, DAEMON); // a link comes up, confirmed at once
+      await settled();
+      expect([client.heard(), client.closed()]).toEqual([0, false]); // not let in by the confirmation
+      h.backend.engineProcess(A, ENGINE); // judged now, with no relay of its own link's to pass as
+      await until(client.closed);
+      expect(client.heard()).toBe(0);
+      expect(h.logs).toEqual([`cua socket of A: refused peer pid ${DAEMON} (not_descendant)`]);
+    });
+
     it('a relayed socket accepted while the confirmation is under way is let in once it comes', async () => {
       const addon = fakeAddon();
       const h = harness({ peer: { addon } });

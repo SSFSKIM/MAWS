@@ -101,8 +101,12 @@ export function authorizePeer(
   if (!peer) return { reason: 'peer_unavailable', pid: null };
   const { pid } = peer;
   if (peer.uid !== uid) return { reason: 'uid_mismatch', pid };
-  // the daemon's relay, by its exact instance; its pid with another start is a stranger, judged as any peer below
-  if (relay !== null && pid === relay.pid && isLive(relay, addon.process)) return read()?.pid === pid ? null : { reason: 'not_descendant', pid };
+  // the daemon's relay, by its exact instance; its pid with another start is a stranger, judged as any peer below. Held
+  // to the accept-time rule too: a daemon started after the accept did not connect (the socket's pid is reused)
+  if (relay !== null && pid === relay.pid && isLive(relay, addon.process)) {
+    if (relay.start > now * 1000) return { reason: 'not_descendant', pid };
+    return read()?.pid === pid ? null : { reason: 'not_descendant', pid };
+  }
   const live = roots.filter((root) => isLive(root, addon.process));
   if (live.length === 0) return { reason: 'no_root', pid };
   // A peer started after the accept is not the process that connected: that one is gone and its pid reused.
