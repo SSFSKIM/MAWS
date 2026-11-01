@@ -1,0 +1,9 @@
+[u3 03:47:28] electron v44.4.5 on 27.0 arm64; node v26.4.0; addon /Users/new/.local/share/maws-ci/worktrees/u3-spike/native/peer-auth/prebuilds/darwin-arm64/peer-auth.node
+build/host.cjs: 127 inputs, 20 from src/main/browser/
+[u3 03:47:28] mode offscreen
+[u3 03:48:53] mode offscreen: driver exit 0
+[u3 03:48:53] mode offscreen-psb
+[u3 03:50:18] mode offscreen-psb: driver exit 0
+[u3 03:50:18] mode offscreen-nothrottle
+[u3 03:51:42] mode offscreen-nothrottle: driver exit 0
+[u3 03:51:42] done; /Users/new/.local/share/maws-ci/worktrees/u3-spike/spikes/u3-remote-browser/results/summary.json
