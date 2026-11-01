@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext } from '@shared/ipc/client';
-import { claimable, machineOps } from './machine-ops';
+import { claimable, machineOps, registerMachineOps, type LateOutcome } from './machine-ops';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -102,5 +102,65 @@ describe('machine.op', () => {
     expect(ops.opQuery({ opId: 'op-4', opCreated: created, tombstoneIfAbsent: true })).toEqual({ state: 'not-received' });
     expect(await ops.op({ opId: 'op-4', opCreated: created, claim: CLAIM, name: 'session.rename', input: { appSessionId: 'app-1', title: 'B' } }, CONTEXT)).toEqual({ state: 'refused', reason: 'tombstoned' });
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P5 O7 M4 (the milestone review's finding, as the architect refined it): a claim the last process left with no result
+// can't be finished by this one, so the services' ledger (`orphanAtOpen`) answers it `expired`, the RL4 state a device
+// settles unknown, instead of `in-progress` until the horizon; it is never run again, and an outcome read back later
+// replaces it
+describe('a claim the last process left unfinished', () => {
+  const SPAWN = { ...CLAIM, target: null, name: 'session.spawn' };
+  // the services as mawsd composes them after a restart: the ledger reopened with its orphans, machine.op registered
+  function restarted(dir: string, lateOutcome?: LateOutcome) {
+    const handlers = new Map<string, (input: unknown, context?: HandlerContext) => unknown>();
+    const invoke = vi.fn<Invoke>(async () => ({ ok: true, value: { status: 'ok', appSessionId: 'a-second-run' } }));
+    const ledger = OpLedger.open(dir, 'spine-ops.jsonl', { orphanAtOpen: true });
+    registerMachineOps({ register: (name: string, handler: (input: unknown, context?: HandlerContext) => unknown) => void handlers.set(name, handler), invoke } as never, ledger, lateOutcome);
+    return {
+      ledger,
+      invoke,
+      op: (input: unknown) => handlers.get('machine.op')!(input, CONTEXT) as Promise<unknown>,
+      query: (opId: string, opCreated: string) => handlers.get('machine.opQuery')!({ opId, opCreated, tombstoneIfAbsent: true }),
+    };
+  }
+
+  it('answers it expired after a reopen and never runs it again; an outcome arriving later replaces it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'machine-ops-'));
+    dirs.push(dir);
+    const opCreated = now();
+    const spawn = { opId: 'op-orphan-1', opCreated, claim: CLAIM, name: 'session.spawn', input: { checkout: '/c', permission_mode: 'default' } };
+    expect(OpLedger.open(dir, 'spine-ops.jsonl').begin('op-orphan-1', opCreated, SPAWN, () => null)).toEqual({ kind: 'claimed' }); // the process ends here
+    // the engine host's and the endpoint's ledgers open without the option: there the claim stays in progress
+    expect(OpLedger.open(dir, 'spine-ops.jsonl').query('op-orphan-1', opCreated, false)).toMatchObject({ state: 'in-progress' });
+
+    const first = restarted(dir); // nothing to read back yet
+    expect(first.query('op-orphan-1', opCreated)).toEqual({ state: 'expired' });
+    expect(await first.op(spawn)).toEqual({ state: 'in-progress' }); // a replay runs nothing
+    expect(first.invoke).not.toHaveBeenCalled();
+    expect(first.ledger.orphans().map((orphan) => orphan.opId)).toEqual(['op-orphan-1']);
+    // the act outlived the process (its session launched on an engine host this mawsd adopted): its outcome, read back
+    const late = { ok: true as const, value: { status: 'ok', appSessionId: 'app-launched' } };
+    const second = restarted(dir, (name, opId) => (name === 'session.spawn' && opId === 'op-orphan-1' ? late : null));
+    expect(second.query('op-orphan-1', opCreated)).toEqual({ state: 'done', outcome: late, ...SPAWN });
+    expect(await second.op(spawn)).toEqual({ state: 'done', result: late });
+    expect(second.invoke).not.toHaveBeenCalled();
+    expect(second.ledger.orphans()).toEqual([]);
+    expect(restarted(dir).query('op-orphan-1', opCreated)).toEqual({ state: 'done', outcome: late, ...SPAWN }); // kept on disk
+  });
+
+  it('takes an outcome given in the same run in place of the unknown, and leaves a finished op alone at a reopen', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'machine-ops-'));
+    dirs.push(dir);
+    const opCreated = now();
+    const before = OpLedger.open(dir, 'spine-ops.jsonl');
+    before.begin('op-orphan-2', opCreated, SPAWN, () => null);
+    before.begin('op-kept', opCreated, { ...CLAIM, target: 'app-1', name: 'session.rename' }, () => null);
+    before.finish('op-kept', { ok: true });
+    const after = restarted(dir);
+    expect(after.ledger.orphans().map((orphan) => orphan.opId)).toEqual(['op-orphan-2']);
+    expect(after.query('op-kept', opCreated)).toMatchObject({ state: 'done', outcome: { ok: true } });
+    after.ledger.finish('op-orphan-2', { ok: true, value: { status: 'ok', appSessionId: 'app-2' } });
+    expect(after.query('op-orphan-2', opCreated)).toMatchObject({ state: 'done', outcome: { ok: true, value: { appSessionId: 'app-2' } } });
   });
 });

@@ -22,6 +22,14 @@
 // append would bury that tail mid-file. It stays closed until it is opened again (a restart of its owner), when the load
 // reconciles it with the file as above; a restart is also where a claim left in progress is settled.
 //
+// P5 O7 M4: with `orphanAtOpen` (the services' ledger, `machine.op`), a claim the file holds with no result is the last
+// process's, which is gone, so nothing in this one can finish it: it is orphaned, and a query answers it `expired`, the
+// RL4 state for an op whose outcome the executor can no longer say (a device settles it unknown and stops asking). It is
+// never run again (its id still answers `in-progress` to a new act), and its outcome, if it arrives later (a run that
+// outlived the process, read back by its owner and given to `finish`), replaces it: a query then answers `done`. Nothing
+// of this is written; each open derives it from the file. Without the option (the engine host's `host.op`, the
+// endpoint's own) such a claim stays `in-progress`.
+//
 // What the file holds may have reached only the page cache (an fsync that failed in the last process), and a restart
 // does not flush it: the open fsyncs the file and its directory before it serves a record, and one that can't stays
 // closed. A closed ledger logs one line naming its file and why, and says why as a word (`closed`): `unreadable`,
@@ -47,7 +55,10 @@ export type OpQueryAnswer =
 /** Why a ledger is closed: its file can't be read, what it holds can't be made durable, or a write failed. */
 export type OpLedgerClosed = 'unreadable' | 'unsynced' | 'write-failed';
 
-type Entry = { opCreated: string; at: number; claim: OpClaim | null; result?: { value: unknown } };
+type Entry = { opCreated: string; at: number; claim: OpClaim | null; result?: { value: unknown }; orphaned?: true };
+
+/** How a ledger opens: its clock and log, and whether a claim found with no result is the last process's orphan. */
+export type OpLedgerOptions = { now?(): number; log?(line: string): void; orphanAtOpen?: boolean };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
@@ -71,18 +82,28 @@ export class OpLedger {
   readonly #entries = new Map<string, Entry>();
   #closed: OpLedgerClosed | null = null;
 
-  private constructor(dir: string, name: string, options: { now?(): number; log?(line: string): void }) {
+  readonly #orphanAtOpen: boolean;
+
+  private constructor(dir: string, name: string, options: OpLedgerOptions) {
     this.#dir = dir;
     this.#path = join(dir, name);
     this.#now = options.now ?? Date.now;
     this.#log = options.log ?? (() => {});
+    this.#orphanAtOpen = options.orphanAtOpen === true;
   }
 
   /** The ledger `dir/name`, read and compacted; nothing is created until the first record (then `dir` too, 0700). */
-  static open(dir: string, name: string, options: { now?(): number; log?(line: string): void } = {}): OpLedger {
+  static open(dir: string, name: string, options: OpLedgerOptions = {}): OpLedger {
     const ledger = new OpLedger(dir, name, options);
     ledger.#load();
     return ledger;
+  }
+
+  /** The claims this open found orphaned and no outcome has replaced yet (`orphanAtOpen`), for their owner to read back. */
+  orphans(): { opId: string; claim: OpClaim }[] {
+    const found: { opId: string; claim: OpClaim }[] = [];
+    for (const [opId, entry] of this.#entries) if (entry.orphaned && entry.claim !== null && entry.result === undefined) found.push({ opId, claim: entry.claim });
+    return found;
   }
 
   /** Whether the ledger answers: not when its file could not be read or an append failed; every op is then `unavailable`. */
@@ -148,6 +169,7 @@ export class OpLedger {
     if (entry?.claim != null) {
       const { member, device, fingerprint, target, name } = entry.claim;
       const binding = { member, device, fingerprint, target, name };
+      if (entry.result === undefined && entry.orphaned) return { state: 'expired' }; // P5 O7 M4: the last process's, which no one can finish
       return entry.result === undefined ? { state: 'in-progress', ...binding } : { state: 'done', outcome: entry.result.value, ...binding };
     }
     if (entry === undefined && tombstoneIfAbsent) {
@@ -206,7 +228,7 @@ export class OpLedger {
       if (entry.at < cutoff) {
         this.#entries.delete(opId);
         tidy = true;
-      }
+      } else if (this.#orphanAtOpen && entry.claim !== null && entry.result === undefined) entry.orphaned = true;
     }
     if (!tidy) return;
     try {

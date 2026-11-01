@@ -225,6 +225,13 @@ export class SessionStore {
     return row ? toRecord(row) : null;
   }
 
+  // P5 O7 M4: the record a remote spawn claimed under `opId` launched (its `launchedBy.opId`), or null: how the services'
+  // ledger reads back the outcome of a spawn whose process ended before it could keep it (machine-ops.ts).
+  getByLaunchOp(opId: string): SessionRecord | null {
+    const row = this.db.get<SessionRow>("SELECT * FROM sessions WHERE launched_by IS NOT NULL AND json_extract(launched_by, '$.opId') = ?", opId);
+    return row ? toRecord(row) : null;
+  }
+
   getByEngineId(sessionId: SessionId): SessionRecord | null {
     const row = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', sessionId);
     return row ? toRecord(row) : null;

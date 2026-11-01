@@ -420,7 +420,20 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   parts.push(['library', startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop]);
   // P5 O3-D M4 (Interfaces §H; O3X7): the services' operation ledger, a spine file under the lock, none in a refused run;
   // a remote act on the spine is claimed and run once through it (machine-ops.ts)
-  if (spineRuns) registerMachineOps(bus, OpLedger.open(profile, 'spine-ops.jsonl', { log: (line) => console.warn(`[spine-ops] ${line}`) }));
+  // P5 O7 M4: a claim the last process left with no result is orphaned; a spawn's is read back from the record it launched
+  if (spineRuns) {
+    const ledger = OpLedger.open(profile, 'spine-ops.jsonl', { log: (line) => console.warn(`[spine-ops] ${line}`), orphanAtOpen: true });
+    registerMachineOps(bus, ledger, (name, opId) => {
+      if (name !== 'session.spawn') return null;
+      let launched;
+      try {
+        launched = index.sessions.getByLaunchOp(opId);
+      } catch {
+        return null; // an index this run cannot read says nothing: the spawn stays unknown
+      }
+      return launched === null ? null : { ok: true, value: { status: 'ok', appSessionId: launched.appId } };
+    });
+  }
 
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D; D4): the checkouts (git's read
   // service and watcher, `git.lsFiles`, files and scm) over the in-process view and the counting bus, composed in a run

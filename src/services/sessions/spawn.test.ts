@@ -18,6 +18,7 @@ import { status } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { FakeSpineHost } from '../../../test/support/fake-spine-host';
 import { tempDir } from '../../../test/support/index-fixture';
+import { OpLedger } from '@shared/host/op-ledger';
 import { Index } from '../index/index';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from '../spine-root';
 
@@ -59,9 +60,10 @@ describe('session.spawn on the spine', () => {
   // The spine with a project on the checkout and the direct route as the machine's setting; its engine host answers a
   // launch with the session ready, and a first message as sent. `parked`: the host is not up until a command's need
   // wakes it (mawsd's parked engine host; #411), and `need` counts those wakes.
-  const composed = async ({ parked = false } = {}) => {
+  const composed = async ({ parked = false, seed }: { parked?: boolean; seed?: (index: Index) => void } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
+    seed?.(seeded);
     seeded.close();
     const data = await openSpineData(profile, { build: BUILD });
     data.machineSettings.update({ gateway: { defaultRoute: 'direct' } });
@@ -170,6 +172,29 @@ describe('session.spawn on the spine', () => {
     expect(await bus.invoke('session.update', { appSessionId, patch: { pinned: true, title: { text: 'Renamed', source: 'user' } } })).toMatchObject({ ok: true });
     expect(await bus.invoke('session.update', { appSessionId, patch: { archived: true } })).toMatchObject({ ok: true });
     expect(await record(bus, appSessionId)).toMatchObject({ pinned: true, archived: true, launchedBy });
+  });
+
+  // The milestone review's finding (orphaned claims), as the spine composes it: a spawn the last process claimed and
+  // never kept answers the session it launched, read back by its launchedBy.opId; one that left no record answers
+  // `expired` (its outcome unknown). Neither runs again.
+  it('reads back an orphaned spawn claim from the record it launched, and answers one that left none expired', async () => {
+    const opCreated = new Date().toISOString();
+    const claim = (opId: string) => OpLedger.open(profile, 'spine-ops.jsonl').begin(opId, opCreated, { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1', target: null, name: 'session.spawn' }, () => null);
+    expect(claim('9b8f3a52-0000-4000-8000-0000000000c1')).toEqual({ kind: 'claimed' });
+    expect(claim('9b8f3a52-0000-4000-8000-0000000000c2')).toEqual({ kind: 'claimed' });
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: '9b8f3a52-0000-4000-8000-0000000000c1', action: ACTION };
+    let launchedId = '';
+    const { bus, launched } = await composed({
+      seed: (index) => {
+        launchedId = index.sessions.createForLaunch({ directory: checkout, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null }, launchedBy }).record.appId;
+      },
+    });
+    const query = (opId: string) => bus.main('machine.opQuery', { opId, opCreated, tombstoneIfAbsent: true });
+    expect(await query('9b8f3a52-0000-4000-8000-0000000000c1')).toMatchObject({ ok: true, value: { state: 'done', outcome: { ok: true, value: { status: 'ok', appSessionId: launchedId } } } });
+    expect(await query('9b8f3a52-0000-4000-8000-0000000000c2')).toEqual({ ok: true, value: { state: 'expired' } });
+    const replay = { opId: '9b8f3a52-0000-4000-8000-0000000000c2', opCreated, claim: { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1' }, name: 'session.spawn', input: { checkout, permission_mode: 'default' } };
+    expect(await bus.main('machine.op', replay)).toEqual({ ok: true, value: { state: 'in-progress' } });
+    expect(launched).toEqual([]);
   });
 
   // #411's rule: the spawn's create waits on the session service's boot, which is a need for a parked engine host, and

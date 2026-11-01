@@ -12,7 +12,8 @@
 // context (`HandlerContext.op`), and its answer (`{ok, value}` or `{ok: false, error}`, a throw
 // included: it was tried) is kept and returned. `machine.opQuery` answers RL4's states with the stored binding, as
 // `host.opQuery` does. A local client's own acts (the app's, through its router) run unclaimed, as the engine host's
-// local acts run beside `host.op` (D17).
+// local acts run beside `host.op` (D17). P5 O7 M4: the ledger opens with `orphanAtOpen`: a claim the last process left with
+// no result answers `expired` (its outcome unknown, never run again) until an outcome read back replaces it (`LateOutcome`).
 import { thrownError } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext, HandlerOp } from '@shared/ipc/client';
@@ -84,8 +85,21 @@ export function machineOps(deps: MachineOpsDeps): { op(input: OpInput, context: 
   return { op, opQuery };
 }
 
-/** Registers `machine.op` and `machine.opQuery` over the ledger, running each claimed act through the bus's `invoke`. */
-export function registerMachineOps(bus: Pick<ServicesBus, 'register' | 'invoke'>, ledger: OpLedger): void {
+/**
+ * P5 O7 M4: the outcome of an act the last process claimed and never kept (the ledger's orphans, `orphanAtOpen`), read
+ * back where the act left it, or null when nothing says. A spawn that reached `launching` left its record, under its
+ * `launchedBy.opId`, whatever became of the process that ran it (the engine host it launched on may have been adopted
+ * across the restart); another act leaves nothing to read back, and stays unknown.
+ */
+export type LateOutcome = (name: string, opId: string) => { ok: true; value: unknown } | null;
+
+/** Registers `machine.op` and `machine.opQuery` over the ledger, running each claimed act through the bus's `invoke`. Each
+ * orphan whose outcome `lateOutcome` reads back is kept as that outcome, so a query answers it and nothing runs it again. */
+export function registerMachineOps(bus: Pick<ServicesBus, 'register' | 'invoke'>, ledger: OpLedger, lateOutcome?: LateOutcome): void {
+  for (const { opId, claim } of ledger.orphans()) {
+    const outcome = lateOutcome?.(claim.name, opId) ?? null;
+    if (outcome !== null) ledger.finish(opId, outcome);
+  }
   const { op, opQuery } = machineOps({ ledger, invoke: bus.invoke });
   bus.register('machine.op', (input, context) => op(input, context));
   bus.register('machine.opQuery', (input) => opQuery(input));
