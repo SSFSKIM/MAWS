@@ -2,7 +2,9 @@
 // §3.6) and the runners its jobs take. The set: a manual run's `gates` input, else the pushed commit's `Gates:` trailer
 // (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with unit:darwin and class 1's e2e
 // groups added when the e2e lane is a macOS runner. Explicit unit:darwin runs on macOS regardless of the e2e lane, and so
-// does `packaged` (the unsigned app built per job, then its checks; Decision Log 35), which is only ever explicit.
+// does `packaged` (the unsigned app built per job, then its checks; Decision Log 35). The default set holds packaged
+// only where it would take GitHub's hosted Macs (packagedHosted, below): the packaged app is what the owner runs, and
+// there it costs the mini nothing. Where it would build on the mini (mirror, a reserved final ref) it stays explicit.
 // Class 1a's runner (static, unit, probes): the `class1a` input or the `Class1a:` trailer (`linux`, `macos` or `pool`),
 // else the repository variable GATE_RUNNER, else `linux`. `pool` is ci-kit's pool, each job in a container of its own
 // size (Decision Log 35; on GCE spot VMs since Decision Log 52); `pool=true` when a job runs there (ci-kit's launcher
@@ -225,11 +227,17 @@ export function planOf(env, scripts, now) {
   if (!['mirror', 'direct'].includes(hostedRoute)) refuse(`no such hosted route: ${hostedRoute} (mirror or direct)`);
   const direct = hostedRoute === 'direct';
   const ec2Off = env.MAC_EC2?.toLowerCase() === 'off';
+  const finalRef = [env.GITHUB_REF, env.GITHUB_REF_NAME]
+    .map((value) => value?.replace(/^refs\/heads\//, ''))
+    .find((ref) => ref !== undefined && FINAL_LABELS.some((label) => ref.startsWith(`ci/${label}-`)));
+  // No signing credentials: build:app disables identity discovery, mac.identity is null, and the helper
+  // only invokes swiftc. HOSTED_MAC_JOBS admits packaged; Lane is an e2e override, not a packaged trial.
+  const packagedHosted = direct && words(env.HOSTED_MAC_JOBS).includes('packaged') && lane === 'macos' && finalRef === undefined;
 
   const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
   const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
   const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
-  const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
+  const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : []), ...(packagedHosted ? ['packaged'] : [])];
   const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
   // P4-A2 (X34): a live run takes the tool-time guard's heavy-case fixture beside the live groups it names (LIVE_GUARD_E2E,
   // LIVE_E2E groups that spend nothing), so every gate that runs live specs holds the heaviest known cases under the bound.
@@ -331,9 +339,6 @@ export function planOf(env, scripts, now) {
   const hostable = (group) =>
     (lane === 'macos' || directPeer(group)) && !live && notHosted(group).length === 0 &&
     (laneAsked === 'hosted' || (laneAsked !== 'no-hosted' && (listedHosted.includes(group) || directPeer(group)) && !(vmLane && listedVm.includes(group))));
-  const finalRef = [env.GITHUB_REF, env.GITHUB_REF_NAME]
-    .map((value) => value?.replace(/^refs\/heads\//, ''))
-    .find((ref) => ref !== undefined && FINAL_LABELS.some((label) => ref.startsWith(`ci/${label}-`)));
   const hostedOf = (group) => finalRef === undefined && hostable(group);
   // The waiter: the pool's smallest box, about $0.0006 a minute while it waits. Its timeout is above the waiter's own
   // 95-minute deadline and under the pool's 120-minute bound on a box's run.
@@ -421,9 +426,6 @@ export function planOf(env, scripts, now) {
     e2e_host: JSON.stringify(e2eHost), e2e_vm: JSON.stringify(e2eVm), e2e_build: JSON.stringify(e2eBuild), e2e_build_runner: JSON.stringify(E2E_BUILD_BOX),
     e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait),
   };
-  // No signing credentials: build:app disables identity discovery, mac.identity is null, and the helper
-  // only invokes swiftc. HOSTED_MAC_JOBS admits packaged; Lane is an e2e override, not a packaged trial.
-  const packagedHosted = direct && words(env.HOSTED_MAC_JOBS).includes('packaged') && lane === 'macos' && finalRef === undefined;
   // Each hosted shard builds once. The first owns the small checks; keeping them together preserves their order
   // and leaves the other shard bare-only. Self-hosted routes keep one build and every check on the one Mac.
   outputs.packaged_shards = JSON.stringify(packagedHosted
@@ -433,7 +435,7 @@ export function planOf(env, scripts, now) {
     outputs.packaged_runner = JSON.stringify(RUNNERS.macHosted);
     outputs.timeouts = JSON.stringify({ ...timeouts, packaged: 30 + HOSTED_MARGIN_MINUTES });
   }
-  const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
+  const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : `the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane${packagedHosted ? ', and packaged where it takes a hosted Mac' : ''})`;
   const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
   // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
   const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== JSON.stringify(RUNNERS[lane])).map((entry) => entry.group);
