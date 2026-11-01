@@ -16,7 +16,7 @@ export interface RenderFacts {
   machine: string;
   runtime: { available: true } | { available: false; reason: string }; // the render runtime on this machine (M6 reads Linux's)
   failure: string | null; // the seam is unavailable after two failed starts, until its window passes: the last reason
-  engineHostRenders: boolean; // the engine host's welcome lists host.render
+  engineHostRenders: boolean; // no engine host connected (a cold one starts as this build), or its welcome lists host.render
   appAttached: boolean; // an app is attached (an older engine host's events still reach the seam then)
 }
 
@@ -48,6 +48,9 @@ export interface SessionCapabilitiesOptions {
 export interface SessionCapabilitiesTracker {
   of(appSessionId: AppSessionId): SessionCapabilities; // any session, tracked or not
   track(appSessionId: AppSessionId): void; // its reading kept from now, so a later flip is posted
+  // A client's reading (`session.capabilities`): tracked from now, and a reading that differs from the one last told is
+  // posted before it is answered, so what the next flip compares against is always what every client was last told
+  ask(appSessionId: AppSessionId): SessionCapabilities;
   forget(appSessionId: AppSessionId): void;
   refresh(): void; // something they read may have changed: each tracked session whose reading changed is posted, once
 }
@@ -55,24 +58,33 @@ export interface SessionCapabilitiesTracker {
 export function createSessionCapabilities(options: SessionCapabilitiesOptions): SessionCapabilitiesTracker {
   const last = new Map<AppSessionId, string>();
   const of = (appSessionId: AppSessionId): SessionCapabilities => ({ ...options.render(), browser: options.browser(appSessionId) });
+  const track = (appSessionId: AppSessionId) => {
+    if (last.has(appSessionId)) return;
+    last.set(appSessionId, JSON.stringify(of(appSessionId)));
+    if (last.size === 1) options.tracking?.(true);
+  };
+  // Posts the session's reading when it is not what was last told; the reading, either way
+  const reconcile = (appSessionId: AppSessionId, was: string): SessionCapabilities => {
+    const capabilities = of(appSessionId);
+    const now = JSON.stringify(capabilities);
+    if (now !== was) {
+      last.set(appSessionId, now);
+      options.emit(appSessionId, capabilities);
+    }
+    return capabilities;
+  };
   return {
     of,
-    track(appSessionId) {
-      if (last.has(appSessionId)) return;
-      last.set(appSessionId, JSON.stringify(of(appSessionId)));
-      if (last.size === 1) options.tracking?.(true);
+    track,
+    ask(appSessionId) {
+      track(appSessionId);
+      return reconcile(appSessionId, last.get(appSessionId)!);
     },
     forget(appSessionId) {
       if (last.delete(appSessionId) && last.size === 0) options.tracking?.(false);
     },
     refresh() {
-      for (const [appSessionId, was] of last) {
-        const capabilities = of(appSessionId);
-        const now = JSON.stringify(capabilities);
-        if (now === was) continue;
-        last.set(appSessionId, now);
-        options.emit(appSessionId, capabilities);
-      }
+      for (const [appSessionId, was] of last) reconcile(appSessionId, was);
     },
   };
 }

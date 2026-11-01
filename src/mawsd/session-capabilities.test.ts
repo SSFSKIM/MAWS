@@ -93,6 +93,30 @@ describe('the capabilities and their event', () => {
     expect(events).toHaveLength(1);
   });
 
+  // The panel's scalpel-4#3: a reading a client asked for is told, so it is what the next change compares against. A flip
+  // and its reversal inside the Linux watch's debounce leave the asker holding the flip unless the reversal is posted
+  it('a client\'s reading is what was last told: a flip it read and the reversal after it are both posted', () => {
+    const { state, events, caps } = stand();
+    caps.track(A);
+    state.browser = false;
+    expect(caps.ask(A).browser).toEqual({ available: false, reason: 'no browser is attached on mini' });
+    expect(events.map((event) => event.capabilities.browser)).toEqual([{ available: false, reason: 'no browser is attached on mini' }]); // every other client hears the flip the asker read
+    state.browser = true;
+    caps.refresh();
+    expect(events.map((event) => event.capabilities.browser)).toEqual([{ available: false, reason: 'no browser is attached on mini' }, available]);
+    expect(caps.ask(A).browser).toEqual(available);
+    expect(events).toHaveLength(2); // a reading equal to what was told posts nothing
+  });
+
+  it('a client\'s reading enrols its session: the next flip is posted', () => {
+    const { state, events, caps } = stand();
+    expect(caps.ask(A).browser).toEqual(available);
+    expect(events).toEqual([]);
+    state.browser = false;
+    caps.refresh();
+    expect(events.map((event) => event.appSessionId)).toEqual(['A']);
+  });
+
   it('says when the first session is tracked and when the last is forgotten, once each (the Linux cache watch rides on it)', () => {
     const tracking: boolean[] = [];
     const caps = createSessionCapabilities({ render: () => ({ artifact_screenshot: available, artifact_export: available }), browser: () => available, emit: () => {}, tracking: (any) => void tracking.push(any) });
