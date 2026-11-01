@@ -16,12 +16,14 @@ export function useAgentBrowser(appSessionId: AppSessionId, client: MawsBridge =
   const [reading, setReading] = useState<{ appSessionId: AppSessionId; entry: SessionCapability | null } | null>(null);
   useEffect(() => {
     let live = true;
+    let heard = false; // this effect heard the session's event: newer than its answer
     const off = client.on('session.capabilitiesChanged', (payload) => {
-      if (payload.appSessionId === appSessionId) setReading({ appSessionId, entry: payload.capabilities.browser ?? null });
+      if (payload.appSessionId !== appSessionId) return;
+      heard = true;
+      setReading({ appSessionId, entry: payload.capabilities.browser ?? null });
     });
     void client.invoke('session.capabilities', { appSessionId }).then((result) => {
-      // an event that came meanwhile is newer than this answer
-      if (live && result.ok) setReading((current) => (current?.appSessionId === appSessionId ? current : { appSessionId, entry: result.value.browser ?? null }));
+      if (live && !heard && result.ok) setReading({ appSessionId, entry: result.value.browser ?? null });
     });
     return () => {
       live = false;
