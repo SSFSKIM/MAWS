@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { artifactUrl } from '../src/shared/artifacts/scheme';
-import { MIGRATIONS } from '../src/services/index/migrations';
+import { ADDED_COLUMNS, MIGRATIONS } from '../src/services/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
@@ -253,6 +253,8 @@ function rewindIndexTo9(path: string): void {
     const template = new DatabaseSync(':memory:');
     try {
       for (const migration of MIGRATIONS.filter((m) => m.version <= 9)) template.exec(migration.sql);
+      // the opener adds every ADDED_COLUMNS entry at any version (P5 O7 M4), so a version-9 index this build opened has them
+      for (const added of ADDED_COLUMNS) template.exec(`ALTER TABLE ${added.table} ADD COLUMN ${added.column} ${added.definition}`);
       template.exec('PRAGMA user_version = 9');
       expect(schemaOf(db), 'the rewound index is a version-9 index').toEqual(schemaOf(template));
     } finally {

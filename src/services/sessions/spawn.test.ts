@@ -74,11 +74,12 @@ describe('session.spawn on the spine', () => {
     // of it reaches a launch)
     host.answer('engine.configure', () => ({ path: '/usr/local/bin/claude', testedVersion: '2.1.0', version: '2.1.0', ok: true, error: null }));
     host.answer('engine.policy.set', () => ({ enabled: false, limitKiB: 0, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null }));
-    host.answer('session.launch', ({ spec }: { spec: LaunchSpec }) => {
+    // the launch's input is the schema's parse, wider than LaunchSpec's type; the test reads only the spec it built
+    host.answer('session.launch', (({ spec }: { spec: LaunchSpec }) => {
       launched.push(spec);
       setTimeout(() => host.emit('session.status', { appSessionId: spec.appSessionId, status: status(spec.appSessionId) }), 5);
       return { status: 'launching', session: status(spec.appSessionId, { process: 'starting' }) };
-    });
+    }) as never);
     host.answer('session.send', ({ content }: { content: unknown }) => {
       sent.push(content);
       return { messageUuid: null, disposition: 'sent', queueId: 'q-1' };
