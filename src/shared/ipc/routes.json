@@ -81,6 +81,8 @@
   "presentations.present",
   "pty.hostState",
   "pty.openLink",
+  "remote.forward.close",
+  "remote.forward.open",
   "voice.cancel",
   "voice.openPrivacySettings",
   "voice.start",

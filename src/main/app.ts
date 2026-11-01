@@ -389,6 +389,17 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     emit: (machine, name, payload) => void emitFrom(machine, name, payload),
     log: (line) => console.log(`[lane-b] ${line}`),
   });
+  // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
+  // close with remote lane B's `stop`, a shutdown step below
+  registerMainHandler('remote.forward.open', async (input) => {
+    const result = await remoteLaneB.forward.open(input);
+    if (!result.ok) throw new CommandFailure(result.error);
+    return result.value;
+  });
+  registerMainHandler('remote.forward.close', async (input) => {
+    const result = await remoteLaneB.forward.close(input);
+    if (!result.ok) throw new CommandFailure(result.error);
+  });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §E): a page's git.watch and git.unwatch
