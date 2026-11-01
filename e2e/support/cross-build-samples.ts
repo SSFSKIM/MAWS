@@ -4,6 +4,8 @@
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { IpcError } from '@shared/ipc/errors';
+import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 
 // ---- JSON Schema, as the manifest renders the wire (z.toJSONSchema) ---------------------------------------------------
 
@@ -51,21 +53,28 @@ export function fitTo(schema: unknown, value: unknown, root: unknown = schema): 
 // What the gap probe keeps of an answer. P5 O4 M2: the ids a sample mints are fresh on each probe, so a call on one
 // supervisor leaves nothing the next one meets (the same server answers both: a lease, a run or a grant under a reused id
 // would be found the second time); a refusal that names one (`no artifact <id>`) is kept with SAMPLED_ID in its place.
-export type ProbeAnswer = { ok: true } | { ok: false; code: string; message: string };
+// P5 O5 M4: `refusal`, an artifact command's named refusal (ArtifactRefusalSchema's reason), which its handler gives a
+// parsed input.
+export type ProbeAnswer = { ok: true } | { ok: false; code: string; message: string; refusal?: string };
 export const SAMPLED_ID = '<sampled id>';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const mintedIds = (value: unknown): string[] =>
   typeof value === 'string' ? (UUID.test(value) ? [value] : []) : Array.isArray(value) ? value.flatMap(mintedIds) : isSchema(value) ? Object.values(value).flatMap(mintedIds) : [];
-export const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }, input: unknown): ProbeAnswer =>
-  result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: mintedIds(input).reduce((message, id) => message.replaceAll(id, SAMPLED_ID), result.error!.message) };
+export const answerOf = (result: { ok: boolean; error?: IpcError }, input: unknown): ProbeAnswer => {
+  if (result.ok) return { ok: true };
+  const refusal = artifactRefusalOf(result.error!)?.reason;
+  return { ok: false, code: result.error!.code, message: mintedIds(input).reduce((message, id) => message.replaceAll(id, SAMPLED_ID), result.error!.message), ...(refusal && { refusal }) };
+};
 
 // Whether an answer says the command was never reached with its sample: refused as input (`invalid_input`), by the
 // registry or by a handler's own check, unless it is the answer for an id nothing has. That one (the engine host's
 // `no artifact <id>`, `invalid_input` by its store's convention, for the id the sample minted) is the sample doing its
 // job: it changes nothing, answered by the command's own handler (P5 O4 M3: the library's reads, retagged `machine`).
 // Any other refusal, one naming the sampled id included (`artifact <id> is not a file artifact`), is a refused sample.
+// P5 O5 M4: an artifact command's named `notFound` is that same answer however its text reads (`artifacts.export`, served
+// by main's render library or by mawsd's render seam).
 const UNKNOWN_ID_ANSWERS = new Set([`no artifact ${SAMPLED_ID}`]);
-export const refusedSample = (answer: ProbeAnswer): boolean => !answer.ok && answer.code === 'invalid_input' && !UNKNOWN_ID_ANSWERS.has(answer.message);
+export const refusedSample = (answer: ProbeAnswer): boolean => !answer.ok && answer.code === 'invalid_input' && !UNKNOWN_ID_ANSWERS.has(answer.message) && answer.refusal !== 'notFound';
 
 // A command the sampler cannot give an input to, named here with one its schema accepts. P5 O3-D M1: the spine's commands,
 // retagged `machine`, joined the manifest and so the probe; those whose sampled input their schema's own refinement
@@ -81,6 +90,9 @@ export const INPUTS: Record<string, unknown> = {
   'session.drafts.set': { appSessionId: 'x', draft: null },
   'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
   'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
+  // P5 O5 M4: on the wire as `machine`; an id no artifact has, one id for both probes so the two answers compare. Its
+  // handler answers an unknown artifact `invalid_input` with its named refusal (`notFound`), which a parsed input alone reaches.
+  'artifacts.export': { artifactId: '00000000-0000-4000-8000-00000000c0b5', format: 'pdf' },
 };
 
 // A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under

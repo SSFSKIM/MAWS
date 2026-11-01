@@ -18,7 +18,7 @@ import { registerDesigns, type Designs } from '.';
 import { LEGACY_FILES, logRows, makeLegacyDesign } from './legacy.fixture';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
-const { ExporterRegistry, startExportService } = await import('../../main/artifacts/export');
+const { ExporterRegistry, startExportService } = await import('../../render/export');
 
 let userData: string;
 let documents: Documents;

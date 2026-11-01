@@ -43,6 +43,12 @@ export interface EndpointServices {
   hold(reason: string): () => void;
   /** A remote viewer's subscriptions join the union (OX5). */
   interest: { report(viewer: string, sessions: readonly AppSessionId[]): void; drop(viewer: string): void };
+  /**
+   * P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §C): a `maws-artifact:` URL's answer as
+   * `mawsd`'s artifacts.sock serves it (the status, the scheme's headers, the bytes); O7 M5 carries it over RL2, graded
+   * `view` on the artifact's session.
+   */
+  artifacts: { fetch(request: { url: string; method: 'GET' | 'HEAD'; range?: string }): Promise<{ status: number; headers: Record<string, string>; body: ReadableStream<Uint8Array> | null }> };
   log(line: string): void;
 }
 

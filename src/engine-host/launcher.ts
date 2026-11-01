@@ -53,6 +53,7 @@ export interface LauncherDeps {
   log: (message: string) => void;
   wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
   appAttached?: () => boolean; // E10: handed to each session's bridges (P5 O3-D M3: the app's presence)
+  rendersAnswered?: () => boolean; // P5 O5 M4: the capture and export bridges' gate (the attachment's answersRenders)
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store the sessions' artifact tools write through
   datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: the registry the sessions' dataset refreshes ask main through
@@ -133,6 +134,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
         launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
         appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
+        rendersAnswered: deps.rendersAnswered, // P5 O5 M4: the capture and export bridges, with no client that renders
         unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
         observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1

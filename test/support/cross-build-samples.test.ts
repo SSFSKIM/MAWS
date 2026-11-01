@@ -63,16 +63,18 @@ describe('the probe’s reading of an answer', () => {
   it('counts an unknown sampled id’s refusal as reached, with the id masked so either supervisor’s answer compares', () => {
     const unknown = ipcError('invalid_input', `no artifact ${sample.artifactId}`, { reason: 'notFound', data: { artifactId: sample.artifactId } });
     const answer = answerOf({ ok: false, error: unknown }, sample);
-    expect(answer).toEqual({ ok: false, code: 'invalid_input', message: 'no artifact <sampled id>' });
+    expect(answer).toEqual({ ok: false, code: 'invalid_input', message: 'no artifact <sampled id>', refusal: 'notFound' });
     expect(refusedSample(answer)).toBe(false);
     expect(refusedSample(answerOf({ ok: true }, sample))).toBe(false);
     expect(refusedSample(answerOf({ ok: false, error: ipcError('internal', `no artifact ${sample.artifactId}`) }, sample))).toBe(false);
+    // P5 O5 M4: an artifact command's named notFound is that answer whatever its text
+    expect(refusedSample(answerOf({ ok: false, error: ipcError('invalid_input', 'the render host: no such artifact', { reason: 'notFound', data: {} }) }, sample))).toBe(false);
   });
 
   it('counts the registry’s refusal, and a handler’s that names no sampled id, as a refused sample', () => {
     const registry = validateCommandInput('library.content', { artifactId: 'x' });
     expect(registry.ok).toBe(false);
-    expect(refusedSample(answerOf(registry as { ok: false; error: { code: string; message: string } }, { artifactId: 'x' }))).toBe(true);
+    expect(refusedSample(answerOf(registry as Parameters<typeof answerOf>[0], { artifactId: 'x' }))).toBe(true);
     expect(refusedSample(answerOf({ ok: false, error: ipcError('invalid_input', 'the screenshot is not under userData') }, sample))).toBe(true);
   });
 

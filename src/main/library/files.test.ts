@@ -11,7 +11,7 @@ import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
-import { zipFiles } from '../design-systems/zip';
+import { zipFiles } from '../../render/design-systems/zip';
 import { createLibraryFiles, type LibraryFilesDeps } from './files';
 
 // Run real filesystem operations, interleaving another writer at the asynchronous boundaries.

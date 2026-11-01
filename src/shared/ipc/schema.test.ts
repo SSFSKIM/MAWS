@@ -75,10 +75,11 @@ import * as org from './schema/org'; // P5 O8 M1
 import * as laneA from './schema/lane-a'; // P5 O9 M2
 import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
+import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, remote /* P5 O7 M2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -669,7 +670,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'remote' /* P5 O7 M2 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -2097,6 +2098,40 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-H H3b end
+
+  // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A): the render host's request, answer and exit
+  describe('P5 O5 render.*', () => {
+    const CAPTURE = { appSessionId: 'app-1', requestId: 'req-1', artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', revision: 3, width: 1280, height: 800 };
+    const EXPORT = { appSessionId: 'app-1', requestId: 'req-2', artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', kind: 'html', format: 'pdf', revision: 3, path: '/tmp/x/3-pdf.pdf' };
+
+    it('posts one request per kind, carrying what the bridge or the library asked, unchanged', () => {
+      expect(Object.fromEntries(Object.entries(render.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'render.answer': 'machine' });
+      expect(Object.keys(render.events)).toEqual(['render.request', 'render.exit', 'render.hostGeneration' /* P5 O5 M4 */]);
+      expect(MAIN_ONLY_COMMANDS).toContain('render.answer');
+      expect(validateEventPayload('render.request', { id: 'r1', kind: 'capture', request: CAPTURE }).ok).toBe(true);
+      expect(validateEventPayload('render.request', { id: 'r2', kind: 'export', request: EXPORT }).ok).toBe(true);
+      expect(validateEventPayload('render.request', { id: 'r3', kind: 'libraryExport', request: { artifactId: CAPTURE.artifactId, format: 'png', width: 640 } }).ok).toBe(true);
+      expect(validateEventPayload('render.request', { id: 'r4', kind: 'export', request: CAPTURE }).ok, 'a capture is not an export').toBe(false);
+      expect(validateEventPayload('render.request', { id: '', kind: 'capture', request: CAPTURE }).ok).toBe(false);
+      expect(validateEventPayload('render.exit', {}).ok).toBe(true);
+      // P5 O5 M4: the Word comment authors an export carries, and the engine-host link's generation
+      expect(validateEventPayload('render.request', { id: 'r5', kind: 'export', request: EXPORT, authors: { human: 'K. Min', sessions: { 'app-1': 'Quarterly review' } } }).ok).toBe(true);
+      expect(validateEventPayload('render.request', { id: 'r6', kind: 'capture', request: CAPTURE, authors: {} }).ok, 'a capture carries none').toBe(false);
+      expect(validateEventPayload('render.hostGeneration', { generation: 2 }).ok).toBe(true);
+      expect(validateEventPayload('render.hostGeneration', { generation: -1 }).ok).toBe(false);
+    });
+
+    it('answers by id with the kind’s answer or a failure, a library export’s refusal carried as its IPC error', () => {
+      const answer = (value: unknown) => validateCommandInput('render.answer', { id: 'r1', answer: value }).ok;
+      expect(answer({ ok: true, png: 'iVBORw0KGgo=', width: 1280, height: 800, consoleErrors: [] })).toBe(true);
+      expect(answer({ ok: true, revision: 3, path: '/tmp/x/3-pdf.pdf' })).toBe(true);
+      expect(answer({ ok: false, unavailable: true, error: 'MAWS cannot export a html artifact as docx yet' })).toBe(true);
+      expect(answer({ path: '/tmp/x/3-pdf.pdf', revision: 3 }), 'artifacts.export’s output').toBe(true);
+      expect(answer({ ok: false, error: 'no artifact x', ipcError: { code: 'invalid_input', message: 'no artifact x', issues: { reason: 'notFound', data: {} } } })).toBe(true);
+      expect(answer({ ok: false, error: 'x', ipcError: { code: 'no_such_code', message: 'x' } })).toBe(false);
+      expect(answer({ ok: true })).toBe(false);
+    });
+  });
 
   // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §C, §E, §G, §H, §I): the services front's
   // commands and events and the machine half's

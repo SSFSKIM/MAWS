@@ -95,7 +95,8 @@ const register: HostRegister = (untimedOn, emit, client) => {
   if (documents && documentPerfSeamRequested(process.env)) startDocumentPerfSeam(documents.store, join(userData, 'document-perf')); // P3-B M9: the scale gate's seam, MAWS_E2E=1 and MAWS_DOCUMENT_PERF=1 only
   // P5 O3-D M3 (Interfaces §D): the app's presence, which the app-bound gates below read: told by `host.attachment` when
   // the client declared it (`mawsd`, the permanent client), the connection otherwise (main's direct link, a utility port)
-  registerAttachment(on, client);
+  // P5 O5 M4 (Interfaces §F): and whether a client answers render requests, the capture and export bridges' gate
+  const attachment = registerAttachment(on, client);
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): agents' dataset refreshes, asked of main by id alone;
   // the sessions' tools ask, main reads (artifacts.*) and answers (maws.*), route E's starts claim; the app's going ends them
   // (P5 O4 M2, Interfaces §D: the connectors' presence, which for a client listing `host.connectors` is its connection)
@@ -136,6 +137,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     diskEvents: (id, request, quiet) => fs.eventsSnapshot(id, null, request, quiet) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
+    rendersAnswered: attachment.answersRenders, // P5 O5 M4: the capture and export bridges ask a client that renders, app or no app
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
   });

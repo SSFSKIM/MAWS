@@ -185,6 +185,18 @@ export const PTY_FRAMES_CAPABILITY = 'socket.ptyFrames';
 // its own and reads the machine's.
 export const ATTACHMENT_CAPABILITY = 'host.attachment';
 export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §C): `mawsd`'s welcome lists it when it
+// serves the artifact endpoint on `artifacts.sock`, so an app proxies the `maws-artifact:` scheme there; an app attached
+// to a daemon that lists it not serves the scheme itself, as before.
+export const MACHINE_ARTIFACTS_CAPABILITY = 'machine.artifacts';
+// P5 O5 M3 (Interfaces §A): the render host's hello to `machine.sock` lists it: the client renders, so `mawsd` may post it
+// `render.request` and take its `render.answer` (M4's front).
+export const RENDER_CLIENT_CAPABILITY = 'render.client';
+// P5 O5 M4 (Interfaces §A, §F): `mawsd`'s welcome lists `machine.render` when its render seam answers render requests and
+// `artifacts.export`, so main composes no render answering of its own; the engine host's lists `host.render` when it
+// reads `host.attachment`'s `render`, so `mawsd` knows its bridges send requests with no app attached.
+export const MACHINE_RENDER_CAPABILITY = 'machine.render';
+export const HOST_RENDER_CAPABILITY = 'host.render';
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
 // `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
 // that lists it, and on a client's hello (only `mawsd`'s, beside `host.attachment`) that those are the client's own, app
@@ -202,13 +214,14 @@ export const CONNECTORS_CLIENT_CAPABILITY = 'machine.connectors';
 // `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
 // hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O4 M2: it keys the connectors on a declaring client)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
-  daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add
+  daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
+  renderClient: [RENDER_CLIENT_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock
 } as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
 const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53

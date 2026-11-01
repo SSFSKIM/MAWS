@@ -103,10 +103,19 @@ const CATALOG_BUDGETS_MS = {
   'catalog.engine': 3 * HOST + MARGIN_MS,
 } as const satisfies Partial<Record<CommandName, number>>;
 
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md): the library's Export, answered by mawsd's render seam:
+// the render host's start (the seam's deadline for it, src/mawsd/render-seam.ts's START_DEADLINE_MS.libraryExport),
+// then the export within the library's own budget (src/render/export.ts's EXPORT_BUDGET_MS); neither module is this
+// chunk's to load, so their values are restated here.
+const RENDER_START_MS = 55_000;
+const RENDER_EXPORT_MS = 55_000;
+
 export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> = {
   ...CHECKOUTS_BUDGETS_MS,
   ...CONNECTORS_BUDGETS_MS,
   ...CATALOG_BUDGETS_MS,
+  'artifacts.export': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4
+  'daemon.e2eRender': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4: the e2e's capture, within the same bounds
   // a background job's `claude stop` and the registry's clearing after it, or a terminal pane's pause and resume
   'session.takeOver': Math.max(STOP_TIMEOUT_MS + TAKE_OVER_WAIT_MS, PANE_TAKE_OVER_MS) + MARGIN_MS,
   // a process still exiting, the configure gate, and the launch to ready (the watch fails one silent for WATCHDOG_MS;

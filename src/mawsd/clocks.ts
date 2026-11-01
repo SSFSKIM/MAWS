@@ -19,6 +19,10 @@
 //   P5 (a parked host's need): `engineNeeded()`, a command waits on the engine host (the spine's session service waits
 //   for its first streaming), starts the clock again from that moment, so the host woken for it is not asked to park the
 //   moment it is ready, and a discovery wake's park asked after the need is left to the clock.
+//   P5 O5 (landing 1, the park race): a client's request to the engine host (engine-requests.ts) is a need too, and while
+//   any is in flight no park is asked (`engineRequests`), so the host is never asked to exit under a request it holds;
+//   one that arrives after the ask was sent (`parkAsked`) waits for that host's exit, or takes the park back
+//   (`takeBackPark`) when the host stays.
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
@@ -46,6 +50,7 @@ export class DaemonClocks {
   private discoveryPark = false; // parkNow's ask, until it is sent or no longer wanted
   private discoveryWake = false; // a discovery wake is out: no ask until its parkNow
   private neededInWake = false; // engineNeeded() came while a discovery wake was out: its parkNow leaves the park to the clock
+  private requestsInFlight = 0; // P5 O5: clients' requests to the engine host not answered yet: no park asked under them
   private parkSince: number;
   private parked = { engine: true, pty: true };
   private clientCount = 0;
@@ -124,6 +129,27 @@ export class DaemonClocks {
     this.evaluate();
   }
 
+  // P5 O5 (landing 1): the clients' requests to the engine host in flight (the header's terms)
+  engineRequests(count: number): void {
+    this.requestsInFlight = count;
+    this.evaluate();
+  }
+
+  // P5 O5 (landing 1): the served engine host was asked to exit when idle and has not exited yet
+  parkAsked(): boolean {
+    return this.armedPid !== null && this.armedPid === this.enginePid;
+  }
+
+  // P5 O5 (landing 1): a request found the host asked to park and still serving after the exit's bound (it holds live
+  // rows, so it is not leaving): the ask is taken back, as an app's attach takes it back, and the clock starts again
+  takeBackPark(): void {
+    if (!this.parkAsked()) return;
+    this.armedPid = null;
+    this.parkSince = Date.now();
+    this.actions.disarmEnginePark();
+    this.evaluate();
+  }
+
   // P5 O3-D M6 (fix rounds 1, 2, 3): the discovery wake's park of the engine host it woke (the header's terms)
   parkNow(): void {
     this.discoveryWake = false;
@@ -187,7 +213,7 @@ export class DaemonClocks {
     const now = Date.now();
     const waits: number[] = [];
     const park = this.parkDue();
-    if (this.enginePid !== null && this.armedPid !== this.enginePid && !this.between && !this.discoveryWake) {
+    if (this.enginePid !== null && this.armedPid !== this.enginePid && !this.between && !this.discoveryWake && this.requestsInFlight === 0) {
       const discovery = this.discoveryPark && !this.attached && this.interestEmpty;
       if (discovery || (park !== null && now >= park)) {
         if (this.actions.armEnginePark(discovery ? 'discovery' : 'idle')) [this.armedPid, this.discoveryPark] = [this.enginePid, false];

@@ -20,7 +20,7 @@ import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
-const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M2
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O5 M4; P5 O4 M2
 
 const Id = z.uuid();
 // E3: the snapshot refs one hold names (an artifact's own assets, `assets/<name>`), 1 to 64 (ASSET_HOLD_LIMITS.groupRefs)
@@ -249,7 +249,10 @@ export const commands = {
   // answers the id beside its path, so no later export of the same revision and format replaces it. It lives under the
   // artifact's export storage as the cache files do. P4 (W1, L302): Send to sets it, and so do the header exports
   // (deck, document, dashboard), the HTML viewer's Export and the library's, each saving its file by `exportId`.
-  'artifacts.export': main(
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §G, §K): `machine`, answered by the
+  // machine the artifact is on (`mawsd`'s render seam on the daemon shape, main's render library on the embedded one);
+  // `dialect` (additive), the format's dialect for a connector, Send to's Notion Markdown (P4-B5), one command on both.
+  'artifacts.export': machine(
     z.strictObject({
       artifactId: Id,
       format: z.enum(ARTIFACT_EXPORT_FORMATS),
@@ -262,6 +265,7 @@ export const commands = {
       boards: z.array(z.string().min(1).max(64)).max(200).optional(), // P3-E
       scale: z.number().min(0.1).max(4).optional(), // P3-E
       ownFile: z.literal(true).optional(), // P3-H (Decision Log 91)
+      dialect: z.enum(['notion']).optional(), // P5 O5 M4: P4-B5's export option, on the wire
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
     // PDF printer refused; `exportId`: the id of an export of its own file, the one `library.saveAs` names it by (P3-E,

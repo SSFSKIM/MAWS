@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'nod
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
+import { ciRefusal, e2eLabel, homeInstanceRefusal, OWNER_UNIT_LABEL, runIdOf } from './support/daemon-unit-guard.mjs';
 import { REPO_ROOT } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
 
@@ -48,6 +48,9 @@ function jobPid(label: string): number | null {
 test.beforeAll(() => {
   const refusal = ciRefusal(process.env);
   if (refusal !== null) throw new Error(refusal);
+  // P5 O5 M4 (the architect's ruling): never on the mini's home instance, whose launchd holds the owner's own unit
+  const home = homeInstanceRefusal(process.env, spawnSync('launchctl', ['print', `gui/${UID}/${OWNER_UNIT_LABEL}`], { encoding: 'utf8' }).status === 0);
+  if (home !== null) throw new Error(`e2e:daemon-unit: ${home}`);
 });
 
 test.beforeAll(() => {

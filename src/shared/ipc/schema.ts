@@ -68,6 +68,7 @@ import * as org from './schema/org'; // P5 O8 M1
 import * as laneA from './schema/lane-a'; // P5 O9 M2
 import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
+import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
@@ -175,6 +176,7 @@ export const commands = {
   ...laneA.commands, // P5 O9 M2
   ...machineSettings.commands, // P5 O3-D
   ...clientPort.commands, // P5 O3-D
+  ...render.commands, // P5 O5 M3
   ...remote.commands, // P5 O7 M2
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
@@ -230,6 +232,7 @@ export const events = {
   ...laneA.events, // P5 O9 M2
   ...machineSettings.events, // P5 O3-D
   ...clientPort.events, // P5 O3-D
+  ...render.events, // P5 O5 M3
   ...remote.events, // P5 O7 M2
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
@@ -289,6 +292,8 @@ export const MACHINE_EVENTS = [
   'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
   'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
+  'render.request', 'render.exit', // P5 O5 M3: the render host's work, posted to it alone
+  'render.hostGeneration', // P5 O5 M4: the engine host's link generation, to the render host alone
   'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
   'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
 ] as const satisfies readonly EventName[];
