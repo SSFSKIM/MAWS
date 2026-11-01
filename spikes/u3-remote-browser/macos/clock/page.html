@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>U3 clock probe</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; font: 16px system-ui, sans-serif; }
+  #target { position: fixed; left: 40px; top: 40px; width: 240px; height: 80px; border: 0; background: #dde3ee; font: 16px system-ui, sans-serif; }
+  #panel { position: fixed; left: 0; top: 160px; right: 0; bottom: 0; background: rgb(255, 255, 255); }
+</style>
+</head>
+<body>
+<button id="target">click me</button>
+<div id="panel"></div>
+<script>
+  // The clock probe's page (P5 O17 M8; probe.cjs loads it into one offscreen tab per variant). Two readings:
+  // `__measure(ms)` counts requestAnimationFrame and a 16 ms and a 100 ms setInterval over one window, each callback's
+  // time on the page's clock; a click on #target repaints the whole lower panel (y >= 160), alternating green and
+  // magenta (both symmetric in red and blue, so main reads them in either byte order), and logs `clock-probe click <n>`
+  // so main sees the handler run. Nothing else on the page moves.
+  const COLOURS = ['rgb(0, 160, 0)', 'rgb(160, 0, 160)'];
+  const panel = document.getElementById('panel');
+  const target = document.getElementById('target');
+  window.__clicks = 0;
+  window.__trusted = [];
+  window.__visibilityChanges = [];
+  document.addEventListener('visibilitychange', () => window.__visibilityChanges.push({ at: Math.round(performance.now()), state: document.visibilityState }));
+  target.addEventListener('click', (event) => {
+    window.__clicks += 1;
+    window.__trusted.push(event.isTrusted);
+    panel.style.background = COLOURS[(window.__clicks - 1) % 2];
+    console.log(`clock-probe click ${window.__clicks}`);
+  });
+  window.__state = () => ({ visibilityState: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(), innerWidth, innerHeight, devicePixelRatio, clicks: window.__clicks, visibilityChanges: window.__visibilityChanges });
+  window.__measure = (ms) =>
+    new Promise((resolve) => {
+      const t0 = performance.now();
+      const at = () => Math.round((performance.now() - t0) * 10) / 10;
+      const raf = [], t16 = [], t100 = [];
+      let running = true;
+      const frame = () => { if (!running) return; raf.push(at()); requestAnimationFrame(frame); };
+      requestAnimationFrame(frame);
+      const i16 = setInterval(() => t16.push(at()), 16);
+      const i100 = setInterval(() => t100.push(at()), 100);
+      const before = window.__state();
+      // the window closes on a timer of its own; under throttling it may close late, and `windowMs` says by how much
+      setTimeout(() => {
+        running = false;
+        clearInterval(i16);
+        clearInterval(i100);
+        resolve({ requestedMs: ms, windowMs: at(), raf, t16, t100, before, after: window.__state() });
+      }, ms);
+    });
+</script>
+</body>
+</html>
