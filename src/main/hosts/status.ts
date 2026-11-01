@@ -44,6 +44,10 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
   // good), or lists no holder, tells it as counted.
   let hostedAtLastStatus = 0;
   let adopting: NonNullable<HostStatus['lastExit']> | null = null;
+  // P5 O16 M3c: a host whose last status said it was handing over (`holder.handover` draining) leaves by design, whoever
+  // asked it (on the daemon shape `mawsd` asks, so main's link reads the close as an exit): that exit is not told
+  let drainingAtLastStatus = false;
+  let handedOver: string | null = null; // the `at` of the last exit so passed over, read once
 
   // P5 O1 M6 (OX1): a supervisor that sends its status was welcomed, so it shares the wire's major or (the protocol-2
   // window) the fingerprint, and differs at most by build; what an incompatible one refused comes from the transport
@@ -58,11 +62,13 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     const facts = deps.hosts.facts('engine-host');
     // an exit is counted against the status before it, once: a successor's status does not rewrite it, and a successor
     // that dies before sending one interrupted nothing
-    if (facts.lastExit && facts.lastExit.at !== (adopting ?? lastExit)?.at) {
+    if (facts.lastExit && facts.lastExit.at !== (adopting ?? lastExit)?.at && facts.lastExit.at !== handedOver) {
       if (adopting) lastExit = adopting; // superseded before its successor's count: told as counted
       const exit = { ...facts.lastExit, interrupted: liveAtLastStatus };
-      [adopting, lastExit] = hostedAtLastStatus > 0 ? [exit, lastExit] : [null, exit];
+      if (drainingAtLastStatus) handedOver = facts.lastExit.at; // P5 O16 M3c: not told
+      else [adopting, lastExit] = hostedAtLastStatus > 0 ? [exit, lastExit] : [null, exit];
       liveAtLastStatus = hostedAtLastStatus = 0;
+      drainingAtLastStatus = false;
     }
     if (adopting && deps.hosts.snapshot('engine-host').state === 'crashed') [lastExit, adopting] = [adopting, null];
     return {
@@ -93,6 +99,7 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     }
     liveAtLastStatus = next.liveSessions;
     hostedAtLastStatus = next.holder?.hosts ?? 0;
+    drainingAtLastStatus = next.holder?.handover === 'draining';
     deps.emit(status());
   };
   // M5b fix round 2: on the daemon shape `mawsd`'s link to the engine host is permanent, so an app that attaches to a host

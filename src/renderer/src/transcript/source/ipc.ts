@@ -144,15 +144,54 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
     const at = departedAt;
     departedAt = null;
     if (at === null || running() === null) return;
-    void client.invoke('engine.sessions', undefined, { machine }).then((result) => {
+    const listed = async (): Promise<boolean | null> => {
+      const result = await client.invoke('engine.sessions', undefined, { machine });
+      return asked !== heard || !result.ok || running() === null ? null : result.value.some((status) => status.appSessionId === appSessionId);
+    };
+    void (async () => {
+      let found = await listed();
+      // P5 O16 M3c: a successor that holds session hosts lists a session only once it has adopted it, and its ready
+      // comes before its start's adoptions end: this machine's host is asked again once main's status says they ended
+      if (found === false && machine === client.localMachine && (await adoptionsEnded(client, () => asked !== heard))) found = await listed();
+      if (asked !== heard) return; // a later departure: the next ready asks again
       const last = running();
-      if (asked !== heard || !result.ok || last === null || result.value.some((status) => status.appSessionId === appSessionId)) return;
+      if (found !== false || last === null) return;
       lost({
         // P5 O6 M2: under the bare app id, as main's synthesised ids are
         id: `${bareOf(appSessionId)}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
         kind: 'process.exited', code: null, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null,
       });
-    });
+    })();
+  });
+}
+
+// P5 O16 M3c: settles once main's host status says the local engine host's start-up adoptions are not under way (its
+// first status heard, and `holder.adopting` not true) or the host left ready; true when that host holds session hosts,
+// so its table may have changed since it was read, false (at once) for one that holds none. `stale`: a later departure
+// was heard, and the answer no longer matters.
+function adoptionsEnded(client: MawsBridge, stale: () => boolean): Promise<boolean> {
+  type Status = CommandOutput<'host.status'>;
+  const read = (status: Status): boolean | null => {
+    if (status.state !== 'ready') return true;
+    if (status.supervisor === null) return null;
+    if (status.supervisor.holder === undefined) return false;
+    return status.supervisor.holder.adopting === true ? null : true;
+  };
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = (value: boolean) => {
+      if (done) return;
+      done = true;
+      off();
+      resolve(value);
+    };
+    const hear = (status: Status) => {
+      if (stale()) return settle(false);
+      const ended = read(status);
+      if (ended !== null) settle(ended);
+    };
+    const off = client.on('host.status', (status, { machine }) => void (machine === client.localMachine && hear(status)));
+    void client.invoke('host.status', undefined).then((result) => (result.ok ? hear(result.value) : settle(false)));
   });
 }
 

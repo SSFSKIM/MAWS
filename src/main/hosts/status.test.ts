@@ -217,6 +217,26 @@ describe('host.status', () => {
     expect(g.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 2 });
   });
 
+  // P5 O16 M3c: a host whose last status said it was handing over left by design (another client asked it: `mawsd restart
+  // --engine-host`, `mawsd` of another build), so its exit is no unexpected one, its successor's adoptions or not
+  it('the exit of a host whose last status said it was handing over is not told', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 1, holder: holder(1, 0, false) }));
+    h.status(supervisorStatus({ liveSessions: 1, holder: { ...holder(1, 0, false), handover: 'draining' } }));
+    h.move({ state: 'restarting', pid: null }, { lastExit: { code: 0, signal: null, at: '2026-10-06T10:05:00.000Z' } });
+    h.move({ state: 'ready', pid: 5151 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 1, holder: holder(1, 1, true) }));
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 1, holder: holder(1, 1, false) }));
+    expect(h.emitted.map((status) => status.lastExit)).toEqual(h.emitted.map(() => null));
+    // a later crash of the successor is told as before
+    const crash = { code: null, signal: 'SIGKILL', at: '2026-10-06T10:06:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: crash });
+    h.move({ state: 'ready', pid: 6161 });
+    h.status(supervisorStatus({ pid: 6161, liveSessions: 1, holder: holder(1, 1, false) }));
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...crash, interrupted: 0, adopted: 1 });
+  });
+
   it('a successor that lists no holder counts nothing adopted', () => {
     const h = harness();
     h.move({ state: 'ready', pid: 4242 });

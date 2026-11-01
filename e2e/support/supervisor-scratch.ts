@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -29,6 +29,7 @@ import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './launch';
 import { killScratchProcesses } from './processes';
 import { tmpSocketDirOf } from './supervisor-socket';
 import { stubLaunchReady, writeStubEngine, type StubEngine, type StubSceneOptions } from './stub-engine'; // P5 O16 M2b
+import { createRedactor } from '../../test/live/support/public-evidence.mjs'; // P5 O16 M3c
 
 // C3's permission round trip: a prompt, ~44 `in` rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
@@ -152,6 +153,23 @@ export class Scratch {
     return existsSync(this.daemonFile(DAEMON_FILES.log)) ? readFileSync(this.daemonFile(DAEMON_FILES.log), 'utf8') : '';
   }
 
+  // P5 O16 M3c: a failed stub case's engine-host and `mawsd` logs, every generation, redacted and each cut to its last
+  // 256 KiB, into the test's output (a relaunch's own evidence excludes a profile's earlier logs, and a stub case's
+  // story spans its relaunches); the stub is the test's own engine, so nothing in them is the runner's
+  keepLogs(outputDir: string): void {
+    const redact = createRedactor(process.env);
+    const sources: [string, string][] = [
+      [this.file('host.log.1'), 'scratch-host.previous.log'], [this.file('host.log'), 'scratch-host.log'],
+      [this.daemonFile(`${DAEMON_FILES.log}.1`), 'scratch-mawsd.previous.log'], [this.daemonFile(DAEMON_FILES.log), 'scratch-mawsd.log'],
+    ];
+    mkdirSync(outputDir, { recursive: true });
+    for (const [from, name] of sources) {
+      if (!existsSync(from)) continue;
+      const text = readFileSync(from, 'utf8');
+      writeFileSync(join(outputDir, name), redact(text.length > 256 * 1024 ? text.slice(text.indexOf('\n', text.length - 256 * 1024) + 1) : text));
+    }
+  }
+
   // P5 O16 M2b: the case's sessions on the stub engine from here on, `rowMs` the pace of its `in` rows (the value the
   // case gives MAWS_E2E_REPLAY_ROW_MS); call before the first launch that should name it
   useStub(opts: StubSceneOptions = {}): StubEngine {
@@ -218,7 +236,7 @@ export class Scratch {
       app.process().stdout?.on('data', (chunk) => (text += String(chunk)));
       app.process().stderr?.on('data', (chunk) => (text += String(chunk)));
     };
-    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...(this.stub && { MAWS_E2E_ENGINE_BIN: this.stub.bin }), ...env } }));
+    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, ...(this.stub && { syntheticEngineBin: this.stub.bin }) /* P5 O16 M3c: the stub is the test's own engine, so its logs are kept as a replay's are */, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...(this.stub && { MAWS_E2E_ENGINE_BIN: this.stub.bin }), ...env } }));
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
     const run: Run = { maws, page: maws.page, child, output: () => text, quitLines: () => text.split('\n').filter((l) => l.startsWith('quit-guard:')), exited };
@@ -311,6 +329,7 @@ export async function withScratch(name: string, body: (s: Scratch) => Promise<vo
     await body(s);
   } catch (error) {
     failed = true;
+    if (s.stub !== null) s.keepLogs(test.info().outputPath('scratch')); // P5 O16 M3c
     throw error;
   } finally {
     // a cleanup failure is the case's failure only when the body passed; otherwise it is logged and the body's error stands

@@ -29,17 +29,21 @@ const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare
 const AGENT = 'agent-7' as AgentId;
 
 // A fake X2 client (the page's side, on `TEST_MACHINE`): every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
-// from `appEvents` (what main's read model keeps); events are pushed by name.
+// from `appEvents` (what main's read model keeps), and main's `host.status`, answered at once from `hostStatus` (P5 O16
+// M3c: a ready host with no session hosts, unless a case sets it); events are pushed by name.
 function fakeClient() {
   const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const calls: { name: string; input: unknown; machine?: MachineRef; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
   const appEvents = new Map<AppSessionId, SessionEvent[]>();
+  const host = { status: { state: 'ready', supervisor: { pid: 1 } } as unknown };
   const client: MawsBridge = {
     localMachine: TEST_MACHINE,
     invoke: ((name: CommandName, input: unknown, opts?: { machine?: MachineRef }) =>
       name === 'session.appEvents'
         ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
-        : new Promise((resolve) => calls.push({ name, input, ...(opts?.machine && { machine: opts.machine }), answer: resolve as never }))) as MawsBridge['invoke'],
+        : name === 'host.status'
+          ? Promise.resolve({ ok: true, value: host.status })
+          : new Promise((resolve) => calls.push({ name, input, ...(opts?.machine && { machine: opts.machine }), answer: resolve as never }))) as MawsBridge['invoke'],
     on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
@@ -51,7 +55,7 @@ function fakeClient() {
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) => {
     for (const listener of listeners.get(name) ?? []) listener(payload, { machine });
   };
-  return { client, calls, emit, listeners, appEvents };
+  return { client, calls, emit, listeners, appEvents, host };
 }
 
 const batch = (events: SessionEvent[], appSessionId = APP) => ({ appSessionId, events });
@@ -1617,6 +1621,74 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     await flush();
     expect(second.fake.calls.map((call) => call.name)).toEqual(['session.events']);
     useTranscriptStore.getState().detach(second.source.key!);
+  });
+
+  // P5 O16 M3c: a successor of a host that kept its sessions under session hosts adopts them, and its ready comes before
+  // its start's adoptions end; a session it has not adopted yet is not listed, so it is asked again once main's status
+  // says the adoptions ended
+  const holderStatus = (adopting: boolean) => ({ state: 'ready', supervisor: { pid: 5151, holder: { hosts: 1, adopted: adopting ? 0 : 1, failed: 0, gate: null, handover: 'none', adopting } } });
+
+  it('a successor still adopting is asked again once its adoptions end: a session it adopted keeps working', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.host.status = holderStatus(true);
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []); // not adopted yet
+    await flush();
+    expect(divider().state, 'nothing told while it adopts').toBe('working');
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+    fake.emit('host.status', holderStatus(false) as never);
+    await flush();
+    table(fake, [APP]);
+    await flush();
+    expect(divider().state).toBe('working');
+    expect(exitRows()).toEqual([]);
+    useTranscriptStore.getState().detach(source.key!);
+  });
+
+  it('a session the successor did not adopt is closed once its adoptions end, with one crash exit row', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.host.status = { state: 'ready', supervisor: null }; // its first status not heard yet: unknown, so waited for
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []);
+    await flush();
+    fake.emit('host.status', holderStatus(true) as never);
+    await flush();
+    expect(divider().state).toBe('working');
+    fake.emit('host.status', holderStatus(false) as never);
+    await flush();
+    table(fake, []); // the adoption failed
+    await flush();
+    expect(divider().state).toBe('stopped');
+    expect(exitRows()).toMatchObject([{ severity: 'error', text: 'Session process exited (crash)' }]);
+    useTranscriptStore.getState().detach(source.key!);
+  });
+
+  it('a departure heard while the successor adopts says nothing; the next ready asks again', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.host.status = holderStatus(true);
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []);
+    await flush();
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('host.status', { state: 'restarting', supervisor: null } as never);
+    await flush();
+    expect(divider().state, 'the stale read tells nothing').toBe('working');
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+    useTranscriptStore.getState().detach(source.key!);
+  });
+
+  it('a host without session hosts is read once, as before', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []);
+    await flush();
+    expect(divider().state).toBe('stopped');
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+    useTranscriptStore.getState().detach(source.key!);
   });
 
   // The branch review: `engine.hostState` crosses machine links. Another machine's host leaving says nothing about this
