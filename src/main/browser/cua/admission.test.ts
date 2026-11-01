@@ -39,6 +39,7 @@ const STRANGER = 6000; // a Terminal's nc, under launchd
 const DAEMON = 4000; // the attached mawsd (P5 O5 M5), the engine's ancestor through its engine host
 const ENGINE_HOST = 4500;
 const NEXT_DAEMON = 4001; // a mawsd that replaced it
+const NEXT_ENGINE = 5100; // an engine that replaced the session's
 const MACHINE_FD = 901; // the app's machine.sock connection: its peer is the daemon actually attached
 const uid = process.getuid!();
 
@@ -50,6 +51,7 @@ function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: 
     [DAEMON, { ppid: 1, start: 5 }],
     [ENGINE_HOST, { ppid: DAEMON, start: 6 }],
     [NEXT_DAEMON, { ppid: 1, start: 8 }],
+    [NEXT_ENGINE, { ppid: 1, start: 50 }],
   ]);
   const addon = {
     table,
@@ -328,6 +330,36 @@ describe('the wait for the session\'s engine', () => {
 // checked by `mawsd`, which relays the connection from its own process; the app admits it by the daemon's exact instance
 // (the peer of the app's live machine.sock connection, its start read then), at once, without waiting for the session's
 // engine; a change of that identity ends what the old one relayed.
+// What was admitted as a descendant of the session's engine is that engine's (the embedded shape's direct path): it ends
+// when the root changes or goes, its leases with it; the same engine's next status keeps it, and what the daemon relayed
+// follows the relay's own rules
+describe('a change of the session\'s engine', () => {
+  it.each([
+    ['replaced by another', NEXT_ENGINE],
+    ['gone', null],
+  ])('ends the connections admitted under the old engine once it is %s, releasing their leases; the relay\'s stay', async (_, next) => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const tab = h.personTab();
+    const own = await connectFakeHost(h.backend.socketPathFor(A)!); // CHILD, under ENGINE
+    tracked.hosts.push(own);
+    await own.request('debugger.attach', { tabId: await h.idOf(own, tab) });
+    await attach(h.backend, addon, DAEMON);
+    addon.peerPid = DAEMON;
+    const relayed = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(relayed);
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 2, leased: [tab.tab.tabId] });
+    h.backend.engineProcess(A, ENGINE); // the same engine's next status
+    expect(await own.request('tabs.query', {})).toHaveLength(1);
+    h.backend.engineProcess(A, next);
+    await until(() => !own.socketState().open);
+    expect(own.socketState()).toMatchObject({ open: false, endedByMaws: true });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, leased: [] });
+    expect(await relayed.request('tabs.query', {})).toHaveLength(1);
+  });
+});
+
 describe('the daemon\'s relay', () => {
   it('is admitted by its exact instance at once, with no engine known for the session', async () => {
     const addon = fakeAddon();
