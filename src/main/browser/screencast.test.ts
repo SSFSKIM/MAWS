@@ -10,7 +10,7 @@ import type { BrowserInput } from '@shared/browser/screencast';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { TabControls } from './agent/control';
-import { encodeJpeg, startScreencast, type EncodedFrame, type FrameSource, type ProducedFrame, type Screencast } from './screencast';
+import { encodeJpeg, SCREENCAST_HELD_KEYS, startScreencast, type EncodedFrame, type FrameSource, type ProducedFrame, type Screencast } from './screencast';
 import { TabStore, type TabEntry } from './tabs';
 
 const A = 'A' as AppSessionId;
@@ -307,7 +307,7 @@ describe('a viewer’s input (§G: a person’s, through the takeover gate)', ()
     send({ kind: 'text', text: '안녕 é' });
     expect(t.contents(entry).sent).toEqual([
       { type: 'mouseMove', x: 640, y: 400, modifiers: [] },
-      { type: 'mouseDown', x: 640, y: 400, button: 'left', clickCount: 1, modifiers: ['shift', 'meta'] },
+      { type: 'mouseDown', x: 640, y: 400, button: 'left', clickCount: 1, modifiers: ['shift', 'meta', 'leftbuttondown'] },
       { type: 'mouseUp', x: 640, y: 400, button: 'left', clickCount: 1, modifiers: [] },
       { type: 'mouseWheel', x: 10, y: 20, deltaX: -0, deltaY: -120, modifiers: [] },
       { type: 'keyDown', keyCode: 'Up', modifiers: ['control', 'isAutoRepeat'] },
@@ -337,6 +337,62 @@ describe('a viewer’s input (§G: a person’s, through the takeover gate)', ()
     expect(t.contents(entry).sent.at(-1), 'released at the close').toEqual({ type: 'keyUp', keyCode: 'a', modifiers: [] });
     t.screencast.open({ subscriptionId: 'v2', appSessionId: A, tabId: entry.tab.tabId, control: true });
     expect(() => t.screencast.input(A, 'v2', 1, down), 'nothing replays across subscriptions: a new one counts afresh').not.toThrow();
+  });
+
+  it('carries the pressed buttons into each pointer event, so a drag’s moves report the held button', () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    let seq = 0;
+    const pointer = (type: 'move' | 'down' | 'up', buttons: number, button: 'left' | 'middle' | 'right' = 'left') =>
+      t.screencast.input(A, 'v1', ++seq, { kind: 'pointer', type, x: 10, y: 20, button, buttons, clickCount: type === 'move' ? 0 : 1, modifiers: ['Shift'] });
+    pointer('down', 1);
+    pointer('move', 1);
+    pointer('down', 5, 'middle');
+    pointer('move', 7);
+    pointer('up', 0);
+    expect(t.contents(entry).sent.map((event) => event.modifiers)).toEqual([
+      ['shift', 'leftbuttondown'],
+      ['shift', 'leftbuttondown'],
+      ['shift', 'leftbuttondown', 'middlebuttondown'],
+      ['shift', 'leftbuttondown', 'rightbuttondown', 'middlebuttondown'],
+      ['shift'],
+    ]);
+  });
+
+  it('releases the native key it pressed, whatever the key reads at the release (Shift let go first, a UK layout’s Quote)', () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    let seq = 0;
+    const key = (type: 'down' | 'up', key: string, repeat = false) => t.screencast.input(A, 'v1', ++seq, { kind: 'key', type, key, code: 'Digit2', repeat, modifiers: [] });
+    key('down', '"');
+    key('down', '2', true); // its auto-repeat after Shift's release: the same native key
+    key('up', '2');
+    t.screencast.input(A, 'v1', ++seq, { kind: 'blur' });
+    expect(t.contents(entry).sent).toEqual([
+      { type: 'keyDown', keyCode: '"', modifiers: [] },
+      { type: 'keyDown', keyCode: '"', modifiers: ['isAutoRepeat'] },
+      { type: 'keyUp', keyCode: '"', modifiers: [] },
+    ]);
+  });
+
+  it(`holds at most ${SCREENCAST_HELD_KEYS} keys: a press past them releases the oldest first, so a blur releases no more`, () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    const presses = 5_000;
+    for (let n = 1; n <= presses; n += 1) t.screencast.input(A, 'v1', n, { kind: 'key', type: 'down', key: 'a', code: `Code${n}`, repeat: false, modifiers: [] });
+    const sent = t.contents(entry).sent;
+    expect(sent.slice(0, SCREENCAST_HELD_KEYS + 2)).toEqual([
+      ...Array.from({ length: SCREENCAST_HELD_KEYS }, () => ({ type: 'keyDown', keyCode: 'a', modifiers: [] })),
+      { type: 'keyUp', keyCode: 'a', modifiers: [] }, // the oldest, before the press past the bound
+      { type: 'keyDown', keyCode: 'a', modifiers: [] },
+    ]);
+    const before = sent.length;
+    t.screencast.input(A, 'v1', presses + 1, { kind: 'blur' });
+    expect(sent.slice(before)).toHaveLength(SCREENCAST_HELD_KEYS);
+    expect(sent.filter((event) => event.type === 'keyUp')).toHaveLength(presses);
   });
 
   it('is the person’s input: an agent holding the tab yields it (human), and the seam records a human press', () => {

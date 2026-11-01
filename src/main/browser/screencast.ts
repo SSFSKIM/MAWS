@@ -33,6 +33,10 @@ import type { TabEntry, TabStore } from './tabs';
 
 export const SCREENCAST_JPEG_QUALITY = 60;
 export const SCREENCAST_SPACING_MS = 1_000 / BROWSER_LIMITS.fps;
+// The keys a controlling viewer may hold down at once: a person's chord is a few keys, and a keyboard's own report holds
+// 14 (USB HID's boot protocol: 8 modifiers and 6 keys). A press past them releases the oldest held key first, so every
+// press the page saw keeps its release and a blur or close releases at most this many, whatever codes a viewer sends.
+export const SCREENCAST_HELD_KEYS = 16;
 
 // A tab's paints: `start` subscribes (and asks for a first paint, so a still page has an image), `stop` ends it
 export interface FrameSource<Image> {
@@ -110,7 +114,7 @@ interface Viewer<Image> {
   lastSentAt: number;
   timer: ReturnType<typeof setTimeout> | null; // the spacing's, while it waits
   inputSeq: number;
-  keys: Map<string, string>; // held down: code → Electron's key name
+  keys: Map<string, string>; // held down, oldest first: code → the Electron key name its first press sent
   buttons: Map<'left' | 'middle' | 'right', number>; // held down: the button → its click count
   at: { x: number; y: number };
   closed: boolean;
@@ -120,6 +124,14 @@ interface Viewer<Image> {
 const KEY_NAMES: Record<string, string> = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', ' ': 'Space' };
 const keyName = (key: string) => KEY_NAMES[key] ?? key;
 const modifiersOf = (modifiers: string[]) => modifiers.map((modifier) => modifier.toLowerCase());
+// The DOM's `buttons` (1 left, 2 right, 4 middle) as Electron's button-down modifiers: Electron builds each mouse event
+// alone, reading which buttons are held from these, so a drag's moves carry them
+const BUTTONS_DOWN = [
+  [1, 'leftbuttondown'],
+  [2, 'rightbuttondown'],
+  [4, 'middlebuttondown'],
+] as const;
+const buttonsDown = (buttons: number) => BUTTONS_DOWN.filter(([bit]) => (buttons & bit) !== 0).map(([, modifier]) => modifier);
 
 export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>): Screencast {
   const now = deps.now ?? (() => performance.now());
@@ -247,7 +259,7 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
         const x = Math.round(event.x);
         const y = Math.round(event.y);
         viewer.at = { x, y };
-        const modifiers = modifiersOf(event.modifiers) as MouseInputEvent['modifiers'];
+        const modifiers = [...modifiersOf(event.modifiers), ...buttonsDown(event.buttons)] as MouseInputEvent['modifiers'];
         if (event.type === 'move') return contents.sendInputEvent({ type: 'mouseMove', x, y, modifiers });
         person(viewer, 'mouse');
         if (event.type === 'down') viewer.buttons.set(event.button, event.clickCount);
@@ -261,13 +273,25 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
         return contents.sendInputEvent(wheel);
       }
       case 'key': {
-        const keyCode = keyName(event.key);
+        const id = event.code || event.key;
+        // a held code is the native key its first press sent until its release, whatever the key reads now (Shift let go)
+        const held = viewer.keys.get(id);
+        const keyCode = held ?? keyName(event.key);
         const modifiers = [...modifiersOf(event.modifiers), ...(event.repeat ? ['isAutoRepeat'] : [])] as MouseInputEvent['modifiers'];
-        if (event.type === 'down') {
-          person(viewer, 'key', keyActivates(event));
-          viewer.keys.set(event.code || event.key, keyCode);
-        } else viewer.keys.delete(event.code || event.key);
-        return contents.sendInputEvent({ type: event.type === 'down' ? 'keyDown' : 'keyUp', keyCode, modifiers });
+        if (event.type === 'up') {
+          viewer.keys.delete(id);
+          return contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+        }
+        person(viewer, 'key', keyActivates(event));
+        if (held === undefined) {
+          const [oldest] = viewer.keys;
+          if (oldest && viewer.keys.size >= SCREENCAST_HELD_KEYS) {
+            viewer.keys.delete(oldest[0]);
+            contents.sendInputEvent({ type: 'keyUp', keyCode: oldest[1], modifiers: [] });
+          }
+          viewer.keys.set(id, keyCode);
+        }
+        return contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
       }
       case 'text':
         person(viewer, 'key');
