@@ -166,6 +166,22 @@ describe('main ipc router', () => {
       await expect(invoke(appWindow(), 'attention.viewing', { appSessionId: 'app-1' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
       expect(handler).not.toHaveBeenCalled();
     });
+
+    // P5 O7 M3: another machine's pty host state is its link's (remote lane B's), and a link out of its session is main's
+    it('hands pty.hostState for another machine to the connection manager, and answers a link opened from one of its sessions here with that machine as ctx.target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { state: 'ready', pid: null, restarts: 0, revision: 1 } }));
+      await load(DEV_URL, undefined, remote);
+      await expect(invoke(appWindow(), 'pty.hostState', undefined, OTHER)).resolves.toEqual({ ok: true, value: { state: 'ready', pid: null, restarts: 0, revision: 1 } });
+      expect(remote.mock.calls.map(([machine, name]) => [machine, name])).toEqual([[OTHER, 'pty.hostState']]);
+      const opened = vi.fn<(input: unknown, context: MainContext) => { opened: boolean }>(() => ({ opened: true }));
+      router.registerMainHandler('pty.openLink', opened);
+      const external = vi.fn<(input: unknown, context: MainContext) => void>(() => undefined);
+      router.registerMainHandler('layout.openExternal', external);
+      await expect(invoke(appWindow(), 'pty.openLink', { url: 'https://example.com/' }, OTHER)).resolves.toEqual({ ok: true, value: { opened: true } });
+      await expect(invoke(appWindow(), 'layout.openExternal', { url: 'https://example.com/' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
+      expect([...opened.mock.calls, ...external.mock.calls].map(([, context]) => context.target)).toEqual([OTHER, OTHER]);
+      expect(remote).toHaveBeenCalledOnce();
+    });
   });
 
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check

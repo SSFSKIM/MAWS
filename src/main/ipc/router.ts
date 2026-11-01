@@ -138,6 +138,13 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     table.set(name, handler);
   };
 
+  // P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The terminal's machine", "Forwarding"): two kinds of
+  // `client` command answered for another machine all the same. Its pty host's state is its link's, which the connection
+  // manager's path answers (remote lane B's adapter for an RL2 machine, from the link's state); a link opened out of one of
+  // its sessions is this app's to open, by main's handler with that machine as `ctx.target`, which never opens the other
+  // machine's loopback on this Mac (src/main/open-external.ts).
+  const ANSWERED_BY_ITS_LINK: ReadonlySet<string> = new Set(['pty.hostState']);
+  const OPENED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['pty.openLink', 'layout.openExternal']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
@@ -169,8 +176,8 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
-    if (target !== local) {
-      if (gradeOf(name) === 'client') {
+    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name)) {
+      if (gradeOf(name) === 'client' && !ANSWERED_BY_ITS_LINK.has(name)) {
         if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
         return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };
       }
