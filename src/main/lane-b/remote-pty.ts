@@ -367,12 +367,16 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     const pty = bind(link, ptyId, ran.handle.opId);
     pty.attach?.answer(failure('internal', 'pty.attach: another attach of this terminal took its place'));
     const from = checkpoints.get(keyOf(link.machine, ptyId))?.offset ?? 0;
+    // The ring's bytes wait the act's bound again (`pendingMs`, REMOTE_ACT_PENDING_MS in lane B), so a whole attach, act
+    // then replay, answers within twice it: REMOTE_ATTACH_PENDING_MS (src/shared/machine/remote-pending.ts), which the
+    // renderer's re-adoption waits above
+    const replayMs = deps.pendingMs;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (pty.attach !== waiting) return;
         pty.attach = null;
         resolve(failure('timeout', `pty.attach: ${link.name} didn’t send the terminal’s output in time`));
-      }, deps.pendingMs);
+      }, replayMs);
       const waiting: Attach = { from, ring: null, chunks: [], at: from, answer: (result) => (clearTimeout(timer), resolve(result)) };
       pty.attach = waiting;
       open(pty, from);

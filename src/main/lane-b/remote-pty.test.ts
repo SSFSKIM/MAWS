@@ -3,13 +3,15 @@
 // nothing said, and the geometry sent again on each stream.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
-import { FakeLink, type FakeStream } from '../../../test/lane-b/fake-link';
+import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '@shared/machine/remote-pending';
+import { FakeLink, type FakeAct, type FakeStream } from '../../../test/lane-b/fake-link';
+import { REMOTE_LANE_B_TIMING } from './remote';
 import { createRemotePty } from './remote-pty';
 
 const INFO = { ptyId: 'pty-1', appSessionId: 'app-1', label: 'zsh', pid: 7, cwd: '/w', shell: '/bin/zsh', cols: 80, rows: 24, spawnedAt: '2026-11-01T00:00:00.000Z', alive: true, paused: false, exit: null, offset: 0 };
 const RETRY: readonly [number, number] = [50, 400];
 
-function lab() {
+function lab(pendingMs = 60_000) {
   const link = new FakeLink();
   link.peers = ['rl2.executor.machine', 'rl2.streams'];
   link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'pty.spawn' ? { ptyId: 'pty-1', pid: 7 } : { info: INFO, ringStart: 0, nextOffset: 0 } });
@@ -18,7 +20,7 @@ function lab() {
     remote: () => link,
     emit: (_machine, name, payload) => void emitted.push({ name, payload }),
     bounded: (handle) => handle.outcome,
-    pendingMs: 60_000,
+    pendingMs,
     timing: { streamRetryMs: RETRY, inputHeldMax: 4 << 20 },
     now: Date.now,
     log: () => {},
@@ -56,6 +58,21 @@ describe('remote terminal streams (P5 O7 M3)', () => {
     l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 5 }, credit: 1 << 20 });
     l.last().sink.data(0, new TextEncoder().encode('hello'));
     expect(await answer).toMatchObject({ ok: true, value: { replayFrom: 0, nextOffset: 5 } });
+  });
+
+  it('answers a whole attach within twice the act’s bound: REMOTE_ATTACH_PENDING_MS at lane B’s default', async () => {
+    expect([REMOTE_LANE_B_TIMING.sendPendingMs, 2 * REMOTE_LANE_B_TIMING.sendPendingMs]).toEqual([REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS]);
+    const l = lab(1000);
+    const acts: FakeAct[] = [];
+    l.link.onAct = (act) => void acts.push(act); // a non-owner at the sheet: the act settles at the end of its bound
+    let answered: unknown = null;
+    void l.cmd('pty.attach', { ptyId: 'pty-1' }).then((result) => (answered = result));
+    await vi.advanceTimersByTimeAsync(999);
+    acts[0]!.settle({ state: 'done', result: { info: INFO, ringStart: 0, nextOffset: 5 } });
+    await vi.advanceTimersByTimeAsync(999); // the ring's bytes never come
+    expect(answered).toBeNull();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(answered).toMatchObject({ ok: false, error: { code: 'timeout' } });
   });
 
   it('sends the latest geometry again on every stream, so a resize lost with its channel is not lost', async () => {

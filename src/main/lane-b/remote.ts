@@ -51,6 +51,7 @@ import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FilesUploadInput } from '@shared/ipc/schema/files';
 import { listenLoopback, type LocalListener } from '../forwards';
@@ -89,7 +90,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   idleRetryMs: [1000, 30_000],
   // past the machine's park window (10 min by default) and its first tries: a try wakes a parked host (O5's audit)
   idleProbeMaxMs: 30 * 60_000,
-  sendPendingMs: 60_000,
+  sendPendingMs: REMOTE_ACT_PENDING_MS, // shared with the renderer, whose waits are bounded above it
   sendQueueMax: 8,
   batchMax: 500,
   // the machine's own bound on a spawn (`session.spawn`'s command budget, 200 s: the configure gate, a git call, the
