@@ -514,4 +514,97 @@ describe('main ipc router', () => {
       expect(() => router.interceptCommand('attention.list', () => [])).toThrow('already intercepted');
     });
   });
+
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §F, D24): the seam before the owner switch,
+  // on both shapes, for the window report and the delivery cancel
+  describe('beforeCommand', () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const LEASE = '66666666-6666-4666-8666-666666666666';
+    const runId = '55555555-5555-4555-8555-555555555555';
+
+    it('runs for the named commands alone, with the validated input and the asker, then continues to the embedded handler', async () => {
+      const order: string[] = [];
+      router.registerMachineHandler('connectors.open', () => {
+        order.push('handler');
+        return { leaseId: LEASE };
+      });
+      router.registerMachineHandler('connectors.close', () => ({ closed: true }));
+      const hook = vi.fn(async () => {
+        order.push('hook');
+        return undefined;
+      });
+      router.beforeCommand(['connectors.open'], hook);
+      const event = appWindow();
+      await expect(invoke(event, 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: true, value: { leaseId: LEASE } });
+      expect(order).toEqual(['hook', 'handler']);
+      expect(hook).toHaveBeenCalledWith('connectors.open', { artifactId: ART }, expect.objectContaining({ id: `page:${event.sender.id}.1` }));
+      await invoke(event, 'connectors.close', { leaseId: LEASE });
+      expect(hook).toHaveBeenCalledOnce(); // not named
+      await expect(invoke(event, 'connectors.open', { artifactId: 'not an id' })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(hook).toHaveBeenCalledOnce(); // an invalid input never reaches it
+    });
+
+    it('waits for the hook before forwarding to the machine host, on the host binding too', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async () => ({ ok: true, value: { leaseId: LEASE } }));
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host' } });
+      let release!: () => void;
+      router.beforeCommand(['connectors.open'], () => new Promise((resolve) => (release = () => resolve(undefined))));
+      const event = appWindow();
+      const answering = invoke(event, 'connectors.open', { artifactId: ART });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(dispatchToHost).not.toHaveBeenCalled();
+      release();
+      await expect(answering).resolves.toEqual({ ok: true, value: { leaseId: LEASE } });
+      expect(dispatchToHost).toHaveBeenCalledWith('machine', 'connectors.open', { artifactId: ART }, expect.objectContaining({ id: `page:${event.sender.id}.1` }));
+    });
+
+    it('answers what a hook answers, short-circuiting the owner and later hooks, and runs for main’s own calls too', async () => {
+      const handler = vi.fn(() => ({ cancelled: false }));
+      router.registerMachineHandler('delivery.cancel', handler);
+      const later = vi.fn(async () => undefined);
+      router.beforeCommand(['delivery.cancel'], async () => ({ ok: true, value: { cancelled: true } }));
+      router.beforeCommand(['delivery.cancel'], later);
+      await expect(invoke(appWindow(), 'delivery.cancel', { runId })).resolves.toEqual({ ok: true, value: { cancelled: true } });
+      const { mainClient } = await import('./clients');
+      await expect(router.invokeOwn('delivery.cancel', { runId }, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: true, value: { cancelled: true } });
+      expect(handler).not.toHaveBeenCalled();
+      expect(later).not.toHaveBeenCalled();
+    });
+
+    it('runs hooks in order until one answers, and its disposer removes it alone', async () => {
+      router.registerMachineHandler('delivery.cancel', () => ({ cancelled: false }));
+      const first = vi.fn(async () => undefined);
+      const dispose = router.beforeCommand(['delivery.cancel'], first);
+      const second = vi.fn(async () => undefined);
+      router.beforeCommand(['delivery.cancel'], second);
+      await expect(invoke(appWindow(), 'delivery.cancel', { runId })).resolves.toEqual({ ok: true, value: { cancelled: false } });
+      expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 1]);
+      dispose();
+      await invoke(appWindow(), 'delivery.cancel', { runId });
+      expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 2]);
+    });
+
+    it('answers a hook’s throw as a handler’s, and is not consulted for a command an interceptor shadows', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const handler = vi.fn(() => ({ cancelled: false }));
+      router.registerMachineHandler('delivery.cancel', handler);
+      const off = router.beforeCommand(['delivery.cancel'], async () => {
+        throw new router.CommandFailure({ code: 'timeout', message: 'too slow' });
+      });
+      await expect(invoke(appWindow(), 'delivery.cancel', { runId })).resolves.toEqual({ ok: false, error: { code: 'timeout', message: 'too slow' } });
+      off();
+      const broken = vi.fn(async () => {
+        throw new Error('broke');
+      });
+      router.beforeCommand(['delivery.cancel'], broken);
+      await expect(invoke(appWindow(), 'delivery.cancel', { runId })).resolves.toEqual({ ok: false, error: { code: 'internal', message: 'broke' } });
+      expect(handler).not.toHaveBeenCalled();
+      router.interceptCommand('delivery.cancel', () => ({ cancelled: true }));
+      await expect(invoke(appWindow(), 'delivery.cancel', { runId })).resolves.toEqual({ ok: true, value: { cancelled: true } });
+      expect(broken).toHaveBeenCalledOnce();
+    });
+  });
 });

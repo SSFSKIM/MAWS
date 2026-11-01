@@ -31,7 +31,7 @@ describe('appIdentity', () => {
   it('is the bundle’s build id, the wire’s major, minor and capabilities, and the wire fingerprint', () => {
     const identity = appIdentity(modulePath, {});
     expect(identity.buildId()).toBe(buildIdOf(modulePath));
-    expect([identity.major(), identity.minor(), identity.capabilities()]).toEqual([SOCKET_PROTOCOL, WIRE_MINOR, ['socket.ptyFrames', 'machine.spine', 'host.holder']]); // P5 O16 M3b: host.holder; P5 O3-D: main's own list (M5b: machine.spine)
+    expect([identity.major(), identity.minor(), identity.capabilities()]).toEqual([SOCKET_PROTOCOL, WIRE_MINOR, ['socket.ptyFrames', 'machine.spine', 'machine.connectors', 'host.holder']]); // P5 O3-D: main's own list (M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
     expect(identity.wire()).toBe(wireFingerprint());
   });
 

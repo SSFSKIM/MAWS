@@ -8,12 +8,13 @@
 // different skills: anthropics/skills, life-sciences), the place is ambiguous in every source: each entry there, in any
 // marketplace, is its own plugin, (repository, path, entry name), and a directory record there joins the entry of its
 // engine name (join.ts).
+import { DIRECTORY_MARKETPLACE, type EngineViewWire } from '@shared/catalog/engine-view';
 import type { CatalogComponents, ConnectorRoute, Ownership } from '@shared/ipc/schema/catalog';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { AvailablePlugin, InstalledPlugin, MarketplaceManifestView, PluginManifestView, PluginSourceRef } from '@shared/ipc/schema/plugins';
 import { repositoryLocation } from '@shared/plugins/source-key';
 import type { DirectoryComponent, DirectoryServer, ManifestEntry, NetworkData } from './records';
-import { DIRECTORY_MARKETPLACE, routeRank, seedOf, SEEDS, type Seed, type TestSource } from './sources';
+import { routeRank, seedOf, SEEDS, type Seed, type TestSource } from './sources';
 
 export type Runs = boolean | 'unknown';
 export interface Known {
@@ -21,7 +22,8 @@ export interface Known {
   runs: Runs;
 }
 
-/** The engine's reads for one cwd (engine-reads.ts); a read that failed is null. */
+/** The engine's reads for one cwd (the machine's `catalog.engine`, src/services/catalog/engine-reads.ts); a read that
+ * failed is null. */
 export interface EngineView {
   cwd: string;
   installed: InstalledPlugin[] | null;
@@ -32,6 +34,13 @@ export interface EngineView {
   // the place of each installed Anthropic Directory plugin's code as the engine recorded it at install (its fold key,
   // `plugins.directoryProvenance`), by entry name: the available listing omits installed plugins (fact 2a)
   directoryInstalled: ReadonlyMap<string, string>;
+}
+
+/** P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D25): the view as the machine answered it, its entry
+ * arrays read back into the Maps the join reads, once per read. */
+export function engineViewFromWire(wire: EngineViewWire | null): EngineView | null {
+  if (wire === null) return null;
+  return { ...wire, manifests: new Map(wire.manifests), directoryInstalled: new Map(wire.directoryInstalled) };
 }
 
 /** A test-source descriptor with its marketplace read from disk (Sources, 3a). */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS } from './names';
-import { commandChannel, commands, eventChannel, events, HOST_EVENTS, NAMESPACES, type Namespace } from './schema';
+import { commandChannel, commands, eventChannel, events, HOST_EVENTS, MACHINE_EVENTS, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
 import * as fs from './schema/fs';
@@ -1936,7 +1936,8 @@ describe('ipc schema validates both directions', () => {
     // P5 O3-D: the three reads and files' admission read are the spine's library, `machine`-owned
     it('owns the three reads in the spine (machine) and the three host reads in the engine host, main-only, and emits library.changed from the spine', () => {
       const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
-      const files = { 'library.exportFormats': 'main', 'library.content': 'main', 'library.openExternally': 'main', 'library.reveal': 'main', 'library.read': 'main', 'library.saveAs': 'main' }; // M5b; M6b fix wave 2: library.read
+      // M5b; M6b fix wave 2: library.read; P5 O4 M3 (D19): the reads of a stored file the machine's, the export formats and Save as main's
+      const files = { 'library.exportFormats': 'main', 'library.content': 'machine', 'library.openExternally': 'machine', 'library.reveal': 'machine', 'library.read': 'machine', 'library.saveAs': 'main' };
       expect(owners).toEqual({ 'library.list': 'machine', 'library.get': 'machine', 'library.spaces': 'machine', 'library.fileLinkedPaths': 'machine', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host', 'library.testImport': 'engine-host' /* M6b */ });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text', 'library.fileLinkedPaths']));
       expect(MAIN_ONLY_COMMANDS).not.toContain('library.testImport'); // M6b: the e2e calls it from a window; the host refuses it outside MAWS_E2E=1
@@ -2037,12 +2038,19 @@ describe('ipc schema validates both directions', () => {
   // engine host's, main's alone), the owner's grant commands (main's), and the events' payloads
   describe('P3-H connectors', () => {
     const ID = '00000000-0000-4000-8000-000000000001';
-    it('bridges the page-lease commands, which are main’s, and never the store’s or the engine leg’s', () => {
+    // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C): the machine's since the services move
+    it('bridges the page-lease commands, which are the machine’s, and never the store’s or the engine leg’s', () => {
       const owners = Object.fromEntries(Object.entries(connectors.commands).map(([name, spec]) => [name, spec.owner]));
       // P4-AGG M4: Customize's add and remove are the engine host's plugin runner, which a window reaches as it reaches
-      // `plugins.install`; every other bridged connectors command is main's
+      // `plugins.install`; every other bridged connectors command is the machine's
       const runner = ['connectors.add', 'connectors.remove'];
-      for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe(runner.includes(name) ? 'engine-host' : 'main');
+      for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe(runner.includes(name) ? 'engine-host' : 'machine');
+      // the app's window report and adoption hand-off: the machine's, asked by main alone
+      for (const name of ['connectors.windowShown', 'connectors.adoptGrant'] as const) {
+        expect(owners[name], name).toBe('machine');
+        expect(MAIN_ONLY_COMMANDS, name).toContain(name);
+        expect([...NAMES.connectors.commands], name).not.toContain(name);
+      }
       const hidden = ['connectors.grants', 'connectors.grant', 'connectors.revoke', 'connectors.check', 'connectors.resolve', 'connectors.start', 'connectors.take', 'connectors.cancel'];
       for (const name of hidden) {
         expect(owners[name], name).toBe('engine-host');
@@ -2050,12 +2058,16 @@ describe('ipc schema validates both directions', () => {
         expect([...NAMES.connectors.commands], name).not.toContain(name);
       }
       for (const name of ['artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool'] as const) {
-        expect(commands[name].owner, name).toBe('main');
+        expect(commands[name].owner, name).toBe('machine');
         expect([...NAMES.artifacts.commands], name).toContain(name);
       }
       expect(HOST_EVENTS).toContain('connectors.operation');
       expect(HOST_EVENTS).toContain('connectors.grantChanged');
-      expect(HOST_EVENTS).not.toContain('connectors.watchUpdate'); // main's, to one window
+      expect(HOST_EVENTS).not.toContain('connectors.watchUpdate'); // the machine's, to one client
+      expect(MACHINE_EVENTS).toContain('connectors.watchUpdate');
+      // the app's own, to its windows: never on any host's wire
+      expect([...NAMES.connectors.events]).toContain('connectors.reset');
+      expect([...HOST_EVENTS, ...MACHINE_EVENTS]).not.toContain('connectors.reset');
     });
 
     it('passes a page’s own payload to the broker as it came, and answers a page only states and closed reasons', () => {

@@ -114,16 +114,20 @@ export const commands = {
   // M5b (Decision Log 14): the export formats main's exporter registry serves for a kind, in ARTIFACT_EXPORT_FORMATS'
   // order (a format `artifacts.export` would refuse `exportUnavailable` is not listed).
   'library.exportFormats': main(z.strictObject({ kind: ArtifactKindSchema }), z.strictObject({ formats: z.array(z.enum(ARTIFACT_EXPORT_FORMATS)) })),
-  // M5b: a byte kind's stored file at a revision, resolved by main through the host (`artifacts.content`).
-  'library.content': main(ContentAt, LibraryContentSchema),
-  // M5b: that file handed to the OS (a kind it opens as a document, never a program) or shown in Finder; a refusal is an
-  // answer with its reason, as `files.openExternal` and `files.reveal` answer.
-  'library.openExternally': main(ContentAt, z.strictObject({ opened: z.boolean(), message: z.string().nullable() })),
-  'library.reveal': main(ContentAt, z.strictObject({ revealed: z.boolean(), message: z.string().nullable() })),
+  // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D19): the four reads of a stored
+  // file are the machine's (src/services/library/files.ts, composed with the spine); the export formats and Save as stay
+  // main's until O5 brings the exporters to the machine.
+  // M5b: a byte kind's stored file at a revision, resolved through the host (`artifacts.content`).
+  'library.content': machine(ContentAt, LibraryContentSchema),
+  // M5b: that file handed to the OS (a kind it opens as a document, never a program) or shown in Finder, on the asking
+  // client through the client port (OX4); a refusal is an answer with its reason, as `files.openExternal` and
+  // `files.reveal` answer.
+  'library.openExternally': machine(ContentAt, z.strictObject({ opened: z.boolean(), message: z.string().nullable() })),
+  'library.reveal': machine(ContentAt, z.strictObject({ revealed: z.boolean(), message: z.string().nullable() })),
   // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file read as `files.read` reads a session's, by the
-  // artifact alone: main resolves its path (`artifacts.content`), so the owner's file reads in its viewer with no
-  // session, and a window names no path.
-  'library.read': main(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
+  // artifact alone: its path resolved through the host (`artifacts.content`) and read by the files service in process,
+  // so the owner's file reads in its viewer with no session, and a window names no path.
+  'library.read': machine(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
   // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
   // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
   // P4 (W1, L302): saving an export by its `exportId` uses it up, main removing that file once the save returns,

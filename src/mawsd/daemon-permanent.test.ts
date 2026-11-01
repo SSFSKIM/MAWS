@@ -7,7 +7,7 @@
 // P5 O5 M4: the stand-in engine host is one of O3-D's build (its welcome lists no `host.render`), which mawsd tells only
 // the attachment; a render-reading host's `render: true` and its tell at each streaming are daemon-render.test.ts's.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, HOLDER_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResync } from '@shared/host/host-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -17,7 +17,8 @@ import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
 
-const O3D_ENGINE = PEER_CAPABILITIES.engineHost.filter((name) => name !== HOST_RENDER_CAPABILITY); // P5 O5 M4 (above)
+// P5 O5 M4 (above); it keeps O4's host.connectors, which mawsd's hellos and tells do not read
+const O3D_ENGINE = PEER_CAPABILITIES.engineHost.filter((name) => name !== HOST_RENDER_CAPABILITY);
 
 beforeEach(() => {
   scene = new MawsdScene('maws-mp-');
@@ -34,6 +35,7 @@ afterEach(async () => {
 });
 
 const INCAPABLE = [PTY_FRAMES_CAPABILITY]; // an engine host of a build before O3-D M3 (O2's update rule keeps one serving)
+const POST_D = [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]; // an app that reads the machine's spine (P5 O4 M2: and its connectors, or it is refused)
 
 // What the endpoint module hears through the seam: availability and the engine host's events
 function listening() {
@@ -64,7 +66,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     await scene.start({ endpoint: seam.endpoint, permanentClient: true });
     expect(await seam.services().dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: true }); // wakes it, no app
     const engine = scene.lastEngine();
-    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY]); // P5 O16 M3b: host.holder whatever the option
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY]); // P5 O4 M2: host.connectors beside it; P5 O16 M3b: host.holder
     // ready by its own resync with the spine cold (nothing to pull): events flow with no app, and are available
     await until(() => engine.send({ n: 1 }), 3_000, 'the link’s ready line');
     await until(() => seam.events.length === 1, 3_000, 'the event through the seam');
@@ -106,7 +108,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
   // ready connection, and every event the engine host emits around each reaches a machine.spine client that stays
   it('a machine.spine client that stays hears every engine-host event emitted around an attach, a replacement and a departure', async () => {
     await scene.start({ permanentClient: true });
-    const pane = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const pane = await scene.app('machine', { capabilities: POST_D });
     pane.ready();
     const first = await scene.app();
     first.ready();
@@ -196,13 +198,13 @@ describe('the permanent client, on, to an engine host that lists host.attachment
   // ends its presence (its pending app-bound requests settle noClient) as a relay departure does
   it('a post-D app is present only while its machine.sock connection is ready: attached at its ready line, gone at its departure', async () => {
     await scene.start({ permanentClient: true });
-    const app = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const app = await scene.app('engine-host', { capabilities: POST_D });
     app.ready();
     await app.request('engine.ping'); // the host is up: an attachment would have been told by now
     const engine = scene.lastEngine();
     await sleep(100);
     expect(attachments(), 'no machine.sock connection yet').toEqual([]);
-    const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const machine = await scene.app('machine', { capabilities: POST_D });
     await sleep(100);
     expect(attachments(), 'machine.sock not ready yet').toEqual([]);
     machine.ready();
@@ -212,7 +214,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     await until(() => attachments().length === 2, 3_000, 'the machine.sock departure');
     expect(attachments().at(-1)).toEqual({ attached: false });
     expect(engine.appGone).toBe(1); // its app-bound requests settled, its holds released
-    const again = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const again = await scene.app('machine', { capabilities: POST_D });
     again.ready();
     await until(() => attachments().length === 3, 3_000, 'the attachment again');
     expect(attachments().at(-1)).toEqual({ attached: true });
@@ -224,9 +226,9 @@ describe('the permanent client, on, to an engine host that lists host.attachment
 
   it('a post-D app whose machine.sock connection was ready before its relay attached is present at its welcome', async () => {
     await scene.start({ permanentClient: true });
-    const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const machine = await scene.app('machine', { capabilities: POST_D });
     machine.ready();
-    const app = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const app = await scene.app('engine-host', { capabilities: POST_D });
     await until(() => attachments().length === 1, 3_000, 'the attachment at the welcome');
     expect(attachments()).toEqual([{ attached: true }]);
     app.leave();

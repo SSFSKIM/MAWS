@@ -3,7 +3,9 @@
 //
 // - `SpineEvents`, the daemon's one subscriber to the engine host's validated events, for the seam's whole life. While
 //   the spine is cold it keeps the coalesced parts (the latest per session and name, `engine.budget` once), so a
-//   periodic status wakes nothing, and offers a `session.eventBatch` to the seam as a trigger; from a trigger until a
+//   periodic status wakes nothing, and offers a trigger (WAKE_EVENTS: a `session.eventBatch`, and from P5 O4 M2 an
+//   agent's `maws.artifact.datasetRefresh`, which the spine's connectors answer) to the seam, by name, and tells it of an
+//   agent's need (NEED_EVENTS, the refresh, D43) in every mode, so the load it wakes or reaches is wanted; from a trigger until a
 //   load's barrier has passed it holds every event in arrival order; once a load's barrier passed it delivers each event
 //   to the loaded spine's listeners. A provisional yield (spine-seam.ts) holds as a load does. Once the seam is off (a
 //   confirmed yield) it drops every other event and keeps the coalesced parts as cold does, since a yield lifts (the
@@ -34,6 +36,13 @@ export type EngineLink = Pick<HostSupervisor, 'onEvent' | 'onState' | 'onStreami
 export type EngineIntercept = (request: RelayRequest) => Promise<HostResponse> | null;
 
 export const COALESCED_EVENTS: ReadonlySet<string> = new Set(['session.status', 'session.queue', 'session.brokerItems', 'session.catalogChanged', 'engine.budget']);
+// What wakes a cold spine and is held for it (P5 O4 M2, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces
+// §D, D12: an agent's dataset refresh announced to a cold daemon is answered by the spine's connectors once it loads,
+// never dropped to wait out its deadline). Every other event while cold is dropped or coalesced.
+export const WAKE_EVENTS: ReadonlySet<string> = new Set(['session.eventBatch', 'maws.artifact.datasetRefresh']);
+// Of those, what an agent asked for (P5 O4 D43): a need, so the load it wakes or reaches may wake the engine host
+// (spine-seam.ts, `wanted`); a batch alone wakes none.
+export const NEED_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.datasetRefresh']);
 export const HOLD_LIMIT_BYTES = 256 * 1024 * 1024; // a last resort no load reaches: a fault to report, not a design loss
 
 type Mode = 'cold' | 'holding' | 'live' | 'off';
@@ -44,7 +53,8 @@ interface Held {
 }
 
 export interface SpineEventsOptions {
-  wake(): boolean; // a batch while cold: true when the seam starts a load for it (the batch is then the hold's first)
+  wake(name: string): boolean; // a trigger while cold (WAKE_EVENTS), by name: true when the seam starts a load for it (the trigger is then the hold's first)
+  need(): void; // a need (NEED_EVENTS) arrived, in any mode: the seam marks the load it reaches wanted
   log(line: string): void;
   holdLimitBytes?: number;
 }
@@ -84,6 +94,7 @@ export class SpineEvents {
 
   private receive(name: string, payload: unknown): void {
     if (!this.linkReady && COALESCED_EVENTS.has(name)) return; // a voided link's whole state
+    if (NEED_EVENTS.has(name)) this.options.need();
     switch (this.mode) {
       case 'live':
         return this.deliver(name, payload);
@@ -93,7 +104,7 @@ export class SpineEvents {
       case 'cold':
         if (COALESCED_EVENTS.has(name)) return void this.coalesced.set(coalescedKey(name, payload), { name, payload });
         if (this.mode === 'off') return;
-        if (name === 'session.eventBatch' && this.options.wake()) this.hold(name, payload); // the wake moved the mode to holding
+        if (WAKE_EVENTS.has(name) && this.options.wake(name)) this.hold(name, payload); // the wake moved the mode to holding
     }
   }
 

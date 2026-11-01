@@ -1,7 +1,6 @@
-// The viewers' and the library's reach to a byte kind's stored file (files.ts): the formats the exporter registry
-// serves, the stored file resolved through the host, Open externally and Reveal (with the e2e seam's log), and Save as…
-// of an export or of the stored file (with the e2e seam's folder).
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+// The library's export formats and Save as (files.ts): the formats the exporter registry serves, and Save as… of an
+// export or of the stored file resolved through the host (with the e2e seam's folder).
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -13,7 +12,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
 import { zipFiles } from '../../render/design-systems/zip';
-import { createLibraryFiles, readResolvedThrough, type LibraryFilesDeps } from './files';
+import { createLibraryFiles, type LibraryFilesDeps } from './files';
 
 // Run real filesystem operations, interleaving another writer at the asynchronous boundaries.
 const diskRace = vi.hoisted(() => ({
@@ -52,12 +51,10 @@ interface Stored {
   files: Record<number, { name: string; path: string }>; // by revision; the highest is the latest
 }
 
-// The OS as the client port reaches it, as fakes a test reads: the save panel, the Replace question, open and reveal.
+// The OS as the client port reaches it, as fakes a test reads: the save panel and the Replace question.
 interface Os {
   showSaveDialog(options: { defaultPath: string }, client: ClientRef | null): Promise<{ canceled: boolean; filePath?: string }>;
   confirmReplaceFolder(request: ConfirmRequest, client: ClientRef | null): Promise<boolean>;
-  openPath(path: string): Promise<string>; // '' on success, else the error text
-  showItemInFolder(path: string): void;
 }
 const CLIENT: ClientRef = { id: 'page:1.1' as ClientId, onGone: () => () => {} };
 // The question the library asks before replacing a slide folder at `path`.
@@ -88,9 +85,6 @@ function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os>
     downloads: () => join(dir, 'Downloads'),
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
     confirmReplaceFolder: vi.fn(async () => false),
-    openPath: vi.fn(async () => ''),
-    showItemInFolder: vi.fn(),
-    readFile: vi.fn(async ({ path, offset = 0 }) => ({ encoding: 'utf8' as const, content: readFileSync(path, 'utf8').slice(offset), bytes: 0, offset, length: 0, truncated: false, mime: 'text/plain', hash: null, utf8: null })),
     env: {},
     ...over,
   };
@@ -100,11 +94,6 @@ function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os>
       return canceled || !filePath ? { cancelled: true } : { path: filePath };
     },
     confirm: async (client, request) => ({ confirmed: await all.confirmReplaceFolder(request, client) }),
-    openExternal: async (_client, target) => {
-      const message = await all.openPath((target as { path: string }).path);
-      return message === '' ? { opened: true } : { opened: false, reason: message };
-    },
-    reveal: async (_client, path) => (all.showItemInFolder(path), { revealed: true }),
   };
   return { ...all, port };
 }
@@ -125,78 +114,13 @@ function ownedPngExport() {
   return { exports, parent, chosen: join(parent, 'Quarterly slides'), input: { artifactId: ID, source: { export: { revision: 7, format: 'pngs', exportId } } } satisfies CommandInput<'library.saveAs'> };
 }
 
+// P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D19): the reads of a stored file (content, read, open,
+// reveal) are the machine's, their cases in src/services/library/files.test.ts; the export formats and Save as stay here.
 describe('library files', () => {
   it('lists the formats the registry serves for a kind, in the formats’ order', () => {
     const files = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: {} }));
     expect(files.exportFormats({ kind: 'html' })).toEqual({ formats: ['pdf', 'png'] });
     expect(files.exportFormats({ kind: 'file' })).toEqual({ formats: [] });
-  });
-
-  it('resolves the stored file at a revision, the latest when none is named, and passes a refusal on', async () => {
-    const one = put('one.html', 'v1');
-    const two = put('two.html', 'v2');
-    const files = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: { 4: { name: 'index.html', path: one }, 9: { name: 'index.html', path: two } } }));
-    await expect(files.content({ artifactId: ID })).resolves.toEqual({ revision: 9, kind: 'html', name: 'index.html', path: two });
-    await expect(files.content({ artifactId: ID, revision: 4 })).resolves.toEqual({ revision: 4, kind: 'html', name: 'index.html', path: one });
-    await expect(files.content({ artifactId: ID, revision: 5 })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
-  });
-
-  // M6b fix wave 2 (Decision Log 36i): a File artifact's file read by the artifact alone, its path resolved here
-  it('reads a File artifact’s stored file at a revision by its id, the path resolved here; refuses another kind', async () => {
-    const csv = put('ledger.csv', 'item,cost\n');
-    const reading = deps({ kind: 'file', title: 'ledger.csv', files: { 2: { name: 'ledger.csv', path: csv } } });
-    const files = createLibraryFiles(reading);
-    await expect(files.read({ artifactId: ID, offset: 0, hash: true })).resolves.toMatchObject({ content: 'item,cost\n' });
-    expect(reading.readFile).toHaveBeenCalledWith({ path: csv, offset: 0, hash: true });
-    const page = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: { 4: { name: 'index.html', path: put('index.html', '<p>x</p>') } } }));
-    await expect(page.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
-  });
-
-  // P5 O3-E M2 (Interfaces §D): library.read reaches the files service through files.readResolved over main's own route,
-  // which answers the same CommandResult in process (the embedded binding) and from mawsd (the machine host); the
-  // adapter hands library.read the bytes, or throws the route's error for its caller
-  it('reads a File artifact through files.readResolved, and fails library.read with the route’s error', async () => {
-    const csv = put('ledger.csv', 'item,cost\n');
-    const answered = { encoding: 'utf8' as const, content: 'item,cost\n', bytes: 10, offset: 0, length: 10, truncated: false, mime: 'text/csv', hash: null, utf8: null };
-    let answer: CommandResult<'files.readResolved'> = { ok: true, value: answered };
-    const invoke = vi.fn(async () => answer);
-    const files = createLibraryFiles({ ...deps({ kind: 'file', title: 'ledger.csv', files: { 2: { name: 'ledger.csv', path: csv } } }), readFile: readResolvedThrough(invoke) });
-    await expect(files.read({ artifactId: ID, offset: 0 })).resolves.toEqual(answered);
-    expect(invoke).toHaveBeenCalledWith('files.readResolved', { path: csv, offset: 0 });
-    answer = { ok: false, error: ipcError('internal', `not found: ${csv}`) }; // the files service's refusal, as either route answers it
-    await expect(files.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'internal', message: `not found: ${csv}` } });
-    answer = { ok: false, error: ipcError('host_unavailable', 'the spine is held by another MAWS') }; // mawsd's spine refused
-    await expect(files.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'host_unavailable' } });
-  });
-
-  it('opens a document externally and reveals any file, through the e2e seam’s log when it is set', async () => {
-    const pdf = put('report.pdf', '%PDF-1.4');
-    const opened = deps({ kind: 'file', title: 'report.pdf', files: { 2: { name: 'report.pdf', path: pdf } } });
-    const files = createLibraryFiles(opened);
-    await expect(files.openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: true, message: null });
-    expect(opened.openPath).toHaveBeenCalledWith(pdf);
-    await expect(files.reveal({ artifactId: ID }, null)).resolves.toEqual({ revealed: true, message: null });
-    expect(opened.showItemInFolder).toHaveBeenCalledWith(pdf);
-
-    const log = join(dir, 'open.log');
-    const seamed = deps({ kind: 'file', title: 'report.pdf', files: { 2: { name: 'report.pdf', path: pdf } } }, { env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    const seam = createLibraryFiles(seamed);
-    await seam.openExternally({ artifactId: ID }, null);
-    await seam.reveal({ artifactId: ID }, null);
-    expect(readFileSync(log, 'utf8')).toBe(`${pdf}\nreveal ${pdf}\n`);
-    expect(seamed.openPath).not.toHaveBeenCalled();
-  });
-
-  it('never opens a program or a kind the OS would run: the refusal is an answer', async () => {
-    const script = put('run.sh', 'echo hi');
-    const tool = put('tool.html', '<p>x</p>');
-    chmodSync(tool, 0o755);
-    const sh = deps({ kind: 'file', title: 'run.sh', files: { 1: { name: 'run.sh', path: script } } });
-    await expect(createLibraryFiles(sh).openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: run.sh' });
-    const exec = deps({ kind: 'file', title: 'tool.html', files: { 1: { name: 'tool.html', path: tool } } });
-    await expect(createLibraryFiles(exec).openExternally({ artifactId: ID }, null)).resolves.toEqual({ opened: false, message: 'Not opened outside MAWS: tool.html' });
-    expect(sh.openPath).not.toHaveBeenCalled();
-    expect(exec.openPath).not.toHaveBeenCalled();
   });
 
   it('saves all-slide PNGs as one named folder only after explicit replacement approval, remembering its parent', async () => {

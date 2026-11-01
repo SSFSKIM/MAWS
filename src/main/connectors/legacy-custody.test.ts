@@ -1,13 +1,25 @@
 // P5 O4 M1: the legacy reader and the one-pass adoption driver (./legacy-custody.ts; docs/doperpowers/plans/2026-10-31-
 // p5-o4-services.md, Interfaces §B, Decision Log D3 and D32). A reversible fake stands in for Electron's safeStorage and a
-// recording fake for `connectors.adoptGrant`; no keychain is touched.
+// recording fake for `connectors.adoptGrant`; no keychain is touched. M2 (D20, D21): Electron's sealer and the MAWS_E2E
+// custody guard moved here from the store and the old OAuth root, and their tests with them; Electron is doubled.
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorOAuthRecord } from '@shared/connectors/oauth-types';
 import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
-import { ADOPTION_PROBE_ID, adoptLegacy, listLegacy } from './legacy-custody';
+
+const electron = vi.hoisted(() => ({
+  userData: '',
+  safeStorage: { isAsyncEncryptionAvailable: vi.fn(async () => true), encryptStringAsync: vi.fn(async (text: string) => Buffer.from(text)), decryptStringAsync: vi.fn(async (sealed: Buffer) => ({ result: sealed.toString(), shouldReEncrypt: false })) },
+  hasSwitch: vi.fn(() => true),
+}));
+vi.mock('electron', () => ({
+  app: { getPath: () => electron.userData, whenReady: async () => {}, commandLine: { hasSwitch: electron.hasSwitch } },
+  safeStorage: electron.safeStorage,
+}));
+
+const { ADOPTION_PROBE_ID, adoptLegacy, electronOAuthSealer, guardE2ECustody, legacySealer, listLegacy } = await import('./legacy-custody');
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -188,5 +200,128 @@ describe('adoptLegacy', () => {
     };
     expect(await adopt()).toEqual({ adopted: 1, left: 0, stopped: false });
     expect(adopted.map(({ connectionId }) => connectionId)).toEqual([A]);
+  });
+});
+
+describe('electronOAuthSealer', () => {
+  it("names the Keychain's format, version 1", () => {
+    const adapter = electronOAuthSealer({
+      isAsyncEncryptionAvailable: async () => true,
+      encryptStringAsync: async () => Buffer.alloc(0),
+      decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
+    }, async () => {});
+    expect(adapter.format).toBe(SEALED_FORMAT_V1);
+    expect(adapter.format).toBe('maws-connector-oauth/1');
+  });
+
+  it('uses only the asynchronous safeStorage API, after app readiness', async () => {
+    const order: string[] = [];
+    let ready!: () => void;
+    const readiness = new Promise<void>((resolve) => { ready = resolve; });
+    // only the asynchronous methods exist: a synchronous call would throw
+    const safeStorage = {
+      isAsyncEncryptionAvailable: async () => { order.push('available'); return true; },
+      encryptStringAsync: async (text: string) => { order.push('encrypt'); return Buffer.from(`enc:${text}`); },
+      decryptStringAsync: async (data: Buffer) => { order.push('decrypt'); return { result: data.toString().slice(4), shouldReEncrypt: true }; },
+    };
+    const adapter = electronOAuthSealer(safeStorage, async () => { order.push('wait'); await readiness; order.push('ready'); });
+    const availability = adapter.available();
+    await Promise.resolve();
+    expect(order).toEqual(['wait']);
+    ready();
+    expect(await availability).toBe(true);
+    expect(await adapter.open(await adapter.seal('hello', A), A)).toEqual({ text: 'hello', reseal: true });
+    expect(order).toEqual(['wait', 'ready', 'available', 'wait', 'ready', 'encrypt', 'wait', 'ready', 'decrypt']);
+  });
+
+  it('a rejected availability check reads as unavailable', async () => {
+    const adapter = electronOAuthSealer({
+      isAsyncEncryptionAvailable: async () => { throw new Error('no'); },
+      encryptStringAsync: async () => Buffer.alloc(0),
+      decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
+    }, async () => {});
+    expect(await adapter.available()).toBe(false);
+  });
+});
+
+// P3-HD M3c2 (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, Decision Log 28): under MAWS_E2E the mock keychain
+// switch and the scratch profile under the OS temporary directory are proven at each call, or the sealer is
+// unavailable without asking safeStorage. Outside E2E it is the real sealer.
+describe('the E2E custody guard', () => {
+  function spySealer() {
+    const calls: string[] = [];
+    const spy: ConnectorOAuthSealer = {
+      format: 'maws-connector-oauth/spy',
+      available: async () => (calls.push('available'), true),
+      seal: async (text, id) => (calls.push(`seal:${id}`), Buffer.from(text)),
+      open: async (sealed, id) => (calls.push(`open:${id}`), { text: sealed.toString(), reseal: false }),
+    };
+    return { sealer: spy, calls };
+  }
+  const facts = (over: Partial<Parameters<typeof guardE2ECustody>[1]> = {}): Parameters<typeof guardE2ECustody>[1] => ({
+    e2e: true, mockKeychain: () => true, userData: () => join(root, 'profile'), scratch: () => join(root, 'profile'), tmp: () => tmpdir(), ...over,
+  });
+  beforeEach(() => mkdirSync(join(root, 'profile')));
+
+  it('outside E2E is the real sealer itself', () => {
+    const { sealer: spy } = spySealer();
+    expect(guardE2ECustody(spy, facts({ e2e: false }))).toBe(spy);
+  });
+
+  it('passes through on the mock keychain with the scratch profile, compared canonically', async () => {
+    symlinkSync(join(root, 'profile'), join(root, 'link'));
+    const { sealer: spy, calls } = spySealer();
+    const guarded = guardE2ECustody(spy, facts({ scratch: () => join(root, 'link') }));
+    expect(guarded.format).toBe('maws-connector-oauth/spy'); // the guarded sealer's files keep its format
+    expect(await guarded.available()).toBe(true);
+    expect((await guarded.open(await guarded.seal('x', D), D)).text).toBe('x');
+    expect(calls).toEqual(['available', `seal:${D}`, `open:${D}`]);
+  });
+
+  it.each([
+    ['the mock keychain switch is absent', { mockKeychain: () => false }],
+    ['no scratch profile was named', { scratch: () => undefined }],
+    ['the profile is not the scratch one', { scratch: () => root }],
+    ['the profile is outside the OS temporary directory', { tmp: () => join(root, 'profile', 'elsewhere') }],
+    ['the profile cannot be resolved', { userData: () => join(root, 'missing'), scratch: () => join(root, 'missing') }],
+  ])('fails closed, never reaching safeStorage, when %s', async (_why, over) => {
+    const { sealer: spy, calls } = spySealer();
+    const guarded = guardE2ECustody(spy, facts(over));
+    expect(await guarded.available()).toBe(false);
+    await expect(guarded.seal('x', D)).rejects.toThrow();
+    await expect(guarded.open(Buffer.from('x'), D)).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+
+  it('proves custody at every call, not once', async () => {
+    let mock = true;
+    const { sealer: spy, calls } = spySealer();
+    const guarded = guardE2ECustody(spy, facts({ mockKeychain: () => mock }));
+    expect(await guarded.available()).toBe(true);
+    mock = false;
+    await expect(guarded.open(Buffer.from('x'), D)).rejects.toThrow();
+    expect(calls).toEqual(['available']);
+  });
+});
+
+describe('legacySealer', () => {
+  beforeEach(() => {
+    electron.hasSwitch.mockReturnValue(true);
+    for (const fn of Object.values(electron.safeStorage)) fn.mockClear();
+  });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('is lazy: composing it asks safeStorage nothing', () => {
+    expect(legacySealer().format).toBe(SEALED_FORMAT_V1);
+    for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('under MAWS_E2E with a non-scratch profile, the real safeStorage is never asked and the pass stops', async () => {
+    vi.stubEnv('MAWS_E2E', '1');
+    vi.stubEnv('MAWS_USER_DATA', join(root, 'other'));
+    electron.userData = root;
+    plant(A);
+    expect(await adoptLegacy({ directory: dir, sealer: legacySealer(), adopt: async () => ({ adopted: true }), log: () => {} })).toEqual({ adopted: 0, left: 1, stopped: true });
+    for (const fn of Object.values(electron.safeStorage)) expect(fn).not.toHaveBeenCalled();
   });
 });

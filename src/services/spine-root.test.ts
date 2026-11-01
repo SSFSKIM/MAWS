@@ -4,7 +4,7 @@
 // attention, the checkouts over the spine's view (P5 O3-E M2: composed by the root itself, its last parts), and the
 // root's stop releasing what it held. The exact commands, intercepts and taps the root installs are pinned here.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
@@ -16,7 +16,7 @@ import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
-import { CHECKOUTS_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
+import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
@@ -48,6 +48,8 @@ const noClientPort = {
 // as well (P5 O3-D M2).
 const SPINE_REFUSED_COMMANDS = [
   ...CHECKOUTS_COMMANDS,
+  ...CONNECTORS_COMMANDS, // P5 O4 M2: the connectors and delivery hold no spine file either
+  ...LIBRARY_CATALOG_COMMANDS, // P5 O4 M3: nor the library's reads and the catalog's machine half
   'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
@@ -447,6 +449,102 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.main('library.fileLinkedPaths', { appSessionId: id })).toEqual({ ok: true, value: { paths: [] } });
   });
 
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, M2's Proves): the connectors, their sign-in and
+  // delivery composed by the root alone, over the fake engine host, a scratch custody under the profile and a fake gws
+  // on the engine environment's PATH; a release takes the receipts with it (they are the load's, D30)
+  it('composes the connectors and delivery: a lease, its declaration, the owner’s rows, Drive’s state, a delivery and its receipt', async () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const bin = join(dir.path, 'bin');
+    mkdirSync(bin);
+    const gws = join(bin, 'gws');
+    writeFileSync(gws, [
+      '#!/bin/sh',
+      'case "$1 $2" in',
+      `  "auth status") echo '{"auth_method":"oauth2","credential_source":"encrypted","user":"owner@example.com","scopes":["https://www.googleapis.com/auth/drive"]}' ;;`,
+      `  "drive files") echo '{"id":"f1","name":"Quarterly memo.docx","webViewLink":"https://drive.google.com/file/d/f1/view"}' ;;`,
+      '  *) exit 3 ;;',
+      'esac',
+      '',
+    ].join('\n'));
+    chmodSync(gws, 0o755);
+    const engineEnv = Promise.resolve<Record<string, string>>({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude'), PATH: `${bin}:/usr/bin:/bin` });
+    const lock = await takeSpineLock(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    const at = 1_793_000_000_000;
+    host.answer('artifacts.get', () => ({ artifact: { id: ART, kind: 'document', title: 'Quarterly memo', createdBy: { kind: 'human' }, createdAt: at, updatedAt: at, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 7 } }));
+    const bus = fakeBus();
+    const first = compose(await openSpineData(profile, { build: BUILD, lock }), host, bus, { engineEnv });
+    await host.ready();
+
+    expect(await bus.main('connectors.windowShown', { shown: true })).toEqual({ ok: true, value: { ok: true } });
+    const opened = await bus.invoke('connectors.open', { artifactId: ART });
+    if (!opened.ok) throw new Error(opened.error.message);
+    expect(await bus.invoke('connectors.declare', { leaseId: opened.value.leaseId, tools: [{ server: 'notes', tool: 'search' }] })).toMatchObject({ ok: true });
+    expect(await bus.invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] })).toMatchObject({ ok: true });
+    expect(await bus.invoke('delivery.status', { target: 'drive', artifactId: ART })).toEqual({ ok: true, value: { target: 'drive', state: 'ready', user: 'owner@example.com' } });
+    expect(await bus.invoke('delivery.receipts', undefined)).toEqual({ ok: true, value: { receipts: [] } });
+
+    // main's export, as it leaves it under the profile, handed over
+    const exports = join(profile, 'artifacts', ART, 'exports');
+    mkdirSync(exports, { recursive: true });
+    const exportPath = join(exports, `7-docx-${'22222222-2222-4222-8222-222222222222'}.docx`);
+    writeFileSync(exportPath, 'bytes');
+    const delivered = await bus.main('delivery.deliver', { runId: '33333333-3333-4333-8333-333333333333', target: 'drive', artifactId: ART, format: 'docx', destination: { kind: 'default' }, exportPath, revision: 7, title: 'Quarterly memo' });
+    expect(delivered).toMatchObject({ ok: true, value: { ok: true, receipt: { target: 'drive', name: 'Quarterly memo.docx', url: 'https://drive.google.com/file/d/f1/view' } } });
+    expect(readdirSync(exports)).toEqual([]); // the export removed
+    expect(bus.emittedOf('delivery.receipt')).toHaveLength(1);
+    expect(await bus.invoke('delivery.receipts', undefined)).toMatchObject({ ok: true, value: { receipts: [{ artifactId: ART, target: 'drive' }] } });
+
+    stopOnce(first);
+    const again = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD, lock }), new FakeSpineHost(), again, { engineEnv });
+    expect(await again.invoke('delivery.receipts', undefined)).toEqual({ ok: true, value: { receipts: [] } });
+    lock.release();
+  });
+
+  // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 6 and 7): the library's reads of a stored
+  // file, `library.read` reaching the files service in process (the bus runs no files.readResolved), and the catalog's
+  // machine half, composed by the root alone
+  it('composes the library’s reads of a stored file and the catalog’s machine half', async () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const stored = join(profile, 'artifacts', ART, 'content', '2', 'ledger.csv'); // where the engine host's store keeps it
+    mkdirSync(join(stored, '..'), { recursive: true });
+    writeFileSync(stored, 'item,cost\n');
+    const host = new FakeSpineHost();
+    host.answer('artifacts.content', ({ artifactId }) => ({ revision: 2, kind: 'file', name: 'ledger.csv', size: 10, sha256: 'x'.repeat(64), path: artifactId === ART ? stored : join(profile, 'gone') }));
+    const bus = fakeBus();
+    const register = bus.register;
+    const ran: string[] = []; // each command the bus ran
+    bus.register = (name, handler) => register(name, ((input: never, context: never) => (ran.push(name), handler(input, context))) as typeof handler);
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+
+    expect(await bus.invoke('library.content', { artifactId: ART })).toEqual({ ok: true, value: { revision: 2, kind: 'file', name: 'ledger.csv', path: stored } });
+    expect(await bus.invoke('library.read', { artifactId: ART, offset: 0 })).toMatchObject({ ok: true, value: { content: 'item,cost\n' } });
+    expect(ran).toEqual(['library.content', 'library.read']); // no files.readResolved on the bus
+    // opened and revealed through the client port, which has no client here
+    expect(await bus.invoke('library.openExternally', { artifactId: ART })).toEqual({ ok: true, value: { opened: false, message: 'no client' } });
+    expect(await bus.invoke('library.reveal', { artifactId: ART })).toEqual({ ok: true, value: { revealed: false, message: 'no client' } });
+
+    const engine = await bus.invoke('catalog.engine', { cwd: dir.path });
+    expect(engine).toMatchObject({ ok: true, value: { generation: 0, serial: expect.any(Number), view: { cwd: dir.path, installed: null, manifests: [] } } }); // the fake host lists no plugin
+    expect(await bus.invoke('catalog.engineRefresh', undefined)).toEqual({ ok: true, value: { ok: true } });
+    expect(bus.emittedOf('catalog.engineChanged')).toEqual([{ scope: 'all' }]);
+    host.emit('plugins.changed', {});
+    expect(bus.emittedOf('catalog.engineChanged')).toEqual([{ scope: 'all' }, { scope: 'all' }]);
+    expect(await bus.invoke('catalog.engine', { cwd: dir.path })).toMatchObject({ ok: true, value: { generation: 2 } });
+  });
+
+  // P5 O4 M2: on the daemon shape a dispatch to a parked engine host starts it, and the discovery wake waits only for a
+  // host it woke itself (src/mawsd/discovery-wake.ts): a load asks a host that does not stream nothing (CI run
+  // 41205847879, where sign-in's listing at the load spawned the host before the wake)
+  it('asks an engine host that does not stream nothing at its load', async () => {
+    const host = new FakeSpineHost();
+    compose(await openSpineData(profile, { build: BUILD }), host, fakeBus());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(host.calls.map(({ name }) => name)).toEqual([]);
+  });
+
   it('installs exactly its commands, intercepts and taps, and its stop releases every listener the spine held on the host', async () => {
     const host = new FakeSpineHost();
     const spineBus = fakeBus();
@@ -454,6 +552,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
     await host.ready();
     expect(spineBus.registered().sort()).toEqual(SPINE_COMMANDS);
     for (const name of CHECKOUTS_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O3-E: the checkouts' with them
+    for (const name of CONNECTORS_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O4: the connectors' and delivery's
+    for (const name of LIBRARY_CATALOG_COMMANDS) expect(SPINE_COMMANDS, name).toContain(name); // P5 O4 M3: the library's reads and the catalog's
     expect(spineBus.intercepted()).toEqual(SPINE_INTERCEPTS); // the checkouts intercept nothing
     expect(spineBus.tapped().sort()).toEqual(SPINE_TAPS); // and tap nothing: they follow the spine through its view
     expect(host.held()).toBeGreaterThan(0);
@@ -522,5 +622,10 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(bus.emittedOf('machineSettings.changed')).toEqual([]);
     expect(bus.intercepted()).toEqual(SPINE_REFUSED_INTERCEPTS);
     expect(bus.tapped().sort()).toEqual(SPINE_REFUSED_TAPS);
+    // P5 O4 M2: the connectors and delivery answer in a refused run too (no spine file of theirs)
+    expect(await bus.invoke('connectors.open', { artifactId: '11111111-1111-4111-8111-111111111111' })).toMatchObject({ ok: true, value: { leaseId: expect.any(String) } });
+    expect(await bus.invoke('connectors.servers', { artifactId: '11111111-1111-4111-8111-111111111111', tools: [] })).toMatchObject({ ok: true });
+    expect(await bus.invoke('delivery.status', { target: 'drive', artifactId: '11111111-1111-4111-8111-111111111111' })).toEqual({ ok: true, value: { target: 'drive', state: 'absent' } }); // no gws on its PATH
+    expect(await bus.invoke('delivery.receipts', undefined)).toEqual({ ok: true, value: { receipts: [] } });
   });
 });

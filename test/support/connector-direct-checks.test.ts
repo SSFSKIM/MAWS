@@ -6,9 +6,10 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, forbiddenFrames, isBlankResume, journalFilesOf, journalFrameShapes, readJournalRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
-  scanScratchTree, scrubDiagnostic, SEALED_FORMAT, shellQuoted, type ScratchFs,
+  addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, forbiddenFrames, isBlankResume, journalFilesOf, journalFrameShapes, readJournalRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, openMachineSealed, pageVariant, plaintextHits, readSealedText,
+  scanScratchTree, scrubDiagnostic, SEALED_FORMAT_V1, SEALED_FORMAT_V2, shellQuoted, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
+import { fileKeyCustody } from '../../src/services/connectors/custody';
 
 describe('custodyProblems: the scratch profile and mock keychain a launch must show before any owner action', () => {
   const good = { mockKeychain: true, userData: '/private/var/folders/x/T/maws-connectors-a/ud', scratch: '/private/var/folders/x/T/maws-connectors-a/ud', expected: '/private/var/folders/x/T/maws-connectors-a/ud', tmp: '/private/var/folders/x/T' };
@@ -58,17 +59,47 @@ describe('the loopback listener a Connect binds', () => {
 describe('readSealedText: a sealed OAuth record’s plain format line and base64 ciphertext', () => {
   const ciphertext = Buffer.from([0x76, 0x31, 0x30, 0x00, 0xff, 0x10, 0x20]);
 
-  it('reads the format line and the ciphertext bytes', () => {
-    const read = readSealedText(`${SEALED_FORMAT}\n${ciphertext.toString('base64')}\n`);
-    expect(read).toEqual({ ok: true, ciphertext });
+  it('reads the format line, which of the two formats it is, and the ciphertext bytes', () => {
+    expect(readSealedText(`${SEALED_FORMAT_V2}\n${ciphertext.toString('base64')}\n`)).toEqual({ ok: true, format: 2, ciphertext });
+    expect(readSealedText(`${SEALED_FORMAT_V1}\n${ciphertext.toString('base64')}\n`)).toEqual({ ok: true, format: 1, ciphertext });
   });
 
   it('refuses another format line, a missing body, trailing content and a body that is not canonical base64', () => {
-    expect(readSealedText(`maws-connector-oauth/2\n${ciphertext.toString('base64')}\n`)).toEqual({ ok: false, why: 'format' });
-    expect(readSealedText(`${SEALED_FORMAT}\n`)).toEqual({ ok: false, why: 'body' });
-    expect(readSealedText(`${SEALED_FORMAT}\n${ciphertext.toString('base64')}\nmore\n`)).toEqual({ ok: false, why: 'body' });
-    expect(readSealedText(`${SEALED_FORMAT}\n{"tokens":{}}\n`)).toEqual({ ok: false, why: 'body' });
-    expect(readSealedText(`${SEALED_FORMAT}\n${ciphertext.toString('base64')}`)).toEqual({ ok: false, why: 'body' });
+    expect(readSealedText(`maws-connector-oauth/3\n${ciphertext.toString('base64')}\n`)).toEqual({ ok: false, why: 'format' });
+    for (const format of [SEALED_FORMAT_V1, SEALED_FORMAT_V2]) {
+      expect(readSealedText(`${format}\n`)).toEqual({ ok: false, why: 'body' });
+      expect(readSealedText(`${format}\n${ciphertext.toString('base64')}\nmore\n`)).toEqual({ ok: false, why: 'body' });
+      expect(readSealedText(`${format}\n{"tokens":{}}\n`)).toEqual({ ok: false, why: 'body' });
+      expect(readSealedText(`${format}\n${ciphertext.toString('base64')}`)).toEqual({ ok: false, why: 'body' });
+    }
+  });
+});
+
+describe('openMachineSealed: a format 2 record opened with the profile’s own key, as the machine’s custody sealed it', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'maws-sealed-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const ID = '5f0c7d2e-8a4b-4c1e-9d2f-0123456789ab';
+  const OTHER = '6a1d8e3f-9b5c-4d2f-8e3a-123456789abc';
+  const sealedBy = async (text: string, id: string) => {
+    const custody = fileKeyCustody(dir, { excludeFromBackup: async () => false });
+    return `${SEALED_FORMAT_V2}\n${(await custody.seal(text, id)).toString('base64')}\n`;
+  };
+
+  it('opens what the custody sealed under the same connection id', async () => {
+    const file = await sealedBy('{"version":1,"connectionId":"x"}', ID);
+    expect(openMachineSealed(dir, ID, file)).toBe('{"version":1,"connectionId":"x"}');
+  });
+
+  it('refuses the record under another id, under another key and in another format', async () => {
+    const file = await sealedBy('{"version":1}', ID);
+    expect(() => openMachineSealed(dir, OTHER, file)).toThrow();
+    expect(() => openMachineSealed(dir, ID, file.replace(SEALED_FORMAT_V2, SEALED_FORMAT_V1))).toThrow(/format 2/);
+    writeFileSync(join(dir, 'key'), Buffer.alloc(32, 7), { mode: 0o600 });
+    expect(() => openMachineSealed(dir, ID, file)).toThrow();
   });
 });
 
@@ -416,8 +447,8 @@ describe('isRetainedScratch: the scratch files a scene scans as retainable', () 
     }
   });
 
-  it('never reads the host token, the raw open log, a fixture’s secrets inventory or a sealed record', () => {
-    for (const path of ['ud/supervisor/host.token', 'open.log', 'oauth-series-secrets.jsonl', 'oauth-other-secrets.jsonl', 'ud/connectors/oauth/5f0c7d2e-8a4b-4c1e-9d2f-0123456789ab.sealed']) {
+  it('never reads the host token, the raw open log, a fixture’s secrets inventory, a sealed record or the machine’s custody key', () => {
+    for (const path of ['ud/supervisor/host.token', 'open.log', 'oauth-series-secrets.jsonl', 'oauth-other-secrets.jsonl', 'ud/connectors/oauth/5f0c7d2e-8a4b-4c1e-9d2f-0123456789ab.sealed', 'ud/connectors/oauth/key']) {
       expect(isRetainedScratch(path), path).toBe(false);
     }
   });

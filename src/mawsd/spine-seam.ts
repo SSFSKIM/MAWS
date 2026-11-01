@@ -28,7 +28,7 @@ import type { SpineLock } from '../services/settings/spine-lock';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { isAlive, procStartOf } from '../engine-host/supervisor-files';
 import { HELLO_HOLD_MS } from './relay';
-import { SpineEvents, SpineHostsAdapter, type EngineIntercept, type EngineLink } from './spine-hosts';
+import { NEED_EVENTS, SpineEvents, SpineHostsAdapter, type EngineIntercept, type EngineLink } from './spine-hosts';
 
 export type SpineState = 'cold' | 'loading' | 'loaded' | 'refused' | 'releasing' | 'yielded';
 export type SpineTrigger = 'command' | 'event' | 'endpoint';
@@ -156,17 +156,26 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   // streaming), so the next host that is wanted is configured then. A command that waits on the engine host (the session
   // service's boot waits for its first streaming) is the need that wakes it: a wanted load's adapter tells the daemon
   // (`needEngine`); a command that never waits on it wakes nothing.
+  //
+  // P5 O4 D43: an agent's request announced through the engine host's events (NEED_EVENTS: its dataset refresh, which runs
+  // through the asking session's engine) is a need, not an event: the load it wakes from cold is wanted, one it reaches
+  // that an event started (loading, loaded or releasing) becomes wanted, and one a provisional yield holds makes the load
+  // its lift resumes wanted.
   let wanted = false;
-  const need = (reason: SpineTrigger) => {
-    if (reason !== 'event') wanted = true;
-  };
+  let heldNeed = false; // a need a provisional yield's hold took: the load its lift resumes is wanted; its discard forgets it
+  const provisionallyYielded = () => yieldTo?.provisional != null; // read through a call: `ensure` yields as it runs
+  const wantsOf = (reason: SpineTrigger) => reason !== 'event';
 
   const events = new SpineEvents(options.hosts, {
     log,
-    wake: () => {
+    wake: (name) => {
       if (!options.wakeOnEvents || stopped || !loadable()) return false;
-      void ensure('event').catch(() => {}); // a refusal is logged and kept by the load
+      void ensure('event', NEED_EVENTS.has(name)).catch(() => {}); // a refusal is logged and kept by the load
       return true;
+    },
+    need: () => {
+      if (loading || loaded) wanted = true;
+      else if (yieldTo?.provisional) heldNeed = true; // held with the announcement; a cold seam's is the wake's, above
     },
   });
 
@@ -181,12 +190,13 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     return state === 'refused' && refusal !== null && now() - refusal.at >= timing.refusalRetryMs;
   }
 
-  async function ensure(reason: SpineTrigger): Promise<SpineRoot> {
+  // `wants`: whether the load this trigger reaches may wake the engine host (`wanted`, above)
+  async function ensure(reason: SpineTrigger, wants = wantsOf(reason)): Promise<SpineRoot> {
     for (;;) {
       if (stopped) throw new SpineUnavailable('the daemon is exiting', 'exiting');
       if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid}, an app that runs its own`, 'yielded');
-      if (loaded && state === 'loaded') return need(reason), loaded.root;
-      if (loading) return need(reason), loading;
+      if (loaded && state === 'loaded') return (wanted ||= wants), loaded.root;
+      if (loading) return (wanted ||= wants), loading;
       if (releasing) {
         await releasing;
         continue;
@@ -195,18 +205,19 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       const candidate = options.yieldCandidate?.() ?? null; // P5 O3-D M5 (D21): read at each load attempt
       if (candidate !== null) {
         yieldSpine(candidate, true);
+        if (reason === 'event' && provisionallyYielded()) heldNeed ||= wants; // an announced need that is the yield's trigger is held with it
         continue;
       }
-      loading = load(reason).finally(() => {
+      loading = load(reason, wants).finally(() => {
         loading = null;
       });
       return loading;
     }
   }
 
-  async function load(reason: SpineTrigger): Promise<SpineRoot> {
+  async function load(reason: SpineTrigger, wants: boolean): Promise<SpineRoot> {
     const started = now();
-    wanted = reason !== 'event';
+    wanted = wants;
     events.beginHold();
     set('loading', reason);
     log(`[spine] loading (${reason})`);
@@ -391,8 +402,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     if (state === 'yielded') {
       if (!provisional) events.cold();
       set('cold', 'the yield lifted');
-      if (provisional) void ensure('event').catch(() => {}); // the hold resumes in a load: coalesced parts, resync, then the hold
+      if (provisional) void ensure('event', heldNeed).catch(() => {}); // the hold resumes in a load: coalesced parts, resync, then the hold
     }
+    heldNeed = false;
   }
 
   // A provisional yield confirmed (the app's hello lists no machine.spine, the app is gone, or no hello came in time):
@@ -402,6 +414,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     clearTimeout(yieldTo.provisional);
     yieldTo.provisional = null;
     log(`[spine] the yield to pid ${yieldTo.pid} confirmed: ${why}`);
+    heldNeed = false;
     if (state === 'yielded') events.discard('the yield was confirmed', 'off');
   }
 
@@ -466,7 +479,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   return {
     state: () => state,
     status: () => ({ state, refused: state === 'refused' ? (refusal?.reason ?? null) : null, loadedAt, heldDropped: events.dropped }),
-    ensure,
+    ensure: (reason) => ensure(reason),
     root: () => (state === 'loaded' ? (loaded?.root ?? null) : null),
     quiet(quiet) {
       quietFact = quiet;

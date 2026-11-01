@@ -197,6 +197,13 @@ export const RENDER_CLIENT_CAPABILITY = 'render.client';
 // reads `host.attachment`'s `render`, so `mawsd` knows its bridges send requests with no app attached.
 export const MACHINE_RENDER_CAPABILITY = 'machine.render';
 export const HOST_RENDER_CAPABILITY = 'host.render';
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
+// `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
+// that lists it, and on a client's hello (only `mawsd`'s, beside `host.attachment`) that those are the client's own, app
+// or no app; `machine.connectors` on an app's hello says the app runs no connectors, sign-in or delivery of its own and
+// obeys the machine's sealed store, and a post-O4 `mawsd` refuses an app's hello that lacks it.
+export const CONNECTORS_CAPABILITY = 'host.connectors';
+export const CONNECTORS_CLIENT_CAPABILITY = 'machine.connectors';
 // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11): on the engine host's welcome, that it
 // hands its sessions over (`host.handover`, the drain, then an exit that leaves every session host and its engine
 // running for the successor to adopt); on a client's hello, that the client will adopt through its successor, so an
@@ -208,12 +215,14 @@ export const HOLDER_CAPABILITY = 'host.holder';
 // `host.attachment` (the engine host serves it; `mawsd` declares it only with its permanent-client option on, which
 // drops the name from this list otherwise, src/mawsd/daemon.ts); main's hellos list `machine.spine` from M5b, when main
 // stops composing the spine on the daemon shape (`mawsd` refuses a hello on engine-host.sock that does not list it).
-// `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
+// `mawsd`'s relays welcome with the upstream's list and `daemon`'s added. From O4 M2 the engine host's welcome and
+// `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
+// hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, HOLDER_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O16 M3b: it hands over)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
-  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O16 M3b: host.holder)
-  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: host.attachment under its permanent-client option; P5 O16 M3b: host.holder)
+  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock

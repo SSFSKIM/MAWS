@@ -987,7 +987,7 @@ const LIVENESS_BOUNDS = {
     'expect(closedMs).toBeLessThan(5_000);': 'the transport\'s close of its process group: a signal, against 5 s',
     'expect(goneMs).toBeLessThan(10_000);': 'the transport\'s own 5 s idle bound, read between 5 s and 10 s',
     'expect(goneMs).toBeLessThan(5_000);': 'the lifeline\'s end when its host is killed: a signal, against 5 s',
-    "expect(elapsedMs, 'from main’s kill until every member is gone').toBeLessThan(5_000);": 'the detached host\'s client-gone cleanup after main\'s kill: signals, against 5 s',
+    "expect(elapsedMs, 'from the connector client’s kill until every member is gone').toBeLessThan(5_000);": 'the detached host\'s client-gone cleanup after its connector client\'s kill (main on the embedded shape, the profile\'s mawsd on the daemon shape, P5 O4 D10): signals, against 5 s',
   },
   'e2e/document-provisional.spec.ts': {
     "expect(Date.now() - composingAt, 'the batch landed inside the hold’s cap').toBeLessThan(4_500);": 'the hold\'s own cap, a timer of the product\'s',
@@ -1013,6 +1013,7 @@ const LIVENESS_BOUNDS = {
   },
   'e2e/dashboard-live-data.spec.ts': {
     "expect(Date.parse(scheduled.at) - Date.parse(last.at), 'the scheduled call within the schedule (and a margin)').toBeLessThanOrEqual(35_000);": 'the product\'s own 30 s schedule; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA, outside every list)',
+    "expect(elapsed, 'answered within the operation’s deadline').toBeLessThan(CONNECTOR_OPERATION_DEADLINE_MS);": 'a cold spine\'s refresh against the product\'s own 180 s operation deadline (P5 O4 acceptance 3), a timer of the product\'s, which the call\'s own 200 s timeout outlasts; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA)',
   },
   'e2e/p1-live-keep-quit.spec.ts': {
     "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'the test\'s own steps from the first app\'s exit to its relaunch (an A-15 read and the launch\'s setup, no wait), against 10 s inside the 45 s sleep the relaunch must land in (keep-quit-live, on the home Mac)',

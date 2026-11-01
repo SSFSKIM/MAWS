@@ -15,11 +15,18 @@
 // what signs in, and registers the engine's callbacks (`http://localhost:<port>/callback` and the `127.0.0.1` one).
 // `engineKeychainCustody` owns the one Keychain item the engine's secure storage writes for the scene's scratch
 // configuration directory. The MAWS mode above keeps every safeguard it has.
-import { createHash } from 'node:crypto';
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, U7: Interfaces §B, D26): the format 1 records of the
+// adoption scenes, as a pre-O4 build kept route D's grants: `sealWithAppSafeStorage` seals a record's JSON with the
+// app's own safeStorage (under the mock keychain the scene has proved, its fixed password), `writeLegacySealed` writes
+// it in the store's format 1 envelope, and `unopenableLegacy` is the negative case's file, a format 1 header over bytes
+// no safeStorage sealed.
+import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import type { ElectronApplication } from '@playwright/test';
+import { SEALED_FORMAT_V1 } from '../../src/shared/connectors/sealer';
 import {
   OPEN_CONTROL, parseOAuthControl,
   type OAuthFixtureMode, type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
@@ -367,4 +374,49 @@ export function engineKeychainCustody(configDir: string, options: EngineKeychain
       return { service, found: deleted, deleted };
     },
   };
+}
+
+// ---- P5 O4 M2: format 1 records for the adoption scenes ----------------------------------------------------------------
+
+// `text` sealed by the app's own safeStorage, as the Electron sealer a pre-O4 build composed sealed it (the base64 of
+// encryptStringAsync's bytes, src/main/connectors/legacy-custody.ts). Called only after the scene's custody check
+// (connector-direct-oauth.ts `expectScratchCustody`): the Keychain this reaches is Chromium's mock, never the login one.
+export async function sealWithAppSafeStorage(app: ElectronApplication, text: string): Promise<string> {
+  return app.evaluate(async ({ safeStorage }, plain) => (await safeStorage.encryptStringAsync(plain)).toString('base64'), text);
+}
+
+// `<directory>/<connectionId>.sealed` in the store's format 1 envelope (the format line, one base64 line), 0600 in the
+// 0700 directory, replacing whatever the file held; written aside and renamed, as the store writes.
+export function writeLegacySealed(directory: string, connectionId: string, base64: string): string {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, `${connectionId}.sealed`);
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${SEALED_FORMAT_V1}\n${base64}\n`, { mode: 0o600 });
+  chmodSync(temporary, 0o600);
+  renameSync(temporary, path);
+  return path;
+}
+
+// The base64 body of a format 1 file no safeStorage sealed: random bytes, so no sealer opens them to a record.
+export const unopenableLegacy = (): string => randomBytes(96).toString('base64');
+
+// P5 O4 M4: a version 1 record's JSON with no server behind it, for a scene that needs a grant to adopt but signs
+// nothing in (e2e/cross-build.spec.ts): the shape the adoption validates (src/services/connectors/oauth-store.ts, the
+// SDK's metadata and registration schemas), on example.org's names, its tokens random placeholders no server minted.
+export function placeholderGrantText(connectionId: string, server = 'xb-grant'): string {
+  const at = Date.now();
+  const issuer = 'https://auth.example.org';
+  const redirectUri = 'http://127.0.0.1:53100/callback';
+  return JSON.stringify({
+    version: 1,
+    connectionId,
+    identity: { requestUrl: 'https://mcp.example.org/mcp', server, scope: 'user', configPath: '/nonexistent/.claude.json', entryPath: ['mcpServers', server] },
+    issuer,
+    resource: 'https://mcp.example.org',
+    redirectUri,
+    authorizationServer: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, response_types_supported: ['code'] },
+    client: { client_id: `xb-${connectionId}`, redirect_uris: [redirectUri] },
+    tokens: { accessToken: randomBytes(24).toString('hex'), refreshToken: randomBytes(24).toString('hex'), tokenType: 'Bearer', obtainedAt: at },
+    savedAt: at,
+  });
 }

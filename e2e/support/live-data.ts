@@ -49,12 +49,19 @@ export const agentOf = (scene: ConnectorScene): AgentSeam => new AgentSeam(join(
  * fetched), then put by the owner in a Space linked to the scene's project, the context an owner's Start starts in.
  */
 export async function createBoard(scene: ConnectorScene, page: Page, agent: AgentSeam): Promise<string> {
-  const { artifactId } = await agent.ok<{ artifactId: string }>(AUTHOR, 'artifact_create', { kind: 'dashboard', title: BOARD, content: CONTENT });
-  const configured = await agent.ok<{ notFetched?: true; rows?: number }>(AUTHOR, 'artifact_dataset', { artifact: artifactId, id: DATASET, title: TITLE, source: SOURCE, baseRevision: 'last' });
-  expect(configured, 'the query configured, nothing fetched').toMatchObject({ notFetched: true });
+  const artifactId = await writeBoard(agent);
   const { space } = await ok<{ space: { id: string } }>(page, 'spaces.create', { name: 'Live data', linkedDir: scene.project });
   await ok(page, 'artifacts.update', { artifactId, spaceId: space.id });
   scene.note('dashboard', { artifactId, space: space.id });
+  return artifactId;
+}
+
+/** The dashboard written and its query configured through the agent seam alone, as `session`, with no page and no
+ * engine (P5 O4 M4: e2e/cross-build.spec.ts asks its refresh of an engine host with no app): its id. */
+export async function writeBoard(agent: AgentSeam, session = AUTHOR): Promise<string> {
+  const { artifactId } = await agent.ok<{ artifactId: string }>(session, 'artifact_create', { kind: 'dashboard', title: BOARD, content: CONTENT });
+  const configured = await agent.ok<{ notFetched?: true; rows?: number }>(session, 'artifact_dataset', { artifact: artifactId, id: DATASET, title: TITLE, source: SOURCE, baseRevision: 'last' });
+  expect(configured, 'the query configured, nothing fetched').toMatchObject({ notFetched: true });
   return artifactId;
 }
 

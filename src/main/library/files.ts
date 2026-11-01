@@ -1,25 +1,23 @@
-// A byte kind's stored file as the viewers and the library reach it (docs/doperpowers/plans/2026-10-12-p3-l-library.md,
-// M5b; Decision Log 14): `library.exportFormats` (what main's exporter registry serves for a kind), `library.content`
-// (the stored file at a revision, which names the `maws-artifact:` URL and the file a File artifact's code body reads),
-// `library.openExternally` and `library.reveal`, and `library.saveAs` (an export's file, or the stored file, copied to
-// where the owner chose). Every path is resolved here from the artifact's id through the engine host's
-// `artifacts.content` (main's alone to send) or the export service's own naming rule, never taken from the window, so
-// a window reaches the files of the store and of the exports and nothing beside them. Open externally hands the OS a
-// document kind only, never a program (the files service's rule). The dialogs, the Replace question, the open and the
-// reveal go through the client port (OX4), asked through the requesting client. Under MAWS_E2E=1 the seams the rest
-// of the app uses stand in for the OS: MAWS_E2E_OPEN_LOG takes an open or a reveal as a line, MAWS_E2E_SAVE_PATH is
-// the folder a save lands in without the dialog.
-import { appendFile, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+// A byte kind's export formats and a stored file's or an export's copy, the app's half of the library's files
+// (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5b; Decision Log 14): `library.exportFormats` (what main's
+// exporter registry serves for a kind) and `library.saveAs` (an export's file, or the stored file, copied to where the
+// owner chose). P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D19): the reads of a stored file
+// (`library.content`, `library.read`, `library.openExternally`, `library.reveal`) are the machine's
+// (src/services/library/files.ts); these two stay main's, beside the exporters, until O5 moves them. Every path is
+// resolved here from the artifact's id through the engine host's `artifacts.content` (main's alone to send) or the export
+// service's own naming rule, never taken from the window, so a window reaches the files of the store and of the exports
+// and nothing beside them. The dialogs and the Replace question go through the client port (OX4), asked through the
+// requesting client. Under MAWS_E2E=1 MAWS_E2E_SAVE_PATH is the folder a save lands in without the dialog.
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import JSZip from 'jszip';
 import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ArtifactKind } from '@shared/artifacts/entity';
-import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
+import { isNoClient, type ClientPort } from '@shared/client/port';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import { opensExternally } from '@shared/ipc/schema/files';
 import { ARTIFACT_EXPORT_FORMATS, artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 
@@ -28,25 +26,11 @@ export interface LibraryFilesDeps {
   exporters: { get(kind: ArtifactKind, format: ArtifactExportFormat): unknown }; // startArtifacts().exporters
   root: string; // `<userData>/artifacts`, where the export service writes the library's exports
   downloads(): string; // app.getPath('downloads')
-  port: Pick<ClientPort, 'save' | 'confirm' | 'openExternal' | 'reveal'>; // Save as…, Replace?, Open externally, Reveal
-  readFile(input: Omit<CommandInput<'files.read'>, 'appSessionId'>): Promise<CommandOutput<'files.read'>>; // M6b fix wave 2: the files service's `readResolved`
+  port: Pick<ClientPort, 'save' | 'confirm'>; // Save as…, Replace?
   env: NodeJS.ProcessEnv;
 }
 
 type Out<N extends CommandName> = Promise<CommandOutput<N>>;
-
-// P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D; D6): `readFile` as the files
-// service's files.readResolved over main's own route, which answers in process on the embedded shape and through mawsd
-// on the daemon one; a failure is thrown as the route answered it, so library.read's caller sees the files service's
-// error (`not found: <path>`, `not a regular file: <path>`, `path must be absolute`) or the host's (`host_unavailable`
-// while mawsd's spine is refused) either way.
-export function readResolvedThrough(invoke: (name: 'files.readResolved', input: CommandInput<'files.readResolved'>) => Promise<CommandResult<'files.readResolved'>>): LibraryFilesDeps['readFile'] {
-  return async (input) => {
-    const result = await invoke('files.readResolved', input);
-    if (result.ok) return result.value;
-    throw new CommandFailure(result.error);
-  };
-}
 
 // A title as a file name: no path separator, colon or control character, at most 120 characters, never empty.
 export function fileNameOf(title: string): string {
@@ -61,17 +45,10 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     if (!result.ok) throw new CommandFailure(result.error);
     return result.value;
   };
-  const seamLog = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_OPEN_LOG : undefined;
-
+  // The stored file a copy of the content is made from (the machine resolves it the same way for its reads)
   const content = async ({ artifactId, revision }: CommandInput<'library.content'>): Out<'library.content'> => {
     const found = await required('artifacts.content', { artifactId, ...(revision !== undefined && { revision }) });
     return { revision: found.revision, kind: found.kind, name: found.name, path: found.path };
-  };
-
-  // A regular file the OS may open as a document: a kind `opensExternally` admits, with no execute bit.
-  const openable = async (path: string, name: string): Promise<boolean> => {
-    const target = await lstat(path).catch(() => null);
-    return target !== null && target.isFile() && (target.mode & 0o111) === 0 && opensExternally(name);
   };
 
   let lastExportDirectory: string | null = null;
@@ -99,38 +76,6 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     exportFormats: ({ kind }: CommandInput<'library.exportFormats'>): CommandOutput<'library.exportFormats'> => ({
       formats: ARTIFACT_EXPORT_FORMATS.filter((format) => deps.exporters.get(kind, format) !== undefined),
     }),
-
-    content,
-
-    // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file, read by the artifact alone (its path resolved
-    // here, never taken from the window), so the owner's files read in their viewer with no session
-    async read({ artifactId, revision, ...chunk }: CommandInput<'library.read'>): Out<'library.read'> {
-      const found = await content({ artifactId, revision });
-      if (found.kind !== 'file') throw new CommandFailure(ipcError('invalid_input', `artifact ${artifactId} is not a file artifact`));
-      return deps.readFile({ path: found.path, ...chunk });
-    },
-
-    async openExternally(input: CommandInput<'library.openExternally'>, client: ClientRef | null): Out<'library.openExternally'> {
-      const { name, path } = await content(input);
-      if (!(await openable(path, name))) return { opened: false, message: `Not opened outside MAWS: ${name}` };
-      if (seamLog) {
-        await appendFile(seamLog, `${path}\n`);
-        return { opened: true, message: null };
-      }
-      const answer = await deps.port.openExternal(client, { path });
-      if (isNoClient(answer)) return { opened: false, message: NO_CLIENT_REASON };
-      return answer.opened ? { opened: true, message: null } : { opened: false, message: answer.reason };
-    },
-
-    async reveal(input: CommandInput<'library.reveal'>, client: ClientRef | null): Out<'library.reveal'> {
-      const { path } = await content(input);
-      if (!(await lstat(path).catch(() => null))?.isFile()) return { revealed: false, message: `Not on disk any more: ${basename(path)}` };
-      if (seamLog) {
-        await appendFile(seamLog, `reveal ${path}\n`);
-        return { revealed: true, message: null };
-      }
-      return isNoClient(await deps.port.reveal(client, path)) ? { revealed: false, message: NO_CLIENT_REASON } : { revealed: true, message: null };
-    },
 
     async saveAs({ artifactId, source }: CommandInput<'library.saveAs'>, client: ClientRef | null): Out<'library.saveAs'> {
       // P3-E (E1 M5; Decision Log 33): an export's save reads the row alone (`prepare: false`, Decision Log 22), so a
@@ -244,9 +189,5 @@ async function savePngFolder(from: string, to: string, confirmReplace: () => Pro
 export function registerLibraryFiles(register: typeof registerMainHandler, deps: LibraryFilesDeps): void {
   const files = createLibraryFiles(deps);
   register('library.exportFormats', files.exportFormats);
-  register('library.content', files.content);
-  register('library.read', files.read); // M6b fix wave 2
-  register('library.openExternally', (input, { client }) => files.openExternally(input, client));
-  register('library.reveal', (input, { client }) => files.reveal(input, client));
   register('library.saveAs', (input, { client }) => files.saveAs(input, client));
 }

@@ -9,7 +9,8 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
-  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ };
+  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, streaming: () => false, onStreaming: (owner: string) => (streamingOwners.push(owner), () => {}) /* P5 O4 M2: the app's connectors follow the machine host */ };
+  const streamingOwners: string[] = [];
   const appPath = `/tmp/maws-lifecycle-test-app-${process.pid}`;
   const app = {
     on(event: string, listener: (...args: unknown[]) => void) {
@@ -30,7 +31,7 @@ const fake = vi.hoisted(() => {
   };
   // an event as Electron passes one (will-quit's is held by a step's promise: P5 O8 M2's rows cache)
   const emit = (event: string) => (listeners.get(event) ?? []).forEach((listener) => listener({ preventDefault: () => {} }));
-  return { listeners, windows, hosts, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
+  return { listeners, windows, hosts, streamingOwners, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
 });
 
 vi.mock('electron', () => {
@@ -63,11 +64,10 @@ vi.mock('./client/machine-settings-mirror', () => ({ createMachineSettingsMirror
 vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
-vi.mock('./connectors', () => ({ startConnectors: () => ({ stop: vi.fn() }) })); // P3-H H3b: the connector broker's main side
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-const router = vi.hoisted(() => ({ installs: [] as unknown[] })); // plain records: the suite clears mocks between cases
-vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, CommandFailure: Error /* C11 */ }));
+const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as string[][] /* P5 O4 M2 */ })); // plain records: the suite clears mocks between cases
+vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[]) => (router.before.push(names), () => {}) /* P5 O4 M2 */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-C (M4): the services entry's roots, stubbed as main sees them: the machine's identity (no machine.json under the
@@ -126,6 +126,13 @@ describe('the daemon shape’s root in main', () => {
     expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host', daemonRenders: expect.any(Function) /* P5 O5 M4: router.test drives it */ } })]);
     expect(mirrors.spine).toEqual([expect.objectContaining({ hosts: fake.hosts, daemon: daemonWatch })]);
     expect(mirrors.settings).toEqual([expect.objectContaining({ file: '/tmp/maws-lifecycle-test/machine-settings.json', hosts: fake.hosts })]);
+  });
+
+  // P5 O4 M2 (Interfaces §B, §F; D28): the adoption waits for the machine host's first streaming, and each later one resets
+  // the windows' leases; the window report stands before a page's lease commands
+  it('composes the app’s connectors over the machine host’s streamings and the router’s seam', async () => {
+    expect(fake.streamingOwners).toContain('machine');
+    expect(router.before).toEqual(expect.arrayContaining([expect.arrayContaining(['connectors.open', 'connectors.call']), ['delivery.cancel']]));
   });
 
   // P5 O3-E M2 (Interfaces §E): a page's git.watch and git.unwatch go through the watch replay, never straight to the

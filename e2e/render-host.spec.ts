@@ -25,7 +25,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
@@ -56,7 +57,7 @@ interface Scene {
   app: ElectronApplication;
   child: ChildProcess; // kept from the launch: `app.process()` reads Playwright's live channel, disposed once the process ends
   client: FakeFrontClient;
-  stderr(): string; // main's stderr so far
+  stderr(): string; // main's stderr so far, from its spawn on
   exited: Promise<number | null>;
   ask(request: RenderRequest): Promise<RenderAnswer>;
 }
@@ -115,15 +116,17 @@ async function startScene(): Promise<Scene> {
   // app's userData: the render host names its own
   const env = launchEnvironment(process.env, join(profile, 'unused-app-profile'));
   delete env.MAWS_USER_DATA;
+  // The binary (the packaged one MAWS_E2E_EXECUTABLE names, or this checkout's Electron with Playwright's loader and the
+  // entry, as Playwright itself would start it) under stderrFromSpawn's wrapper, so main's stderr is read from its first
+  // byte: a listener on the child's stderr, attached once `_electron.launch` resolves, misses what came before, and the
+  // packaged binary, whose `ready` no loader holds, says it serves the profile before then (fix wave 2)
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
-  const args = ['--render-host', profile];
-  const app = executable
-    ? await _electron.launch({ executablePath: executable, args, env, cwd: REPO_ROOT })
-    : await _electron.launch({ args: [join(REPO_ROOT, 'out/main/index.js'), ...args], env, cwd: REPO_ROOT });
+  const fromRoot = createRequire(join(REPO_ROOT, 'package.json'));
+  const binary = executable ?? (fromRoot('electron') as string);
+  const entry = executable ? [] : ['-r', join(dirname(fromRoot.resolve('playwright-core/package.json')), 'lib/server/electron/loader.js'), join(REPO_ROOT, 'out/main/index.js')];
+  const wrapped = stderrFromSpawn(fixtures, binary);
+  const app = await _electron.launch({ executablePath: wrapped.executablePath, args: [...entry, '--render-host', profile], env, cwd: REPO_ROOT });
   const child = app.process();
-  let written = '';
-  child.stderr?.on('data', (chunk: Buffer) => void (written += chunk.toString('utf8')));
-  const stderr = () => written;
   const exited = new Promise<number | null>((done) => {
     if (child.exitCode !== null) return done(child.exitCode);
     child.once('exit', (code) => done(code));
@@ -136,7 +139,28 @@ async function startScene(): Promise<Scene> {
     client.send('render.request', request);
     return answered;
   };
-  return { profile, front, endpoint, app, child, client, stderr, exited, ask };
+  return { profile, front, endpoint, app, child, client, stderr: wrapped.stderr, exited, ask };
+}
+
+// A wrapper that execs `binary` (the same pid, so the process Playwright holds is the binary's) with its stderr through
+// `tee` into a file as well as on to Playwright, which reads the inspector's address from it: the file holds main's
+// stderr from its spawn on, whenever the test reads it
+function stderrFromSpawn(dir: string, binary: string): { executablePath: string; stderr(): string } {
+  const quoted = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`;
+  const log = join(dir, 'render-host.stderr');
+  const executablePath = join(dir, 'render-host-stderr.sh');
+  writeFileSync(log, '');
+  writeFileSync(executablePath, `#!/bin/bash\nexec ${quoted(binary)} "$@" 2> >(exec tee -a ${quoted(log)} >&2)\n`, { mode: 0o755 });
+  return {
+    executablePath,
+    stderr: () => {
+      try {
+        return readFileSync(log, 'utf8');
+      } catch {
+        return ''; // the profile removed
+      }
+    },
+  };
 }
 
 const captureOf = (requestId: string): MawsArtifactCapture => ({ appSessionId: 'app-render-host-e2e', requestId, artifactId: ARTIFACT, revision: REVISION, width: 640, height: 480 }) as MawsArtifactCapture;
