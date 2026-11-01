@@ -58,6 +58,10 @@ type Target = CommandInput<'remote.forward.open'>;
 export interface RemoteForwards {
   open(target: Target): Promise<CommandResult<'remote.forward.open'>>;
   close(target: Target): void;
+  /** The port of this Mac's listener of the machine's port, while one listens (src/main/browser/forwarded.ts). */
+  listening(machine: MachineRef, port: number): number | null;
+  /** The machine's port the listener at `localPort` forwards, while it listens. */
+  at(localPort: number): { machine: MachineRef; port: number } | null;
   /** The roster changed: the forwards of a machine whose link is no longer the one they were made on close. */
   linksChanged(): void;
   stop(): void;
@@ -287,6 +291,11 @@ export function createRemoteForwards(deps: RemoteForwardsDeps): RemoteForwards {
     close({ machine, port }) {
       const fwd = forwards.get(keyOf(machine as MachineRef, port));
       if (fwd !== undefined) closeForward(fwd, false);
+    },
+    listening: (machine, port) => forwards.get(keyOf(machine, port))?.listener?.port ?? null,
+    at(localPort) {
+      for (const { machine, port, listener } of forwards.values()) if (listener?.port === localPort) return { machine, port };
+      return null;
     },
     linksChanged() {
       for (const [key, fwd] of [...forwards]) {

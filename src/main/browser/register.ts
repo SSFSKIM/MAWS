@@ -14,6 +14,8 @@ import { pageOf } from '../ipc/clients';
 import { CommandFailure, type MainHandler, type registerMainHandler } from '../ipc/router';
 import type { Navigator } from './navigation';
 import type { Downloads } from './downloads';
+import type { ForwardedTabs } from './forwarded';
+import type { SessionMachines } from './machines';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import { shown, type ViewManager } from './view';
@@ -39,6 +41,9 @@ export interface BrowserHandlerDeps {
   // cua #90 end
   profiles(): BrowserProfile[];
   register: typeof registerMainHandler;
+  // P5 O7 M3: a session of another machine's tabs (machines.ts), and a tab opened at a forward's listener (forwarded.ts)
+  sessions?: Pick<SessionMachines, 'note' | 'of'>;
+  forwarded?: Pick<ForwardedTabs, 'opened'>;
 }
 
 // A handler whose unknown tab is the caller's mistake, not main's fault.
@@ -78,11 +83,34 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register }: BrowserHandlerDeps): void {
-  register('browser.tabs.list', ({ appSessionId }) => store.list(appSessionId === undefined ? undefined : session(appSessionId)));
-  register('browser.tabs.open', (request) => store.open({ ...request, appSessionId: session(request.appSessionId) }));
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded }: BrowserHandlerDeps): void {
+  // P5 O7 M3: the three that name a session are answered for a session of any machine (the router's
+  // BROWSER_TOOL_HERE_FOR_ANY_MACHINE), its machine noted; a list of every session is the target machine's sessions only,
+  // since the answer is lifted with it (machines.ts)
+  register('browser.tabs.list', ({ appSessionId }, { target }) => {
+    if (appSessionId !== undefined) {
+      sessions?.note(session(appSessionId), target);
+      return store.list(session(appSessionId));
+    }
+    const all = store.list();
+    if (sessions === undefined) return all;
+    const mine = (id: string) => sessions.of(id) === target;
+    return { tabs: all.tabs.filter((tab) => mine(tab.appSessionId)), selected: Object.fromEntries(Object.entries(all.selected).filter(([id]) => mine(id))) };
+  });
+  register('browser.tabs.open', (request, { target }) => {
+    sessions?.note(session(request.appSessionId), target);
+    const opened = store.open({ ...request, appSessionId: session(request.appSessionId) });
+    forwarded?.opened(opened.tab);
+    return { ...opened, tab: store.entry(opened.tab.tabId)?.tab ?? opened.tab };
+  });
   register('browser.tabs.close', knownTabs(({ tabId }) => store.close(tabId)));
-  register('browser.tabs.select', knownTabs(({ appSessionId, tabId }) => store.select(session(appSessionId), tabId)));
+  register(
+    'browser.tabs.select',
+    knownTabs(({ appSessionId, tabId }, { target }) => {
+      sessions?.note(session(appSessionId), target);
+      store.select(session(appSessionId), tabId);
+    }),
+  );
   register('browser.tabs.navigate', knownTabs(({ tabId, to }) => ({ accepted: navigator.navigate(tabId, to) })));
   register('browser.tabs.zoom', knownTabs(({ tabId, action }) => ({ zoom: navigator.zoom(tabId, action) })));
   register('browser.tabs.find', knownTabs(({ tabId, ...request }) => navigator.find(tabId, request)));

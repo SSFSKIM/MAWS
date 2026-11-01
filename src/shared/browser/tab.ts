@@ -4,6 +4,7 @@
 // page string in it (title, URL, favicon) is data the renderer shows as text or a `data:` image, never as markup.
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../graph/ids';
+import { MachineRefSchema } from '../machine/ref';
 import { LOAD_ERROR_KINDS } from './errors';
 
 export const BROWSER_TAB_ID = /^b_[0-9a-f]{12}$/;
@@ -38,6 +39,10 @@ export const BROWSER_SUGGESTIONS_MAX = 8; // the address field's history rows
 export const BROWSER_AGENT_BADGE_MAX_CHARS = 40; // E13: an agent tab's badge text
 
 const count = z.number().int().min(0);
+
+const port = z.number().int().min(1).max(65535);
+export const BrowserTabForwardSchema = z.strictObject({ machine: MachineRefSchema, port, localPort: port });
+export type BrowserTabForward = z.infer<typeof BrowserTabForwardSchema>;
 
 export const BrowserTabSchema = z.strictObject({
   tabId: BrowserTabIdSchema,
@@ -80,6 +85,12 @@ export const BrowserTabSchema = z.strictObject({
   // Options"). Such a tab is transient: never persisted, never suspended (closed instead), closed with its extension.
   // null for every other tab.
   internal: z.strictObject({ kind: z.literal('extension'), extensionId: z.string().regex(EXTENSION_ID), title: z.string() }).nullable(),
+  // P5 O7 M3 additive: a tab of a session on another machine opened on a forwarded port of that machine (main's
+  // `remote.forward.open`): the machine, its port, and the port of this Mac's listener the tab's URL loads from. Kept
+  // while the tab is; past a relaunch the tab's first load opens the forward again and moves `localPort` to the new
+  // listener (src/main/browser/forwarded.ts). Absent for every other tab. The tab shows a page of the forward while its
+  // URL is `127.0.0.1:<localPort>`.
+  forward: BrowserTabForwardSchema.optional(),
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;
 

@@ -133,6 +133,8 @@ describe('forwarded ports (P5 O7 M3)', () => {
     const l = lab();
     const port = localPort(await l.open());
     expect(l.watching()).toBe(1);
+    // the in-app browser's reads of the listener (src/main/browser/forwarded.ts)
+    expect([l.forwards.listening(MINI, PORT), l.forwards.at(port), l.forwards.at(port + 1)]).toEqual([port, { machine: MINI, port: PORT }, null]);
     const { seen } = await client(port);
     await until(() => l.link.streams.length === 1);
     l.link.streams[0].sink.opened({ credit: 1 << 20 });
@@ -141,6 +143,7 @@ describe('forwarded ports (P5 O7 M3)', () => {
     expect(l.link.streams[0].closed).toBe('closed');
     expect(l.watching()).toBe(0);
     expect(await refused(port)).toBe(true);
+    expect([l.forwards.listening(MINI, PORT), l.forwards.at(port)]).toEqual([null, null]);
     await until(() => seen.closed);
     // The ended link opens no forward again.
     expect(await l.open()).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });

@@ -145,6 +145,13 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // machine's loopback on this Mac (src/main/open-external.ts).
   const ANSWERED_BY_ITS_LINK: ReadonlySet<string> = new Set(['pty.hostState']);
   const OPENED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['pty.openLink', 'layout.openExternal']);
+  // P5 O7 M3 (the spec's Decision Log on the in-app browser for a remote session): the in-app browser is this Mac's own
+  // surface, and a remote session's panel holds local tabs. The Browser tool's commands that name the session are answered
+  // here for any machine, by main's handlers with that machine as `ctx.target` (src/main/browser/machines.ts); the rest of
+  // the tool's commands name a tab alone and come here already. An explicit list: any other `browser.*` (the agent's
+  // control of a page above all: a remote session's agent never drives this Mac's browser) stays refused for another
+  // machine until it is listed on purpose.
+  const BROWSER_TOOL_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['browser.tabs.list', 'browser.tabs.open', 'browser.tabs.select']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
@@ -176,7 +183,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
-    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name)) {
+    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name)) {
       if (gradeOf(name) === 'client' && !ANSWERED_BY_ITS_LINK.has(name)) {
         if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
         return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };

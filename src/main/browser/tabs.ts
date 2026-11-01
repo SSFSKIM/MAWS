@@ -107,6 +107,9 @@ export interface TabStoreDeps {
   // E13 (the in-app browser spec of 2026-10-08, Decision Log M2): a tab an agent drives through cua (under a debugger
   // lease) is never a cap victim: suspending it would end the agent's attachment under it
   driven?(tabId: string): boolean;
+  // P5 O7 M3: where a load of the tab goes (forwarded.ts's `route`): the URL, moved to a forwarded port's new listener, or
+  // null when the forward is being opened again and the load is made once it answers
+  routeLoad?(tab: BrowserTab, url: string): string | null;
 }
 
 // A page's `window.open` child, adopted as a tab of its opener's session in its opener's partition (window-open.ts).
@@ -251,6 +254,7 @@ export class TabStore {
       zoom: tab.zoom,
       createdAt: tab.createdAt,
       lastShownAt: tab.lastShownAt,
+      ...(tab.forward !== undefined && { forward: tab.forward }),
     }));
     const selected = [...this.selected].map(([appSessionId, tabId]) => [appSessionId, tabId === null ? null : this.keptSelection(appSessionId, tabId)]);
     return { version: 1, tabs, selected: Object.fromEntries(selected) };
@@ -355,7 +359,9 @@ export class TabStore {
   // the navigation commanded and `loadURL` voided, since tab state comes from the view's events alone (Decision Log 23).
   // False when the tab could not be loaded: left suspended by the cap, or its view could not be created.
   load(tabId: string, url: string): boolean {
-    return this.loadInto(this.require(tabId), url);
+    const entry = this.require(tabId);
+    const routed = this.deps.routeLoad ? this.deps.routeLoad(entry.tab, url) : url;
+    return routed === null || this.loadInto(entry, routed); // P5 O7 M3: null: loaded once its forward opens again
   }
 
   // cua #90: what a cap does to its victim: an ordinary tab is suspended; an internal tab, which has no page to come back

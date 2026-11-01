@@ -66,7 +66,7 @@ import { outcomeAsResult, pendingResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
-import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwardsTiming } from './remote-forward';
+import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
 import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
 
@@ -140,6 +140,9 @@ export interface RemoteLaneB {
   forward: {
     open(input: CommandInput<'remote.forward.open'>): Promise<CommandResult<'remote.forward.open'>>;
     close(input: CommandInput<'remote.forward.close'>): Promise<CommandResult<'remote.forward.close'>>;
+    /** The in-app browser's reads of the listeners (src/main/browser/forwarded.ts). */
+    listening: RemoteForwards['listening'];
+    at: RemoteForwards['at'];
   };
   /** Every subscription, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
@@ -488,6 +491,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         }
       },
       close: async (input) => (forwards.close(input), { ok: true, value: undefined }),
+      listening: (machine, port) => forwards.listening(machine, port),
+      at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
     replay(machine, app) {
