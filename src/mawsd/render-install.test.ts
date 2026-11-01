@@ -391,6 +391,22 @@ describe('an install', () => {
     expect(listing()).toEqual([]);
   });
 
+  // The real lock where flock(1) cannot run (here a PATH without it): a named refusal before anything is fetched or
+  // unpacked, never an install without the lock
+  it('refuses, naming flock, where flock cannot run: never an unlocked install', async () => {
+    const path = process.env.PATH;
+    process.env.PATH = bin; // xvfb-run alone
+    try {
+      await expect(installRenderRuntime(deps({ lock: undefined }))).rejects.toThrow(/cannot lock .*\.install-lock: flock \(util-linux\) did not run/);
+      await expect(uninstallRenderRuntime(deps({ lock: undefined }))).rejects.toThrow(/flock \(util-linux\) did not run/);
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(downloads).toEqual([]);
+    expect(unzipped).toBe(0);
+    expect(listing()).toEqual([]);
+  });
+
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {
     const packZip = join(dir, 'dist', 'electron-v44.4.5-linux-x64.zip');
     mkdirSync(join(dir, 'dist'));
