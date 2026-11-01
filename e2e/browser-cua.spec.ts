@@ -44,6 +44,15 @@ import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './support/la
 import { startProfileDaemon } from './support/profile-daemon'; // P5 O5 M5
 import { cuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket'; // P5 O5 M5
+// P5 O17 M8 start
+import { symlinkSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { daemonPaths, renderCuaSocketDir } from '@shared/daemon/files';
+import { BROWSER_ENGINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { reachMachine } from '../src/mawsd/machine-client';
+import type { ConnectorControl } from '../test/support/cua-engine';
+import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, PAGE_MARKER, SCREENCAST, startHeadlessScene, startPages as startHeadlessPages, type HeadlessScene } from './support/headless-browser';
+// P5 O17 M8 end
 import { collectMainOutput } from './support/browser-import-scene';
 import { closeScene, launchScene, scratchProject, seedTranscripts, show } from './support/maws-tools';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
@@ -703,3 +712,330 @@ test('one session\'s engine cannot reach another session\'s tab engine directly:
   }
 });
 // P5 O5 M5 end
+
+// P5 O17 M8 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8's scenes 1 to 5 and 8; acceptance 1, 3, 4, 5
+// and 9): the agent's browser with no app. Each scene is a profile's `mawsd` with no app (./support/headless-browser.ts),
+// its sessions started through the ordinary start path on the cua engine stub that comes ready, whose connector is cua's
+// host, driven over its control socket; `daemon.status`'s render entry counts the render host's starts, browser sessions
+// and tabs. A scene that needs a real engine host listing `host.browserWork` (M7) skips with BEFORE_M7 until this build's
+// engine host lists it: then no real engine host selects the headless route.
+const QUIET_MS = 15_000; // the render host's quiet period under these scenes (MAWS_RENDER_QUIET_MS)
+const LONG_QUIET_MS = 120_000; // a scene that must find the render host still running
+const appCuaSocket = (userData: string, id: AppSessionId) => join(userData, 'browser', 'cua', `${id}.sock`);
+const launchOver = (scene: HeadlessScene) => launchMaws({ userData: scene.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: scene.bin } });
+const quitApp = async (maws: MawsLaunch) => {
+  const exited = new Promise<void>((done) => maws.app.process().once('exit', () => done()));
+  await maws.app.evaluate(({ app: electron }) => electron.quit());
+  await exited;
+};
+const workHold = async (scene: HeadlessScene, id: AppSessionId) => ((await scene.sessionStatus(id)).work as { holds?: { browser?: string } } | undefined)?.holds?.browser;
+const evaluated = async (cua: ConnectorControl, tabId: number, expression: string) =>
+  ((await answered(`Runtime.evaluate ${expression}`, cua.call<{ result: { value: unknown } }>('debugger.sendCommand', { debuggee: { tabId }, method: 'Runtime.evaluate', params: { expression, returnByValue: true }, timeoutMs: 10_000 }))).result.value);
+
+test('O17 scene 1, the first browser: with no app a session through the start path reads the screencast; cua is answered cold, its creation sequence starts the render host within 4 s and reaches 127.0.0.1; the render host ends after its quiet period while cua stays connected', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(180_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ env: { MAWS_RENDER_QUIET_MS: String(QUIET_MS) } });
+  try {
+    expect(await scene.render(), 'no render host at the daemon’s start').toMatchObject({ starts: 0, pid: null });
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    expect((await scene.capabilities(id)).browser, 'before Chromium starts').toEqual(SCREENCAST);
+    const cua = await scene.connector(repo);
+    await expect.poll(() => scene.report(repo)?.hellos ?? 0, { timeout: 15_000, message: 'the broker greets cua' }).toBeGreaterThan(0);
+    expect(scene.report(repo)).toMatchObject({ socket: scene.daemonSocket(id), hello: { extensionInstanceId: `maws:${id}`, protocolVersion: 1, profileName: 'MAWS' }, connected: true });
+    expect(await answered('tabs.query', cua.call('tabs.query')), 'answered cold: no live tab engine, no tabs hidden').toEqual([]);
+    expect(await scene.status(), 'nothing started, no artifact made or fetched').toMatchObject({ render: { starts: 0 }, artifacts: { requests: 0 } });
+
+    const created = await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+    const startMs = created.steps.filter((step) => step.method === 'windows.create' || step.method === 'tabs.create').reduce((sum, step) => sum + step.ms, 0);
+    expect(startMs, `the first real primitive through to the tab within CUA_BROWSER_START_MS (${JSON.stringify(created.steps)})`).toBeLessThanOrEqual(4_000);
+    expect(created.screenshotBytes, 'a screenshot through the lease').toBeGreaterThan(0);
+    expect(await evaluated(cua, created.tabId, 'document.querySelector("#marker").textContent'), 'the page from 127.0.0.1').toBe(PAGE_MARKER);
+    expect(await scene.render()).toMatchObject({ starts: 1, browserSessions: 1, browserTabs: 1, pid: expect.any(Number) });
+    await answered('Page.navigate', cua.call('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Page.navigate', params: { url: pages.url('/still') }, timeoutMs: 10_000 }));
+    await expect.poll(() => evaluated(cua, created.tabId, 'document.title').catch(() => null), { message: 'navigated' }).toBe('still');
+    await answered('tabs.remove', cua.call('tabs.remove', { tabId: created.tabId }));
+    await expect.poll(async () => (await scene.render()).browserTabs, { message: 'the tab closed' }).toBe(0);
+
+    await expect.poll(scene.mawsdLog, { timeout: QUIET_MS + 30_000, message: 'the quiet period ends the render host' }).toContain(`[render] quiet for ${QUIET_MS / 1000} s: ending the render host`);
+    await expect.poll(async () => (await scene.render()).pid, { timeout: 15_000, message: 'the render host gone' }).toBeNull();
+    const hellos = scene.report(repo)!.hellos!;
+    await expect.poll(async () => (await cua.state()).connected === true && (await cua.state()).hellos! >= hellos, { timeout: 15_000, message: 'cua still connected, to the broker' }).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 2_000)); // a few of cua's retry intervals
+    expect(await answered('tabs.query', cua.call('tabs.query')), 'answered cold again').toEqual([]);
+    expect((await scene.render()).starts, 'nothing started Chromium again').toBe(1);
+    cua.close();
+  } finally {
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('O17 scene 2, handover: the app attaching during a start and during an active lease with a command in flight and an export, a quit and a reattach, and the app’s leaving, after which cua is answered cold with no Chromium start', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(360_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ engine: { retryMs: 5_000 /* cua's CLIENT_RETRY_MS */, lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  const launches: MawsLaunch[] = [];
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    const cua = await scene.connector(repo);
+    await expect.poll(() => scene.report(repo)?.hellos ?? 0, { timeout: 15_000 }).toBeGreaterThan(0);
+    const servedByApp = async (maws: MawsLaunch) => {
+      await expect.poll(async () => (await seam(maws).inspect())[id]?.connections ?? 0, { timeout: 30_000, message: 'the app serves the session’s cua connection' }).toBe(1);
+      expect((await scene.capabilities(id)).browser).toEqual({ available: true, viewed: 'local' });
+    };
+
+    await test.step('the app attaches during a start: whatever the start had made is dropped, and cua is served by the app', async () => {
+      const creating = cua.sequence(pages.url('/'));
+      await expect.poll(async () => (await scene.render()).state, { timeout: 10_000, message: 'the render host starting' }).not.toBe('off');
+      const first = await launchOver(scene);
+      launches.push(first);
+      const outcome = await creating;
+      await servedByApp(first);
+      await expect.poll(async () => ((await scene.render()).browserTabs ?? 0), { message: 'the session’s headless tabs closed' }).toBe(0);
+      console.log(`[O17 scene 2] the creation sequence across the attachment: ${outcome.ok ? 'it finished before the handover' : outcome.error}`);
+      await quitApp(first);
+    });
+
+    await test.step('during an active lease, a command in flight and an export: the command is lost, the export completes, and cua is served by the app within its 5 s cycle', async () => {
+      await expect.poll(async () => (await cua.state()).connected, { timeout: 15_000, message: 'cua back on the broker' }).toBe(true);
+      const created = await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+      expect(await scene.render()).toMatchObject({ browserSessions: 1, browserTabs: 1 });
+      const artifact = await scene.daemon.request<{ artifact: { id: string } }>('artifacts.create', { kind: 'html', title: 'Handover export', content: { bytes: new TextEncoder().encode('<!doctype html><title>x</title><p>handover</p>'), name: 'index.html' } });
+      const inFlight = cua.call('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Runtime.evaluate', params: { expression: 'new Promise((r) => setTimeout(r, 30000))', awaitPromise: true }, timeoutMs: 60_000 });
+      const exporting = scene.daemon.request<{ path: string }>('artifacts.export', { artifactId: artifact.artifact.id, format: 'pdf' });
+      const second = await launchOver(scene);
+      launches.push(second);
+      const lost = await inFlight;
+      const lostAt = Date.now();
+      expect(lost, 'the command in flight ends with its connection').toMatchObject({ ok: false, error: 'lost' });
+      expect((await exporting).path.startsWith(join(scene.userData, 'artifacts', artifact.artifact.id, 'exports')), 'the export completes').toBe(true);
+      await servedByApp(second);
+      expect(Date.now() - lostAt, 'served within cua’s 5 s retry, and the poll’s slack').toBeLessThan(5_000 + 3_000);
+      await expect.poll(async () => (await scene.render()).browserTabs ?? 0, { message: 'the session’s headless tabs closed' }).toBe(0);
+      await quitApp(second);
+    });
+
+    await test.step('a quit and a reattach serve it again; when the app leaves, the next tabs.query is answered cold and nothing starts Chromium', async () => {
+      const third = await launchOver(scene);
+      launches.push(third);
+      await servedByApp(third);
+      const starts = (await scene.render()).starts;
+      await quitApp(third);
+      await expect.poll(async () => (await scene.capabilities(id)).browser, { message: 'the screencast again with no app' }).toEqual(SCREENCAST);
+      await expect.poll(async () => (await cua.state()).connected, { timeout: 15_000, message: 'cua back on the broker' }).toBe(true);
+      await expect.poll(async () => { const answer = await cua.call('tabs.query'); return answer.ok ? answer.result : answer.error; }, { timeout: 15_000 }).toEqual([]); // prettier-ignore
+      expect((await scene.render()).starts, 'no Chromium start for an inventory').toBe(starts);
+    });
+    cua.close();
+  } finally {
+    for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('O17 scene 3, the recovery close: cua killed holding the session’s last tab; the next cua of the session closes it, the count and the hold clear, and the render host ends after its quiet period', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(180_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ engine: { respawn: true }, env: { MAWS_RENDER_QUIET_MS: String(QUIET_MS) } });
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    const first = await scene.connector(repo);
+    const created = await answered('cua’s creation sequence', first.sequence(pages.url('/')));
+    await expect.poll(() => workHold(scene, id), { message: 'the engine host holds the session for its tab' }).toBe('held');
+    const killed = scene.report(repo)!.pid;
+    first.close();
+    process.kill(killed, 'SIGKILL');
+    await expect.poll(() => { const report = scene.report(repo); return report !== null && report.pid !== killed && (report.hellos ?? 0) > 0; }, { timeout: 20_000, message: 'the engine starts cua again' }).toBe(true); // prettier-ignore
+    expect((await scene.render()).browserTabs, 'the tab outlives its creator').toBe(1);
+    const next = await scene.connector(repo);
+    const tabs = await answered('tabs.query', next.call<{ id: number; url: string }[]>('tabs.query'));
+    expect(tabs.map((tab) => tab.url), 'the new connection of the session finds the tab').toEqual([pages.url('/')]);
+    await answered('tabs.remove of the orphan', next.call('tabs.remove', { tabId: tabs[0]!.id }));
+    await expect.poll(async () => (await scene.render()).browserTabs, { message: 'no tab left' }).toBe(0);
+    await expect.poll(() => workHold(scene, id), { message: 'the hold cleared' }).toBeUndefined();
+    await expect.poll(scene.mawsdLog, { timeout: QUIET_MS + 30_000, message: 'the render host ends after its quiet period' }).toContain(`[render] quiet for ${QUIET_MS / 1000} s: ending the render host`);
+    expect(created.tabId).toBeGreaterThan(0);
+    next.close();
+  } finally {
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('O17 scene 4, an engine’s exit and an engine-host restart: the exit closes the session’s tab and both holds, a resume re-prepares in the running render host; `mawsd restart --engine-host` keeps a held tab and both holds', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(300_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ engine: { lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    let cua = await scene.connector(repo);
+    await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+    await expect.poll(() => workHold(scene, id)).toBe('held');
+    const starts = (await scene.render()).starts;
+
+    await test.step('the engine exits holding a tab: the tab closes and both holds clear; a resume’s next tabs.create re-prepares in the running render host', async () => {
+      const pid = (await scene.sessionStatus(id)).pid!;
+      cua.close();
+      process.kill(pid, 'SIGTERM');
+      await expect.poll(async () => (await scene.sessionStatus(id)).process, { timeout: 20_000, message: 'the engine exited' }).toBe('exited');
+      await expect.poll(async () => (await scene.render()).browserTabs ?? 0, { message: 'its headless tab closed' }).toBe(0);
+      await expect.poll(() => workHold(scene, id), { message: 'the engine host’s hold cleared' }).toBeUndefined();
+      expect(await scene.daemon.request('session.start', { appSessionId: id, message: { content: 'resume', display: 'resume' }, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+      await expect.poll(async () => { const st = await scene.sessionStatus(id); return st.process === 'ready' && st.pid !== pid && st.turn === null; }, { timeout: 60_000, message: 'resumed' }).toBe(true); // prettier-ignore
+      cua = await scene.connector(repo);
+      await expect.poll(() => scene.report(repo)?.pid !== undefined && (scene.report(repo)?.hellos ?? 0) > 0, { timeout: 15_000 }).toBe(true);
+      await answered('cua’s creation sequence after the resume', cua.sequence(pages.url('/')));
+      expect(await scene.render(), 'the running render host prepared it again').toMatchObject({ starts, browserSessions: 1, browserTabs: 1 });
+    });
+
+    await test.step('`mawsd restart --engine-host` with a held tab: the engine, its tab and both holds survive', async () => {
+      const pid = (await scene.sessionStatus(id)).pid;
+      // the hold as each status read gives it through the handover: `held`, or `unknown` while the adopted session awaits
+      // mawsd's first snapshot, never absent (the review's test, scene 6, at e2e: nothing may release it meanwhile)
+      const seen = new Set<string>();
+      let sampling = true;
+      const sampler = (async () => {
+        while (sampling) {
+          const status = await scene.sessionStatus(id).catch(() => null);
+          if (status !== null && status.process !== 'exited') seen.add(String((status.work as { holds?: { browser?: string } } | undefined)?.holds?.browser));
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      })();
+      const restarted = await scene.daemon.cli(['restart', '--engine-host']);
+      expect(restarted.status, restarted.stderr || restarted.stdout).toBe(0);
+      await expect.poll(async () => (await scene.sessionStatus(id).catch(() => null))?.pid ?? null, { timeout: 60_000, message: 'the session’s engine adopted by the successor' }).toBe(pid);
+      expect(await scene.render()).toMatchObject({ starts, browserTabs: 1 });
+      await expect.poll(() => workHold(scene, id), { timeout: 20_000, message: 'the successor holds the session once mawsd’s first snapshot applies' }).toBe('held');
+      sampling = false;
+      await sampler;
+      expect([...seen].filter((hold) => hold !== 'held' && hold !== 'unknown'), `the hold through the handover (${[...seen].join(', ')})`).toEqual([]);
+      expect((await answered('tabs.query', cua.call<{ url: string }[]>('tabs.query'))).map((tab) => tab.url)).toEqual([pages.url('/')]);
+    });
+    cua.close();
+  } finally {
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('O17 scene 5, O5 M5’s scene 3 extended: A’s relay works while A’s engine-side peer reaches neither B’s render-host socket nor, once the app attaches, B’s app socket', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(240_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ repos: 2, engine: { lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  const launches: MawsLaunch[] = [];
+  try {
+    const [repoA, repoB] = [scene.repo(0), scene.repo(1)];
+    const a = await scene.start(repoA, 'session A');
+    const b = await scene.start(repoB, 'session B');
+    const cuaA = await scene.connector(repoA);
+    const cuaB = await scene.connector(repoB);
+    await answered('A’s creation sequence', cuaA.sequence(pages.url('/')));
+    await answered('B’s creation sequence', cuaB.sequence(pages.url('/')));
+    const renderB = scene.renderSocket(b)!;
+    expect(existsSync(renderB), 'B’s render-host socket listens').toBe(true);
+    expect(await answered('A dials B’s render-host socket', cuaA.probe(renderB)), 'refused before any hello: only mawsd’s relay is admitted').toEqual({ hello: null, closed: true });
+    expect((await answered('A’s own relay', cuaA.call<unknown[]>('tabs.query'))).length, 'A’s relay still works').toBe(1);
+
+    const maws = await launchOver(scene);
+    launches.push(maws);
+    await expect.poll(async () => (await seam(maws).inspect())[b]?.connections ?? 0, { timeout: 30_000, message: 'B served by the app' }).toBe(1);
+    await expect.poll(async () => (await seam(maws).inspect())[a]?.connections ?? 0, { timeout: 30_000, message: 'A served by the app' }).toBe(1);
+    expect(await answered('A dials B’s app socket', cuaA.probe(appCuaSocket(scene.userData, b))), 'refused: A descends from A’s engine, not mawsd').toEqual({ hello: null, closed: true });
+    await expect.poll(async () => { const answer = await cuaA.call('tabs.query'); return answer.ok; }, { timeout: 15_000, message: 'A’s relay to the app works' }).toBe(true); // prettier-ignore
+    expect((await seam(maws).inspect())[b], 'B’s socket refused A once').toMatchObject({ connections: 1, refused: 1 });
+    cuaA.close();
+    cuaB.close();
+  } finally {
+    for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('O17 scene 8, sockets: a tab engine that is not selected for a session has every reply refused by mawsd, and a symlinked cua directory of the app serves no session', async () => {
+  test.setTimeout(180_000);
+  const scene = await startHeadlessScene();
+  let maws: MawsLaunch | null = null;
+  try {
+    const id = 'o17-scene-8-session' as AppSessionId;
+    // a client of machine.sock saying hello as a tab engine, selected for nothing: its stale or foreign replies
+    const reached = await reachMachine(daemonPaths(scene.userData), { build: 'e2e-o17-stale-engine', capabilities: [BROWSER_ENGINE_CAPABILITY] });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    try {
+      const refused = async (name: string, input: unknown) => {
+        const answer = await reached.link.request(name, input);
+        return answer.ok ? 'answered' : answer.error.code;
+      };
+      expect(await refused('browserEngine.state', { appSessionId: id, inventory: { tabs: [], selected: null, state: 'ready' } })).toBe('forbidden_sender');
+      expect(await refused('browserEngine.work', { appSessionId: id, held: true })).toBe('forbidden_sender');
+      expect(await refused('browserEngine.work', { appSessionId: id, held: false })).toBe('forbidden_sender');
+      expect(await refused('browserEngine.answer', { id: 'stale-1', result: { ok: true, value: null } })).toBe('invalid_input');
+      expect(await refused('browserEngine.frame', { subscriptionId: 'stale-1', frame: { tabId: 'b_000000000000', seq: 1, capturedAt: 0, width: 1, height: 1, viewport: { width: 1, height: 1 }, jpegBase64: 'AA==' } })).toBe('forbidden_sender');
+      expect(await refused('browserEngine.ended', { subscriptionId: 'stale-1', reason: 'tab_closed' })).toBe('forbidden_sender');
+    } finally {
+      reached.link.close();
+    }
+
+    // the app's cua directory a symlink to a directory of this user: refused at the start, no session's socket made
+    const elsewhere = join(scene.root, 'elsewhere');
+    mkdirSync(elsewhere, { mode: 0o700 });
+    mkdirSync(join(scene.userData, 'browser'), { recursive: true });
+    symlinkSync(elsewhere, join(scene.userData, 'browser', 'cua'));
+    maws = await launchOver(scene);
+    expect(await seam(maws).socketPathFor(id), 'no socket for any session').toBeNull();
+    expect(readdirSync(elsewhere), 'nothing made through the link').toEqual([]);
+  } finally {
+    await maws?.cleanup().catch((error: unknown) => console.error(error));
+    await scene.stop();
+  }
+});
+
+test('O17 scene 8, sockets (the render host’s root): an engine-side peer dialling a session’s render-host socket directly is refused, and a symlinked render-host cua directory makes no socket and starts no tab', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(180_000);
+  const pages = await startHeadlessPages();
+  const scene = await startHeadlessScene({ env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    const cua = await scene.connector(repo);
+    await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+    expect(await answered('the session’s own engine-side peer dials its render-host socket', cua.probe(scene.renderSocket(id)!)), 'only mawsd’s relay is admitted there').toEqual({ hello: null, closed: true });
+    cua.close();
+  } finally {
+    await scene.stop();
+  }
+
+  const linked = await startHeadlessScene({ env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  try {
+    const renderDir = renderCuaSocketDir(linked.userData, tmpdir());
+    const elsewhere = join(linked.root, 'elsewhere');
+    mkdirSync(elsewhere, { mode: 0o700 });
+    rmSync(renderDir, { recursive: true, force: true });
+    symlinkSync(elsewhere, renderDir);
+    const repo = linked.repo(0);
+    const id = await linked.start(repo);
+    const cua = await linked.connector(repo);
+    const created = await cua.sequence(pages.url('/'));
+    expect(created.ok, 'the creation fails with its reason, never an invented success').toBe(false);
+    expect(readdirSync(elsewhere), 'no socket made through the link').toEqual([]);
+    expect((await linked.render()).browserTabs ?? 0).toBe(0);
+    expect(existsSync(linked.daemonSocket(id)), 'the session’s cold listener stays').toBe(true);
+    cua.close();
+  } finally {
+    await linked.stop();
+    await pages.close();
+  }
+});
+// P5 O17 M8 end

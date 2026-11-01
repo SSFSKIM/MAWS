@@ -21,10 +21,10 @@
 // no capture window, `mawsd`'s welcome lists `machine.render`.
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
@@ -38,9 +38,17 @@ import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { ipcError } from '@shared/ipc/errors';
 import { startFakeArtifactsEndpoint, type FakeArtifactsEndpoint } from '../test/support/fake-artifacts-endpoint';
-import { startFakeFront, type FakeFront, type FakeFrontClient } from '../test/support/fake-front';
+import { startFakeFront, type FakeFront, type FakeFrontClient, type FrontHandler } from '../test/support/fake-front';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { launchEnvironment } from './support/scratch-env';
+// P5 O17 M8: pass 3
+import type { AppSessionId } from '@shared/graph/ids';
+import { cuaSocketPath } from '@shared/browser/cua-socket';
+import { renderCuaSocketDir } from '@shared/daemon/files';
+import { machineName } from '@shared/machine/identity';
+import type { BrowserEngineRequest, BrowserEngineResult, EngineInventory } from '@shared/ipc/schema/browser-engine';
+import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
+import { answered, BEFORE_M7, BUTTON, ENGINE_HOST_BROWSER_WORK, linuxReason, SCREENCAST, startHeadlessScene, startPages } from './support/headless-browser';
 
 const ARTIFACT = randomUUID();
 const REVISION = 1;
@@ -79,7 +87,7 @@ test.afterEach(async ({}, testInfo) => {
   rmSync(ending.profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-async function startScene(): Promise<Scene> {
+async function startScene(more: Record<string, FrontHandler> = {}): Promise<Scene> {
   const profile = mkdtempSync('/tmp/mrh-');
   const fixtures = join(profile, 'fixtures');
   mkdirSync(fixtures);
@@ -109,6 +117,7 @@ async function startScene(): Promise<Scene> {
       answers.set(id, answer);
       waiting.get(id)?.(answer);
     },
+    ...more, // P5 O17 M8: pass 3's tab engine wire
   });
   const endpoint = await startFakeArtifactsEndpoint(front.paths.artifactsSocket, content);
 
@@ -368,5 +377,282 @@ test('part (b): on the daemon shape, with the app quit, a second client’s libr
   } finally {
     for (const each of launches.reverse()) await each.cleanup().catch((error: unknown) => console.error(error));
     rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// ---- part (c): pass 3, the render host as the agent's tab engine (P5 O17 M8) --------------------------------------------
+//
+// docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8 scene 7 and acceptance 7.2's real half: the built app started as
+// the render host against the fake `mawsd`, now a tab engine (its hello lists `browser.engine`). The test is `mawsd` and
+// every client of it at once: it prepares a session over `browserEngine.request`, connects to the session's socket as
+// `mawsd`'s relay (its process is the fake front's, the machine.sock link's peer the engine admits), drives cua's
+// creation sequence with the fake cua host, holds the fence (`browserEngine.work`), reads the inventory pushes, and is
+// the viewer of `DaemonServices.browser`'s engine half: it opens subscriptions, takes `browserEngine.frame`s and
+// acknowledges them. Through the real Electron it checks what M4 and M6 left to the real run: a tab and an adopted
+// `window.open` popup are offscreen and no window is shown; the frame subscription (`beginFrameSubscription` with
+// `invalidate()`) gives an offscreen view a first frame and a still page nothing more after it; a person's wheel scrolls
+// in the DOM's sense; keys reach an offscreen view no window focuses; a click lands through presence's gate. Then the
+// stream across a cua screenshot, a detach and a re-attach, cua's host receiving no frame of the viewer's, and a 60 Hz
+// page read by a 2 fps viewer for 60 s with the producer's counters and main's heap flat after the warm-up. It needs no
+// engine host, so no M7: it runs on the mini and, with MAWS_E2E_LINUX_HEADLESS=1 under xvfb, on the Linux VM (the uid
+// is the render host's socket boundary there), as `-g "pass 3"`.
+
+const P3 = 'pass3-session-a' as AppSessionId;
+type PersonInput = Extract<BrowserEngineRequest['operation'], { op: 'input' }>['event'];
+// the render host's e2e seam (src/render-host/root.ts): the tab engine's sessions and the producer's counters
+interface EngineFacts {
+  sessions: Record<string, { tabs: number; creating: number; held: string }>;
+  screencast: { tabs: number; images: number; viewers: { id: string; tabId: string; control: boolean; inFlight: number; encoding: number; waiting: number }[] };
+}
+const P3_IDENTITY = { ref: 'e2e-render-host-pass3', name: 'pass3', project: { key: 'e2e', name: 'e2e', smnsId: null } };
+
+interface EngineWire {
+  answers: Map<string, BrowserEngineResult>;
+  work: { appSessionId: string; held: boolean }[];
+  states: EngineInventory[];
+  frames: { at: number; subscriptionId: string; frame: { tabId: string; seq: number; width: number; height: number; viewport: { width: number; height: number }; jpegBase64: string } }[];
+  ended: { subscriptionId: string; reason: string }[];
+  onFrame: ((frame: EngineWire['frames'][number]) => void) | null;
+}
+function engineWire(): { wire: EngineWire; handlers: Record<string, FrontHandler> } {
+  const wire: EngineWire = { answers: new Map(), work: [], states: [], frames: [], ended: [], onFrame: null };
+  return {
+    wire,
+    handlers: {
+      'machine.identity': () => P3_IDENTITY, // the relay's confirmation on this link (§H)
+      'browserEngine.answer': (input) => void wire.answers.set((input as { id: string }).id, (input as { result: BrowserEngineResult }).result),
+      'browserEngine.work': (input) => void wire.work.push(input as EngineWire['work'][number]), // the fence held at once
+      'browserEngine.state': (input) => void wire.states.push((input as { inventory: EngineInventory }).inventory),
+      'browserEngine.frame': (input) => {
+        const frame = { at: Date.now(), ...(input as Omit<EngineWire['frames'][number], 'at'>) };
+        wire.frames.push(frame);
+        wire.onFrame?.(frame);
+      },
+      'browserEngine.ended': (input) => void wire.ended.push(input as EngineWire['ended'][number]),
+    },
+  };
+}
+
+test('pass 3: the render host as the agent’s tab engine against a fake mawsd: offscreen tabs and popups, the real frame subscription, a person’s input, a stream across cua’s screenshot and re-attach, and a 2 fps viewer of a 60 Hz page for 60 s', async () => {
+  test.setTimeout(300_000);
+  const { wire, handlers } = engineWire();
+  scene = await startScene(handlers);
+  const { app, client, profile } = scene;
+  const pages = await startPages();
+  let host = null as FakeHost | null;
+  let asked = 0;
+  const send = (operation: BrowserEngineRequest['operation']) => {
+    const id = `p3-${++asked}`;
+    client.send('browserEngine.request', { id, appSessionId: P3, operation });
+    return id;
+  };
+  const ask = async (operation: BrowserEngineRequest['operation']) => {
+    const id = send(operation);
+    await expect.poll(() => wire.answers.has(id), { timeout: 30_000, message: `the answer to ${operation.op}` }).toBe(true);
+    return wire.answers.get(id)!;
+  };
+  const ok = async (operation: BrowserEngineRequest['operation']) => expect(await ask(operation), operation.op).toEqual({ ok: true, value: operation.op === 'inventory' ? expect.anything() : null });
+  // a page's own reading, in the render host's main (never through cua's lease, which a person's input may hold)
+  const inPage = <T>(urlPart: string, expression: string) =>
+    app.evaluate(async ({ webContents }, [part, code]) => {
+      const contents = webContents.getAllWebContents().find((each) => each.getURL().includes(part));
+      return contents ? ((await contents.executeJavaScript(code, true)) as unknown) : null;
+    }, [urlPart, expression] as const) as Promise<T | null>;
+  const tabIdOf = (path: string) => wire.states.at(-1)?.tabs.find((tab) => tab.url === pages.url(path))?.tabId ?? null;
+  const inspect = () => app.evaluate(() => (globalThis as unknown as { __maws_tab_engine: { inspect(): EngineFacts } }).__maws_tab_engine.inspect());
+  const lines: string[] = [];
+  try {
+    await test.step('prepare: the session’s socket listens and admits mawsd’s relay; cua’s creation sequence makes an offscreen tab behind the fence', async () => {
+      await ok({ op: 'prepare' });
+      const path = cuaSocketPath(renderCuaSocketDir(profile, tmpdir()), P3)!;
+      host = await connectFakeHost(path);
+      expect(host.hello).toMatchObject({ extensionId: 'maws', extensionInstanceId: `maws:${P3}`, protocolVersion: 1, profileName: 'MAWS' });
+      expect(await host.request('tabs.query')).toEqual([]);
+      expect(await host.request('windows.query')).toEqual([{ id: 1, focused: true, type: 'normal' }]);
+      expect(await host.request('windows.create', { url: 'about:blank', focused: false })).toEqual({ id: 1 });
+      const tab = await host.request<{ id: number }>('tabs.create', { url: pages.url('/still'), group: { key: 's', title: 'cua' } });
+      expect(typeof tab.id).toBe('number');
+      expect(wire.work, 'the fence held before the first tab').toEqual([{ appSessionId: P3, held: true }]);
+      await expect.poll(() => tabIdOf('/still'), { message: 'the inventory pushed with the tab' }).not.toBeNull();
+      const facts = await app.evaluate(({ BaseWindow, webContents }, url) => {
+        const contents = webContents.getAllWebContents().find((each) => each.getURL() === url);
+        return { offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
+      }, pages.url('/still'));
+      expect(facts, 'the tab renders offscreen and no window is shown').toEqual({ offscreen: true, shown: 0 });
+      expect(await inPage<number[]>('/still', '[innerWidth, innerHeight]'), 'the agent’s viewport').toEqual([1280, 800]);
+    });
+
+    await test.step('the frame subscription gives an offscreen view a first frame, and a still page nothing more after its acknowledgement', async () => {
+      const tabId = tabIdOf('/still')!;
+      await ok({ op: 'open', subscriptionId: 'still', tabId, control: false });
+      await expect.poll(() => wire.frames.filter((f) => f.subscriptionId === 'still').length, { timeout: 10_000, message: 'a first frame (invalidate() on the offscreen view)' }).toBe(1);
+      const first = wire.frames.find((f) => f.subscriptionId === 'still')!;
+      expect(first.frame).toMatchObject({ tabId, seq: 1, viewport: { width: 1280, height: 800 } });
+      const size = await app.evaluate(({ nativeImage }, base64) => nativeImage.createFromBuffer(Buffer.from(base64, 'base64')).getSize(), first.frame.jpegBase64);
+      expect(size, 'a JPEG of the frame’s own size, within 1280×800').toEqual({ width: first.frame.width, height: first.frame.height });
+      await ok({ op: 'ack', subscriptionId: 'still', seq: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(wire.frames.filter((f) => f.subscriptionId === 'still').length, 'a still page sends its latest image and nothing more').toBeLessThanOrEqual(2);
+      await ok({ op: 'close', subscriptionId: 'still' });
+    });
+
+    await test.step('a person’s input on a controlling subscription: a click through presence’s gate, the wheel in the DOM’s sense, keys and text into a view no window focuses', async () => {
+      const tab = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/input'), group: { key: 's', title: 'cua' } });
+      await expect.poll(() => tabIdOf('/input')).not.toBeNull();
+      const tabId = tabIdOf('/input')!;
+      await ok({ op: 'open', subscriptionId: 'person', tabId, control: true });
+      await expect.poll(() => wire.frames.some((f) => f.subscriptionId === 'person'), { timeout: 10_000, message: 'a frame before any pointer input' }).toBe(true);
+      let seq = 0;
+      const input = (event: PersonInput) => ok({ op: 'input', subscriptionId: 'person', seq: ++seq, event });
+      const centre = { x: BUTTON.x + BUTTON.width / 2, y: BUTTON.y + BUTTON.height / 2 };
+      for (const type of ['down', 'up'] as const) await input({ kind: 'pointer', type, ...centre, button: 'left', buttons: type === 'down' ? 1 : 0, clickCount: 1, modifiers: [] });
+      await expect.poll(() => inPage<string>('/input', 'document.querySelector("#state").textContent'), { message: 'the click landed' }).toBe('clicked');
+      await expect.poll(() => wire.states.at(-1)?.tabs.find((each) => each.tabId === tabId)?.control, { message: 'the tab is the person’s while they act' }).toBe('human');
+      await input({ kind: 'wheel', x: 300, y: 300, deltaX: 0, deltaY: 400, modifiers: [] });
+      await expect.poll(() => inPage<number>('/input', 'scrollY'), { message: 'a positive deltaY scrolls down (the DOM’s sense)' }).toBeGreaterThan(0);
+      expect((await inPage<number[]>('/input', '__wheel'))!.every((delta) => delta > 0), 'the page heard a downward wheel').toBe(true);
+      await input({ kind: 'key', type: 'down', key: 'a', code: 'KeyA', repeat: false, modifiers: [] });
+      await input({ kind: 'key', type: 'up', key: 'a', code: 'KeyA', repeat: false, modifiers: [] });
+      await expect.poll(() => inPage<string[]>('/input', '__keys'), { message: 'a key reaches the unfocused offscreen view' }).toContain('a');
+      await input({ kind: 'text', text: 'hello' });
+      await expect.poll(() => inPage<string>('/input', 'document.querySelector("#field").value'), { message: 'text through insertText' }).toContain('hello');
+      await ok({ op: 'close', subscriptionId: 'person' });
+      await new Promise((resolve) => setTimeout(resolve, 3_500)); // the person's hand-back: the agent acts again 3 s after their last input
+      await host!.request('tabs.remove', { tabId: tab.id });
+    });
+
+    await test.step('an adopted window.open popup is offscreen too, and no window is shown', async () => {
+      const opener = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/popup'), group: { key: 's', title: 'cua' } });
+      await expect.poll(() => tabIdOf('/popup')).not.toBeNull();
+      await inPage('/popup', `window.open(${JSON.stringify(pages.url('/child'))}, '_blank'); true`); // with a user gesture
+      await expect.poll(() => tabIdOf('/child'), { message: 'the popup adopted as a tab of the session' }).not.toBeNull();
+      const facts = await app.evaluate(({ BaseWindow, webContents }, url) => {
+        const contents = webContents.getAllWebContents().find((each) => each.getURL() === url);
+        return { offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
+      }, pages.url('/child'));
+      expect(facts, 'the adopted popup renders offscreen and no window is shown').toEqual({ offscreen: true, shown: 0 });
+      expect(await inPage<number[]>('/child', '[innerWidth, innerHeight]'), 'the popup at the agent’s viewport').toEqual([1280, 800]);
+      const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
+      await host!.request('tabs.remove', { tabId: child.id });
+      await host!.request('tabs.remove', { tabId: opener.id });
+    });
+
+    await test.step('a 60 Hz page read by a 2 fps viewer for 60 s, across cua’s screenshot, a detach and a re-attach: the page keeps its rate, cua hears no frame of the viewer’s, the counters and main’s heap stay flat', async () => {
+      const tab = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/anim'), group: { key: 's', title: 'cua' } });
+      await expect.poll(() => tabIdOf('/anim')).not.toBeNull();
+      const tabId = tabIdOf('/anim')!;
+      const rate = async (ms: number) => {
+        const before = (await inPage<number>('/anim', '__frames'))!;
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        return (((await inPage<number>('/anim', '__frames'))! - before) * 1_000) / ms;
+      };
+      const unsubscribed = await rate(3_000);
+      // the viewer: each frame acknowledged 500 ms after it came
+      wire.onFrame = (frame) => {
+        if (frame.subscriptionId === 'anim') setTimeout(() => send({ op: 'ack', subscriptionId: 'anim', seq: frame.frame.seq }), 500);
+      };
+      await ok({ op: 'open', subscriptionId: 'anim', tabId, control: false });
+      const frames = () => wire.frames.filter((f) => f.subscriptionId === 'anim');
+      const samples: { atS: number; frames: number; heapKiB: number; images: number; inFlight: number; waiting: number }[] = [];
+      const sample = async (atS: number) => {
+        const facts = await inspect();
+        const heapKiB = await app.evaluate(() => Math.round(process.memoryUsage().heapUsed / 1024));
+        const viewers = facts.screencast.viewers.filter((viewer) => viewer.id === 'anim');
+        samples.push({ atS, frames: frames().length, heapKiB, images: facts.screencast.images, inFlight: viewers.reduce((n, v) => n + v.inFlight, 0), waiting: viewers.reduce((n, v) => n + v.waiting, 0) });
+      };
+      const started = Date.now();
+      const at = (s: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, started + s * 1_000 - Date.now())));
+      // cua's own work on the tab while the viewer reads it: a screenshot through the lease, then a detach and a re-attach
+      await host!.request('debugger.attach', { tabId: tab.id });
+      const shot = await host!.request<{ data: string }>('debugger.sendCommand', { debuggee: { tabId: tab.id }, method: 'Page.captureScreenshot', params: { format: 'png' }, timeoutMs: 10_000 });
+      expect(Buffer.from(shot.data, 'base64').subarray(1, 4).toString('latin1'), 'cua’s screenshot').toBe('PNG');
+      await host!.request('debugger.detach', { tabId: tab.id });
+      await host!.request('debugger.attach', { tabId: tab.id });
+      let subscribed = 0;
+      for (const s of [10, 20, 30, 40, 50, 60]) {
+        await at(s);
+        await sample(s);
+        if (s === 30) subscribed = await rate(3_000);
+      }
+      await host!.request('debugger.detach', { tabId: tab.id });
+      wire.onFrame = null;
+      await ok({ op: 'close', subscriptionId: 'anim' });
+
+      const warm = samples[0]!;
+      const last = samples.at(-1)!;
+      const perSecond = (last.frames - warm.frames) / (last.atS - warm.atS);
+      lines.push(
+        `the page's rAF: ${unsubscribed.toFixed(1)} Hz unsubscribed, ${subscribed.toFixed(1)} Hz under the 2 fps viewer`,
+        `frames to the viewer: ${frames().length} in about 60 s, ${perSecond.toFixed(2)} a second after the warm-up`,
+        `main's heap: ${samples.map((s) => `${s.atS}s ${s.heapKiB} KiB`).join(', ')}`,
+        `counters: ${samples.map((s) => `${s.atS}s images ${s.images} in flight ${s.inFlight} waiting ${s.waiting}`).join('; ')}`,
+      );
+      expect(subscribed, 'the subscription keeps the page’s own rate (within the noise of a 3 s reading)').toBeGreaterThanOrEqual(unsubscribed * 0.7);
+      expect(perSecond, 'the viewer’s pace, never the page’s: at most 2 a second, and some').toBeGreaterThan(0.5);
+      expect(perSecond).toBeLessThanOrEqual(2.2);
+      expect(samples.every((s) => s.images <= 1 && s.inFlight <= 1 && s.waiting <= 1), 'one newest image and one frame in flight, all through').toBe(true);
+      expect(last.heapKiB - warm.heapKiB, `main’s heap after the warm-up (${warm.heapKiB} → ${last.heapKiB} KiB)`).toBeLessThan(16 * 1024);
+      const cuaFrames = host!.notifications.filter((n) => n.method === 'debugger.event' && (n.params as { method?: string }).method === 'Page.screencastFrame');
+      expect(cuaFrames, 'cua’s host hears no frame it did not ask for').toEqual([]);
+      expect(wire.ended, 'no subscription ended on its own').toEqual([]);
+      await host!.request('tabs.remove', { tabId: tab.id });
+    });
+
+    await test.step('the last tab’s close reports the zero, and drop answers once the session is gone here', async () => {
+      for (const left of await host!.request<{ id: number }[]>('tabs.query')) await host!.request('tabs.remove', { tabId: left.id }); // the still page's
+      await expect.poll(() => wire.work.at(-1), { message: 'the session’s browser work back to zero' }).toEqual({ appSessionId: P3, held: false });
+      await ok({ op: 'drop' });
+      await host!.closed;
+      expect(await inspect()).toMatchObject({ sessions: {}, screencast: { tabs: 0, images: 0, viewers: [] } });
+    });
+    for (const line of lines) console.log(`[pass 3] ${line}`);
+    test.info().annotations.push({ type: 'pass 3', description: lines.join('\n') });
+  } finally {
+    await host?.close().catch(() => {});
+    await pages.close();
+  }
+});
+
+// ---- part (c), on Linux: the route's reading, and pass 3 through it under the e2e switch (P5 O17 M8) ------------------
+//
+// M8's Decisions: on Linux the route is `none` with §I's Linux reason until cua's owner ships a Linux peer check (R6), and
+// the e2e-only switch MAWS_E2E_LINUX_HEADLESS=1 (read by `mawsd` under MAWS_E2E=1 alone) lets it reach `cold` for the
+// fixture connector, never for real cua. Both read a profile's `mawsd` with no app; the render runtime is installed on
+// the VM first (`mawsd render install`, Concrete Steps).
+
+test('pass 3, Linux: without the switch the browser reads the Linux reason and nothing listens for the session', async () => {
+  test.skip(process.platform !== 'linux', 'the Linux route (the VM)');
+  const headless = await startHeadlessScene({ env: { MAWS_E2E_LINUX_HEADLESS: '0' } });
+  try {
+    const id = await headless.start(headless.repo(0));
+    expect((await headless.capabilities(id)).browser).toEqual({ available: false, reason: linuxReason(machineName(process.env, hostname())) });
+    await expect.poll(() => headless.report(headless.repo(0))?.refused ?? 0, { timeout: 15_000, message: 'cua’s host finds nothing listening' }).toBeGreaterThan(1);
+    expect(existsSync(headless.daemonSocket(id)), 'no listener on Linux (D5)').toBe(false);
+  } finally {
+    await headless.stop();
+  }
+});
+
+test('pass 3, Linux: under the switch the fixture connector’s creation sequence runs through the route, the render host starting at its first real primitive', async () => {
+  test.skip(process.platform !== 'linux', 'the Linux route (the VM)');
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  const pages = await startPages();
+  const headless = await startHeadlessScene({ env: { MAWS_E2E_LINUX_HEADLESS: '1' } });
+  try {
+    const id = await headless.start(headless.repo(0));
+    expect((await headless.capabilities(id)).browser).toEqual(SCREENCAST);
+    const connector = await headless.connector(headless.repo(0));
+    await expect.poll(() => headless.report(headless.repo(0))?.hellos ?? 0, { timeout: 15_000, message: 'the broker greets cua' }).toBeGreaterThan(0);
+    expect(await answered('tabs.query', connector.call('tabs.query'))).toEqual([]);
+    expect((await headless.render()).starts).toBe(0);
+    const created = await answered('the creation sequence', connector.sequence(pages.url('/')));
+    expect(created.screenshotBytes).toBeGreaterThan(0);
+    expect(await headless.render()).toMatchObject({ starts: 1, browserSessions: 1, browserTabs: 1 });
+    await answered('tabs.remove', connector.call('tabs.remove', { tabId: created.tabId }));
+    await expect.poll(async () => (await headless.render()).browserTabs).toBe(0);
+    connector.close();
+  } finally {
+    await headless.stop();
+    await pages.close();
   }
 });
