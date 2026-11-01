@@ -555,7 +555,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await test.step('M4: "+ Session" on B in a new worktree with a dropped file: the file goes up under the worktree, then one message names it', async () => {
       const tab = await newChat(again, A_PROJECT);
       await chooseMachine(again, B_NAME);
-      await again.locator('[data-project-row]').getByRole('checkbox', { name: 'Worktree' }).check();
+      // the box shows the intent's location, so it holds checked once main's patch of the intent is back
+      const worktreeBox = again.locator('[data-project-row]').getByRole('checkbox', { name: 'Worktree' });
+      await worktreeBox.click();
+      await expect(worktreeBox).toBeChecked({ timeout: 30_000 });
       type Intents = { intents: { appSessionId: string; location: { kind: string; name?: string } | null }[] };
       let name: string | undefined;
       await expect
