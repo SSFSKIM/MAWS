@@ -23,7 +23,7 @@
 | `machine.artifacts`, `machine.render` | `mawsd` welcome capabilities | O5 M2, M4 | main composes the scheme proxy and drops its render code only when listed |
 | `host.render`, `host.attachment.render` | engine-host welcome capability and attachment signal | O5 M4 | O16 (re-homes the welcome and `host.attachment`) |
 | `render.*` | wire namespace | O5 M3 | the render host and `mawsd` |
-| `artifacts.export` retagged `machine` (grade `view` kept) | command | O5 M4 | O4's delivery (calls `RenderService.exportForLibrary` once O5 lands), O7 M5's offer rows |
+| `artifacts.export` retagged `machine` (grade `view` kept) | command | O5 M4 | O4's delivery, O7 M5a's offer rows; `delivery.send`'s retag to `machine` did not land with O5 and is O7 M5c's, behind the welcome capability `machine.delivery` (P5 Decision Log 195) |
 | `daemon.e2eRender` | additive e2e command | O5 M4 | e2e only |
 | `session.capabilities`, `session.capabilitiesChanged` | new schema keyed by tool name | O5 M5 | O4 adds keys; O7 M5 draws from it |
 | `host.holder` | capability on the engine host's welcome and on the app's and `mawsd`'s hellos | O16 M2, M3 | `mawsd`'s detached transport |
@@ -136,6 +136,13 @@
 | `startTabEngine`, `HEADLESS_WINDOW` | `src/render-host/tab-engine.ts` | O17 M4 | O17 M5, M8 |
 | `OffscreenViews` | `src/render-host/offscreen-views.ts` | O17 M4 | O17 M5, M8 |
 | `RenderHostDeps.browser` | `src/render-host/host.ts` | O17 M4 | O17 M5 |
+| `prepare.parent` (the session's parent, from `mawsd`'s index; a row in `address-paths.json`) | `src/shared/ipc/schema/browser-engine.ts` | O17 M5 | the render host's tab engine |
+| `CuaSockets.incarnationChanged(appSessionId, pid)` (an exit is a new engine incarnation: another pid, or the same pid with another start) | `src/mawsd/cua-sockets.ts` | O17 M5 | O17 M8 |
+| `OfferRow.kind` `stream` (a stream row: a `streamOpen` with no `op`, authorized at the row's grade and rechecked at `caps` refresh, record change and relink; `artifacts.fetch`, `documents.open`) | RL2 offer table (`src/endpoint/offers.ts`, `authorize.ts`, `apps/org-protocol/src/messages.ts`) | O7 M5b | O17 M9 (the screencast row; a controlling open is `control.op` beside it) |
+| `STREAM_REFUSALS`' `read-only`, behind `rl2.read-open`; `browser.screencast` and `rl2.browser-screencast` reserved by name | RL2 refusal word and capabilities (`apps/org-protocol/src/messages.ts`) | O7 M5b | O17 M9 |
+| `BrowserRefused`, `BrowserEndReason` (with `input_overflow`), `BrowserRefusalReason` (`unavailable`, `viewers`, `invalid`, `read_only`, `closed`), `BrowserInputSchema`, `BrowserSeqSchema`, `BrowserFrameMetaSchema`, `JPEG_BASE64_MAX`, `BROWSER_MODIFIERS`, `readBrowserInput` | `src/shared/browser/screencast.ts` | O17 M6 | O17 M8 and M9 (M9 maps the feed's reasons to RL2's words) |
+| `startScreencast`, `Screencast`, `ScreencastDeps`, `ProducedFrame`, `EncodedFrame`, `contentsFrameSource`, `encodeJpeg`, `SCREENCAST_*` | `src/main/browser/screencast.ts` | O17 M6 | O17 M8 and M9 |
+| `createBrowserFeed`, `BrowserFeedService`, `BrowserFeedOptions`; `DaemonServices.browser`; `FrontBrowser.frame`, `.ended` and `.gone`; `TabEngineDeps.frames` | `src/mawsd/browser-feed.ts`, `src/mawsd/front.ts`, the tab engine | O17 M6 | O17 M8 and M9 |
 
 ## Shared files and who goes first
 
@@ -187,6 +194,8 @@
 | `src/main/machines/link-surface.ts` | O17 M3 (`host.browserIdle` and the `browserEngine` namespace on the client side), O16 (`daemon.engineHandover` on the client side) | additions beside additions; whoever lands second rebases its entries |
 | `src/main/browser/` | O7 M3 (landed: the allow-list for another machine, `browser.tabs.list`, `open` and `select`; address-keyed remote sessions translated at every exit; `BrowserTab.forward`), then O17 | O17 rebases onto O7 M3's shape |
 | `src/mawsd/daemon.ts` | O7 M3 (landed: one line relaying the pty host's state to the endpoint as `pty.hostState`), O16, O17 | additions beside additions; whoever lands second rebases |
+| `src/mawsd/engine-requests.ts` | O5 (landing 1), O16 (adoption and handover across a park), O7 M5b (an open endpoint document channel is a park need) | separate spots; the later lander keeps every park need |
+| `src/mawsd/endpoint-seam.test.ts` (the `DaemonServices` and `EndpointServices` type pin) | O17 M6 (checks `Omit<DaemonServices, 'browser'>` until O17 M9 restores full equality), O7 M5 (`EndpointServices.clientPort` and `documents`) | the later lander keeps the pin exact; O17 M9 restores full equality |
 
 ## Start order
 
@@ -215,3 +224,6 @@
 - 2026-11-01, p5-desk-track-owner: O12 M11's MAWS half (PR #431): its names as built (the proof file's path and module, the endpoint's `Spawner`, `QueryBinding.launchedBy`, `RecordSource.handedOff`, `handed-off.json`) and the endpoint files it shares with O7.
 - 2026-11-01, the architect: O17 M1 to M3's names (the cold broker, the event scope, the browser-work hold and the front's selection) and `src/main/machines/link-surface.ts` as a shared file of O16 and O17, at O5's close (P5 Decision Log 192).
 - 2026-11-01, the architect: O7 M3's names and two shared files (main's browser, `mawsd`'s daemon) at its landing (PR #433, P5 Decision Log 194), and O17 M4's names.
+- 2026-11-01, the architect: O17 M5's two names (`prepare.parent`, `CuaSockets.incarnationChanged`).
+- 2026-11-01, the architect: O7 M5's re-plan (PR #434) adds the read open's stream row and refusal word, which O17 M9 builds on, and a park need in `mawsd`'s engine requests; the `artifacts.export` row's consumers are corrected (`delivery.send`'s retag is O7 M5c's).
+- 2026-11-01, the architect: O17 M6's names (the screencast's shared schema, main's producer, `mawsd`'s feed) and the endpoint seam's type pin as a shared file.
