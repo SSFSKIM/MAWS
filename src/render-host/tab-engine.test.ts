@@ -777,7 +777,7 @@ describe('a viewer’s subscription', () => {
     expect((await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: true })).ok).toBe(true);
     expect(await t.op(A, { op: 'open', subscriptionId: 'v2', tabId: t.tabId, control: true })).toEqual({ ok: false, error: 'control_busy' });
     expect(await t.op(A, { op: 'input', subscriptionId: 'v1', seq: 1, event: { kind: 'pointer', type: 'down', x: 3, y: 4, button: 'left', buttons: 1, clickCount: 1, modifiers: [] } })).toEqual({ ok: true, value: null });
-    expect(newestPage().input).toEqual([{ type: 'mouseDown', x: 3, y: 4, button: 'left', clickCount: 1, modifiers: [] }]);
+    expect(newestPage().input).toEqual([{ type: 'mouseDown', x: 3, y: 4, button: 'left', clickCount: 1, modifiers: ['leftbuttondown'] }]); // the held button rides the modifiers (panel-1 scalpel-4#1)
     expect(await t.op(B, { op: 'input', subscriptionId: 'v1', seq: 2, event: { kind: 'blur' } }), 'bound to its session').toMatchObject({ ok: false });
   });
 
