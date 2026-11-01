@@ -378,7 +378,7 @@ describe('the drop’s cleanup', () => {
     expect(existsSync(t.socketOf(A)), 'no socket listens for the refused session').toBe(false);
   });
 
-  it('makes a drop sent while a prepare cleans the partition wait for that prepare, then tear down what it made', async () => {
+  it('makes a drop sent while a prepare cleans the partition wait for that clear, cancelling the prepare, then answer', async () => {
     let release!: () => void;
     const retry = new Promise<void>((resolve) => (release = resolve));
     let storage = 0;
@@ -395,9 +395,51 @@ describe('the drop’s cleanup', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect([t.answered('p2'), t.answered('d2')]).toEqual([undefined, undefined]);
     release();
-    await expect.poll(() => [t.answered('p2'), t.answered('d2')]).toEqual([{ ok: true, value: null }, { ok: true, value: null }]);
-    expect(existsSync(t.socketOf(A)), 'the prepared socket closed by the drop after it').toBe(false);
+    await expect.poll(() => [t.answered('p2'), t.answered('d2')]).toEqual([{ ok: false, error: 'the headless browser on mini dropped this session while preparing it' }, { ok: true, value: null }]);
+    expect(existsSync(t.socketOf(A)), 'the cancelled prepare made no socket').toBe(false);
     expect(t.engine.inspect().sessions).toEqual({});
+  });
+
+  it('cancels a prepare stuck on a live link’s missing answer at a drop, which answers without it, the socket closed', async () => {
+    let confirm!: (ok: boolean) => void;
+    const t = stand({ identity: () => new Promise<boolean>((resolve) => (confirm = resolve)) });
+    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    await expect.poll(() => existsSync(t.socketOf(A))).toBe(true);
+    t.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
+    const answered = (id: string) => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === id)?.input.result;
+    await expect.poll(() => [answered('p1'), answered('d1')]).toEqual([{ ok: false, error: 'the headless browser on mini dropped this session while preparing it' }, { ok: true, value: null }]);
+    expect(existsSync(t.socketOf(A))).toBe(false);
+    expect(t.engine.inspect().sessions).toEqual({});
+    confirm(true); // the late answer does nothing
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(t.calls.filter((c) => c.name === 'browserEngine.answer')).toHaveLength(2);
+    expect(existsSync(t.socketOf(A))).toBe(false);
+  });
+
+  it('cancels a prepare still queued behind a drop when another drop follows it', async () => {
+    let release!: () => void;
+    const storage = new Promise<void>((resolve) => (release = resolve));
+    const t = await droppable((what) => (what === 'storage' ? storage : Promise.resolve()));
+    t.send('d1', 'drop');
+    await expect.poll(() => t.calls.some((c) => c.name === 'clear storage')).toBe(true);
+    t.send('p2', 'prepare');
+    t.send('d2', 'drop');
+    release();
+    await expect.poll(() => [t.answered('d1'), t.answered('p2'), t.answered('d2')]).toEqual([
+      { ok: true, value: null },
+      { ok: false, error: 'the headless browser on mini dropped this session while preparing it' },
+      { ok: true, value: null },
+    ]);
+    expect(existsSync(t.socketOf(A))).toBe(false);
+  });
+
+  it('cancels a running prepare at dispose', async () => {
+    const t = stand({ identity: () => new Promise<boolean>(() => {}) });
+    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    await expect.poll(() => existsSync(t.socketOf(A))).toBe(true);
+    t.engine.dispose();
+    await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer')?.input.result).toEqual({ ok: false, error: 'the headless browser on mini is ending' });
+    expect(existsSync(t.socketOf(A))).toBe(false);
   });
 
   it('serves a prepare once it has cleaned the partition its last drop left uncleared', async () => {

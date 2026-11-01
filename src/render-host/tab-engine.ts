@@ -109,6 +109,20 @@ interface Served {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+// The promise, or the signal's reason once it is aborted first (the promise's later outcome then goes nowhere)
+function cancellable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason as Error);
+  return new Promise<T>((resolve, reject) => {
+    const cancelled = () => reject(signal.reason as Error);
+    signal.addEventListener('abort', cancelled, { once: true });
+    const done = () => signal.removeEventListener('abort', cancelled);
+    promise.then(
+      (value) => (done(), resolve(value)),
+      (error: unknown) => (done(), reject(error as Error)),
+    );
+  });
+}
 const clip = (text: string, max: number) => (text.length <= max ? text : text.slice(0, max));
 
 export function startTabEngine(deps: TabEngineDeps): TabEngine {
@@ -116,6 +130,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   const caps = deps.caps ?? HEADLESS_TABS;
   const served = new Map<AppSessionId, Served>();
   const chains = new Map<AppSessionId, Promise<unknown>>(); // each session's prepares and drops, one at a time (`serially`)
+  const cancels = new Map<AppSessionId, AbortController>(); // the session's prepares queued or running, which a drop cancels
   const opened = new Map<string, Session>(); // every partition opened, cleared at its session's drop
   const uncleared = new Set<string>(); // partitions a drop could not clear: the session's next prepare cleans them first
 
@@ -302,9 +317,12 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   // ---- the operations ----------------------------------------------------------------------------------------------
 
   // A session's prepares and drops run one at a time, each once the one before has settled, its failure included: a
-  // drop sent while a prepare runs tears down what that prepare made, a second drop finds nothing served and answers at
-  // once, and a prepare finds the partition a drop left uncleared. Each step still checks, after each await, that it
-  // serves the session before making anything for it (the engine may be disposed meanwhile).
+  // drop tears down what a prepare before it made, a second drop finds nothing served and answers at once, and a
+  // prepare finds the partition a drop left uncleared. A drop first cancels every prepare of the session queued or
+  // running before it (as dispose cancels them all): a prepare's waits on the link (the lineage, the socket's listen, the
+  // relay's confirmation) have no deadline of their own and end at once, so a drop is bounded by the prepare's own
+  // teardown and its partition's clear, never by a peer's answer; a late answer to a cancelled prepare does nothing. Each step still checks, after each await, that
+  // it serves the session before making anything for it.
   function serially(appSessionId: AppSessionId, step: () => Promise<null>): Promise<null> {
     const run = (chains.get(appSessionId) ?? Promise.resolve()).then(step);
     const settled = run.catch(() => {});
@@ -313,19 +331,27 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return run;
   }
 
-  async function prepare(appSessionId: AppSessionId): Promise<null> {
+  function cancelPrepares(appSessionId: AppSessionId, why: string): void {
+    cancels.get(appSessionId)?.abort(new Error(why));
+    cancels.delete(appSessionId);
+  }
+
+  async function prepare(appSessionId: AppSessionId, signal: AbortSignal): Promise<null> {
+    signal.throwIfAborted();
     if (served.has(appSessionId)) return null;
     const session: Served = { parent: null, creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
     const serves = () => {
+      signal.throwIfAborted();
       if (served.get(appSessionId) !== session) throw new Error(`the headless browser on ${machine} no longer serves this session`);
     };
     try {
+      // local work, the session's own cleanup, never cut short: a drop's clear must not overlap it
       const why = uncleared.has(headlessPartition(appSessionId)) ? await clearPartition(appSessionId) : null;
       if (why !== null) throw new Error(why);
       serves();
       if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
-      const [parent, , relay] = await Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]);
+      const [parent, , relay] = await cancellable(Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]), signal);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
       serves();
       session.parent = parent;
@@ -374,7 +400,17 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
 
   return {
     request({ id, appSessionId, operation }) {
-      const run = operation.op === 'inventory' ? Promise.resolve(inventory(appSessionId)) : serially(appSessionId, () => (operation.op === 'prepare' ? prepare : drop)(appSessionId));
+      let run: Promise<EngineInventory | null>;
+      if (operation.op === 'inventory') run = Promise.resolve(inventory(appSessionId));
+      else if (operation.op === 'drop') {
+        cancelPrepares(appSessionId, `the headless browser on ${machine} dropped this session while preparing it`);
+        run = serially(appSessionId, () => drop(appSessionId));
+      } else {
+        let cancel = cancels.get(appSessionId);
+        if (!cancel) cancels.set(appSessionId, (cancel = new AbortController()));
+        const { signal } = cancel;
+        run = serially(appSessionId, () => prepare(appSessionId, signal));
+      }
       run.then(
         (value) => {
           answer(id, { ok: true, value });
@@ -389,6 +425,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       ),
     }),
     dispose() {
+      for (const appSessionId of [...cancels.keys()]) cancelPrepares(appSessionId, `the headless browser on ${machine} is ending`);
       served.clear();
       dialogs.dispose();
       cua.dispose();
