@@ -26,10 +26,11 @@
 // starts beside it.
 //
 // `stop()` (the daemon's exit order, before the spine's stop ends the engine-host link): admission closes, every request
-// in the table is answered `ok: false` over the still-live link, then the host is ended. A request the seam answered
+// in the table is answered `ok: false` over the still-live link, then the host is ended (render.exit and SIGTERM
+// together, SIGKILL at the grace) and its exit awaited, bounded past the SIGKILL's settle. A request the seam answered
 // itself after handing it over (its answer deadline, or the stop) is remembered until the host exits, so the host's late
 // answer is taken (not refused as unknown) and an inspection export's file it names is removed: nobody will read it.
-import { spawn as spawnProcess, type ChildProcess } from 'node:child_process';
+import { spawn as spawnProcess, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -112,6 +113,7 @@ export const START_WATCHDOG_MS = 30_000;
 export const FAILURE_WINDOW_MS = 60_000;
 export const EXIT_GRACE_MS = 5_000;
 const DELIVERY_BOUND_MS = 2_000; // stop()'s wait for its refusals' answers from the engine host
+const STOP_MARGIN_MS = 1_000; // stop()'s wait past its SIGKILL's settle: the exit's way to the seam
 const RESTART_BACKOFF_MS = [500, 2_000, 5_000] as const; // @shared/host/host-supervisor's, which this chunk does not load
 
 type Kind = RenderRequest['kind'];
@@ -496,20 +498,26 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       if (deliveries.size > 0) await Promise.race([Promise.allSettled([...deliveries]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
       if (child === null) set('off');
       else {
-        // a host being ended for its start watchdog is not asked: it was sent SIGTERM, and is SIGKILLed at the grace
+        // A daemon stop is no quiet exit: render.exit and SIGTERM together, SIGKILL at the grace (a host being ended for
+        // its start watchdog is not asked: it was sent SIGTERM already). The wait covers the SIGKILL and the settle after
+        // it (a group's retirement reports its exit within KILL_SETTLE_MS of its SIGKILL), so mawsd never exits while
+        // the escalation is still pending: nothing would retire a detached group after it (KillMode=process).
         const going = child;
         const hungStart = retiring;
         const gone = new Promise<void>((resolve) => (exited = resolve));
         set('ending');
-        if (!hungStart) options.postExit();
-        const timer = setTimeout(() => {
-          if (child === going) {
-            log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: ${hungStart ? 'SIGKILL' : 'SIGTERM'}`);
-            going.kill(hungStart ? 'SIGKILL' : 'SIGTERM');
-          }
+        if (!hungStart) {
+          options.postExit();
+          going.kill('SIGTERM');
+        }
+        const kill = setTimeout(() => {
+          if (child !== going) return;
+          log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: SIGKILL`);
+          going.kill('SIGKILL');
         }, exitGraceMs);
-        await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, exitGraceMs + 1_000))]);
-        clearTimeout(timer);
+        let bound: ReturnType<typeof setTimeout> | null = null;
+        await Promise.race([gone, new Promise((resolve) => (bound = setTimeout(resolve, exitGraceMs + KILL_SETTLE_MS + STOP_MARGIN_MS)))]);
+        for (const timer of [kill, bound]) clear(timer);
       }
       // an undelivered or late inspection answer's file removal, whichever branch (bounded)
       if (removals.size > 0) await Promise.race([Promise.allSettled([...removals]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
@@ -635,11 +643,19 @@ export function renderCommand({ platform, packaged, execPath, appRoot, profile, 
 // line kept as its own reason for an exit. For a group (Linux: xvfb-run's shell, Electron and its helpers, the Xvfb), the
 // wrapper's exit is not the host's: the rest of the group is ended (SIGTERM, then SIGKILL at `groupGraceMs`) and the exit
 // is reported only once no member of the group remains, so the seam's escalation and its successor wait for all of it
-// (fix wave 1: a member ignoring SIGTERM outlived the wrapper).
+// (fix wave 1: a member ignoring SIGTERM outlived the wrapper). After the group's SIGKILL (the retirement's or the
+// seam's) the wait is bounded by KILL_SETTLE_MS: a group that still answers then holds only zombies nobody reaps, and
+// waiting on them would keep the seam's child forever (PR #428's panel).
 export const GROUP_POLL_MS = 50;
-export function spawnRenderHost(command: RenderCommand, log: (line: string) => void, { groupGraceMs = EXIT_GRACE_MS }: { groupGraceMs?: number } = {}): RenderChild {
+export const KILL_SETTLE_MS = 1_000;
+export interface SpawnRenderHostOptions {
+  groupGraceMs?: number;
+  spawn?: (command: string, args: string[], options: SpawnOptions) => ChildProcess; // tests: a fake wrapper
+  signal?: (pid: number, signal: NodeJS.Signals | 0) => void; // tests: a fake group (process.kill's contract)
+}
+export function spawnRenderHost(command: RenderCommand, log: (line: string) => void, { groupGraceMs = EXIT_GRACE_MS, spawn = spawnProcess, signal: sendSignal = (pid, sent) => void globalThis.process.kill(pid, sent) }: SpawnRenderHostOptions = {}): RenderChild {
   const group = command.group === true;
-  const process: ChildProcess = spawnProcess(command.command, command.args, { env: command.env, cwd: command.cwd, ...(command.argv0 !== undefined && { argv0: command.argv0 }), stdio: ['ignore', 'pipe', 'pipe'], detached: group });
+  const process: ChildProcess = spawn(command.command, command.args, { env: command.env, cwd: command.cwd, ...(command.argv0 !== undefined && { argv0: command.argv0 }), stdio: ['ignore', 'pipe', 'pipe'], detached: group });
   let last: string | null = null;
   const read = (stream: NodeJS.ReadableStream | null) => {
     if (!stream) return;
@@ -666,34 +682,45 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
   // Whether any member of the group is still there (EPERM: one is, under another identity)
   const groupAlive = (pgid: number): boolean => {
     try {
-      globalThis.process.kill(-pgid, 0);
+      sendSignal(-pgid, 0);
       return true;
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === 'EPERM';
     }
   };
-  const signalGroup = (pgid: number, signal: NodeJS.Signals) => {
+  const signalGroup = (pgid: number, sent: NodeJS.Signals) => {
     try {
-      globalThis.process.kill(-pgid, signal);
+      sendSignal(-pgid, sent);
     } catch {
       // the group is gone already
     }
   };
-  // The wrapper exited: the rest of its group retired before the exit is reported
+  let killedAt: number | null = null; // when the group was first sent SIGKILL, by the retirement or by the seam
+  const killGroup = (pgid: number) => {
+    killedAt ??= Date.now();
+    signalGroup(pgid, 'SIGKILL');
+  };
+  // The wrapper exited: the rest of its group retired before the exit is reported. Once the group has been sent SIGKILL
+  // nothing of it runs code; what still answers `kill(-pgid, 0)` KILL_SETTLE_MS later is a zombie nobody reaps (an
+  // adopter that does not reap), and the exit is reported regardless
   const retireGroup = (pgid: number, code: number | null, signal: string | null) => {
     if (!groupAlive(pgid)) return finish(code, signal);
-    signalGroup(pgid, 'SIGTERM');
+    if (killedAt === null) signalGroup(pgid, 'SIGTERM');
     const since = Date.now();
-    let killed = false;
     const poll = setInterval(() => {
       if (!groupAlive(pgid)) {
         clearInterval(poll);
         return finish(code, signal);
       }
-      if (!killed && Date.now() - since >= groupGraceMs) {
-        killed = true;
+      if (killedAt === null) {
+        if (Date.now() - since < groupGraceMs) return;
         log(`[render] the render host's process group outlived its wrapper by ${groupGraceMs / 1000} s: SIGKILL`);
-        signalGroup(pgid, 'SIGKILL');
+        return killGroup(pgid);
+      }
+      if (Date.now() - killedAt >= KILL_SETTLE_MS) {
+        clearInterval(poll);
+        log(`[render] the render host's process group still answered ${KILL_SETTLE_MS / 1000} s after SIGKILL (members nobody reaped): its exit reported`);
+        finish(code, signal);
       }
     }, GROUP_POLL_MS);
   };
@@ -706,7 +733,9 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
     pid: process.pid ?? null,
     kill: (signal) => {
       if (!group || process.pid === undefined) return void process.kill(signal);
-      signalGroup(process.pid, signal); // the group: Electron, its helpers, xvfb-run and its Xvfb
+      // the group: Electron, its helpers, xvfb-run and its Xvfb
+      if (signal === 'SIGKILL') killGroup(process.pid);
+      else signalGroup(process.pid, signal);
     },
     onExit(listener) {
       if (ended) return listener(ended.code, ended.signal);

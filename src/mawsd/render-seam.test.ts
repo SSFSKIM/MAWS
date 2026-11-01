@@ -5,6 +5,8 @@
 // never spawns; the host is ended after the quiet period and a request after that starts it again; its stop answers the
 // table and ends the host; the answers reach the asker in its own shape (an undelivered inspection's file removed, a
 // library refusal with its IPC error).
+import type { ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +19,7 @@ import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
 import { EXPORT_BUDGET_MS } from '../render/export';
 import { until } from '../../test/support/mawsd-scene';
-import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
+import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, GROUP_POLL_MS, KILL_SETTLE_MS, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
 
 const isAlive = (pid: number) => {
   try {
@@ -527,7 +529,7 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.posted[1]).toMatchObject({ kind: 'export', authors });
   });
 
-  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit, SIGTERM after the grace)', async () => {
+  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit and SIGTERM together, SIGKILL at the grace)', async () => {
     const s = scene();
     s.seam.capture(capture('cap-1'));
     s.seam.clientReady();
@@ -541,9 +543,12 @@ describe('the render seam (P5 O5 M4)', () => {
     ]);
     expect(((await library) as HostCommandError).ipcError).toMatchObject({ code: 'host_unavailable', message: 'the render service is restarting on mini' });
     expect(s.exits.count).toBe(1);
-    await vi.advanceTimersByTimeAsync(5_000);
+    expect(s.children[0]!.killed, 'a daemon stop is no quiet exit: SIGTERM with render.exit').toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_999);
     expect(s.children[0]!.killed).toEqual(['SIGTERM']);
-    s.children[0]!.exit(null, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.children[0]!.killed).toEqual(['SIGTERM', 'SIGKILL']);
+    s.children[0]!.exit(null, 'SIGKILL');
     await stopped;
     expect(s.seam.state()).toBe('off');
     s.seam.capture(capture('cap-3'));
@@ -565,6 +570,102 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.seam.capabilities().artifact_screenshot).toEqual({ available: false, reason: 'the engine host on mini predates the render service; it is replaced when idle' });
     s.renders.app = true; // its events reach the seam while an app is attached
     expect(s.seam.capabilities().artifact_screenshot).toEqual({ available: true });
+  });
+});
+
+// PR #428's panel (scalpel-3): a Linux render host's process group under fake time, through spawnRenderHost's injected
+// spawn and signal. The wrapper (xvfb-run's shell) exits at the group's SIGTERM; one member ignores it and dies only at
+// SIGKILL. `zombies` keeps the group answering `kill(-pgid, 0)` after the SIGKILL, as orphans no subreaper reaps do.
+describe('the render host’s process group (Linux) under the seam', () => {
+  const WRAPPER = 4242;
+  class FakeWrapper extends EventEmitter {
+    readonly pid = WRAPPER;
+    readonly stdout = null;
+    readonly stderr = null;
+  }
+  const esrch = () => Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+  const groupScene = ({ zombies = false } = {}) => {
+    const events: string[] = [];
+    const logs: string[] = [];
+    const wrappers: FakeWrapper[] = [];
+    const group = { members: 0, killed: false };
+    const signal = (pid: number, sent: NodeJS.Signals | 0) => {
+      expect(pid, 'every signal addresses the group').toBe(-WRAPPER);
+      if (sent === 0) {
+        if (group.members === 0 && !(zombies && group.killed)) throw esrch();
+        return;
+      }
+      if (group.members === 0) throw esrch();
+      events.push(sent);
+      if (sent === 'SIGKILL') {
+        group.members = 0;
+        group.killed = true;
+      } else if (sent === 'SIGTERM' && group.members === 2) {
+        group.members = 1; // the wrapper goes; the member that ignores TERM stays
+        const wrapper = wrappers.at(-1)!;
+        queueMicrotask(() => wrapper.emit('exit', null, 'SIGTERM'));
+      }
+    };
+    const spawn = () => {
+      const wrapper = new FakeWrapper();
+      wrappers.push(wrapper);
+      group.members = 2;
+      group.killed = false;
+      return wrapper as unknown as ChildProcess;
+    };
+    const command = { command: '/usr/bin/xvfb-run', args: [], env: {}, cwd: '/p', group: true };
+    const seam = createRenderSeam({
+      machine: 'linux-box',
+      spawn: () => {
+        const child = spawnRenderHost(command, (line) => void logs.push(line), { spawn, signal });
+        child.onExit((code, sig) => void events.push(`exit ${code ?? sig}`));
+        return child;
+      },
+      post: () => true,
+      postExit: () => true,
+      answerEngine: async () => 'delivered',
+      quietMs: () => 30_000,
+      runtime: () => ({ available: true }),
+      engineHostRenders: () => true,
+      appAttached: () => false,
+      hold: () => () => undefined,
+      log: (line) => void logs.push(line),
+      restartBackoffMs: [500, 2_000, 5_000],
+    });
+    return { seam, events, logs, wrappers, group };
+  };
+
+  it('stop with a member that ignores SIGTERM resolves only after the SIGKILL and the host’s exit', async () => {
+    const g = groupScene();
+    g.seam.capture(capture('cap-1'));
+    g.seam.clientReady();
+    let done = false;
+    const stopped = g.seam.stop().then(() => void (done = true));
+    await flush();
+    expect(g.events, 'the group is sent SIGTERM at once; its wrapper exits, the rest is sent SIGTERM again').toEqual(['SIGTERM', 'SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(done, 'the TERM-ignoring member is still there').toBe(false);
+    expect(g.events).not.toContain('SIGKILL');
+    await vi.advanceTimersByTimeAsync(100 + GROUP_POLL_MS);
+    await stopped;
+    expect(g.events, 'SIGKILL, then the exit, before stop returns').toEqual(['SIGTERM', 'SIGTERM', 'SIGKILL', 'exit SIGTERM']);
+    expect(g.group.members).toBe(0);
+    expect(g.seam.state()).toBe('off');
+  });
+
+  it('a group left with zombies after its SIGKILL still reports its exit within a bounded settle, and a replacement starts', async () => {
+    const g = groupScene({ zombies: true });
+    g.seam.capture(capture('cap-1'));
+    expect(g.wrappers).toHaveLength(1);
+    g.group.members = 1;
+    g.wrappers[0]!.emit('exit', 70, null); // the wrapper exits before its ready, a member left behind
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(g.events).toEqual(['SIGTERM', 'SIGKILL']);
+    await vi.advanceTimersByTimeAsync(KILL_SETTLE_MS);
+    expect(g.events.at(-1), 'the exit is reported though the group still answers').toBe('exit 70');
+    expect(g.logs).toContain(`[render] the render host's process group still answered ${KILL_SETTLE_MS / 1000} s after SIGKILL (members nobody reaped): its exit reported`);
+    await vi.advanceTimersByTimeAsync(500); // the failed start's backoff
+    expect(g.wrappers, 'a replacement host started').toHaveLength(2);
   });
 });
 
