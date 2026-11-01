@@ -308,6 +308,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
         emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
         retired: (requestId) => session.requestRetired(requestId), // E11
         historyThrough, // P5 O16 M3c
+        restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));

@@ -267,6 +267,31 @@ const permission = (id: string) => ({ type: 'control_request', request_id: id, r
 const initFailed = (rows: JournalRow[]) => rows.filter((row) => (row.frame as { event?: string }).event === 'init_failed').map((row) => (row.frame as { message: string }).message);
 const ended = (a: ReturnType<typeof adopter>) => a.transport.calls.some((c) => c.startsWith('kill:'));
 
+// P5 O16 M3c fix wave 1: every pending kind the broker restores keeps its originating event for `session.pendingRequest`
+// (lane B's digest check reads it), though the fold told none of them
+describe('an adopted session’s restored requests', () => {
+  it('keeps the originating event of each request its fold read: a permission, a dialog, an elicitation', async () => {
+    const plan = planOf();
+    predecessor(plan, (w) => {
+      w.row('out', { type: 'user', uuid: 'u-1', message: { role: 'user', content: 'go' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+      w.row('in', { type: 'control_request', request_id: 'e-perm', request: { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_perm' } });
+      w.row('in', { type: 'control_request', request_id: 'e-dialog', request: { subtype: 'request_user_dialog', dialog_kind: 'refusal_fallback_prompt', payload: { title: 'Model refused', options: ['retry'] } } });
+      w.row('in', { type: 'control_request', request_id: 'e-elicit', request: { subtype: 'elicitation', mcp_server_name: 'srv', mode: 'form', message: 'pick' } });
+    });
+    const a = adopter(plan);
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    const pending = a.session.brokerItems().filter((item) => item.state === 'pending').map((item) => item.request.requestId!);
+    expect(pending.sort()).toEqual(['e-dialog', 'e-elicit', 'e-perm']);
+    const kinds: Record<string, string> = { 'e-perm': 'permission.requested', 'e-dialog': 'dialog.requested', 'e-elicit': 'elicitation.requested' };
+    expect(pending.map((id) => [id, a.session.restoredRequest(id)?.kind])).toEqual(pending.map((id) => [id, kinds[id]]));
+    expect(a.events.filter((e) => e.kind.endsWith('.requested')), 'none told again').toEqual([]);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+});
+
 describe('an adopted session, fix wave 1', () => {
   it('a journal the fold cannot read is a failed adoption: never served, nothing written, its host and engine left running', async () => {
     const plan = planOf();

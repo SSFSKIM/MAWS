@@ -73,6 +73,7 @@ import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // 
 // P2-A end
 import { connectorLaunchContext, type ConnectorLaunchContext } from './connectors/provenance'; // P3-HD
 import type { ConnectorLocalKey } from './connectors/local-key'; // P3-HD
+import { isRequested } from './session-stream'; // P5 O16 M3c fix wave 1
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
@@ -262,6 +263,9 @@ export class EngineSession {
   private hookBoundMs = SESSION_START_HOOK_MS; // debt wave 6: the launch's configured bound once read
   private initFailed = false;
   private exitCause: ExitCause | null = null; // P5 O16 M3b (D58a): the adopted re-initialize's failure, carried by the end
+  // P5 O16 M3c fix wave 1: the originating request events the adoption's fold read, by request id (it tells none), so a
+  // restored broker item's request is still known to `session.pendingRequest` (lane B's digest check, its presentation)
+  private readonly restored = new Map<string, SessionEvent>();
   private journalClosed = false;
   private lastEventSeq = 0;
   private lastStatusSignature = '';
@@ -852,6 +856,11 @@ export class EngineSession {
   }
 
   // The session's attention list: the broker's items, then the blocking asks' (E1 M4b).
+  // P5 O16 M3c fix wave 1: the originating event of a request the adoption's fold read, else null
+  restoredRequest(requestId: string): SessionEvent | null {
+    return this.restored.get(requestId) ?? null;
+  }
+
   brokerItems(): AttentionItem[] {
     return [...this.broker.snapshot(), ...this.maws.attention()];
   }
@@ -1352,6 +1361,7 @@ export class EngineSession {
         } else if (row.direction === 'out' && frame.type === 'user' && typeof frame.uuid === 'string') written.add(frame.uuid);
         else if (row.direction === 'meta' && frame.event === 'host_attach' && frame.replayed === 'gap') this.tracker.gap();
         for (const event of events) {
+          if (isRequested(event)) this.restored.set((event as { requestId: string }).requestId, event); // P5 O16 M3c fix wave 1
           if (event.parentToolUseId !== null) continue;
           if (event.kind === 'turn.started') this.tracker.turnStarted(event.id);
           else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {

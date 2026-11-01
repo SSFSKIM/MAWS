@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AttentionItem } from '@shared/graph/attention'; // P5 O16 M3c fix wave 1
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -264,6 +265,19 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
 
   // E1 M5: a list published between a request's event and its item (a blocking `maws` ask opens its item after the
   // broker re-published for the same frame, which confirmed the call's permission) must not forget the event
+  // P5 O16 M3c fix wave 1: an adopted launch's restored item, whose event the stream never saw, from its fold's read
+  it('answers a live item it never saw the event of from `restored`, and nothing once the item has left the list', async () => {
+    const { launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const restoredEvent = { kind: 'permission.requested', requestId: 'rq-restored' } as unknown as SessionEvent;
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, restored: (id) => (id === 'rq-restored' ? restoredEvent : null) });
+    expect(stream.pendingRequest('rq-restored' as RequestId), 'not a live item yet').toBeNull();
+    const item: AttentionItem = { id: 'a' as never, appSessionId, sessionId: null, kind: 'permission', request: { requestId: 'rq-restored' as RequestId, toolUseId: null, taskId: null, agentId: null }, summary: 's', createdAt: 't', state: 'pending', stateChangedAt: 't', expiresAt: null };
+    stream.brokerItems([item]);
+    expect(stream.pendingRequest('rq-restored' as RequestId)).toBe(restoredEvent);
+    stream.brokerItems([]);
+    expect(stream.pendingRequest('rq-restored' as RequestId)).toBeNull();
+  });
+
   it('keeps a request event whose item has not been listed yet across an earlier list', async () => {
     const run = await replayedSession('pass1', 'permission-roundtrip', (row, { session, ready, fixture, transport }) => {
       const frame = row.frame as { type: string };

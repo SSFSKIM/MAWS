@@ -36,7 +36,7 @@ export const BATCH_BYTES = 16 * 1024 * 1024;
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
 // E1 M4b: an ask's attention item originates in its `maws.ask.opened` (P2-C2: an async ask's `async_input` item too)
-const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || event.kind === 'maws.ask.opened';
+export const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || event.kind === 'maws.ask.opened';
 
 export interface SessionStreamOptions {
   appSessionId: AppSessionId;
@@ -57,6 +57,9 @@ export interface SessionStreamOptions {
   // P5 O16 M3c: an adopted launch's last journaled seq before this stream began (the successor's fold tells nothing):
   // that range is answered from the journal, as an evicted one is (absent: the stream began with the launch)
   historyThrough?: number;
+  // P5 O16 M3c fix wave 1: an adopted launch's originating request events its fold read (the successor told none), for a
+  // live broker item whose event this stream never saw (absent: none)
+  restored?: (requestId: string) => SessionEvent | null;
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -178,9 +181,10 @@ export class SessionStream {
   }
 
   // `session.pendingRequest`: the originating *.requested event (a blocking ask's `maws.ask.opened`, E1 M4b) of a pending
-  // or delivered broker item, else null.
+  // or delivered broker item, else null; P5 O16 M3c fix wave 1: an adopted launch's item restored by its fold, from the
+  // fold's own read of the journal (`restored`).
   pendingRequest(requestId: RequestId): SessionEvent | null {
-    return this.liveItems.has(requestId) ? (this.requests.get(requestId) ?? null) : null;
+    return this.liveItems.has(requestId) ? (this.requests.get(requestId) ?? this.opts.restored?.(requestId) ?? null) : null;
   }
 
   // `session.events`: every event after `afterSeq` (null: from the start of this launch), whole rows at a time up to

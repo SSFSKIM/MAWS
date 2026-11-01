@@ -17,6 +17,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
+import { requestDigestOf } from '@shared/host/request-digest'; // P5 O16 M3c fix wave 1
 import { buildHostedManager, startHostedManager, type HostedManager } from '../../../test/support/hosted-manager-bin';
 import { buildStubEngine, writeStubEngine } from '../../../test/support/stub-engine-bin';
 import { TESTED_ENGINE_VERSION } from '../engine-compat';
@@ -211,6 +212,36 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
     connection.send({ t: 'attach', role: 'writer', fence: 1 });
     expect(await connection.expect('refused', Date.now() + 5_000)).toMatchObject({ reason: 'fence' });
     connection.close();
+  });
+
+  // P5 O16 M3c fix wave 1: lane B's answer to a request raised before the kill, through the successor's `host.op`: the
+  // op's digest check reads the request's originating event (`session.pendingRequest`), which the successor's stream
+  // holds for a request its fold restored, so the answer is delivered, not refused `digest-mismatch`
+  it('with a permission pending: a lane B answer through the successor’s host.op is delivered and completes the turn', { timeout: LONG }, async () => {
+    const stub = writeStubEngine(join(scratch, 'claude-perm-op'), stubBundle, { fixture: PERMISSION });
+    const id = 'app-perm-op';
+    const old = startHostedManager(managerBundle, { userData, stub, binary: BINARY, version: TESTED_ENGINE_VERSION });
+    managers.push(old);
+    await old.call('session.launch', { spec: spec(id) });
+    await until(async () => (await old.status(id))?.process === 'ready', 'ready');
+    await old.call('session.send', { appSessionId: id, content: 'Use Bash to run exactly git log --oneline. Then say DONE.' });
+    await until(() => old.events(id).some((e) => e.kind === 'permission.requested'), 'permission.requested');
+    const requested = ofKind(old.events(id), 'permission.requested')[0]!;
+    await until(async () => (await old.status(id))?.engineSessionId !== null, 'the engine session id');
+    await old.kill('SIGKILL');
+
+    const next = successor(stub);
+    expect((await next.adopt()).outcome.adopted).toEqual([id]);
+    await until(() => next.status(id).process === 'ready', 'ready');
+    const now = next.status(id);
+    const answer = {
+      opId: 'op-adopted-answer-1', opCreated: new Date().toISOString(), member: 'm-a', device: 'd-a', fingerprint: 'fp-1', name: 'session.answer',
+      input: { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } },
+      context: { launchId: now.launchId, engineSessionId: now.engineSessionId! }, requestDigest: requestDigestOf(id as AppSessionId, requested)!,
+    };
+    expect(await next.call('host.op', answer as never)).toEqual({ state: 'done', result: { ok: true, value: { outcome: 'delivered' } } });
+    await until(() => next.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended');
+    expect(ofKind(next.events(id), 'turn.ended')[0]).toMatchObject({ terminalReason: 'completed' });
   });
 
   // M3a fix waves 1 and 2 (D58's condition on the synchronous fold): the engine bursts while the successor's fold holds
