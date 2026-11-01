@@ -114,6 +114,28 @@
 | `CuaBroker.admit(id, socket, epoch)`, the epoch argument from M1's fix | `src/mawsd/cua-broker.ts` | O17 M1 | O17 M5, M8 |
 | `BrowserWork.holding(engine, appSessionId)`, `oldHostReason`, `reconnectingReason` | `src/mawsd/browser-work.ts` | O17 M3 | O17 M5, M8 |
 | `FrontBrowser {work, selected}` with `selected` returning `FrontSelection {engine, period}` (the frontier fix; M5 supplies the route's epoch as the period), `FrontOptions.browser?` (none: `NO_BROWSER`) | `src/mawsd/front.ts` | O17 M3 | O17 M5 |
+| `StreamKind`, `STREAM_REFUSALS` (with `unavailable`), `STREAM_CHUNK_BYTES`, `STREAM_CREDIT_MAX`, `MAX_STREAMS`, the `Stream*Message` types and `inputSent` (RL2 1.3) | `apps/org-protocol/src/messages.ts` | O7 M3 | the endpoint, O17's remote stage |
+| `PtyOpAttachSchema`, `PtyReplaySchema` | `src/shared/ipc/schema/pty.ts` | O7 M3 | the endpoint, O16 |
+| `PTY_OPS_FILE`, the ops exports, `attachMetadata`, `opsDir` | `src/pty-host/ops.ts`, `src/pty-host/index.ts` | O7 M3 | O16, `mawsd`'s pty-host park rule |
+| `Streams`, `STREAM_BACKLOG_BYTES`, `STREAM_INPUT_CREDIT`, `Forwards`, `MAX_FORWARDS_PER_DEVICE`, `StreamBinding`, `OfferRow.accepts`, `forwardOf` | `src/endpoint/streams.ts`, `forwards.ts`, `authorize.ts`, `offers.ts`, `endpoint-actions.ts` | O7 M3 | O17's remote stage, the desk track |
+| `test/endpoint/fake-pty-host.ts` | test support | O7 M3 | the endpoint's tests |
+| `RemoteLink.openStream`, `RemoteLink.ended()` | `src/main/machines/remote/link.ts` | O7 M3 | O7 M6, O17's remote stage |
+| `createRemotePty`, `createRemoteForwards` | `src/main/lane-b/remote-pty.ts`, `remote-forward.ts` | O7 M3 | O7 M7 |
+| `listenLoopback` | `src/main/forwards.ts` | O7 M3 | none named |
+| `isLoopbackLink`, `loopbackPort`, `forwardedUrl` | `src/shared/machine/loopback-link.ts` | O7 M3 | the renderer's browser, O17 |
+| `FORWARDED_ELSEWHERE` | `src/main/open-external.ts` | O7 M3 | none named |
+| `BrowserTab.forward`, `SessionMachines` | `src/shared/browser/`, `src/main/browser/machines.ts` | O7 M3 | O17 |
+| `REMOTE_ACT_PENDING_MS`, `REMOTE_ATTACH_PENDING_MS` | `src/shared/machine/remote-pending.ts` | O7 M3 | O7 M6 |
+| `hostReadyOf` | `src/renderer/src/tools/terminal/index.ts` | O7 M3 | none named |
+| `BROWSER_ENGINE_CAPABILITY` (`'browser.engine'`, the hello capability) | `src/shared/host/socket-protocol.ts` | O17 M4 | O17 M5, M8 |
+| the `BrowserEngine*` schemas, `EngineInventorySchema` | `src/shared/ipc/schema/browser-engine.ts` | O17 M4 | O17 M5, M6 |
+| `BROWSER_SUMMARY_BOUNDS` (title, url and tab-count bounds) | `src/shared/browser/screencast.ts` | O17 M4 | O17 M5, the remote stage |
+| `OrphanPolicy` (`'person'` or `'session'`) | `src/main/browser/cua/claims.ts` | O17 M4 | O17 M5 |
+| `CuaCreations`, the creation gate (the app passes none and is unchanged) | `src/main/browser/cua/connection.ts` | O17 M4 | the render host's tab engine |
+| the cua backend's `closeSession` returning a Promise, `relay` returning `Promise<boolean>`, and the new `listening(appSessionId)` (the app ignores all three) | `src/main/browser/cua/index.ts` | O17 M4 | the render host's tab engine |
+| `startTabEngine`, `HEADLESS_WINDOW` | `src/render-host/tab-engine.ts` | O17 M4 | O17 M5, M8 |
+| `OffscreenViews` | `src/render-host/offscreen-views.ts` | O17 M4 | O17 M5, M8 |
+| `RenderHostDeps.browser` | `src/render-host/host.ts` | O17 M4 | O17 M5 |
 
 ## Shared files and who goes first
 
@@ -163,6 +185,8 @@
 | `test/support/fake-spine-host.ts` | O4 (typed `answer`), O7 M4 (spawn's launch stub against it) | keeps O4's typed form |
 | O16's engine-host files (`budget.ts`, `work-state.ts`, `idle-release.ts`, `process-table.ts`, `launcher.ts`, `session-status.ts`, `session.ts`, `index.ts`, `ipc.ts`, `src/shared/host/runtime.ts`, `src/shared/engine/status.ts`, `socket-protocol.ts`; `holder/reap.ts` tests only) | O16, then O17 M3 (schema, grade and capability lines) and M7 | O16 lands first; O17's M7 edits on O16's landed code |
 | `src/main/machines/link-surface.ts` | O17 M3 (`host.browserIdle` and the `browserEngine` namespace on the client side), O16 (`daemon.engineHandover` on the client side) | additions beside additions; whoever lands second rebases its entries |
+| `src/main/browser/` | O7 M3 (landed: the allow-list for another machine, `browser.tabs.list`, `open` and `select`; address-keyed remote sessions translated at every exit; `BrowserTab.forward`), then O17 | O17 rebases onto O7 M3's shape |
+| `src/mawsd/daemon.ts` | O7 M3 (landed: one line relaying the pty host's state to the endpoint as `pty.hostState`), O16, O17 | additions beside additions; whoever lands second rebases |
 
 ## Start order
 
@@ -190,3 +214,4 @@
 - 2026-11-01, the architect: O17's names and its shared files with O16, at its execution document's landing (PR #430).
 - 2026-11-01, p5-desk-track-owner: O12 M11's MAWS half (PR #431): its names as built (the proof file's path and module, the endpoint's `Spawner`, `QueryBinding.launchedBy`, `RecordSource.handedOff`, `handed-off.json`) and the endpoint files it shares with O7.
 - 2026-11-01, the architect: O17 M1 to M3's names (the cold broker, the event scope, the browser-work hold and the front's selection) and `src/main/machines/link-surface.ts` as a shared file of O16 and O17, at O5's close (P5 Decision Log 192).
+- 2026-11-01, the architect: O7 M3's names and two shared files (main's browser, `mawsd`'s daemon) at its landing (PR #433, P5 Decision Log 194), and O17 M4's names.
