@@ -7,7 +7,7 @@
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
 // - a main-loop request of the holder's acceptance run (P5 O16 M4; its first message `o16-holder go <tag> <s>`) gets
-//   holder.mjs's script (`holderStep`): a background `sleep <s>`, a Bash call that raises a permission, the turn's
+//   the holder run's script (`holderStep`, below): a background `sleep <s>`, a Bash call that raises a permission, the turn's
 //   text, then the text answering the shell's completion;
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; the relay's health check
@@ -20,7 +20,6 @@ import console from 'node:console';
 import { createServer } from 'node:http';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
-import { holderStep } from './holder.mjs';
 import { jsonOf, sseOf, textTurn, toolTurn } from './stub-api.mjs';
 
 const arg = (name, fallback) => {
@@ -43,6 +42,31 @@ function textOf(content) {
       return '';
     })
     .join('\n');
+}
+
+// P5 O16 M4: the holder's acceptance run (holder.mjs).
+const GO = /o16-holder go ([a-z0-9]{1,16}) (\d{1,4})/;
+
+/**
+ * The holder run's next model step for a main-loop request, or null when the conversation is not the run's: decided by
+ * the run's first message and the last assistant message alone, so a request the engine repeats gets the same answer.
+ *   the first request              Bash `sleep <s>` in the background
+ *   after that tool's result        Bash `curl` to a closed port, which no rule allows: the permission
+ *   after the permission's tool     the turn's text, `o16-holder done <tag>`
+ *   after that (a new turn: the background shell's completion)   `o16-holder notified <tag>`
+ */
+export function holderStep(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const first = messages.find((m) => m?.role === 'user');
+  const go = GO.exec(textOf(first?.content));
+  if (!go) return null;
+  const [, tag, seconds] = go;
+  const last = [...messages].reverse().find((m) => m?.role === 'assistant');
+  if (!last) return { tool: { id: `toolu_o16_${tag}_bg`, name: 'Bash', input: { command: `sleep ${seconds}`, run_in_background: true, description: `o16 holder background sleep ${tag}` } } };
+  const used = (Array.isArray(last.content) ? last.content : []).filter((b) => b?.type === 'tool_use').map((b) => b.id);
+  if (used.includes(`toolu_o16_${tag}_bg`)) return { tool: { id: `toolu_o16_${tag}_ask`, name: 'Bash', input: { command: `curl -sS --max-time 2 http://127.0.0.1:9/o16-holder-${tag}`, description: `o16 holder permission ${tag}` } } };
+  if (used.includes(`toolu_o16_${tag}_ask`)) return { text: `o16-holder done ${tag}` };
+  return { text: `o16-holder notified ${tag}` };
 }
 
 const isMainLoop = (body) => Array.isArray(body.tools) && body.tools.some((t) => t?.name === 'Bash');

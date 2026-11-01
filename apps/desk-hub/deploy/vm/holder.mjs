@@ -3,7 +3,8 @@
 // the installed `mawsd`'s machine.sock, as lane-b.mjs is, with no app anywhere. Run as the user whose `mawsd install`
 // (devenv/setup.sh) runs the systemd user unit, with XDG_RUNTIME_DIR set so `systemctl --user` reaches its manager:
 //   node holder.mjs run <directory> <tag> --next-pack <pack> [--sleep-s 120] [--stub-port 47899]
-// It starts the stub model (stub-model.mjs beside it, with spikes/protocol-probe/stub-api.mjs copied beside that),
+// It starts the stub model (stub-model.mjs beside it, with spikes/protocol-probe/stub-api.mjs copied beside that; its
+// `holderStep` is the run's script),
 // allows `sleep` in <directory>'s project settings, and starts a lane B session there whose first message makes the stub
 // run `sleep <s>` in the background and then a Bash call no rule allows, so a permission is raised and the turn waits
 // on it. Mid-turn it restarts the unit (`systemctl --user restart mawsd`: a new mawsd adopts the same engine host), then
@@ -28,38 +29,6 @@ import { reach } from './lane-b.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const UNIT = 'mawsd.service';
 const PAGE = 500;
-
-// ---- the stub model's script ------------------------------------------------------------------------------------------
-
-const GO = /o16-holder go ([a-z0-9]{1,16}) (\d{1,4})/;
-
-function textOf(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map((b) => (b?.type === 'text' ? (b.text ?? '') : b?.type === 'tool_result' ? textOf(b.content) : '')).join('\n');
-}
-
-/**
- * The holder run's next model step for a main-loop request, or null when the conversation is not the run's: decided by
- * the run's first message and the last assistant message alone, so a request the engine repeats gets the same answer.
- *   the first request              Bash `sleep <s>` in the background
- *   after that tool's result        Bash `curl` to a closed port, which no rule allows: the permission
- *   after the permission's tool     the turn's text, `o16-holder done <tag>`
- *   after that (a new turn: the background shell's completion)   `o16-holder notified <tag>`
- */
-export function holderStep(body) {
-  const messages = Array.isArray(body?.messages) ? body.messages : [];
-  const first = messages.find((m) => m?.role === 'user');
-  const go = GO.exec(textOf(first?.content));
-  if (!go) return null;
-  const [, tag, seconds] = go;
-  const last = [...messages].reverse().find((m) => m?.role === 'assistant');
-  if (!last) return { tool: { id: `toolu_o16_${tag}_bg`, name: 'Bash', input: { command: `sleep ${seconds}`, run_in_background: true, description: `o16 holder background sleep ${tag}` } } };
-  const used = (Array.isArray(last.content) ? last.content : []).filter((b) => b?.type === 'tool_use').map((b) => b.id);
-  if (used.includes(`toolu_o16_${tag}_bg`)) return { tool: { id: `toolu_o16_${tag}_ask`, name: 'Bash', input: { command: `curl -sS --max-time 2 http://127.0.0.1:9/o16-holder-${tag}`, description: `o16 holder permission ${tag}` } } };
-  if (used.includes(`toolu_o16_${tag}_ask`)) return { text: `o16-holder done ${tag}` };
-  return { text: `o16-holder notified ${tag}` };
-}
 
 // ---- reading the machine ----------------------------------------------------------------------------------------------
 
@@ -137,7 +106,8 @@ async function eventsOf(link, app) {
   throw new Error('session.events: not complete after 400 pages');
 }
 
-const contentText = (content) => (typeof content === 'string' ? content : textOf(content));
+const textOf = (content) =>
+  typeof content === 'string' ? content : Array.isArray(content) ? content.map((b) => (b?.type === 'text' ? (b.text ?? '') : b?.type === 'tool_result' ? textOf(b.content) : '')).join('\n') : '';
 
 // ---- the run ----------------------------------------------------------------------------------------------------------
 
@@ -258,7 +228,7 @@ async function run({ directory, tag, nextPack, seconds, stubPort, profile }) {
     const results = done(all).length;
     const reconnects = all.filter((e) => e.kind === 'session.reconnect');
     const hostRestarts = reconnects.filter((e) => e.trigger === 'host_restart' && e.phase === 'reconnected').length;
-    const prompts = count((e) => e.kind === 'user.message' && !e.isReplay && contentText(e.content).includes(text));
+    const prompts = count((e) => e.kind === 'user.message' && !e.isReplay && textOf(e.content).includes(text));
     for (const e of reconnects) say(`event session.reconnect ${e.phase} trigger ${e.trigger} attempt ${e.attempt} reason ${e.reason}`);
     say(`events: ${all.length}; permission.requested ${permission} x${permissions}; turn.ended done x${results}, notified x${notified(all).length}; prompt x${prompts}`);
     if (results !== 1) failures.push(`the turn's result arrived ${results} times`);

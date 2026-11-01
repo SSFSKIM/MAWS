@@ -1,10 +1,19 @@
-// The holder's acceptance run (deploy/vm/holder.mjs, P5 O16 M4): the stub model's script for it, which decides each
-// main-loop request from the run's first message and the last assistant message alone.
+// The holder's acceptance run (deploy/vm/holder.mjs, P5 O16 M4): the stub model's script for it (stub-model.mjs
+// `holderStep`), which decides each main-loop request from the run's first message and the last assistant message alone.
+import { copyFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 type Step = { tool: { id: string; name: string; input: Record<string, unknown> } } | { text: string } | null;
-const load = async () => (await import(join(import.meta.dirname, '../../deploy/vm/holder.mjs'))) as { holderStep: (body: unknown) => Step };
+type Turn = { blocks: Array<Record<string, unknown>>; stop: string };
+// stub-model.mjs staged as the VM run stages it, beside spikes/protocol-probe's stub-api.mjs
+async function load(): Promise<{ holderStep: (body: unknown) => Step; answer: (body: unknown) => Turn }> {
+  const dir = mkdtempSync(join(tmpdir(), 'o16-stub-'));
+  copyFileSync(join(import.meta.dirname, '../../deploy/vm/stub-model.mjs'), join(dir, 'stub-model.mjs'));
+  copyFileSync(join(import.meta.dirname, '../../../../spikes/protocol-probe/stub-api.mjs'), join(dir, 'stub-api.mjs'));
+  return (await import(join(dir, 'stub-model.mjs'))) as { holderStep: (body: unknown) => Step; answer: (body: unknown) => Turn };
+}
 
 const go = { role: 'user', content: [{ type: 'text', text: 'o16-holder go t1 120' }] };
 const system = { role: 'system', content: 'a reminder the engine appends after the last user message' }; // 2.1.316 (M0)
@@ -20,6 +29,12 @@ describe("the stub model's holder script", () => {
     const afterAsk = [...afterShell.slice(0, 3), assistant('toolu_o16_t1_ask'), result('toolu_o16_t1_ask', 'curl: (7) Failed to connect')];
     expect(holderStep({ messages: afterAsk })).toEqual({ text: 'o16-holder done t1' });
     expect(holderStep({ messages: afterAsk })).toEqual({ text: 'o16-holder done t1' }); // a repeated request, the same answer
+  });
+
+  it("is the turn the stub model answers a main-loop request of the run with", async () => {
+    const { answer } = await load();
+    expect(answer({ tools: [{ name: 'Bash' }], messages: [go, system] })).toEqual({ blocks: [{ type: 'tool_use', id: 'toolu_o16_t1_bg', name: 'Bash', input: { command: 'sleep 120', run_in_background: true, description: 'o16 holder background sleep t1' } }], stop: 'tool_use' });
+    expect(answer({ tools: [{ name: 'Bash' }], messages: [go, assistant('toolu_o16_t1_ask'), result('toolu_o16_t1_ask', '7')] })).toEqual({ blocks: [{ type: 'text', text: 'o16-holder done t1' }], stop: 'end_turn' });
   });
 
   it("answers the background shell's completion, a turn of its own, with the notified text", async () => {
