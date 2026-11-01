@@ -134,7 +134,9 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
   const machine = machineOf(appSessionId);
   let departedAt: string | null = null; // when the host was first heard leaving ready with the process running
   let heard = 0;
-  return client.on('engine.hostState', ({ state }, from) => {
+  let disposed = false; // P5 O16 M3c fix wave 1: the subscription ended; a pending adoption wait ends with it
+  const waits = new Set<() => void>();
+  const off = client.on('engine.hostState', ({ state }, from) => {
     if (from.machine !== machine) return;
     const asked = ++heard;
     if (state !== 'ready') {
@@ -152,8 +154,8 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
       let found = await listed();
       // P5 O16 M3c: a successor that holds session hosts lists a session only once it has adopted it, and its ready
       // comes before its start's adoptions end: this machine's host is asked again once main's status says they ended
-      if (found === false && machine === client.localMachine && (await adoptionsEnded(client, () => asked !== heard))) found = await listed();
-      if (asked !== heard) return; // a later departure: the next ready asks again
+      if (found === false && machine === client.localMachine && (await adoptionsEnded(client, () => disposed || asked !== heard, waits))) found = await listed();
+      if (disposed || asked !== heard) return; // a later departure: the next ready asks again
       const last = running();
       if (found !== false || last === null) return;
       lost({
@@ -163,13 +165,19 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
       });
     })();
   });
+  return () => {
+    disposed = true;
+    off();
+    for (const cancel of [...waits]) cancel();
+  };
 }
 
 // P5 O16 M3c: settles once main's host status says the local engine host's start-up adoptions are not under way (its
 // first status heard, and `holder.adopting` not true) or the host left ready; true when that host holds session hosts,
 // so its table may have changed since it was read, false (at once) for one that holds none. `stale`: a later departure
-// was heard, and the answer no longer matters.
-function adoptionsEnded(client: MawsBridge, stale: () => boolean): Promise<boolean> {
+// was heard, and the answer no longer matters. P5 O16 M3c fix wave 1: `waits` holds its cancel while it waits, so the
+// subscription's end removes its listener (settled false).
+function adoptionsEnded(client: MawsBridge, stale: () => boolean, waits: Set<() => void>): Promise<boolean> {
   type Status = CommandOutput<'host.status'>;
   const read = (status: Status): boolean | null => {
     if (status.state !== 'ready') return true;
@@ -183,8 +191,11 @@ function adoptionsEnded(client: MawsBridge, stale: () => boolean): Promise<boole
       if (done) return;
       done = true;
       off();
+      waits.delete(cancel);
       resolve(value);
     };
+    const cancel = () => settle(false);
+    waits.add(cancel);
     const hear = (status: Status) => {
       if (stale()) return settle(false);
       const ended = read(status);

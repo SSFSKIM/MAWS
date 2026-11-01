@@ -1716,6 +1716,22 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     useTranscriptStore.getState().detach(source.key!);
   });
 
+  // P5 O16 M3c fix wave 1: the adoption wait's `host.status` listener ends with the subscription
+  it('a detach while the successor adopts removes the wait’s listener and tells nothing', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.host.status = holderStatus(true);
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    table(fake, []);
+    await flush();
+    expect(fake.listeners.get('host.status')?.size ?? 0, 'the wait listens').toBeGreaterThan(0);
+    useTranscriptStore.getState().detach(source.key!);
+    expect(fake.listeners.get('host.status')?.size ?? 0, 'gone with the subscription').toBe(0);
+    fake.emit('host.status', holderStatus(false) as never);
+    await flush();
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+  });
+
   it('a host without session hosts is read once, as before', async () => {
     const { fake, source } = await hydrated(midTurn());
     fake.emit('engine.hostState', { state: 'restarting' } as never);
