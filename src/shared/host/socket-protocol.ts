@@ -197,6 +197,10 @@ export const RENDER_CLIENT_CAPABILITY = 'render.client';
 // reads `host.attachment`'s `render`, so `mawsd` knows its bridges send requests with no app attached.
 export const MACHINE_RENDER_CAPABILITY = 'machine.render';
 export const HOST_RENDER_CAPABILITY = 'host.render';
+// P5 O17 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A, §E): the engine host's welcome lists it when
+// it serves `host.browserWork` from `mawsd`'s permanent link, counts a browser hold in its releases and emits
+// `host.browserIdle`; `mawsd` sends that host the snapshot and selects no headless browser for one that lists it not.
+export const HOST_BROWSER_WORK_CAPABILITY = 'host.browserWork';
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
 // `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
 // that lists it, and on a client's hello (only `mawsd`'s, beside `host.attachment`) that those are the client's own, app

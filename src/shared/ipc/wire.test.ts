@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -239,7 +239,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
 
   it('names both, and lists them in the manifest’s union', () => {
     expect([CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]).toEqual(['host.connectors', 'machine.connectors']);
-    expect(manifest.capabilities).toEqual(['host.attachment', 'host.connectors', 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect(manifest.capabilities).toEqual(['host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
   });
 
   it('has each peer list only what it implements', () => {
@@ -307,6 +307,27 @@ describe('the library’s reads and the catalog’s machine half on the wire (P5
 
 // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §K): the render host's work over
 // machine.sock, the request and the exit among the machine host's events and the answer a machine-owned main-only command
+// P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A, §E, §F): mawsd's browser-work snapshot to
+// the engine host and its capability, the engine host's idle notice, and a tab engine's report to mawsd. Every name is
+// main-only; the engine host lists the capability from M7, when it serves the command, so no peer lists it yet.
+describe('browser work on the wire (P5 O17 M3)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+
+  it('carries host.browserWork and browserEngine.work as main-only commands and host.browserIdle among the engine host’s events', () => {
+    expect(HOST_BROWSER_WORK_CAPABILITY).toBe('host.browserWork');
+    expect(WIRE_CAPABILITIES).toContain(HOST_BROWSER_WORK_CAPABILITY);
+    for (const list of Object.values(PEER_CAPABILITIES)) expect(list).not.toContain(HOST_BROWSER_WORK_CAPABILITY);
+    expect(REGISTRY.commands['host.browserWork'].owner).toBe('engine-host');
+    expect(REGISTRY.commands['browserEngine.work'].owner).toBe('machine');
+    for (const name of ['host.browserWork', 'browserEngine.work']) {
+      expect(REGISTRY.mainOnly.has(name), name).toBe(true);
+      expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+    }
+    expect(REGISTRY.hostEvents).toContain('host.browserIdle');
+    expect(manifest.entries).toHaveProperty(['events.host.browserIdle']);
+  });
+});
+
 describe('the render host on the wire (P5 O5 M3)', () => {
   const manifest = wireManifestOf(REGISTRY);
 

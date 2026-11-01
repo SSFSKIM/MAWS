@@ -40,6 +40,7 @@ describe('HOST_EVENTS', () => {
         'connectors.operation', // P3-H H3b: an operation's end, its id alone
         'connectors.grantChanged', // P3-H H3b: a committed grant change, the tool and the change alone
         'connectors.directOperation', // P3-HD M2: a direct operation's end, its id alone
+        'host.browserIdle', // P5 O17 M3: to mawsd's permanent link alone
         // E4c's `maws.browser.request` and `maws.browser.cancel` left with the browser tools (P1 A-54)
       ].sort(),
     );

@@ -44,6 +44,15 @@
 // attached app's browser socket may have changed (a `machine.client`, the end of a connection that sent one), so the
 // cua sockets listen or stop.
 //
+// P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): `browserEngine.work`, a tab
+// engine's browser-work report, is the front's own, from a machine.sock client alone and bound to its connection:
+// `held: true` from the connection the route selects for the session (`browser.selected`, M5's route; until then a
+// stand-in that selects none), answered once the fence is had or refused with its reason (`host_unavailable`), so the
+// engine makes no tab; `held: false` from the selected connection or one holding the session, answered at once. A
+// connection's end removes its holds. `host.browserWork` is `mawsd`'s own signal to the engine host, refused from a
+// forwarded caller as `host.attachment` is, and the engine host's `host.browserIdle` is `mawsd`'s to answer (M5): no
+// client hears it.
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
@@ -66,6 +75,7 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import type { SessionCapabilities } from '@shared/ipc/schema/session-capabilities';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { BrowserWork, EngineConnection } from './browser-work';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -77,12 +87,15 @@ import type { EngineIntercept } from './spine-hosts';
 
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
-// P5 O5 M5: a session's capabilities (session.capabilities).
-export const FRONT_COMMANDS = ['artifacts.export', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
+// P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
-const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
-// P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears
-const RENDER_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export']);
+const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.work', 'clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
+// P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
+// browser idle notice, which mawsd answers (M5)
+const DAEMON_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export', 'host.browserIdle']);
+// P5 O17 M3: `mawsd`'s own signals to the engine host, refused from any forwarded caller
+const DAEMON_SIGNALS: ReadonlySet<string> = new Set(['host.attachment', 'host.browserWork']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
 // (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
 // daemon-spine.test.ts pins it to what the spine registers.
@@ -106,6 +119,19 @@ export interface FrontRender {
   answer(input: CommandInput<'render.answer'>): boolean; // false for an id the seam did not post
   exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
 }
+
+// P5 O17 M3: browser work as the front reaches it: the holds (browser-work.ts) and the engine connection the route selects
+// for a session (M5's browser-route.ts), compared by identity with the asking connection
+export interface FrontBrowser {
+  work: Pick<BrowserWork, 'acquire' | 'release' | 'holding' | 'engineGone'>;
+  selected(appSessionId: AppSessionId): EngineConnection | null;
+}
+
+// A front that takes no browser work: no connection is selected and none holds, so every report is refused
+const NO_BROWSER: FrontBrowser = {
+  work: { acquire: async () => {}, release: () => {}, holding: () => false, engineGone: () => {} },
+  selected: () => null,
+};
 
 // A front with no render seam: a render client's work is never taken, the library's Export unavailable
 const NO_RENDER: FrontRender = {
@@ -132,6 +158,7 @@ export interface FrontOptions {
   render?: FrontRender; // P5 O5 M4: none, a front that renders nothing (NO_RENDER)
   capabilities?(appSessionId: AppSessionId): SessionCapabilities; // P5 O5 M5: session.capabilities, cold (none: no entry)
   browserChanged?(): void; // P5 O5 M5: the attached app's browser socket may have changed
+  browser?: FrontBrowser; // P5 O17 M3: none, a front that takes no browser work (NO_BROWSER)
 }
 
 export interface ServicesFront {
@@ -167,6 +194,7 @@ const OWN: ReadonlySet<string> = new Set(FRONT_COMMANDS);
 export function createServicesFront(options: FrontOptions): ServicesFront {
   const { log } = options;
   const render = options.render ?? NO_RENDER; // P5 O5 M4
+  const browser = options.browser ?? NO_BROWSER; // P5 O17 M3
   const table = new Map<string, AnyHandler>();
   const intercepts = new Map<string, AnyHandler>();
   const taps = new Map<string, Set<(payload: unknown) => void>>();
@@ -205,6 +233,23 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   const own: Record<(typeof FRONT_COMMANDS)[number], (input: unknown, context: HandlerContext, from: FrontClient | null) => unknown> = {
     'artifacts.export': (input) => render.exportForLibrary(input as CommandInput<'artifacts.export'>), // P5 O5 M4
+    // P5 O17 M3: a tab engine's browser work, bound to its connection (above)
+    'browserEngine.work': async (input, _context, from) => {
+      const { held } = input as CommandInput<'browserEngine.work'>;
+      const appSessionId = (input as CommandInput<'browserEngine.work'>).appSessionId as AppSessionId;
+      const selected = browser.selected(appSessionId) === from;
+      if (held) {
+        if (!selected) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId} from a connection not selected for that session`));
+        try {
+          await browser.work.acquire(from!, appSessionId);
+        } catch (error) {
+          throw new HostCommandError(ipcError('host_unavailable', messageOf(error)));
+        }
+        return;
+      }
+      if (!selected && !browser.work.holding(from!, appSessionId)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: false} for ${appSessionId} from a connection that neither holds nor is selected for that session`));
+      browser.work.release(from!, appSessionId);
+    },
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
     'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
     // P5 O5 M4: the render host's answer, from a render client alone
@@ -243,7 +288,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   const offRaw = options.hosts.onRaw('engine-host', ({ name, payload }) => {
     tap(name, payload);
-    if (RENDER_EVENTS.has(name)) return; // P5 O5 M4: the render seam's to answer
+    if (DAEMON_EVENTS.has(name)) return; // P5 O5 M4: the render seam's to answer; P5 O17 M3: and mawsd's browser idle
     if (STREAM_EVENTS.has(name) && !diskBatch(name, payload)) return streams.liveEvent(name, payload);
     const app = sessionOf(payload);
     post(name, payload, app === null ? readsHostEvents : (client) => readsHostEvents(client) || client.follower.carries(app));
@@ -269,7 +314,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
   async function forward(name: string, input: unknown, client: ClientRef): Promise<CommandResult<CommandName>> {
     const { owner } = REGISTRY.commands[name as CommandName];
     if (owner !== 'engine-host' && owner !== 'pty-host') return { ok: false, error: ipcError('internal', `mawsd serves no ${owner} command (${name})`) };
-    if (name === 'host.attachment') return { ok: false, error: ipcError('forbidden_sender', 'host.attachment is mawsd’s own link to the engine host') };
+    if (DAEMON_SIGNALS.has(name)) return { ok: false, error: ipcError('forbidden_sender', `${name} is mawsd’s own link to the engine host`) };
     const intercepted = owner === 'engine-host' ? options.intercept({ id: 'machine', name, input }) : null;
     const response: HostResponse = await (intercepted ?? options.hosts.forward(owner, { name, input, ...(owner === 'engine-host' && { client }) }));
     return (response.ok ? { ok: true, value: response.value } : { ok: false, error: response.error }) as CommandResult<CommandName>;
@@ -443,6 +488,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.delete(this);
       this.follower.end();
       clientPort.gone(this);
+      browser.work.engineGone(this); // P5 O17 M3: its browser work, if it reported any
       if (this.browserSocket !== null) options.browserChanged?.(); // P5 O5 M5: the app that told it is gone
       if (wasReady && this.renders) return void render.clientGone(); // P5 O5 M4
       if (wasReady) options.readiness?.();

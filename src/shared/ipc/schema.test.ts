@@ -77,9 +77,10 @@ import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
+import * as browserEngine from './schema/browser-engine'; // P5 O17
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -670,7 +671,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1217,16 +1218,17 @@ describe('ipc schema validates both directions', () => {
       // P5 O2 M2 adds host.interest (main-only, below)
       // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
       // P5 O3-D: `host.attachment`, mawsd's signal of an app's attachment (main-only)
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.attachment', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O17 M3: `host.browserWork`, mawsd's browser-work snapshot (main-only), and the engine host's `host.browserIdle`
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.attachment', 'host.browserWork', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
         'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
-        'host.op': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host',
+        'host.op': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host', 'host.browserWork': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
-      expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
+      expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status', 'host.browserIdle']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.attachment']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.attachment', 'host.browserWork']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
     });
 
@@ -2098,6 +2100,27 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-H H3b end
+
+  // P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): mawsd's snapshot of the held
+  // sessions to the engine host, the engine host's idle notice, and a tab engine's report to mawsd, all main-only
+  describe('P5 O17 browser work', () => {
+    it('host.browserWork carries the full held set, at most the host set’s 10,000; host.browserIdle names one session', () => {
+      expect(validateCommandInput('host.browserWork', { held: [] }).ok).toBe(true);
+      expect(validateCommandInput('host.browserWork', { held: ['a', 'b'] }).ok).toBe(true);
+      expect(validateCommandInput('host.browserWork', { held: [''] }).ok).toBe(false);
+      expect(validateCommandInput('host.browserWork', { held: Array.from({ length: 10_001 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateEventPayload('host.browserIdle', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateEventPayload('host.browserIdle', { appSessionId: 'a', extra: 1 }).ok).toBe(false);
+    });
+
+    it('browserEngine.work is a machine-owned main-only command naming one session and whether it is held', () => {
+      expect(Object.fromEntries(Object.entries(browserEngine.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'browserEngine.work': 'machine' });
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.work', 'host.browserWork']));
+      expect(validateCommandInput('browserEngine.work', { appSessionId: 'a', held: true }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.work', { appSessionId: 'a' }).ok).toBe(false);
+      expect(validateCommandInput('browserEngine.work', { appSessionId: '', held: false }).ok).toBe(false);
+    });
+  });
 
   // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A): the render host's request, answer and exit
   describe('P5 O5 render.*', () => {

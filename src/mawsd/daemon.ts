@@ -97,7 +97,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
@@ -133,6 +133,7 @@ import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
 import { createCuaSockets, type CuaSockets } from './cua-socket'; // P5 O5 M5
 import { browserCapability, createSessionCapabilities } from './session-capabilities'; // P5 O5 M5
+import { createBrowserWork } from './browser-work'; // P5 O17 M3
 import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -536,6 +537,17 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     else interests.set(holder, sessions);
   };
 
+  // --- browser work (P5 O17 M3; browser-work.ts): the fence's daemon side ----------------------------------------------
+  // The sessions a tab engine holds browser work for, told to the engine host as `host.browserWork` first on each fresh
+  // link of the permanent client (before the interest, R4's condition) and at each change. Only a permanent link to a
+  // host whose welcome lists `host.browserWork` takes it (the engine host serves it from its declaring client alone).
+  const machine = machineName(env, hostname());
+  const browserWork = createBrowserWork({ machine, log });
+  const sendBrowserWork = async (held: AppSessionId[]) => {
+    const answer = await hosts.forward('engine-host', { name: 'host.browserWork', input: { held } });
+    if (!answer.ok) throw new Error(answer.error.message);
+  };
+
   // --- listeners the seam offers ---------------------------------------------------------------------------------------
   const eventListeners = new Set<(owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void>();
   const attachmentListeners = new Set<(attached: boolean) => void>();
@@ -712,7 +724,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       case 'host.exitWhenIdle':
         return exitWhenIdle(request);
       case 'host.attachment': // P5 O3-D M3: mawsd's own signal; the relay's welcome lists the upstream's capability, never for an app to use
-        return Promise.resolve({ t: 'res', id: request.id, ok: false, error: ipcError('forbidden_sender', 'host.attachment is mawsd’s own signal to the engine host') });
+      case 'host.browserWork': // P5 O17 M3: as host.attachment
+        return Promise.resolve({ t: 'res', id: request.id, ok: false, error: ipcError('forbidden_sender', `${request.name} is mawsd’s own signal to the engine host`) });
       default:
         return null;
     }
@@ -781,10 +794,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (ready && !upstreamConnected) {
       upstreamConnected = true;
       generation += 1;
+      // P5 O17 M3: the browser-work snapshot first on the fresh link, before anything else mawsd sends it
+      void browserWork.linkUp(sendBrowserWork, permanentLink && (hosts.peer('engine-host')?.capabilities.includes(HOST_BROWSER_WORK_CAPABILITY) ?? false));
       each(upstreamListeners, { connected: true, generation });
       void sendInterest(true); // a fresh link starts with no interest of its own
     } else if (!ready && upstreamConnected) {
       upstreamConnected = false;
+      browserWork.linkDown(); // P5 O17 M3: an acquire waiting on this link fails, its engine making no tab
       renderGeneration += 1;
       front.postRender('render.hostGeneration', { generation: renderGeneration }); // P5 O5 M4: at the loss, above
       each(upstreamListeners, { connected: false, generation }); // after every endpoint channel's `upstream` close (doc-relay)
@@ -809,6 +825,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
   hosts.onRaw('engine-host', (message) => {
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
+    if (message.name === 'host.browserIdle') return; // P5 O17 M3: mawsd's own (M5 drops the session's headless tabs), no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
     engineRelay.deliver(message);
     each(eventListeners, 'engine-host', message);
@@ -896,7 +913,6 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the render seam (P5 O5 M4; render-handle.ts, render-seam.ts): its chunk loaded at the first request ----------------
   const RENDER_AUTHORS_SPINE_WAIT_MS = 10_000; // an export's wait for a cold spine's session titles (its comment authors)
-  const machine = machineName(env, hostname());
   const renderQuietMs = positiveInteger(env.MAWS_RENDER_QUIET_MS); // the measured scene's quiet period
   const answerEngine = async (name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown) => {
     const answer = await clientEngine.forward('engine-host', { name, input });
@@ -1057,6 +1073,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // the answer is what the next flip compares against (the panel's scalpel-4#3: `ask` posts it first when it changed)
     capabilities: (appSessionId) => (askedAbout.add(appSessionId), sessionCapabilities.ask(appSessionId)),
     browserChanged: followTabEngine, // P5 O5 M5
+    // P5 O17 M3: the route's selected engine connection is M5's (browser-route.ts); until then none is selected, so no
+    // engine's `held: true` is taken
+    browser: { work: browserWork, selected: () => null },
     log,
   });
   eventClients = () => front.eventClients(); // P5 O5 M6: the cache's watch reads them from here on

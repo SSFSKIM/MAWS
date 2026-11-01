@@ -128,6 +128,12 @@ export const commands = {
   // capture and export bridges send their requests with no app attached; read by an engine host whose welcome lists
   // `host.render`.
   'host.attachment': host(z.strictObject({ attached: z.boolean(), render: z.boolean().optional() }), z.void()),
+  // P5 O17 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; R4): the sessions `mawsd` holds browser
+  // work for (a render host's tabs, or a creation in flight), the full set, replacing the last: sent first on every fresh
+  // link of `mawsd`'s permanent client and at each change, answered once applied. Served by an engine host whose welcome
+  // lists `host.browserWork` (HOST_BROWSER_WORK_CAPABILITY), from the declaring client alone; refused from any forwarded
+  // caller. Main-only.
+  'host.browserWork': host(z.strictObject({ held: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.status': main(z.void(), HostStatusSchema),
   'host.restart': main(z.strictObject({ stopSessions: z.boolean() }), z.void()), // the banner's Restart now and Settings' Stop all
   'host.openLog': main(z.void(), z.void()), // shell.openPath on host.log
@@ -136,4 +142,7 @@ export const commands = {
 export const events = {
   'host.supervisorStatus': SupervisorStatusSchema, // the engine host's, on every change and in the connect burst
   'host.status': HostStatusSchema, // main's, on every SupervisorStatus and every transport transition
+  // P5 O17 (Interfaces §E; D20): to `mawsd`'s permanent link, the idle release found the session due but for its browser
+  // hold; `mawsd` drops the session's headless tabs, and the next snapshot clears the hold
+  'host.browserIdle': z.strictObject({ appSessionId: AppSessionIdSchema }),
 } as const satisfies Record<`host.${string}`, z.ZodType>;

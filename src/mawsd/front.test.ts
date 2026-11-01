@@ -10,6 +10,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { status as statusOf } from '../../test/support/builders';
 import { createServicesFront, FRONT_COMMANDS, SPINE_ENGINE_INTERCEPTS, spineTakes, type FrontOptions } from './front';
+import { createBrowserWork, type EngineConnection } from './browser-work';
 import { SpineUnavailable } from './spine-seam';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
@@ -414,5 +415,98 @@ describe('the services front', () => {
     other.close();
     served.close();
     expect(changed).toBe(2); // the app's connection ended (the other sent none)
+  });
+});
+
+// P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): a tab engine's browser work, bound to
+// its connection; the route's selection is a stand-in here (M5's). The holds are browser-work.ts's own, over a stand-in
+// link to the engine host that acknowledges at once.
+describe('browser work through the front', () => {
+  const S = 's1' as never;
+
+  function withWork(capable = true) {
+    const work = createBrowserWork({ machine: 'mini', log: () => {} });
+    const snapshots: unknown[][] = [];
+    void work.linkUp(async (held) => void snapshots.push(held), capable);
+    let selected: EngineConnection | null = null;
+    const served = front({ browser: { work, selected: () => selected } });
+    // a render host's connection: its runtime is the engine connection the route selects
+    const engine = () => {
+      const end = connection();
+      const runtime = served.served.runtimeFor({ appPid: 1, capabilities: [RENDER_CLIENT_CAPABILITY] });
+      runtime.serve(end.port);
+      end.ready();
+      return { end, runtime };
+    };
+    return { work, snapshots, served, engine, select: (connection: EngineConnection | null) => void (selected = connection) };
+  }
+
+  it('takes held: true from the selected connection alone, answered after the snapshot naming the session', async () => {
+    const { work, snapshots, engine, select } = withWork();
+    const [chosen, other] = [engine(), engine()];
+    select(chosen.runtime);
+    expect(await other.end.request('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(work.held()).toEqual([]);
+    expect(await chosen.end.request('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: true });
+    expect(snapshots).toEqual([[], [S]]);
+    expect(work.held()).toEqual([S]);
+  });
+
+  it('takes held: false from a connection holding the session after the route moved, and refuses it from one that holds nothing', async () => {
+    const { work, snapshots, engine, select } = withWork();
+    const [retiring, next] = [engine(), engine()];
+    select(retiring.runtime);
+    await retiring.end.request('browserEngine.work', { appSessionId: S, held: true });
+    select(next.runtime); // a handover: the old engine reports its zero after its drop
+    const stranger = engine();
+    expect(await stranger.end.request('browserEngine.work', { appSessionId: S, held: false })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(work.held()).toEqual([S]);
+    expect(await retiring.end.request('browserEngine.work', { appSessionId: S, held: false })).toMatchObject({ ok: true });
+    expect(work.held()).toEqual([]);
+    await vi.waitFor(() => expect(snapshots.at(-1)).toEqual([]));
+  });
+
+  it('a failed acquire makes no tab: a render-host stand-in creates only once the fence answered', async () => {
+    const { engine, select } = withWork(false); // the old-host cell
+    const chosen = engine();
+    select(chosen.runtime);
+    const tabs: string[] = [];
+    const create = async (url: string) => {
+      const answer = await chosen.end.request('browserEngine.work', { appSessionId: S, held: true });
+      if (answer.ok === true) tabs.push(url);
+      return answer;
+    };
+    expect(await create('http://127.0.0.1:5173/')).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'the engine host on mini predates browser work holds; it is replaced when idle' } });
+    expect(tabs).toEqual([]);
+  });
+
+  it('removes a connection’s holds when it ends', async () => {
+    const { work, snapshots, engine, select } = withWork();
+    const chosen = engine();
+    select(chosen.runtime);
+    await chosen.end.request('browserEngine.work', { appSessionId: S, held: true });
+    chosen.end.close();
+    chosen.runtime.detach();
+    expect(work.held()).toEqual([]);
+    await vi.waitFor(() => expect(snapshots.at(-1)).toEqual([]));
+  });
+
+  it('refuses host.browserWork forwarded from any caller, a client or the endpoint, before it reaches the engine host', async () => {
+    const { served, client, forwarded } = front();
+    expect(await client([MACHINE_SPINE_CAPABILITY]).request('host.browserWork', { held: [] })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await served.dispatch('host.browserWork', { held: [] })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await served.dispatch('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: false, error: { code: 'internal' } }); // a client's own
+    expect(forwarded).toEqual([]);
+  });
+
+  it('posts the engine host’s host.browserIdle to no client; the taps hear it', () => {
+    const { served, client, raw } = front();
+    const spine = client([MACHINE_SPINE_CAPABILITY]);
+    spine.ready();
+    const tapped: unknown[] = [];
+    served.bus.onEmitted('host.browserIdle' as never, (payload) => void tapped.push(payload));
+    raw('host.browserIdle', { appSessionId: 's1' });
+    expect(spine.events()).toEqual([]);
+    expect(tapped).toEqual([{ appSessionId: 's1' }]);
   });
 });

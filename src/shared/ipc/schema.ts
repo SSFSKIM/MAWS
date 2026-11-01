@@ -71,6 +71,7 @@ import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
+import * as browserEngine from './schema/browser-engine'; // P5 O17
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -179,6 +180,7 @@ export const commands = {
   ...clientPort.commands, // P5 O3-D
   ...render.commands, // P5 O5 M3
   ...remote.commands, // P5 O7 M2
+  ...browserEngine.commands, // P5 O17
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -235,6 +237,7 @@ export const events = {
   ...clientPort.events, // P5 O3-D
   ...render.events, // P5 O5 M3
   ...remote.events, // P5 O7 M2
+  ...browserEngine.events, // P5 O17
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -273,6 +276,7 @@ export const HOST_EVENTS = [
   'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
   'connectors.operation', 'connectors.grantChanged', // P3-H H3b: an operation's end (its id alone) and a committed grant change
   'connectors.directOperation', // P3-HD: a direct operation's end, its id alone
+  'host.browserIdle', // P5 O17 (D20): to mawsd's permanent link alone, which drops the session's headless tabs
 ] as const satisfies readonly EventName[];
 // E10 end
 // P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the events the pty host emits. Under the daemon shape

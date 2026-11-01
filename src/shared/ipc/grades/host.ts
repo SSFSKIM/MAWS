@@ -15,4 +15,5 @@ export const grades = {
   'host.op': 'internal',
   'host.opQuery': 'internal',
   'host.attachment': 'internal', // P5 O3-D: mawsd's alone
+  'host.browserWork': 'internal', // P5 O17: mawsd's alone
 } as const satisfies CommandGrades<'host'>;

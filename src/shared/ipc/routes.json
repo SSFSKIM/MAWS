@@ -90,6 +90,7 @@
  "addressed": [
   "attention.acknowledge",
   "attention.request",
+  "browserEngine.work",
   "connectors.observe",
   "connectors.resolve",
   "connectors.signIn",
@@ -418,6 +419,7 @@
   "fs.state",
   "fs.tasks",
   "host.attachment",
+  "host.browserWork",
   "host.configure",
   "host.exitWhenIdle",
   "host.interest",
