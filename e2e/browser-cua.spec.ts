@@ -610,8 +610,9 @@ test('on the daemon shape the engine\'s connector reaches the app through mawsd\
     const path = daemonSocketOf(live.userData, id);
     expect(path.startsWith(`${live.userData}/mawsd/cua/`), 'the daemon\'s cua directory').toBe(true);
     expect(value(await invoke(maws.page, 'session.capabilities', { appSessionId: id }))).toMatchObject({ browser: { available: true } });
-    // an ordinary launch: no socket named by the scene, the spine's own CUA_BROWSER_BACKENDS reaches the engine
-    expect(value(await invoke(maws.page, 'session.launch', { spec: { ...launchDefaults(id, live.repo), gateway: 'direct' as const } }))).toMatchObject({ status: 'launching' });
+    // session.launch is the engine host's raw command: the spec names the socket, as the spine's start and resume name
+    // its browserSocket (spine-root.ts, launch-mapping.ts; daemon-cua.test.ts pins the daemon's path there)
+    expect(value(await invoke(maws.page, 'session.launch', { spec: launchSpec(id, live.repo, path) }))).toMatchObject({ status: 'launching' });
 
     const report = join(live.repo, 'cua-connector.json');
     await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'the connector hears the hello through the relay' }).toBeGreaterThan(0);
