@@ -711,7 +711,10 @@ describe('a viewer’s subscription', () => {
     expect(await t.op(A, { op: 'ack', subscriptionId: 'v1', seq: 1 })).toEqual({ ok: true, value: null });
     await expect.poll(() => t.sent('browserEngine.frame')).toHaveLength(2);
     expect(await t.op(A, { op: 'ack', subscriptionId: 'v1', seq: 9 })).toMatchObject({ ok: false, error: expect.stringContaining('future') });
+    // P5 O17 M8: the producer's counters, read by pass 3 through the render host's e2e seam
+    expect(t.engine.inspect().screencast).toMatchObject({ tabs: 1, images: 1, viewers: [{ id: 'v1', tabId: t.tabId, control: false, inFlight: 1 }] });
     expect(await t.op(A, { op: 'close', subscriptionId: 'v1' })).toEqual({ ok: true, value: null });
+    expect(t.engine.inspect().screencast).toEqual({ tabs: 0, images: 0, viewers: [] });
     expect(t.frames.live.size, 'the source stopped with its last viewer').toBe(0);
     expect(await t.op(A, { op: 'close', subscriptionId: 'v1' }), 'a second close finds nothing').toEqual({ ok: true, value: null });
   });

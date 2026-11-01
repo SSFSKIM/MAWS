@@ -1021,7 +1021,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (peer === null) return 'none';
     return permanentClient && peer.capabilities.includes(ATTACHMENT_CAPABILITY) && peer.capabilities.includes(HOST_BROWSER_WORK_CAPABILITY) ? 'browserWork' : 'old';
   };
-  const browserHeadless = (): string | null => headlessReason({ machine, platform, addon: peerAddonLoad, engineHost: engineHostBrowserWork(), runtime: renderRuntime(), failure: render.unavailable() });
+  // P5 O17 M8: the e2e's Linux switch, read once from mawsd's own environment, never from a request (pass 3 on Linux)
+  const e2eLinuxHeadless = platform === 'linux' && env.MAWS_E2E === '1' && env.MAWS_E2E_LINUX_HEADLESS === '1';
+  if (e2eLinuxHeadless) log('[cua] MAWS_E2E_LINUX_HEADLESS=1: the headless browser is usable on Linux for the e2e\'s fixture connector');
+  const browserHeadless = (): string | null => headlessReason({ machine, platform, addon: peerAddonLoad, engineHost: engineHostBrowserWork(), runtime: renderRuntime(), failure: render.unavailable(), e2eLinuxHeadless });
   const renderCuaDir = renderCuaSocketDir(profileDir, options.tmp ?? tmpdir());
   const renderSocketOf = (appSessionId: AppSessionId) => cuaSocketPath(renderCuaDir, appSessionId);
   // A side thread's parent, whose tabs it reaches in the render host, from the spine's index: read at once when the

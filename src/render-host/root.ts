@@ -73,8 +73,8 @@ export function runRenderHost(entryDir: string): Promise<void> {
       installRenderSeams({ content, env: process.env });
       return composeRender({ call, content, root: join(profile, 'artifacts'), env: process.env, hostGeneration });
     },
-    browser: (link, paths) =>
-      startTabEngine({
+    browser: (link, paths) => {
+      const engine = startTabEngine({
         ...link,
         views: (partitions) => new OffscreenViews(partitions),
         fromPartition: (partition) => session.fromPartition(partition),
@@ -84,7 +84,12 @@ export function runRenderHost(entryDir: string): Promise<void> {
         machine: machineName(process.env, hostname()),
         version: app.getVersion(),
         log: (line) => console.error(line),
-      }),
+      });
+      // P5 O17 M8: pass 3 (e2e/render-host.spec.ts) reads the engine's sessions and the producer's counters here, under
+      // MAWS_E2E=1 alone, as the render library's seams are installed (../render/e2e-seams.ts)
+      if (process.env.MAWS_E2E === '1') (globalThis as { __maws_tab_engine?: { inspect(): unknown } }).__maws_tab_engine = { inspect: () => engine.inspect() };
+      return engine;
+    },
     log: (line) => console.error(line),
     exit: (code) => app.exit(code),
   }).catch(fatal);

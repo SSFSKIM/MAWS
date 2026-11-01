@@ -43,11 +43,14 @@ export interface HeadlessFacts {
   engineHost: 'none' | 'browserWork' | 'old'; // none connected (a cold one starts as this build), one that holds browser work, one that predates it
   runtime: { available: true } | { available: false; reason: string }; // the render runtime
   failure: string | null; // the render seam is unavailable after two failed starts: the last reason
+  // P5 O17 M8 (Decisions, pass 3 on Linux): MAWS_E2E_LINUX_HEADLESS=1 under MAWS_E2E=1, read once by the daemon: Linux's
+  // route reaches `cold` for the e2e's fixture connector (never real cua, which refuses its clients there, R6)
+  e2eLinuxHeadless?: boolean;
 }
 
 // Why the headless browser is not usable, in §I's order (2 to 5), or null when it is
-export function headlessReason({ machine, platform, addon, engineHost, runtime, failure }: HeadlessFacts): string | null {
-  if (platform === 'linux') return `cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on ${machine}`; // D5, R6
+export function headlessReason({ machine, platform, addon, engineHost, runtime, failure, e2eLinuxHeadless = false }: HeadlessFacts): string | null {
+  if (platform === 'linux' && !e2eLinuxHeadless) return `cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on ${machine}`; // D5, R6
   if (platform === 'darwin' && addon === 'failed') return `the peer identity check did not load on ${machine}, so the agent's browser is refused`;
   if (engineHost === 'old') return oldHostReason(machine);
   if (!runtime.available) return `the render service is unavailable on ${machine}: ${runtime.reason}`;

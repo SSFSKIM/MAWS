@@ -11,6 +11,7 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
+import { join } from 'node:path';
 import { format } from 'node:util';
 import engineHostPath from '../engine-host/index?modulePath';
 import ptyHostPath from '../pty-host/index?modulePath';
@@ -20,6 +21,7 @@ import { DAEMON_FILES } from '@shared/daemon/files';
 import { buildIdOf } from '../engine-host/supervisor-files';
 import { nodeFloorProblem } from './node-floor';
 import { parseRun, USAGE, type RunArgs } from './run-args';
+import { writeE2eResources } from './e2e-seam';
 
 function main(argv: readonly string[]): void {
   const [command, ...rest] = argv;
@@ -50,6 +52,17 @@ function run({ kind, dir }: RunArgs, profileDir: string): void {
   process.on('SIGUSR1', () => {});
   let daemon: RunningDaemon | null = null;
   let log: (line: string) => void = (line) => void process.stderr.write(`${line}\n`);
+  // P5 O17 M8: under MAWS_E2E=1 alone, a SIGUSR2 writes what this process holds to <dir>/e2e-resources.json (e2e-seam.ts),
+  // which e2e:daemon-idle reads at a cold start and at idle
+  if (process.env.MAWS_E2E === '1') {
+    process.on('SIGUSR2', () => {
+      try {
+        writeE2eResources(join(dir, 'e2e-resources.json'));
+      } catch (error) {
+        log(`the e2e resource report was not written: ${error instanceof Error ? error.message : String(error)}`); // never fatal
+      }
+    });
+  }
   let signalled = false;
   const fatal = (error: unknown) => {
     log(`fatal: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);

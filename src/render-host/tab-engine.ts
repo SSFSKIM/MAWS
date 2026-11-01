@@ -61,7 +61,7 @@ import { PageDialogs } from '../main/browser/agent/dialogs';
 import { startCuaBackend, type CuaBackend } from '../main/browser/cua';
 import type { PeerAddon } from '../main/browser/cua/peer';
 import { attachInputSeams } from '../main/browser/input';
-import { startScreencast, type ScreencastDeps } from '../main/browser/screencast';
+import { startScreencast, type ScreencastDeps, type ScreencastInspection } from '../main/browser/screencast';
 import { Navigator } from '../main/browser/navigation';
 import { Partitions } from '../main/browser/partition';
 import { guardPage, preparePermissions } from '../main/browser/permissions';
@@ -101,6 +101,7 @@ export interface TabEngineDeps {
 
 export interface TabEngineInspection {
   sessions: Record<string, { tabs: number; creating: number; held: 'none' | 'acquiring' | 'held' }>;
+  screencast: ScreencastInspection; // P5 O17 M8: the producer's counters (pass 3 reads them through the e2e seam, root.ts)
 }
 
 export interface TabEngine {
@@ -467,6 +468,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       sessions: Object.fromEntries(
         [...served].map(([appSessionId, session]) => [appSessionId, { tabs: tabsOf(appSessionId).length, creating: session.creating, held: session.fence === 'none' || session.fence === 'held' ? session.fence : 'acquiring' }]),
       ),
+      screencast: screencast.inspect(),
     }),
     dispose() {
       for (const appSessionId of [...cancels.keys()]) cancelPrepares(appSessionId, `the headless browser on ${machine} is ending`);

@@ -211,6 +211,18 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     });
   });
 
+  // P5 O17 M8 (Decisions, pass 3 on Linux): MAWS_E2E_LINUX_HEADLESS=1 reads only under MAWS_E2E=1, from mawsd's own
+  // environment at its start; with both, Linux's browser reads the screencast as a Mac's does
+  it.each([
+    [{ MAWS_E2E_LINUX_HEADLESS: '1' }, NO_BROWSER],
+    [{ MAWS_E2E: '1' }, NO_BROWSER],
+    [{ MAWS_E2E: '1', MAWS_E2E_LINUX_HEADLESS: '1' }, { available: true, viewed: 'screencast' }],
+  ])('reads the headless browser on Linux only under MAWS_E2E=1 with MAWS_E2E_LINUX_HEADLESS=1 (%j)', async (extra, browser) => {
+    await scene.start({ permanentClient: true, tmp: TMP, render: { runtime: () => ({ available: true as const }) }, env: { MAWS_USER_DATA: scene.root, ...extra } });
+    const client = await scene.app('machine', { capabilities: [] });
+    expect(await client.request('session.capabilities', { appSessionId: S })).toMatchObject({ ok: true, value: { browser } });
+  });
+
   it('answers session.capabilities cold with the render entries\' reason where the runtime is absent, loading nothing', async () => {
     await scene.start({ permanentClient: true, tmp: TMP });
     const client = await scene.app('machine', { capabilities: [] });

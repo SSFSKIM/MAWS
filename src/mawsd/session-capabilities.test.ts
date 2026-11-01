@@ -78,6 +78,18 @@ describe('whether the headless browser is usable, and why not (P5 O17 M5, Interf
     expect(headlessReason({ ...worst, platform: 'darwin', addon: 'loaded', engineHost: 'browserWork' })).toBe('the render service is unavailable on mini: the render runtime is not installed on mini');
     expect(headlessReason({ ...usable, failure: 'the render host failed: no display' })).toBe('the render service is unavailable on mini: the render host failed: no display');
   });
+
+  // P5 O17 M8 (Decisions, pass 3 on Linux): the e2e switch lets Linux's route reach `cold` for the fixture connector; the
+  // rest of §I's order still reads, and without it Linux reads its own reason
+  it('on Linux under the e2e switch, reads the rest of §I’s order instead of the Linux reason', () => {
+    const linux: HeadlessFacts = { ...usable, platform: 'linux', addon: 'untried' };
+    expect(headlessReason(linux)).toBe("cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on mini");
+    expect(headlessReason({ ...linux, e2eLinuxHeadless: false })).toBe("cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on mini");
+    expect(headlessReason({ ...linux, e2eLinuxHeadless: true })).toBeNull();
+    expect(headlessReason({ ...linux, e2eLinuxHeadless: true, engineHost: 'old' })).toBe(oldHostReason('mini'));
+    expect(headlessReason({ ...usable, e2eLinuxHeadless: true })).toBeNull(); // a Mac reads as it does without it
+    expect(headlessReason({ ...usable, addon: 'failed', e2eLinuxHeadless: true })).toBe("the peer identity check did not load on mini, so the agent's browser is refused");
+  });
 });
 
 describe('the capabilities and their event', () => {

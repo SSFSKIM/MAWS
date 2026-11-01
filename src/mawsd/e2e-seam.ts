@@ -5,7 +5,10 @@
 // so a spec's seam reads the same on both shapes. Refused unless `mawsd` was started under MAWS_E2E=1: `allowed` is
 // mawsd's own reading of its environment at its start (daemon.ts), never anything a request carries.
 import { randomUUID } from 'node:crypto';
+import { renameSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { Module } from 'node:module';
+import { basename } from 'node:path';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
@@ -32,4 +35,20 @@ export async function runE2eRender(input: CommandInput<'daemon.e2eRender'>, allo
   const result = await capture({ appSessionId: 'e2e-render' as AppSessionId, requestId: `e2e-render-${randomUUID()}` as RequestId, artifactId, revision, width, height });
   if (!result.ok) throw new Error(`the capture failed: ${result.error}`);
   await writeFile(to, Buffer.from(result.png, 'base64'));
+}
+
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8, e2e:daemon-idle): what `mawsd` holds, read from
+// outside by the e2e at a moment it chooses (SIGUSR2 under MAWS_E2E=1, ./index.ts): Node's active resources (a `Timeout`
+// per armed timer, a `PipeServerWrap` per listener) and the modules loaded so far, by file name (a deferred chunk's file
+// is its module's name and a hash: `cua-broker-…js`, `browser-feed-…js`). Nothing reads it in a run that is not an e2e.
+export function e2eResources(): { resources: string[]; modules: string[] } {
+  const cache = (Module as unknown as { _cache?: Record<string, unknown> })._cache ?? {}; // require.cache
+  return { resources: process.getActiveResourcesInfo(), modules: Object.keys(cache).map((path) => basename(path)) };
+}
+
+// The report, written whole (a temp file renamed over the last)
+export function writeE2eResources(file: string): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify({ at: new Date().toISOString(), ...e2eResources() }));
+  renameSync(temp, file);
 }

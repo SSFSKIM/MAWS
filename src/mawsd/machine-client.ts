@@ -27,7 +27,9 @@ export interface MachineLink {
 // answered with a refusal (another protocol).
 export type Reached = { ok: true; link: MachineLink } | { ok: false; state: 'down' | 'refused' | 'incompatible'; why: string };
 
-export async function reachMachine(paths: DaemonPaths, options: { build: string; helloTimeoutMs?: number }): Promise<Reached> {
+// `capabilities`: what the hello lists of this client (none, as the command line's; P5 O17 M8's scene 8 says hello as a
+// tab engine, `browser.engine`, to show a stale engine's replies refused)
+export async function reachMachine(paths: DaemonPaths, options: { build: string; helloTimeoutMs?: number; capabilities?: readonly string[] }): Promise<Reached> {
   const down = (why: string): Reached => ({ ok: false, state: 'down', why });
   let token: string;
   try {
@@ -76,7 +78,7 @@ export async function reachMachine(paths: DaemonPaths, options: { build: string;
     };
     socket.on('data', onData);
     socket.on('connect', () => {
-      socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: options.build, capabilities: [], appPid: process.pid })}\n`);
+      socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: options.build, capabilities: options.capabilities ?? [], appPid: process.pid })}\n`);
     });
   });
 }
