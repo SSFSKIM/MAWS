@@ -163,9 +163,10 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
   });
 
   // P5 O5 M4 (acceptance 8): the render seam (its table, the render host's command line and spawn, the authors' read) is
-  // a chunk the handle loads at the first render request, never at start; the handle, which is, holds none of it
+  // a chunk the handle loads at the first render request, never at start; the handle, which is, holds none of it. P5 O17
+  // M5: the headless browser's sessions (createRenderBrowser) are the seam's too
   it('keep the render seam off the run path, in the chunk its handle loads at the first request', () => {
-    const markers = { createRenderSeam: /\bfunction createRenderSeam\(/, spawnRenderHost: /\bfunction spawnRenderHost\(/, renderAuthors: /\bfunction renderAuthors\(/ };
+    const markers = { createRenderSeam: /\bfunction createRenderSeam\(/, spawnRenderHost: /\bfunction spawnRenderHost\(/, renderAuthors: /\bfunction renderAuthors\(/, createRenderBrowser: /\bfunction createRenderBrowser\(/ };
     const run = runPathOf(MAWSD);
     for (const [what, marker] of Object.entries(markers)) {
       expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);

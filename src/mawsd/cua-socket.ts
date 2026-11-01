@@ -23,6 +23,10 @@
 // app's attachment or at a capability read. What the broker serves under one epoch, or checked against one engine,
 // ends when the route or the engine moves on, as a relayed pair does. PENDING_BUDGET counts the broker's promotions
 // waiting for the render host beside the peer-root waits: one counter (D2).
+//
+// P5 O17 M5 (§B): in `headless` a newly admitted peer is relayed straight to the render host's socket for the session
+// (`target`), as a peer is to the app's, never through the broker; a relayed pair is its epoch's, and ends when the
+// route's epoch moves on.
 import { chmodSync, readdirSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -52,6 +56,7 @@ export interface CuaColdRoute {
   reading(appSessionId: AppSessionId): BrowserRouteReading;
   live(appSessionId: AppSessionId): boolean; // §B's *live*: the session's engine process is live
   ensureBrowser(demand: BrowserDemand): Promise<BrowserTarget>;
+  target?(appSessionId: AppSessionId): string | null; // P5 O17 M5: in `headless`, the render host's socket for the session (§D)
 }
 
 export interface CuaSocketsOptions {
@@ -90,6 +95,7 @@ export interface CuaSockets {
 interface Pair {
   engine: Socket;
   app: Socket | null; // null while the relay's connect is under way
+  epoch: string | null; // P5 O17 M5: the route's epoch it was admitted in (null with no cold route)
 }
 
 interface Session {
@@ -185,10 +191,10 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
 
   // A checked peer, relayed to the tab engine's socket for its session; the app's socket may not listen yet (it starts
   // at the session's status in the app), so the connect is tried again until RELAY_CONNECT_WAIT_MS has passed.
-  const relay = (appSessionId: AppSessionId, session: Session, engine: Socket) => {
-    const target = tabEngine === null ? null : cuaSocketPath(tabEngine, appSessionId);
+  // P5 O17 M5: the tab engine is the app's, or in `headless` the render host's (`who` names it in the lines)
+  const relay = (appSessionId: AppSessionId, session: Session, engine: Socket, target: string | null, epoch: string | null, who = 'the attached app') => {
     if (target === null) return void engine.destroy();
-    const pair: Pair = { engine, app: null };
+    const pair: Pair = { engine, app: null, epoch };
     session.pairs.add(pair);
     engine.on('close', () => {
       session.pairs.delete(pair);
@@ -197,7 +203,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     const deadline = Date.now() + relayWaitMs;
     const retry = (why: string) => {
       if (Date.now() < deadline && !engine.destroyed && session.pairs.has(pair)) return void setTimeout(attempt, RELAY_RETRY_MS).unref();
-      log(`cua socket of ${appSessionId}: the attached app's socket did not answer (${why}): the connection is closed`);
+      log(`cua socket of ${appSessionId}: ${who}'s socket did not answer (${why}): the connection is closed`);
       engine.destroy();
     };
     const attempt = () => {
@@ -207,7 +213,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         assertPrivateSocket(target);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return retry('ENOENT');
-        log(`cua socket of ${appSessionId}: the attached app's socket is refused: ${error instanceof Error ? error.message : String(error)}`);
+        log(`cua socket of ${appSessionId}: ${who}'s socket is refused: ${error instanceof Error ? error.message : String(error)}`);
         return void engine.destroy();
       }
       const app = connect(target);
@@ -289,11 +295,14 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     );
   };
 
-  // A checked peer goes to the attached app, or on a cold route to the broker under its epoch (P5 O17 M1)
+  // A checked peer goes to the attached app, or on a cold route to the broker under its epoch (P5 O17 M1), or in
+  // `headless` straight to the render host (M5)
   const serve = (appSessionId: AppSessionId, session: Session, socket: Socket, epoch: string | null) => {
-    if (tabEngine !== null) return relay(appSessionId, session, socket);
-    if (coldServes(appSessionId) && epoch !== null) return toBroker(appSessionId, session, socket, epoch);
-    socket.destroy();
+    if (tabEngine !== null) return relay(appSessionId, session, socket, cuaSocketPath(tabEngine, appSessionId), epoch);
+    if (!coldServes(appSessionId) || epoch === null) return void socket.destroy();
+    const headless = options.cold!.target?.(appSessionId) ?? null;
+    if (headless !== null) return relay(appSessionId, session, socket, headless, epoch, 'the render host');
+    toBroker(appSessionId, session, socket, epoch);
   };
 
   // The verdict on an accepted socket, which nothing has read yet: refused, counted and destroyed unread; let in, relayed.
@@ -457,6 +466,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       const epoch = epochOf(appSessionId);
       endPending(session, (accepted) => accepted === epoch); // P5 O17: an older epoch's, still waiting for its engine's root
       endAwaiting(session, (entry) => entry.epoch === epoch); // P5 O17 M1: an older epoch's, still waiting for the chunk
+      for (const pair of [...session.pairs]) if (pair.epoch !== epoch) endPair(pair); // P5 O17 M5: relayed under an older epoch
       broker?.routeChanged(appSessionId);
       if (tabEngine === null) settle(appSessionId, session);
     },

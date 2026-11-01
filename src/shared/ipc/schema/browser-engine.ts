@@ -13,7 +13,8 @@
 // M4: `browserEngine.request`, `mawsd`'s request to the engine connection it selected for a session (an event to that
 // connection alone, as `render.request` is: a reverse request kind would be a new envelope kind), answered once with
 // `browserEngine.answer`: `prepare` (the engine serves the session's cua socket: answered null once it listens and the
-// daemon's relay pass is confirmed), `drop` (answered null once the session's views, connections and socket there are
+// daemon's relay pass is confirmed; P5 O17 M5: it names the session's parent when the session is a side thread, which
+// `mawsd` reads from its own index, so the engine reads no lineage over the link), `drop` (answered null once the session's views, connections and socket there are
 // gone) and `inventory` (the session's tabs). `browserEngine.state`: the session's inventory, pushed at each change of
 // its tabs or of its readiness. Request ids are `mawsd`'s; engines carry no epoch (D7). M6 adds the subscription's
 // operations, `browserEngine.frame` and `browserEngine.ended`.
@@ -35,7 +36,7 @@ export const EngineInventorySchema = z.strictObject({
 export type EngineInventory = z.infer<typeof EngineInventorySchema>;
 
 export const BrowserEngineOperationSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('prepare') }), // the render host only
+  z.strictObject({ op: z.literal('prepare'), parent: AppSessionIdSchema.optional() }), // the render host only; M5: a side thread's parent, whose tabs it reaches
   z.strictObject({ op: z.literal('drop') }), // the render host only
   z.strictObject({ op: z.literal('inventory') }),
 ]);

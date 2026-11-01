@@ -530,6 +530,7 @@ describe('the cold route (P5 O17 M1)', () => {
   function coldStand(options: Partial<CuaSocketsOptions> & { addon?: PeerAddon | null } = {}) {
     const readings = new Map<AppSessionId, BrowserRouteReading>();
     const live = new Map<AppSessionId, boolean>();
+    const targets = new Map<AppSessionId, string>(); // P5 O17 M5: the render host's socket in `headless`
     const demands: BrowserDemand[] = [];
     let loads = 0;
     const stood = stand({
@@ -539,11 +540,12 @@ describe('the cold route (P5 O17 M1)', () => {
         reading: (appSessionId) => readings.get(appSessionId) ?? { state: 'cold', epoch: 'e1' },
         live: (appSessionId) => live.get(appSessionId) ?? true,
         ensureBrowser: (demand) => (demands.push(demand), new Promise<BrowserTarget>(() => {})),
+        target: (appSessionId) => (readings.get(appSessionId)?.state === 'headless' ? (targets.get(appSessionId) ?? null) : null),
       },
       loadBroker: () => (loads++, loadCuaBroker()),
       ...options,
     });
-    return { ...stood, readings, live, demands, loads: () => loads };
+    return { ...stood, readings, live, targets, demands, loads: () => loads };
   }
 
   it('listens with no app while the route is cold and the engine live, stops when it is not, and listens while starting', async () => {
@@ -588,7 +590,7 @@ describe('the cold route (P5 O17 M1)', () => {
     addon.peerPid = STRANGER;
     const path = sockets.ensure(A)!;
     await until(() => exists(path));
-    browserCapability({ machine: 'mini', appSessionId: A, path, tabEngine: sockets.tabEngine() });
+    browserCapability({ machine: 'mini', appSessionId: A, path, tabEngine: sockets.tabEngine(), headless: null });
     sockets.inspect();
     const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.query', params: {} }));
     await until(client.closed);
@@ -806,5 +808,26 @@ describe('the cold route (P5 O17 M1)', () => {
     sockets.target(appDir);
     sockets.target(null);
     expect(logs.at(-1)).toBe("[cua] no tab engine is attached: 1 of the sessions' sockets keep listening on their cold route, the others stop");
+  });
+  // P5 O17 M5 (§B): `headless` relays a new connection straight to the render host, never through the broker
+  it('in headless, relays a newly admitted peer straight to the render host’s socket, the broker never loaded, until the epoch moves on', async () => {
+    const addon = fakeAddon();
+    const { sockets, readings, targets, loads, root } = coldStand({ addon });
+    const render = appSocket(root, 'render-A'); // the render host's socket for A, its own hello first
+    render.server.on('connection', (socket) => void socket.write('render-host:hello'));
+    await render.listening;
+    targets.set(A, render.path);
+    readings.set(A, { state: 'headless', epoch: 'e1' });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const client = engineClient(path, Buffer.from('tabs.create'));
+    await until(() => client.heard().toString() === 'render-host:hello' && render.heard().toString() === 'tabs.create');
+    expect(sockets.inspect().A!.relayed).toBe(1);
+    expect(loads(), 'no broker on the headless path').toBe(0);
+    readings.set(A, { state: 'cold', epoch: 'e2' }); // the render host ended: a new period
+    sockets.routeChanged(A);
+    await until(client.closed);
+    await until(() => render.peers.every((peer) => peer.destroyed || peer.readableEnded));
   });
 });

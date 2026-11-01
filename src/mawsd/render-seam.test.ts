@@ -14,6 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HostCommandError } from '@shared/host/runtime';
 import type { MawsArtifactCapture, MawsArtifactExport } from '@shared/ipc/schema/maws';
 import type { RenderRequest } from '@shared/ipc/schema/render';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { BrowserEngineRequest, BrowserEngineResult } from '@shared/ipc/schema/browser-engine';
+import type { BrowserDemand } from './cua-broker';
 import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
@@ -576,6 +579,186 @@ describe('the render seam (P5 O5 M4)', () => {
 // PR #428's panel (scalpel-3): a Linux render host's process group under fake time, through spawnRenderHost's injected
 // spawn and signal. The wrapper (xvfb-run's shell) exits at the group's SIGTERM; one member ignores it and dies only at
 // SIGKILL. `zombies` keeps the group answering `kill(-pgid, 0)` after the SIGKILL, as orphans no subreaper reaps do.
+// P5 O17 M5 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §B, §D, §F): the render host as the sessions'
+// headless browser, over a fake front whose engine connection records what is posted to it
+describe('the headless browser through the seam (P5 O17 M5)', () => {
+  const ENGINE = { connection: 'the render host’s' };
+  const OTHER = { connection: 'another' };
+  function browserScene() {
+    const posts: BrowserEngineRequest[] = [];
+    const ended: string[] = [];
+    const dropped: string[] = [];
+    const held = { value: false };
+    const parents = new Map<string, Promise<AppSessionId | null>>();
+    const s = scene({
+      browser: {
+        post: (engine, request) => engine === ENGINE && (posts.push(request), true),
+        socketPath: (id) => `/p/mawsd/render-cua/${id}.sock`,
+        parentOf: (id) => parents.get(id) ?? Promise.resolve(null),
+        held: () => held.value,
+        ended: (id) => void ended.push(id),
+        dropped: (_engine, id) => void dropped.push(id),
+      },
+    });
+    const ops = () => posts.map((request) => `${request.operation.op} ${request.appSessionId}`);
+    const answer = (index: number, result: BrowserEngineResult = { ok: true, value: null }) => s.seam.browserAnswer(ENGINE, { id: posts[index]!.id, result });
+    return { ...s, posts, ops, answer, ended, dropped, held, parents };
+  }
+  const demand = (appSessionId = 'S', extra: Partial<BrowserDemand> = {}): BrowserDemand => ({ appSessionId: appSessionId as AppSessionId, epoch: 'e1', deadline: performance.now() + 4_000, signal: new AbortController().signal, ...extra });
+
+  it('starts the render host for a demand, prepares the session on its connection naming the parent, and resolves at the answer', async () => {
+    const s = browserScene();
+    let lineage!: (parent: AppSessionId | null) => void;
+    s.parents.set('S', new Promise((resolve) => (lineage = resolve)));
+    const ensured = s.seam.ensureBrowser(demand());
+    expect(s.children, 'a demand starts it as a request does').toHaveLength(1);
+    s.seam.clientReady(ENGINE);
+    await flush();
+    expect(s.posts, 'the lineage read first').toEqual([]);
+    lineage('P' as AppSessionId);
+    await flush();
+    expect(s.posts).toEqual([{ id: expect.any(String), appSessionId: 'S', operation: { op: 'prepare', parent: 'P' } }]);
+    expect(s.seam.browserEngine('S' as AppSessionId), 'selected from the prepare on').toBe(ENGINE);
+    expect(s.seam.browserAnswer(OTHER, { id: s.posts[0]!.id, result: { ok: true, value: null } }), 'from another connection').toBe(false);
+    expect(s.answer(0)).toBe(true);
+    expect(await ensured).toEqual({ epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' });
+    expect(s.answer(0), 'answered once').toBe(false);
+    expect(await s.seam.ensureBrowser(demand('S', { epoch: 'e2' })), 'a session it serves resolves at once').toEqual({ epoch: 'e2', socketPath: '/p/mawsd/render-cua/S.sock' });
+    expect(s.posts).toHaveLength(1);
+  });
+
+  it('a demand that runs out of time or is cancelled after its prepare was sent undoes it with drop: no prepared session is left behind', async () => {
+    const s = browserScene();
+    s.seam.ensureBrowser(demand()).catch(() => {});
+    s.seam.clientReady(ENGINE);
+    const expired = s.seam.ensureBrowser(demand('T', { deadline: performance.now() + 1_000 })).catch((error: Error) => error.message);
+    await flush();
+    expect(s.ops()).toEqual(['prepare S', 'prepare T']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await expired).toBe('the browser on mini did not start within its deadline');
+    expect(s.ops(), 'the drop behind the prepare: the render host cancels it').toEqual(['prepare S', 'prepare T', 'drop T']);
+    expect(s.seam.browserEngine('T' as AppSessionId)).toBeNull();
+    s.answer(1); // the prepare's late answer does nothing
+    expect(s.seam.browserEngine('T' as AppSessionId)).toBeNull();
+    const controller = new AbortController();
+    const cancelled = s.seam.ensureBrowser(demand('U', { signal: controller.signal })).catch((error: Error) => error.message);
+    await flush();
+    controller.abort();
+    expect(await cancelled).toBe('This operation was aborted');
+    expect(s.ops().slice(-2)).toEqual(['prepare U', 'drop U']);
+    const early = new AbortController();
+    early.abort();
+    await expect(s.seam.ensureBrowser(demand('V', { signal: early.signal }))).rejects.toThrow();
+    expect(s.ops().some((op) => op.endsWith('V')), 'cancelled before anything was sent').toBe(false);
+  });
+
+  it('a drop of a session being prepared follows its prepare and fails its demand; the drop resolves at its answer, the hold then released', async () => {
+    const s = browserScene();
+    s.seam.clientReady(ENGINE); // not starting: not taken
+    const ensured = s.seam.ensureBrowser(demand()).catch((error: Error) => error.message);
+    s.seam.clientReady(ENGINE);
+    await flush();
+    let dropped = false;
+    const drop = s.seam.dropBrowser('S' as AppSessionId).then(() => (dropped = true));
+    expect(await ensured).toBe('the browser of S was dropped');
+    expect(s.ops()).toEqual(['prepare S', 'drop S']);
+    s.answer(0); // its prepare answered after the drop was sent: taken, nothing served
+    expect(s.seam.browserEngine('S' as AppSessionId)).toBeNull();
+    await flush();
+    expect(dropped).toBe(false);
+    expect(s.dropped).toEqual([]);
+    s.answer(1);
+    await drop;
+    expect(s.dropped).toEqual(['S']);
+  });
+
+  it('a new prepare on a connection retiring for the session waits for the drop’s answer (the socket’s order separates the periods)', async () => {
+    const s = browserScene();
+    s.seam.ensureBrowser(demand()).catch(() => {});
+    s.seam.clientReady(ENGINE);
+    await flush();
+    s.answer(0);
+    await flush();
+    void s.seam.dropBrowser('S' as AppSessionId);
+    const again = s.seam.ensureBrowser(demand('S', { epoch: 'e2' }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(s.ops(), 'held behind the drop').toEqual(['prepare S', 'drop S']);
+    s.answer(1);
+    await flush();
+    expect(s.ops()).toEqual(['prepare S', 'drop S', 'prepare S']);
+    s.answer(2);
+    expect(await again).toEqual({ epoch: 'e2', socketPath: '/p/mawsd/render-cua/S.sock' });
+  });
+
+  it('the host’s connection ending ends its sessions’ service, resolves its drops and fails what it was preparing', async () => {
+    const s = browserScene();
+    s.seam.ensureBrowser(demand()).catch(() => {});
+    s.seam.clientReady(ENGINE);
+    await flush();
+    s.answer(0);
+    const preparing = s.seam.ensureBrowser(demand('T')).catch((error: Error) => error.message);
+    await flush();
+    const drop = s.seam.dropBrowser('S' as AppSessionId);
+    s.seam.ensureBrowser(demand('U')).catch(() => {});
+    await flush();
+    s.answer(2); // U served
+    s.seam.clientGone(ENGINE);
+    await drop;
+    expect(await preparing).toBe('the render host on mini ended');
+    expect(s.ended.sort()).toEqual(['T', 'U']); // S had been dropped: its route moved already
+    expect(s.dropped).toEqual(['S']);
+    expect(s.seam.browserEngine('U' as AppSessionId)).toBeNull();
+  });
+
+  it('browser holds keep the host past its quiet period; once none stands it ends, and a demand meanwhile waits for the next host', async () => {
+    const s = browserScene();
+    const ensured = s.seam.ensureBrowser(demand('S', { deadline: performance.now() + 120_000 })); // a long one, to watch the quiet period
+    s.seam.clientReady(ENGINE);
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.exits.count, 'a prepare in flight holds it').toBe(0);
+    s.answer(0);
+    await ensured;
+    s.held.value = true; // a tab: browser work held on its connection
+    s.seam.browserWorkChanged();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.exits.count, 'a held tab holds it').toBe(0);
+    s.held.value = false; // the last tab closed
+    s.seam.browserWorkChanged();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(s.exits.count).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.exits.count, 'a prepared session with no tab does not hold it').toBe(1);
+    const next = s.seam.ensureBrowser(demand('T'));
+    await flush();
+    expect(s.ops(), 'nothing sent to a host that ends').toEqual(['prepare S']);
+    s.seam.clientGone(ENGINE);
+    s.children[0]!.exit(0);
+    expect(s.ended).toEqual(['S']);
+    expect(s.children, 'the demand starts the next host').toHaveLength(2);
+    const NEXT = ENGINE; // the stand-in front posts to one connection object
+    s.seam.clientReady(NEXT);
+    await flush();
+    expect(s.ops()).toEqual(['prepare S', 'prepare T']);
+    s.answer(1);
+    expect(await next).toMatchObject({ socketPath: '/p/mawsd/render-cua/T.sock' });
+  });
+
+  it('refuses a demand while unavailable or stopped, and fails the waiting ones when the seam becomes unavailable', async () => {
+    const s = browserScene();
+    const waiting = s.seam.ensureBrowser(demand('S', { deadline: performance.now() + 60_000 })).catch((error: Error) => error.message);
+    s.children[0]!.exit(70);
+    await vi.advanceTimersByTimeAsync(500);
+    s.children[1]!.exit(70);
+    expect(await waiting).toMatch(/^the render service could not start on mini/);
+    expect(s.seam.unavailable()).not.toBeNull();
+    await expect(s.seam.ensureBrowser(demand())).rejects.toThrow(/could not start on mini/);
+    s.runtime.value = { available: false, reason: 'the render runtime is not installed on mini' };
+    await vi.advanceTimersByTimeAsync(61_000);
+    await expect(s.seam.ensureBrowser(demand())).rejects.toThrow('the render runtime is not installed on mini');
+  });
+});
+
 describe('the render host’s process group (Linux) under the seam', () => {
   const WRAPPER = 4242;
   class FakeWrapper extends EventEmitter {

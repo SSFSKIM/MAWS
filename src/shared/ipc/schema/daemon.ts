@@ -50,12 +50,16 @@ export type DaemonArtifacts = z.infer<typeof DaemonArtifactsSchema>;
 // (`off`, `starting`, `ready`, `ending`, `unavailable`), a string as a host's is; `detail`, why it is unavailable or what
 // it waits for; `pid`, the render host's while one runs; `starts`, the render hosts started since the daemon's start;
 // `requests`, the requests in its table now.
+// P5 O17 M5 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §D): while the seam is loaded, the sessions
+// the render host serves as their headless browser (`browserSessions`) and the tabs it holds for them (`browserTabs`).
 export const DaemonRenderSchema = z.strictObject({
   state: z.string(),
   detail: z.string().nullable(),
   pid: z.number().int().nullable(),
   starts: z.number().int().nonnegative(),
   requests: z.number().int().nonnegative(),
+  browserSessions: z.number().int().nonnegative().optional(),
+  browserTabs: z.number().int().nonnegative().optional(),
 });
 export type DaemonRender = z.infer<typeof DaemonRenderSchema>;
 

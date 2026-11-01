@@ -3,8 +3,9 @@
 // renderer and O7's remote rows show as written. `mawsd` answers `session.capabilities` cold (no spine) from its render
 // seam's state and its cua sockets' (`artifact_screenshot`, `artifact_export`, `browser`), and posts
 // `session.capabilitiesChanged` to every ready client and the endpoint at each flip. Keyed by any string, as lane A's
-// control capabilities are (`ControlCapabilitySchema`): a key a sibling adds (O4's) is kept, never refused; M8's re-plan
-// may add `viewed` to an entry, which the loose entry keeps.
+// control capabilities are (`ControlCapabilitySchema`): a key a sibling adds (O4's) is kept, never refused. P5 O17 M5:
+// the browser entry's `viewed` (`local`, in the app's pane; `screencast`, the render host's headless browser), which the
+// loose entry keeps.
 import type * as z from 'zod';
 import { ControlCapabilitiesSchema, ControlCapabilitySchema } from './lane-a';
 

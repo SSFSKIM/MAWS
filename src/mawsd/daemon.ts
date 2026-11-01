@@ -79,6 +79,13 @@
 // engine that outlived a daemon, D-16); a removed session's socket goes. The peer identity addon loads from the app's
 // Resources as the app loads it, at the first session's socket (never at an idle start, acceptance 14). `session.capabilities` is the front's, answered from the render handle's and the cua
 // sockets' readings; `session.capabilitiesChanged` follows each flip of a session the daemon holds a socket for.
+//
+// P5 O17 M5 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §B, §D, §I): each session's browser route
+// (browser-route.ts) from its inputs: the attached app, whether the headless browser is usable here (the platform, the
+// peer addon, an engine host that holds browser work or none connected, the render service), each raw `session.status`
+// (its engine live, or exited), `session.removed`, `host.browserIdle` and the render host's end. With no app, a live
+// session's cua socket listens cold (the broker), promotes through the render seam's `ensureBrowser` and is relayed to
+// the render host while it serves the session; the browser capability reads the same inputs.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -89,8 +96,8 @@ import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-sup
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
-import { cuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5
-import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
+import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
@@ -132,8 +139,9 @@ import { SpineReaders } from './spine-readers';
 import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
 import { createCuaSockets, type CuaSockets } from './cua-socket'; // P5 O5 M5
-import { browserCapability, createSessionCapabilities } from './session-capabilities'; // P5 O5 M5
+import { browserCapability, createSessionCapabilities, headlessReason, type HeadlessFacts } from './session-capabilities'; // P5 O5 M5
 import { createBrowserWork } from './browser-work'; // P5 O17 M3
+import { createBrowserRoute } from './browser-route'; // P5 O17 M5
 import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -801,6 +809,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     } else if (!ready && upstreamConnected) {
       upstreamConnected = false;
       browserWork.linkDown(); // P5 O17 M3: an acquire waiting on this link fails, its engine making no tab
+      browserInputs(); // P5 O17 M5: with no engine host connected the headless browser reads this build's
       renderGeneration += 1;
       front.postRender('render.hostGeneration', { generation: renderGeneration }); // P5 O5 M4: at the loss, above
       each(upstreamListeners, { connected: false, generation }); // after every endpoint channel's `upstream` close (doc-relay)
@@ -812,7 +821,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // and what is available follows the app again (a permanent link replaced by an older host's)
     if (permanentLink) hosts.sayReady('engine-host');
     else if (available !== engineRelay.attachedApp()) availability(engineRelay.attachedApp());
-    sessionCapabilities.refresh(); // P5 O5 M5: whether this engine host renders (its welcome) reads in the render entries
+    browserInputs(); // P5 O5 M5: whether this engine host renders (its welcome) reads in the render entries; P5 O17 M5: and holds browser work
   });
   hosts.onStreaming('engine-host', () => {
     if (permanentLink && !available) availability(true); // P5 O3-D M3: events are available from here on, with or without an app
@@ -825,7 +834,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
   hosts.onRaw('engine-host', (message) => {
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
-    if (message.name === 'host.browserIdle') return; // P5 O17 M3: mawsd's own (M5 drops the session's headless tabs), no app hears it
+    if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
     engineRelay.deliver(message);
     each(eventListeners, 'engine-host', message);
@@ -873,7 +882,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
       spine: spine.status(),
       artifacts: artifacts.status(), // P5 O5 M2
-      render: render.status(), // P5 O5 M4
+      render: { ...render.status(), ...(render.loaded() && route.counts()) }, // P5 O5 M4; P5 O17 M5: its browser sessions and tabs
     };
   }
   // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
@@ -977,10 +986,20 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       },
       hold: (reason) => services.hold(reason),
       // P5 O5 M5: a session's render entries follow the seam's state; an unavailable seam reads available again once its
-      // window has passed, with no state change of its own, so the reading is taken again then
+      // window has passed, with no state change of its own, so the reading is taken again then. P5 O17 M5: so does the
+      // headless browser's usability, and with it each session's route
       onState: (state) => {
-        sessionCapabilities.refresh();
-        if (state === 'unavailable') setTimeout(() => sessionCapabilities.refresh(), chunk.FAILURE_WINDOW_MS + 100).unref();
+        browserInputs();
+        if (state === 'unavailable') setTimeout(() => browserInputs(), chunk.FAILURE_WINDOW_MS + 100).unref();
+      },
+      // P5 O17 M5 (§D): the render host as the sessions' headless browser
+      browser: {
+        post: (engine, request) => front.postEngine(engine, 'browserEngine.request', request),
+        socketPath: renderSocketOf,
+        parentOf: sideThreadParent,
+        held: (engine) => browserWork.held().some((appSessionId) => browserWork.holding(engine, appSessionId)),
+        ended: (appSessionId) => route.engineEnded(appSessionId),
+        dropped: (engine, appSessionId) => front.browserDropped(engine, appSessionId),
       },
       log,
     }),
@@ -988,6 +1007,61 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     facts: () => ({ machine, runtime: renderRuntime(), engineHostRenders: engineHostMayRender(), appAttached: appPresent() }), // P5 O5 M5
     log,
   });
+
+  // --- the browser route (P5 O17 M5; browser-route.ts): each session's tab engine, under its epoch ---------------------
+  let peerAddonLoad: HeadlessFacts['addon'] = 'untried'; // the cua sockets load it at the first session's socket
+  // An engine host that holds browser work: the permanent link's, its welcome listing host.browserWork (browser-work.ts's
+  // `capable`); none connected is a cold one, which starts as this build (the acquire meanwhile answers "reconnecting")
+  const engineHostBrowserWork = (): HeadlessFacts['engineHost'] => {
+    const peer = hosts.peer('engine-host');
+    if (peer === null) return 'none';
+    return permanentClient && peer.capabilities.includes(ATTACHMENT_CAPABILITY) && peer.capabilities.includes(HOST_BROWSER_WORK_CAPABILITY) ? 'browserWork' : 'old';
+  };
+  const browserHeadless = (): string | null => headlessReason({ machine, platform, addon: peerAddonLoad, engineHost: engineHostBrowserWork(), runtime: renderRuntime(), failure: render.unavailable() });
+  const renderCuaDir = renderCuaSocketDir(profileDir, options.tmp ?? tmpdir());
+  const renderSocketOf = (appSessionId: AppSessionId) => cuaSocketPath(renderCuaDir, appSessionId);
+  // A side thread's parent, whose tabs it reaches in the render host, from the spine's index: read at once when the
+  // spine is loaded, else loaded for it within the demand's deadline less PREPARE_MARGIN_MS (the prepare's own time),
+  // never waited for past it: the session then reaches its own tabs alone (M4's open question, settled at M5)
+  const PREPARE_MARGIN_MS = 1_000;
+  const sideThreadParent = async (appSessionId: AppSessionId, deadline: number): Promise<AppSessionId | null> => {
+    let root = spine.root();
+    if (root === null) {
+      const wait = deadline - performance.now() - PREPARE_MARGIN_MS;
+      if (wait <= 0) return null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      root = await Promise.race([
+        spine.ensure('command').catch(() => null),
+        new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), wait))),
+      ]);
+      clearTimeout(timer);
+      if (root === null) log(`[browser] ${appSessionId}'s lineage was not read in time: it reaches its own tabs alone`);
+    }
+    const lineage = root && root.view.unavailable() === null ? root.view.record(appSessionId)?.lineage : null;
+    return lineage?.kind === 'side-thread' ? lineage.parentAppSessionId : null;
+  };
+  const route = createBrowserRoute({
+    machine,
+    app: () => front.browserSocket() !== null,
+    headless: browserHeadless,
+    ensureBrowser: (demand) => render.ensureBrowser(demand),
+    dropBrowser: (appSessionId) => render.dropBrowser(appSessionId),
+    engineOf: (appSessionId) => render.browserEngine(appSessionId),
+    socketPath: renderSocketOf,
+    routeChanged: (appSessionId) => cua?.routeChanged(appSessionId),
+    log,
+  });
+  // What the routes and the browser entry read may have changed: the routes first (`between`, after their epochs are
+  // minted and before any teardown), then each tracked session's capabilities
+  const browserInputs = (between?: () => void) => {
+    route.inputsChanged(between);
+    sessionCapabilities.refresh();
+  };
+  // host.browserIdle (D20): the session's headless tabs dropped when it holds browser work, else ignored
+  const browserIdle = (payload: unknown) => {
+    const appSessionId = (payload as { appSessionId?: unknown } | null)?.appSessionId;
+    if (typeof appSessionId === 'string') route.browserIdle(appSessionId as AppSessionId, browserWork.held().includes(appSessionId as AppSessionId));
+  };
 
   // --- the cua sockets and the session capabilities (P5 O5 M5; cua-socket.ts, session-capabilities.ts) -----------------
   const cuaDir = cuaSocketDir(profileDir, options.tmp ?? tmpdir());
@@ -1012,7 +1086,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
-    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null }),
+    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null, headless: browserHeadless() }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
     tracking: (any) => ((tracked = any), syncCacheWatch()),
   });
@@ -1020,8 +1094,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // or stop; and whatever a session's capabilities read may have changed with it
   const followTabEngine = () => {
     if (stopping !== null) return; // the exit closes the sockets and the clients: no flip to tell
-    cua?.target(front.browserSocket());
-    sessionCapabilities.refresh();
+    browserInputs(() => cua?.target(front.browserSocket())); // P5 O17 M5: the routes' epochs minted before the sockets move
   };
   const browserSocketFor = (appSessionId: AppSessionId): string | null => {
     const path = cua?.ensure(appSessionId) ?? null;
@@ -1038,16 +1111,23 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (cua === null || typeof appSessionId !== 'string' || typeof status !== 'object' || status === null) return;
     const id = appSessionId as AppSessionId;
     const running = status.process !== 'exited';
+    const pid = typeof status.pid === 'number' ? status.pid : null;
+    route.statusSeen(id, { process: String(status.process), pid }); // P5 O17 M5: live, or the engine's exit
     if (running && cua.ensure(id) !== null) sessionCapabilities.track(id);
-    cua.engineProcess(id, running && typeof status.pid === 'number' ? status.pid : null);
+    // P5 O17 M5 (§B): a running reading with no pid (an adoption's first, after an engine-host restart) names no new
+    // engine, so the peer check's root stays and what was checked against it (relayed, cold and spliced) goes on; the
+    // next pid is compared with it
+    if (!running || pid !== null) cua.engineProcess(id, running ? pid : null);
     if (!running && !launchedHere.has(id)) {
       cua.remove(id);
+      route.removed(id); // P5 O17 M5
       if (!askedAbout.has(id)) sessionCapabilities.forget(id); // the panel's scalpel-4#2: an asker hears its next flip
     }
   };
   const sessionRemoved = (appSessionId: AppSessionId) => {
     launchedHere.delete(appSessionId);
     askedAbout.delete(appSessionId);
+    route.removed(appSessionId); // P5 O17 M5: its headless tabs dropped
     cua?.remove(appSessionId);
     sessionCapabilities.forget(appSessionId);
   };
@@ -1068,14 +1148,19 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     beforeSpineCommand: wakeForDiscovery,
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
-    render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady()) },
+    render: { ...render.front, clientReady: (engine) => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady(engine)) },
     // P5 O5 M5: a session asked about is followed from then on, so the asker hears its next flip (forgotten at its removal);
     // the answer is what the next flip compares against (the panel's scalpel-4#3: `ask` posts it first when it changed)
     capabilities: (appSessionId) => (askedAbout.add(appSessionId), sessionCapabilities.ask(appSessionId)),
     browserChanged: followTabEngine, // P5 O5 M5
-    // P5 O17 M3: the route's selected engine connection is M5's (browser-route.ts); until then none is selected, so no
-    // engine's `held: true` is taken
-    browser: { work: browserWork, selected: () => null },
+    // P5 O17 M3, M5: the route's selected engine connection and its period; the render seam's answers; the route's cache
+    browser: {
+      work: browserWork,
+      selected: (appSessionId) => route.selection(appSessionId),
+      answer: (engine, input) => render.browserAnswer(engine, input),
+      state: (engine, input) => route.state(engine, input),
+      workChanged: () => render.browserWorkChanged(),
+    },
     log,
   });
   eventClients = () => front.eventClients(); // P5 O5 M6: the cache's watch reads them from here on
@@ -1221,10 +1306,14 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const addon = loadAddon();
         if (addon === null) log(platform === 'darwin' ? '[cua] the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)' : '[cua] no peer identity addon on this platform: the uid is the cua sockets\' boundary');
         else log('[cua] the peer identity addon loaded');
+        peerAddonLoad = addon === null ? 'failed' : 'loaded'; // P5 O17 M5: on darwin, whether the headless browser is usable
+        queueMicrotask(() => browserInputs()); // after the socket that loaded it is set up
         return addon;
       },
       uidBoundary: platform !== 'darwin',
       log,
+      // P5 O17 M5: with no app, a session's route (browser-route.ts): the broker cold, the render host's socket headless
+      cold: { machine, version: options.build.version, reading: (id) => route.reading(id), live: (id) => route.live(id), ensureBrowser: (demand) => route.ensureBrowser(demand), target: (id) => route.target(id) },
       onChange: () => sessionCapabilities.refresh(),
       ...(options.cua?.relayConnectWaitMs !== undefined && { relayConnectWaitMs: options.cua.relayConnectWaitMs }),
     });

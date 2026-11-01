@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionCapability } from '@shared/ipc/schema/session-capabilities';
-import { browserCapability, createSessionCapabilities, renderCapabilities } from './session-capabilities';
+import { oldHostReason } from './browser-work';
+import { browserCapability, createSessionCapabilities, headlessReason, renderCapabilities, type HeadlessFacts } from './session-capabilities';
 
 // A session's capabilities on this machine (P5 O5 M5; docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §I;
 // acceptance 9): the render entries from the render seam's state (cold when it is not loaded), the browser entry from
@@ -27,13 +28,18 @@ describe('the render entries', () => {
   });
 });
 
-describe('the browser entry', () => {
+describe('the browser entry (P5 O17 M5, Interfaces §I)', () => {
   const TOO_LONG = { available: false, reason: 'the browser socket of this session is longer than a Unix socket allows on mini' };
+  const local = { available: true, viewed: 'local' };
+  const screencast = { available: true, viewed: 'screencast' };
+  const at = { machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock' };
 
-  it('is available while a tab engine is attached, and says why when none is or the path does not fit', () => {
-    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: '/u/browser/cua' })).toEqual(available);
-    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: null })).toEqual({ available: false, reason: 'no browser is attached on mini' });
-    expect(browserCapability({ machine: 'mini', appSessionId: A, path: null, tabEngine: '/u/browser/cua' })).toEqual(TOO_LONG);
+  it('reads the app’s pane while an app is attached, the screencast while the headless browser is usable, else its reason', () => {
+    expect(browserCapability({ ...at, tabEngine: '/u/browser/cua', headless: 'whatever' })).toEqual(local); // an app first
+    expect(browserCapability({ ...at, tabEngine: null, headless: null })).toEqual(screencast);
+    expect(browserCapability({ ...at, tabEngine: null, headless: 'the reason' })).toEqual({ available: false, reason: 'the reason' });
+    expect(browserCapability({ ...at, path: null, tabEngine: '/u/browser/cua', headless: null })).toEqual(TOO_LONG);
+    expect(browserCapability({ ...at, path: null, tabEngine: null, headless: null })).toEqual(TOO_LONG);
   });
 
   // the relay connects to the tab engine's own socket for the session: a daemon socket that fits (102 bytes) is no browser
@@ -44,8 +50,33 @@ describe('the browser entry', () => {
     const appDir = `/${'a'.repeat(61)}`; // 104 bytes
     expect(Buffer.byteLength(`${daemonDir}/${id}.sock`)).toBe(102);
     expect(Buffer.byteLength(`${appDir}/${id}.sock`)).toBe(104);
-    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: appDir })).toEqual(TOO_LONG);
-    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: daemonDir })).toEqual(available);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: appDir, headless: null })).toEqual(TOO_LONG);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: daemonDir, headless: null })).toEqual(local);
+  });
+});
+
+describe('whether the headless browser is usable, and why not (P5 O17 M5, Interfaces §I 2–5)', () => {
+  const usable: HeadlessFacts = { machine: 'mini', platform: 'darwin', addon: 'loaded', engineHost: 'browserWork', runtime: { available: true }, failure: null };
+
+  it('is usable on a Mac with the addon loaded (or not tried yet), an engine host that holds browser work, and the render service', () => {
+    expect(headlessReason(usable)).toBeNull();
+    expect(headlessReason({ ...usable, addon: 'untried' })).toBeNull(); // a capability read loads no addon (acceptance 14)
+  });
+
+  // The architect (2026-11-01): with no engine host connected the reading is this build's, never the old-host reason; the
+  // fence's acquire meanwhile answers that the engine host is reconnecting (browser-work.test.ts), so the two never disagree
+  it('reads this build’s with no engine host connected (reconnecting), never the old-host reason', () => {
+    expect(headlessReason({ ...usable, engineHost: 'none' })).toBeNull();
+    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: null, headless: headlessReason({ ...usable, engineHost: 'none' }) })).toEqual({ available: true, viewed: 'screencast' });
+  });
+
+  it('says why in §I’s order: Linux, the addon, an engine host that predates browser work, the render service', () => {
+    const worst: HeadlessFacts = { machine: 'mini', platform: 'linux', addon: 'failed', engineHost: 'old', runtime: { available: false, reason: 'the render runtime is not installed on mini' }, failure: 'it failed twice' };
+    expect(headlessReason(worst)).toBe("cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on mini");
+    expect(headlessReason({ ...worst, platform: 'darwin' })).toBe("the peer identity check did not load on mini, so the agent's browser is refused");
+    expect(headlessReason({ ...worst, platform: 'darwin', addon: 'loaded' })).toBe(oldHostReason('mini'));
+    expect(headlessReason({ ...worst, platform: 'darwin', addon: 'loaded', engineHost: 'browserWork' })).toBe('the render service is unavailable on mini: the render runtime is not installed on mini');
+    expect(headlessReason({ ...usable, failure: 'the render host failed: no display' })).toBe('the render service is unavailable on mini: the render host failed: no display');
   });
 });
 

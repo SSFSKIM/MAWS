@@ -9,9 +9,9 @@
 // `browserEngine.answer`):
 // - `prepare`: the session's socket under `renderCuaSocketDir` listens, admitting only `mawsd`'s confirmed relay (the
 //   peer of this process's `machine.sock` link, through the addon, confirmed by `machine.identity` on that link; no
-//   trusted roots in production, §H), and the session's lineage is read (`session.get`) for the existing reach rule: a
-//   side thread reaches its parent's tabs (P-24). Answered null once all three hold, then the session's inventory is
-//   pushed (`browserEngine.state`); a session already served answers at once.
+//   trusted roots in production, §H). The request names a side thread's parent (P5 O17 M5: `mawsd` reads it from its own
+//   index), for the existing reach rule: a side thread reaches its parent's tabs (P-24). Answered null once both hold,
+//   then the session's inventory is pushed (`browserEngine.state`); a session already served answers at once.
 // - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its partition's
 //   storage and cache cleared, its browser work reported zero, then answered null (the partition's reason when it could
 //   not be cleared). Only that session's tabs close. A session's prepares and drops run one at a time, in the order
@@ -229,15 +229,6 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     const answered: CommandResult<'browserEngine.work'> = await call('browserEngine.work', { appSessionId, held });
     if (!answered.ok) throw new Error(answered.error.message);
   };
-  const parentOf = async (appSessionId: AppSessionId): Promise<AppSessionId | null> => {
-    const read = await call('session.get', { appSessionId });
-    if (!read.ok) {
-      log(`[browser] ${appSessionId}'s lineage could not be read (${read.error.message}): it reaches its own tabs alone`);
-      return null;
-    }
-    const lineage = read.value?.lineage;
-    return lineage?.kind === 'side-thread' ? (lineage.parentAppSessionId as AppSessionId) : null;
-  };
 
   // ---- the inventory -----------------------------------------------------------------------------------------------
 
@@ -319,8 +310,8 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   // A session's prepares and drops run one at a time, each once the one before has settled, its failure included: a
   // drop tears down what a prepare before it made, a second drop finds nothing served and answers at once, and a
   // prepare finds the partition a drop left uncleared. A drop first cancels every prepare of the session queued or
-  // running before it (as dispose cancels them all): a prepare's waits on the link (the lineage, the socket's listen, the
-  // relay's confirmation) have no deadline of their own and end at once, so a drop is bounded by the prepare's own
+  // running before it (as dispose cancels them all): a prepare's waits (the socket's listen, the relay's confirmation on
+  // the link) have no deadline of their own and end at once, so a drop is bounded by the prepare's own
   // teardown and its partition's clear, never by a peer's answer; a late answer to a cancelled prepare does nothing. Each step still checks, after each await, that
   // it serves the session before making anything for it.
   function serially(appSessionId: AppSessionId, step: () => Promise<null>): Promise<null> {
@@ -336,10 +327,10 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     cancels.delete(appSessionId);
   }
 
-  async function prepare(appSessionId: AppSessionId, signal: AbortSignal): Promise<null> {
+  async function prepare(appSessionId: AppSessionId, parent: AppSessionId | null, signal: AbortSignal): Promise<null> {
     signal.throwIfAborted();
     if (served.has(appSessionId)) return null;
-    const session: Served = { parent: null, creating: 0, fence: 'none', told: null };
+    const session: Served = { parent, creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
     const serves = () => {
       signal.throwIfAborted();
@@ -351,10 +342,9 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       if (why !== null) throw new Error(why);
       serves();
       if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
-      const [parent, , relay] = await cancellable(Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]), signal);
+      const [, relay] = await cancellable(Promise.all([cua.listening(appSessionId), relayed]), signal);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
       serves();
-      session.parent = parent;
       return null;
     } catch (error) {
       if (served.get(appSessionId) === session) served.delete(appSessionId);
@@ -409,7 +399,8 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
         let cancel = cancels.get(appSessionId);
         if (!cancel) cancels.set(appSessionId, (cancel = new AbortController()));
         const { signal } = cancel;
-        run = serially(appSessionId, () => prepare(appSessionId, signal));
+        const parent = (operation.parent ?? null) as AppSessionId | null;
+        run = serially(appSessionId, () => prepare(appSessionId, parent, signal));
       }
       run.then(
         (value) => {

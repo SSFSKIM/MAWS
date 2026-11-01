@@ -268,7 +268,7 @@
 "events.browser.extensions.reveal":[".show<kind=replacement>.tab.appSessionId AppSessionId",".show<kind=tab>.tab.appSessionId AppSessionId"],
 "events.browser.notice":[".appSessionId AppSessionId"],
 "events.browser.tabs.changed":[".appSessionId AppSessionId",".tabs[].appSessionId AppSessionId"],
-"events.browserEngine.request":[".appSessionId AppSessionId"],
+"events.browserEngine.request":[".appSessionId AppSessionId",".operation<op=prepare>.parent AppSessionId"],
 "events.engine.budget":[".blocked[].appSessionId AppSessionId",".lastRelease.appSessionId AppSessionId",".releasing AppSessionId"],
 "events.files.changed":[".appSessionId AppSessionId"],
 "events.fs.followState":[".appSessionId AppSessionId"],

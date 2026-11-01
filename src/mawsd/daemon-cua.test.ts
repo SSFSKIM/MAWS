@@ -37,7 +37,8 @@ afterEach(async () => {
 
 const MACHINE = machineName({}, hostname());
 const S = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
-const NO_BROWSER = { available: false, reason: `no browser is attached on ${MACHINE}` };
+// P5 O17 M5 (Interfaces §I 2): the scene's platform is linux, where no app attached reads the Linux reason (D5)
+const NO_BROWSER = { available: false, reason: `cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on ${MACHINE}` };
 
 async function awake(daemon: RunningDaemon) {
   void daemon.hosts.wake('engine-host');
@@ -246,13 +247,13 @@ describe('the render cache’s flips on Linux (P5 O5 M6, fix wave 1)', () => {
     mkdirSync(join(cacheRoot, '44.4.5-aaaaaaaaaaaa'));
     rmSync(join(cacheRoot, '.unpack-44.4.5-aaaaaaaaaaaa-1'), { recursive: true });
     await until(() => watch.changes().length === 2, 3_000, 'the install’s flip');
-    expect(watch.changes()[1]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: { available: true }, artifact_export: { available: true }, browser: { available: true } } });
+    expect(watch.changes()[1]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: { available: true }, artifact_export: { available: true }, browser: { available: true, viewed: 'local' } } });
 
     installed = false;
     rmSync(join(cacheRoot, '44.4.5-aaaaaaaaaaaa'), { recursive: true });
     await until(() => watch.changes().length === 3, 3_000, 'the uninstall’s flip');
     const unavailable = { available: false, reason: `the render service is unavailable on ${MACHINE}: ${absent}` };
-    expect(watch.changes()[2]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: unavailable, artifact_export: unavailable, browser: { available: true } } });
+    expect(watch.changes()[2]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: unavailable, artifact_export: unavailable, browser: { available: true, viewed: 'local' } } });
     await new Promise((resolve) => setTimeout(resolve, 800)); // past the watch's quiet period
     expect(watch.changes()).toHaveLength(3); // one event per flip
   });

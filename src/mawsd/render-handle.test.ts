@@ -23,6 +23,12 @@ function fakeSeam(taken: string[]): RenderSeam {
     capabilities: () => ({ artifact_screenshot: { available: true }, artifact_export: { available: true } }),
     status: () => ({ state: 'ready', detail: null, pid: 7, starts: 1, requests: 0 }),
     stop: async () => void taken.push('stop'),
+    ensureBrowser: async (demand) => (taken.push(`ensure ${demand.appSessionId}`), { epoch: demand.epoch, socketPath: `/p/${demand.appSessionId}.sock` }),
+    dropBrowser: async (appSessionId) => void taken.push(`drop ${appSessionId}`),
+    browserAnswer: () => (taken.push('answer'), true),
+    browserEngine: () => null,
+    browserWorkChanged: () => void taken.push('work'),
+    unavailable: () => 'it failed twice',
   };
 }
 
@@ -111,5 +117,35 @@ describe('the render entries of a session’s capabilities (P5 O5 M5)', () => {
     await settle();
     facts.runtime = { available: false, reason: 'unread' };
     expect(s.handle.capabilities().artifact_screenshot).toEqual({ available: true }); // the loaded seam's own reading
+  });
+});
+
+describe('the headless browser through the handle (P5 O17 M5, Interfaces §D)', () => {
+  const demand = { appSessionId: 'S' as never, epoch: 'e1', deadline: 4_000, signal: new AbortController().signal };
+
+  it('loads the seam at a browser demand alone: a drop, an answer, a work change or a reading with none loaded loads nothing', async () => {
+    const s = scene(['ok']);
+    await s.handle.dropBrowser('S' as never);
+    expect(s.handle.browserAnswer({}, { id: 'x', result: { ok: true, value: null } })).toBe(false);
+    s.handle.browserWorkChanged();
+    expect(s.handle.browserEngine('S' as never)).toBeNull();
+    expect(s.handle.unavailable()).toBeNull();
+    expect(s.loads()).toBe(0);
+    expect(await s.handle.ensureBrowser(demand)).toEqual({ epoch: 'e1', socketPath: '/p/S.sock' });
+    expect(s.loads()).toBe(1);
+    await s.handle.dropBrowser('S' as never);
+    expect(s.handle.browserAnswer({}, { id: 'x', result: { ok: true, value: null } })).toBe(true);
+    expect(s.handle.unavailable()).toBe('it failed twice');
+    expect(s.taken).toEqual(['ensure S', 'drop S', 'answer']);
+  });
+
+  it('a drop while the seam loads reaches it once loaded; a demand the chunk could not load for fails with the reason', async () => {
+    const s = scene(['ok']);
+    const ensured = s.handle.ensureBrowser(demand);
+    const dropped = s.handle.dropBrowser('S' as never);
+    await Promise.all([ensured, dropped]);
+    expect(s.taken).toEqual(['ensure S', 'drop S']);
+    const failing = scene(['no chunk']);
+    await expect(failing.handle.ensureBrowser(demand)).rejects.toThrow('the render service could not start on mini: no chunk');
   });
 });

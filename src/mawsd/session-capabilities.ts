@@ -3,9 +3,15 @@
 // it), and `session.capabilitiesChanged` posted for each session `mawsd` holds a cua socket for at each flip, once. The
 // render entries come from the render seam's state, or from the facts it reads when it is not loaded (render-handle.ts);
 // the browser entry from the cua sockets' (cua-socket.ts). The reasons are exact sentences the renderer and O7 show.
+//
+// P5 O17 M5 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §I): the browser entry says how a person on
+// the machine sees the agent's tabs (`viewed`): in the attached app's pane (`local`), or only by screencast when the
+// render host is the session's headless browser (`screencast`, before Chromium starts and whether or not the engine is
+// live); else why not, in §I's order (`headlessReason`), the same reading that selects the route (browser-route.ts).
 import { cuaSocketPath } from '@shared/browser/cua-socket';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionCapabilities, SessionCapability } from '@shared/ipc/schema/session-capabilities';
+import { oldHostReason } from './browser-work'; // P5 O17 M5: the fence's own sentence
 
 export interface RenderCapabilities {
   artifact_screenshot: SessionCapability;
@@ -29,13 +35,34 @@ export function renderCapabilities({ machine, runtime, failure, engineHostRender
   return { artifact_screenshot: entry, artifact_export: entry };
 }
 
+// P5 O17 M5: what decides whether the render host can be a session's headless browser on this machine
+export interface HeadlessFacts {
+  machine: string;
+  platform: NodeJS.Platform;
+  addon: 'untried' | 'loaded' | 'failed'; // the peer identity addon (darwin): loaded at the first session's socket, never for a reading
+  engineHost: 'none' | 'browserWork' | 'old'; // none connected (a cold one starts as this build), one that holds browser work, one that predates it
+  runtime: { available: true } | { available: false; reason: string }; // the render runtime
+  failure: string | null; // the render seam is unavailable after two failed starts: the last reason
+}
+
+// Why the headless browser is not usable, in §I's order (2 to 5), or null when it is
+export function headlessReason({ machine, platform, addon, engineHost, runtime, failure }: HeadlessFacts): string | null {
+  if (platform === 'linux') return `cua's host cannot check its peers on Linux yet, so the agent's browser is unavailable on ${machine}`; // D5, R6
+  if (platform === 'darwin' && addon === 'failed') return `the peer identity check did not load on ${machine}, so the agent's browser is refused`;
+  if (engineHost === 'old') return oldHostReason(machine);
+  if (!runtime.available) return `the render service is unavailable on ${machine}: ${runtime.reason}`;
+  if (failure !== null) return `the render service is unavailable on ${machine}: ${failure}`;
+  return null;
+}
+
 // `path`: the daemon's socket for the session (none past sun_path); `tabEngine`: the attached tab engine's cua directory,
 // null while none is attached. The relay connects to the tab engine's own socket for the session, so a path that does
-// not fit on either side is no browser.
-export function browserCapability({ machine, appSessionId, path, tabEngine }: { machine: string; appSessionId: AppSessionId; path: string | null; tabEngine: string | null }): SessionCapability {
+// not fit on either side is no browser. P5 O17 M5: `headless`, `headlessReason`'s reading (§I).
+export function browserCapability({ machine, appSessionId, path, tabEngine, headless }: { machine: string; appSessionId: AppSessionId; path: string | null; tabEngine: string | null; headless: string | null }): SessionCapability {
   const tooLong = path === null || (tabEngine !== null && cuaSocketPath(tabEngine, appSessionId) === null);
   if (tooLong) return { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${machine}` };
-  return tabEngine !== null ? { available: true } : { available: false, reason: `no browser is attached on ${machine}` };
+  if (tabEngine !== null) return { available: true, viewed: 'local' };
+  return headless === null ? { available: true, viewed: 'screencast' } : { available: false, reason: headless };
 }
 
 export interface SessionCapabilitiesOptions {

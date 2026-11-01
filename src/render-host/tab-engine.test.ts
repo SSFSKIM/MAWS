@@ -72,7 +72,7 @@ function stand(
     caps?: { session: number; total: number };
     work?: (input: { appSessionId: string; held: boolean }) => Promise<CommandResult<'browserEngine.work'>>;
     identity?: () => Promise<boolean>;
-    lineage?: Record<string, AppSessionId>;
+    lineage?: Record<string, AppSessionId>; // the parent mawsd names in a side thread's prepare (M5)
     clear?: (partition: string, what: 'storage' | 'cache') => Promise<void>;
   } = {},
 ) {
@@ -86,10 +86,6 @@ function stand(
     switch (name) {
       case 'machine.identity':
         return (await (options.identity?.() ?? Promise.resolve(true))) ? { ok: true, value: {} } : { ok: false, error: ipcError('host_unavailable', 'gone') };
-      case 'session.get': {
-        const parent = options.lineage?.[input.appSessionId as string];
-        return { ok: true, value: { lineage: parent ? { kind: 'side-thread', parentAppSessionId: parent } : null } };
-      }
       case 'browserEngine.work':
         return options.work ? options.work(input as { appSessionId: string; held: boolean }) : { ok: true, value: undefined };
       default:
@@ -134,7 +130,8 @@ function stand(
   // A request as mawsd sends it, and its answer
   const ask = async (appSessionId: AppSessionId, op: BrowserEngineRequest['operation']['op']) => {
     const id = `q${++next}`;
-    engine.request({ id, appSessionId, operation: { op } } as BrowserEngineRequest);
+    const parent = op === 'prepare' ? options.lineage?.[appSessionId] : undefined;
+    engine.request({ id, appSessionId, operation: { op, ...(parent && { parent }) } } as BrowserEngineRequest);
     await expect.poll(() => answers().find((a) => a.id === id), { timeout: 3000 }).toBeDefined();
     return answers().find((a) => a.id === id)!.result;
   };
@@ -261,12 +258,12 @@ describe('the tab engine’s sessions', () => {
     await expect.poll(() => t.states(A).at(-1)?.tabs.length).toBe(1); // pushed at the change
   });
 
-  it('lets a side thread reach its parent’s tabs by the existing rule, its lineage read at prepare', async () => {
+  it('lets a side thread reach its parent’s tabs by the existing rule, the parent named in its prepare (M5), reading nothing over the link', async () => {
     const t = stand({ lineage: { S: A } });
     await t.ask(A, 'prepare');
     await t.ask(S, 'prepare');
     await t.ask(B, 'prepare');
-    expect(t.calls.filter((c) => c.name === 'session.get').map((c) => c.input.appSessionId)).toEqual([A, S, B]);
+    expect(t.calls.filter((c) => c.name === 'session.get'), 'no lineage read: a spine release could hold it with no deadline').toEqual([]);
     const hostA = await t.host(A);
     await hostA.request('tabs.create', { url: 'http://127.0.0.1:4000/parent' });
     expect((await (await t.host(S)).request<{ url: string }[]>('tabs.query')).map((tab) => tab.url)).toEqual(['http://127.0.0.1:4000/parent']);
