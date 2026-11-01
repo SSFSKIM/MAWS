@@ -14,7 +14,7 @@ import type { BrowserEngineRequest, EngineInventory } from '@shared/ipc/schema/b
 import { connectFakeHost } from '../../test/support/cua-fake-host';
 import type { PeerAddon } from '../main/browser/cua/peer';
 import { tabWebPreferences } from '../main/browser/view';
-import { made, reset, type FakePage, type WebContentsView as FakeView } from './electron.fake';
+import { FakePage, made, reset, type WebContentsView as FakeView } from './electron.fake';
 import type { EngineCall } from './host';
 import { HEADLESS_VIEWPORT, HEADLESS_WEBRTC_IP_POLICY, OffscreenViews, offscreenPreferences } from './offscreen-views';
 import { HEADLESS_TABS, headlessPartition, startTabEngine, type TabEngine } from './tab-engine';
@@ -42,8 +42,8 @@ afterEach(async () => {
 });
 beforeEach(() => reset());
 
-// A partition's session as the browser's preparers use it
-function fakeSession() {
+// A partition's session as the browser's preparers use it, and as a drop clears it
+function fakeSession(cleared: (what: 'storage' | 'cache') => Promise<void>) {
   const handlers = new Map<string, unknown>();
   const record = (name: string) => (handler: unknown) => void handlers.set(name, handler);
   const session = {
@@ -56,6 +56,8 @@ function fakeSession() {
     setDevicePermissionHandler: record('devicePermission'),
     setDisplayMediaRequestHandler: record('displayMedia'),
     on: (event: string, handler: unknown) => (handlers.set(`on ${event}`, handler), session),
+    clearStorageData: () => cleared('storage'),
+    clearCache: () => cleared('cache'),
   };
   return session;
 }
@@ -65,7 +67,15 @@ interface Call {
   input: Record<string, unknown>;
 }
 
-function stand(options: { caps?: { session: number; total: number }; work?: (input: { appSessionId: string; held: boolean }) => Promise<CommandResult<'browserEngine.work'>>; identity?: () => Promise<boolean>; lineage?: Record<string, AppSessionId> } = {}) {
+function stand(
+  options: {
+    caps?: { session: number; total: number };
+    work?: (input: { appSessionId: string; held: boolean }) => Promise<CommandResult<'browserEngine.work'>>;
+    identity?: () => Promise<boolean>;
+    lineage?: Record<string, AppSessionId>;
+    clear?: (partition: string, what: 'storage' | 'cache') => Promise<void>;
+  } = {},
+) {
   const root = mkdtempSync('/tmp/mrt-');
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const calls: Call[] = [];
@@ -86,12 +96,27 @@ function stand(options: { caps?: { session: number; total: number }; work?: (inp
         return { ok: true, value: undefined };
     }
   }) as unknown as EngineCall;
+  // Electron's own `-run-dialog` listener, one on every webContents: a box (for an offscreen page, a parentless one)
+  const native = vi.fn((_info: unknown, callback: (accept: boolean, text: string) => void) => callback(true, ''));
   const engine: TabEngine = startTabEngine({
     call,
     socketFd: () => 3,
-    views: (partitions) => new OffscreenViews(partitions),
+    views: (partitions) => {
+      const views = new OffscreenViews(partitions);
+      const create = views.createView;
+      views.createView = (tab, adopted) => {
+        const view = create(tab, adopted);
+        const contents = view.webContents as unknown as NodeJS.EventEmitter;
+        if (contents.listenerCount('-run-dialog') === 0) contents.on('-run-dialog', native);
+        return view;
+      };
+      return views;
+    },
     fromPartition: (partition) => {
-      const session = fakeSession();
+      const session = fakeSession(async (what) => {
+        calls.push({ name: `clear ${what}`, input: { partition } });
+        await options.clear?.(partition, what);
+      });
       sessions.set(partition, session);
       return session as unknown as Session;
     },
@@ -121,7 +146,7 @@ function stand(options: { caps?: { session: number; total: number }; work?: (inp
   };
   const states = (appSessionId: AppSessionId) => calls.filter((c) => c.name === 'browserEngine.state' && c.input.appSessionId === appSessionId).map((c) => c.input.inventory as EngineInventory);
   const works = () => calls.filter((c) => c.name === 'browserEngine.work').map((c) => `${String(c.input.appSessionId)} ${c.input.held ? 'held' : 'zero'}`);
-  return { engine, calls, ask, host, socketOf, states, works, sessions, logs };
+  return { engine, calls, ask, host, socketOf, states, works, sessions, logs, native };
 }
 
 const pageOf = (view: FakeView) => view.webContents;
@@ -267,6 +292,79 @@ describe('the tab engine’s sessions', () => {
     expect((await hostB.request<unknown[]>('tabs.query')).length).toBe(1); // B's tab stands
     expect(await t.ask(A, 'drop'), 'a session not served answers at once').toEqual({ ok: true, value: null });
   });
+
+  it('clears the dropped session’s partition, its storage and cache, before it answers; a re-prepare waits for it', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const t = stand({ clear: (_partition, what) => (what === 'storage' ? held : Promise.resolve()) });
+    await t.ask(A, 'prepare');
+    await t.ask(B, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/a' });
+    t.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
+    await expect.poll(() => t.calls.filter((c) => c.name.startsWith('clear')).length).toBe(2);
+    t.engine.request({ id: 'p2', appSessionId: A, operation: { op: 'prepare' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const pending = () => t.calls.filter((c) => c.name === 'browserEngine.answer' && ['d1', 'p2'].includes(c.input.id as string)).map((c) => c.input.id);
+    expect(pending(), 'neither answered while the storage is being cleared').toEqual([]);
+    release();
+    await expect.poll(pending).toEqual(['d1', 'p2']);
+    expect(t.calls.filter((c) => c.name.startsWith('clear')).map((c) => `${c.name} ${String(c.input.partition)}`)).toEqual([`clear storage ${headlessPartition(A)}`, `clear cache ${headlessPartition(A)}`]);
+    expect(await t.ask(B, 'drop'), 'a session that opened no tab has no partition to clear').toEqual({ ok: true, value: null });
+    expect(t.calls.filter((c) => c.name.startsWith('clear'))).toHaveLength(2);
+  });
+
+  it('answers a drop whose partition could not be cleared with the reason, its tabs closed and its work reported zero all the same', async () => {
+    const t = stand({ clear: async () => Promise.reject(new Error('the disk said no')) });
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/a' });
+    expect(await t.ask(A, 'drop')).toEqual({ ok: false, error: 'the headless browser on mini could not clear this session’s partition: the disk said no' });
+    expect(t.works()).toEqual(['A held', 'A zero']);
+    expect(t.engine.inspect().sessions).toEqual({});
+  });
+});
+
+describe('a headless page’s JavaScript dialogs', () => {
+  const dialog = (page: FakePage, dialogType: string) => {
+    const answered = vi.fn();
+    page.emit('-run-dialog', { dialogType, messageText: 'onload' }, answered);
+    return answered;
+  };
+
+  it('answers an unleased page’s alert and confirm with the defaults and never raises Electron’s box; a prompt stays Electron’s', async () => {
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    expect(dialog(newestPage(), 'alert')).toHaveBeenCalledWith(false, '');
+    expect(dialog(newestPage(), 'confirm')).toHaveBeenCalledWith(false, '');
+    expect(t.native).not.toHaveBeenCalled();
+    dialog(newestPage(), 'prompt'); // its renderer refuses prompt() first; Electron's listener answers at once, showing nothing
+    expect(t.native).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds a leased page’s alert for cua, unanswered and with no box, for the vendor to answer through CDP', async () => {
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    const created = await host.request<{ id: number }>('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    await host.request('debugger.attach', { tabId: created.id });
+    const answered = dialog(newestPage(), 'alert');
+    expect(answered).not.toHaveBeenCalled();
+    expect(t.native).not.toHaveBeenCalled();
+  });
+
+  it('treats an adopted popup’s dialogs the same way', async () => {
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    const child = new FakePage();
+    (popup(activated(newestPage()), 'http://127.0.0.1:4000/popup') as { createWindow(options: unknown): unknown }).createWindow({ webContents: child });
+    expect(dialog(child, 'alert')).toHaveBeenCalledWith(false, '');
+    expect(t.native).not.toHaveBeenCalled();
+  });
 });
 
 describe('the fence and the caps', () => {
@@ -358,6 +456,49 @@ describe('the fence and the caps', () => {
     await hostB.request('tabs.create', { url: 'http://127.0.0.1:4000/b1' });
     await expect(hostB.request('tabs.create', { url: 'http://127.0.0.1:4000/b2' })).rejects.toThrow('the headless browser on mini already holds its 3 tabs');
     expect(made.views).toHaveLength(3);
+  });
+
+  it('checks a popup again when Chromium hands its child over: two admitted past the cap make one tab, the other child closed', async () => {
+    const refused = vi.spyOn(console, 'error').mockImplementation(() => {}); // window-open.ts's line for a child not adopted
+    const t = stand({ caps: { session: 3, total: 4 } });
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/1' });
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/2' });
+    const [one, two] = made.views.map((view) => popup(activated(pageOf(view)), 'http://127.0.0.1:4000/popup') as { action: string; createWindow(options: unknown): unknown });
+    expect([one!.action, two!.action]).toEqual(['allow', 'allow']); // each admitted while there was room for one
+    const children = [new FakePage(), new FakePage()];
+    one!.createWindow({ webContents: children[0] });
+    two!.createWindow({ webContents: children[1] });
+    expect(t.engine.inspect().sessions.A!.tabs).toBe(3);
+    await expect.poll(() => children[1]!.isDestroyed()).toBe(true);
+    expect(children[0]!.isDestroyed()).toBe(false);
+    expect(refused).toHaveBeenCalledWith('[browser] a window.open child could not be adopted:', new Error('a page’s popup was refused: the headless browser on mini already holds its 3 tabs'));
+    // a modifier-clicked link (no child: the page is opened as a tab) is held to the same caps, and opens nothing
+    two!.createWindow({});
+    expect(t.engine.inspect().sessions.A!.tabs).toBe(3);
+    const [, second] = await host.request<{ id: number; blockedPopups?: number }[]>('tabs.query');
+    expect(second).toBeDefined();
+    expect(t.logs.filter((line) => line.includes('popup was refused'))).toHaveLength(2);
+    refused.mockRestore();
+  });
+
+  it('makes no tab of a popup whose child arrives after its session was dropped', async () => {
+    const refused = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    const late = popup(activated(newestPage()), 'http://127.0.0.1:4000/late') as { action: string; createWindow(options: unknown): unknown };
+    expect(late.action).toBe('allow');
+    expect(await t.ask(A, 'drop')).toEqual({ ok: true, value: null });
+    const views = made.views.length;
+    const child = new FakePage();
+    late.createWindow({ webContents: child });
+    late.createWindow({});
+    expect(made.views).toHaveLength(views);
+    await expect.poll(() => child.isDestroyed()).toBe(true);
+    refused.mockRestore();
   });
 });
 

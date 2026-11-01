@@ -12,16 +12,20 @@
 //   trusted roots in production, §H), and the session's lineage is read (`session.get`) for the existing reach rule: a
 //   side thread reaches its parent's tabs (P-24). Answered null once all three hold, then the session's inventory is
 //   pushed (`browserEngine.state`); a session already served answers at once.
-// - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its browser work
-//   reported zero, then answered null. Only that session's tabs close.
+// - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its partition's
+//   storage and cache cleared, its browser work reported zero, then answered null (the partition's reason when it could
+//   not be cleared). Only that session's tabs close. A `prepare` of the session meanwhile waits for the drop to end.
 // - `inventory`: the session's tabs, bounded (screencast.ts), or `unavailable` for a session not served here.
 // The inventory is pushed again at each change of the session's tabs (the store's coalesced `browser.tabs.changed`), only
 // when it changed; nothing polls.
 //
-// Each session's tabs open in a partition of its own, kept in memory for the process's life (no `persist:`), so one
-// session's cookies never reach another's and none outlives the render host, whose userData is cleared at each start.
+// Each session's tabs open in a partition of its own, in memory (no `persist:`), so one session's cookies never reach
+// another's and none outlives the render host, whose userData is cleared at each start; a drop clears it, so a session
+// prepared again (§B: tabs, cookies and in-flight commands are lost at a handover) starts with nothing.
 // No imported profile, no browser preload, no application window; a page's download is refused (no person is there to
-// save it, and nothing here may write it), its `mailto:` and external links go nowhere.
+// save it, and nothing here may write it), its `mailto:` and external links go nowhere. A page's `alert` and `confirm`
+// never reach Electron's own box, which for an offscreen page is a parentless modal that would stall the engine: the
+// app's dialog wrap (agent/dialogs.ts) answers them with the defaults, or holds a leased tab's for cua (cua/dialogs.ts).
 //
 // The fence (§E): a `tabs.create` passes the creation gate first. At the session's first tab (no tab and no creation in
 // flight) it acquires with `browserEngine.work {held: true}`, which `mawsd` answers only once the engine host has
@@ -32,10 +36,11 @@
 // (one refused or failed made no tab and holds nothing at `mawsd`).
 //
 // The caps (D11): HEADLESS_TABS, tabs plus creations in flight; past either, `tabs.create` answers its reason and a page's
-// popup is denied. The orphan policy (D1): a tab whose creating connection closed is adopted, at its first lease or
+// popup is denied, at its admission and again when Chromium hands its child over (another popup or creation may have
+// taken the room meanwhile, its opener closed or its session been dropped). The orphan policy (D1): a tab whose creating connection closed is adopted, at its first lease or
 // close, by a connection of its own session (claims.ts), so a tab whose cua connection died can still be closed.
 // `windows.query` answers one synthetic window, so the query that follows a promotion agrees with `windows.create`.
-import type { WebContents, WebContentsView, WebPreferences } from 'electron';
+import type { Session, WebContents, WebContentsView, WebPreferences } from 'electron';
 import type { BrowserTabSummary } from '@shared/browser/screencast';
 import { BROWSER_SUMMARY_BOUNDS } from '@shared/browser/screencast';
 import type { BrowserTab } from '@shared/browser/tab';
@@ -44,13 +49,14 @@ import type { CommandResult } from '@shared/ipc/schema';
 import type { BrowserEngineRequest, BrowserEngineResult, EngineInventory } from '@shared/ipc/schema/browser-engine';
 import { TabControls } from '../main/browser/agent/control';
 import { AgentCursor } from '../main/browser/agent/cursor';
+import { PageDialogs } from '../main/browser/agent/dialogs';
 import { startCuaBackend, type CuaBackend } from '../main/browser/cua';
 import type { PeerAddon } from '../main/browser/cua/peer';
 import { attachInputSeams } from '../main/browser/input';
 import { Navigator } from '../main/browser/navigation';
 import { Partitions } from '../main/browser/partition';
 import { guardPage, preparePermissions } from '../main/browser/permissions';
-import { TabStore, type BrowserEmit, type TabEntry } from '../main/browser/tabs';
+import { TabStore, type BrowserEmit, type OpenRequest, type TabEntry } from '../main/browser/tabs';
 import { attachWindowOpen } from '../main/browser/window-open';
 import type { EngineCall } from './host';
 
@@ -109,6 +115,8 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   const { call, log, machine } = deps;
   const caps = deps.caps ?? HEADLESS_TABS;
   const served = new Map<AppSessionId, Served>();
+  const dropping = new Map<AppSessionId, Promise<unknown>>(); // a drop's run, which a prepare of its session waits for
+  const opened = new Map<string, Session>(); // every partition opened, cleared at its session's drop
 
   // ---- the composition --------------------------------------------------------------------------------------------
 
@@ -116,6 +124,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     if (name === 'browser.tabs.changed') changed((payload as { appSessionId: AppSessionId }).appSessionId);
   };
   const partitions = new Partitions(deps.fromPartition, [
+    (ses, partition) => void opened.set(partition, ses),
     (ses, partition) => preparePermissions(store)(ses, partition),
     (ses) =>
       void ses.on('will-download', (event) => {
@@ -132,13 +141,34 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   });
   const seam = { line: () => {}, openExternal: (url: string) => log(`[browser] a headless page’s external link went nowhere (${url.slice(0, 64)})`) };
   const navigator = new Navigator({ store, history: { visit: () => {}, setTitle: () => {} }, favicons: { resolve: async () => null }, emit, seam });
-  // a page's popup within the caps (D11), else denied as a popup with no room is
+  // A page's popup within the caps (D11), else denied as a popup with no room is. Admission (`hasRoomForView`) and the
+  // child's arrival (`adoptChild`, or `open` for a modifier-clicked link) are apart, so the arrival is checked again; a
+  // child refused there is closed by window-open.ts, a link refused opens nothing (Electron does not read the answer).
+  const popupRefusal = (opener: TabEntry): string | null => {
+    if (store.entry(opener.tab.tabId) !== opener) return 'its opener has closed';
+    if (!served.has(opener.tab.appSessionId)) return `the headless browser on ${machine} no longer serves this session`;
+    return room(opener.tab.appSessionId);
+  };
+  const refusePopup = (opener: TabEntry, why: string): string => {
+    if (store.entry(opener.tab.tabId) === opener) store.update(opener.tab.tabId, { blockedPopups: opener.tab.blockedPopups + 1 });
+    log(`[browser] a page’s popup was refused: ${why}`);
+    return `a page’s popup was refused: ${why}`;
+  };
   const popups = {
     entry: (tabId: string) => store.entry(tabId),
     update: store.update.bind(store),
-    adoptChild: store.adoptChild.bind(store),
-    open: store.open.bind(store),
     hasRoomForView: (opener?: TabEntry) => (opener === undefined || room(opener.tab.appSessionId) === null) && store.hasRoomForView(opener),
+    adoptChild: (opener: TabEntry, request: Parameters<TabStore['adoptChild']>[1]) => {
+      const why = popupRefusal(opener);
+      if (why !== null) throw new Error(refusePopup(opener, why));
+      return store.adoptChild(opener, request);
+    },
+    open: (request: OpenRequest) => {
+      const why = request.opener ? popupRefusal(request.opener) : null;
+      if (why === null) return store.open(request);
+      refusePopup(request.opener!, why);
+      return { tab: request.opener!.tab, reused: true };
+    },
   };
   store.onViewCreated((entry) => {
     navigator.attach(entry);
@@ -165,6 +195,9 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     version: deps.version,
     log: (line) => log(`[browser] ${line}`),
   });
+  // Every view's dialogs wrapped as it is made, adopted popups' included: never placed, so an unleased page's are answered
+  // with the defaults (the `hidden` route), a leased one's held for cua
+  const dialogs = new PageDialogs({ store, emit, log: (line) => log(`[browser] ${line}`), held: cua.dialogs });
   // §H: on darwin only mawsd's relay is admitted, by the daemon this link reaches; elsewhere the uid is the boundary
   const fd = deps.socketFd();
   const relayed: Promise<boolean> =
@@ -272,7 +305,9 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     if (existing) return existing.ready.then(() => null);
     const session: Served = { parent: null, ready: Promise.resolve(), creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
+    const dropped = dropping.get(appSessionId);
     session.ready = (async () => {
+      await dropped; // its partition cleared, its socket gone
       if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
       const [parent, , relay] = await Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
@@ -291,18 +326,30 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return null;
   }
 
-  async function drop(appSessionId: AppSessionId): Promise<null> {
+  function drop(appSessionId: AppSessionId): Promise<null> {
+    const run = dropSession(appSessionId);
+    const settled = run.catch(() => {});
+    dropping.set(appSessionId, settled);
+    void settled.then(() => dropping.get(appSessionId) === settled && dropping.delete(appSessionId));
+    return run;
+  }
+
+  async function dropSession(appSessionId: AppSessionId): Promise<null> {
     const session = served.get(appSessionId);
     if (!session) return null;
     served.delete(appSessionId);
     store.removeSession(appSessionId);
     await cua.closeSession(appSessionId);
+    // §B: nothing of the session's browsing outlives it here (a session that opened no tab opened no partition)
+    const partition = opened.get(headlessPartition(appSessionId));
+    const uncleared = partition ? await Promise.all([partition.clearStorageData(), partition.clearCache()]).then(() => null, (error: unknown) => messageOf(error)) : null;
     // the zero only after an acquire that succeeded: one refused or failed made no tab and holds nothing to report, and a
     // zero sent while it is in flight could fail it (or a newer one) at mawsd, so an acquire in flight is waited out
     const fence = session.fence;
     session.fence = 'none';
     const held = fence === 'held' || (fence !== 'none' && (await fence.then(() => true, () => false)));
     if (held) await work(appSessionId, false).catch((error: unknown) => log(`[browser] the zero of ${appSessionId}'s browser work was refused: ${messageOf(error)}`));
+    if (uncleared !== null) throw new Error(`the headless browser on ${machine} could not clear this session’s partition: ${uncleared}`);
     return null;
   }
 
@@ -323,6 +370,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       ),
     }),
     dispose() {
+      dialogs.dispose();
       cua.dispose();
       cursor.dispose();
       controls.dispose();
