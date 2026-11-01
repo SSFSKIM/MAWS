@@ -32,7 +32,7 @@ import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore } from '../stores/composer';
-import { toast } from '../stores/notices';
+import { toast, useNotices } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
@@ -296,6 +296,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
+  const startAnew = useRef(false); // P5 O7 M4: the next spawn is the person's "Start a new session"
 
   const onSubmit = async (s: Serialized): Promise<boolean> => {
     const retry = () => handle.current?.submit();
@@ -315,11 +316,24 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             return false;
           }
           if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
-          const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default' }, client);
+          const fresh = startAnew.current; // the person's "Start a new session"
+          startAnew.current = false;
+          const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default', fresh }, client);
           if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
           if (spawned.started) return true;
-          // a start the machine took but hasn't confirmed: the try checks on it (the same act), it never starts another
-          warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
+          // a start the machine took but hasn't confirmed: the try checks on it (the same op), it never starts another;
+          // only the person's explicit choice, offered once a check still can't confirm it, starts anew
+          if (spawned.startNew) {
+            const id = toast({
+              level: 'warning',
+              text: spawned.words,
+              actions: [
+                { label: SPAWN_WORDS.checkAgain, run: () => (useNotices.getState().dismiss(id), retry()) },
+                { label: SPAWN_WORDS.startNew(spawnAt.name), run: () => (useNotices.getState().dismiss(id), (startAnew.current = true), retry()) },
+              ],
+              dismissible: true,
+            });
+          } else warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
           return false;
         } finally {
           setStarting(appSessionId, false);

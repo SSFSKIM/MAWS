@@ -438,7 +438,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (name === 'files.upload') return upload(link, fields);
     if (name === 'session.spawn') {
       // the tab it is made from (the envelope's session); a session it started is one this app spawned
-      const result = await spawns.spawn(link, fields, ctx.session);
+      const result = await spawns.spawn(link, fields, ctx.session, ctx.client); // the page asking: an answer to a page gone isn't taken
       const output = result.ok ? (result.value as { status?: unknown; appSessionId?: unknown }) : null;
       if (output?.status === 'ok' && typeof output.appSessionId === 'string') {
         spawnedAt(''); // the sweep

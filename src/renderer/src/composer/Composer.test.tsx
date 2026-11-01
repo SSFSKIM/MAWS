@@ -24,7 +24,7 @@ import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-sess
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
-import { queueFirstSend, resetRemoteSpawn, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -902,6 +902,28 @@ describe('a New chat tab started on another machine', () => {
     await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' })); // settled: the next try starts afresh
     await waitFor(() => expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull());
     expect(editorOf().editor.getText()).toBe('build it and test it'); // the edit stayed
+  });
+
+  // M4's milestone review: a reload keeps the start the tab was checking on, so its next Send goes to that attempt
+  it('after a reload checks on the held start rather than starting on this Mac', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    await act(() => fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout'));
+    cleanup(); // the page reloads
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe(SPAWN_WORDS.checking('mini', false));
+    expect(invoked('session.spawn')).toHaveLength(2);
+    expect(stub.start).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
   });
 
   // M4c fix wave 1 (review finding 2): this Mac's files are not offered, and a mention of one never goes to the machine

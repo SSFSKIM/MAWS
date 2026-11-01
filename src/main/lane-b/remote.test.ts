@@ -65,7 +65,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
     route,
     cmd: (name: string, input: unknown, machine: MachineRef = MINI) => route(machine, name as CommandName, input, ctx),
     // M4c fix wave 2: a command made from a tab (the envelope's session: a spawn's New chat tab)
-    cmdFrom: (name: string, input: unknown, from: string, machine: MachineRef = MINI) => route(machine, name as CommandName, input, { ...ctx, session: from as AppSessionId }),
+    cmdFrom: (name: string, input: unknown, from: string, client: MainContext['client'] = ctx.client) => route(MINI, name as CommandName, input, { ...ctx, client, session: from as AppSessionId }),
     setTabs(...apps: string[]) {
       tabs = tabsOf(...apps);
       for (const listener of layoutListeners) listener('main.tabs');
@@ -546,21 +546,59 @@ describe('the checkout and the spawn (M4)', () => {
       expect(l.adapter.spawnsKept()).toEqual([]);
     });
 
-    it('says a terminal unknown as such, never as a pending start, and only the tab’s next Send after it is a new act', async () => {
+    const unknown = { ok: false, error: { code: 'internal', message: 'Couldn’t confirm whether it started on mini; check again, or check mini’s sessions', issues: { refusal: 'unknown' } } };
+
+    it('never says a terminal unknown as a pending start, and asks the same op again at each ask: a later ok opens that session, one act', async () => {
       const l = lab({ tabs: [] });
       l.link.onAct = (a) => a.move('sent');
       await timedOut(l);
       l.link.acts[0].settle({ state: 'unknown', reason: 'expired' }); // nobody waiting
       await vi.advanceTimersByTimeAsync(0);
-      const unknown = { ok: false, error: { code: 'internal', message: 'Couldn’t confirm whether it started on mini; check mini’s sessions before starting again', issues: { refusal: 'unknown' } } };
-      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // Check again: the attempt's answer
-      expect(l.link.acts).toHaveLength(1);
-      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
-      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } }); // a deliberate Send
-      expect(l.link.acts).toHaveLength(2);
-      // an unknown said to a waiting caller is said once too
+      const check = l.cmdFrom('session.spawn', spawn, TAB); // Check again
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.link.requeries.map((q) => q.request.action)).toEqual([`requery ${l.link.acts[0].opId}`]); // the same op, by query
+      l.link.requeries[0].settle({ state: 'unknown', reason: 'expired' }); // still can't be known
+      expect(await check).toMatchObject(unknown);
+      // the ledger records it later (an engine host adopted across a restart): the next ask, a Send, hears it
+      l.link.onRequery = (q) => q.settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', { ...spawn, brief: 'edited' }, TAB)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.link.acts).toHaveLength(1); // never a second act
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    it('keeps an unknown said to a waiting page for the next ask, and only a new attempt key makes a new act, carrying no session', async () => {
+      const l = lab({ tabs: [] });
       l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
-      expect(await l.cmdFrom('session.spawn', spawn, 'new-2')).toMatchObject(unknown);
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]);
+      l.link.onRequery = (q) => q.settle({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // a Send: asked again, still unknown
+      expect(l.link.acts).toHaveLength(1);
+      // the person's explicit "Start a new session": the renderer's next attempt key
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, `${TAB}~1`)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.link.acts).toHaveLength(2);
+      // the attempt key is a key only: never the act's session or context, never in a log line
+      for (const act of l.link.acts) expect(act.request).toEqual({ action: 'session.spawn', args: spawn, executor: 'machine', stepUp: 'required' });
+      expect(l.logs.filter((line) => line.includes(TAB))).toEqual([]);
+    });
+
+    it('keeps an outcome for the tab when the page waiting on it went: a reload during Check again starts one session', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      const before = endableClientRef('page-before');
+      let late: unknown = null;
+      void l.cmdFrom('session.spawn', spawn, TAB, before).then((r) => (late = r)); // Check again
+      await vi.advanceTimersByTimeAsync(0);
+      before.end(); // the page reloads while the check waits
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(late).toMatchObject({ ok: true }); // said to a page that is gone: not taken
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]);
+      const after = endableClientRef('page-after');
+      expect(await l.cmdFrom('session.spawn', spawn, TAB, after)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } }); // the reloaded tab's Send
+      expect(l.link.acts).toHaveLength(1);
       expect(l.adapter.spawnsKept()).toEqual([]);
     });
 

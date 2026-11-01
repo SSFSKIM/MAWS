@@ -19,7 +19,7 @@ import { serializeDraft } from '../composer/editor/serialize';
 import { rememberingRemoteDrafts, resetRemoteDrafts } from '../composer/editor/drafts';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
-import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
+import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 
 const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const LOCAL_TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
@@ -187,26 +187,52 @@ describe('a spawn on another machine', () => {
     expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
   });
 
-  it('says a start that can’t be known as such, offers no check on it, and the next Send is a new start', async () => {
+  it('checks again on a start that can’t be known, under the same key, and starts anew only when the person chooses to', async () => {
     const fake = fakeClient();
-    const ask = (text: string) => {
+    const ask = (text: string, fresh = false) => {
       const d = docOf([paragraph(textNode(text))]);
-      return spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+      return spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default', fresh }, fake.client);
     };
-    const run = ask('go');
+    const answer = async (run: Promise<unknown>, fail: () => Promise<void>) => {
+      await Promise.resolve();
+      await fail();
+      return run;
+    };
+    const unknownAnswer = () => fake.fail('session.spawn', 'Couldn’t confirm whether it started on mini; check again, or check mini’s sessions', 'internal', { refusal: 'unknown' });
+    await expect(answer(ask('go'), unknownAnswer)).resolves.toEqual({ started: false, words: SPAWN_WORDS.unknown('mini'), again: 'check' });
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+    // a plain Send after it is a check too: the same key, the input first sent; still unknown, the choice is offered
+    await expect(answer(ask('go, edited'), unknownAnswer)).resolves.toEqual({ started: false, words: SPAWN_WORDS.stillUnknown('mini'), again: 'check', startNew: true });
+    expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB, LOCAL_TAB]);
+    expect(fake.invoked('session.spawn')).toEqual([
+      { checkout: '/srv/app', permission_mode: 'default', brief: 'go' },
+      { checkout: '/srv/app', permission_mode: 'default', brief: 'go' },
+    ]);
+    // "Start a new session on mini": the next attempt key (this Mac's, the tab's id with its number), the text as it is now
+    const fresh = ask('go, edited', true);
+    await Promise.resolve();
+    await fake.reply('session.spawn', ok);
+    await expect(fresh).resolves.toEqual({ started: true });
+    expect(fake.sessions('session.spawn').at(-1)).toBe(addressOf(TEST_MACHINE, 'new-1~1' as AppSessionId));
+    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'default', brief: 'go, edited' });
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+  });
+
+  it('chooses the held attempt’s machine again on a reload, so the tab’s next Send checks on that start', async () => {
+    const fake = fakeClient();
+    useRemoteSpawn.getState().choose(LOCAL_TAB, target);
+    const doc = docOf([paragraph(textNode('go'))]);
+    const run = spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
     await Promise.resolve();
     await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
     await run;
-    const check = ask('go');
-    await Promise.resolve();
-    await fake.fail('session.spawn', SPAWN_WORDS.unknown('mini'), 'internal', { refusal: 'unknown' });
-    await expect(check).resolves.toEqual({ started: false, words: SPAWN_WORDS.unknown('mini'), again: null });
-    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
-    const fresh = ask('go again');
-    await Promise.resolve();
-    await fake.reply('session.spawn', ok);
-    await fresh;
-    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'default', brief: 'go again' });
+    useRemoteSpawn.setState({ chosen: new Map() }); // the page reloads: its memory goes
+    restoreHeldAttempts(); // what loading the page does
+    expect(spawnTargetOf(LOCAL_TAB, KEY)).toEqual(target);
+    useRemoteSpawn.getState().choose(addressOf(TEST_MACHINE, 'new-2' as AppSessionId), target); // an ordinary choice
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    expect(spawnTargetOf(addressOf(TEST_MACHINE, 'new-2' as AppSessionId), KEY)).toBeNull(); // memory only
   });
 
   it('after a timeout and then a refusal, the next start is a new one', async () => {
