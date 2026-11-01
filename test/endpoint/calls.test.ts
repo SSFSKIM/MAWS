@@ -35,12 +35,13 @@ describe('a call', () => {
     expect(await call(a, 'session.events', { appSessionId: 'app-1', afterSeq: null, limit: null })).toMatchObject({ ok: true, output: { events: [], complete: true } });
   });
 
-  it('refuses a read of anything graded higher (`act-required`), and remote terminals, documents and what the table lacks (`not-offered`)', async () => {
+  it('refuses a read of anything graded higher (`act-required`: a terminal’s attach among them, P5 O7 M3), and documents and what the table lacks (`not-offered`)', async () => {
     const f = await startEndpoint(org, started);
     f.host.add('app-1');
     const a = await openRemote(f, org.a1, org.A);
     expect(await call(a, 'session.send', { appSessionId: 'app-1', content: 'hi' })).toMatchObject({ ok: false, error: { code: 'act-required' } });
-    expect(await call(a, 'pty.attach', { ptyId: 'p1' })).toMatchObject({ ok: false, error: { code: 'not-offered' } });
+    expect(await call(a, 'pty.attach', { ptyId: 'p1' })).toMatchObject({ ok: false, error: { code: 'act-required' } });
+    expect(await call(a, 'pty.list', {})).toMatchObject({ ok: false, error: { code: 'not-offered' } });
     expect(await call(a, 'documents.open', { channel: 1 })).toMatchObject({ ok: false, error: { code: 'not-offered' } });
   });
 

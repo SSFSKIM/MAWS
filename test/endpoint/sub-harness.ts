@@ -38,6 +38,7 @@ import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpo
 import { EndpointState } from '../../src/endpoint/state/store';
 import { dialDirect } from './carriers';
 import { fakeServices, type FakeServices } from './fake-services';
+import type { FakePtyHost } from './fake-pty-host';
 import { genesis, iso, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
 import { FakeSminos, type Frame } from './rl10/fake-sminos';
 
@@ -547,6 +548,8 @@ export type Fixture = {
   port: () => number;
   interest: Array<[string, string, string[]?]>;
   sminos?: FakeSminos;
+  /** The pty host, when the suite gave one (P5 O7 M3). */
+  pty?: FakePtyHost;
 };
 
 export type StartOptions = {
@@ -558,6 +561,8 @@ export type StartOptions = {
   subscriptions?: EndpointOptions['subscriptions'];
   /** The direct listener's handshake limits (P5 O7 M1: a suite that reconnects often from loopback raises them). */
   limits?: NonNullable<EndpointOptions['direct']>['limits'];
+  /** A pty host behind `dispatch('pty-host', …)`, `onFrame` and the pty host's events (P5 O7 M3). */
+  pty?: FakePtyHost;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -567,6 +572,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   const spine = host.spine ?? new FakeSpine(host);
   spine.serve(services);
   host.spine = spine;
+  options.pty?.serve(services);
   const interest: Fixture['interest'] = [];
   services.interest = { report: (viewer, sessions) => void interest.push(['report', viewer, [...sessions]]), drop: (viewer) => void interest.push(['drop', viewer]) };
   const ref = services.machine.ref;
@@ -606,7 +612,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   });
   records.bindLaneA(endpoint.rl10.members);
   await endpoint.start(services);
-  const f: Fixture = { endpoint, services, host, spine, records, ref, key, chain, port: () => port, interest };
+  const f: Fixture = { endpoint, services, host, spine, records, ref, key, chain, port: () => port, interest, ...(options.pty === undefined ? {} : { pty: options.pty }) };
   started.push(f);
   await until(() => port !== 0, 'the direct listener bound');
   return f;

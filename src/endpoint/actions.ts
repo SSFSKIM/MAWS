@@ -12,8 +12,8 @@
 //      (`unavailable`), its own fields must agree with its args (`malformed`) (rl10's `rpc`);
 //   4. an executor that keeps a ledger: the engine host (lane B, `host.op`), sminos (lane A, RL10's `rpc`), the endpoint
 //      itself (endpoint-actions.ts) or the machine's services (P5 O3-D M4: `machine.op`, `mawsd`'s spine, whose ledger
-//      claims no launch, so a session's context is not read for it); any other is `no-ledger` (a pty-host command, or
-//      main's, until their owners give them ledgers).
+//      claims no launch, so a session's context is not read for it), or the pty host (P5 O7 M3: `pty.op`, the shape of
+//      `machine.op`, its sealed action beside its claim); main's commands are `no-ledger` until main gives them one.
 // Then `ack {state: 'accepted'}`, and `done {opId, outcome}` when the executing side answers, its own refusals
 // (`tombstoned`, `op-conflict`, `digest-mismatch`, `context`, `expired`, `unavailable`) included. An outcome is in
 // sminos's vocabulary on either lane, so a device reads one: lane A's is sminos's `rpc-result` outcome; lane B's and the
@@ -152,7 +152,7 @@ export class Actions {
     const offers = this.ctx.offers ?? OFFERS;
     const row = Object.hasOwn(offers.commands, action.action) ? offers.commands[action.action] : undefined;
     if (row === undefined) return refuse('not-offered');
-    if (row.executor !== 'engine-host' && row.executor !== 'sminos' && row.executor !== 'endpoint' && row.executor !== 'machine') return refuse('no-ledger');
+    if (row.executor === 'main') return refuse('no-ledger');
     const who = { member: channel.member, device: channel.device };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
     const fingerprint = await actionFingerprint(action);
@@ -169,19 +169,20 @@ export class Actions {
       accept();
       const release = this.#hold();
       try {
-        channel.send({ t: 'done', opId: action.opId, outcome: answered(await this.ctx.own.run(action, who, fingerprint)) });
+        channel.send({ t: 'done', opId: action.opId, outcome: answered(await this.ctx.own.run(action, who, fingerprint, channel)) });
       } finally {
         release();
       }
       return;
     }
 
-    if (row.executor === 'machine') {
+    if (row.executor === 'machine' || row.executor === 'pty-host') {
       accept();
       const release = this.#hold();
       try {
         const kept = KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
-        const answer = await dispatch('machine', 'machine.op', { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args, ...kept });
+        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args, ...kept };
+        const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
       } finally {
         release();

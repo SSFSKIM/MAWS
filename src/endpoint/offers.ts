@@ -29,6 +29,12 @@ export type OfferRow = {
   target: TargetRule;
   /** The grade, for a name outside the registry; `null` for the endpoint's signed actions. Absent: the registry's. */
   grade?: GradeSpec | null;
+  /**
+   * The input a name outside the registry takes (P5 O7 M3: `forward.open`), held to it at authorization's step 2 as a
+   * registry command's is to its schema (`malformed`). Absent for such a name: its executor reads its input (sminos's RPCs,
+   * the endpoint's signed actions).
+   */
+  accepts?(input: unknown): boolean;
 };
 
 /**
@@ -43,6 +49,11 @@ const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'mac
 /** A read of a lane B session's checkout by a path (`git.*`): the call names its session, the input a directory in it. */
 const checkout: OfferRow = { kind: 'call', executor: 'machine', target: 'checkout' };
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
+/** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
+const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
+/** `forward.open`'s args: exactly a port. */
+const isForwardArgs = (input: unknown): boolean =>
+  typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
 
 export const OFFERS: Offers = {
   commands: {
@@ -132,6 +143,16 @@ export const OFFERS: Offers = {
     // and the projects "+ Session"'s machine menu lists (`list`).
     'session.spawn': { kind: 'act', executor: 'machine', target: 'machine' },
     'session.projects.list': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M3: a remote terminal's acts, each `shell` on the machine, under the pty host's ledger; the terminal's bytes go
+    // over a stream opened under the spawn or the attach (streams.ts). `pty.listFor` is `pty.list` for one session, since an
+    // act's args are an object and `pty.list` takes none.
+    'pty.spawn': pty,
+    'pty.attach': pty,
+    'pty.kill': pty,
+    'pty.listFor': pty,
+    // A port of the machine's loopback forwarded to the device: the endpoint's own act (no registry name), `shell` on the
+    // machine; its result names the forward, which a `tcp` stream names (forwards.ts).
+    'forward.open': { kind: 'act', executor: 'endpoint', target: 'machine', grade: 'shell', accepts: isForwardArgs },
     // Lane A's bridge-fenced RPCs and spawn, through RL10 (M6); `resume`, `retire` and `stop` run outside the bridge's
     // fence and are not offered.
     'sminos.steer': laneA('act', 'converse'),

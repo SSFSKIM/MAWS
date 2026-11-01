@@ -1,0 +1,757 @@
+// Streams (P5 O7 M3, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Streams", "The pty stream" and
+// "Forwarding", Interfaces §N; RL §4.8): byte flows inside a device's channel, each opened under an act the device sent,
+// behind `rl2.streams`. Two planes: `pty` (a terminal's output and input, the pty host's) and `tcp` (one connection to a
+// forwarded port of the machine's loopback, forwards.ts).
+//
+// Admission. A caller who doesn't hold the kind's grade (`shell`) now is refused `grade` before anything else is read, so
+// it learns nothing of the op it names. `streamOpen {id, kind, op}` names the authorizing act's opId. The act's executor's ledger is read for it
+// (the pty host's, `pty.opQuery`, for `pty`; the endpoint's own for `tcp`), without a tombstone: it must answer `done`
+// with a binding of this channel's member and device and a name the kind allows (STREAM_ACTS), and the act's kept result
+// must name the pty or forward the open names; else `grade` (`unknown` for an op the ledger holds nothing of, and for a
+// forward past its window: a fresh act may open it; `unavailable` when the ledger can't say now). Then the binding is
+// authorized as a query is (authorize.ts's `stream`): the member still holds the act's machine grade (`shell`), the device
+// is still the head's. Step-up and the rest of the act's decision stood when the act ran, so a reopen under it asks
+// nothing of the person. A ledger keeps an op for a day (KEPT_S); a stream reopened past that needs a new act. The ledger
+// is read as of now (its `opCreated`), since the horizon bounds an act's resends, not what its binding authorizes.
+//
+// Credit. Each direction goes within the other side's credit: the device's, given at open and refunded by
+// `streamCredit` (at most STREAM_CREDIT_MAX), bounds what the endpoint sends, counted in decoded bytes; the endpoint's,
+// STREAM_INPUT_CREDIT at `streamOpened` and refunded as it writes, bounds the device's (past it: `malformed`). Data goes in
+// chunks of at most STREAM_CHUNK_BYTES, through the channel's stream window (stream-window.ts), so control messages never
+// wait behind a stream.
+//
+// A pty stream reads the ring through `pty.replay {ptyId, from}` at its open (the pty host's offsets, independent of any
+// viewer's checkpoint) and sends `[max(from, ringStart), nextOffset)`, then each later `pty.data` frame of that pty at its
+// offset (`onFrame`), frames from before the replay's answer trimmed against it. Output past the device's credit is held
+// up to STREAM_BACKLOG_BYTES (the ring's size), and then the stream closes `behind`: the device reopens from its last
+// offset and the ring fills the gap. The pty's own flow control is untouched (the endpoint takes no credit, `mawsd`'s
+// seam). Input is written through `pty.write` in order; the endpoint keeps the next input offset per `(device, ptyId,
+// inputEpoch)` while a stream holds it and for RESUME_MS after, drops what it already wrote (a resend after a reopen), and
+// forgets an older epoch when a new one opens, which starts at its `inputFrom` (zero for an app run's first stream).
+// Bytes are UTF-8 to `pty.write`'s string, decoded across chunks and reopens. Resize is `streamControl {resize: {cols,
+// rows}}`, through `pty.resize`. A pty that exits closes its streams `exit` after the output they hold.
+//
+// A tcp stream connects to `127.0.0.1:<port>` at its open (`streamOpened` after the connect, `unreachable` on failure),
+// and ends whole with either side's close. The socket is paused while the device's credit is out, so its own flow
+// control holds the peer (it is never closed `behind`).
+//
+// A stream dies with its channel (a tcp socket reset, a pty stream dropped: the device reopens it on its next channel
+// from its offsets, under the same act). Open streams, and the forwards the table keeps, are authorized again at every
+// refresh of the members' rights (channels.ts's `caps` refresh: a grant kept, an owner changed, a new head): one whose
+// member no longer holds the grade closes `removed` at once, its held input dropped, its forward removed and its socket
+// reset. While the check runs, its output and input wait. Streams carry no liveness of their own.
+import { createConnection, type Socket } from 'node:net';
+import { TextDecoder } from 'node:util';
+import {
+  MAX_STREAMS,
+  STREAM_CHUNK_BYTES,
+  STREAM_CREDIT_MAX,
+  type DeviceStreamMessage,
+  type EndpointMessage,
+  type StreamControlMessage,
+  type StreamDataMessage,
+  type StreamKind,
+  type StreamOpenMessage,
+  type StreamRefusal,
+} from 'org-protocol';
+import type { AuthorizeRequest, Decision, StreamBinding, Who } from './authorize';
+import type { RemoteChannel } from './channels';
+import type { EndpointActions } from './endpoint-actions';
+import { forwardOf } from './endpoint-actions';
+import type { Forward, Forwards } from './forwards';
+import { RESUME_MS } from './interest';
+import { dispatchAs, type EndpointServices } from './services';
+import { RECHECK_RETRY_MS, TRANSMIT_DEADLINE_MS } from './subscriptions';
+import { StreamWindow, type StreamSource } from './stream-window';
+
+/** Output held past the device's credit, at most; a pty stream past it closes `behind` (the pty host's ring is as large). */
+export const STREAM_BACKLOG_BYTES = 512 * 1024;
+/** The credit the endpoint gives a stream for the device's bytes, refunded as they are written. */
+export const STREAM_INPUT_CREDIT = 256 * 1024;
+/** The acts a stream of each kind opens under. */
+export const STREAM_ACTS: Readonly<Record<StreamKind, readonly string[]>> = { pty: ['pty.spawn', 'pty.attach'], tcp: ['forward.open'] };
+/** The largest terminal a resize sets. */
+const RESIZE_MAX = 10_000;
+
+export type StreamsContext = {
+  authorize(request: AuthorizeRequest, who: Who, now: number): Promise<Decision>;
+  dispatch: EndpointServices['dispatch'];
+  own: Pick<EndpointActions, 'query'>;
+  forwards: Forwards;
+  now(): number;
+  log(line: string): void;
+  /** The suites' seams: how a tcp stream connects, the input epochs' window, the re-check's retries, a stuck send's deadline. */
+  connect?(port: number): Socket;
+  resumeMs?: number;
+  recheckRetryMs?: readonly number[];
+  transmitDeadlineMs?: number;
+};
+
+type Queued = { offset: number; bytes: Uint8Array } | { close: string };
+
+/** An act's ledger answer, as a stream's admission reads it. */
+type Ledgered = { kind: 'done'; member: string; device: string; name: string; outcome: unknown } | { kind: 'refused'; reason: StreamRefusal };
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
+
+/** One stream of one channel: its output queue under the device's credit, and its input under the endpoint's. */
+abstract class Stream implements StreamSource {
+  /** Answered `streamOpened`: data flows. */
+  opened = false;
+  #ended = false;
+  #credit: number;
+  readonly #queue: Queued[] = [];
+  #backlog = 0;
+  #held = 0;
+  #release: (() => void) | null = null;
+  #gate: Promise<void> = Promise.resolve();
+  /** What the device may still send. */
+  #inputCredit = 0;
+  #refund = 0;
+
+  constructor(
+    readonly id: string,
+    readonly channel: RemoteChannel,
+    readonly act: string,
+    readonly binding: StreamBinding,
+    credit: number,
+    protected readonly window: StreamWindow,
+    private readonly over: (stream: Stream) => void,
+  ) {
+    this.#credit = Math.min(credit, STREAM_CREDIT_MAX);
+  }
+
+  get ended(): boolean {
+    return this.#ended || this.channel.closed;
+  }
+
+  get backlog(): number {
+    return this.#backlog;
+  }
+
+  /** The stream's answer: `streamOpened`, the device's input credit given. */
+  open(fields: { pty?: Record<string, unknown> }): void {
+    this.opened = true;
+    this.#inputCredit = STREAM_INPUT_CREDIT;
+    this.channel.send({ t: 'streamOpened', id: this.id, ...fields, credit: STREAM_INPUT_CREDIT } as EndpointMessage);
+  }
+
+  /** Output at `offset`, queued for the device's credit. */
+  push(offset: number, bytes: Uint8Array): void {
+    if (this.ended || bytes.byteLength === 0) return;
+    this.#queue.push({ offset, bytes });
+    this.#backlog += bytes.byteLength;
+    this.queued();
+    if (!this.ended) this.window.ready(this);
+  }
+
+  /** The stream closes with `reason` once what it holds is sent. */
+  closeAfter(reason: string): void {
+    if (this.ended) return;
+    this.#queue.push({ close: reason });
+    this.window.ready(this);
+  }
+
+  credit(bytes: number): void {
+    this.#credit = Math.min(this.#credit + bytes, STREAM_CREDIT_MAX);
+    this.window.ready(this);
+  }
+
+  /** Its access is checked again: nothing goes either way until a current decision grants it. */
+  hold(): void {
+    if (this.#held++ > 0) return;
+    this.#gate = new Promise((resolve) => (this.#release = resolve));
+  }
+
+  unhold(): void {
+    if (this.#held === 0 || --this.#held > 0) return;
+    this.#release?.();
+    this.#release = null;
+    this.window.ready(this);
+  }
+
+  /** Resolves once no re-check holds the stream. */
+  get gate(): Promise<void> {
+    return this.#gate;
+  }
+
+  /** The device's chunk counted against its input credit: false when it is over (the stream is then closed `malformed`). */
+  take(bytes: number): boolean {
+    this.#inputCredit -= bytes;
+    if (this.#inputCredit >= 0) return true;
+    this.end('malformed');
+    return false;
+  }
+
+  /** `bytes` of the device's taken off the stream (written, or dropped as a resend): refunded in batches. */
+  refund(bytes: number): void {
+    this.#refund += bytes;
+    this.#inputCredit += bytes;
+    if (this.#refund < STREAM_INPUT_CREDIT / 4 && !this.idle()) return;
+    if (!this.ended) this.channel.send({ t: 'streamCredit', id: this.id, bytes: this.#refund });
+    this.#refund = 0;
+  }
+
+  /** The stream window's turn: its next chunk the device's credit allows, or its close once it holds nothing before it. */
+  next(): { message: EndpointMessage; bytes: number } | null {
+    if (this.ended || this.#held > 0 || this.#queue.length === 0) return null;
+    const head = this.#queue[0];
+    if ('close' in head) {
+      this.#queue.shift();
+      const message: EndpointMessage = { t: 'streamClose', id: this.id, reason: head.close };
+      this.#finish();
+      return { message, bytes: 64 };
+    }
+    if (this.#credit <= 0) return null;
+    const n = Math.min(head.bytes.byteLength, STREAM_CHUNK_BYTES, this.#credit);
+    const chunk = head.bytes.subarray(0, n);
+    const offset = head.offset;
+    if (n === head.bytes.byteLength) this.#queue.shift();
+    else this.#queue[0] = { offset: offset + n, bytes: head.bytes.subarray(n) };
+    this.#credit -= n;
+    this.#backlog -= n;
+    this.drained();
+    const data = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString('base64url');
+    return { message: { t: 'streamData', id: this.id, offset, data } as EndpointMessage, bytes: data.length + 96 };
+  }
+
+  /** The stream ends now with `reason`, told to the device unless `reason` is null (the device closed it, or its channel). */
+  end(reason: string | null): void {
+    if (this.#ended) return;
+    if (reason !== null && !this.channel.closed) this.channel.send({ t: 'streamClose', id: this.id, reason });
+    this.#finish();
+  }
+
+  #finish(): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.#queue.length = 0;
+    this.#backlog = 0;
+    this.#release?.();
+    this.#release = null;
+    this.closed();
+    this.over(this);
+  }
+
+  /** Output was queued (a pty past its backlog closes `behind`). */
+  protected queued(): void {}
+  /** Output was sent (a paused socket reads again). */
+  protected drained(): void {}
+  /** Whether no input waits to be written (a refund then goes at once). */
+  protected abstract idle(): boolean;
+  /** Its plane lets go (a socket reset, a pty's frames no longer routed here). */
+  protected abstract closed(): void;
+  abstract input(m: StreamDataMessage): void;
+  abstract control(m: StreamControlMessage): void;
+  /** The device closed it. */
+  abstract closedByDevice(): void;
+}
+
+/** What the endpoint keeps of one device's input to one pty: the epoch, the next offset, the decoder, the write order. */
+type InputRecord = { epoch: string; next: number; decoder: TextDecoder; chain: Promise<void>; holders: number; forget: (() => void) | null };
+
+class PtyStream extends Stream {
+  /** The next output offset the device is owed; earlier bytes of a frame are trimmed. */
+  sent = 0;
+  /** Frames that came while the ring was read, applied after it. */
+  pending: Array<{ offset: number; data: Uint8Array }> | null = [];
+  /** The pty exited while the stream opened. */
+  exited = false;
+  #writing = 0;
+
+  constructor(
+    id: string,
+    channel: RemoteChannel,
+    act: string,
+    binding: StreamBinding,
+    credit: number,
+    window: StreamWindow,
+    over: (stream: Stream) => void,
+    readonly ptyId: string,
+    readonly record: InputRecord,
+    private readonly host: EndpointServices['dispatch'],
+    private readonly log: (line: string) => void,
+  ) {
+    super(id, channel, act, binding, credit, window, over);
+  }
+
+  /** A `pty.data` frame of its pty, at the pty host's offset. */
+  frame(offset: number, data: Uint8Array): void {
+    if (this.pending !== null) return void this.pending.push({ offset, data });
+    const end = offset + data.byteLength;
+    if (end <= this.sent) return;
+    const start = Math.max(0, this.sent - offset);
+    this.push(offset + start, data.subarray(start));
+    this.sent = end;
+  }
+
+  protected override queued(): void {
+    if (this.backlog > STREAM_BACKLOG_BYTES) this.end('behind');
+  }
+
+  protected idle(): boolean {
+    return this.#writing === 0;
+  }
+
+  protected closed(): void {}
+
+  input(m: StreamDataMessage): void {
+    const bytes = Buffer.from(m.data, 'base64url');
+    if (!this.take(bytes.byteLength)) return;
+    const record = this.record;
+    this.#writing++;
+    record.chain = record.chain
+      .then(() => this.gate)
+      .then(async () => {
+        if (this.ended) return;
+        const end = m.offset + bytes.byteLength;
+        if (m.offset > record.next) return this.end('malformed'); // a gap: bytes the device never sent here
+        if (end <= record.next) return; // a resend of what was written
+        const fresh = bytes.subarray(record.next - m.offset);
+        record.next = end;
+        const text = record.decoder.decode(fresh, { stream: true });
+        if (text === '') return;
+        const written = await this.host('pty-host', 'pty.write', { ptyId: this.ptyId, data: text });
+        if (!written.ok) this.log(`endpoint: a remote terminal's input could not be written: ${written.error.code}`);
+      })
+      .catch((error: unknown) => this.log(`endpoint: a remote terminal's input could not be written: ${(error as Error).message}`))
+      .finally(() => {
+        this.#writing--;
+        this.refund(bytes.byteLength);
+      });
+  }
+
+  control(m: StreamControlMessage): void {
+    const resize = m.control.resize;
+    const size = (v: unknown) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= RESIZE_MAX;
+    if (!isObject(resize) || !size(resize.cols) || !size(resize.rows) || Object.keys(m.control).length !== 1) return this.end('malformed');
+    void this.gate.then(async () => {
+      if (this.ended) return;
+      const answer = await this.host('pty-host', 'pty.resize', { ptyId: this.ptyId, cols: resize.cols, rows: resize.rows });
+      if (!answer.ok) this.log(`endpoint: a remote terminal could not be resized: ${answer.error.code}`);
+    });
+  }
+
+  closedByDevice(): void {
+    this.end(null);
+  }
+}
+
+class TcpStream extends Stream {
+  socket: Socket | null = null;
+  #out = 0;
+  #in = 0;
+  #writing = 0;
+  #paused = false;
+
+  constructor(id: string, channel: RemoteChannel, act: string, binding: StreamBinding, credit: number, window: StreamWindow, over: (stream: Stream) => void, readonly forward: Forward) {
+    super(id, channel, act, binding, credit, window, over);
+  }
+
+  /** The connection made: its bytes to the device, its end the stream's. */
+  attach(socket: Socket): void {
+    this.socket = socket;
+    socket.on('data', (data: Buffer) => {
+      this.push(this.#out, data);
+      this.#out += data.byteLength;
+    });
+    socket.on('end', () => this.closeAfter('closed'));
+    socket.on('close', () => this.closeAfter('closed'));
+    socket.on('error', () => {});
+  }
+
+  protected override queued(): void {
+    if (this.backlog >= STREAM_CHUNK_BYTES && !this.#paused) {
+      this.#paused = true;
+      this.socket?.pause();
+    }
+  }
+
+  protected override drained(): void {
+    if (this.#paused && this.backlog < STREAM_CHUNK_BYTES) {
+      this.#paused = false;
+      this.socket?.resume();
+    }
+  }
+
+  protected idle(): boolean {
+    return this.#writing === 0;
+  }
+
+  protected closed(): void {
+    const socket = this.socket;
+    if (socket !== null && !socket.destroyed) socket.resetAndDestroy();
+  }
+
+  input(m: StreamDataMessage): void {
+    const bytes = Buffer.from(m.data, 'base64url');
+    if (!this.take(bytes.byteLength)) return;
+    if (m.offset !== this.#in) return this.end('malformed');
+    this.#in += bytes.byteLength;
+    this.#writing++;
+    void this.gate.then(() => {
+      if (this.ended || this.socket === null) return;
+      this.socket.write(bytes, () => {
+        this.#writing--;
+        this.refund(bytes.byteLength);
+      });
+    });
+  }
+
+  control(): void {
+    this.end('malformed');
+  }
+
+  /** The device's side closed: what it sent is written, then the connection ends (and is reset if it lingers). */
+  closedByDevice(): void {
+    const socket = this.socket;
+    this.socket = null;
+    this.end(null);
+    if (socket === null || socket.destroyed) return;
+    socket.end();
+    const linger = setTimeout(() => socket.destroy(), 10_000);
+    linger.unref?.();
+    socket.once('close', () => clearTimeout(linger));
+  }
+}
+
+export class Streams {
+  readonly #ctx: StreamsContext;
+  readonly #channels = new Map<RemoteChannel, Map<string, Stream>>();
+  readonly #windows = new Map<RemoteChannel, StreamWindow>();
+  /** Each pty's open streams, for its frames and its exit. */
+  readonly #byPty = new Map<string, Set<PtyStream>>();
+  /** Each device's input to each pty (`<device>\n<ptyId>`). */
+  readonly #inputs = new Map<string, InputRecord>();
+  /** Re-checks begun per stream or forward: only the latest one's verdict is taken. */
+  readonly #checks = new Map<unknown, number>();
+  /** Counts `recheck` calls, so a stream authorized before one and opened after it is checked again. */
+  #epoch = 0;
+  readonly #offRemoved: () => void;
+
+  constructor(ctx: StreamsContext) {
+    this.#ctx = ctx;
+    // A forward removed (its member lost `shell`) or forgotten takes its connections with it.
+    this.#offRemoved = ctx.forwards.onRemoved((forward) => {
+      for (const streams of this.#channels.values())
+        for (const stream of streams.values()) if (stream instanceof TcpStream && stream.forward === forward) stream.end('removed');
+    });
+  }
+
+  /** The channel's stream messages. */
+  receive(channel: RemoteChannel, m: DeviceStreamMessage): void {
+    if (channel.closed) return;
+    if (m.t === 'streamOpen') return void this.#open(channel, m);
+    const stream = this.#channels.get(channel)?.get(m.id);
+    if (stream === undefined || stream.ended) return;
+    switch (m.t) {
+      case 'streamData':
+        if (!stream.opened) return stream.end('malformed');
+        return stream.input(m);
+      case 'streamControl':
+        return stream.control(m);
+      case 'streamCredit':
+        return stream.credit(m.bytes);
+      case 'streamClose':
+        return stream.closedByDevice();
+    }
+  }
+
+  /** A pty's output frame (`onFrame`). */
+  frame(frame: { ptyId: string; offset: number; data: Uint8Array }): void {
+    for (const stream of this.#byPty.get(frame.ptyId) ?? []) stream.frame(frame.offset, frame.data);
+  }
+
+  /** The pty host's events: a pty that exits closes its streams after what they hold. */
+  event(owner: string, message: { name: string; payload: unknown }): void {
+    if (owner !== 'pty-host' || message.name !== 'pty.exit' || !isObject(message.payload) || !isText(message.payload.ptyId)) return;
+    for (const stream of this.#byPty.get(message.payload.ptyId) ?? []) {
+      if (stream.pending !== null) stream.exited = true;
+      else stream.closeAfter('exit');
+    }
+  }
+
+  /**
+   * The members' rights may have changed (a grant kept or ended, an owner changed, a new head): every open stream and
+   * every kept forward is authorized again, and one no longer granted ends `removed` (a forward: removed, its streams with it).
+   */
+  recheck(): void {
+    this.#epoch++;
+    for (const streams of this.#channels.values()) for (const stream of streams.values()) if (stream.opened && !stream.ended) this.#recheckStream(stream);
+    for (const forward of this.#ctx.forwards.list()) this.checkForward(forward);
+  }
+
+  /**
+   * A forward authorized again: removed, its streams with it, once its member no longer holds `shell`. The endpoint asks
+   * at each one's opening too, since the act that opened it was decided before the effect ran.
+   */
+  checkForward(forward: Forward): void {
+    const binding = { member: forward.member, device: forward.device };
+    this.#check(forward, 'forward.open', binding, { ...binding, clientClass: forward.clientClass }, (verdict) => verdict === 'refused' && this.#ctx.forwards.remove(forward.device, forward.id));
+  }
+
+  /** An open stream authorized again, held while the check runs; ended `removed` (its forward too) once refused. */
+  #recheckStream(stream: Stream): void {
+    stream.hold();
+    this.#check(stream, stream.act, stream.binding, this.#who(stream.channel), (verdict) => {
+      if (verdict === 'granted') return stream.unhold();
+      if (stream instanceof TcpStream && verdict === 'refused') this.#ctx.forwards.remove(stream.forward.device, stream.forward.id);
+      stream.end(verdict === 'refused' ? 'removed' : 'unavailable');
+    });
+  }
+
+  /** Every stream ended and every socket reset (the endpoint stops). */
+  stop(): void {
+    this.#offRemoved();
+    for (const streams of this.#channels.values()) for (const stream of [...streams.values()]) stream.end(null);
+    this.#channels.clear();
+    this.#windows.clear();
+    for (const record of this.#inputs.values()) record.forget?.();
+    this.#inputs.clear();
+  }
+
+  // ---- Admission ---------------------------------------------------------------------------------------------------
+
+  async #open(channel: RemoteChannel, m: StreamOpenMessage): Promise<void> {
+    const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
+    let streams = this.#channels.get(channel);
+    if (streams === undefined) {
+      const mine = new Map<string, Stream>();
+      streams = mine;
+      this.#channels.set(channel, mine);
+      this.#windows.set(channel, new StreamWindow(channel, { deadlineMs: this.#ctx.transmitDeadlineMs ?? TRANSMIT_DEADLINE_MS, log: this.#ctx.log }));
+      channel.onClose(() => this.#channelClosed(channel, mine));
+    }
+    if (streams.has(m.id)) return refuse('malformed');
+    if (streams.size >= MAX_STREAMS) return refuse('busy');
+    // The id is the open's from here on: a second open of it is `malformed`, a `streamClose` cancels it.
+    const placeholder = new Cancelled(m.id, channel, this.#windows.get(channel)!, (s) => this.#forget(s));
+    streams.set(m.id, placeholder);
+    try {
+      const who = this.#who(channel);
+      // The caller's own standing first: one below the kind's grade learns nothing of the op it names, and no ledger is read.
+      const floor = await this.#ctx.authorize({ kind: 'stream', name: STREAM_ACTS[m.kind][0], input: { member: who.member, device: who.device } }, who, this.#ctx.now());
+      if (placeholder.ended) return;
+      if (!floor.ok) return refuse(floor.reason === 'unavailable' ? 'unavailable' : 'grade');
+      const ledgered = m.kind === 'pty' ? await this.#ptyLedger(m.op, channel) : this.#ownLedger(m.op);
+      if (placeholder.ended) return;
+      if (ledgered.kind === 'refused') return refuse(ledgered.reason);
+      if (ledgered.member !== who.member || ledgered.device !== who.device || !STREAM_ACTS[m.kind].includes(ledgered.name)) return refuse('grade');
+      const named = m.kind === 'pty' ? ptyOf(ledgered.name, ledgered.outcome) : forwardOf(ledgered.outcome);
+      if (named === null || named !== (m.kind === 'pty' ? m.pty!.ptyId : m.tcp!.forward)) return refuse('grade');
+      const binding: StreamBinding = { member: ledgered.member, device: ledgered.device };
+      const epoch = this.#epoch;
+      const decision = await this.#ctx.authorize({ kind: 'stream', name: ledgered.name, input: binding }, who, this.#ctx.now());
+      if (placeholder.ended) return;
+      if (!decision.ok) return refuse(decision.reason === 'unavailable' ? 'unavailable' : 'grade');
+      // The stream takes the open's place in the table as it answers, so what the device sends next reaches it.
+      // One authorized before a re-check that missed it (it wasn't open yet) is checked again now.
+      const install = (stream: Stream) => {
+        if (streams.get(m.id) !== placeholder) return;
+        streams.set(m.id, stream);
+        if (this.#epoch !== epoch) queueMicrotask(() => stream.opened && !stream.ended && this.#recheckStream(stream));
+      };
+      if (m.kind === 'pty') await this.#openPty(channel, m, ledgered.name, binding, placeholder, install);
+      else await this.#openTcp(channel, m, ledgered.name, binding, placeholder, install);
+    } catch (error) {
+      this.#ctx.log(`endpoint: a stream on channel ${channel.key} could not be opened: ${(error as Error).message}`);
+      refuse('unavailable');
+    } finally {
+      if (streams.get(m.id) === placeholder) streams.delete(m.id);
+    }
+  }
+
+  /** The pty host's ledger, read for the act's binding and result. */
+  async #ptyLedger(op: string, channel: RemoteChannel): Promise<Ledgered> {
+    const answer = await dispatchAs(this.#ctx.dispatch, channel.client)('pty-host', 'pty.opQuery', { opId: op, opCreated: new Date(this.#ctx.now()).toISOString(), tombstoneIfAbsent: false });
+    if (!answer.ok || !isObject(answer.value)) return { kind: 'refused', reason: 'unavailable' };
+    return ledgered(answer.value);
+  }
+
+  /** The endpoint's own ledger (`forward.open`). */
+  #ownLedger(op: string): Ledgered {
+    return ledgered(this.#ctx.own.query(op, new Date(this.#ctx.now()).toISOString(), false));
+  }
+
+  async #openPty(channel: RemoteChannel, m: StreamOpenMessage, act: string, binding: StreamBinding, placeholder: Cancelled, install: (stream: Stream) => void): Promise<void> {
+    const { ptyId, from, inputEpoch, inputFrom } = m.pty!;
+    const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
+    const dispatch = dispatchAs(this.#ctx.dispatch, channel.client);
+    const record = this.#input(binding.device, ptyId, inputEpoch, inputFrom);
+    const stream = new PtyStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), ptyId, record, dispatch, this.#ctx.log);
+    // Frames from now on are held while the ring is read, then trimmed against it.
+    let set = this.#byPty.get(ptyId);
+    if (set === undefined) this.#byPty.set(ptyId, (set = new Set()));
+    set.add(stream);
+    const fail = (reason: StreamRefusal | null) => {
+      stream.end(null);
+      if (reason !== null) refuse(reason);
+    };
+    const [listed, replayed] = await Promise.all([dispatch('pty-host', 'pty.list', undefined), dispatch('pty-host', 'pty.replay', { ptyId, from })]);
+    if (placeholder.ended || channel.closed) return fail(null);
+    if (!listed.ok) return fail(unavailableOr(listed, 'unknown'));
+    if (!replayed.ok) return fail(unavailableOr(replayed, 'unknown'));
+    const info = (isObject(listed.value) && Array.isArray(listed.value.ptys) ? listed.value.ptys : []).find((p: unknown) => isObject(p) && p.ptyId === ptyId) as Record<string, unknown> | undefined;
+    const replay = isObject(replayed.value) ? replayed.value : {};
+    const bytes = replay.replay instanceof Uint8Array ? replay.replay : null;
+    if (info === undefined || bytes === null || !Number.isSafeInteger(replay.replayFrom) || !Number.isSafeInteger(replay.nextOffset)) return fail('unknown');
+    const ringStart = replay.replayFrom as number;
+    const nextOffset = replay.nextOffset as number;
+    install(stream);
+    stream.open({ pty: { info, ringStart, nextOffset } });
+    stream.push(ringStart, bytes);
+    stream.sent = Math.max(nextOffset, from);
+    const pending = stream.pending ?? [];
+    stream.pending = null;
+    for (const frame of pending) stream.frame(frame.offset, frame.data);
+    if (stream.exited || info.alive === false) stream.closeAfter('exit');
+  }
+
+  async #openTcp(channel: RemoteChannel, m: StreamOpenMessage, act: string, binding: StreamBinding, placeholder: Cancelled, install: (stream: Stream) => void): Promise<void> {
+    const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
+    const forward = this.#ctx.forwards.hold(binding.device, m.tcp!.forward, channel);
+    if (forward === null) return refuse('unknown');
+    const socket = (this.#ctx.connect ?? connectLoopback)(forward.port);
+    const connected = await new Promise<boolean>((resolve) => {
+      socket.once('connect', () => resolve(true));
+      socket.once('error', () => resolve(false));
+    });
+    if (!connected) {
+      socket.destroy();
+      return refuse('unreachable');
+    }
+    if (placeholder.ended || channel.closed || this.#ctx.forwards.get(forward.device, forward.id) !== forward) {
+      socket.resetAndDestroy();
+      if (!placeholder.ended && !channel.closed) refuse('unknown');
+      return;
+    }
+    const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward);
+    install(stream);
+    stream.attach(socket);
+    stream.open({});
+  }
+
+  /** The device's input record for a pty: kept for its epoch, a new epoch replacing it from its `inputFrom`. */
+  #input(device: string, ptyId: string, epoch: string, inputFrom: number): InputRecord {
+    const key = `${device}\n${ptyId}`;
+    let record = this.#inputs.get(key);
+    if (record === undefined || record.epoch !== epoch) {
+      record?.forget?.();
+      record = { epoch, next: inputFrom, decoder: new TextDecoder(), chain: Promise.resolve(), holders: 0, forget: null };
+      this.#inputs.set(key, record);
+    } else {
+      // A reopen in the same epoch: what the endpoint wrote stands; bytes the device says it won't send again are skipped.
+      record.next = Math.max(record.next, inputFrom);
+    }
+    record.forget?.();
+    record.forget = null;
+    record.holders++;
+    return record;
+  }
+
+  // ---- The table -----------------------------------------------------------------------------------------------------
+
+  #who(channel: RemoteChannel): Who {
+    return { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
+  }
+
+  /** A stream ended: out of the table, its pty's routing and its input record's holders. */
+  #forget(stream: Stream): void {
+    const streams = this.#channels.get(stream.channel);
+    if (streams?.get(stream.id) === stream) streams.delete(stream.id);
+    this.#checks.delete(stream);
+    if (!(stream instanceof PtyStream)) return;
+    const set = this.#byPty.get(stream.ptyId);
+    set?.delete(stream);
+    if (set?.size === 0) this.#byPty.delete(stream.ptyId);
+    const record = stream.record;
+    if (--record.holders > 0) return;
+    const key = `${stream.binding.device}\n${stream.ptyId}`;
+    const timer = setTimeout(() => {
+      if (this.#inputs.get(key) === record && record.holders === 0) this.#inputs.delete(key);
+    }, this.#ctx.resumeMs ?? RESUME_MS);
+    timer.unref?.();
+    record.forget = () => clearTimeout(timer);
+  }
+
+  /** A channel closed: its streams die with it, told nothing (a tcp socket reset, a pty stream dropped). */
+  #channelClosed(channel: RemoteChannel, streams: Map<string, Stream>): void {
+    for (const stream of [...streams.values()]) stream.end(null);
+    this.#channels.delete(channel);
+    this.#windows.delete(channel);
+  }
+
+  /**
+   * Authorizes a stream's binding again for `who`, the latest check of `key` counting; an answer the endpoint can't give
+   * now (`unavailable`) is asked again after each retry delay, and is `unanswered` after the last.
+   */
+  #check(key: unknown, act: string, binding: StreamBinding, who: Who, verdict: (verdict: 'granted' | 'refused' | 'unanswered') => void, attempt = 0): void {
+    const n = attempt === 0 ? (this.#checks.get(key) ?? 0) + 1 : this.#checks.get(key)!;
+    this.#checks.set(key, n);
+    const current = () => this.#checks.get(key) === n && !(key instanceof Stream && key.ended);
+    const done = (answer: 'granted' | 'refused' | 'unanswered') => {
+      this.#checks.delete(key);
+      verdict(answer);
+    };
+    this.#ctx
+      .authorize({ kind: 'stream', name: act, input: binding }, who, this.#ctx.now())
+      .then((decision) => {
+        if (!current()) return;
+        if (decision.ok) return done('granted');
+        if (decision.reason !== 'unavailable') return done('refused');
+        const retries = this.#ctx.recheckRetryMs ?? RECHECK_RETRY_MS;
+        if (attempt >= retries.length) return done('unanswered');
+        const timer = setTimeout(() => current() && this.#check(key, act, binding, who, verdict, attempt + 1), retries[attempt]);
+        timer.unref?.();
+      })
+      .catch((error: unknown) => {
+        if (!current()) return;
+        this.#ctx.log(`endpoint: a stream's access could not be checked again: ${(error as Error).message}`);
+        done('unanswered');
+      });
+  }
+}
+
+/** An open not yet answered: it holds the id, and a `streamClose` cancels it. */
+class Cancelled extends Stream {
+  constructor(id: string, channel: RemoteChannel, window: StreamWindow, over: (stream: Stream) => void) {
+    super(id, channel, '', { member: '', device: '' }, 1, window, over);
+  }
+  protected idle(): boolean {
+    return true;
+  }
+  protected closed(): void {}
+  input(): void {
+    this.end(null);
+  }
+  control(): void {}
+  closedByDevice(): void {
+    this.end(null);
+  }
+}
+
+/** A ledger's query answer as a stream's admission reads it. */
+function ledgered(value: Record<string, unknown>): Ledgered {
+  if (value.state === 'not-received' || value.state === 'expired') return { kind: 'refused', reason: 'unknown' };
+  if (value.state !== 'done') return { kind: 'refused', reason: 'unavailable' };
+  if (!isText(value.member) || !isText(value.device) || !isText(value.name)) return { kind: 'refused', reason: 'grade' };
+  return { kind: 'done', member: value.member, device: value.device, name: value.name, outcome: value.outcome };
+}
+
+/** The pty a kept `pty.spawn` or `pty.attach` result names (`{ptyId}`, `{info: {ptyId}}`), or null. */
+function ptyOf(name: string, outcome: unknown): string | null {
+  if (!isObject(outcome) || outcome.ok !== true || !isObject(outcome.value)) return null;
+  const value = outcome.value;
+  const ptyId = name === 'pty.spawn' ? value.ptyId : isObject(value.info) ? value.info.ptyId : undefined;
+  return isText(ptyId) ? ptyId : null;
+}
+
+/** A failed host read's refusal: `unavailable` when the host couldn't answer, else `fallback`. */
+function unavailableOr(response: { ok: false; error: { code: string } }, fallback: StreamRefusal): StreamRefusal {
+  return response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : fallback;
+}
+
+function connectLoopback(port: number): Socket {
+  return createConnection({ host: '127.0.0.1', port });
+}
