@@ -399,6 +399,31 @@ describe('the detached entry', () => {
       expect(host.life.exitAsked).toHaveBeenCalledWith('idle', { refused: true, capabilities: ['host.holder'] });
     });
 
+    // P5 O16 M3c: the e2e's stand-in for an engine host from before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, under MAWS_E2E
+    // only): its welcome lists no host.holder, and a refused link's exit reaches its life as a hello that listed none
+    it('stands in for a host without host.holder under the e2e seam alone', async () => {
+      const host = harness({ env: { MAWS_E2E: '1', MAWS_E2E_HOST_WITHOUT_HOLDER: '1' } });
+      await host.start();
+      const welcomed = await connect(['host.holder']);
+      expect(await welcomed.next()).toMatchObject({ t: 'welcome', capabilities: ['socket.ptyFrames', 'host.attachment', 'host.render', 'host.connectors'] });
+      welcomed.socket.destroy();
+      const lock = readLock(dir)!;
+      const client = await connectLines(lock.socketPath);
+      clients.push(client);
+      client.send({ t: 'hello', protocol: SOCKET_PROTOCOL + 1, token: readFileSync(join(dir, 'host.token'), 'utf8'), capabilities: ['host.holder', 'socket.ptyFrames'] });
+      expect(await client.next()).toMatchObject({ t: 'refuse', reason: 'protocol' });
+      client.send({ t: 'exit', when: 'idle' });
+      await until(() => host.life.exitAsked.mock.calls.length === 1);
+      expect(host.life.exitAsked).toHaveBeenCalledWith('idle', { refused: true, capabilities: ['socket.ptyFrames'] });
+    });
+
+    it('lists host.holder whatever the seam says outside MAWS_E2E', async () => {
+      const host = harness({ env: { MAWS_E2E_HOST_WITHOUT_HOLDER: '1' } });
+      await host.start();
+      const client = await connect();
+      expect(await client.next()).toMatchObject({ t: 'welcome', capabilities: expect.arrayContaining(['host.holder']) });
+    });
+
     // P5 O16 M3b: the exit order stops every row only at a stop-all; any other reason (SIGTERM included) detaches
     it('runs the shutdown in stop mode for a stop-all and in detach mode for every other reason', async () => {
       const stopAll = harness();

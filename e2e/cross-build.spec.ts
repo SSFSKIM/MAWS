@@ -98,6 +98,13 @@
 //                       runs, an agent's dataset refresh is asked through the serving host's dashboard seam: the kept
 //                       older host settles it `noClient` (O3-D's rule, the app's attachment), the host that replaced it
 //                       at idle hands it to `mawsd`, whose connectors answer it with no app.
+// P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11; acceptance 1): every crossing branches on
+// `host.holder`. Where both builds list it, the kept engine host is asked to hand over as soon as the other build's
+// client (its main, or its `mawsd`) is welcomed: the kept session, on the stub engine under a session host (a replay
+// launch survives no handover), is adopted at once by a host of the attacher's build, which serves the app from then on,
+// with no banner and no wait for idle (handedOverCrossing). Where either does not (the merge-base peer at O16's landing),
+// O3-D's crossing above stands; the first landing after O16 that bumps WIRE_MINOR runs the handover's branch against
+// O16's merge as the peer.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -110,7 +117,7 @@ import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
-import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
@@ -126,6 +133,7 @@ import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer 
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -237,6 +245,9 @@ const hostsAttachment = (build: Build) => build.manifest.capabilities.includes('
 // `host.connectors` (Interfaces §D), and whether its app lists `machine.connectors` (an app from O4 on, which obeys
 // `mawsd` as the connectors' owner and reads the sealed store's format 2)
 const hostsConnectors = (build: Build) => build.manifest.capabilities.includes(CONNECTORS_CAPABILITY);
+// P5 O16 M3c: whether a build's engine host hands its sessions over and its clients ask it to (`host.holder`, on the
+// engine host's welcome and on the app's and `mawsd`'s hellos alike); a crossing hands over only where both builds do
+const holds = (build: Build) => build.manifest.capabilities.includes(HOLDER_CAPABILITY);
 const appObeysConnectors = (build: Build) => build.manifest.capabilities.includes(CONNECTORS_CLIENT_CAPABILITY);
 // P5 O3-D M6: whether a build's app takes `spine.lock` (O3-A on): one before it runs its spine with no lock at all
 const takesSpineLock = (build: Build) => ['src/main/settings/spine-lock.ts', 'src/services/settings/spine-lock.ts'].some((file) => existsSync(join(build.root ?? REPO_ROOT, file)));
@@ -281,6 +292,7 @@ interface CrossingSteps {
 }
 
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED, steps: CrossingSteps = {}): Promise<string[]> {
+  if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
@@ -445,6 +457,96 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const daemonLines = s.daemonLog().split('\n');
   if (shapes.keeper === 'daemon' || shapes.attacher === 'daemon') said.push(`  mawsd's log: ${daemonLines.filter((l) => HOST_REFUSES.test(l)).length} lines of the refusal pattern${daemonLines.filter((l) => HOST_REFUSES.test(l)).map((l) => ` | ${l.trim()}`).join('')}`);
   const dropped = [...appLines, ...hostLines, ...daemonLines].filter((l) => DROPPED.test(l));
+  said.push(dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+  for (const run of attacherRuns) expect(run.maws.consoleErrors()).toEqual([]);
+  if (steps.attacherMoved) said.push(...(await steps.attacherMoved(second)));
+  return said;
+}
+
+// P5 O16 M3c (M3; D9, D11, D40): the crossing where both builds list `host.holder`. The keeper's session is a stub launch
+// under a session host, kept across the quit as above; the attacher's client is welcomed by the kept host, finds another
+// build that hands over, and asks it to at once, so the kept host drains, detaches the session and exits, and a host of
+// the attacher's build, started by that client, adopts it and serves the app from the start: no banner, no exit armed
+// for idle, the session live with the same engine process. What the older supervisor would have answered across the gap
+// is not probed (it never serves the app), nor acceptance 9's reattach to it; the permanent link to the attacher's own
+// host is, as in the crossing above.
+async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, shapes: Shapes, steps: CrossingSteps): Promise<string[]> {
+  const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
+  const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches; both list ${HOLDER_CAPABILITY}: the handover`];
+  const stub = s.useStub({ rowMs: Number(ROW_MS) });
+
+  // the keeper: a paced stub launch kept across a quit, its background failure and its request still ahead
+  const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
+  const own = await s.ready(first.page, onShape(shapes.keeper));
+  expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
+  const kept = own.supervisor!;
+  const keeperDaemon = shapes.keeper === 'daemon' ? own.daemon!.pid : null;
+  if (steps.keeperReady) said.push(...(await steps.keeperReady(first)));
+  const id = await s.record(first.page);
+  const input = fitTo(commandOf(keeper, 'session.launch')!.input, { spec: stubSpec(stub, id, tailFixture(s.root), { cwd: s.repo }) });
+  expect(value(await invoke(first.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+  await expect.poll(async () => (await statusOf(first.page, id)).process).toBe('ready');
+  value(await invoke(first.page, 'session.send', { appSessionId: id, content: PROMPT }));
+  await expect.poll(async () => (await eventsOf(first.page, id)).length, { message: 'a few rows have streamed' }).toBeGreaterThan(5);
+  const engine = (await statusOf(first.page, id)).pid;
+  expect(engine, 'the kept session runs a process (the stub, under a session host)').not.toBeNull();
+  expect(first.maws.consoleErrors()).toEqual([]);
+  await s.quit(first);
+  expect(first.quitLines()).toContain(shapes.keeper === 'daemon' ? 'quit-guard: 1 mid-turn, not asked: they outlive the app' : 'quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  expect(isAlive(kept.pid), 'the kept supervisor outlives its app').toBe(true);
+  const seqAtQuit = Math.max(...s.journal(id).map((r) => r.seq));
+  await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
+
+  // the other build's app attaches: its client asks the kept host to hand over, and a host of its own build adopts
+  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS), ...steps.env }, attacher.root);
+  let second = await attach();
+  const attacherRuns: Run[] = [second];
+  const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), 90_000);
+  const build = served.appBuildId;
+  expect(build, 'two builds').not.toBe(kept.buildId);
+  expect(served, `${attacher.label} on a supervisor of its own build at once`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
+  await expect.poll(() => isAlive(kept.pid), { timeout: 15_000, message: 'the kept supervisor is gone' }).toBe(false);
+  const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
+  const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
+  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
+  expect(s.log(), 'host.log: the kept host handed over').toContain('exiting (handover)');
+  await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host never served the app').toHaveCount(0);
+  if (keeperDaemon !== null) {
+    await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
+    expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
+  }
+  await expect.poll(async () => (await statusOf(second.page, id)).holder?.adopted, { timeout: 60_000, message: 'the kept session adopted' }).toBe(true);
+  expect((await statusOf(second.page, id)).pid, 'the same engine process').toBe(engine);
+  said.push(`  hello: ${hello}…`, `  handed over: supervisor pid ${kept.pid} (build ${kept.buildId}) exited by the handover; pid ${served.supervisor!.pid} (build ${build}) adopted the session (engine pid ${engine})`);
+
+  // the tail: what was journaled while no app ran reaches this main, its live derivation included
+  const atAttach = await eventsOf(second.page, id);
+  const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
+  expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
+  await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away, once' }).toBe(1);
+  if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
+  said.push('  gap: not probed: the older supervisor never served this app (its session was handed over at the attach)');
+
+  // a launch on the successor plays a turn; the kept request answered there, the adopted session plays on
+  const launched = `xb-launch-${Date.now()}` as AppSessionId;
+  await launchOn(attacher, second.page, launched, turnsJournal(s.root, 'launch', 1), s);
+  value(await invoke(second.page, 'session.send', { appSessionId: launched, content: 'turn 1' }));
+  await turnEnded(second.page, launched, 30_000);
+  const requested = (await eventsOf(second.page, id)).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
+  value(await invoke(second.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  await turnEnded(second.page, id);
+  expect(s.journal(id).filter((r) => r.direction === 'out' && r.frame.type === 'user'), 'the prompt was written once').toHaveLength(1);
+  said.push('  served: the adopted session played its turn to the end on the successor; a launch played its turn there too');
+  const afterMove = `xb-after-${Date.now()}` as AppSessionId;
+  await launchOn(attacher, second.page, afterMove, join(REPO_ROOT, PERMISSION), s);
+  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: served.supervisor!.pid, daemon: attacherDaemon, id: afterMove, connectors: hostsConnectors(attacher), away: steps.awayOnOwn, said });
+
+  // neither end refused what the other build sent; what either dropped as unknown is named
+  const appLines = attacherRuns.flatMap((run) => run.output().split('\n'));
+  expect(appLines.filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing ${keeper.label}'s supervisor sent`).toEqual([]);
+  expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'neither supervisor refuses what the other build sent').toEqual([]);
+  const dropped = [...appLines, ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
   said.push(dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
   for (const run of attacherRuns) expect(run.maws.consoleErrors()).toEqual([]);
   if (steps.attacherMoved) said.push(...(await steps.attacherMoved(second)));

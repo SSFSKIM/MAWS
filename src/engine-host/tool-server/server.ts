@@ -78,6 +78,7 @@ export interface MawsToolServerDeps {
   log: (message: string) => void;
   onChange?: () => void; // the calls in flight changed (the session's status counts them)
   fromSubagent?: (toolUseId: ToolUseId | null) => boolean; // P2-C3: the normaliser's reading of the frames before the call
+  hold?: () => Promise<void>; // P5 O16 M3c: the e2e's hold (./e2e-hold.ts), awaited before any tool but `ask` runs
 }
 
 export class MawsToolServer {
@@ -206,6 +207,7 @@ export class MawsToolServer {
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
+      if (name !== 'ask' && this.deps.hold) await this.deps.hold();
       result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal, fromSubagent: this.deps.fromSubagent?.(toolUseId) ?? false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

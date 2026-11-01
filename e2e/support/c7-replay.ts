@@ -48,6 +48,22 @@ export function turnsJournal(dir: string, name: string, turns: number): string {
   return writeJournal(dir, `${name}-${turns}`, journal.rows);
 }
 
+// P5 O16 M3c (e2e/supervisor.spec.ts (f)'s deferred handover): one human turn in which the engine calls the `maws`
+// server's `tool` and waits for its answer, which the journal holds as the `out` row the replay waits on, then ends.
+export function toolCallJournal(dir: string, name: string, tool: string, args: Record<string, unknown> = {}): string {
+  const journal = humanTurns();
+  const at = journal.rows.length;
+  journal.turn(1);
+  const [user, started, init, result, completed] = journal.rows.splice(at) as [Row, Row, Row, Row, Row];
+  const requestId = 'e2e-tool-call-0000-4000-8000-000000000001';
+  const call = { type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: tool, arguments: args, _meta: { 'claudecode/toolUseId': 'toolu_e2e_tool_call_01' } } } } };
+  const answer = { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { mcp_response: { jsonrpc: '2.0', id: 7, result: { content: [] } } } } };
+  let seq = user.seq;
+  const rows: Row[] = [user, started, init, { ...init, direction: 'in', frame: call }, { ...init, direction: 'out', frame: answer }, result, completed];
+  journal.rows.push(...rows.map((row) => ({ ...row, seq: seq++ })));
+  return writeJournal(dir, name, journal.rows);
+}
+
 // The prelude and a builder of human turns behind it (turnsJournal's), for journals that add rows between turns.
 function humanTurns() {
   const rows: Row[] = [...rowsOf('test/fixtures/engine/replay-handshake.jsonl')];

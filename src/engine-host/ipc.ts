@@ -343,8 +343,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
   // P5 O16 M3b: `detach`, a detached host's exit order but a stop-all's: the hosted rows are detached, the rest stopped
+  // P5 O16 M3c: and the host.op runs in flight keep their results on this host before it exits (registerOps below,
+  // bound late); the caller's bound (socket-host's SHUTDOWN_BOUND_MS) leaves a run that outlasts it open
+  const ops: { settled?: () => Promise<void> } = {};
   const shutdown = async (graceMs: number, mode: 'stop' | 'detach' = 'stop') => {
-    const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */]);
+    const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */, ops.settled?.()]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };
@@ -938,7 +941,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
 
   // P5 O10 M7: lane B's operation ledger, compacted at the host's start, and the endpoint's two commands over the
   // handlers registered above (registered on the host's own `on`: host.op never runs itself)
-  registerOps(hostOn, {
+  ops.settled = registerOps(hostOn, {
     ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log }),
     handler: (name) => own.get(name),
     status: (id) => {
@@ -947,7 +950,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     },
     pending: (id, requestId) => streams.get(id as AppSessionId)?.pendingRequest(requestId as RequestId) ?? null,
     log,
-  });
+  }).settled;
 
   return { table, plugins, shutdown, adopt };
 }

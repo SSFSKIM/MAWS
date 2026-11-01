@@ -293,6 +293,33 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     expect(server.inFlightThroughDelivery()).toBe(0);
   });
 
+  // P5 O16 M3c: the e2e's hold (./e2e-hold.ts) keeps a call in flight before its tool runs, so a scene's handover defers
+  it('holds a call before its tool runs, counted in flight through the hold; ask is never held', async () => {
+    let release: () => void = () => {};
+    const ran: string[] = [];
+    const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
+    const writes: RequestId[] = [];
+    const server = new MawsToolServer({
+      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      respond: async (requestId) => void writes.push(requestId),
+      hold: () => new Promise<void>((resolve) => (release = resolve)),
+    });
+    const call = (request_id: string, name: string, id: number) =>
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } } } } as ControlRequestFrame);
+    call('req-ask', 'ask', 1);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    call('req-pane', 'show_pane', 2);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    expect(server.inFlightThroughDelivery()).toBe(1);
+    release();
+    await flush();
+    expect(ran).toEqual(['ask', 'show_pane']);
+    expect(writes).toContain('req-pane');
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
   it("counts an unknown tool's answer until its write settles", async () => {
     const { server, writes, call } = gated([]);
     call('echo_file', 5);

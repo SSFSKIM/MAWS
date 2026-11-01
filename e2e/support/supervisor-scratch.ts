@@ -12,7 +12,7 @@
 // sessions on the stub engine, a real process each under a real session host, instead of the in-process replay:
 // every launch of the app names the stub (MAWS_E2E_ENGINE_BIN), and `launchSession` (and so `startTurn`) launches live
 // sessions that play their fixture on it. Every other case keeps the replay.
-import { type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,7 +28,7 @@ import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './launch';
 import { killScratchProcesses } from './processes';
 import { tmpSocketDirOf } from './supervisor-socket';
-import { stubLaunchReady, writeStubEngine, type StubEngine } from './stub-engine'; // P5 O16 M2b
+import { stubLaunchReady, writeStubEngine, type StubEngine, type StubSceneOptions } from './stub-engine'; // P5 O16 M2b
 
 // C3's permission round trip: a prompt, ~44 `in` rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
@@ -154,9 +154,54 @@ export class Scratch {
 
   // P5 O16 M2b: the case's sessions on the stub engine from here on, `rowMs` the pace of its `in` rows (the value the
   // case gives MAWS_E2E_REPLAY_ROW_MS); call before the first launch that should name it
-  useStub(opts: { rowMs?: number } = {}): StubEngine {
+  useStub(opts: StubSceneOptions = {}): StubEngine {
     this.stub = writeStubEngine(this.root, opts);
     return this.stub;
+  }
+
+  // P5 O16 M3c: `fixture` as the seeded transcript's own session (its recorded session id replaced by this case's engine
+  // id), for a resume of the record: the record, its transcript and its binding keep one engine session id
+  asOwnSession(fixture: string): string {
+    const text = readFileSync(join(REPO_ROOT, fixture), 'utf8');
+    const recorded = text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow).find((r) => r.direction === 'in' && typeof r.frame.session_id === 'string')!.frame.session_id as string;
+    const path = join(this.root, `own-${randomUUID()}.jsonl`);
+    writeFileSync(path, text.replaceAll(recorded, this.engineId));
+    return path;
+  }
+
+  // P5 O16 M3c: a subagent transcript of the seeded session (`<sessionId>/subagents/agent-<id>.jsonl` beside the
+  // transcript), as the engine writes one when the model starts an agent
+  writeAgent(agentId: string): void {
+    const dir = join(this.userData, 'claude-config', 'projects', this.repo.replace(/[^a-zA-Z0-9]/g, '-'), this.engineId, 'subagents');
+    mkdirSync(dir, { recursive: true });
+    const row = { parentUuid: null, isSidechain: true, type: 'user', message: { role: 'user', content: `agent ${agentId}'s task` }, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd: this.repo, sessionId: this.engineId, agentId, version: '2.1.283' };
+    writeFileSync(join(dir, `agent-${agentId}.jsonl`), `${JSON.stringify(row)}\n`);
+  }
+
+  // P5 O16 M3c: `mawsd <args> --profile <profile>`, the built CLI under this checkout's Electron as Node, as an owner
+  // runs it against the profile's daemon (src/mawsd/cli.ts)
+  mawsd(args: string[], timeoutMs = 150_000): Promise<{ status: number | null; stdout: string; stderr: string }> {
+    const electron = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+    const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
+    return new Promise((done, failed) => {
+      const run = spawn(electron, ['--disable-sigusr1', script, ...args, '--profile', this.userData], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', MAWS_E2E: '1' }, stdio: ['ignore', 'pipe', 'pipe'], argv0: 'mawsd' });
+      let [stdout, stderr] = ['', ''];
+      run.stdout!.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
+      run.stderr!.on('data', (chunk: Buffer) => void (stderr += chunk.toString()));
+      const timer = setTimeout(() => {
+        run.kill('SIGKILL');
+        failed(new Error(`mawsd ${args.join(' ')} did not end within ${timeoutMs} ms: ${stdout}${stderr}`));
+      }, timeoutMs);
+      run.once('exit', (status) => {
+        clearTimeout(timer);
+        done({ status, stdout, stderr });
+      });
+    });
+  }
+
+  // P5 O16 M3c: the session's journaled stderr lines, oldest first (the stub's directives print theirs there)
+  stderrOf(id: string): string[] {
+    return this.journal(id).filter((r) => r.direction === 'stderr').map((r) => String(r.frame.text ?? ''));
   }
 
   // A session of `fixture` launched and ready: live on the stub engine under `useStub`, else the in-process replay.

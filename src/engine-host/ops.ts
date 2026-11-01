@@ -49,8 +49,9 @@ const refused = (reason: string): OpOutput => ({ state: 'refused', reason });
 const sameDigest = (a: RequestDigest | undefined, b: RequestDigest | null) =>
   a !== undefined && b !== null && a.session === b.session && a.request === b.request && a.tool === b.tool && a.input_sha256 === b.input_sha256;
 
-export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>; opQuery(input: OpQueryInput): OpQueryOutput } {
+export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>; opQuery(input: OpQueryInput): OpQueryOutput; settled(): Promise<void> } {
   const { ledger } = deps;
+  const running = new Set<Promise<unknown>>(); // P5 O16 M3c: the runs claimed and not yet kept
 
   async function op(input: OpInput, ctx: HandlerContext): Promise<OpOutput> {
     const { opId, opCreated, member, device, fingerprint, name, context, requestDigest } = input;
@@ -74,16 +75,30 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
     });
     if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
 
-    let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
+    const run = (async () => {
+      let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
+      try {
+        const value = await handler(checked.value, ctx);
+        const output = validateCommandOutput(name as keyof typeof commands, value);
+        result = output.ok ? { ok: true, value: output.value } : { ok: false, error: ipcError('internal', output.error.message) };
+      } catch (error) {
+        result = { ok: false, error: thrownError(error) };
+      }
+      ledger.finish(opId, result);
+      return result;
+    })();
+    running.add(run);
     try {
-      const value = await handler(checked.value, ctx);
-      const output = validateCommandOutput(name as keyof typeof commands, value);
-      result = output.ok ? { ok: true, value: output.value } : { ok: false, error: ipcError('internal', output.error.message) };
-    } catch (error) {
-      result = { ok: false, error: thrownError(error) };
+      return closedSaid({ state: 'done', result: await run });
+    } finally {
+      running.delete(run);
     }
-    ledger.finish(opId, result);
-    return closedSaid({ state: 'done', result });
+  }
+
+  // P5 O16 M3c: settles once every run claimed so far has kept its result, so an exit that waits for it (ipc.ts's
+  // shutdown, within the exit order's bound) never ends this process between a run's claim and its result
+  async function settled(): Promise<void> {
+    await Promise.all([...running]);
   }
 
   function opQuery({ opId, opCreated, tombstoneIfAbsent }: OpQueryInput): OpQueryOutput {
@@ -95,12 +110,13 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
     return ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
   }
 
-  return { op, opQuery };
+  return { op, opQuery, settled };
 }
 
-/** Registers `host.op` and `host.opQuery` over `deps`. */
-export function registerOps(on: HostOn, deps: OpsDeps): void {
-  const { op, opQuery } = opCommands(deps);
+/** Registers `host.op` and `host.opQuery` over `deps`; answers when the runs claimed so far have kept their results. */
+export function registerOps(on: HostOn, deps: OpsDeps): { settled(): Promise<void> } {
+  const { op, opQuery, settled } = opCommands(deps);
   on('host.op', async (input, ctx) => op(input, ctx));
   on('host.opQuery', async (input) => opQuery(input));
+  return { settled };
 }

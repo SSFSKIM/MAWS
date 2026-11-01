@@ -38,6 +38,7 @@ import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
 import { withLinkedReads, type Admission, type ReadAnswer } from './linked-reads'; // P4-A3
 import type { SendContent } from '@shared/engine/session-state-store'; // P4-A3
 import type { McpToolDefinition } from './tool-server/server';
+import { toolHoldFor } from './tool-server/e2e-hold'; // P5 O16 M3c
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -114,6 +115,7 @@ export class SessionMaws {
       log: host.log,
       onChange: () => host.touch(),
       fromSubagent: host.fromSubagent && ((toolUseId) => host.fromSubagent!(toolUseId)), // P2-C3
+      hold: toolHoldFor(process.env), // P5 O16 M3c: the e2e's hold, under MAWS_E2E only
     });
     // E1 end
   }

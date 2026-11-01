@@ -39,7 +39,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { runSocketHost, START_EXIT_ABORTED, startSocketHost, type HostProcess } from '@shared/host/socket-host'; // P5 O2 M4
-import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
@@ -63,6 +63,16 @@ export interface DetachedOptions {
   // session hosts' roster, holds a row for each live host it adopts and starts the adoptions; answers what the sweep must
   // leave (the live hosts' rows) and take (the dead hosts' live children)
   adopt?(): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] };
+  env?: NodeJS.ProcessEnv; // P5 O16 M3c: the e2e seam's reading (e2eWithoutHolder); process.env when absent
+}
+
+// P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): the e2e's stand-in for an engine host from before
+// O16, under MAWS_E2E=1 with MAWS_E2E_HOST_WITHOUT_HOLDER=1 alone: its welcome lists no `host.holder`, so a client of
+// another build is served until idle (E10's update) rather than handing over, and a refused link's `exit idle` reaches
+// its life as from a hello that listed none, so it waits for idle (E10's incompatible update) rather than draining
+// (D11). The scenes keep their coverage of an older host with it (e2e/supervisor.spec.ts (f) and (g)).
+export function e2eWithoutHolder(env: NodeJS.ProcessEnv): boolean {
+  return env.MAWS_E2E === '1' && env.MAWS_E2E_HOST_WITHOUT_HOLDER === '1';
 }
 
 // The supervisor's own life as the engine host decides it (supervision.ts), told what only this entry knows.
@@ -98,6 +108,8 @@ export function runDetached(hostVersion: string, register: HostRegister, opts: D
 // be created).
 export async function startSupervisor(hostVersion: string, register: HostRegister, opts: DetachedOptions, proc: SupervisorProcess): Promise<RunningSupervisor | null> {
   const { dir, log } = opts;
+  const withoutHolder = e2eWithoutHolder(opts.env ?? process.env); // P5 O16 M3c
+  const unlisted = (capabilities: readonly string[]) => (withoutHolder ? capabilities.filter((capability) => capability !== HOLDER_CAPABILITY) : capabilities);
   return startSocketHost(
     {
       kind: 'supervisor',
@@ -108,14 +120,14 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       modulePath: opts.modulePath,
       register,
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
-      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: with `host.attachment`, which it serves from M3
+      capabilities: unlisted(PEER_CAPABILITIES.engineHost), // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
       // (2) every live row stopped (grace 3 s) and the plugin runner with it; P5 O16 M3b: a hosted row detached instead,
       // unless all were asked to stop
       shutdown: (reason) => opts.shutdown(EXIT_GRACE_MS, reason === 'stopAll' ? 'stop' : 'detach'),
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
       exitWhenIdle: () => opts.life.exitAsked('idle', { refused: false, capabilities: [] }),
-      exitAsked: (when, from) => opts.life.exitAsked(when, from), // P5 O16 M3b
+      exitAsked: (when, from) => opts.life.exitAsked(when, { ...from, capabilities: unlisted(from.capabilities) }), // P5 O16 M3b
       onClient: (connected, peer) => {
         // the owner is back: the next launch captures the shell again (a declaring client says so by host.attachment)
         if (connected && !peer?.capabilities.includes(ATTACHMENT_CAPABILITY)) invalidateShellEnvironment();

@@ -4,7 +4,7 @@
 // nothing. `host.opQuery` answers RL4's states with the stored binding and tombstones an absent id when asked.
 // The first block drives the commands over a stand-in handler table; the second through registerEngineIpc's own handlers
 // and a replayed engine session, so a reseal shows one effect in a real session.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -153,6 +153,40 @@ describe('host.op', () => {
     const open = ops({ ledger: { closed: null, begin: () => ({ kind: 'claimed' }), finish: () => {}, query: () => ({ state: 'not-received' }) } as unknown as OpLedger });
     expect(await open.op(op(), CTX)).not.toHaveProperty('ledger');
     expect(open.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+  });
+});
+
+// P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): an engine host leaving (a handover's exit, any
+// exit order) waits, within the exit order's own bound, for the runs claimed so far, so a run in flight when the rows
+// froze keeps its result in this host's ledger before the process exits; a run that outlasts the bound is left open,
+// its claim `in-progress` to the successor that reopens the ledger (an `expired` reading of it is O7's orphanAtOpen,
+// not on master at this landing).
+describe('the runs in flight when the engine host leaves', () => {
+  const lines = () => readFileSync(join(dir, 'ops.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { opId: string; result?: unknown });
+
+  it('settles once each run claimed so far has kept its result on disk', async () => {
+    let finish!: () => void;
+    const h = ops({ handler: (name) => (name === 'session.send' ? async () => (await new Promise<void>((resolve) => (finish = resolve)), { messageUuid: null, disposition: 'queued', queueId: 'q1' }) : undefined) });
+    const answer = h.op(op(), CTX);
+    let settled = false;
+    const leaving = h.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled, 'the exit waits for the run').toBe(false);
+    expect(lines().filter((line) => 'result' in line), 'nothing kept yet').toEqual([]);
+    finish();
+    await leaving;
+    expect(lines().filter((line) => 'result' in line), 'the result on disk before the exit goes on').toEqual([{ opId: 'op-000000000000001', result: { ok: true, value: { messageUuid: null, disposition: 'queued', queueId: 'q1' } } }]);
+    expect(await answer).toMatchObject({ state: 'done' });
+    await h.settled(); // nothing in flight: at once
+  });
+
+  it('keeps a run that never ends waiting, so the exit order’s bound leaves its claim open, in-progress to the successor', async () => {
+    const h = ops();
+    void h.op(op({ name: 'session.interrupt', input: { appSessionId: 'app-1', cancelEngineQueued: false } }), CTX);
+    const bound = new Promise<'bound'>((resolve) => setTimeout(() => resolve('bound'), 50));
+    expect(await Promise.race([h.settled().then(() => 'settled' as const), bound])).toBe('bound');
+    const successor = ops({ ledger: OpLedger.open(dir, 'ops.jsonl') });
+    expect(successor.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toMatchObject({ state: 'in-progress', name: 'session.interrupt' });
   });
 });
 

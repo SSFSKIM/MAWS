@@ -12,7 +12,7 @@ import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
-import { buildStubEngine, writeStubEngine as writeStubScript } from '../../test/support/stub-engine-bin';
+import { buildStubEngine, writeStubEngine as writeStubScript, type StubEngineOptions } from '../../test/support/stub-engine-bin';
 import { invoke, value } from './c7-replay';
 import { REPO_ROOT } from './launch';
 
@@ -21,14 +21,18 @@ export interface StubEngine {
   fixtures: string; // `<engine session id>.jsonl`, one per launch
 }
 
+// The stub's options a scene picks (test/support/stub-engine-bin.ts): the pace of its `in` rows, and P5 O16 M3c's
+// directives, a `sleep` it parents (its pid a stderr line) and the frames it read (a stderr line at its exit)
+export type StubSceneOptions = Pick<StubEngineOptions, 'rowMs' | 'spawnChild' | 'countStdin'>;
+
 // The stub under `dir` (a case's scratch root, so the scratch's cleanup finds its processes by path).
-export function writeStubEngine(dir: string, opts: { rowMs?: number } = {}): StubEngine {
+export function writeStubEngine(dir: string, opts: StubSceneOptions = {}): StubEngine {
   const home = join(dir, 'stub-engine');
   const fixtures = join(home, 'fixtures');
   mkdirSync(fixtures, { recursive: true });
   const bundle = buildStubEngine(home);
   // a launch whose id names no journal plays none: the stub exits at once, naming the missing default
-  const bin = writeStubScript(join(home, 'claude'), bundle, { fixture: join(fixtures, 'unnamed-launch.jsonl'), fixtureDir: fixtures, rowMs: opts.rowMs });
+  const bin = writeStubScript(join(home, 'claude'), bundle, { ...opts, fixture: join(fixtures, 'unnamed-launch.jsonl'), fixtureDir: fixtures });
   return { bin, fixtures };
 }
 
