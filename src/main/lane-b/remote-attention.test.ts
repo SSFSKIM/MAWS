@@ -245,7 +245,7 @@ describe('the attention feed', () => {
     expect(l.unfed).toEqual([]);
   });
 
-  it('stops following at a channel with no feed, saying so (`unfed`) so the sessions’ streams speak again; it tells a page nothing then', () => {
+  it('stops following at a channel with no feed, saying so (`unfed`) so the sessions’ streams speak again; it tells a page nothing then, neither a session nor an announcement', () => {
     const l = lab();
     l.add(STUDIO, ['rl2.executor.machine']);
     l.rosterIs(MINI, STUDIO);
@@ -258,7 +258,7 @@ describe('the attention feed', () => {
     const said = l.emitted.length;
     l.attention.replay(MINI, 'app-1');
     l.attention.sayAgain();
-    expect(l.emitted.slice(said)).toEqual([{ machine: MINI, name: 'remote.attention', payload: { machine: MINI, items: [], greyed: false } }]);
+    expect(l.emitted.slice(said)).toEqual([]); // the ended feed's cache speaks for nobody: the streams have the sessions back
   });
 });
 

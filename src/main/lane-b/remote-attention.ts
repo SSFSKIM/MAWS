@@ -21,7 +21,8 @@
 // - Fix wave 1: while a machine's feed follows (open, or opening again), it is its sessions' attention: their streams
 //   (./remote-session.ts) say none of theirs, which are the broker's items alone and would overwrite the feed's whole
 //   list, and a page's `session.get` is told the session's items from here. When the channel has no feed, the streams
-//   say theirs again (`unfed`). A page that announces itself is told every machine's state again (`sayAgain`).
+//   say theirs again (`unfed`). A page that announces itself is told every following machine's state again (`sayAgain`);
+//   a machine with no feed is told it by its sessions' streams (a page's `session.get`), never by the ended feed's cache.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -54,7 +55,7 @@ export interface RemoteAttention {
   follows(machine: MachineRef): boolean;
   /** Fix wave 1: a session's items said again from the feed (a page's `session.get`), while the feed follows. */
   replay(machine: MachineRef, app: string): void;
-  /** Fix wave 1: every machine's state said again (a page that just announced itself). */
+  /** Fix wave 1: every following machine's state said again (a page that just announced itself); one whose feed ended says nothing. */
   sayAgain(): void;
   /** Heard after each change has been said to the renderer. */
   onChange(listener: (change: RemoteAttentionChange) => void): () => void;
@@ -276,7 +277,8 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
     },
     sayAgain() {
       if (stopped) return;
-      for (const [machine, feed] of feeds) if (feed.said) sayAll(machine, feed);
+      // only a feed that follows speaks for its machine: one that ended has given its sessions back to their streams
+      for (const [machine, feed] of feeds) if (feed.said && (feed.sub !== null || feed.timer !== null)) sayAll(machine, feed);
     },
     onChange(listener) {
       listeners.add(listener);

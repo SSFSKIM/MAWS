@@ -803,6 +803,21 @@ describe('the attention feed beside a session’s stream', () => {
     expect(attentionOf(l).at(-1)).toEqual([]);
   });
 
+  // fix wave 2: a page's announcement re-says a machine's attention only while its feed follows
+  it('keeps the stream’s items after the feed ended `not-offered` through a page’s announcement and its `session.get`', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    feed.sink.ended('not-offered');
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+    const said = l.emitted.length;
+    l.adapter.attention.sayAgain(); // attention.pendingNavigate
+    await l.cmd('session.get', { appSessionId: APP });
+    expect(l.emitted.slice(said).filter((e) => e.name === 'remote.attention')).toEqual([]);
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+  });
+
   it('answers `session.search` of a machine whose endpoint offers none (older than M6) `host_unavailable`, as an offline one', async () => {
     const l = lab();
     const refused = routeLaneB(async () => ({ ok: false, error: { code: 'internal', message: 'session.search: refused not-offered by machine mini', issues: { refusal: 'not-offered' } } }) as CommandResult<CommandName>, (m) => (m === MINI ? l.link : null), l.adapter);
