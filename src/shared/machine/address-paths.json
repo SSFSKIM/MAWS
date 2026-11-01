@@ -286,6 +286,7 @@
 "events.plugins.operation":[".reload.sessions[].appSessionId AppSessionId"],
 "events.pty.data":[".ptyId PtyId"],
 "events.pty.exit":[".ptyId PtyId"],
+"events.remote.attention":[".items[].appSessionId AppSessionId",".items[].id AttentionId"],
 "events.remote.gap":[".appSessionId AppSessionId"],
 "events.remote.historyTooLarge":[".appSessionId AppSessionId"],
 "events.remote.session":[".address AppSessionId"],
