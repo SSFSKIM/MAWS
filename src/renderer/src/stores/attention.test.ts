@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
-import { item, record } from '../../../../test/support/builders';
+import { item, record, remoteRow } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { swapOf } from '../composer/docked/swap';
-import { createAttentionStore, REQUEST_RETRY_MS, selectNeedsYou, selectPendingOf } from './attention';
+import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -68,6 +68,72 @@ describe('attention snapshot and changes in both orders', () => {
     expect(selectNeedsYou(store.getState(), sessions)).toBe(rows); // memoised while the versions stand
     store.getState().applyChanged({ appSessionId: S, items: [] }, M);
     expect(selectNeedsYou(store.getState(), sessions)).toEqual([]);
+  });
+});
+
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "The feed"; M6b's `remote.attention`): another
+// machine's feed, its snapshot replacing that machine's partition whole, greyed from its link's `down` until its next
+// snapshot, `up` or not; a greyed partition's rows are drawn (`selectGreyedNeedsYou`) and never counted.
+describe('another machine’s attention feed', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  const bItem = (id: string, createdAt: string) => item(onB(id), 'permission', createdAt);
+  const listed = new Map([onB('b1'), onB('b2')].map((appId) => [appId, { ...remoteRow(OTHER_MACHINE, appId), appId }]));
+  const sessions = { records: new Map([[S, record('s1')]]), recordsVersion: 1, listed };
+  const live = (store: ReturnType<typeof createAttentionStore>) => selectNeedsYou(store.getState(), sessions).map((r) => r.appSessionId);
+  const greyed = (store: ReturnType<typeof createAttentionStore>) => selectGreyedNeedsYou(store.getState(), sessions).map((r) => r.appSessionId);
+  const b1 = bItem('b1', '2026-09-28T08:00:00Z');
+  const b2 = bItem('b2', '2026-09-28T07:00:00Z');
+
+  it('a snapshot replaces that machine’s sessions only, and a listed row stands in for the record', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(M);
+    store.getState().applySnapshot([older], M);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1, b2], greyed: false });
+    expect(live(store)).toEqual([onB('b2'), onB('b1'), S]);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b2], greyed: false });
+    expect(store.getState().bySession.has(onB('b1'))).toBe(false);
+    expect(live(store)).toEqual([onB('b2'), S]);
+  });
+
+  it('greyed at the link’s down: drawn, out of the count; the next snapshot restores them', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1, b2], greyed: false });
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1, b2], greyed: true });
+    expect(live(store)).toEqual([]);
+    expect(greyed(store)).toEqual([onB('b2'), onB('b1')]);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: false }); // b2 answered while it was down
+    expect(live(store)).toEqual([onB('b1')]);
+    expect(greyed(store)).toEqual([]);
+    expect(store.getState().greyed.size).toBe(0);
+  });
+
+  it('a change heard while greyed (the pane’s stream after up) stays greyed until the snapshot', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: true });
+    store.getState().applyChanged({ appSessionId: onB('b2'), items: [b2] }, OTHER_MACHINE);
+    expect(live(store)).toEqual([]);
+    expect(greyed(store)).toEqual([onB('b2'), onB('b1')]);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1, b2], greyed: false });
+    expect(live(store)).toEqual([onB('b2'), onB('b1')]);
+  });
+
+  it('a session leaving the feed (`items: []`) leaves Needs you; the feed gone (`items: []`, not greyed) empties the machine', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1, b2], greyed: false });
+    store.getState().applyChanged({ appSessionId: onB('b2'), items: [] }, OTHER_MACHINE);
+    expect(live(store)).toEqual([onB('b1')]);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [b1], greyed: true });
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect([...store.getState().bySession.keys()]).toEqual([]);
+    expect([live(store), greyed(store)]).toEqual([[], []]);
+  });
+
+  it('memoises on the listed rows too: a session listed later gains its row', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [bItem('b3', '2026-09-28T08:00:00Z')], greyed: false });
+    expect(live(store)).toEqual([]);
+    const later = new Map([...listed, [onB('b3'), { ...remoteRow(OTHER_MACHINE, 'b3'), appId: onB('b3') }]]);
+    expect(selectNeedsYou(store.getState(), { ...sessions, listed: later }).map((r) => r.appSessionId)).toEqual([onB('b3')]);
   });
 });
 

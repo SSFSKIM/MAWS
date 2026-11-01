@@ -10,3 +10,7 @@ export function displayTitle(record: Pick<SessionRecord, 'title'> | null | undef
   const text = record?.title.text ?? '';
   return text.trim() === '' ? NEW_CHAT : text;
 }
+
+// P5 O8 M2: a listed row's title (another machine's session as its listing says it), "New chat" while its listing has
+// none, as `displayTitle` reads a record's.
+export const listedTitle = (listed: { title: string }): string => (listed.title.trim() === '' ? NEW_CHAT : listed.title);

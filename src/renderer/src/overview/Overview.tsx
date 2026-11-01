@@ -25,9 +25,9 @@ const PREVIOUS = new Set(['ArrowUp', 'ArrowLeft']);
 
 export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex; onSessionCreated?: () => void }) {
   const sessions = useSessions(
-    useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, digests: s.digests, projects: selectProjectOrder(s), indexing: s.indexing })),
+    useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, listed: s.listed, digests: s.digests, projects: selectProjectOrder(s), indexing: s.indexing })),
   );
-  const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version })));
+  const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version, greyed: a.greyed })));
   const rows = selectNeedsYou(attention, sessions);
   const machines = useMachines((s) => s.machines);
   const local = ipc.localMachine;

@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, PreloadBridge, SettingsState } from '@shared/ipc/schema';
-import { TEST_MACHINE } from '../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../test/support/machine';
+import { item } from '../../../test/support/builders'; // P5 O7 M6
+import type { MachineRef } from '@shared/machine/ref';
+import { addressOf } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
@@ -32,12 +35,14 @@ const GIT_STATUS = {
 // `settings.changed` first, as the router does; both hosts are ready; the PTY host records a write to its shell and
 // answers nothing until the test calls `answerEcho()`, which delivers the terminal's echo of the line and then the
 // command's output and resolves `echoed`. No timer is involved, so "not yet answered" cannot race the delivery.
-function fakeMain(initial: SettingsState['settings']['theme']) {
+// P5 O7 M6: `onAnnounce`, what main says before it answers the page's `attention.pendingNavigate` (M6b's fix wave: every
+// machine's `remote.attention` again); `send` names the machine an event comes from (none: this Mac).
+function fakeMain(initial: SettingsState['settings']['theme'], { onAnnounce }: { onAnnounce?: (send: (name: string, payload: unknown, machine?: MachineRef) => void) => void } = {}) {
   let theme = initial;
   let markEchoed!: () => void;
   const echoed = new Promise<void>((resolve) => (markEchoed = resolve));
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
+  const listeners = new Map<string, Set<(payload: unknown, machine?: MachineRef) => void>>();
+  const send = (name: string, payload: unknown, machine?: MachineRef) => listeners.get(name)?.forEach((l) => l(payload, machine));
   let written = '';
   const answerEcho = () => {
     // Since C9 the stream is binary: each chunk is bytes stamped with its stream offset.
@@ -99,6 +104,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'attention.list':
         return [];
       case 'attention.pendingNavigate':
+        onAnnounce?.(send);
         return { navigate: null };
       case 'layout.list':
         return { keys: [] };
@@ -155,7 +161,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
   };
   window.maws = {
     invoke: vi.fn(async (name: string, input: { theme: typeof theme; data: string }) => ({ ok: true, value: answer(name, input) })),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, machine?: MachineRef) => void) => {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name)!.add(listener);
       return () => listeners.get(name)!.delete(listener);
@@ -361,6 +367,24 @@ describe("C7's registrations from the app", () => {
   });
 });
 // C7 end
+
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6; M6b's fix wave): main says every machine's
+// attention feed again when a page announces itself (`attention.pendingNavigate`), so the page must hear `remote.attention`
+// before it announces: a reloaded page or a new window holds the other machines' items at once.
+describe('the page’s announcement', () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: PreloadBridge }).maws;
+  });
+
+  it('receives the remote partitions main says again before answering it', async () => {
+    const waiting = item('b1', 'permission', '2026-11-01T09:00:00Z');
+    fakeMain('light', { onAnnounce: (send) => send('remote.attention', { machine: OTHER_MACHINE, items: [waiting], greyed: false }, OTHER_MACHINE) });
+    await renderApp();
+    const { useAttention } = await import('./stores/attention');
+    expect(useAttention.getState().bySession.get(addressOf(OTHER_MACHINE, waiting.appSessionId))?.map((i) => i.id)).toEqual([addressOf(OTHER_MACHINE, waiting.id)]);
+  });
+});
 
 // P3-F wave S (F14 review 2): App.tsx installs `openArtifactTab` into the host actions at its module load, so a Markdown
 // surface outside any Transcript (the Side tool's answer, the ask sheet's previews, the Code tool's preview, a plugin

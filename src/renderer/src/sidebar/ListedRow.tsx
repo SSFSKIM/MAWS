@@ -10,6 +10,7 @@ import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { listedGlyph } from '../attention/glyph';
 import { remoteOpenerFor } from '../sessions/remote-openers';
+import { selectPendingOf, useAttention } from '../stores/attention'; // P5 O7 M6
 import type { ListedSession } from '../stores/sessions';
 import { formatAge, listedTitle } from './derive';
 import { ListedHoverCard } from './HoverCard';
@@ -25,7 +26,8 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
   const [card, setCard] = useState(false);
   const title = listedTitle(listed);
   const owners = useOwnersLabel(id);
-  const glyph = listedGlyph(listed.state);
+  const pending = useAttention((s) => selectPendingOf(s, id)); // P5 O7 M6: its machine's attention feed
+  const glyph = listedGlyph(listed.state, pending);
   const issued = Date.parse(listed.issued);
   const activate = () => {
     const open = remoteOpenerFor(listed.lane);
