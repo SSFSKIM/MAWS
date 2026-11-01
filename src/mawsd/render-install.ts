@@ -31,7 +31,7 @@ import type { CommandRunner } from './units/unit';
 
 const WHOLE = '.maws-unpacked'; // an unpack's mark: written once unzip finished, holding the zip's sha256
 const UNZIP_TIMEOUT_MS = 300_000;
-const LOCK = '.install-lock'; // the install lock: its holder's pid and a token of the holder's own
+const LOCK = '.install-lock'; // the install lock: its holder's pid, the kernel's start of that process and a token of the holder's own
 const LOCK_POLL_MS = 500; // the pause between tries of a lock another installer holds
 
 export interface RenderInstallDeps {
@@ -47,6 +47,8 @@ export interface RenderInstallDeps {
   now(): number;
   checkpoint?(step: 'unpacked' | 'chown' | 'chmod' | 'publishing'): Promise<void> | void; // a test's barrier between the transaction's steps
   waitForLock?(holder: number): Promise<void>; // a test's stand-in for the pause between tries of the install lock another installer holds
+  startOf?(pid: number): string | null; // a test's stand-in for /proc/<pid>/stat's start of a process (null when unreadable)
+  notice?(line: string): void; // a line for the person running the install (the command line's stderr)
 }
 
 export type InstallOutcome =
@@ -232,15 +234,18 @@ function published(entry: string, pin: ElectronPin, helperConfigured: (path: str
   return readManifest(entry, pin) !== null && existsSync(join(entry, RUNTIME_BINARY)) && helperConfigured(join(entry, SANDBOX_HELPER));
 }
 
-// The install lock, taken; its release. Taken by linking a file that already holds this installer's pid and token into
-// place, since a link never replaces what is there and the lock is never seen empty. Held by a live process: waited for.
-// Held by a process that is gone (an install killed midway): broken, by moving it aside first and removing it only if
-// what moved is still that holder's, so two installers breaking it at once never both remove a live one (a live lock
-// moved by mistake is linked back).
+// The install lock, taken; its release. Taken by linking a file that already holds this installer's pid, its start and
+// a token into place, since a link never replaces what is there and the lock is never seen empty. Held by a live
+// process: waited for, said once. Held by a process that is gone (an install killed midway), or by a pid now another
+// process's (its start is not the one recorded): broken, by moving it aside first and removing it only if what moved is
+// still that holder's, so two installers breaking it at once never both remove a live one (a live lock moved by mistake
+// is linked back).
 async function lockInstall(root: string, deps: RenderInstallDeps): Promise<() => void> {
   const lock = join(root, LOCK);
+  const startOf = deps.startOf ?? procStart;
   const token = randomBytes(8).toString('hex');
-  const mine = `${process.pid} ${token}\n`;
+  const mine = `${process.pid} ${startOf(process.pid) ?? '-'} ${token}\n`;
+  let said = false;
   const own = join(root, `.lock-${token}-${process.pid}`);
   writeFileSync(own, mine);
   try {
@@ -253,8 +258,11 @@ async function lockInstall(root: string, deps: RenderInstallDeps): Promise<() =>
       }
       const held = textOf(lock);
       if (held === null) continue; // released meanwhile
-      const holder = Number(held.split(' ')[0]);
-      if (Number.isInteger(holder) && holder > 0 && alive(holder)) {
+      const [pid, start] = held.split(' ');
+      const holder = Number(pid);
+      if (Number.isInteger(holder) && holder > 0 && alive(holder) && sameProcess(start, startOf(holder))) {
+        if (!said) deps.notice?.(`waiting for the runtime install by pid ${holder}`);
+        said = true;
         await (deps.waitForLock ?? pause)(holder);
         continue;
       }
@@ -283,6 +291,18 @@ async function lockInstall(root: string, deps: RenderInstallDeps): Promise<() =>
 }
 
 const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+
+// Whether the live process at a lock's pid is the one that wrote it: its start is the recorded one. Unknown either way
+// (no start recorded, or none readable now: no /proc) leaves the pid's liveness to decide.
+const sameProcess = (recorded: string | undefined, now: string | null): boolean => recorded === undefined || recorded === '-' || now === null || recorded === now;
+
+// The kernel's start of a process (/proc/<pid>/stat's starttime, in clock ticks since boot): what tells a pid reused by
+// another process from the one that took the lock. Null where there is no /proc or the process is gone.
+function procStart(pid: number): string | null {
+  const stat = textOf(`/proc/${pid}/stat`);
+  if (stat === null) return null;
+  return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null; // the fields after the command's name, from the state (field 3) on
+}
 
 function textOf(path: string): string | null {
   try {

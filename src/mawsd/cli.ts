@@ -566,6 +566,7 @@ async function render(context: Context, args: readonly string[]): Promise<number
     download: deps.download ?? downloadTo,
     processes: deps.processes ?? procProcesses,
     now: deps.now,
+    notice: (line) => deps.err(`${line}\n`), // fix wave (PR #428 panel): a wait for another install's lock shows
   };
   if (command === 'install') {
     const outcome = await installRenderRuntime(install);

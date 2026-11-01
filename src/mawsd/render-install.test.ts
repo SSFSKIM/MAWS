@@ -351,6 +351,48 @@ describe('an install', () => {
     expect(listing()).toEqual([runtimeName(pin)]);
   });
 
+  // A killed install's pid reused by another process: alive, but not the process that took the lock (its start differs)
+  it('takes over an install lock whose pid is now another process’s', async () => {
+    mkdirSync(root(), { recursive: true });
+    writeFileSync(join(root(), '.install-lock'), `${process.pid} 4242 0123456789abcdef\n`); // live pid, the killed holder's start
+    const notices: string[] = [];
+    let waited = 0;
+    const waitForLock = async () => {
+      if ((waited += 1) > 3) throw new Error('still waiting on a lock its holder can no longer release');
+    };
+    const outcome = await installRenderRuntime(deps({ startOf: (pid) => (pid === process.pid ? '9999' : null), notice: (line) => notices.push(line), waitForLock }));
+    expect(outcome).toMatchObject({ state: 'installed' });
+    expect(waited, 'a pid whose start is not the lock’s is not waited for').toBe(0);
+    expect(notices).toEqual([]);
+    expect(listing()).toEqual([runtimeName(pin)]);
+  });
+
+  // The real reader of a process's start (/proc/<pid>/stat), where there is one: the same takeover with nothing injected
+  it.runIf(existsSync('/proc/self/stat'))('reads a process’s start from /proc: a lock recording another start for a live pid is taken over', async () => {
+    mkdirSync(root(), { recursive: true });
+    writeFileSync(join(root(), '.install-lock'), `${process.pid} 1 0123456789abcdef\n`); // this process never started at tick 1
+    const waitForLock = async () => {
+      throw new Error('waited: the start /proc gives for this process was taken as the lock’s');
+    };
+    expect(await installRenderRuntime(deps({ waitForLock }))).toMatchObject({ state: 'installed' });
+  });
+
+  it('waits for an install lock its live holder holds, saying so once however long it waits', async () => {
+    mkdirSync(root(), { recursive: true });
+    const lock = join(root(), '.install-lock');
+    writeFileSync(lock, `${process.pid} 9999 0123456789abcdef\n`); // this process, as it started: a live holder
+    const notices: string[] = [];
+    let waited = 0;
+    const waitForLock = async (holder: number) => {
+      expect(holder).toBe(process.pid);
+      if ((waited += 1) === 3) rmSync(lock); // the holder finishes after three polls
+    };
+    const outcome = await installRenderRuntime(deps({ startOf: (pid) => (pid === process.pid ? '9999' : null), notice: (line) => notices.push(line), waitForLock }));
+    expect(outcome).toMatchObject({ state: 'installed' });
+    expect(waited).toBe(3);
+    expect(notices).toEqual([`waiting for the runtime install by pid ${process.pid}`]);
+  });
+
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {
     const packZip = join(dir, 'dist', 'electron-v44.4.5-linux-x64.zip');
     mkdirSync(join(dir, 'dist'));
