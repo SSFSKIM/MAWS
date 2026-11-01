@@ -2114,11 +2114,33 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('browserEngine.work is a machine-owned main-only command naming one session and whether it is held', () => {
-      expect(Object.fromEntries(Object.entries(browserEngine.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'browserEngine.work': 'machine' });
+      expect(Object.fromEntries(Object.entries(browserEngine.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'browserEngine.work': 'machine', 'browserEngine.answer': 'machine', 'browserEngine.state': 'machine' /* M4 */ });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.work', 'host.browserWork']));
       expect(validateCommandInput('browserEngine.work', { appSessionId: 'a', held: true }).ok).toBe(true);
       expect(validateCommandInput('browserEngine.work', { appSessionId: 'a' }).ok).toBe(false);
       expect(validateCommandInput('browserEngine.work', { appSessionId: '', held: false }).ok).toBe(false);
+    });
+
+    // M4 (Interfaces §F, §G): mawsd's request to a tab engine, its answer, and the session's inventory, bounded
+    it('browserEngine.request names a session and one operation of M4’s three; its answer and the inventory are bounded', () => {
+      expect(Object.keys(browserEngine.events)).toEqual(['browserEngine.request']);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.answer', 'browserEngine.state']));
+      for (const op of ['prepare', 'drop', 'inventory']) expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op } }).ok, op).toBe(true);
+      expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op: 'open' } }).ok, 'M6’s, not yet').toBe(false);
+      expect(validateEventPayload('browserEngine.request', { id: '', appSessionId: 'a', operation: { op: 'drop' } }).ok).toBe(false);
+      expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op: 'drop' }, epoch: 'e1' }).ok, 'engines carry no epoch (D7)').toBe(false);
+      const tab = { tabId: 'b_000000000001', title: 'Local', url: 'http://127.0.0.1:4000/', control: 'agent' };
+      const inventory = { tabs: [tab], selected: tab.tabId, state: 'ready' };
+      expect(validateCommandInput('browserEngine.answer', { id: 'q1', result: { ok: true, value: null } }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.answer', { id: 'q1', result: { ok: true, value: inventory } }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.answer', { id: 'q1', result: { ok: false, error: 'the headless browser on mini does not serve this session' } }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.answer', { id: 'q1', result: { ok: false } }).ok).toBe(false);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { tabs: [], selected: null, state: 'unavailable', reason: 'not served' } }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, epoch: 'e1' } }).ok, 'mawsd stamps the epoch').toBe(false);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: Array.from({ length: 257 }, () => tab) } }).ok).toBe(false);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: [{ ...tab, url: 'x'.repeat(8_193) }] } }).ok).toBe(false);
+      expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: [{ ...tab, control: 'remote' }] } }).ok).toBe(false);
     });
   });
 

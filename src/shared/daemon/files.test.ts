@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cuaSocketDir, daemonHostFiles, daemonPaths, socketFallbackDir } from './files';
+import { cuaSocketDir, daemonHostFiles, daemonPaths, renderCuaSocketDir, socketFallbackDir } from './files';
 import { defaultProfileDir } from './profile';
 
 describe('defaultProfileDir', () => {
@@ -62,5 +62,23 @@ describe('cuaSocketDir', () => {
     const longer = `${fits}y`;
     expect(daemonPaths(longer, '/var/tmp').socketDir).toBe(join(longer, 'mawsd')); // the daemon's own sockets still fit
     expect(cuaSocketDir(longer, '/var/tmp')).toBe(join(socketFallbackDir(longer, '/var/tmp'), 'cua'));
+  });
+});
+
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §D): the render host's per-session cua
+// sockets, beside mawsd's own and chosen the same way, by their own length
+describe('renderCuaSocketDir', () => {
+  const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
+  it('is <profile>/mawsd/render-cua when <dir>/render-cua/<uuid>.sock fits', () => {
+    expect(renderCuaSocketDir('/tmp/p', '/var/tmp')).toBe('/tmp/p/mawsd/render-cua');
+  });
+
+  it('falls back by its own length, to render-cua in the profile’s fallback directory', () => {
+    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/render-cua/${UUID}.sock`.length)}`;
+    expect(Buffer.byteLength(join(fits, 'mawsd', 'render-cua', `${UUID}.sock`))).toBe(103);
+    expect(renderCuaSocketDir(fits, '/var/tmp')).toBe(join(fits, 'mawsd', 'render-cua'));
+    const longer = `${fits}y`;
+    expect(cuaSocketDir(longer, '/var/tmp')).toBe(join(longer, 'mawsd', 'cua')); // mawsd's own still fit
+    expect(renderCuaSocketDir(longer, '/var/tmp')).toBe(join(socketFallbackDir(longer, '/var/tmp'), 'render-cua'));
   });
 });

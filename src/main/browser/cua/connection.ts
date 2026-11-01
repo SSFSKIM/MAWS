@@ -29,6 +29,11 @@
 //   connection keeps for itself (the children, the navigations and screenshots it tells the windows of, the targets'
 //   detaches) reads every event; the scope ends with the lease, a child's with its detach.
 //
+// - (P5 O17 M4) In the render host, a tab whose creating connection closed is an orphan (claims.ts's 'session' policy):
+//   a connection of the tab's own session adopts it at its first lease or close, and any other connection is refused it.
+//   A `tabs.create` there first passes the engine's creation gate (`creations`: the headless caps and the fence), which
+//   may refuse it with its reason; no tab is opened before the gate lets it through.
+//
 // Secrets: params, page content and typed text never reach a log line; errors name methods and tab ids only.
 import type { Socket } from 'node:net';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -78,6 +83,13 @@ export interface ServerContext {
   presence: AgentPresence | null; // M3: control, takeover and the cursor (null: the bare server's tests)
   feed: ActivityFeed | null; // M3: what the agent did, to the windows
   emit: BrowserEmit | null; // the final fix wave: `browser.agent.acting`, to the windows
+  creations: CuaCreations | null; // P5 O17 M4: the render host's creation gate (null: the app's, none)
+}
+
+// P5 O17 M4: what a tab engine asks before a `tabs.create` opens its tab: `begin` resolves with the creation's end, called
+// once the tab is open or its opening failed, or rejects with the reason the primitive answers (no tab is made)
+export interface CuaCreations {
+  begin(appSessionId: AppSessionId): Promise<() => void>;
 }
 
 interface Child {
@@ -232,9 +244,10 @@ export class CuaConnection {
     return {
       'tabs.query': () => this.reachableEntries().map((entry) => this.record(entry)),
       'tabs.get': ({ tabId }) => this.record(this.tab(tabId)),
-      'tabs.create': ({ url, group }) => this.create(url, group),
+      'tabs.create': ({ url, group }) => (this.ctx.creations ? this.gatedCreate(url, group) : this.create(url, group)),
       'tabs.remove': ({ tabId }) => {
         const entry = this.tab(tabId);
+        this.adoptOrphan(entry);
         if (this.ctx.claims.reservedTo(entry.tab.tabId) !== this) fail(ERRORS.notOwned);
         this.closeTab(entry);
         return {};
@@ -267,8 +280,7 @@ export class CuaConnection {
   }
 
   private create(url: unknown, group: unknown): Record_ {
-    const target = typeof url === 'string' && url !== '' ? url : 'about:blank';
-    if (target !== 'about:blank' && !validateBrowserUrl(target).ok) fail(`Invalid url: only http and https pages open in MAWS`);
+    const target = createTarget(url);
     const { tab } = this.ctx.store.open({ appSessionId: this.appSessionId, url: target, select: false });
     this.ctx.claims.reserve(tab.tabId, this);
     const { key, title } = (typeof group === 'object' && group !== null ? group : {}) as { key?: unknown; title?: unknown };
@@ -276,6 +288,27 @@ export class CuaConnection {
     const entry = this.ctx.store.entry(tab.tabId)!;
     this.tell(entry, { kind: 'tabOpened', url: target });
     return this.record(entry);
+  }
+
+  // P5 O17 M4: the render host's create: the URL checked first (a refused URL takes nothing of the gate), then the gate,
+  // then the tab opened unless the connection closed meanwhile
+  private async gatedCreate(url: unknown, group: unknown): Promise<Record_> {
+    createTarget(url);
+    const done = await this.ctx.creations!.begin(this.appSessionId);
+    try {
+      if (this.closed) fail(ERRORS.cancelled('disconnected'));
+      return this.create(url, group);
+    } finally {
+      done();
+    }
+  }
+
+  // P5 O17 M4: an orphan (the render host's policy, claims.ts) is adopted by a connection of the tab's own session at its
+  // first lease or close; any other connection is refused it, as a tab another agent session holds
+  private adoptOrphan(entry: TabEntry): void {
+    if (!this.ctx.claims.isOrphan(entry.tab.tabId)) return;
+    if (entry.tab.appSessionId !== this.appSessionId) fail(ERRORS.heldElsewhere);
+    this.ctx.claims.adoptOrphan(entry.tab.tabId, this);
   }
 
   // ---- groups and the panel's badge ----------------------------------------------------------------------------------
@@ -323,6 +356,7 @@ export class CuaConnection {
       return this.attach(debuggee);
     }
     if (this.leases.has(tabId)) return { alreadyHeld: true };
+    this.adoptOrphan(entry); // P5 O17 M4
     this.refuseHeld(entry);
     // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS): the new lease
     // starts once it settles, so none of its own toggles is undone and the page reads its own size again
@@ -780,6 +814,13 @@ export class CuaConnection {
 }
 
 const syntheticTargetId = (entry: TabEntry) => `maws-page-${entry.tab.tabId}`;
+
+// The page a `tabs.create` opens: its URL, or a blank page; anything but http, https or blank is refused
+function createTarget(url: unknown): string {
+  const target = typeof url === 'string' && url !== '' ? url : 'about:blank';
+  if (target !== 'about:blank' && !validateBrowserUrl(target).ok) fail(`Invalid url: only http and https pages open in MAWS`);
+  return target;
+}
 
 // Waits until the page reads its view's size again, polling its layout metrics; gives up at `until`, when the page or
 // its attachment goes (never sending to a detached tab, which would attach it again), or at a reading that cannot tell.

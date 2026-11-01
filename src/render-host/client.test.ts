@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { daemonPaths } from '@shared/daemon/files';
-import { RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import type { CommandResult } from '@shared/ipc/schema';
 import { startFakeFront, type FakeFront, type FrontHandler } from '../../test/support/fake-front';
 import { connectRenderClient, hostCall, type RenderClient } from './client';
@@ -49,11 +49,11 @@ describe('the render host’s machine.sock client', () => {
     expect(gone).toEqual({ ok: false, why: expect.stringContaining('machine.sock') });
   });
 
-  it('says hello with render.client and says ready when its root does, not before', async () => {
+  it('says hello with render.client and browser.engine (P5 O17 M4) and says ready when its root does, not before', async () => {
     const at = await front();
     const client = await connected(at);
     const seen = await at.client();
-    expect(seen.capabilities).toEqual([RENDER_CLIENT_CAPABILITY]);
+    expect(seen.capabilities).toEqual([RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY]);
     expect(seen.appPid).toBe(process.pid);
     expect(client.welcome.protocol).toBe(3);
     let ready = false;
@@ -89,6 +89,16 @@ describe('the render host’s machine.sock client', () => {
     seen.send('render.request', { id: 'r1', kind: 'libraryExport', request: { artifactId: ARTIFACT, format: 'pdf' } });
     await expect.poll(() => events.map((event) => event.name)).toEqual(['render.exit', 'render.request']);
     expect(events[1]!.payload).toEqual({ id: 'r1', kind: 'libraryExport', request: { artifactId: ARTIFACT, format: 'pdf' } });
+  });
+
+  // P5 O17 M4 (Interfaces §D, §H): the render host's cua sockets admit mawsd's relay by the peer of this very link
+  it('gives the link’s descriptor while it is open, and none once it closed', async () => {
+    const at = await front();
+    const client = await connected(at);
+    const fd = client.socketFd();
+    expect(Number.isInteger(fd) && fd! >= 0).toBe(true);
+    client.close();
+    expect(client.socketFd()).toBeNull();
   });
 
   it('tells the connection’s end once and answers every request still waiting host_unavailable', async () => {

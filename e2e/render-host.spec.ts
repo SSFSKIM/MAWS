@@ -32,7 +32,7 @@ import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import type { RenderAnswer, RenderRequest } from '@shared/ipc/schema/render';
-import { MACHINE_RENDER_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, MACHINE_RENDER_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { daemonPaths } from '@shared/daemon/files';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -171,7 +171,7 @@ test('the render host renders windowless against a fake mawsd, three captures in
   const { app, child, client, profile, endpoint } = scene;
 
   await test.step('it said hello as a render client, is out of the Dock and keeps its own userData under the daemon’s directory', async () => {
-    expect(client.capabilities).toEqual([RENDER_CLIENT_CAPABILITY]);
+    expect(client.capabilities).toEqual([RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY]); // P5 O17 M4: a tab engine too
     expect(client.appPid).toBe(child.pid);
     const facts = await app.evaluate(({ app: electron, BrowserWindow }) => ({ dock: electron.dock?.isVisible() ?? false, userData: electron.getPath('userData'), windows: BrowserWindow.getAllWindows().length }));
     expect(facts).toEqual({ dock: false, userData: join(profile, 'mawsd', 'render-host'), windows: 0 });

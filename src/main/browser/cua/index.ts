@@ -35,6 +35,13 @@
 // commands while the person has the tab (presence.ts); with `emit`, what the agent did reaches the windows
 // (`browser.agent.activity`, activity.ts); `downloads` is the agent's route for E4a's downloads (downloads.ts), and
 // `dialogs` the `-run-dialog` wrap's held route for a leased tab (dialogs.ts).
+//
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4, Interfaces §D, §H): the render host composes the same
+// server as a tab engine through three options the app leaves at its defaults: `socketDir` (its sockets under
+// `mawsd`'s render-cua directory, not the app's userData), `orphans: 'session'` (a closed connection's tabs wait for a
+// connection of their own session, claims.ts) and `creations` (the headless caps and the fence before a tab opens). It
+// waits on `listening` and `relay`'s answer before it tells `mawsd` a session is prepared, and on `closeSession`'s before
+// it tells it a session is dropped.
 import { chmodSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
@@ -48,8 +55,8 @@ import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
 import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket';
 import { assertPrivateDirectory } from '@shared/host/private-path';
 import { ActivityFeed } from './activity';
-import { TabClaims } from './claims';
-import { CuaConnection } from './connection';
+import { TabClaims, type OrphanPolicy } from './claims';
+import { CuaConnection, type CuaCreations } from './connection';
 import { HeldDialogs } from './dialogs';
 import { agentDownloads, type AgentDownloads } from './downloads';
 import { AgentPresence, type PresenceDeps } from './presence';
@@ -74,6 +81,10 @@ export interface CuaBackendDeps {
   // (this process's when absent) chooses the policy: darwin's process tree, else the uid boundary; `uid` is this process's
   // user (a test stands in another to see a directory another user owns).
   peer?: { addon: PeerAddon | null; trustedRoots?: Set<ProcessRoot>; platform?: NodeJS.Platform; uid?: number };
+  // P5 O17 M4: the render host's (absent: the app's own, `<userData>/browser/cua`, 'person', no gate)
+  socketDir?: string;
+  orphans?: OrphanPolicy;
+  creations?: CuaCreations;
 }
 
 export interface CuaSessionInspection {
@@ -87,15 +98,20 @@ export interface CuaSessionInspection {
 export interface CuaBackend extends LeaseHolds {
   // The session's socket path, listening from now on; null when the path is too long for a Unix socket (logged).
   socketPathFor(appSessionId: AppSessionId): string | null;
-  // The session was removed: its socket closes and every connection on it ends.
-  closeSession(appSessionId: AppSessionId): void;
+  // The session was removed: its socket closes and every connection on it ends. P5 O17 M4: resolves once every one of
+  // its connections has closed (each lease let go).
+  closeSession(appSessionId: AppSessionId): Promise<void>;
+  // P5 O17 M4: resolves once the session's socket listens (after `socketPathFor`); rejects when it cannot, or when it
+  // closed first
+  listening(appSessionId: AppSessionId): Promise<void>;
   // The session's engine process, from each of its statuses: the root its socket's peers must descend from (null: none).
   engineProcess(appSessionId: AppSessionId, pid: number | null): void;
   // P5 O5 M5: the app's live machine.sock connection: its descriptor, whose peer (the daemon actually connected, its pid
   // and start read now through the addon) every session's socket admits as its relay once `confirm` (a request on that
   // same link, sent after the read) is answered and the start read again is the same; null while the link is down. Told
-  // again at each change of the link; a changed or cleared identity ends the connections the old one relayed.
-  relay(link: RelayLink | null): void;
+  // again at each change of the link; a changed or cleared identity ends the connections the old one relayed. P5 O17 M4:
+  // resolves true once this link's relay pass holds, false when it is refused or the link changed first.
+  relay(link: RelayLink | null): Promise<boolean>;
   // The e2e seam's reading: whether the peer check's addon loaded; per listening session, its connections, held commands,
   // leased tabs and refused peers.
   inspect(): { peerModule: 'loaded' | 'unavailable'; sessions: Record<string, CuaSessionInspection> };
@@ -123,6 +139,8 @@ interface Listening {
   connections: Set<CuaConnection>;
   pending: Map<Socket, Waiting>;
   refused: number;
+  ready: Promise<void>; // P5 O17 M4: the server listens
+  emptied: Set<() => void>; // P5 O17 M4: told when its last connection has closed
 }
 
 const refusalLine = (appSessionId: AppSessionId, { reason, pid, detail }: PeerRefusal) =>
@@ -155,17 +173,17 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   // P5 O17 M2: the uid boundary where the platform has no addon; with no peer option at all, darwin's (fail closed)
   const platform = deps.peer ? (deps.peer.platform ?? process.platform) : 'darwin';
   const uidBoundary = platform !== 'darwin';
-  const dir = join(deps.userData, ...CUA_SOCKET_DIR);
+  const dir = deps.socketDir ?? join(deps.userData, ...CUA_SOCKET_DIR);
   const dirRefused = privateDirectory(dir, uid);
   if (dirRefused !== null) log(`the cua socket directory ${dir} is refused (${dirRefused}): no session's browser is reachable`);
   else for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
 
-  const claims = new TabClaims<CuaConnection>();
+  const claims = new TabClaims<CuaConnection>(deps.orphans);
   const sessions = new Map<AppSessionId, Listening>();
   const tooLong = new Set<AppSessionId>();
   const feed = deps.emit ? new ActivityFeed({ emit: deps.emit, now: deps.now, store: deps.activityStore, log }) : null;
   const presence = deps.presence ? new AgentPresence({ ...deps.presence, store: deps.store }) : null;
-  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed, emit: deps.emit ?? null };
+  const ctx = { store: deps.store, claims, windows: deps.windows, reaches: deps.reaches, version: deps.version, log, presence, feed, emit: deps.emit ?? null, creations: deps.creations ?? null };
   const viewed = new WeakSet<TabEntry>();
   const everyConnection = () => [...sessions.values()].flatMap((listening) => [...listening.connections]);
 
@@ -234,6 +252,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       listening.connections.delete(closed);
       relayedBy.delete(closed);
       engineBy.delete(closed);
+      if (listening.connections.size === 0) for (const told of [...listening.emptied]) told(); // P5 O17 M4
     });
     listening.connections.add(connection);
     if (viaRelay && relay) relayedBy.set(connection, relay);
@@ -290,7 +309,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   };
 
   const listen = (appSessionId: AppSessionId, path: string): Listening => {
-    const listening: Listening = { path, server: null as unknown as Server, connections: new Set(), pending: new Map(), refused: 0 };
+    const listening: Listening = { path, server: null as unknown as Server, connections: new Set(), pending: new Map(), refused: 0, ready: Promise.resolve(), emptied: new Set() };
     listening.server = createServer({ pauseOnConnect: true }, (socket) => admit(appSessionId, listening, socket));
     listening.server.on('error', (error) => log(`the cua socket of ${appSessionId} failed: ${error.message}`));
     listening.server.on('listening', () => {
@@ -300,10 +319,28 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
         log(`the cua socket of ${appSessionId} could not be made owner-only: ${(error as Error).message}`);
       }
     });
+    // P5 O17 M4: after the mode is set (the handler above runs first)
+    listening.ready = new Promise<void>((resolve, reject) => {
+      listening.server.once('listening', resolve);
+      listening.server.once('error', reject);
+      listening.server.once('close', () => reject(new Error(`the cua socket of ${appSessionId} closed`)));
+    });
+    listening.ready.catch(() => {}); // asked for or not: a socket that never listened is logged above
     rmSync(path, { force: true });
     listening.server.listen(path);
     return listening;
   };
+
+  // P5 O17 M4: resolves once the session's last connection has closed
+  const emptied = (listening: Listening) =>
+    new Promise<void>((resolve) => {
+      if (listening.connections.size === 0) return resolve();
+      const told = () => {
+        listening.emptied.delete(told);
+        resolve();
+      };
+      listening.emptied.add(told);
+    });
 
   const close = (listening: Listening, why: string) => {
     listening.server.close();
@@ -375,7 +412,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
         decide(appSessionId, listening, socket, acceptedAt, generation);
       }
     },
-    relay(link) {
+    async relay(link) {
       const ask = ++relayAsk;
       // the peer read now; `peer(fd)` may still name a peer that died, whose pid another process may hold by the start
       // read, so no pass until a request sent on the link after the read is answered (the daemon lived past it, so the
@@ -385,27 +422,34 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       dropWaitingRelays();
       relayRoot = null;
       confirming = read;
-      if (link === null || read === null) return;
-      const confirmed = (ok: boolean) => {
-        if (ask !== relayAsk) return; // the link changed since: its own relay() decides
+      if (link === null || read === null) return false;
+      const confirmed = (ok: boolean): boolean => {
+        if (ask !== relayAsk) return false; // the link changed since: its own relay() decides
         confirming = null;
         if (!ok || addon?.process(read.pid)?.start !== read.start) {
           if (!ok) log(`the machine link's daemon (pid ${read.pid}) did not answer: its relayed connections are not admitted`);
           revokeRelayed(null);
-          return admitWaitingRelays(); // refused now, not at their wait's end
+          admitWaitingRelays(); // refused now, not at their wait's end
+          return false;
         }
         relayRoot = read;
         admitWaitingRelays();
+        return true;
       };
-      link.confirm().then(confirmed, () => confirmed(false));
+      return link.confirm().then(confirmed, () => confirmed(false));
     },
     closeSession(appSessionId) {
       feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its stored rows too, BrowserData)
       engineRoots.delete(appSessionId);
       const listening = sessions.get(appSessionId);
-      if (!listening) return;
+      if (!listening) return Promise.resolve();
       sessions.delete(appSessionId);
       close(listening, 'its session was removed');
+      return emptied(listening);
+    },
+    listening(appSessionId) {
+      const listening = sessions.get(appSessionId);
+      return listening ? listening.ready : Promise.reject(new Error(`no cua socket listens for ${appSessionId}`));
     },
     holds: (tabId) => claims.leasedTo(tabId) !== undefined,
     onChange: (listener) => claims.onChange(listener),

@@ -201,6 +201,10 @@ export const HOST_RENDER_CAPABILITY = 'host.render';
 // it serves `host.browserWork` from `mawsd`'s permanent link, counts a browser hold in its releases and emits
 // `host.browserIdle`; `mawsd` sends that host the snapshot and selects no headless browser for one that lists it not.
 export const HOST_BROWSER_WORK_CAPABILITY = 'host.browserWork';
+// P5 O17 M4 (Interfaces §A, §F): a `machine.sock` client's hello lists it when the client is a tab engine: it serves
+// `browserEngine.request` for the sessions `mawsd` prepares on it and pushes `browserEngine.state` (the render host; the
+// app from the remote stage, M9).
+export const BROWSER_ENGINE_CAPABILITY = 'browser.engine';
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
 // `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
 // that lists it, and on a client's hello (only `mawsd`'s, beside `host.attachment`) that those are the client's own, app
@@ -225,7 +229,7 @@ export const PEER_CAPABILITIES = {
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
-  renderClient: [RENDER_CLIENT_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock
+  renderClient: [RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock; P5 O17 M4: it is a tab engine
 } as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
 const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53

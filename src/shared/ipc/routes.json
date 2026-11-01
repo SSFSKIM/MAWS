@@ -90,6 +90,7 @@
  "addressed": [
   "attention.acknowledge",
   "attention.request",
+  "browserEngine.state",
   "browserEngine.work",
   "connectors.observe",
   "connectors.resolve",
@@ -365,6 +366,7 @@
   "artifacts.versionState",
   "artifacts.versions",
   "attention.list",
+  "browserEngine.answer",
   "catalog.engineRefresh",
   "catalog.icon",
   "catalog.refresh",

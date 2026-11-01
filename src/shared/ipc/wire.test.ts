@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -225,7 +225,7 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     expect(PEER_CAPABILITIES.app).toEqual(expect.arrayContaining([PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY]));
     expect(PEER_CAPABILITIES.daemonToEngineHost).toEqual(expect.arrayContaining([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY]));
     expect(PEER_CAPABILITIES.daemon).toEqual([PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY]);
-    expect(PEER_CAPABILITIES.renderClient).toEqual([RENDER_CLIENT_CAPABILITY]);
+    expect(PEER_CAPABILITIES.renderClient).toEqual([RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY]); // P5 O17 M4: a tab engine
     for (const list of Object.values(PEER_CAPABILITIES)) for (const name of list) expect(WIRE_CAPABILITIES).toContain(name);
   });
 });
@@ -239,7 +239,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
 
   it('names both, and lists them in the manifest’s union', () => {
     expect([CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]).toEqual(['host.connectors', 'machine.connectors']);
-    expect(manifest.capabilities).toEqual(['host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect(manifest.capabilities).toEqual(['browser.engine' /* P5 O17 M4 */, 'host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
   });
 
   it('has each peer list only what it implements', () => {
@@ -251,7 +251,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
       daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY],
       link: [PTY_FRAMES_CAPABILITY],
-      renderClient: [RENDER_CLIENT_CAPABILITY],
+      renderClient: [RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // P5 O17 M4
     });
   });
 });
@@ -325,6 +325,24 @@ describe('browser work on the wire (P5 O17 M3)', () => {
     }
     expect(REGISTRY.hostEvents).toContain('host.browserIdle');
     expect(manifest.entries).toHaveProperty(['events.host.browserIdle']);
+  });
+});
+
+// P5 O17 M4 (Interfaces §A, §F): mawsd's request to a tab engine, an event to that connection alone as render.request is,
+// and the engine's answer and inventory, main-only; the render host's hello lists `browser.engine`
+describe('the tab engine’s wire (P5 O17 M4)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+
+  it('carries browserEngine.request as a machine event, browserEngine.answer and .state as main-only machine commands, and the capability', () => {
+    expect(BROWSER_ENGINE_CAPABILITY).toBe('browser.engine');
+    expect(WIRE_CAPABILITIES).toContain(BROWSER_ENGINE_CAPABILITY);
+    expect(REGISTRY.machineEvents).toContain('browserEngine.request');
+    expect(manifest.entries).toHaveProperty(['events.browserEngine.request']);
+    for (const name of ['browserEngine.answer', 'browserEngine.state'] as const) {
+      expect(REGISTRY.commands[name].owner, name).toBe('machine');
+      expect(REGISTRY.mainOnly.has(name), name).toBe(true);
+      expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+    }
   });
 });
 

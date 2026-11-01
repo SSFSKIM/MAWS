@@ -67,7 +67,7 @@ const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.
 // its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the
 // machine half's and the visible set's changes are the spine's own emits (the parts that hold them emit them), so the
 // front's own is the client port's request alone.
-const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged']; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd
+const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged', 'browserEngine.request']; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd; P5 O17 M4: mawsd's request to a tab engine
 // Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
 // src/services/ (P5 O3-E: the checkouts' root's `git.changed`, `files.changed` and `scm.remote.output` included). A part
 // emits through a function it was handed, always with the event's name written.

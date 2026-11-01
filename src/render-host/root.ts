@@ -12,16 +12,28 @@
 // (P5 O5 M4: each export's request carries what `mawsd` holds, else the exporters' defaults) and the engine host's link
 // generation `mawsd` posts as its restart count (a dashboard export captured again once across a restart, as the app's);
 // its exports are written under the profile's store, `<profile>/artifacts`, as the app writes them.
+//
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4): the tab engine (tab-engine.ts), composed at the
+// first `browserEngine.request`: offscreen views (offscreen-views.ts) in Electron's partitions, the per-session sockets in
+// `renderCuaSocketDir`, the peer check's addon as the app loads it (the packaged app's Resources, else the development app
+// root this binary was started on), named for its machine as `mawsd` names it. No trusted root and no stand-in addon: only
+// `mawsd`'s relay is admitted, on darwin; elsewhere the uid is the boundary.
 import { writeSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { app, session } from 'electron';
+import { renderCuaSocketDir } from '@shared/daemon/files';
+import { machineName } from '@shared/machine/identity';
+import { loadPeerAddon, peerAddonPath } from '../main/browser/cua/peer';
 import { buildIdOf } from '../engine-host/supervisor-files';
 import { CAPTURE_PARTITION } from '../render/capture';
 import { composeRender } from '../render/compose';
 import { installRenderSeams } from '../render/e2e-seams';
 import { guardPermissions, installFramePolicies } from '../render/policies';
 import { serveArtifactsThrough, type ContentLookup } from '../render/scheme';
-import { EXIT_FAILED, sandboxRefusal, startRenderHost } from './host';
+import { EXIT_FAILED, RENDER_HOST_DIR, sandboxRefusal, startRenderHost } from './host';
+import { OffscreenViews } from './offscreen-views';
+import { startTabEngine } from './tab-engine';
 
 // A windowless process must never raise Electron's error dialog, which an uncaught exception in main shows, modal: it
 // would hold the render host (before `ready`, Chromium's start with it) with nothing said. The failure is written to
@@ -61,6 +73,18 @@ export function runRenderHost(entryDir: string): Promise<void> {
       installRenderSeams({ content, env: process.env });
       return composeRender({ call, content, root: join(profile, 'artifacts'), env: process.env, hostGeneration });
     },
+    browser: (link, paths) =>
+      startTabEngine({
+        ...link,
+        views: (partitions) => new OffscreenViews(partitions),
+        fromPartition: (partition) => session.fromPartition(partition),
+        socketDir: renderCuaSocketDir(paths.profileDir),
+        userData: join(paths.dir, RENDER_HOST_DIR),
+        peer: { addon: loadPeerAddon(peerAddonPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: app.getAppPath() })) },
+        machine: machineName(process.env, hostname()),
+        version: app.getVersion(),
+        log: (line) => console.error(line),
+      }),
     log: (line) => console.error(line),
     exit: (code) => app.exit(code),
   }).catch(fatal);

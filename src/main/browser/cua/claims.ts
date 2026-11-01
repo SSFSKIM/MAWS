@@ -3,6 +3,14 @@
 // *reserved* to it until the connection closes; a tab under a connection's debugger lease is *leased* to it; a tab whose
 // let-go lease is still being undone has that undo, which its next lease waits for. All are keyed by MAWS tab id,
 // across app sessions, since a side thread's connection reaches its parent's tabs (P-24).
+//
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4's Decisions; D1): the orphan policy says whose a tab
+// is that no live connection reserves. The app's `'person'`: the person's, in the panel, never closed by a primitive (a
+// closed connection's tabs become so). The render host's `'session'`: no person is there to take it, so it is an
+// *orphan* until a connection of its own session adopts it at its first lease or close (connection.ts), which is how a
+// tab whose cua connection died can still be closed; a popup no connection's lease adopted is one too.
+
+export type OrphanPolicy = 'person' | 'session';
 
 export class TabClaims<Holder> {
   private readonly reserved = new Map<string, Holder>();
@@ -10,8 +18,23 @@ export class TabClaims<Holder> {
   private readonly undoes = new Map<string, Promise<void>>();
   private readonly listeners = new Set<(tabId: string) => void>();
 
+  constructor(private readonly orphans: OrphanPolicy = 'person') {}
+
   reserve(tabId: string, holder: Holder): void {
     this.reserved.set(tabId, holder);
+  }
+
+  // P5 O17 M4: under 'session', no live connection reserves the tab (never under 'person')
+  isOrphan(tabId: string): boolean {
+    return this.orphans === 'session' && !this.reserved.has(tabId);
+  }
+
+  // P5 O17 M4: the orphan reserved to `holder`, which the caller checked is of the tab's own session; false when the tab
+  // is no orphan
+  adoptOrphan(tabId: string, holder: Holder): boolean {
+    if (!this.isOrphan(tabId)) return false;
+    this.reserve(tabId, holder);
+    return true;
   }
 
   reservedTo(tabId: string): Holder | undefined {
@@ -60,7 +83,8 @@ export class TabClaims<Holder> {
     if (this.leased.delete(tabId)) this.changed(tabId);
   }
 
-  // The holder's connection closed: its reservations end (its tabs become the person's); its leases are released by it.
+  // The holder's connection closed: its reservations end (its tabs become the person's, or under 'session' orphans); its
+  // leases are released by it.
   dropReservations(holder: Holder): void {
     for (const [tabId, reservedTo] of [...this.reserved]) if (reservedTo === holder) this.reserved.delete(tabId);
   }
