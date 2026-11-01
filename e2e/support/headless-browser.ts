@@ -41,7 +41,7 @@ export const BUTTON = { x: 40, y: 60, width: 120, height: 40 } as const; // the 
 
 // `/` a marker and a button; `/still` one colour, painting nothing more; `/input` a tall page that keeps what a person's
 // input did (its button's click, keys, wheel, and a text field that has focus); `/anim` a page that repaints at every
-// animation frame and counts them; `/popup` and `/child`, an opener and the page it opens.
+// animation frame and counts them; `/popup` and `/child`, an opener (its button at BUTTON opens the child) and the page it opens.
 export interface Pages {
   origin: string;
   url(path: string): string;
@@ -58,7 +58,9 @@ export function startPages(): Promise<Pages> {
         `<script>window.__keys=[];window.__wheel=[];addEventListener('keydown',(e)=>__keys.push(e.key));addEventListener('wheel',(e)=>__wheel.push(e.deltaY));document.querySelector('#field').focus();</script></body>`,
     ),
     '/anim': html(`<title>anim</title><body style="margin:0"><script>window.__frames=0;const tick=()=>{__frames+=1;document.body.style.background='hsl('+(__frames%360)+',60%,50%)';requestAnimationFrame(tick)};requestAnimationFrame(tick);</script></body>`),
-    '/popup': html('<title>opener</title><p>opener</p>'),
+    // an opener whose button opens `/child` as a person's or an agent's click would (MAWS's popup policy honours an open only
+    // after an attributed press in the page, src/main/browser/window-open.ts)
+    '/popup': html(`<title>opener</title><p>opener</p><button id="open" style="position:absolute;left:${BUTTON.x}px;top:${BUTTON.y}px;width:${BUTTON.width}px;height:${BUTTON.height}px" onclick="window.open('/child', '_blank')">Open</button>`),
     '/child': html('<title>child</title><p>child</p>'),
   };
   const server: Server = createServer((req, res) => {

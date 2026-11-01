@@ -573,12 +573,22 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       await host!.request('tabs.remove', { tabId: tab.id });
     });
 
-    await test.step('an adopted window.open popup is offscreen too, and no window is shown', async () => {
+    await test.step('a script’s window.open with no attributed press is denied; one from the agent’s click is adopted as a tab of the session, offscreen too, and no window is shown', async () => {
       const opener = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/popup'), group: { key: 's', title: 'cua' } });
       await expect.poll(() => tabIdOf('/popup')).not.toBeNull();
-      await committed('/popup'); // the one-shot window.open runs in the opener's own document, never its blank first one
-      await inPage('/popup', `window.open(${JSON.stringify(pages.url('/child'))}, '_blank'); true`); // with a user gesture
-      await expect.poll(() => tabIdOf('/child'), { message: 'the popup adopted as a tab of the session' }).not.toBeNull();
+      await committed('/popup'); // the opener's own document, never its blank first one
+      // the popup policy (src/main/browser/window-open.ts): a page's open is honoured only within 5 s of an attributed press
+      // (the person's or the agent's) in it; Chromium's gesture flag on a script is no press, so it is denied, as in the app
+      await inPage('/popup', `window.open(${JSON.stringify(pages.url('/child'))}, '_blank'); true`);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(tabIdOf('/child'), 'a gesture-less open is denied').toBeNull();
+      // the agent clicks the opener's button through its lease: an attributed press, so the open is honoured and adopted
+      const centre = { x: BUTTON.x + BUTTON.width / 2, y: BUTTON.y + BUTTON.height / 2 };
+      await host!.request('debugger.attach', { tabId: opener.id });
+      for (const type of ['mousePressed', 'mouseReleased'] as const) {
+        await host!.request('debugger.sendCommand', { debuggee: { tabId: opener.id }, method: 'Input.dispatchMouseEvent', params: { type, ...centre, button: 'left', clickCount: 1 }, timeoutMs: 10_000 });
+      }
+      await expect.poll(() => tabIdOf('/child'), { timeout: 10_000, message: 'the popup adopted as a tab of the session' }).not.toBeNull();
       expect(await viewFacts(tabIdOf('/child')!), 'the adopted popup renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
       await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { message: 'the popup at the agent’s viewport, once it commits' }).toEqual([1280, 800]);
       const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
