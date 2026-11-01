@@ -2,9 +2,10 @@
 // §O's `forward.open`; P5 Decision Log 108's A6): a port of a machine's own loopback, reached from this Mac's, so the
 // in-app browser loads a loopback link of a session there (a dev server) through the machine's RL2 link.
 //
-// - `remote.forward.open {machine, port}` binds a listener on 127.0.0.1 at a port the system picks (src/main/forwards.ts),
-//   runs the act `forward.open {port}` (the endpoint's own executor, graded `shell`: a non-owner confirms it), and answers
-//   `{localPort}`. Open is idempotent per machine and port: a listener kept answers its port again, with no act.
+// - `remote.forward.open {machine, port}` runs the act `forward.open {port}` (the endpoint's own executor, graded
+//   `shell`: a non-owner confirms it), then, once granted, binds a listener on 127.0.0.1 at a port the system picks
+//   (src/main/forwards.ts) and answers `{localPort}`. Open is idempotent per machine and port: a listener kept answers its
+//   port again, with no act, and an open meeting one still pending shares its outcome.
 // - Each connection the listener accepts is one `tcp` stream naming the act's forward, its bytes both ways under credit:
 //   the local socket is read only while the endpoint's credit lasts (paused past a high mark of bytes waiting for it), and
 //   what the machine sends is refunded as the socket writes it.
@@ -266,21 +267,21 @@ export function createRemoteForwards(deps: RemoteForwardsDeps): RemoteForwards {
     const mine: Forward = held ?? { machine, port, link, listener: null, opening: null, grant: null, granting: null, streams: new Set(), generation: 0, waiting: 0 };
     forwards.set(key, mine);
     watch(link);
+    // A listener is there only once its forward was granted: an open meeting the act still pending (a non-owner at the
+    // sheet) awaits the same opening, and no connection is accepted before the grant.
     if (mine.listener !== null) return { ok: true, value: { localPort: mine.listener.port } } as CommandResult<CommandName>;
     mine.opening ??= (async (): Promise<CommandResult<CommandName>> => {
       const generation = mine.generation;
+      const closedMeanwhile = () => failure('host_unavailable', `${NAME}: the forward of port ${port} on ${link.name} was closed while it opened`);
+      const grant = await granted(mine);
+      if (mine.generation !== generation) return closedMeanwhile();
+      if ('ok' in grant) return grant;
       const listener = await deps.listen((socket) => void connection(mine, socket));
       if (mine.generation !== generation) {
         listener.close();
-        return failure('host_unavailable', `${NAME}: the forward of port ${port} on ${link.name} was closed while it opened`);
+        return closedMeanwhile();
       }
       mine.listener = listener;
-      const grant = await granted(mine);
-      if (mine.generation !== generation) return failure('host_unavailable', `${NAME}: the forward of port ${port} on ${link.name} was closed while it opened`);
-      if ('ok' in grant) {
-        closeForward(mine, false);
-        return grant;
-      }
       return { ok: true, value: { localPort: listener.port } } as CommandResult<CommandName>;
     })().finally(() => (mine.opening = null));
     return mine.opening;

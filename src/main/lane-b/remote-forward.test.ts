@@ -150,17 +150,38 @@ describe('forwarded ports (P5 O7 M3)', () => {
     expect(l.link.acts).toHaveLength(1);
   });
 
-  it('ends the forward when its act fails its grade at the open: the listener closes, nothing is retried', async () => {
+  it('ends the forward when its act fails its grade at the open: no listener is bound, nothing is retried', async () => {
     const l = lab({}, (act) => act.settle(FAILED_GRADE));
     const result = await l.open();
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).toContain('grade');
-    expect(l.listeners).toHaveLength(1);
-    expect(l.listeners[0].closed).toBe(true);
-    expect(await refused(l.listeners[0].port)).toBe(true);
+    expect(l.listeners).toHaveLength(0);
     await sleep(100);
     expect(l.link.acts).toHaveLength(1);
   });
+
+  // M3 milestone review: an open meeting another whose act is pending (a non-owner at the sheet) never answers before it
+  for (const [outcome, settled] of [
+    ['granted', GRANTED],
+    ['cancelled', { state: 'refused', reason: 'step-up-cancelled' }],
+  ] as const) {
+    it(`shares a pending opening: two opens both get its outcome when it is ${outcome}, and nothing listens before the grant`, async () => {
+      const pending: FakeAct[] = [];
+      const l = lab({}, (act) => void pending.push(act));
+      const answers: unknown[] = [];
+      const both = Promise.all([l.open(), l.open()].map((answer) => answer.then((result) => (answers.push(result), result))));
+      await sleep(50);
+      expect([answers, l.listeners, l.forwards.listening(MINI, PORT), l.link.acts.length]).toEqual([[], [], null, 1]);
+      pending[0]!.settle(settled as ActOutcome);
+      const [first, second] = await both;
+      if (outcome === 'granted') {
+        expect([first.ok, second.ok, localPort(first) === localPort(second), l.listeners.length]).toEqual([true, true, true, 1]);
+      } else {
+        expect([first, second]).toMatchObject([{ ok: false }, { ok: false }]);
+        expect(l.listeners).toEqual([]);
+      }
+    });
+  }
 
   it('ends the forward when the renewal of a forgotten forward fails its grade: the connection resets, the listener closes, nothing is retried', async () => {
     let answers = 0;
