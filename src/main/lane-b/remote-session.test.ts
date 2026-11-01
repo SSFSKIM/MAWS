@@ -22,7 +22,7 @@ const catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [
 
 type Emitted = { machine: MachineRef; name: EventName; payload: Record<string, unknown> };
 
-function lab(options: { record?: () => unknown; followed?: () => boolean } = {}) {
+function lab(options: { record?: () => unknown; followed?: () => boolean; spawnedAt?: () => number | null; spawnWaitOver?: () => void } = {}) {
   const link = new FakeLink();
   const emitted: Emitted[] = [];
   const logs: string[] = [];
@@ -40,6 +40,8 @@ function lab(options: { record?: () => unknown; followed?: () => boolean } = {})
     timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 30 * 60_000, batchMax: 500 },
     revision: () => ++revision,
     ...(options.followed && { followed: options.followed }),
+    ...(options.spawnedAt && { spawnedAt: options.spawnedAt }),
+    ...(options.spawnWaitOver && { spawnWaitOver: options.spawnWaitOver }),
     log: (line) => void logs.push(line),
   });
   const names = () => emitted.map((e) => e.name);
@@ -89,6 +91,70 @@ describe('opening', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.subs).toHaveLength(1);
     expect(l.lastState()).toMatchObject({ reason: null });
+  });
+
+  // P5 O7 M4 (the architect's ruling on M4d's gap): B's endpoint ranks a lane B session by its sminos listing, so one this
+  // app just spawned answers `grade` until sminos lists it; main, which knows it spawned it, keeps asking for a minute.
+  describe('a session this app spawned', () => {
+    const WAITING = 'Waiting for mini to list the new session…';
+    const refused = (l: ReturnType<typeof lab>, until: () => boolean) =>
+      l.link.answers.set('session.get', () => (until() ? { ok: true, output: record(APP) } : { ok: false, error: { code: 'grade' } }));
+
+    it('says it waits for the machine to list it, and keeps asking past the usual retries until it is listed', async () => {
+      let listed = false;
+      const over: number[] = [];
+      const spawned = Date.now();
+      const l = lab({ spawnedAt: () => spawned, spawnWaitOver: () => void over.push(Date.now() - spawned) });
+      refused(l, () => listed);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING, controls: { send: { available: false, reason: WAITING } } });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      expect(l.link.subs).toEqual([]);
+      listed = true;
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(l.link.subs).toHaveLength(1);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: null });
+      expect(over).toHaveLength(1); // the wait let go at the first open
+    });
+
+    it('gives up a minute after the spawn settled, with “can’t place” and Try again’s ended stream, and asks no more', async () => {
+      const over: number[] = [];
+      const spawned = Date.now() - 50_000; // settled 50 s before the tab opened it: 10 s left
+      const l = lab({ spawnedAt: () => spawned, spawnWaitOver: () => void over.push(Date.now() - spawned) });
+      refused(l, () => false);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(l.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+      expect(over).toEqual([60_000]);
+      const asked = l.link.calls.length;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(l.link.calls).toHaveLength(asked);
+
+      const settled = Date.now();
+      const m = lab({ spawnedAt: () => settled, spawnWaitOver: () => {} });
+      refused(m, () => false);
+      m.session.start();
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(m.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(m.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+      expect(m.link.calls.length).toBeLessThan(25); // asked on a backoff, not in a loop
+    });
+
+    it('leaves a session it didn’t spawn as it was: “Opening…”, then “can’t place” after 0.5, 1, 2 and 4 s', async () => {
+      const l = lab({ spawnedAt: () => null });
+      refused(l, () => false);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: 'Opening on mini…' });
+      await vi.advanceTimersByTimeAsync(7_500);
+      expect(l.link.calls).toHaveLength(5);
+      expect(l.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+    });
   });
 
   it('counts a `grade` refusal as not placed yet, as null', async () => {

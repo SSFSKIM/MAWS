@@ -88,18 +88,20 @@ export function remoteLinkView(link: Pick<RemoteLink, 'state' | 'carrier' | 'ref
 }
 
 /** Why no control of the session acts from this device, or null when they do. */
-export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): string | null {
+export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'> & Partial<Pick<RemoteSessionState, 'listing'>>, link: RemoteLinkState, machine: string): string | null {
   if (link.refusal === 'removed') return `This Mac is no longer allowed on ${machine}`;
   if (link.refusal !== null) return `${machine} refused this device (${link.refusal})`;
   if (state.ended === 'closed') return `the link to ${machine} closed`;
   // The session's own right withdrawn (a share or grant taken back) while the device stays allowed on the machine.
   if (state.ended === 'removed') return `${machine} no longer lets you open this session`;
-  if (state.record === null) return state.stream === 'ended' ? `${machine} can’t place this session` : `Opening on ${machine}…`;
+  if (state.record === null && state.stream === 'ended') return `${machine} can’t place this session`;
+  // P5 O7 M4: a session this app spawned, which the machine's endpoint ranks once sminos lists it
+  if (state.record === null) return state.listing === true ? `Waiting for ${machine} to list the new session…` : `Opening on ${machine}…`;
   return null;
 }
 
 /** Every control of the session's port with the remote overlay (§K's `controls`). */
-export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
+export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'> & Partial<Pick<RemoteSessionState, 'listing'>>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
   const reason = sessionReason(state, link, machine);
   const controls = {} as Record<ControlKey, RemoteCapability>;
   for (const key of CONTROL_KEYS) {

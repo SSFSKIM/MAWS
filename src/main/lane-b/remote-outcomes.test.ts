@@ -9,7 +9,7 @@ import type { RemoteSessionState } from './remote-session';
 
 const MINI = 'MiniMachineRef00000000' as MachineRef;
 const up = { state: 'up' as const, carrier: 'direct' as const, refusal: null, member: 'm-a', rights: [] };
-const state = (over: Partial<RemoteSessionState> = {}): RemoteSessionState => ({ machine: MINI, app: 'app-1', status: null, record: record('app-1'), stream: 'live', launch: 'L1', sends: 0, ended: null, ...over });
+const state = (over: Partial<RemoteSessionState> = {}): RemoteSessionState => ({ machine: MINI, app: 'app-1', status: null, record: record('app-1'), stream: 'live', launch: 'L1', sends: 0, ended: null, listing: false, ...over });
 
 describe('outcomeAsResult', () => {
   it('answers `done` with the command’s output, checked, and a malformed one `internal`', () => {
@@ -54,6 +54,9 @@ describe('the link and the overlay', () => {
     expect(sessionReason(state({ stream: 'ended', ended: 'closed' }), up, 'mini')).toBe('the link to mini closed');
     expect(sessionReason(state({ record: null, stream: 'opening' }), up, 'mini')).toBe('Opening on mini…');
     expect(sessionReason(state({ record: null, stream: 'ended', ended: 'unplaced' }), up, 'mini')).toBe('mini can’t place this session');
+    // P5 O7 M4: a session this app spawned, waiting for the machine to list it; given up, it can't be placed as any other
+    expect(sessionReason(state({ record: null, stream: 'opening', listing: true }), up, 'mini')).toBe('Waiting for mini to list the new session…');
+    expect(sessionReason(state({ record: null, stream: 'ended', ended: 'unplaced', listing: true }), up, 'mini')).toBe('mini can’t place this session');
     const closed = controlsOverlay(state({ record: null, stream: 'opening' }), up, 'mini');
     expect(Object.keys(closed).sort()).toEqual([...CONTROL_KEYS].sort());
     for (const key of CONTROL_KEYS) expect(closed[key]).toEqual({ available: false, reason: 'Opening on mini…' });
