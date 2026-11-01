@@ -351,7 +351,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     expect(server.inFlightThroughDelivery()).toBe(0);
   });
 
-  // P5 O16 M3c fix wave 2: the e2e's gate (./e2e-hold.ts `callGateFor`) keeps a call out of flight until it opens
+  // P5 O16 M3c fix wave 2: the e2e race's gate (../e2e-handover-race.ts) keeps a call out of flight until it opens
   it('gates a call before it is counted in flight; ask is never gated', async () => {
     let open: () => void = () => {};
     const ran: string[] = [];

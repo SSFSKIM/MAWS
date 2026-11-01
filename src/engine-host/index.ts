@@ -24,7 +24,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
-import { handoverRaceFor } from './e2e-handover-race'; // P5 O16 M3c fix wave 2
+import { E2E_HANDOVER_RACE } from './e2e-handover-race'; // P5 O16 M3c fix wave 2
 import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
 import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: LiveRow
@@ -219,7 +219,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     startup: designSystems.ready, // the register's gate: no collection lands mid-seed
     gate: { path: () => (gateFailed ? null : gatePath), counts: () => rows.gateCounts() }, // O16 M5
     handingOver: () => datasetRefresh.handOver(), // P5 O16 M3b fix wave 4: a refresh in flight fails, retryable
-    e2eRace: handoverRaceFor(process.env), // P5 O16 M3c fix wave 2: under MAWS_E2E alone
+    e2eRace: E2E_HANDOVER_RACE?.race, // P5 O16 M3c fix wave 2: under MAWS_E2E alone
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run

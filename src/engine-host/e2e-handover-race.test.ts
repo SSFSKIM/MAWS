@@ -31,19 +31,31 @@ describe('handoverRaceFor: the e2e race of a call into a handover', () => {
 
   it('settles once a call is in flight, with how long it waited', async () => {
     const { calls, deps, count } = harness([0, 0, 1]);
-    expect(await handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!(count)).toBe(200);
+    expect(await handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!.race(count)).toBe(200);
     expect(calls).toEqual(['inFlight 0', 'sleep 100', 'inFlight 0', 'sleep 100', 'inFlight 1']);
   });
 
   it('ends at once when another ask armed the drain meanwhile, so its own answer never holds the exit', async () => {
     const { deps, count } = harness([0, 0, 0, 0]);
     let asked = 0;
-    const race = handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!(count, () => ++asked > 1); // armed after the first poll
+    const race = handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!.race(count, () => ++asked > 1); // armed after the first poll
     expect(await race).toBe(100);
   });
 
   it('gives up at its bound, so a scene that never calls cannot hold a handover for good', async () => {
     const { deps, count } = harness([]);
-    expect(await handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!(count)).toBe(HANDOVER_RACE_MAX_MS);
+    expect(await handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!.race(count)).toBe(HANDOVER_RACE_MAX_MS);
+  });
+
+  it('gates a call until the first handover is asked, so the call starts between the quiet report and the freeze', async () => {
+    const { deps, count } = harness([1]);
+    const seam = handoverRaceFor({ MAWS_E2E: '1', MAWS_E2E_HANDOVER_RACE: '1' }, deps)!;
+    let passed = false;
+    void seam.gate().then(() => (passed = true));
+    await Promise.resolve();
+    expect(passed).toBe(false);
+    await seam.race(count);
+    await Promise.resolve();
+    expect(passed).toBe(true);
   });
 });
