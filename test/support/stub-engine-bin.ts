@@ -20,6 +20,7 @@ export interface StubEngineOptions {
   countStdin?: boolean; // the frames it read, on stderr at its exit
   printEnv?: string[]; // these variables of its environment, on stderr at its start
   burst?: { file: string; lines: number }; // padded status lines once `file` exists (P5 O16 M3a fix waves 1 and 2)
+  gate?: string; // a `maws` tools/call waits until this file exists (P5 O16 M3c fix wave 2)
 }
 
 // The bundle, written once into `dir`.
@@ -53,6 +54,7 @@ export function writeStubEngine(path: string, bundle: string, opts: StubEngineOp
   if (opts.countStdin) args.push('--stub-count-stdin');
   if (opts.printEnv?.length) args.push('--stub-print-env', opts.printEnv.join(','));
   if (opts.burst) args.push('--stub-burst', `${opts.burst.file},${opts.burst.lines}`);
+  if (opts.gate) args.push('--stub-gate', opts.gate);
   writeFileSync(path, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(bundle)} ${args.map(quote).join(' ')} -- "$@"\n`, { mode: 0o755 });
   return path;
 }

@@ -129,6 +129,7 @@ export class ProcessTable {
   // E10 start: the idle-row release (P5 O2 M2: its rule in idle-release.ts) and the row set's listeners
   private readonly idle: IdleRelease;
   private readonly rowsListeners = new Set<() => void>();
+  private readonly deliveryListeners = new Set<() => void>(); // P5 O16 M3c fix wave 2
   private readonly holdListeners = new Set<() => void>(); // P5 Decision Log 124
   private launches = 0; // P5 Decision Log 124: launches from their entry until they have reserved their row or refused
   private readonly adopting = new Set<AppSessionId>(); // P5 O16 M3: rows held for an adoption under way
@@ -189,6 +190,7 @@ export class ProcessTable {
       this.trackLive(session, status); // E10
       for (const listener of this.listeners) listener(status);
     });
+    session.on('delivery', () => this.tell(this.deliveryListeners, 'delivery')); // P5 O16 M3c fix wave 2
     this.rowsChanged(); // E10
     void session.start();
     return { status: 'launching', session };
@@ -215,11 +217,22 @@ export class ProcessTable {
   }
 
   private rowsChanged(): void {
-    for (const listener of this.rowsListeners) {
+    this.tell(this.rowsListeners, 'rows');
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): told whenever a row's calls in flight through delivery (or the first one's tool)
+  // change, which its status does not carry: the supervisor's status reports them, so an update waits for quiet
+  onDeliveryChanged(listener: () => void): () => void {
+    this.deliveryListeners.add(listener);
+    return () => this.deliveryListeners.delete(listener);
+  }
+
+  private tell(listeners: ReadonlySet<() => void>, what: string): void {
+    for (const listener of listeners) {
       try {
         listener();
       } catch (error) {
-        this.log(`rows listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.log(`${what} listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }

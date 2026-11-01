@@ -297,6 +297,7 @@ export const MACHINE_EVENTS = [
   'render.hostGeneration', // P5 O5 M4: the engine host's link generation, to the render host alone
   'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
   'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
+  'daemon.engineHandover', // P5 O16 M3c fix wave 2: `mawsd`'s engine host update under way (the front's own)
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

@@ -3,7 +3,8 @@
 // Settings is shown. Every `host.status` re-derives them:
 // - `supervisor.updated`, a banner while an older build's supervisor serves live sessions (main armed its exit when
 //   idle): Restart now, replaced in place as the count changes, dismissed when the mismatch ends; one the owner
-//   dismissed stays dismissed until the mismatch ends.
+//   dismissed stays dismissed until the mismatch ends. P5 O16 M3c fix wave 2: while an update waits for MAWS tool calls
+//   (host.status's `handover`), the same banner says what it waits for.
 // - `supervisor.incompatible`, a banner while main waits on a supervisor it cannot talk to that still runs sessions:
 //   Restart now and Wait. Main armed that supervisor's exit-when-idle itself (Decision Log b2e4a1b1), so Wait only
 //   acknowledges and dismisses; a launch refused with `host_unavailable` while still waiting shows it again (90f959f4).
@@ -15,7 +16,7 @@ import type { HostStatus } from '@shared/ipc/schema/host';
 import { ipc, onCommandRefused } from '../ipc/client';
 import { createHostsStore, useHosts } from '../stores/hosts';
 import { createNoticesStore, useNotices } from '../stores/notices';
-import { SUPERVISOR_NOTICES } from './copy';
+import { ENGINE_HOST_UPDATE, SUPERVISOR_NOTICES } from './copy';
 
 export const SUPERVISOR_NOTICE_IDS = { updated: 'supervisor.updated', incompatible: 'supervisor.incompatible', crashed: 'supervisor.crashed' } as const;
 
@@ -56,10 +57,14 @@ export function connectSupervisorNotices({ client = ipc, hosts = useHosts, notic
 
   const wanted = (status: HostStatus): Record<Banner, { text: string; actions: { label: string; run: () => void }[] } | null> => {
     const live = status.supervisor?.liveSessions ?? 0;
+    const restartNow = { label: SUPERVISOR_NOTICES.restartNow, run: restart };
     return {
-      updated:
-        status.state === 'ready' && status.matches === 'build' && live > 0
-          ? { text: SUPERVISOR_NOTICES.updated(live), actions: [{ label: SUPERVISOR_NOTICES.restartNow, run: restart }] }
+      // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls says so (Restart now while the old build
+      // is served); E10's copy only while the older build's exit when idle is armed, which is what it promises
+      updated: status.handover
+        ? { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), actions: status.state === 'ready' ? [restartNow] : [] }
+        : status.state === 'ready' && status.matches === 'build' && live > 0 && status.supervisor?.exitWhenIdle === true
+          ? { text: SUPERVISOR_NOTICES.updated(live), actions: [restartNow] }
           : null,
       incompatible: waiting(status)
         ? {

@@ -16,7 +16,9 @@
 // (the stderr line `stub-engine stdin <frames> frames, <user> user` at its exit) and `--stub-print-env <K1,K2>` (each
 // as the stderr line `stub-engine env K=V` at its start); `--stub-burst <file>,<lines>` (once `<file>` exists, that
 // many padded `system/status` lines of about 1 KB at once: output nobody asked for, a session host's ring overflow
-// under a reader that stopped reading). `--version` alone answers the tested version. A write the
+// under a reader that stopped reading); `--stub-gate <file>` (P5 O16 M3c fix wave 2: a `maws` `tools/call` it would play
+// waits until `<file>` exists, so a scene starts the call when it chooses, a session's turn open meanwhile with no call
+// in flight). `--version` alone answers the tested version. A write the
 // fixture never recorded ends the replay as a mismatch: the reason on stderr and exit 1. An `end_session` and the end of
 // stdin end it with 0, SIGTERM with the signal, as the engine does.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -90,6 +92,13 @@ if (burst !== undefined) {
   }, 5);
 }
 
+// P5 O16 M3c fix wave 2: `--stub-gate`, above
+const gate = option('--stub-gate');
+function isToolCall(frame: unknown): boolean {
+  const request = (frame as { type?: string; request?: { subtype?: string; message?: { method?: string } } }).type === 'control_request' ? (frame as { request?: { subtype?: string; message?: { method?: string } } }).request : undefined;
+  return request?.subtype === 'mcp_message' && request.message?.method === 'tools/call';
+}
+
 let child: ChildProcess | null = null;
 if (flag('--stub-spawn-child')) {
   child = spawn('sleep', ['600'], { stdio: 'ignore' });
@@ -150,6 +159,7 @@ void (async () => {
       if (item.error.kind === 'replay_mismatch') mismatch ??= item.error.message;
       continue; // a stand-in's note (an unrecorded read): its answer follows as a frame
     }
+    if (gate !== undefined && isToolCall(item.frame)) while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 50)); // P5 O16 M3c fix wave 2
     process.stdout.write(`${JSON.stringify(item.frame)}\n`);
   }
   await stderr;

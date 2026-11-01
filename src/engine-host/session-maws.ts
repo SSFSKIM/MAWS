@@ -231,6 +231,11 @@ export class SessionMaws {
     return this.toolServer.inFlightThroughDelivery();
   }
 
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first of those calls
+  deliveringTool(): string | null {
+    return this.toolServer.deliveringTool();
+  }
+
   // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.
   answerPane(requestId: RequestId, result: MawsPaneAnswerResult): 'delivered' | 'not_pending' {
     return this.panes.answer(requestId, result);

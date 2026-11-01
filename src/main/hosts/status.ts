@@ -13,9 +13,10 @@ import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { HostStatus, MainBuild, SupervisorStatus } from '@shared/ipc/schema/host';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import type { HostSupervisor } from './supervisor';
+import type { EngineHandoverWatch } from './engine-handover'; // P5 O16 M3c fix wave 2
 
 export interface HostStatusDeps {
-  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch' | 'onStreaming' | 'streaming'>;
+  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch' | 'onStreaming' | 'streaming' | 'handoverState' | 'onHandover'>;
   appBuildId(): string; // the build id of the engine-host bundle this app would start
   appWire(): string; // this app's wire fingerprint
   mainBuild: MainBuild; // E11 §2.7: main's own build, for Diagnostics
@@ -26,6 +27,7 @@ export interface HostStatusDeps {
   daemon?(): DaemonStatus | null; // P5 O2 M7: the daemon shape's last daemon.status (null until it first answers)
   daemonUnavailable?: string | null; // P5 O2 M7: why the daemon shape the setting asks for does not run this launch
   spineRefused?: string | null; // P5 O3-A: why this run does not run the spine (src/services/settings/spine-lock.ts); the embedded shape's
+  engineHandover?: Pick<EngineHandoverWatch, 'reason' | 'onChange'>; // P5 O16 M3c fix wave 2: the daemon shape's, mawsd's report
 }
 
 export interface HostStatusService {
@@ -44,9 +46,11 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
   // good), or lists no holder, tells it as counted.
   let hostedAtLastStatus = 0;
   let adopting: NonNullable<HostStatus['lastExit']> | null = null;
-  // P5 O16 M3c: a host whose last status said it was handing over (`holder.handover` draining) leaves by design, whoever
-  // asked it (on the daemon shape `mawsd` asks, so main's link reads the close as an exit): that exit is not told
-  let drainingAtLastStatus = false;
+  // P5 O16 M3c: a host whose last status said its handover completed leaves by design, whoever asked it (on the daemon
+  // shape `mawsd` asks, so main's link reads the close as an exit): that exit is not told. Fix wave 2 (the re-review's
+  // item 6): the evidence, `holder.detached` (every row detached, said before the exit), not the intent (`draining`), so
+  // a host killed mid-drain is told
+  let detachedAtLastStatus = false;
   let handedOver: string | null = null; // the `at` of the last exit so passed over, read once
 
   // P5 O1 M6 (OX1): a supervisor that sends its status was welcomed, so it shares the wire's major or (the protocol-2
@@ -65,10 +69,10 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     if (facts.lastExit && facts.lastExit.at !== (adopting ?? lastExit)?.at && facts.lastExit.at !== handedOver) {
       if (adopting) lastExit = adopting; // superseded before its successor's count: told as counted
       const exit = { ...facts.lastExit, interrupted: liveAtLastStatus };
-      if (drainingAtLastStatus) handedOver = facts.lastExit.at; // P5 O16 M3c: not told
+      if (detachedAtLastStatus) handedOver = facts.lastExit.at; // P5 O16 M3c: not told
       else [adopting, lastExit] = hostedAtLastStatus > 0 ? [exit, lastExit] : [null, exit];
       liveAtLastStatus = hostedAtLastStatus = 0;
-      drainingAtLastStatus = false;
+      detachedAtLastStatus = false;
     }
     if (adopting && deps.hosts.snapshot('engine-host').state === 'crashed') [lastExit, adopting] = [adopting, null];
     return {
@@ -87,7 +91,19 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       daemonUnavailable: deps.daemonUnavailable ?? null,
       // P5 O3-A; P5 O3-D M5b: on the daemon shape the spine is mawsd's, and its last daemon.status says why it does not run
       spineRefused: deps.daemon ? (deps.daemon()?.spine?.refused ?? null) : (deps.spineRefused ?? null),
+      ...handoverOf(), // P5 O16 M3c fix wave 2
     };
+  };
+
+  // P5 O16 M3c fix wave 2 (D63): what an update of the engine host waits for: mawsd's report on the daemon shape, main's
+  // own transport's on the embedded one; only while MAWS tool calls are in flight
+  const handoverOf = (): Pick<HostStatus, 'handover'> => {
+    if (deps.engineHandover) {
+      const reason = deps.engineHandover.reason();
+      return reason === null ? {} : { handover: reason };
+    }
+    const own = deps.hosts.handoverState('engine-host');
+    return own === null || own.inFlight === 0 ? {} : { handover: { inFlight: own.inFlight, ...(own.tool !== undefined && { tool: own.tool }) } };
   };
 
   const take = (next: SupervisorStatus) => {
@@ -99,7 +115,7 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     }
     liveAtLastStatus = next.liveSessions;
     hostedAtLastStatus = next.holder?.hosts ?? 0;
-    drainingAtLastStatus = next.holder?.handover === 'draining';
+    detachedAtLastStatus = next.holder?.detached === true;
     deps.emit(status());
   };
   // M5b fix round 2: on the daemon shape `mawsd`'s link to the engine host is permanent, so an app that attaches to a host
@@ -129,6 +145,8 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       heard += 1;
       take(next);
     }),
+    // P5 O16 M3c fix wave 2: the update's wait, at each change
+    deps.engineHandover ? deps.engineHandover.onChange(() => deps.emit(status())) : deps.hosts.onHandover('engine-host', () => deps.emit(status())),
   ];
 
   if (deps.daemon && bothReady()) ask();

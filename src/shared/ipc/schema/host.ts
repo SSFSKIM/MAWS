@@ -45,7 +45,14 @@ export const SupervisorStatusSchema = z.strictObject({
   // (M5: null while it is not served) and a handover under way (M3); `mawsd`'s `daemon.status` counts from it. Optional
   // for an older supervisor. P5 O16 M3b: `adopting`, true until the start's adoptions have ended (a detached host's), so
   // main counts the re-adopted sessions of a crash once they are known (the crash toast); optional for an older one.
-  holder: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']), adopting: z.boolean().optional() }).optional(),
+  // P5 O16 M3c fix wave 2 (D63; additive, optional for an older one): `inFlight`, the MAWS tool calls the hosted rows hold
+  // in flight through their answers' delivery (what a handover drains), and `tool`, the first one's name, so an update
+  // waits for its first quiet report (inFlight 0) before it asks the handover, and says what it waits for; `detached`,
+  // true once a handover's drain has settled and every row's detach has ended, which only a planned exit says
+  holder: z.strictObject({
+    hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int(), gate: z.string().nullable(), handover: z.enum(['none', 'draining']), adopting: z.boolean().optional(),
+    inFlight: z.number().int().nonnegative().optional(), tool: z.string().optional(), detached: z.boolean().optional(),
+  }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 
@@ -79,6 +86,11 @@ export const HostStatusSchema = z.strictObject({
   // writes none of its files (another live process holds the profile's spine.lock, named by pid and build); null while
   // it holds the lock. Optional, so the status of a build before O3-A (another profile's, over O6's link) still reads.
   spineRefused: z.string().nullable().optional(),
+  // P5 O16 M3c fix wave 2 (D63): an update of the engine host under way that waits for MAWS tool calls to finish (the
+  // calls in flight and the first one's tool): the waiting phase, while the old build serves on, and a deferred handover;
+  // from main's own transport on the embedded shape, from `mawsd`'s `daemon.engineHandover` on the daemon shape. Absent
+  // when none waits.
+  handover: z.strictObject({ inFlight: z.number().int().nonnegative(), tool: z.string().optional() }).optional(),
 });
 export type HostStatus = z.infer<typeof HostStatusSchema>;
 
@@ -131,8 +143,8 @@ export const commands = {
   // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9): the drain armed, then the exit that leaves
   // every session host and its engine running for the successor; `detaching` once the drain has settled (within
   // `graceMs`, default 10 s: how long the caller waits, never how long a call may run), else `deferred` with the calls
-  // still in flight, the exit following later. Main-only (`mawsd` sends it).
-  'host.handover': host(z.strictObject({ graceMs: z.number().int().nonnegative().max(600_000).optional() }), z.discriminatedUnion('state', [z.strictObject({ state: z.literal('detaching') }), z.strictObject({ state: z.literal('deferred'), inFlight: z.number().int().nonnegative() })])),
+  // still in flight (P5 O16 M3c fix wave 2: and the first one's tool), the exit following later. Main-only (`mawsd` sends it).
+  'host.handover': host(z.strictObject({ graceMs: z.number().int().nonnegative().max(600_000).optional() }), z.discriminatedUnion('state', [z.strictObject({ state: z.literal('detaching') }), z.strictObject({ state: z.literal('deferred'), inFlight: z.number().int().nonnegative(), tool: z.string().optional() /* P5 O16 M3c fix wave 2 */ })])),
   // P5 O2 M2: the sessions the asking connection holds interest in (main's: open session tabs and on-screen sessions),
   // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
   'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),

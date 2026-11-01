@@ -23,7 +23,8 @@ export interface StubEngine {
 
 // The stub's options a scene picks (test/support/stub-engine-bin.ts): the pace of its `in` rows, and P5 O16 M3c's
 // directives, a `sleep` it parents (its pid a stderr line) and the frames it read (a stderr line at its exit)
-export type StubSceneOptions = Pick<StubEngineOptions, 'rowMs' | 'spawnChild' | 'countStdin'>;
+// (P5 O16 M3c fix wave 2: and `gate`, a tool call held until a file exists)
+export type StubSceneOptions = Pick<StubEngineOptions, 'rowMs' | 'spawnChild' | 'countStdin' | 'gate'>;
 
 // The stub under `dir` (a case's scratch root, so the scratch's cleanup finds its processes by path).
 export function writeStubEngine(dir: string, opts: StubSceneOptions = {}): StubEngine {

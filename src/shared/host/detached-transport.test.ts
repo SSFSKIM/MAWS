@@ -29,6 +29,9 @@ const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_2
 const BEFORE_HOLDER = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY] };
 const BACKOFF = [30, 60, 90] as const;
 
+// P5 O16 M3c fix wave 2: an engine host's status as it pushes it (host.supervisorStatus), for a fake to emit
+const supervisorStatus = (pid: number, over: Record<string, unknown> = {}) => ({ mode: 'detached', pid, startedAt: 't', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, ...over });
+const holding = (pid: number, inFlight: number | undefined, tool?: string) => ({ ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'none', ...(inFlight !== undefined && { inFlight }), ...(tool !== undefined && { tool }) } });
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -255,6 +258,43 @@ describe('the detached transport: connecting', () => {
     expect(state()).toMatchObject({ state: 'crashed' });
     expect(spawn).not.toHaveBeenCalled();
     expect(errors.mock.calls.flat().join(' ')).toContain(`a supervisor (pid ${holder}) holds the lock and does not answer`);
+  });
+
+  // P5 O16 M3c fix wave 2 (D63; concern 1): a relay holds the app's hello while its engine host hands over, and reports it
+  // (`waitingOn`, main's daemon shape): the start budget holds, both ways main used to fail, and a report that ends falls
+  // back to today's bound
+  it('a lock holder that holds the hello while a handover is reported fails nothing; once the report ends, today’s bound applies', async () => {
+    let waiting = true;
+    supervisor.stop();
+    supervisor = makeSupervisor(false, {}, { waitingOn: () => waiting });
+    const relay = await startFake({ answer: 'silent' });
+    void supervisor.start();
+    await sleep(TIMING.startTimeoutMs * 2);
+    expect(state().state).not.toBe('crashed');
+    expect(relay.connections.length).toBeGreaterThanOrEqual(2); // retried every pidPollMs meanwhile
+    expect(spawn).not.toHaveBeenCalled();
+    expect(processes.kills).toEqual([]);
+    const ended = Date.now();
+    waiting = false;
+    await until(() => state().state === 'crashed', TIMING.startTimeoutMs * 3);
+    // a whole budget from the last retry that saw the report (one hello's wait and a poll before its end, at most)
+    expect(Date.now() - ended).toBeGreaterThanOrEqual(TIMING.startTimeoutMs - TIMING.helloTimeoutMs - 2 * TIMING.pidPollMs - 50);
+    expect(supervisor.facts('engine-host').reason).toBe('held_lock');
+  });
+
+  it('a candidate it started that holds the hello while a handover is reported is never stopped; once the report ends, it is', async () => {
+    let waiting = true;
+    supervisor.stop();
+    supervisor = makeSupervisor(false, {}, { waitingOn: () => waiting });
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid!, answer: 'silent' }); // `mawsd`, holding the hello
+    void supervisor.start();
+    await sleep(TIMING.startTimeoutMs * 2);
+    expect(state().state).not.toBe('crashed');
+    expect(processes.kills).toEqual([]);
+    expect(spawn).toHaveBeenCalledOnce();
+    waiting = false;
+    await until(() => state().state === 'crashed', TIMING.startTimeoutMs * 3);
+    expect(processes.kills[0]).toEqual([candidates[0].pid, 'SIGTERM']);
   });
 
   it('a candidate alive and never answering is stopped (SIGTERM, then SIGKILL) and the host left crashed (held_lock)', async () => {
@@ -515,8 +555,10 @@ describe('the detached transport: a request held and never sent', () => {
 describe('the detached transport: early exits and the crash ladder', () => {
   // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it: `mawsd restart
   // --engine-host`) leaves as planned, not as a crash: no crash count, no backoff, three of them within the window
-  it('the close of a host whose last status said it was handing over is no crash: three within the window, uncounted', async () => {
-    const draining = (pid: number) => ({ mode: 'detached', pid, startedAt: 't', buildId: buildIdOf(profile.modulePath), protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining' } });
+  // P5 O16 M3c fix wave 2 (the re-review's item 6): planned only on the old host's word that its handover completed (every
+  // row detached), which it says after the drain settled and before its exit; its intent alone (`draining`) is no evidence
+  it('the close of a host whose last status said its handover detached every row is no crash: three within the window, uncounted', async () => {
+    const draining = (pid: number) => ({ ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', detached: true } });
     let host = await startFake();
     await supervisor.start();
     for (let round = 0; round < 3; round += 1) {
@@ -536,6 +578,19 @@ describe('the detached transport: early exits and the crash ladder', () => {
     await until(() => state().state === 'ready' && state().pid !== crashed);
     expect(state().restarts).toBe(1);
     expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
+  });
+
+  it('a host killed mid-drain, after it said draining and before its rows detached, is a crash: counted, backed off, told', async () => {
+    const host = await startFake();
+    await supervisor.start();
+    const pid = host.pid;
+    await until(() => host.emit('host.supervisorStatus', { ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 1, tool: 'artifact_list' } } as never));
+    await until(() => emit.mock.calls.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { pid: number }).pid === pid));
+    await host.die(); // SIGKILL while its tool still runs
+    await until(() => state().state === 'ready' && state().pid !== pid);
+    expect(state().restarts).toBe(1); // the crash ladder's backoff and count
+    expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
+    expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
   });
 
   it('backs off on repeated early exits and stays crashed after three within the window', async () => {
@@ -1140,19 +1195,111 @@ describe('the detached transport: the handover', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('another build with sessions live that hands over is never served: asked on the attempt’s connection, then its successor', async () => {
-    const { fake: old, asked, inFlight } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 2, rows: 2 } }, { count: 3 });
-    void supervisor.start(); // settles at the successor's welcome
+  // P5 O16 M3c fix wave 2 (D63): an update waits for quiet. Another build with sessions live that hands over is served
+  // while MAWS tool calls run on it (never asked to exit when idle), and asked to hand over once, at its first pushed
+  // status that says nothing is in flight (or says nothing of it: a capable build before the report)
+  it('another build with sessions live that hands over is served while its calls run, and asked once at its first quiet status', async () => {
+    const { fake: old, asked } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 2, rows: 2 } });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: old.pid }); // served, and ready (#409, #411)
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, 2, 'artifact_list') as never));
+    await until(() => supervisor.handoverState('engine-host')?.inFlight === 2);
+    expect(supervisor.handoverState('engine-host')).toEqual({ state: 'waiting', inFlight: 2, tool: 'artifact_list' });
+    await sleep(TIMING.waitRetryMs * 2);
+    expect(asked).toEqual([]);
+    expect(old.exits).toEqual([]); // never asked to exit when idle
+    expect(await ping()).toMatchObject({ ok: true, value: { pid: old.pid } }); // the app works meanwhile
+    old.emit('host.supervisorStatus', holding(old.pid, 0) as never);
     await until(() => asked.length === 1);
     expect(asked[0]).toEqual({ graceMs: 10_000 });
-    await until(() => logs.includes(`engine host pid ${old.pid} defers its handover: 3 calls in flight`));
-    inFlight.count = 0;
-    await until(() => asked.length === 2); // the next attempt asks again
-    await old.die();
-    await until(() => state().state === 'ready');
-    expect(state().pid).not.toBe(old.pid);
-    expect(states.some((s) => s.state === 'ready' && s.pid === old.pid)).toBe(false);
+    expect(supervisor.handoverState('engine-host')).toMatchObject({ state: 'draining' });
+    old.emit('host.supervisorStatus', holding(old.pid, 0) as never); // a second quiet report asks nothing more
+    await sleep(20);
+    expect(asked).toHaveLength(1);
+    await old.die(); // drained at once: it detaches and exits
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    expect(supervisor.handoverState('engine-host')).toBeNull();
     expect(spawn).toHaveBeenCalledOnce();
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
+  });
+
+  it('a capable build whose status says nothing of its calls in flight is asked at its first status', async () => {
+    const { fake: old, asked } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 } });
+    await supervisor.start();
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, undefined) as never));
+    await until(() => asked.length === 1);
+    await old.die();
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+  });
+
+  it('a call racing the quiet report defers the handover: the host leaves ready at the ask, is asked again, and its successor follows its exit', async () => {
+    const { fake: old, asked, inFlight } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 } }, { count: 1 });
+    await supervisor.start();
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, 0) as never)); // quiet, then a call starts before the freeze
+    await until(() => asked.length === 1);
+    expect(state().state).toBe('restarting'); // D56: not ready from the freeze
+    await until(() => logs.includes(`engine host pid ${old.pid} defers its handover: 1 calls in flight`));
+    expect(supervisor.handoverState('engine-host')).toMatchObject({ state: 'draining', inFlight: 1 });
+    await until(() => asked.length >= 2); // the deferral's retry
+    const pinged = ping(); // held for the successor
+    inFlight.count = 0;
+    await old.die();
+    expect(await pinged).toMatchObject({ ok: true });
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    expect(supervisor.handoverState('engine-host')).toBeNull();
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('a host that is never quiet keeps the old build served, and says why', async () => {
+    const { fake: old, asked } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 } });
+    await supervisor.start();
+    for (let k = 1; k <= 4; k += 1) {
+      await until(() => old.emit('host.supervisorStatus', holding(old.pid, k, 'show_pane') as never));
+      await until(() => supervisor.handoverState('engine-host')?.inFlight === k);
+      await sleep(TIMING.waitRetryMs);
+    }
+    expect(asked).toEqual([]);
+    expect(state()).toMatchObject({ state: 'ready', pid: old.pid });
+    expect(supervisor.handoverState('engine-host')).toEqual({ state: 'waiting', inFlight: 4, tool: 'show_pane' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('the owner’s handover (restart --engine-host) asks at once during the wait, and a later quiet report asks nothing more', async () => {
+    const { fake: old, asked } = await handingOverFake({ buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 } }, { count: 1 });
+    await supervisor.start();
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, 1, 'artifact_list') as never));
+    await until(() => supervisor.handoverState('engine-host') !== null);
+    expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    const before = asked.length;
+    old.emit('host.supervisorStatus', holding(old.pid, 0) as never);
+    await sleep(TIMING.waitRetryMs / 2);
+    expect(asked.length).toBe(before);
+  });
+
+  it('a failed ask clears the wait at its recycle, and the reconnected host waits for quiet again', async () => {
+    let fail = true;
+    const asked: unknown[] = [];
+    const old = await startFake({
+      buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 },
+      register: (on) => {
+        on('host.handover', async (input) => {
+          asked.push(input);
+          if (fail) throw new Error('no drain here');
+          return { state: 'detaching' as const };
+        });
+      },
+    });
+    const told: unknown[] = [];
+    supervisor.onHandover('engine-host', (current) => void told.push(current));
+    await supervisor.start();
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, 0) as never));
+    await until(() => asked.length === 1);
+    await until(() => told.at(-1) === null && state().state === 'ready');
+    expect(told.map((t) => (t as { state?: string } | null)?.state ?? null)).toEqual(['draining', null]);
+    fail = false;
+    await until(() => old.emit('host.supervisorStatus', holding(old.pid, 0) as never) && asked.length === 2);
+    await old.die();
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
   });
 
   // P5 O16 M3c fix wave 1 (the version skew between two capable builds, which e2e:cross-build cannot run before landing):
@@ -1161,13 +1308,12 @@ describe('the detached transport: the handover', () => {
   for (const skew of [-1, 1]) {
     it(`another build a minor ${skew < 0 ? 'behind' : 'ahead'} that lists host.holder hands over, and the successor is served`, async () => {
       const { fake: old, asked } = await handingOverFake({ buildId: 'another-build', minor: WIRE_MINOR + skew, counts: { liveSessions: 1, rows: 1 } });
-      void supervisor.start();
+      await supervisor.start(); // fix wave 2: served while it waits for quiet
+      await until(() => old.emit('host.supervisorStatus', holding(old.pid, 0) as never));
       await until(() => asked.length === 1);
       expect(asked[0]).toEqual({ graceMs: 10_000 });
       await old.die(); // drained at once: it detaches and exits
-      await until(() => state().state === 'ready');
-      expect(state().pid).not.toBe(old.pid);
-      expect(states.some((s) => s.state === 'ready' && s.pid === old.pid), 'never served').toBe(false);
+      await until(() => state().state === 'ready' && state().pid !== old.pid);
       expect(supervisor.peer('engine-host')).toMatchObject({ major: SOCKET_PROTOCOL, minor: WIRE_MINOR });
       expect(spawn).toHaveBeenCalledOnce();
     });

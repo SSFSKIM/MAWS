@@ -26,6 +26,7 @@ import { DEFAULT_LABEL, type UnitProgram } from '../../mawsd/units/unit';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchShape } from './daemon';
+import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
 import { testLaunchRefusal } from './mode'; // P5 O2 landing
 import { startHostStatus, type HostStatusService } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
@@ -105,9 +106,10 @@ export function createHosts(
   const paths = daemonPaths(userData);
   const modules = { engineHost: engineHostPath, ptyHost: ptyHostPath, mawsd: mawsdPath() };
   const unit = () => unitFor(DEFAULT_LABEL, unitDeps());
+  const engineHandover = daemon ? watchEngineHandover() : null; // P5 O16 M3c fix wave 2: mawsd's report, on machine.sock
   const supervisor = createHostSupervisor({
     hosts: daemon
-      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs)
+      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover?.waiting() ?? false)
       : {
           'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
@@ -115,6 +117,7 @@ export function createHosts(
     emit,
     detached: { identity },
   });
+  engineHandover?.bind(supervisor); // for the launch's life
   // E10: the engine host is told ready after main's resync (X13), which the session read side registers
   // (sessions/index.ts `hostEventSource`); with none registered (launch mode scenario) it is told at once.
   registerMainHandler('engine.hostState', () => supervisor.snapshot('engine-host'));
@@ -149,6 +152,7 @@ export function createHosts(
     ...(watch ? { daemon: () => watch.status() } : {}),
     daemonUnavailable: launch.unavailable,
     spineRefused, // P5 O3-A
+    ...(engineHandover && { engineHandover }), // P5 O16 M3c fix wave 2
   });
   const daemonWatch = watch
     ? {

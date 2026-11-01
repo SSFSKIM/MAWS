@@ -836,9 +836,10 @@ test('(f) an update that changed no wire shape, met by an engine host without ho
 });
 
 // P5 O16 M3c (D9, D40): an engine host that lists `host.holder`, met by an app (or a `mawsd`) of another build with a
-// session live, is asked to hand over at once: it drains (nothing in flight), detaches its session and exits, and the
-// successor of the new build adopts it; nothing is served by the old host, so no banner. On the embedded shape this is
-// the detached transport's handover; on the daemon shape `mawsd`'s.
+// session live, is asked to hand over at its first status (fix wave 2, D63: its first quiet report; nothing is in
+// flight): it drains at once, detaches its session and exits, and the successor of the new build adopts it; it is never
+// asked to exit when idle, so no banner. On the embedded shape the app's own host supervisor asks; on the daemon shape
+// `mawsd`'s.
 test('(f) P5 O16 M3: an update with a session live: the engine host hands it over at once, the successor adopts it, no banner', async () => {
   await withScratch('updated-handover', async (s) => {
     s.useStub();
@@ -850,65 +851,154 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
     expect(s.log(), 'host.log: the old host drained at once').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
     expect(s.log(), 'host.log: and left by the handover').toContain('exiting (handover)');
     await adoptedThenCompleted(s, run.page, id, engine!, requestId!);
-    await expect(banner(run.page, 'MAWS was updated.'), 'no update banner: the old host was never served').toHaveCount(0);
+    await expect(banner(run.page, 'MAWS was updated.'), 'no update banner: the old host hands over, it never waits for idle').toHaveCount(0);
     expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
     expect(run.maws.consoleErrors()).toEqual([]);
   });
 });
 
-// P5 O16 M3c (D9, D40): a handover the old host defers while a tool call runs (held by the e2e's tool hold,
-// src/engine-host/tool-server/e2e-hold.ts): the call finishes on the old host, whose answer reaches the engine before the
-// host detaches; its exit then raises no crash toast, and the successor adopts the session, whose turn plays on. On the
-// embedded shape the handover is an update's (the app of another build meets the kept host); on the daemon shape it is
-// `mawsd restart --engine-host`'s, with the app attached throughout: an update's deferral there outlasts the app's
-// welcome wait on a `mawsd` that is handing over (the report's concern, P5 O16 M3c), which this case does not cover.
-test('(f) P5 O16 M3: a handover while a tool call runs: it defers, the call finishes on the old host, the successor adopts; no crash toast', async () => {
-  await withScratch('updated-deferred', async (s) => {
+// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
+const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
+const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
+const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating the engine host (1 call running).'; // ENGINE_HOST_UPDATE.waiting(1, 'artifact_list')
+
+// After a deferred or waited handover: the successor adopted `id` with the same engine process, the held call was
+// answered once by the old host before it detached, the turn played on to its end, and nothing was told as a crash.
+async function heldCallAdopted(s: Scratch, run: Run, id: AppSessionId, engine: number | null): Promise<void> {
+  const rows = s.journal(id);
+  const answered = rows.findIndex(isToolAnswer);
+  const detached = rows.findIndex((r) => r.direction === 'meta' && r.frame.event === 'host_detach');
+  expect(answered, 'the old host answered the call').toBeGreaterThanOrEqual(0);
+  expect(detached, 'before it detached the session').toBeGreaterThan(answered);
+  await expect.poll(async () => (await statusOf(run.page, id)).holder?.adopted, { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+  expect((await statusOf(run.page, id)).pid, 'the same engine process').toBe(engine);
+  await expect.poll(async () => (await statusOf(run.page, id)).turn === null && (await eventsOf(run.page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn plays on and ends' }).toBe(true);
+  expect(s.journal(id).filter(isToolAnswer), 'the call answered once').toHaveLength(1);
+}
+
+async function noCrashTold(s: Scratch, run: Run): Promise<void> {
+  await new Promise((r) => setTimeout(r, 2_000)); // a crash notice would have been told by now
+  await expect(run.page.getByText(/stopped unexpectedly/), 'no crash toast: the handover’s exit was deliberate').toHaveCount(0);
+  expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
+  expect(run.maws.consoleErrors()).toEqual([]);
+}
+
+// P5 O16 M3c fix wave 2 (D63): an update waits for quiet. Session A's `maws` tool call is held (the e2e's tool hold,
+// src/engine-host/tool-server/e2e-hold.ts) when an app (or a `mawsd`) of another build meets the kept engine host: the
+// old build serves on, so session B's turn is answered meanwhile, and the update says what it waits for. Once the call
+// finishes, the host's next status is quiet: the handover is asked, drains at once, and the successor adopts both.
+test('(f) P5 O16 M3c: an update waits for a running tool call: the old build serves meanwhile and says so, then hands over; both sessions adopted, no toast', async () => {
+  await withScratch('updated-waits', async (s) => {
     s.useStub();
     const hold = join(s.root, 'tool-hold');
     writeFileSync(hold, '');
-    const isCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
-    const isAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
-    const fixture = toolCallJournal(s.root, 'tool-call', 'artifact_list');
-    const calling = async (_page: Page, id: AppSessionId) => void (await expect.poll(() => s.journal(id).some(isCall), { timeout: 30_000, message: 'the engine called the tool, held' }).toBe(true));
-    let run: Run;
-    let pid: number;
-    let id: AppSessionId;
-    let engine: number | null;
-    if (!DAEMON) {
-      ({ pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold }, fixture, prompt: 'turn 1', midTurn: calling }));
-      run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
-      await expect.poll(() => s.log().includes('the handover defers: 1 calls in flight'), { timeout: 30_000, message: 'host.log: the handover defers' }).toBe(true);
-    } else {
-      run = await s.launch({ MAWS_E2E_TOOL_HOLD: hold });
-      pid = (await s.ready(run.page)).supervisor!.pid;
-      id = await s.record(run.page);
-      await startTurn(run.page, s, id, fixture, 'turn 1');
-      await calling(run.page, id);
-      engine = (await statusOf(run.page, id)).pid;
-      const asked = await s.mawsd(['restart', '--engine-host']);
-      expect(asked.stdout, `the CLI's answer: ${asked.stdout}${asked.stderr}`).toContain('the engine host defers its handover: 1 calls in flight');
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_TOOL_HOLD: hold });
+    const status = await s.ready(first.page);
+    const pid = status.supervisor!.pid;
+    const a = await s.record(first.page);
+    await startTurn(first.page, s, a, toolCallJournal(s.root, 'tool-call', 'artifact_list'), 'turn 1');
+    await expect.poll(() => s.journal(a).some(isToolCall), { timeout: 30_000, message: 'A’s engine called the tool, held' }).toBe(true);
+    const b = await s.record(first.page);
+    await startTurn(first.page, s, b, turnsJournal(s.root, 'b', 2), 'turn 1');
+    await expect.poll(async () => (await statusOf(first.page, b)).turn === null, { timeout: 30_000, message: 'B’s first turn ends' }).toBe(true);
+    const engines = { a: (await statusOf(first.page, a)).pid, b: (await statusOf(first.page, b)).pid };
+    await s.quit(first);
+    expect(first.quitLines()).toContain(keptQuitLine());
+    if (DAEMON) {
+      process.kill(status.daemon!.pid, 'SIGKILL'); // the next launch starts a `mawsd` of its own build (the update's)
+      await expect.poll(() => isAlive(status.daemon!.pid)).toBe(false);
     }
-    expect(isAlive(pid), 'the old engine host serves its drain').toBe(true);
-    expect(s.journal(id).some(isAnswer), 'the call is still running').toBe(false);
 
-    rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    const waiting = await s.ready(run.page, (st) => st.supervisor!.pid === pid && st.handover !== undefined, 60_000);
+    expect(waiting, 'served by the old build, nothing armed, what it waits for said').toMatchObject({ matches: 'build', supervisor: { exitWhenIdle: false }, handover: { inFlight: 1, tool: 'artifact_list' } });
+    await expect(banner(run.page, WAITING_FOR_LIST), 'the waiting copy').toHaveCount(1);
+    await expect(banner(run.page, 'MAWS was updated.'), 'not E10’s wait for idle').toHaveCount(0);
+    value(await invoke(run.page, 'session.send', { appSessionId: b, content: 'turn 2' }));
+    await expect.poll(async () => (await eventsOf(run.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s turn is answered by the old build' }).toBe(2);
+    expect(isAlive(pid), 'the old engine host serves on').toBe(true);
+    expect(s.log(), 'host.log: nothing frozen while the call runs').not.toContain('handover armed');
+
+    rmSync(hold); // the call finishes; the host's next status is quiet, and the handover follows
     const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
     expect(moved).toMatchObject({ matches: 'same' });
+    expect(moved.handover, 'nothing waited for any more').toBeUndefined();
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
-    const rows = s.journal(id);
-    const answered = rows.findIndex(isAnswer);
-    const detached = rows.findIndex((r) => r.direction === 'meta' && r.frame.event === 'host_detach');
-    expect(answered, 'the old host answered the call').toBeGreaterThanOrEqual(0);
-    expect(detached, 'before it detached the session').toBeGreaterThan(answered);
-    await expect.poll(async () => (await statusOf(run.page, id)).holder?.adopted, { timeout: 30_000, message: 'the session adopted' }).toBe(true);
-    expect((await statusOf(run.page, id)).pid, 'the same engine process').toBe(engine);
-    await expect.poll(async () => (await statusOf(run.page, id)).turn === null && (await eventsOf(run.page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn plays on and ends' }).toBe(true);
-    expect(s.journal(id).filter(isAnswer), 'the call answered once').toHaveLength(1);
-    await new Promise((r) => setTimeout(r, 2_000)); // a crash notice would have been told by now
-    await expect(run.page.getByText(/stopped unexpectedly/), 'no crash toast: the deferred handover’s exit was deliberate').toHaveCount(0);
-    expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
-    expect(run.maws.consoleErrors()).toEqual([]);
+    expect(s.log(), 'host.log: drained at once').toContain('handover armed: 2 hosted rows frozen, 0 calls in flight');
+    await heldCallAdopted(s, run, a, engines.a);
+    await expect.poll(async () => (await statusOf(run.page, b)).holder?.adopted, { timeout: 30_000, message: 'B adopted' }).toBe(true);
+    expect((await statusOf(run.page, b)).pid, 'B’s engine process kept').toBe(engines.b);
+    await expect(banner(run.page, WAITING_FOR_LIST)).toHaveCount(0);
+    await noCrashTold(s, run);
+  });
+});
+
+// P5 O16 M3c (D9, D40; D63 (3)): the owner's `mawsd restart --engine-host` keeps freeze-then-drain: asked while a tool
+// call runs (held), the host freezes and defers, the call finishes on the old host, whose answer reaches the engine
+// before it detaches; its exit raises no crash toast, and the successor adopts the session, whose turn plays on. The app
+// stays attached throughout: its hello is held meanwhile, which `mawsd`'s handover report keeps from failing.
+test('(f) P5 O16 M3: mawsd restart --engine-host while a tool call runs: it defers, the call finishes on the old host, the successor adopts; no crash toast', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  await withScratch('restart-deferred', async (s) => {
+    s.useStub();
+    const hold = join(s.root, 'tool-hold');
+    writeFileSync(hold, '');
+    const run = await s.launch({ MAWS_E2E_TOOL_HOLD: hold });
+    const pid = (await s.ready(run.page)).supervisor!.pid;
+    const id = await s.record(run.page);
+    await startTurn(run.page, s, id, toolCallJournal(s.root, 'tool-call', 'artifact_list'), 'turn 1');
+    await expect.poll(() => s.journal(id).some(isToolCall), { timeout: 30_000, message: 'the engine called the tool, held' }).toBe(true);
+    const engine = (await statusOf(run.page, id)).pid;
+    const asked = await s.mawsd(['restart', '--engine-host']);
+    expect(asked.stdout, `the CLI's answer: ${asked.stdout}${asked.stderr}`).toContain('the engine host defers its handover: 1 calls in flight');
+    expect(isAlive(pid), 'the old engine host serves its drain').toBe(true);
+    expect(s.journal(id).some(isToolAnswer), 'the call is still running').toBe(false);
+    rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
+    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    await heldCallAdopted(s, run, id, engine);
+    await noCrashTold(s, run);
+  });
+});
+
+// P5 O16 M3c fix wave 2 (D63 (5); M3c's concern 1): the short deferral an update can still meet. The kept host is quiet
+// when the update's `mawsd` meets it (A's turn open, its tool call held back by the stub's gate), so the handover is
+// asked at once; the e2e's race (src/engine-host/e2e-handover-race.ts) holds the freeze until the scene lets the call
+// start, so it is in flight at the freeze and held there (the tool hold) about 25 s, past the app's 15 s welcome bound.
+// Meanwhile `mawsd`'s relay holds the app's hello, and its `daemon.engineHandover` report keeps the app from stopping it
+// or failing `held_lock`; the waiting copy shows. Once the call finishes, the successor adopts; no crash, no toast.
+test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the freeze holds the handover past the app’s welcome bound; the app waits, says why, and the successor adopts', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon): the embedded shape’s app asks the handover itself');
+  await withScratch('updated-short-deferral', async (s) => {
+    const gate = join(s.root, 'call-gate');
+    const hold = join(s.root, 'tool-hold');
+    writeFileSync(hold, '');
+    s.useStub({ gate });
+    const fixture = toolCallJournal(s.root, 'tool-call', 'artifact_list');
+    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: async () => {} });
+    expect(s.journal(id).some(isToolCall), 'no call yet: the host is quiet').toBe(false);
+
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    await expect.poll(() => s.log().includes('e2e: the handover waits for a call to start before its freeze'), { timeout: 60_000, message: 'host.log: the update asked at the quiet report' }).toBe(true);
+    writeFileSync(gate, ''); // the call starts between the quiet report and the freeze
+    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: 'host.log: frozen with the call in flight' }).toBe(true);
+    const frozenAt = Date.now();
+    const daemon = s.daemonLock()!.pid; // the update's mawsd, holding the app's hello
+    await expect.poll(() => s.log().includes('the handover defers: 1 calls in flight'), { timeout: 30_000, message: 'host.log: the handover defers' }).toBe(true);
+    await expect(banner(run.page, WAITING_FOR_LIST), 'the waiting copy, from mawsd’s report').toHaveCount(1, { timeout: 15_000 });
+    while (Date.now() - frozenAt < 25_000) await new Promise((r) => setTimeout(r, 1_000)); // past the app's 15 s welcome bound
+    expect(isAlive(daemon), 'the app never stopped the mawsd it waits on').toBe(true);
+    const meanwhile = value(await invoke(run.page, 'host.status', undefined));
+    expect(meanwhile.state, 'not crashed: waiting').not.toBe('crashed');
+    expect(meanwhile.reason).toBeNull();
+
+    rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
+    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(isAlive(daemon), 'the same mawsd serves the successor').toBe(true);
+    await heldCallAdopted(s, run, id, engine);
+    await expect(banner(run.page, WAITING_FOR_LIST)).toHaveCount(0);
+    await noCrashTold(s, run);
   });
 });
 

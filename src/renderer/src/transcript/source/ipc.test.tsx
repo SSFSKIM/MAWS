@@ -35,14 +35,14 @@ function fakeClient() {
   const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const calls: { name: string; input: unknown; machine?: MachineRef; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
   const appEvents = new Map<AppSessionId, SessionEvent[]>();
-  const host = { status: { state: 'ready', supervisor: { pid: 1 } } as unknown };
+  const host = { status: { state: 'ready', supervisor: { pid: 1 } } as unknown, asked: 0 /* P5 O16 M3c fix wave 2: host.status reads */ };
   const client: MawsBridge = {
     localMachine: TEST_MACHINE,
     invoke: ((name: CommandName, input: unknown, opts?: { machine?: MachineRef }) =>
       name === 'session.appEvents'
         ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
         : name === 'host.status'
-          ? Promise.resolve({ ok: true, value: host.status })
+          ? ((host.asked += 1), Promise.resolve({ ok: true, value: host.status }))
           : new Promise((resolve) => calls.push({ name, input, ...(opts?.machine && { machine: opts.machine }), answer: resolve as never }))) as MawsBridge['invoke'],
     on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
@@ -1730,6 +1730,24 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     fake.emit('host.status', holderStatus(false) as never);
     await flush();
     expect(fake.calls.filter((call) => call.name === 'engine.sessions')).toHaveLength(1);
+  });
+
+  // P5 O16 M3c fix wave 2 (the re-review's item 7): a detach during the table's read installs no wait after the cleanup
+  it('a detach while the table is read creates no wait once it answers: no listener, no host.status asked', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.host.status = holderStatus(true);
+    fake.emit('engine.hostState', { state: 'restarting' } as never);
+    fake.emit('engine.hostState', { state: 'ready' } as never);
+    await flush();
+    expect(fake.calls.filter((call) => call.name === 'engine.sessions'), 'the table is being read').toHaveLength(1);
+    useTranscriptStore.getState().detach(source.key!);
+    let listened = 0;
+    const listen = fake.client.on;
+    fake.client.on = ((name: EventName, listener: never) => ((listened += name === 'host.status' ? 1 : 0), listen(name, listener))) as MawsBridge['on'];
+    table(fake, []); // it answers after the cleanup, empty
+    await flush();
+    expect(listened, 'no wait listens').toBe(0);
+    expect(fake.host.asked, 'nothing asked').toBe(0);
   });
 
   it('a host without session hosts is read once, as before', async () => {

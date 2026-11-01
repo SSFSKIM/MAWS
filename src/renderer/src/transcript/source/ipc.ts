@@ -152,6 +152,7 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
     };
     void (async () => {
       let found = await listed();
+      if (disposed) return; // P5 O16 M3c fix wave 2: the subscription ended during the read: no wait outlives it
       // P5 O16 M3c: a successor that holds session hosts lists a session only once it has adopted it, and its ready
       // comes before its start's adoptions end: this machine's host is asked again once main's status says they ended
       if (found === false && machine === client.localMachine && (await adoptionsEnded(client, () => disposed || asked !== heard, waits))) found = await listed();

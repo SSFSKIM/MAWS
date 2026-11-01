@@ -19,6 +19,7 @@ import { DANGER } from '../sessions/ui';
 import { useHosts } from '../stores/hosts';
 import { toast, useNotices } from '../stores/notices';
 import { SUPERVISOR } from './copy';
+import { ENGINE_HOST_UPDATE } from '../app/copy'; // P5 O16 M3c fix wave 2
 import { INPUT, Segment, Setting, Switch, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 
 // Whole minutes from 1 to MAX_IDLE_MINUTES as typed, or null when the text is not one.
@@ -37,6 +38,8 @@ function describe(status: HostStatus | null): { text: string; restart: boolean; 
     if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: SUPERVISOR.waitingNote };
     return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, restart: true, note };
   }
+  // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, served or deferred, says what it waits for
+  if (status.handover) return { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), restart: false, note };
   if (status.state === 'restarting') return { text: SUPERVISOR.restarting, restart: false, note };
   const s = status.supervisor;
   if (status.state === 'starting' || s === null) return { text: SUPERVISOR.starting, restart: false, note };

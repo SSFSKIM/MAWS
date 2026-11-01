@@ -138,4 +138,16 @@ export const commands = {
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
-export const events = {} as const satisfies Record<`daemon.${string}`, z.ZodType>;
+// P5 O16 M3c fix wave 2 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, D63; M3c's concern 1): `mawsd`'s engine
+// host update under way, posted on machine.sock to every ready client at each change and again every
+// ENGINE_HANDOVER_RESEND_MS while one is, so a client that attached meanwhile learns it and a client can bound its
+// freshness; `none` once it ended (the old host's exit, the successor's welcome, a failed ask's recycle). `waiting`: the
+// old build served until its MAWS tool calls are quiet; `draining`: its handover asked, the old host not yet gone, during
+// which `mawsd`'s relay holds an app's hello. `inFlight` and `tool`: the calls it waits for. `at`: when it was posted.
+// Main learns it from this event alone (never `daemon.status`, which wakes a parked engine host).
+export const EngineHandoverSchema = z.strictObject({ state: z.enum(['waiting', 'draining', 'none']), inFlight: z.number().int().nonnegative(), tool: z.string().optional(), at: z.string() });
+export type EngineHandover = z.infer<typeof EngineHandoverSchema>;
+
+export const events = {
+  'daemon.engineHandover': EngineHandoverSchema, // P5 O16 M3c fix wave 2
+} as const satisfies Record<`daemon.${string}`, z.ZodType>;

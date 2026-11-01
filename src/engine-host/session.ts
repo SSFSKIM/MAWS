@@ -205,6 +205,7 @@ interface SessionListeners {
   exited: (summary: ExitSummary) => void;
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
+  delivery: () => void; // P5 O16 M3c fix wave 2 (D63): the calls in flight through delivery, or the first one's tool, changed
 }
 // E1, E2: paneShow, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
@@ -234,7 +235,7 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, delivery: new Set() /* P5 O16 M3c fix wave 2 */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -269,6 +270,7 @@ export class EngineSession {
   private journalClosed = false;
   private lastEventSeq = 0;
   private lastStatusSignature = '';
+  private lastDelivery = '0:'; // P5 O16 M3c fix wave 2: the calls in flight through delivery and the first one's tool, as last told
   private grants: GrantSnapshot;
   private requestedModel: string | null; // the launch spec's, until `session.setModel` (M5)
   private requestedEffort: Effort | null; // the launch spec's, until `session.setEffort` (M5)
@@ -1181,6 +1183,11 @@ export class EngineSession {
   // The `maws` calls the drain waits for: every tool's but `ask`, each until its answer's write settled.
   inFlightThroughDelivery(): number {
     return this.maws.inFlightThroughDelivery();
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first of those calls, null when none is
+  deliveringTool(): string | null {
+    return this.maws.deliveringTool();
   }
 
   // The freeze, one synchronous step: nothing more is consumed from the transport (no record read from here is journaled,
@@ -2131,6 +2138,12 @@ export class EngineSession {
   // Emits `status` when anything but the event counter changed.
   private touch(): void {
     this.checkDrained(); // P5 O16 M3b: a call's retirement reaches the drain through here
+    // P5 O16 M3c fix wave 2 (D63): told apart from the status, which counts a call only until its tool returns
+    const delivery = `${this.inFlightThroughDelivery()}:${this.deliveringTool() ?? ''}`;
+    if (delivery !== this.lastDelivery) {
+      this.lastDelivery = delivery;
+      this.emit('delivery', undefined);
+    }
     if (this.folding) return; // P5 O16 M3: the fold tells nothing; the adoption's first status follows it
     const status = this.status();
     const signature = JSON.stringify({ ...status, lastEventSeq: 0 });

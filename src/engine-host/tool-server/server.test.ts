@@ -320,6 +320,37 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     expect(server.inFlightThroughDelivery()).toBe(0);
   });
 
+  // P5 O16 M3c fix wave 2 (D63): the engine host's status names what an update waits for
+  it('names the first call in flight through delivery, and tells each change, the start of a call included', async () => {
+    const pane = blocking('show_pane');
+    const file = blocking('send_file');
+    const ask = blocking('ask');
+    const { server, writes, call, changes } = gated([pane.tool, file.tool, ask.tool]);
+    expect(server.deliveringTool()).toBeNull();
+    call('ask', 1);
+    await flush();
+    expect(server.deliveringTool()).toBeNull(); // an ask is never what an update waits for
+    let told = changes();
+    call('show_pane', 2);
+    expect(changes()).toBeGreaterThan(told);
+    call('send_file', 3);
+    await flush();
+    expect(server.deliveringTool()).toBe('show_pane');
+    pane.finish();
+    await flush();
+    told = changes();
+    writes.find((w) => w.requestId === 'req-2')!.settle(true);
+    await flush();
+    expect(changes()).toBeGreaterThan(told);
+    expect(server.deliveringTool()).toBe('send_file');
+    file.finish();
+    await flush();
+    writes.find((w) => w.requestId === 'req-3')!.settle(true);
+    await flush();
+    expect(server.deliveringTool()).toBeNull();
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
   it("counts an unknown tool's answer until its write settles", async () => {
     const { server, writes, call } = gated([]);
     call('echo_file', 5);

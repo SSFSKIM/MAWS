@@ -4,6 +4,7 @@
 // detached entry wires it (detached.ts: a stop-all's exit stops, every other exit detaches).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SupervisorStatus } from '@shared/ipc/schema/host'; // P5 O16 M3c fix wave 2
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { REAP_TERM_MS } from './holder/reap';
 import { ProcessTable } from './process-table';
@@ -37,11 +38,12 @@ async function engineHost(ids: string[], opts: { endSession?: (id: string) => vo
   for (const row of rows) await row.session.start();
   const exits: SupervisorExit[] = [];
   const exitOrders: Promise<unknown>[] = [];
+  const emitted: SupervisorStatus[] = []; // P5 O16 M3c fix wave 2
   const supervision = new Supervision({
     mode: 'detached', identity: IDENTITY, table, role: 'laptop', log: () => {},
     plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
     shutdown: (graceMs) => table.shutdown({ graceMs }),
-    emit: () => true,
+    emit: (status) => (emitted.push(status), true),
   });
   const commands = new Map<string, (input: unknown) => Promise<unknown>>();
   supervision.register((name, handler) => void commands.set(name, handler as (input: unknown) => Promise<unknown>), { onConnect: () => {} });
@@ -51,7 +53,7 @@ async function engineHost(ids: string[], opts: { endSession?: (id: string) => vo
   });
   supervision.clientChanged(true);
   const call = (name: string, input: unknown) => commands.get(name)!(input);
-  return { table, rows, supervision, exits, exitOrders, call };
+  return { table, rows, supervision, exits, exitOrders, call, emitted };
 }
 
 describe('an ignored idle reap, then the handover', () => {
@@ -114,12 +116,23 @@ describe('a stop-all and the drain', () => {
     }
   };
 
+  // P5 O16 M3c fix wave 2 (D63): a real row's call reaches the pushed status (session → table → supervision), which an
+  // update reads for its quiet report
+  it('the status reports a real row’s call in flight through delivery and its tool, pushed at the call’s start', async () => {
+    const host = await engineHost(['app-a']);
+    const [a] = host.rows as [typeof host.rows[0]];
+    expect(host.supervision.status().holder).toMatchObject({ inFlight: 0 });
+    showPane(a);
+    await until(() => host.emitted.at(-1)?.holder?.inFlight === 1, 'the status pushed with the call in flight');
+    expect(host.emitted.at(-1)?.holder).toMatchObject({ inFlight: 1, tool: 'show_pane' });
+  });
+
   it('during a deferral: every frozen row stopped through the ladder, the engines exit, nothing detached, the exit is the stop-all’s', async () => {
     const host = await engineHost(['app-a', 'app-b'], { endSession: (id) => void setTimeout(() => host.rows.find((row) => row.session.status().appSessionId === id)!.transport.exit(0), 0) });
     const [a, b] = host.rows as [typeof host.rows[0], typeof host.rows[0]];
     showPane(a);
     await until(() => a.session.inFlightThroughDelivery() === 1, 'the call in flight');
-    expect(await host.call('host.handover', { graceMs: 50 })).toEqual({ state: 'deferred', inFlight: 1 });
+    expect(await host.call('host.handover', { graceMs: 50 })).toEqual({ state: 'deferred', inFlight: 1, tool: 'show_pane' /* P5 O16 M3c fix wave 2: over the real session */ });
     expect(await host.call('host.stopAll', { graceMs: 5_000 })).toEqual({ stopped: 2, forced: 0 });
     for (const row of [a, b]) {
       expect(row.session.lifecycle).toBe('exited');

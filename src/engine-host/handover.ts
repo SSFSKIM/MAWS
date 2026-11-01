@@ -10,6 +10,7 @@
 // What the drain needs of a frozen row (EngineSession's).
 export interface DrainingRow {
   inFlightThroughDelivery(): number;
+  deliveringTool?(): string | null; // P5 O16 M3c fix wave 2: the first of those calls' tool
   drained(): Promise<void>; // resolves at the first moment nothing is in flight (or the engine has exited)
   detach(reason: 'handover' | 'exit'): Promise<void>;
 }
@@ -22,7 +23,8 @@ export class HandoverDrain {
 
   constructor(
     private readonly rows: readonly DrainingRow[],
-    private readonly opts: { log: (line: string) => void; settled: () => void },
+    // `detached` (P5 O16 M3c fix wave 2): every row's detach has ended, after the settle
+    private readonly opts: { log: (line: string) => void; settled: () => void; detached?: () => void },
   ) {
     this.draining = rows.length;
     for (const row of rows) {
@@ -43,6 +45,15 @@ export class HandoverDrain {
     return this.rows.reduce((sum, row) => sum + row.inFlightThroughDelivery(), 0);
   }
 
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first call the drain still waits for, null when none
+  tool(): string | null {
+    for (const row of this.rows) {
+      const tool = row.deliveringTool?.() ?? null;
+      if (tool !== null) return tool;
+    }
+    return null;
+  }
+
   // Whether the drain settles within `ms`.
   settledWithin(ms: number): Promise<boolean> {
     if (this.settled) return Promise.resolve(true);
@@ -58,7 +69,8 @@ export class HandoverDrain {
   }
 
   private settle(): void {
-    for (const row of this.rows) row.detach('handover').catch((error: unknown) => this.opts.log(`a row's detach failed: ${error instanceof Error ? error.message : String(error)}`));
+    const detaches = this.rows.map((row) => row.detach('handover').catch((error: unknown) => this.opts.log(`a row's detach failed: ${error instanceof Error ? error.message : String(error)}`)));
+    void Promise.all(detaches).then(() => this.opts.detached?.());
     for (const waiter of [...this.waiters]) waiter();
     this.opts.settled();
   }

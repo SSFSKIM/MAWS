@@ -41,7 +41,7 @@ import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
 import { codecOf } from '../ipc/validate';
 import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
-import { createDetachedTransport, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
+import { createDetachedTransport, HANDOVER_GRACE_MS, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
 import { CompletionRoutes, type CompletionRoute } from './completion-routes'; // P5 O16 M3b fix wave 3
 import { DocumentsClosedSchema, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
@@ -121,6 +121,17 @@ export interface HostFacts {
   refused: 'wire' | 'protocol' | null; // while `incompatible`: what the supervisor's refusal named
   waitingLiveSessions: number | null; // while `incompatible`: the sessions its last refusal said it runs (Task 2.4)
   lastExit: { code: number | null; signal: string | null; at: string } | null; // the last unexpected exit this app run
+}
+
+// P5 O16 M3c fix wave 2 (D63): an engine host's update under way, as the host supervisor that asks it knows it:
+// `waiting`, a host of another build served until its MAWS tool calls are quiet (its pushed status's count and first
+// tool); `draining`, a handover asked (by the update or the owner), from the ask until the old host's exit (its link's
+// loss), the count as its last answer or status said. `mawsd` tells it to main (`daemon.engineHandover`); main's own
+// transport's is the embedded shape's.
+export interface EngineHandoverState {
+  state: 'waiting' | 'draining';
+  inFlight: number;
+  tool?: string;
 }
 
 export interface HostSupervisor {
@@ -205,6 +216,10 @@ export interface HostSupervisor {
   // P5 O16 M3b fix wave 2: whether `name` is a completion (DRAIN_REPLIES) whose raising host is gone, so its request is
   // answered `host_unavailable` at once and is no need (mawsd's engine-requests.ts)
   completionGone(owner: HostOwner, name: string, input: unknown): boolean;
+  // P5 O16 M3c fix wave 2 (D63): the host's update under way (above), null when none; told at each change. Cleared at the
+  // old host's exit (its link's loss), at a successor's welcome, and at a failed ask's recycle.
+  handoverState(owner: HostOwner): EngineHandoverState | null;
+  onHandover(owner: HostOwner, listener: (state: EngineHandoverState | null) => void): () => void;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -296,6 +311,10 @@ interface Host {
   raw: Set<(message: { name: string; payload: unknown }) => void>;
   settled: Set<() => void>; // recycles waiting for the host's next ready or crashed
   // P5 O2 M3 end
+  // P5 O16 M3c fix wave 2 (D63): the served host is of another build and hands over: asked at its first quiet status
+  updatePending: boolean;
+  handover: EngineHandoverState | null; // the update under way (EngineHandoverState)
+  handoverListeners: Set<(state: EngineHandoverState | null) => void>;
 }
 
 export function createHostSupervisor(options: HostSupervisorOptions): HostSupervisor {
@@ -305,13 +324,14 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // P5 O1 M6: one line per dropped field, and one per event name this build does not know
   const logDropped = tolerantLog((line) => console.warn(`[hosts] ${line}`));
   const unknownEvents = new Set<string>();
-  // P5 O16 M3c fix wave 1: the engine host pids whose last status said they were handing over (`holder.handover`
-  // draining), heard on whichever link carries the host's events (on the daemon shape, machine.sock); a close of one is
-  // that handover's, not a crash
-  const handingOver = new Set<number>();
+  // P5 O16 M3c fix wave 1: the engine host pids whose last status said their handover completed, heard on whichever link
+  // carries the host's events (on the daemon shape, machine.sock); a close of one is that handover's, not a crash. Fix
+  // wave 2 (the re-review's item 6): on the evidence (`holder.detached`: the drain settled and every row detached, said
+  // before the exit), never on the intent (`draining`), so a host killed mid-drain is a crash
+  const handedOver = new Set<number>();
   const noteHandover = (status: SupervisorStatus) => {
-    if (status.holder?.handover === 'draining') handingOver.add(status.pid);
-    else handingOver.delete(status.pid);
+    if (status.holder?.detached === true) handedOver.add(status.pid);
+    else handedOver.delete(status.pid);
   };
   const hosts: Partial<Record<HostOwner, Host>> = {};
   // P5 O1 M5: for the calls that name a host this process runs
@@ -358,6 +378,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       readyAsked: false,
       raw: new Set(),
       settled: new Set(),
+      updatePending: false, // P5 O16 M3c fix wave 2
+      handover: null,
+      handoverListeners: new Set(),
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -673,9 +696,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       launch(host);
     };
     return {
-      connected(link: HostLink, welcome) {
+      connected(link: HostLink, welcome, facts) {
         if (stopped) return link.close();
         park(host, false); // P5 O2 M3: an adoption, or a launch, reached it
+        host.updatePending = facts?.updatePending === true; // P5 O16 M3c fix wave 2
+        setHandover(host, null); // a successor's welcome, or the same host's again (its wait re-read from its next status)
         host.port = link;
         host.draining = null; // P5 O16 M3b fix wave 1: the successor's link (the old one closed before it)
         opened(host, link, welcome.pid); // fix wave 3: a process still reconnecting is gone, its completions failed
@@ -707,6 +732,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         disconnected();
       },
       lost(loss) {
+        // P5 O16 M3c fix wave 2: the old host's exit (or its link's loss) ends the update it waited in
+        host.updatePending = false;
+        setHandover(host, null);
         // P5 O16 M3b fix wave 1: the old link closed: its host's completions have no one to settle (fix wave 3: refused)
         const drained = host.draining ? host.routes.closed(host.draining) : null;
         host.draining = null;
@@ -730,7 +758,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (loss === 'deliberate') return deliberate();
         // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
         // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
-        if (closed !== null && handingOver.delete(closed)) {
+        if (closed !== null && handedOver.delete(closed)) {
           console.error(`[hosts] ${host.owner} pid ${closed} left after handing its sessions over; starting its successor`);
           failSent(host, 'handed its sessions over');
           return launch(host);
@@ -738,11 +766,13 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         unexpected(loss.crash);
       },
       exited(exit) {
+        setHandover(host, null); // P5 O16 M3c fix wave 2
         if (stopped) return;
         processGone(host, host.routes.allReconnectingGone()); // P5 O16 M3b fix wave 3
         unexpected(exit);
       },
       failed(reason, message) {
+        setHandover(host, null); // P5 O16 M3c fix wave 2
         if (!stopped) crashed(`could not be reached${reason === 'held_lock' ? ' (held_lock)' : ''}: ${message}`, { reason: reason === 'held_lock' ? 'held_lock' : null });
       },
       waiting(refuse) {
@@ -766,6 +796,39 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     };
   }
   // E10 end
+
+  // P5 O16 M3c fix wave 2 (D63): the update under way, told at each change
+  function setHandover(host: Host, next: EngineHandoverState | null): void {
+    if (JSON.stringify(next) === JSON.stringify(host.handover)) return;
+    host.handover = next;
+    for (const listener of [...host.handoverListeners]) {
+      try {
+        listener(next);
+      } catch (error) {
+        console.error(`[hosts] a handover listener of ${host.owner} failed`, error);
+      }
+    }
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the engine host's pushed status. A served host of another build that hands over is asked
+  // to, once, at its first status that says no MAWS tool call is in flight (or says nothing of it, a capable build before
+  // the report): a model turn with no tool in flight is quiet, so the freeze lands between calls. Until then it serves,
+  // and the wait names what it waits for. A draining host's status keeps the count current.
+  function heardStatus(host: Host, status: SupervisorStatus, from: MainPort): void {
+    const inFlight = status.holder?.inFlight;
+    const tool = status.holder?.tool;
+    if (host.handover?.state === 'draining' && from === host.draining && inFlight !== undefined) return setHandover(host, { state: 'draining', inFlight, ...(tool !== undefined && { tool }) });
+    if (!host.updatePending || from !== host.port || status.pid !== host.state.pid) return;
+    if (inFlight !== undefined && inFlight > 0) {
+      if (host.handover === null) console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, hands over once its ${inFlight} calls in flight${tool ? ` (${tool})` : ''} finish; serving it meanwhile`);
+      return setHandover(host, { state: 'waiting', inFlight, ...(tool !== undefined && { tool }) });
+    }
+    host.updatePending = false;
+    console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, is quiet; asking it to hand its sessions over`);
+    void api.handover(host.owner, HANDOVER_GRACE_MS).then((answer) => {
+      if (!answer.ok) console.error(`[hosts] ${host.owner} pid ${status.pid} did not hand over: ${answer.error.message}`);
+    });
+  }
 
   function exited(host: Host, code: number | null): void {
     detach(host, 'exited');
@@ -826,7 +889,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       }
       logDropped(`event ${name}`, read.dropped);
       const payload = read.value;
-      if (name === 'host.supervisorStatus') noteHandover(payload as SupervisorStatus); // P5 O16 M3c fix wave 1
+      if (name === 'host.supervisorStatus') {
+        noteHandover(payload as SupervisorStatus); // P5 O16 M3c fix wave 1
+        heardStatus(host, payload as SupervisorStatus, from); // fix wave 2
+      }
       const relayed = emit(name as EventName, payload as never);
       if (relayed && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
       if (relayed) notifyEvent(name as EventName, payload); // C3: emit validated it, and validators never transform
@@ -999,7 +1065,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   const dispatch: HostDispatch = (owner, name, input, client) => request(owner, name, input, client ?? null, null);
 
-  return {
+  const api: HostSupervisor = {
     start() {
       // Stop is final: a start that comes after it (will-quit racing activate) must not fork past the only cleanup.
       if (stopped) started ??= Promise.resolve();
@@ -1035,6 +1101,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (drain) drains.push(drain);
         detach(host, 'was stopped');
         failHeld(host, 'was stopped');
+        setHandover(host, null); // P5 O16 M3c fix wave 2
         utility?.child.kill();
         host.settleFirstLaunch();
         settle(host); // P5 O2 M3
@@ -1191,6 +1258,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       if (stopped || host.quitting || !transport || !host.port || host.state.state !== 'ready') return { ok: false, error: ipcError('host_unavailable', `${owner} is ${host.parked ? 'parked' : host.state.state}; it cannot hand over`) };
       if (!host.peer?.capabilities.includes(HOLDER_CAPABILITY)) return { ok: false, error: ipcError('host_unavailable', `${owner} (build ${host.peer?.build ?? 'unknown'}) does not hand its sessions over`) };
       host.readyAsked = false; // a sayReady belonged to the connection that ends here
+      // P5 O16 M3c fix wave 2 (D63): from the ask, the update (or the owner's restart) drains; an update's wait is over
+      host.updatePending = false;
+      const waited = host.handover;
+      setHandover(host, { state: 'draining', inFlight: waited?.inFlight ?? 0, ...(waited?.tool !== undefined && { tool: waited.tool }) });
       unlink(host);
       host.draining = host.port; // fix wave 1: the drain's replies still go to it
       host.port = null;
@@ -1200,14 +1271,23 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
         if (host.draining) host.closedPid = host.routes.closed(host.draining); // fix wave 3: the same process, reconnected to
         host.draining = null;
+        setHandover(host, null); // fix wave 2: the recycle's fresh welcome re-reads any update from the host's next status
         transport.recycle(() => failSent(host, 'was recycled'));
         return { ok: false, error: ipcError('internal', `${owner} did not hand over: ${answer.why}`) };
       }
+      if (answer.state === 'deferred' && host.handover?.state === 'draining') setHandover(host, { state: 'draining', inFlight: answer.inFlight, ...(answer.tool !== undefined && { tool: answer.tool }) });
       return { ok: true, value: answer };
     },
     completionGone(owner, name, input) {
       const host = hosts[owner];
       return owner === 'engine-host' && host !== undefined && DRAIN_REPLIES.has(name) && completionRoute(host, input) === null && !viaMachine(host);
     },
+    handoverState: (owner) => hosts[owner]?.handover ?? null, // P5 O16 M3c fix wave 2
+    onHandover(owner, listener) {
+      const { handoverListeners } = hostOf(owner);
+      handoverListeners.add(listener);
+      return () => handoverListeners.delete(listener);
+    },
   };
+  return api;
 }

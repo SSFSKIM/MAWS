@@ -12,6 +12,8 @@ import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { daemonStatus } from '../../../test/support/builders';
 import { CommandFailure } from '../ipc/router';
 import type { HostFacts } from './supervisor';
+import type { EngineHandoverState } from '@shared/host/host-supervisor';
+import type { EngineHandoverWatch } from './engine-handover';
 import { startHostStatus, type HostStatusDeps } from './status';
 
 const APP_BUILD = 'b0b0b0b0b0b0b0b0';
@@ -24,7 +26,7 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
   socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0, ...over,
 });
 
-function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable' | 'spineRefused'> = {}) {
+function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable' | 'spineRefused' | 'engineHandover'> = {}) {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
   let machine: HostState = { state: 'ready', pid: 77, restarts: 0, revision: 0 }; // the daemon shape's machine.sock
   let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
@@ -33,6 +35,8 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
   let machineStreaming = true; // from main's ready line on machine.sock until it leaves ready
   const streamingListeners = new Set<() => void>();
   const eventListeners = new Set<(s: SupervisorStatus) => void>();
+  let handover: EngineHandoverState | null = null; // P5 O16 M3c fix wave 2: main's own transport's (the embedded shape)
+  const handoverListeners = new Set<(s: EngineHandoverState | null) => void>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: HostStatus[] = [];
   const restartSupervisor = vi.fn(async (): Promise<CommandResult<'host.restart'>> => ({ ok: true, value: undefined }));
@@ -58,6 +62,8 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
       onEvent: ((_name: string, l: (s: SupervisorStatus) => void) => (eventListeners.add(l), () => void eventListeners.delete(l))) as HostStatusDeps['hosts']['onEvent'],
       facts: () => facts,
       restartSupervisor,
+      handoverState: () => handover, // P5 O16 M3c fix wave 2
+      onHandover: (_owner, l) => (handoverListeners.add(l), () => void handoverListeners.delete(l)),
     },
     appBuildId: () => APP_BUILD,
     appWire: () => APP_WIRE,
@@ -94,12 +100,16 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     status(next: SupervisorStatus) {
       eventListeners.forEach((l) => l(next));
     },
+    handover(next: EngineHandoverState | null) {
+      handover = next;
+      handoverListeners.forEach((l) => l(next));
+    },
     asked,
     askedOn,
     answerWith(next: (owner: string) => Promise<CommandResult<'host.supervisorStatus'>>) {
       answer = next;
     },
-    listeners: () => stateListeners.size + machineListeners.size + streamingListeners.size + eventListeners.size,
+    listeners: () => stateListeners.size + machineListeners.size + streamingListeners.size + eventListeners.size + handoverListeners.size,
   };
   return h;
 }
@@ -219,11 +229,13 @@ describe('host.status', () => {
 
   // P5 O16 M3c: a host whose last status said it was handing over left by design (another client asked it: `mawsd restart
   // --engine-host`, `mawsd` of another build), so its exit is no unexpected one, its successor's adoptions or not
-  it('the exit of a host whose last status said it was handing over is not told', () => {
+  // P5 O16 M3c fix wave 2 (the re-review's item 6): on the old host's word that its rows detached, not on its intent
+  it('the exit of a host whose last status said its handover detached every row is not told', () => {
     const h = harness();
     h.move({ state: 'ready', pid: 4242 });
     h.status(supervisorStatus({ liveSessions: 1, holder: holder(1, 0, false) }));
     h.status(supervisorStatus({ liveSessions: 1, holder: { ...holder(1, 0, false), handover: 'draining' } }));
+    h.status(supervisorStatus({ liveSessions: 1, holder: { ...holder(1, 0, false), handover: 'draining', detached: true } }));
     h.move({ state: 'restarting', pid: null }, { lastExit: { code: 0, signal: null, at: '2026-10-06T10:05:00.000Z' } });
     h.move({ state: 'ready', pid: 5151 });
     h.status(supervisorStatus({ pid: 5151, liveSessions: 1, holder: holder(1, 1, true) }));
@@ -234,6 +246,17 @@ describe('host.status', () => {
     h.move({ state: 'restarting', pid: null }, { lastExit: crash });
     h.move({ state: 'ready', pid: 6161 });
     h.status(supervisorStatus({ pid: 6161, liveSessions: 1, holder: holder(1, 1, false) }));
+    expect(h.emitted.at(-1)?.lastExit).toEqual({ ...crash, interrupted: 0, adopted: 1 });
+  });
+
+  it('the exit of a host killed mid-drain (it said draining, never detached) is told as the crash it was', () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    h.status(supervisorStatus({ liveSessions: 1, holder: { ...holder(1, 0, false), handover: 'draining', inFlight: 1, tool: 'artifact_list' } }));
+    const crash = { code: null, signal: 'SIGKILL', at: '2026-10-06T10:05:00.000Z' };
+    h.move({ state: 'restarting', pid: null }, { lastExit: crash });
+    h.move({ state: 'ready', pid: 5151 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 1, holder: holder(1, 1, false) }));
     expect(h.emitted.at(-1)?.lastExit).toEqual({ ...crash, interrupted: 0, adopted: 1 });
   });
 
@@ -412,5 +435,41 @@ describe('host.restart and host.openLog', () => {
     const utility = harness('utility');
     await expect(utility.call('host.openLog')).rejects.toMatchObject({ error: { code: 'internal' } });
     expect(utility.openPath).not.toHaveBeenCalled();
+  });
+});
+
+// P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls says so in host.status (`handover`): from main's
+// own transport on the embedded shape, from mawsd's report on the daemon shape; absent when nothing is waited for
+describe('host.status’s handover', () => {
+  it('on the embedded shape, main’s own transport’s wait, emitted at each change, absent with nothing in flight', async () => {
+    const h = harness();
+    h.move({ state: 'ready', pid: 4242 });
+    expect(h.emitted.at(-1)).not.toHaveProperty('handover');
+    h.handover({ state: 'waiting', inFlight: 2, tool: 'artifact_list' });
+    expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 2, tool: 'artifact_list' });
+    expect(validateEventPayload('host.status', h.emitted.at(-1)).ok).toBe(true);
+    h.handover({ state: 'draining', inFlight: 1 });
+    expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 1 });
+    h.handover({ state: 'draining', inFlight: 0 });
+    expect(h.emitted.at(-1)).not.toHaveProperty('handover');
+    h.handover(null);
+    await expect(h.call('host.status')).resolves.not.toHaveProperty('handover');
+    h.service.stop();
+    expect(h.listeners()).toBe(0);
+  });
+
+  it('on the daemon shape, mawsd’s report, emitted at each change', () => {
+    let reason: ReturnType<EngineHandoverWatch['reason']> = null;
+    const changes = new Set<() => void>();
+    const engineHandover: EngineHandoverWatch = { waiting: () => false, reason: () => reason, onChange: (l) => (changes.add(l), () => void changes.delete(l)), bind: () => () => {} };
+    const h = harness('detached', { daemon: () => null, engineHandover });
+    reason = { inFlight: 3, tool: 'show_pane' };
+    changes.forEach((l) => l());
+    expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 3, tool: 'show_pane' });
+    reason = null;
+    changes.forEach((l) => l());
+    expect(h.emitted.at(-1)).not.toHaveProperty('handover');
+    h.service.stop();
+    expect(changes.size).toBe(0);
   });
 });

@@ -113,6 +113,7 @@ import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
+import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
@@ -1011,6 +1012,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     log,
   });
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
+  // P5 O16 M3c fix wave 2 (D63): the engine host's update under way, told to machine.sock's clients (engine-handover-event.ts)
+  const engineHandover = tellEngineHandover({ hosts, emit: (payload) => front.bus.emit('daemon.engineHandover', payload) });
 
   // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
   const artifacts = createArtifactsEndpoint({
@@ -1225,6 +1228,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
+      engineHandover.stop(); // P5 O16 M3c fix wave 2
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);

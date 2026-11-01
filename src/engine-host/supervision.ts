@@ -35,6 +35,7 @@ import type { SupervisorStatus } from '@shared/ipc/schema/host';
 import type { IdleCollector } from '@shared/host/idle-collect';
 import { isIdleRow } from './budget';
 import { HANDOVER_GRACE_MS, HandoverDrain, type DrainingRow } from './handover';
+import type { HandoverRace } from './e2e-handover-race';
 import type { PluginsRunner } from './plugins/runner';
 import type { ProcessTable } from './process-table';
 import type { MachineRole } from './role';
@@ -57,7 +58,9 @@ export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
   table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'launching' | 'onHoldChanged'> & {
-    list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[];
+    // P5 O16 M3c fix wave 2: and each row's calls in flight through delivery (absent in a harness that tells none)
+    list(): readonly (Pick<EngineSession, 'lifecycle' | 'status'> & Partial<Pick<EngineSession, 'inFlightThroughDelivery' | 'deliveringTool'>>)[];
+    onDeliveryChanged?(listener: () => void): () => void; // P5 O16 M3c fix wave 2: the table's
     readonly adoptingCount?: number; // P5 O16 M3
     freezeForHandover?(): readonly DrainingRow[]; // P5 O16 M3b: the table's (absent in a harness that never hands over)
   };
@@ -75,6 +78,8 @@ export interface SupervisionDeps {
   // P5 O16 M3b fix wave 4: told once the drain is armed, to fail the host's work that cannot finish before it goes (the
   // dataset refreshes, whose connector leg runs only on a ready host); their calls answer, and the drain waits for that
   handingOver?(): void;
+  // P5 O16 M3c fix wave 2: the e2e's race into a deferred handover (e2e-handover-race.ts), under MAWS_E2E alone
+  e2eRace?: HandoverRace;
 }
 
 const NO_STATEFUL: ReadonlySet<string> = new Set(); // a stateful server holds a row's release, not its quiet
@@ -96,6 +101,8 @@ export class Supervision {
   private adoptionsFailed = 0; // P5 O16 M3: the session hosts the start found live and did not adopt
   private adopting: boolean; // P5 O16 M3b: a detached host's start-up adoptions have not ended (the crash toast's count waits)
   private drain: HandoverDrain | null = null; // P5 O16 M3b: armed once, for the host's remaining life
+  private detached = false; // P5 O16 M3c fix wave 2: the drain settled and every row's detach ended
+  private racing = false; // P5 O16 M3c fix wave 2: the e2e race has run (or runs) for the first ask
   private answering = 0; // P5 O16 M3b: `host.handover` answers not yet posted; the exit waits for them
   private serving: boolean; // a utility host serves from its register, a detached one from `started`
   private settled: boolean; // the startup gate resolved or rejected
@@ -110,6 +117,7 @@ export class Supervision {
     deps.table.onChange(() => this.refresh());
     if (deps.collector) deps.table.onHoldChanged(() => this.refresh());
     deps.table.onRowsChanged(() => this.refresh());
+    deps.table.onDeliveryChanged?.(() => this.publish(false)); // P5 O16 M3c fix wave 2: the status's holder.inFlight
     deps.plugins.onIdle(() => this.refresh());
     deps.plugins.onBusy(() => this.refresh());
     const settle = () => {
@@ -143,12 +151,20 @@ export class Supervision {
       if (this.deps.mode !== 'detached') throw new HostCommandError({ code: 'internal', message: 'the handover is the detached supervisor’s; a utility host ends with the app' });
       this.answering += 1;
       try {
+        let grace = graceMs ?? HANDOVER_GRACE_MS;
+        const race = this.drain === null && !this.racing ? this.deps.e2eRace : undefined; // fix wave 2: the first ask's alone
+        if (race) {
+          this.racing = true;
+          this.deps.log('e2e: the handover waits for a call to start before its freeze');
+          grace = Math.max(0, grace - (await race(() => this.delivering(this.deps.table.list()).inFlight)));
+        }
         const drain = this.armHandover();
-        const settled = drain.settled || (await drain.settledWithin(graceMs ?? HANDOVER_GRACE_MS));
+        const settled = drain.settled || (await drain.settledWithin(grace));
         if (settled) return { state: 'detaching' as const };
         const inFlight = drain.inFlight();
+        const tool = drain.tool(); // P5 O16 M3c fix wave 2
         this.deps.log(`the handover defers: ${inFlight} calls in flight`);
-        return { state: 'deferred' as const, inFlight };
+        return { state: 'deferred' as const, inFlight, ...(tool !== null && { tool }) };
       } finally {
         this.answering -= 1;
         this.handoverDue();
@@ -221,7 +237,11 @@ export class Supervision {
     const freeze = this.deps.table.freezeForHandover;
     if (!freeze) throw new HostCommandError({ code: 'internal', message: 'this host cannot hand over' });
     const rows = freeze.call(this.deps.table);
-    this.drain = new HandoverDrain(rows, { log: this.deps.log, settled: () => this.handoverDue() });
+    // fix wave 2: the status says detached once every row's detach has ended, before the exit order closes the links
+    this.drain = new HandoverDrain(rows, { log: this.deps.log, settled: () => this.handoverDue(), detached: () => {
+      this.detached = true;
+      this.publish(false);
+    } });
     this.clearIdle();
     this.deps.log(`handover armed: ${rows.length} hosted rows frozen, ${this.drain.inFlight()} calls in flight`);
     this.deps.handingOver?.(); // fix wave 4
@@ -261,8 +281,20 @@ export class Supervision {
       release: { role: this.deps.role, idleMs: this.releaseIdleMs(), ...(this.deps.gate && { gate: this.deps.gate.counts() }) }, // P5 O2 M2; O16 M5: the gate
       // P5 O16 M2: the live rows' session hosts (the detached mode's; a utility host spawns directly, so it counts none);
       // O16 M5: the gate's path, on either shape that serves one (null before it listens or once its listen failed)
-      ...((this.deps.mode === 'detached' || this.deps.gate) && { holder: { hosts: this.deps.mode === 'detached' ? rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length : 0, adopted: rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder?.adopted === true).length, failed: this.adoptionsFailed, /* P5 O16 M3 */ gate: this.deps.gate?.path() ?? null, handover: this.drain === null ? ('none' as const) : ('draining' as const), adopting: this.adopting /* P5 O16 M3b */ } }),
+      ...((this.deps.mode === 'detached' || this.deps.gate) && { holder: { hosts: this.deps.mode === 'detached' ? rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder).length : 0, adopted: rows.filter((row) => row.lifecycle !== 'exited' && row.status().holder?.adopted === true).length, failed: this.adoptionsFailed, /* P5 O16 M3 */ gate: this.deps.gate?.path() ?? null, handover: this.drain === null ? ('none' as const) : ('draining' as const), adopting: this.adopting /* P5 O16 M3b */, ...this.delivering(rows), ...(this.detached && { detached: true }) /* M3c fix wave 2 */ } }),
     };
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the calls the hosted rows hold in flight through delivery, and the first one's tool
+  private delivering(rows: ReturnType<SupervisionDeps['table']['list']>): { inFlight: number; tool?: string } {
+    let inFlight = 0;
+    let tool: string | null = null;
+    for (const row of rows) {
+      if (row.lifecycle === 'exited' || !row.status().holder) continue;
+      inFlight += row.inFlightThroughDelivery?.() ?? 0;
+      tool ??= row.deliveringTool?.() ?? null;
+    }
+    return { inFlight, ...(tool !== null && { tool }) };
   }
 
   // Every change that could move a clock or the status: a row's status, the row set, the runner going busy or idle, a

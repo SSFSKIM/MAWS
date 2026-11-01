@@ -84,7 +84,8 @@ export interface MawsToolServerDeps {
 export class MawsToolServer {
   private readonly tools: Map<string, McpToolDefinition>;
   private readonly calls = new Map<RequestId, { id: RpcId; controller: AbortController; answered: boolean }>();
-  private readonly delivering = new Set<RequestId>(); // P5 O16 M3b: the calls the handover's drain waits for
+  // P5 O16 M3b: the calls the handover's drain waits for; M3c fix wave 2 (D63): each with its tool's name, in call order
+  private readonly delivering = new Map<RequestId, string>();
   private callsStarted = 0;
 
   constructor(private readonly deps: MawsToolServerDeps) {
@@ -106,6 +107,13 @@ export class MawsToolServer {
   // settles. Not `inFlight`, which `call()` clears before it queues the answer.
   inFlightThroughDelivery(): number {
     return this.delivering.size;
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first call `inFlightThroughDelivery` counts (what an update waits for,
+  // in the engine host's status); null when none is
+  deliveringTool(): string | null {
+    for (const tool of this.delivering.values()) return tool;
+    return null;
   }
 
   // Every `mcp_message` the engine sends, read as the normaliser reads it (src/shared/maws/rpc.ts); answered through
@@ -194,7 +202,10 @@ export class MawsToolServer {
 
   private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>): Promise<void> {
     const { name, args, toolUseId } = toolCallOf(params);
-    if (name !== 'ask') this.delivering.add(requestId); // P5 O16 M3b
+    if (name !== 'ask') {
+      this.delivering.set(requestId, String(name)); // P5 O16 M3b
+      this.deps.onChange?.(); // M3c fix wave 2: an update waiting for quiet hears the call start
+    }
     const tool = typeof name === 'string' ? this.tools.get(name) : undefined;
     if (!tool) {
       void this.result(requestId, id, toolError(TOOL_ERRORS.unknownTool(String(name)))).then(() => this.retire(requestId));
