@@ -23,10 +23,12 @@ const LINK_RULES = {
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
-  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'render', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */],
+  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'render', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */, 'browserEngine' /* P5 O17 */],
   // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app.
-  // P5 O5 M3: `render.*` go from a profile's `mawsd` to its own render host alone, never over a machine link
-  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request'],
+  // P5 O5 M3: `render.*` go from a profile's `mawsd` to its own render host alone, never over a machine link. P5 O17:
+  // `browserEngine.*` likewise, to its own tab engines; and the engine host's `host.browserIdle` is `mawsd`'s own, heard
+  // by no app and no link
+  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'host.browserIdle'],
 };
 
 const placedBy = (rules: { namespaces: string[]; names: string[] }) => (name: string) => rules.names.includes(name) || rules.namespaces.includes(name.slice(0, name.indexOf('.')));

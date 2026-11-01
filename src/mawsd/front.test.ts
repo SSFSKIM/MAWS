@@ -424,10 +424,12 @@ describe('the services front', () => {
 describe('browser work through the front', () => {
   const S = 's1' as never;
 
-  function withWork(capable = true) {
+  // `heldBack`: each snapshot is acknowledged only when the test calls its `ack`, else at once
+  function withWork(capable = true, heldBack = false) {
     const work = createBrowserWork({ machine: 'mini', log: () => {} });
     const snapshots: unknown[][] = [];
-    void work.linkUp(async (held) => void snapshots.push(held), capable);
+    const acks: (() => void)[] = [];
+    void work.linkUp((held) => (snapshots.push(held), heldBack ? new Promise<void>((resolve) => void acks.push(resolve)) : Promise.resolve()), capable);
     let selected: EngineConnection | null = null;
     const served = front({ browser: { work, selected: () => selected } });
     // a render host's connection: its runtime is the engine connection the route selects
@@ -438,17 +440,22 @@ describe('browser work through the front', () => {
       end.ready();
       return { end, runtime };
     };
-    return { work, snapshots, served, engine, select: (connection: EngineConnection | null) => void (selected = connection) };
+    return { work, snapshots, acks, served, engine, select: (connection: EngineConnection | null) => void (selected = connection) };
   }
 
-  it('takes held: true from the selected connection alone, answered after the snapshot naming the session', async () => {
-    const { work, snapshots, engine, select } = withWork();
+  it('takes held: true from the selected connection alone, answered only once the snapshot naming the session is acknowledged', async () => {
+    const { work, snapshots, acks, engine, select } = withWork(true, true);
+    acks[0]!(); // the link's first snapshot, {}
     const [chosen, other] = [engine(), engine()];
     select(chosen.runtime);
     expect(await other.end.request('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
     expect(work.held()).toEqual([]);
-    expect(await chosen.end.request('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: true });
-    expect(snapshots).toEqual([[], [S]]);
+    chosen.end.send({ t: 'req', id: 'w1', name: 'browserEngine.work', input: { appSessionId: S, held: true } });
+    await vi.waitFor(() => expect(snapshots).toEqual([[], [S]]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chosen.end.posted.find((m) => m.id === 'w1'), 'no answer before the acknowledgement').toBeUndefined();
+    acks[1]!();
+    await vi.waitFor(() => expect(chosen.end.posted.find((m) => m.id === 'w1')).toMatchObject({ t: 'res', ok: true }));
     expect(work.held()).toEqual([S]);
   });
 
