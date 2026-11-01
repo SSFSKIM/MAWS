@@ -98,6 +98,7 @@ import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
 import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { BrowserRefused, type BrowserFeed } from '@shared/browser/screencast'; // P5 O17 M6
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
@@ -142,6 +143,7 @@ import { createCuaSockets, type CuaSockets } from './cua-socket'; // P5 O5 M5
 import { browserCapability, createSessionCapabilities, headlessReason, type HeadlessFacts } from './session-capabilities'; // P5 O5 M5
 import { createBrowserWork } from './browser-work'; // P5 O17 M3
 import { createBrowserRoute } from './browser-route'; // P5 O17 M5
+import type { BrowserFeedService } from './browser-feed'; // P5 O17 M6: types alone, the feed is a deferred chunk
 import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -1137,6 +1139,34 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     sessionCapabilities.forget(appSessionId);
   };
 
+  // --- the viewers' feed (P5 O17 M6; browser-feed.ts, a deferred chunk): DaemonServices.browser --------------------------
+  // The inventory and its changes are the route's cache, read with nothing loaded; the first open loads the feed, which
+  // then hears the engines' frames and ends through the front (none is taken before: no subscription exists)
+  let feed: BrowserFeedService | null = null;
+  let feedLoading: Promise<BrowserFeedService> | null = null;
+  const ensureFeed = (): Promise<BrowserFeedService> => {
+    if (feed) return Promise.resolve(feed);
+    const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
+    if (refused !== null) return Promise.reject(new BrowserRefused('unavailable', refused));
+    feedLoading ??= import('./browser-feed').then(
+      (chunk) => {
+        feed = chunk.createBrowserFeed({ machine, route, post: (engine, request) => front.postEngine(engine, 'browserEngine.request', request), log });
+        log('[browser] the viewers’ feed loaded at its first open');
+        return feed;
+      },
+      (error: unknown) => {
+        feedLoading = null; // the next open tries again
+        throw new BrowserRefused('unavailable', `the agent's browser feed could not load on ${machine}: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    );
+    return feedLoading;
+  };
+  const browserFeed: BrowserFeed = {
+    inventory: (appSessionId) => route.inventory(appSessionId),
+    watchInventory: (appSessionId, changed) => route.watchInventory(appSessionId, changed),
+    open: (input, sink) => ensureFeed().then((loaded) => loaded.open(input, sink)),
+  };
+
   // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
@@ -1162,9 +1192,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     browser: {
       work: browserWork,
       selected: (appSessionId) => route.selection(appSessionId),
-      answer: (engine, input) => render.browserAnswer(engine, input),
+      answer: (engine, input) => (feed?.answer(engine, input) ?? false) || render.browserAnswer(engine, input), // P5 O17 M6: the feed's requests first
       state: (engine, input) => route.state(engine, input),
       workChanged: () => render.browserWorkChanged(),
+      frame: (engine, input) => feed?.frame(engine, input) ?? false, // P5 O17 M6
+      ended: (engine, input) => feed?.ended(engine, input) ?? false,
+      gone: (engine) => feed?.gone(engine),
     },
     log,
   });
@@ -1287,6 +1320,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       },
     },
     artifacts: { fetch: (request) => artifacts.fetch(request) }, // P5 O5 M2
+    browser: browserFeed, // P5 O17 M6
     log: (line) => log(`[endpoint] ${line}`),
   };
 

@@ -35,6 +35,7 @@ function services(enrolled = false): DaemonServices & { lines: string[] } {
     hold: () => () => {},
     interest: { report: () => {}, drop: () => {} },
     artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
+    browser: { inventory: () => ({ epoch: 'e', tabs: [], selected: null, state: 'ready' }), watchInventory: () => () => {}, open: async () => Promise.reject(new Error('no browser here')) }, // P5 O17 M6
     log: (line) => void lines.push(line),
     lines,
   };
@@ -88,9 +89,13 @@ function loader() {
 }
 
 describe('the endpoint seam', () => {
+  // P5 O17 M6: DaemonServices leads EndpointServices by `browser` (the agent's tabs' feed seam) until O17 M9 adds
+  // EndpointServices.browser in the remote stage (R1), which makes the two equal again
   it('DaemonServices is O10’s EndpointServices, and the two EndpointModule shapes are one', () => {
-    expectTypeOf<DaemonServices>().toEqualTypeOf<EndpointServices>();
-    expectTypeOf<EndpointModule>().toEqualTypeOf<O10Module>();
+    expectTypeOf<Omit<DaemonServices, 'browser'>>().toEqualTypeOf<EndpointServices>();
+    expectTypeOf<DaemonServices>().toExtend<EndpointServices>();
+    expectTypeOf<Omit<EndpointModule, 'start'>>().toEqualTypeOf<Omit<O10Module, 'start'>>();
+    expectTypeOf<Parameters<EndpointModule['start']>[0]>().toExtend<Parameters<O10Module['start']>[0]>();
   });
 
   it('binds O10’s endpoint module: a fresh one for each daemon, reporting unenrolled until it is loaded', async () => {

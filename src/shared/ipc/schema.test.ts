@@ -2114,7 +2114,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('browserEngine.work is a machine-owned main-only command naming one session and whether it is held', () => {
-      expect(Object.fromEntries(Object.entries(browserEngine.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'browserEngine.work': 'machine', 'browserEngine.answer': 'machine', 'browserEngine.state': 'machine' /* M4 */ });
+      expect(Object.fromEntries(Object.entries(browserEngine.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'browserEngine.work': 'machine', 'browserEngine.answer': 'machine', 'browserEngine.state': 'machine' /* M4 */, 'browserEngine.frame': 'machine', 'browserEngine.ended': 'machine' /* M6 */ });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.work', 'host.browserWork']));
       expect(validateCommandInput('browserEngine.work', { appSessionId: 'a', held: true }).ok).toBe(true);
       expect(validateCommandInput('browserEngine.work', { appSessionId: 'a' }).ok).toBe(false);
@@ -2126,7 +2126,7 @@ describe('ipc schema validates both directions', () => {
       expect(Object.keys(browserEngine.events)).toEqual(['browserEngine.request']);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.answer', 'browserEngine.state']));
       for (const op of ['prepare', 'drop', 'inventory']) expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op } }).ok, op).toBe(true);
-      expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op: 'open' } }).ok, 'M6’s, not yet').toBe(false);
+      expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op: 'open' } }).ok, 'M6’s open names its subscription and tab').toBe(false);
       expect(validateEventPayload('browserEngine.request', { id: '', appSessionId: 'a', operation: { op: 'drop' } }).ok).toBe(false);
       expect(validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation: { op: 'drop' }, epoch: 'e1' }).ok, 'engines carry no epoch (D7)').toBe(false);
       const tab = { tabId: 'b_000000000001', title: 'Local', url: 'http://127.0.0.1:4000/', control: 'agent' };
@@ -2141,6 +2141,32 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: Array.from({ length: 257 }, () => tab) } }).ok).toBe(false);
       expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: [{ ...tab, url: 'x'.repeat(8_193) }] } }).ok).toBe(false);
       expect(validateCommandInput('browserEngine.state', { appSessionId: 'a', inventory: { ...inventory, tabs: [{ ...tab, control: 'remote' }] } }).ok).toBe(false);
+    });
+
+    // M6 (Interfaces §F, §G): a viewer's subscription's operations, its frames and its end, bounded at the wire
+    it('browserEngine.request carries M6’s subscription operations; browserEngine.frame and .ended are main-only and bounded', () => {
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['browserEngine.frame', 'browserEngine.ended']));
+      const request = (operation: unknown) => validateEventPayload('browserEngine.request', { id: 'q1', appSessionId: 'a', operation }).ok;
+      const click = { kind: 'pointer', type: 'down', x: 10, y: 20, button: 'left', buttons: 1, clickCount: 1, modifiers: ['Shift'] };
+      expect(request({ op: 'open', subscriptionId: 'v1', tabId: 'b_000000000001', control: true })).toBe(true);
+      expect(request({ op: 'open', subscriptionId: 'v1', tabId: 'tab-1', control: false }), 'a tab id').toBe(false);
+      expect(request({ op: 'ack', subscriptionId: 'v1', seq: 1 })).toBe(true);
+      for (const seq of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) expect(request({ op: 'ack', subscriptionId: 'v1', seq }), String(seq)).toBe(false);
+      expect(request({ op: 'input', subscriptionId: 'v1', seq: 2, event: click })).toBe(true);
+      expect(request({ op: 'input', subscriptionId: 'v1', seq: 2, event: { ...click, modifiers: ['Hyper'] } })).toBe(false);
+      expect(request({ op: 'close', subscriptionId: 'v1' })).toBe(true);
+      expect(request({ op: 'close', subscriptionId: '' })).toBe(false);
+      const meta = { tabId: 'b_000000000001', seq: 1, capturedAt: 12.5, width: 1280, height: 800, viewport: { width: 1280, height: 800 } };
+      const frame = (patch: Record<string, unknown>, jpegBase64 = '/9j/') => validateCommandInput('browserEngine.frame', { subscriptionId: 'v1', frame: { ...meta, ...patch, jpegBase64 } }).ok;
+      expect(frame({})).toBe(true);
+      expect(frame({ width: 1281 }), 'at most 1280 wide').toBe(false);
+      expect(frame({ height: 801 }), 'at most 800 high').toBe(false);
+      expect(frame({ width: 0 })).toBe(false);
+      expect(frame({ epoch: 'e1' }), 'mawsd stamps the epoch').toBe(false);
+      expect(frame({}, 'A'.repeat(Math.ceil(1_048_576 / 3) * 4)), 'a frame at 1 MiB').toBe(true);
+      expect(frame({}, 'A'.repeat(Math.ceil(1_048_576 / 3) * 4 + 4)), 'past 1 MiB').toBe(false);
+      expect(validateCommandInput('browserEngine.ended', { subscriptionId: 'v1', reason: 'view_gone' }).ok).toBe(true);
+      expect(validateCommandInput('browserEngine.ended', { subscriptionId: 'v1', reason: '' }).ok).toBe(false);
     });
   });
 

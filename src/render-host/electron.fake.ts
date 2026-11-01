@@ -26,6 +26,14 @@ export class FakePage extends FakeContents {
   getZoomFactor() {
     return 1;
   }
+  readonly input: Record<string, unknown>[] = []; // P5 O17 M6: what a viewer's input sent the page
+  sendInputEvent(event: Record<string, unknown>) {
+    this.input.push(event);
+  }
+  insertText(text: string) {
+    this.input.push({ type: 'insertText', text });
+    return Promise.resolve();
+  }
 }
 
 export class WebContentsView {

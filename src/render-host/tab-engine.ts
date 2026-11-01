@@ -17,6 +17,13 @@
 //   not be cleared). Only that session's tabs close. A session's prepares and drops run one at a time, in the order
 //   sent; a prepare cleans a partition a drop left uncleared first, or is refused with the reason.
 // - `inventory`: the session's tabs, bounded (screencast.ts), or `unavailable` for a session not served here.
+// - M6: `open`, `ack`, `input` and `close`, a viewer's subscription to one of the session's tabs, served by the producer
+//   (src/main/browser/screencast.ts): its frames go to `mawsd` as `browserEngine.frame` and its own end as
+//   `browserEngine.ended`. `open` joins the session's serial chain, so it follows a prepare it was sent after and a drop
+//   sent after it finds its subscription; it does no waiting of its own, so a drop behind it is never held up. `ack`,
+//   `input` and `close` act on a subscription already open and answer at once. A drop closes the session's
+//   subscriptions first, telling no one (`mawsd` ended them when it made the connection retiring); a frame `mawsd`
+//   refuses (a subscription it has settled) closes it here too.
 // The inventory is pushed again at each change of the session's tabs (the store's coalesced `browser.tabs.changed`), only
 // when it changed; nothing polls.
 //
@@ -54,6 +61,7 @@ import { PageDialogs } from '../main/browser/agent/dialogs';
 import { startCuaBackend, type CuaBackend } from '../main/browser/cua';
 import type { PeerAddon } from '../main/browser/cua/peer';
 import { attachInputSeams } from '../main/browser/input';
+import { startScreencast, type ScreencastDeps } from '../main/browser/screencast';
 import { Navigator } from '../main/browser/navigation';
 import { Partitions } from '../main/browser/partition';
 import { guardPage, preparePermissions } from '../main/browser/permissions';
@@ -87,6 +95,7 @@ export interface TabEngineDeps {
   machine: string; // as the reasons name it
   version: string; // the hello's
   caps?: { session: number; total: number }; // HEADLESS_TABS unless a test lowers them
+  frames?: Pick<ScreencastDeps<unknown>, 'source' | 'encode' | 'now'>; // M6: Electron's frame subscription and encoder unless a test's
   log(line: string): void;
 }
 
@@ -196,6 +205,26 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   store.onViewDestroying((entry) => views.unplace(entry));
   const controls = new TabControls({ store });
   const cursor = new AgentCursor({ store, controls });
+  // M6: the viewers' frames and input; a frame mawsd refuses is for a subscription it has settled, closed here too
+  const screencast = startScreencast<unknown>({
+    store,
+    ...deps.frames,
+    frame: (subscriptionId, { jpeg, ...frame }) =>
+      void call('browserEngine.frame', { subscriptionId, frame: { ...frame, jpegBase64: Buffer.from(jpeg.buffer, jpeg.byteOffset, jpeg.byteLength).toString('base64') } }).then((posted) => {
+        if (posted.ok) return;
+        log(`[browser] a frame of ${subscriptionId} was refused: ${posted.error.code} ${posted.error.message}`);
+        const owner = subscriptions.get(subscriptionId);
+        subscriptions.delete(subscriptionId);
+        if (owner) screencast.close(owner, subscriptionId);
+      }),
+    ended: (subscriptionId, reason) => {
+      subscriptions.delete(subscriptionId);
+      void call('browserEngine.ended', { subscriptionId, reason }).then((posted) => {
+        if (!posted.ok) log(`[browser] the end of ${subscriptionId} was refused: ${posted.error.code} ${posted.error.message}`);
+      });
+    },
+  });
+  const subscriptions = new Map<string, AppSessionId>(); // M6: each open subscription's session
 
   const platform = deps.peer.platform ?? process.platform;
   const cua: CuaBackend = startCuaBackend({
@@ -375,6 +404,8 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     const session = served.get(appSessionId);
     if (!session) return null;
     served.delete(appSessionId);
+    screencast.closeSession(appSessionId); // M6: before its views go, so none of them is told tab_closed
+    for (const [subscriptionId, owner] of [...subscriptions]) if (owner === appSessionId) subscriptions.delete(subscriptionId);
     store.removeSession(appSessionId);
     await cua.closeSession(appSessionId);
     const why = await clearPartition(appSessionId);
@@ -388,10 +419,32 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return null;
   }
 
+  // M6: a viewer's subscription to one of the session's own tabs (the inventory's), on the session's chain
+  async function open(appSessionId: AppSessionId, { subscriptionId, tabId, control }: { subscriptionId: string; tabId: string; control: boolean }): Promise<null> {
+    if (!served.has(appSessionId)) throw new Error(`the headless browser on ${machine} does not serve this session`);
+    if (store.entry(tabId)?.tab.internal) throw new Error('tab_closed');
+    screencast.open({ subscriptionId, appSessionId, tabId, control });
+    subscriptions.set(subscriptionId, appSessionId);
+    return null;
+  }
+
+  // M6: what a viewer does with an open subscription, at once
+  function subscription(appSessionId: AppSessionId, operation: Extract<BrowserEngineRequest['operation'], { op: 'ack' | 'input' | 'close' }>): null {
+    if (operation.op === 'ack') screencast.ack(appSessionId, operation.subscriptionId, operation.seq);
+    else if (operation.op === 'input') screencast.input(appSessionId, operation.subscriptionId, operation.seq, operation.event);
+    else {
+      screencast.close(appSessionId, operation.subscriptionId);
+      if (subscriptions.get(operation.subscriptionId) === appSessionId) subscriptions.delete(operation.subscriptionId);
+    }
+    return null;
+  }
+
   return {
     request({ id, appSessionId, operation }) {
       let run: Promise<EngineInventory | null>;
       if (operation.op === 'inventory') run = Promise.resolve(inventory(appSessionId));
+      else if (operation.op === 'open') run = serially(appSessionId, () => open(appSessionId, operation));
+      else if (operation.op === 'ack' || operation.op === 'input' || operation.op === 'close') run = new Promise((resolve) => resolve(subscription(appSessionId, operation)));
       else if (operation.op === 'drop') {
         cancelPrepares(appSessionId, `the headless browser on ${machine} dropped this session while preparing it`);
         run = serially(appSessionId, () => drop(appSessionId));
@@ -418,6 +471,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     dispose() {
       for (const appSessionId of [...cancels.keys()]) cancelPrepares(appSessionId, `the headless browser on ${machine} is ending`);
       served.clear();
+      screencast.dispose(); // M6
       dialogs.dispose();
       cua.dispose();
       cursor.dispose();

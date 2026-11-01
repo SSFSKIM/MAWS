@@ -63,6 +63,10 @@
 // drop's answer ends that connection's hold on the session (`browserDropped`) even when its zero never came. A render
 // client's ready and end reach the seam with the connection, the tab engine the route selects.
 //
+// P5 O17 M6 (§F, §G): a viewer's subscription's frames and end (`browserEngine.frame`, `.ended`) are taken only for a
+// subscription of the connection they arrive on (`browser.frame`, `.ended`: the feed's, browser-feed.ts, once loaded;
+// else none is open and each is refused), and a connection's end ends its subscriptions (`browser.gone`).
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
@@ -98,9 +102,9 @@ import type { EngineIntercept } from './spine-hosts';
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
 // P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
-export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
-const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
+const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
 // browser idle notice, which mawsd answers (M5)
 const DAEMON_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export', 'host.browserIdle']);
@@ -145,6 +149,10 @@ export interface FrontBrowser {
   answer?(engine: EngineConnection, input: CommandInput<'browserEngine.answer'>): boolean;
   state?(engine: EngineConnection, input: { appSessionId: AppSessionId; inventory: CommandInput<'browserEngine.state'>['inventory'] }): boolean;
   workChanged?(): void;
+  // P5 O17 M6: a subscription's frame and end (false: no subscription of that connection takes it), and the connection's end
+  frame?(engine: EngineConnection, input: CommandInput<'browserEngine.frame'>): boolean;
+  ended?(engine: EngineConnection, input: CommandInput<'browserEngine.ended'>): boolean;
+  gone?(engine: EngineConnection): void;
 }
 
 // A front that takes no browser work: no connection is selected and none holds, so every report is refused
@@ -294,6 +302,15 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       const pushed = input as CommandInput<'browserEngine.state'>;
       const appSessionId = pushed.appSessionId as AppSessionId;
       if (!(browser.state?.(from!, { appSessionId, inventory: pushed.inventory }) ?? false)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.state for ${appSessionId} from a connection not selected for that session`));
+    },
+    // P5 O17 M6: a viewer's subscription's frame and end, bound to the connection they arrive on
+    'browserEngine.frame': (input, _context, from) => {
+      const { subscriptionId } = input as CommandInput<'browserEngine.frame'>;
+      if (!(browser.frame?.(from!, input as CommandInput<'browserEngine.frame'>) ?? false)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.frame for ${subscriptionId}, which is no subscription of this connection awaiting a frame`));
+    },
+    'browserEngine.ended': (input, _context, from) => {
+      const { subscriptionId } = input as CommandInput<'browserEngine.ended'>;
+      if (!(browser.ended?.(from!, input as CommandInput<'browserEngine.ended'>) ?? false)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.ended for ${subscriptionId}, which is no open subscription of this connection`));
     },
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
     'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
@@ -536,6 +553,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       this.follower.end();
       clientPort.gone(this);
       browser.work.engineGone(this); // P5 O17 M3: its browser work, if it reported any
+      browser.gone?.(this); // P5 O17 M6: its viewers' subscriptions
       this.grants.clear();
       browser.workChanged?.(); // P5 O17 M5
       if (this.browserSocket !== null) options.browserChanged?.(); // P5 O5 M5: the app that told it is gone

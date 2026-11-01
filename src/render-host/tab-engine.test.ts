@@ -74,11 +74,13 @@ function stand(
     identity?: () => Promise<boolean>;
     lineage?: Record<string, AppSessionId>; // the parent mawsd names in a side thread's prepare (M5)
     clear?: (partition: string, what: 'storage' | 'cache') => Promise<void>;
+    frameRefused?: boolean; // M6: mawsd refuses every frame (a subscription it settled)
   } = {},
 ) {
   const root = mkdtempSync('/tmp/mrt-');
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const calls: Call[] = [];
+  const frames = paints(); // M6: each tab's paints, by tab id
   const sessions = new Map<string, ReturnType<typeof fakeSession>>();
   const logs: string[] = [];
   const call = (async (name: string, input: Record<string, unknown>) => {
@@ -88,6 +90,8 @@ function stand(
         return (await (options.identity?.() ?? Promise.resolve(true))) ? { ok: true, value: {} } : { ok: false, error: ipcError('host_unavailable', 'gone') };
       case 'browserEngine.work':
         return options.work ? options.work(input as { appSessionId: string; held: boolean }) : { ok: true, value: undefined };
+      case 'browserEngine.frame':
+        return options.frameRefused ? { ok: false, error: ipcError('forbidden_sender', 'no such subscription outstanding') } : { ok: true, value: undefined };
       default:
         return { ok: true, value: undefined };
     }
@@ -122,6 +126,7 @@ function stand(
     machine: 'mini',
     version: '9.9.9',
     caps: options.caps,
+    frames: { source: (entry) => frames.source(entry.tab.tabId), encode: async (image) => ({ jpeg: new Uint8Array([(image as { n: number }).n]), width: 1280, height: 800 }) }, // M6
     log: (line) => void logs.push(line),
   });
   cleanups.push(() => engine.dispose());
@@ -143,7 +148,19 @@ function stand(
   };
   const states = (appSessionId: AppSessionId) => calls.filter((c) => c.name === 'browserEngine.state' && c.input.appSessionId === appSessionId).map((c) => c.input.inventory as EngineInventory);
   const works = () => calls.filter((c) => c.name === 'browserEngine.work').map((c) => `${String(c.input.appSessionId)} ${c.input.held ? 'held' : 'zero'}`);
-  return { engine, calls, ask, host, socketOf, states, works, sessions, logs, native };
+  return { engine, calls, ask, host, socketOf, states, works, sessions, logs, native, frames };
+}
+
+// M6: a tab's frame source as the producer subscribes it (the real frame subscription is M8's pass 3): each paint a
+// numbered image; `live` the tabs subscribed now
+function paints() {
+  const live = new Map<string, (image: { n: number }) => void>();
+  let painted = 0;
+  return {
+    live,
+    source: (tabId: string) => ({ start: (paint: (image: unknown) => void) => void live.set(tabId, paint), stop: () => void live.delete(tabId) }),
+    paint: (tabId: string) => live.get(tabId)?.({ n: ++painted }),
+  };
 }
 
 const pageOf = (view: FakeView) => view.webContents;
@@ -656,6 +673,93 @@ describe('the orphan policy (D1)', () => {
 
 // Condition 4 of O5's M7 verdict: nothing on the render host's path holds a power save blocker. The render host's graph,
 // from its root through every relative and `@shared` import, names none.
+// M6 (Interfaces §F, §G): a viewer's subscription to a session's tab, served by the producer over the session's chain
+describe('a viewer’s subscription', () => {
+  // A prepared session with one tab; `op` sends one operation as mawsd does and reads its answer
+  async function viewed(options: Parameters<typeof stand>[0] = {}) {
+    const t = stand(options);
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    await expect.poll(() => t.states(A).at(-1)?.tabs.length).toBe(1);
+    const tabId = t.states(A).at(-1)!.tabs[0]!.tabId;
+    let next = 0;
+    const answerOf = (id: string) => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === id)?.input.result as { ok: boolean; value?: unknown; error?: string } | undefined;
+    const send = (appSessionId: AppSessionId, operation: BrowserEngineRequest['operation']) => {
+      const id = `m${++next}`;
+      t.engine.request({ id, appSessionId, operation });
+      return id;
+    };
+    const op = async (appSessionId: AppSessionId, operation: BrowserEngineRequest['operation']) => {
+      const id = send(appSessionId, operation);
+      await expect.poll(() => answerOf(id)).toBeDefined();
+      return answerOf(id)!;
+    };
+    const sent = (name: string) => t.calls.filter((c) => c.name === name).map((c) => c.input);
+    return { ...t, host, tabId, op, send, answerOf, sent };
+  }
+
+  it('opens a session’s tab, sends its paints as frames with the viewport, one in flight until the ack, and closes it', async () => {
+    const t = await viewed();
+    expect(await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: false })).toEqual({ ok: true, value: null });
+    t.frames.paint(t.tabId);
+    await expect.poll(() => t.sent('browserEngine.frame')).toHaveLength(1);
+    expect(t.sent('browserEngine.frame')[0]).toMatchObject({ subscriptionId: 'v1', frame: { tabId: t.tabId, seq: 1, width: 1280, height: 800, viewport: HEADLESS_VIEWPORT, jpegBase64: Buffer.from([1]).toString('base64') } });
+    t.frames.paint(t.tabId);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(t.sent('browserEngine.frame'), 'nothing past the unacknowledged frame').toHaveLength(1);
+    expect(await t.op(A, { op: 'ack', subscriptionId: 'v1', seq: 1 })).toEqual({ ok: true, value: null });
+    await expect.poll(() => t.sent('browserEngine.frame')).toHaveLength(2);
+    expect(await t.op(A, { op: 'ack', subscriptionId: 'v1', seq: 9 })).toMatchObject({ ok: false, error: expect.stringContaining('future') });
+    expect(await t.op(A, { op: 'close', subscriptionId: 'v1' })).toEqual({ ok: true, value: null });
+    expect(t.frames.live.size, 'the source stopped with its last viewer').toBe(0);
+    expect(await t.op(A, { op: 'close', subscriptionId: 'v1' }), 'a second close finds nothing').toEqual({ ok: true, value: null });
+  });
+
+  it('refuses an open of another session’s tab, of a session it does not serve, and a second controlling one; takes a person’s input on a controlling one', async () => {
+    const t = await viewed();
+    await t.ask(B, 'prepare');
+    expect(await t.op(B, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: false })).toEqual({ ok: false, error: 'tab_closed' });
+    expect(await t.op('C' as AppSessionId, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: false })).toMatchObject({ ok: false, error: expect.stringContaining('does not serve') });
+    expect((await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: true })).ok).toBe(true);
+    expect(await t.op(A, { op: 'open', subscriptionId: 'v2', tabId: t.tabId, control: true })).toEqual({ ok: false, error: 'control_busy' });
+    expect(await t.op(A, { op: 'input', subscriptionId: 'v1', seq: 1, event: { kind: 'pointer', type: 'down', x: 3, y: 4, button: 'left', buttons: 1, clickCount: 1, modifiers: [] } })).toEqual({ ok: true, value: null });
+    expect(newestPage().input).toEqual([{ type: 'mouseDown', x: 3, y: 4, button: 'left', clickCount: 1, modifiers: [] }]);
+    expect(await t.op(B, { op: 'input', subscriptionId: 'v1', seq: 2, event: { kind: 'blur' } }), 'bound to its session').toMatchObject({ ok: false });
+  });
+
+  it('ends a subscription tab_closed when cua closes its tab, and closes one whose frame mawsd refused', async () => {
+    const t = await viewed({ frameRefused: true });
+    await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: false });
+    t.frames.paint(t.tabId);
+    await expect.poll(() => t.frames.live.size).toBe(0); // a refused frame closes its subscription here too
+    expect(t.sent('browserEngine.ended')).toEqual([]);
+    await t.op(A, { op: 'open', subscriptionId: 'v2', tabId: t.tabId, control: false });
+    await t.host.request('tabs.remove', { tabId: 1 });
+    await expect.poll(() => t.sent('browserEngine.ended')).toEqual([{ subscriptionId: 'v2', reason: 'tab_closed' }]);
+  });
+
+  it('closes the session’s subscriptions at its drop, telling no one, and refuses an open queued behind a prepare that drop cancels', async () => {
+    const identity = deferred<boolean>();
+    const t = await viewed();
+    await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: true });
+    await t.op(A, { op: 'input', subscriptionId: 'v1', seq: 1, event: { kind: 'key', type: 'down', key: 'a', code: 'KeyA', repeat: false, modifiers: [] } });
+    const page = newestPage();
+    expect(await t.ask(A, 'drop')).toEqual({ ok: true, value: null });
+    expect(page.input.at(-1), 'its held key released before the page went').toEqual({ type: 'keyUp', keyCode: 'a', modifiers: [] });
+    expect(t.sent('browserEngine.ended')).toEqual([]);
+    expect(t.frames.live.size).toBe(0);
+    // the drop-cancels-prepare guarantee holds with an open on the chain: the prepare stuck on the relay's confirmation
+    // is cancelled by the next drop, the open behind it refused, the drop answered
+    const stuck = stand({ identity: () => identity.promise });
+    stuck.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    stuck.engine.request({ id: 'o1', appSessionId: A, operation: { op: 'open', subscriptionId: 'v9', tabId: t.tabId, control: false } });
+    stuck.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
+    const answered = () => stuck.calls.filter((c) => c.name === 'browserEngine.answer').map((c) => `${String(c.input.id)} ${(c.input.result as { ok: boolean }).ok}`);
+    await expect.poll(answered).toEqual(['p1 false', 'o1 false', 'd1 true']);
+  });
+});
+
 describe('no power save blocker on the render host’s path', () => {
   it('is named in no module the render host’s root reaches', () => {
     const repo = resolve(__dirname, '../..');

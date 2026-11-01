@@ -187,6 +187,19 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
     }
     expect([...run].some(([, text]) => /\bfunction createCuaSockets\(/.test(text)), 'the sockets are on the run path').toBe(true);
   });
+
+  // P5 O17 M6 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M6, Interfaces §G; acceptance 1 and 14): the viewers'
+  // feed is a chunk the daemon loads at the first open of DaemonServices.browser, never at start, at a capability or
+  // inventory read, or at an app's attachment; the route, which answers the inventory and its watchers, is eager
+  it('keep the viewers’ feed off the run path, in the chunk the first open loads', () => {
+    const markers = { createBrowserFeed: /\bfunction createBrowserFeed\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createBrowserRoute\(/.test(text)), 'the route is on the run path').toBe(true);
+  });
 });
 
 // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M3; Interfaces §E): main's entry loads one of two roots.

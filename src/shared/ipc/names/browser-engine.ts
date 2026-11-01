@@ -4,4 +4,4 @@ export const commands = [] as const;
 
 export const events = ['browserEngine.request' /* P5 O17 M4 */] as const;
 
-export const mainOnlyCommands = ['browserEngine.work' /* P5 O17 M3 */, 'browserEngine.answer', 'browserEngine.state' /* P5 O17 M4 */] as const;
+export const mainOnlyCommands = ['browserEngine.work' /* P5 O17 M3 */, 'browserEngine.answer', 'browserEngine.state' /* P5 O17 M4 */, 'browserEngine.frame', 'browserEngine.ended' /* P5 O17 M6 */] as const;

@@ -19,6 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
 import { BROWSER_ENGINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine';
+import type { BrowserFrame, BrowserInventory } from '@shared/browser/screencast';
+import type { AppSessionId } from '@shared/graph/ids';
 import { machineName } from '@shared/machine/identity';
 import { PEER_AUTH_VERSION, type PeerAddon } from '../main/browser/cua/peer';
 import type { RunningDaemon } from './daemon';
@@ -143,6 +145,8 @@ class RenderHost {
   readonly works: string[] = []; // its browserEngine.work answers: `S held ok`, `S zero ok`, `S held forbidden_sender`…
   readonly peers: Socket[] = [];
   readonly stalled: { socket: Socket; id: number | string }[] = []; // `debugger.sendCommand`s it holds unanswered (a command in flight)
+  readonly views: BrowserEngineRequest[] = []; // M6: its open, ack, input and close requests, in order
+  holdInput = false; // M6: an input request is left unanswered (an operation pending when the engine fails)
   private readonly servers = new Map<string, Server>();
   private seen = 0;
   private exited = false;
@@ -165,7 +169,7 @@ class RenderHost {
       const request = message.payload as BrowserEngineRequest;
       this.requests.push(request);
       const op = request.operation.op;
-      if (op !== 'inventory' && this.holdBack.has(op)) this.heldBack.push(request);
+      if ((op === 'prepare' || op === 'drop') && this.holdBack.has(op)) this.heldBack.push(request);
       else void this.handle(request);
     }
   }
@@ -202,6 +206,9 @@ class RenderHost {
       this.servers.set(appSessionId, server);
       await this.answer(id);
       await this.state(appSessionId);
+    } else if (operation.op === 'open' || operation.op === 'ack' || operation.op === 'input' || operation.op === 'close') {
+      this.views.push(request); // M6: a viewer's subscription, served as its producer would
+      if (operation.op !== 'input' || !this.holdInput) await this.answer(id);
     } else if (operation.op === 'drop') {
       this.servers.get(appSessionId)?.close();
       this.servers.delete(appSessionId);
@@ -240,6 +247,13 @@ class RenderHost {
         })();
       }),
     );
+  }
+  // M6: a subscription's frame, as its producer posts it (JPEG bytes as base64), and its own end
+  frame(subscriptionId: string, seq: number, tabId = 'b_000000000000') {
+    return this.link.request('browserEngine.frame', { subscriptionId, frame: { tabId, seq, capturedAt: 1, width: 1280, height: 800, viewport: { width: 1280, height: 800 }, jpegBase64: Buffer.from([0xff, 0xd8, seq]).toString('base64') } });
+  }
+  ended(subscriptionId: string, reason: string) {
+    return this.link.request('browserEngine.ended', { subscriptionId, reason });
   }
   exit(): void {
     if (this.exited) return;
@@ -565,6 +579,85 @@ describe('the engine’s exit and the engine host’s restart (acceptance 4, 5)'
     expect(cua.closed).toBe(false);
     expect((await cua.request('tabs.create', { url: 'http://127.0.0.1:4000/2' })).result).toEqual({ id: 2 });
     expect(await renderStatus(t.daemon)).toMatchObject({ browserSessions: 1, browserTabs: 2 });
+  });
+});
+
+// M6 (Interfaces §F, §G; acceptance 6; D4): a viewer of the agent's tab through DaemonServices.browser, the engine a
+// client of the real machine.sock. The inventory reads the route's cache and loads nothing; the first open loads the feed;
+// the subscription's end is disposed exactly once, however many of its ends arrive.
+describe('a viewer on DaemonServices.browser (acceptance 6)', () => {
+  // A headless session with one tab, and a stand-in viewer subscribed to it, controlling
+  async function viewing() {
+    const t = await stand();
+    await firstTab();
+    const browser = t.daemon.services.browser;
+    const heard: BrowserInventory[] = [];
+    closers.push(browser.watchInventory(S as AppSessionId, (inventory) => void heard.push(inventory)));
+    const inventory = browser.inventory(S as AppSessionId);
+    expect(inventory).toMatchObject({ state: 'ready', tabs: [{ tabId: 'b_000000000000' }] });
+    expect(heard.at(-1), 'the current snapshot at once').toEqual(inventory);
+    expect(scene.logs.some((line) => line.includes('the viewers’ feed loaded')), 'the inventory and its watchers load no feed').toBe(false);
+    const frames: BrowserFrame[] = [];
+    const closed: string[] = [];
+    const subscription = await browser.open({ appSessionId: S as AppSessionId, epoch: inventory.epoch, tabId: 'b_000000000000', control: true }, { frame: (frame) => void frames.push(frame), closed: (reason) => void closed.push(reason) });
+    expect(scene.logs.some((line) => line.includes('the viewers’ feed loaded')), 'the open loads it').toBe(true);
+    const open = t.host().views.find((request) => request.operation.op === 'open')!;
+    const subscriptionId = (open.operation as { subscriptionId: string }).subscriptionId;
+    expect(open.operation).toEqual({ op: 'open', subscriptionId, tabId: 'b_000000000000', control: true });
+    expect(await t.host().frame(subscriptionId, 1)).toMatchObject({ ok: true });
+    await until(() => frames.length === 1, 3_000, 'the frame');
+    expect(frames[0]).toMatchObject({ epoch: inventory.epoch, tabId: 'b_000000000000', seq: 1, jpeg: new Uint8Array([0xff, 0xd8, 1]) });
+    return { t, subscription, subscriptionId, frames, closed, inventory };
+  }
+
+  it('ends the subscription once when the engine fails after a successful open: its ended, then its connection’s end, then the viewer’s close', async () => {
+    const { t, subscription, subscriptionId, closed } = await viewing();
+    subscription.ack(1);
+    await until(() => t.host().views.some((request) => request.operation.op === 'ack'), 3_000, 'the ack sent on');
+    t.host().holdInput = true;
+    let refusals = 0;
+    const input = subscription.input(1, { kind: 'pointer', type: 'down', x: 640, y: 400, button: 'left', buttons: 1, clickCount: 1, modifiers: [] }).catch((error: unknown) => {
+      refusals += 1;
+      throw error;
+    });
+    await until(() => t.host().views.some((request) => request.operation.op === 'input'), 3_000, 'the input sent on, unanswered');
+    const refused = expect(input).rejects.toMatchObject({ reason: 'producer_failed' });
+    expect(await t.host().ended(subscriptionId, 'producer_failed')).toMatchObject({ ok: true });
+    await refused;
+    expect(closed).toEqual(['producer_failed']);
+    expect(await t.host().ended(subscriptionId, 'producer_failed'), 'a second end finds nothing').toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await t.host().frame(subscriptionId, 2), 'a frame for a settled subscription').toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    t.host().exit(); // the engine's connection ends: the route's period ends with it
+    await until(() => scene.logs.some((line) => line.includes('the render host serving it ended')), 3_000, 'the route told');
+    subscription.close();
+    await sleep(100);
+    expect(closed, 'disposed once').toEqual(['producer_failed']);
+    expect(refusals).toBe(1);
+    expect(t.host().views.filter((request) => request.operation.op === 'close'), 'the engine ended it: nothing to close there').toEqual([]);
+  });
+
+  it('ends the subscription once when the engine’s connection ends after a successful open, the route’s period end and the connection’s end both arriving', async () => {
+    const { t, subscription, closed, inventory } = await viewing();
+    t.host().holdInput = true;
+    const input = subscription.input(1, { kind: 'key', type: 'down', key: 'a', code: 'KeyA', repeat: false, modifiers: [] });
+    await until(() => t.host().views.some((request) => request.operation.op === 'input'), 3_000, 'the input sent on, unanswered');
+    t.host().exit();
+    await expect(input).rejects.toMatchObject({ reason: 'engine_changed' });
+    await until(() => t.daemon.services.browser.inventory(S as AppSessionId).epoch !== inventory.epoch, 3_000, 'a new epoch');
+    await sleep(100);
+    expect(closed).toEqual(['engine_changed']);
+    subscription.close();
+    expect(closed, 'disposed once').toEqual(['engine_changed']);
+    await expect(t.daemon.services.browser.open({ appSessionId: S as AppSessionId, epoch: inventory.epoch, tabId: 'b_000000000000', control: false }, { frame: () => {}, closed: () => {} })).rejects.toMatchObject({ reason: 'engine_changed' });
+  });
+
+  it('reads the app’s relay as unavailable, with its reason, and refuses an open there with it', async () => {
+    const t = await stand();
+    await attachApp();
+    await until(() => t.daemon.services.browser.inventory(S as AppSessionId).state === 'unavailable', 3_000, 'relay');
+    const inventory = t.daemon.services.browser.inventory(S as AppSessionId);
+    expect(inventory).toMatchObject({ tabs: [], reason: `the agent's browser is in the MAWS app on ${MACHINE}` });
+    await expect(t.daemon.services.browser.open({ appSessionId: S as AppSessionId, epoch: inventory.epoch, tabId: 'b_000000000000', control: false }, { frame: () => {}, closed: () => {} })).rejects.toMatchObject({ reason: 'unavailable', message: inventory.reason });
   });
 });
 

@@ -15,6 +15,7 @@
 // (`status`, `keys`, `policy`) over a state directory that holds nothing needs none: presence.ts answers it as the
 // module would, so a check costs an unenrolled daemon nothing until its restart. Until then `status()` is the
 // unenrolled module's, and the stop order is unchanged (a load in flight is awaited, and what it loaded stopped).
+import type { BrowserFeed } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
@@ -56,6 +57,11 @@ export interface DaemonServices {
   // artifacts.sock serves it (the status, the scheme's headers, the bytes), its handler loaded at the first use; for
   // O7 M5's RL2 kind, graded by O10 as `view` on the artifact's session
   artifacts: { fetch(request: { url: string; method: 'GET' | 'HEAD'; range?: string }): Promise<{ status: number; headers: Record<string, string>; body: ReadableStream<Uint8Array> | null }> };
+  // P5 O17 M6 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §G): the agent's tabs on this machine, for
+  // a viewer: the inventory and its changes from the route's cache (loading nothing), and a subscription to a tab's frames
+  // and, under control, its input (its chunk loaded at the first open). The remote stage hands the same object to the
+  // endpoint as EndpointServices.browser (O17 M9, R1); until then DaemonServices leads EndpointServices by this member.
+  browser: BrowserFeed;
   log(line: string): void;
 }
 
