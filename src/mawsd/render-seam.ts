@@ -26,8 +26,8 @@
 // starts beside it.
 //
 // `stop()` (the daemon's exit order, before the spine's stop ends the engine-host link): admission closes, every request
-// in the table is answered `ok: false` over the still-live link, then the host is ended (render.exit, SIGTERM at the
-// grace, SIGKILL a grace later) and its exit awaited, bounded past the SIGKILL's settle. A request the seam answered
+// in the table is answered `ok: false` over the still-live link, then the host is ended (render.exit and SIGTERM
+// together, SIGKILL at the grace) and its exit awaited, bounded past the SIGKILL's settle. A request the seam answered
 // itself after handing it over (its answer deadline, or the stop) is remembered until the host exits, so the host's late
 // answer is taken (not refused as unknown) and an inspection export's file it names is removed: nobody will read it.
 import { spawn as spawnProcess, type ChildProcess, type SpawnOptions } from 'node:child_process';
@@ -498,26 +498,26 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       if (deliveries.size > 0) await Promise.race([Promise.allSettled([...deliveries]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);
       if (child === null) set('off');
       else {
-        // asked (render.exit), SIGTERM at the grace, SIGKILL a grace later; a host being ended for its start watchdog is
-        // not asked: it was sent SIGTERM, and is SIGKILLed at the grace. The wait covers the SIGKILL and the settle after
+        // A daemon stop is no quiet exit: render.exit and SIGTERM together, SIGKILL at the grace (a host being ended for
+        // its start watchdog is not asked: it was sent SIGTERM already). The wait covers the SIGKILL and the settle after
         // it (a group's retirement reports its exit within KILL_SETTLE_MS of its SIGKILL), so mawsd never exits while
         // the escalation is still pending: nothing would retire a detached group after it (KillMode=process).
         const going = child;
         const hungStart = retiring;
         const gone = new Promise<void>((resolve) => (exited = resolve));
         set('ending');
-        if (!hungStart) options.postExit();
-        const steps: { at: number; signal: NodeJS.Signals }[] = hungStart ? [{ at: exitGraceMs, signal: 'SIGKILL' }] : [{ at: exitGraceMs, signal: 'SIGTERM' }, { at: 2 * exitGraceMs, signal: 'SIGKILL' }];
-        const timers = steps.map(({ at, signal }) =>
-          setTimeout(() => {
-            if (child !== going) return;
-            log(`[render] the render host did not exit within ${at / 1000} s of mawsd's stop: ${signal}`);
-            going.kill(signal);
-          }, at),
-        );
+        if (!hungStart) {
+          options.postExit();
+          going.kill('SIGTERM');
+        }
+        const kill = setTimeout(() => {
+          if (child !== going) return;
+          log(`[render] the render host did not exit within ${exitGraceMs / 1000} s of mawsd's stop: SIGKILL`);
+          going.kill('SIGKILL');
+        }, exitGraceMs);
         let bound: ReturnType<typeof setTimeout> | null = null;
-        await Promise.race([gone, new Promise((resolve) => (bound = setTimeout(resolve, steps.at(-1)!.at + KILL_SETTLE_MS + STOP_MARGIN_MS)))]);
-        for (const timer of [...timers, bound]) clear(timer);
+        await Promise.race([gone, new Promise((resolve) => (bound = setTimeout(resolve, exitGraceMs + KILL_SETTLE_MS + STOP_MARGIN_MS)))]);
+        for (const timer of [kill, bound]) clear(timer);
       }
       // an undelivered or late inspection answer's file removal, whichever branch (bounded)
       if (removals.size > 0) await Promise.race([Promise.allSettled([...removals]), new Promise((resolve) => setTimeout(resolve, DELIVERY_BOUND_MS))]);

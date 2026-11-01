@@ -19,7 +19,7 @@ import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
 import { EXPORT_BUDGET_MS } from '../render/export';
 import { until } from '../../test/support/mawsd-scene';
-import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, KILL_SETTLE_MS, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
+import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, GROUP_POLL_MS, KILL_SETTLE_MS, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
 
 const isAlive = (pid: number) => {
   try {
@@ -529,7 +529,7 @@ describe('the render seam (P5 O5 M4)', () => {
     expect(s.posted[1]).toMatchObject({ kind: 'export', authors });
   });
 
-  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit, SIGTERM after the grace)', async () => {
+  it('stop closes admission, answers every request in the table over the live link, then ends the host (render.exit and SIGTERM together, SIGKILL at the grace)', async () => {
     const s = scene();
     s.seam.capture(capture('cap-1'));
     s.seam.clientReady();
@@ -543,9 +543,12 @@ describe('the render seam (P5 O5 M4)', () => {
     ]);
     expect(((await library) as HostCommandError).ipcError).toMatchObject({ code: 'host_unavailable', message: 'the render service is restarting on mini' });
     expect(s.exits.count).toBe(1);
-    await vi.advanceTimersByTimeAsync(5_000);
+    expect(s.children[0]!.killed, 'a daemon stop is no quiet exit: SIGTERM with render.exit').toEqual(['SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_999);
     expect(s.children[0]!.killed).toEqual(['SIGTERM']);
-    s.children[0]!.exit(null, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.children[0]!.killed).toEqual(['SIGTERM', 'SIGKILL']);
+    s.children[0]!.exit(null, 'SIGKILL');
     await stopped;
     expect(s.seam.state()).toBe('off');
     s.seam.capture(capture('cap-3'));
@@ -638,11 +641,12 @@ describe('the render host’s process group (Linux) under the seam', () => {
     g.seam.clientReady();
     let done = false;
     const stopped = g.seam.stop().then(() => void (done = true));
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(g.events, 'the group is sent SIGTERM at the grace; its wrapper exits, the rest is sent SIGTERM again').toEqual(['SIGTERM', 'SIGTERM']);
-    await vi.advanceTimersByTimeAsync(4_000);
+    await flush();
+    expect(g.events, 'the group is sent SIGTERM at once; its wrapper exits, the rest is sent SIGTERM again').toEqual(['SIGTERM', 'SIGTERM']);
+    await vi.advanceTimersByTimeAsync(4_900);
     expect(done, 'the TERM-ignoring member is still there').toBe(false);
-    await vi.advanceTimersByTimeAsync(2_000);
+    expect(g.events).not.toContain('SIGKILL');
+    await vi.advanceTimersByTimeAsync(100 + GROUP_POLL_MS);
     await stopped;
     expect(g.events, 'SIGKILL, then the exit, before stop returns').toEqual(['SIGTERM', 'SIGTERM', 'SIGKILL', 'exit SIGTERM']);
     expect(g.group.members).toBe(0);
