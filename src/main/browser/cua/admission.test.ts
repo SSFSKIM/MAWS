@@ -66,10 +66,16 @@ function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: 
   return addon;
 }
 
-// The app's machine link ready, connected to `pid`: the backend reads the connected daemon from it
-function attach(backend: { relay(fd: number | null): void }, addon: ReturnType<typeof fakeAddon>, pid: number, peerUid = uid) {
+type RelayLink = { fd: number; confirm(): Promise<boolean> } | null;
+type Relaying = { relay(link: RelayLink): void };
+const settled = () => new Promise((resolve) => setImmediate(resolve));
+
+// The app's machine link ready, connected to `pid`: the backend reads the connected daemon from it, and holds no pass
+// until a request on the same link is answered after that read (`confirm`)
+async function attach(backend: Relaying, addon: ReturnType<typeof fakeAddon>, pid: number, peerUid = uid, confirm: () => Promise<boolean> = async () => true) {
   addon.fds.set(MACHINE_FD, { pid, uid: peerUid });
-  backend.relay(MACHINE_FD);
+  backend.relay({ fd: MACHINE_FD, confirm });
+  await settled();
 }
 
 // A raw client that writes a request at once and keeps what it hears, and whether the server closed it.
@@ -326,7 +332,7 @@ describe('the daemon\'s relay', () => {
   it('is admitted by its exact instance at once, with no engine known for the session', async () => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
-    attach(h.backend, addon, DAEMON);
+    await attach(h.backend, addon, DAEMON);
     addon.peerPid = DAEMON;
     const started = Date.now();
     const host = await connectFakeHost(h.backend.socketPathFor(A)!);
@@ -340,7 +346,7 @@ describe('the daemon\'s relay', () => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
     h.backend.engineProcess(A, ENGINE);
-    attach(h.backend, addon, DAEMON);
+    await attach(h.backend, addon, DAEMON);
     addon.table.set(DAEMON, { ppid: 1, start: 99 }); // the daemon exited and its pid was taken
     addon.peerPid = DAEMON;
     const reused = rawClient(h.backend.socketPathFor(A)!);
@@ -365,12 +371,12 @@ describe('the daemon\'s relay', () => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
     h.backend.engineProcess(A, ENGINE);
-    attach(h.backend, addon, DAEMON);
+    await attach(h.backend, addon, DAEMON);
     addon.table.set(DAEMON, { ppid: 1, start: 7 });
     addon.peerPid = DAEMON;
     const before = rawClient(h.backend.socketPathFor(A)!);
     await until(before.closed);
-    attach(h.backend, addon, DAEMON); // the app's machine link reconnected: the instance read again
+    await attach(h.backend, addon, DAEMON); // the app's machine link reconnected: the instance read again
     const after = await connectFakeHost(h.backend.socketPathFor(A)!);
     tracked.hosts.push(after);
     expect(after.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
@@ -383,7 +389,7 @@ describe('the daemon\'s relay', () => {
     const h = harness({ peer: { addon } });
     h.backend.engineProcess(A, ENGINE);
     addon.table.set(DAEMON, { ppid: 1, start: 99 }); // the old daemon's pid, a stranger's now
-    attach(h.backend, addon, NEXT_DAEMON); // what the machine link is connected to
+    await attach(h.backend, addon, NEXT_DAEMON); // what the machine link is connected to
     addon.peerPid = DAEMON;
     const taken = rawClient(h.backend.socketPathFor(A)!);
     await until(taken.closed);
@@ -397,12 +403,13 @@ describe('the daemon\'s relay', () => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
     h.backend.engineProcess(A, ENGINE);
-    attach(h.backend, addon, DAEMON, uid + 1);
+    await attach(h.backend, addon, DAEMON, uid + 1);
     addon.peerPid = DAEMON;
     const other = rawClient(h.backend.socketPathFor(A)!);
     await until(other.closed);
     addon.fds.set(MACHINE_FD, 'closed'); // the connection ended before its peer was read
-    h.backend.relay(MACHINE_FD);
+    h.backend.relay({ fd: MACHINE_FD, confirm: async () => true });
+    await settled();
     const unread = rawClient(h.backend.socketPathFor(A)!);
     await until(unread.closed);
     expect([other.heard(), unread.heard()]).toEqual([0, 0]);
@@ -411,13 +418,13 @@ describe('the daemon\'s relay', () => {
   // what a daemon relayed it relayed as that daemon: when the app's machine link loses it or reaches another, its
   // connections end (their leases with them); a connection from the session's own engine stays
   it.each([
-    ['the machine link down', (backend: { relay(fd: number | null): void }) => backend.relay(null)],
-    ['another daemon attached', (backend: { relay(fd: number | null): void }, addon: ReturnType<typeof fakeAddon>) => attach(backend, addon, NEXT_DAEMON)],
+    ['the machine link down', async (backend: Relaying) => backend.relay(null)],
+    ['another daemon attached', (backend: Relaying, addon: ReturnType<typeof fakeAddon>) => attach(backend, addon, NEXT_DAEMON)],
   ])('ends the connections the daemon relayed at %s, and keeps the engine\'s own', async (_, change) => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
     h.backend.engineProcess(A, ENGINE);
-    attach(h.backend, addon, DAEMON);
+    await attach(h.backend, addon, DAEMON);
     addon.peerPid = DAEMON;
     const relayed = await connectFakeHost(h.backend.socketPathFor(A)!);
     tracked.hosts.push(relayed);
@@ -426,21 +433,90 @@ describe('the daemon\'s relay', () => {
     const own = await connectFakeHost(h.backend.socketPathFor(A)!);
     tracked.hosts.push(own);
     expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 2 });
-    change(h.backend, addon);
+    await change(h.backend, addon);
     await relayed.closed;
     expect(relayed.socketState()).toMatchObject({ open: false, endedByMaws: true });
     expect(await own.request('tabs.query', {})).toEqual([]);
     expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1 });
   });
 
+  // `peer(fd)` keeps the pid of a peer that died until the link's close is handled; the pid may be reused meanwhile,
+  // so the start read for it may be the replacement's. A request on the same link answered after the read proves the
+  // daemon lived past it, and the start read again must be the same.
+  describe('binds the pass to the connected instance', () => {
+    async function deadDaemonReused(confirm: () => Promise<boolean>) {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      h.backend.engineProcess(A, ENGINE);
+      addon.table.set(DAEMON, { ppid: 1, start: 99 }); // the daemon died; a stranger took its pid before the read
+      await attach(h.backend, addon, DAEMON, uid, confirm); // the link's descriptor still names the dead daemon's pid
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!);
+      await until(client.closed, PEER_ROOT_WAIT_MS + 1000); // an unanswered confirmation: refused at the wait's end
+      expect(client.heard()).toBe(0);
+      return h;
+    }
+
+    it('sets no pass when the confirming request fails', async () => {
+      await deadDaemonReused(async () => false);
+    });
+
+    it('sets no pass while the confirming request goes unanswered', async () => {
+      await deadDaemonReused(() => new Promise(() => {}));
+    });
+
+    it('sets no pass when the start read again after the answer is another', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      h.backend.engineProcess(A, ENGINE);
+      await attach(h.backend, addon, DAEMON, uid, async () => {
+        addon.table.set(DAEMON, { ppid: 1, start: 99 }); // replaced by the time the answer came
+        return true;
+      });
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!);
+      await until(client.closed);
+      expect(client.heard()).toBe(0);
+    });
+
+    it('sets no pass when the link went down between the read and the answer', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      h.backend.engineProcess(A, ENGINE);
+      let answer!: (ok: boolean) => void;
+      await attach(h.backend, addon, DAEMON, uid, () => new Promise((resolve) => (answer = resolve)));
+      h.backend.relay(null); // the link went down
+      answer(true); // a late answer for the old link
+      await settled();
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!);
+      await until(client.closed);
+      expect(client.heard()).toBe(0);
+    });
+
+    it('a relayed socket accepted while the confirmation is under way is let in once it comes', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      let answer!: (ok: boolean) => void;
+      await attach(h.backend, addon, DAEMON, uid, () => new Promise((resolve) => (answer = resolve)));
+      addon.peerPid = DAEMON;
+      const hosting = connectFakeHost(h.backend.socketPathFor(A)!);
+      await settled();
+      answer(true);
+      const host = await hosting;
+      tracked.hosts.push(host);
+      expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
+    });
+  });
+
   it('keeps what the daemon relayed when the same daemon is read again', async () => {
     const addon = fakeAddon();
     const h = harness({ peer: { addon } });
-    attach(h.backend, addon, DAEMON);
+    await attach(h.backend, addon, DAEMON);
     addon.peerPid = DAEMON;
     const relayed = await connectFakeHost(h.backend.socketPathFor(A)!);
     tracked.hosts.push(relayed);
-    attach(h.backend, addon, DAEMON); // a machine state change that reached the same daemon
+    await attach(h.backend, addon, DAEMON); // a machine state change that reached the same daemon
     expect(await relayed.request('tabs.query', {})).toEqual([]);
   });
 });
