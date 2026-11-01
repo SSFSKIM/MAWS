@@ -137,6 +137,16 @@ export class FakeLink implements RemoteLink {
     return act;
   }
 
+  /** P5 O7 M4: each op asked about again (`requery`), as an act the suite answers; it never sends the act. */
+  readonly requeries: FakeAct[] = [];
+  onRequery: (act: FakeAct) => void = () => {};
+  requery(op: { opId: string; opCreated: string; executor: string }): ActHandle {
+    const act = new FakeAct({ action: `requery ${op.opId}`, args: {}, executor: op.executor as ActRequest['executor'] }, 'unknown');
+    this.requeries.push(act);
+    this.onRequery(act);
+    return act;
+  }
+
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription {
     // An `ended` is final: the real link removes the subscription, as the fake does.
     const sub: FakeSub = { id: `sub-${++this.#subN}`, request, sink: { ...sink, ended: (reason) => ((sub.closed = true), sink.ended(reason)) }, closed: false, at: request.cursor ?? null };

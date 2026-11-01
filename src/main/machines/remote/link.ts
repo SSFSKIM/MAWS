@@ -41,6 +41,7 @@ import {
   type ChannelMessage,
   type DeviceMessage,
   type EndpointMessage,
+  type Executor,
   type OrgState,
   type SessionRef,
 } from '../../../../apps/org-protocol/src/index.ts';
@@ -88,6 +89,8 @@ export interface RemoteLink extends MachineLink {
    */
   call(name: string, input: unknown, options?: CallOptions): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
+  /** P5 O7 M4: the machine's ledger asked again about an op settled `unknown` (ActTable.requery): query only, never the act. */
+  requery(op: { opId: string; opCreated: string; executor: Executor }): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
   /** `person`: a person acted on this machine (also lifts `refused`). */
   probe(reason: ProbeReason): void;
@@ -748,6 +751,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       });
     },
     act: (request) => acts.act(request, ended()),
+    requery: (op) => acts.requery(op, ended()),
     subscribe: (request, sink) => subs.subscribe(request, sink, ended()),
     probe,
     close() {
