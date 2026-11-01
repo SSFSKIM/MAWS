@@ -634,7 +634,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(localPort, 'a listener of A’s own, not B’s port').not.toBe(devPort);
       expect(tab.url, 'the page loads from A’s listener').toBe(`http://127.0.0.1:${localPort}/`);
 
-      // The page is the directory listing B's server sent for the checkout, and B's server logged the request.
+      // The page is the directory listing B's server sent for the checkout.
       const pageText = () =>
         a!.app.evaluate(async ({ webContents }, origin) => {
           const view = webContents.getAllWebContents().find((w) => w.getURL().startsWith(origin));
@@ -643,13 +643,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect.poll(pageText, { timeout: 60_000, message: 'the forwarded page shows B’s checkout' }).toContain('Directory listing for /');
       const listed = (await pageText())!;
       for (const name of [NOTES, ON_B, WHILE_CUT]) expect(listed, `the listing names ${name}`).toContain(name);
-      await expect
-        .poll(async () => printedAnywhere(await terminalRows(page, id), '"GET / HTTP/1.1" 200'), { timeout: 30_000, message: 'B’s server logged the page’s request' })
-        .toBe(true);
-
-      // ⌃C in the terminal stops the server.
+      // Back in the Terminal tool (the browser may have taken its place): B's server logged the page's request, and ⌃C
+      // stops it.
       await openSurface(page, 'Terminal');
       const shown = await shownTerminal(page);
+      await expect
+        .poll(async () => printedAnywhere(await terminalRows(page, shown), '"GET / HTTP/1.1" 200'), { timeout: 30_000, message: 'B’s server logged the page’s request' })
+        .toBe(true);
       await surface(page, 'terminal').locator(`[data-terminal-id="${shown}"] textarea`).focus();
       await page.keyboard.press('Control+C');
       await expect
