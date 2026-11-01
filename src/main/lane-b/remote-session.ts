@@ -9,11 +9,6 @@
 //   then the stream ends "can't place"; a later `start` (a click: the tab's interest read again) tries again. A read the
 //   link could not carry (offline, a timeout, the machine's index unavailable) is asked again on the idle backoff without
 //   counting. The subscription opens once the record is had.
-// - A session this app spawned (P5 O7 M4, the architect's ruling on M4d's gap): the machine's endpoint ranks a lane B
-//   session by its sminos listing, so a session just spawned here answers `grade` until sminos lists it. While the spawn
-//   settled less than `listWaitMs` ago (`spawnedAt`), a read that can't place it says "Waiting for <machine> to list the
-//   new session…" (`listing`) and is asked again on the retries' last interval until the minute is up; then the stream
-//   ends "can't place" as for any session. The wait is let go (`spawnWaitOver`) at the first record had or at the cap.
 // - The stream. One `full` subscription. Its parts become `session.status`, `session.queue`, `session.catalogChanged`
 //   and, for the broker's items still waiting on a person, `attention.changed` for that session (the renderer never reads
 //   `session.brokerItems`); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
@@ -70,12 +65,7 @@ export interface RemoteSessionState {
   sends: number;
   /** Why the stream ended, while it has: `unplaced`, `closed`, `removed`, or the endpoint's reason. */
   ended: string | null;
-  /** Waiting for the machine to list a session this app spawned (its record can't be read until it does). */
-  listing: boolean;
 }
-
-/** How long after a spawn here settled main waits for the machine to list the new session (M4d's gap). */
-export const LIST_WAIT_MS = 60_000;
 
 export interface RemoteSessionTiming {
   recordRetryMs: readonly number[];
@@ -84,8 +74,6 @@ export interface RemoteSessionTiming {
   /** With no feed carrying the record, an idle stream is tried again on the idle backoff doubling to this. */
   idleProbeMaxMs: number;
   batchMax: number;
-  /** A session this app spawned is asked for this long after the spawn settled (LIST_WAIT_MS). */
-  listWaitMs?: number;
 }
 
 export interface RemoteSessionDeps {
@@ -100,12 +88,6 @@ export interface RemoteSessionDeps {
   subscribed?(): void;
   /** Whether the session's checkout feed carries its record now (`recordChanged`): an idle stream waits for it. */
   followed?(): boolean;
-  /** When this app's spawn of the session settled (epoch ms), or null when it didn't spawn it (or the wait is over). */
-  spawnedAt?(): number | null;
-  /** The wait for the machine to list it is over: the record was had, or the minute is up. */
-  spawnWaitOver?(): void;
-  /** The clock `spawnedAt` is read against (Date.now). */
-  now?(): number;
   log(line: string): void;
 }
 
@@ -144,7 +126,7 @@ export class RemoteSession {
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
     this.#backoffMs = deps.timing.idleRetryMs[0];
-    this.state = { machine: deps.machine, app: deps.app, status: null, record: null, stream: 'opening', launch: null, sends: 0, ended: null, listing: false };
+    this.state = { machine: deps.machine, app: deps.app, status: null, record: null, stream: 'opening', launch: null, sends: 0, ended: null };
   }
 
   get link(): RemoteLink {
@@ -280,7 +262,6 @@ export class RemoteSession {
     if (answer.ok) {
       const read = link.readCommandOutput('session.get', answer.output);
       if (read.ok && read.value !== null) {
-        this.#listed();
         this.state.record = read.value as SessionRecord;
         this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
         this.#subscribe();
@@ -293,23 +274,7 @@ export class RemoteSession {
     } else if (TRANSIENT.has(answer.error.code)) {
       return this.#later(() => void this.#readRecord(attempt, token));
     }
-    // A session this app spawned, not listed yet: asked again until the minute after its spawn is up.
-    const spawned = this.#deps.spawnedAt?.() ?? null;
-    const left = spawned === null ? 0 : spawned + (timing.listWaitMs ?? LIST_WAIT_MS) - (this.#deps.now?.() ?? Date.now());
-    if (left > 0) {
-      if (!this.state.listing) {
-        this.state.listing = true;
-        this.publish();
-      }
-      const interval = timing.recordRetryMs[Math.min(attempt, timing.recordRetryMs.length - 1)] ?? 1000;
-      this.#timer = setTimeout(() => {
-        this.#timer = null;
-        void this.#readRecord(attempt + 1, token);
-      }, Math.min(interval, left));
-      return;
-    }
-    if (spawned !== null) this.#listed();
-    if (attempt >= timing.recordRetryMs.length || spawned !== null) {
+    if (attempt >= timing.recordRetryMs.length) {
       this.state.stream = 'ended';
       this.state.ended = 'unplaced';
       this.publish();
@@ -319,12 +284,6 @@ export class RemoteSession {
       this.#timer = null;
       void this.#readRecord(attempt + 1, token);
     }, timing.recordRetryMs[attempt]);
-  }
-
-  /** The wait for the machine to list a session spawned here is over. */
-  #listed(): void {
-    if (this.state.listing) this.state.listing = false;
-    if (this.#deps.spawnedAt?.() != null) this.#deps.spawnWaitOver?.();
   }
 
   // ---- The stream ------------------------------------------------------------------------------------------------------

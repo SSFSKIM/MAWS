@@ -63,7 +63,7 @@ import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from 
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult } from './remote-outcomes';
-import { LIST_WAIT_MS, RemoteSession, type RemoteSessionTiming } from './remote-session';
+import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
 import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwardsTiming } from './remote-forward';
@@ -212,17 +212,6 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
   /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
-  /**
-   * P5 O7 M4 (the architect's ruling on M4d's gap): the sessions this app spawned, by machine and appSessionId, and when
-   * their spawn settled: their open waits a minute for the machine to list them (remote-session.ts). Let go at the first
-   * record had, at the minute's end, and at stop.
-   */
-  const spawned = new Map<string, number>();
-  const listWaitMs = timing.listWaitMs ?? LIST_WAIT_MS;
-  const spawnedAt = (key: string): number | null => {
-    for (const [held, at] of spawned) if (now() - at >= listWaitMs) spawned.delete(held);
-    return spawned.get(key) ?? null;
-  };
   const spawns = createSpawnAttempts({ now, log: deps.log, pendingMs: timing.spawnPendingMs, tombstoneMs: timing.spawnKeptMs, bounded: (handle, deadline) => bounded(handle, deadline) });
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
@@ -255,9 +244,6 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
-        spawnedAt: () => spawnedAt(`${machine}\n${app}`), // spawned here: its open waits for the machine to list it
-        spawnWaitOver: () => void spawned.delete(`${machine}\n${app}`),
-        now,
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
@@ -459,16 +445,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
     if (name === 'files.upload') return upload(link, fields);
-    if (name === 'session.spawn') {
-      // the tab it is made from (the envelope's session); a session it started is one this app spawned
-      const result = await spawns.spawn(link, fields, ctx.session, ctx.client); // the page asking: an answer to a page gone isn't taken
-      const output = result.ok ? (result.value as { status?: unknown; appSessionId?: unknown }) : null;
-      if (output?.status === 'ok' && typeof output.appSessionId === 'string') {
-        spawnedAt(''); // the sweep
-        spawned.set(`${link.machine}\n${output.appSessionId}`, now());
-      }
-      return result;
-    }
+    // the tab it is made from (the envelope's session), and the page asking: an answer to a page gone isn't taken
+    if (name === 'session.spawn') return spawns.spawn(link, fields, ctx.session, ctx.client);
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
@@ -523,7 +501,6 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       spawns.stop();
       ptys.stop();
       forwards.stop();
-      spawned.clear();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
     },

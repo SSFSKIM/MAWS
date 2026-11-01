@@ -497,28 +497,21 @@ describe('the checkout and the spawn (M4)', () => {
     expect(answer).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
   });
 
-  // The architect's ruling on M4d's gap: a session this app spawned waits a minute for the machine to list it.
-  it('opens a session this app spawned waiting for the machine to list it, lets the wait go at its first open, and leaves another session as it was', async () => {
+  // O12 M11: B's endpoint ranks the spawner as owner, so a session spawned here is placed at once; one that isn't follows
+  // the ordinary record retries, then "can't place", as any session does (the main-side listing wait is gone).
+  it('opens a session this app spawned as any session: placed when the machine answers, else "can’t place" after the retries', async () => {
     const l = lab({ tabs: [] });
-    let listed = false;
-    l.link.answers.set('session.get', (input) => (input.appSessionId === 'app-new' && listed ? { ok: true, output: record('app-new') } : { ok: false, error: { code: 'grade' } }));
+    l.link.answers.set('session.get', (input) => (input.appSessionId === 'app-new' ? { ok: true, output: record('app-new') } : { ok: false, error: { code: 'grade' } }));
     l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
     expect(await l.cmd('session.spawn', { checkout: '/work/repo', permission_mode: 'default' })).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-unplaced' } });
+    expect(await l.cmd('session.spawn', { checkout: '/work/repo', permission_mode: 'default' })).toMatchObject({ ok: true });
     const reasonOf = (app: string) => l.of('remote.session').filter((p) => p.address === app).at(-1)?.reason;
-    l.setTabs('app-new', 'app-other');
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(reasonOf('app-new')).toBe('Waiting for mini to list the new session…');
-    expect(reasonOf('app-other')).toBe('mini can’t place this session'); // not spawned here: given up after 7.5 s
-    listed = true;
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(reasonOf('app-new')).toBeNull();
-    // the wait let go: a later open of it is any session's
-    listed = false;
-    l.setTabs();
-    await vi.advanceTimersByTimeAsync(60_000);
-    l.setTabs('app-new');
+    l.setTabs('app-new', 'app-unplaced');
     await vi.advanceTimersByTimeAsync(0);
-    expect(reasonOf('app-new')).toBe('Opening on mini…');
+    expect(reasonOf('app-new')).toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reasonOf('app-unplaced')).toBe('mini can’t place this session');
   });
 
   // M4c fix wave 2 (the architect's rulings): a New chat tab's spawn is one attempt, kept by the tab it is made from (the
