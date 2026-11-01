@@ -6,11 +6,15 @@
 // unmount gives the page's view back, so the page drawn here is not under it).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { Chrome } from './chrome/Chrome';
 import { useForwards } from './forward';
 import { ForwardFailedPage } from './pages/ForwardFailed';
 import { BrowserPane } from './Pane';
 import { listSession, sessionTabs, useBrowser } from './store';
+
+const isAddressElsewhere = (appSessionId: AppSessionId): boolean => isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
 
 export interface BrowserViewProps {
   appSessionId: AppSessionId;
@@ -21,7 +25,8 @@ export interface BrowserViewProps {
 export function BrowserView({ appSessionId, surface, browserTabId }: BrowserViewProps) {
   useEffect(() => listSession(appSessionId), [appSessionId]);
   const { tabs, selected } = useBrowser((s) => sessionTabs(s, appSessionId));
-  const known = useBrowser((s) => s.ready || s.sessions.has(appSessionId));
+  // P5 O7 M3: the app-wide list is this Mac's sessions only; another machine's session is known once its own list is in
+  const known = useBrowser((s) => s.sessions.has(appSessionId) || (s.ready && !isAddressElsewhere(appSessionId)));
   const shownId = browserTabId ?? selected;
   const tab = tabs.find((candidate) => candidate.tabId === shownId) ?? null;
   const gone = browserTabId !== undefined && known && tab === null;

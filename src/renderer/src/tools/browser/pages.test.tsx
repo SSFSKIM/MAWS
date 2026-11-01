@@ -13,6 +13,9 @@ import { BROWSER_COPY } from './copy';
 import { resetCovering } from './covering';
 import { BrowserPane } from './Pane';
 import { resetBrowser } from './store';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { useMachines } from '../../stores/machines';
 
 const A = 'app-a' as AppSessionId;
 let main: ReturnType<typeof installFakeMain>;
@@ -74,6 +77,18 @@ describe('the other pages', () => {
     expect(screen.getByText('the partition could not open')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(navigations()).toEqual([{ tabId: T1, to: 'reload' }]);
+  });
+
+  // P5 O7 M3c fix wave 1: a restored forwarded tab whose forward main could not open again at its first load
+  it('a forwarded tab main could not re-forward: the port and machine in the heading, main’s words, and Retry opening it again', () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    show({ url: 'http://127.0.0.1:54321/app', failed: { message: 'remote.forward.open: machine mini is not reachable' }, forward: { machine: OTHER_MACHINE, port: 5173, localPort: 54321 } });
+    expect(screen.getByRole('heading', { name: 'Couldn’t open port 5173 on mini' })).toBeTruthy();
+    expect(screen.getByText('remote.forward.open: machine mini is not reachable')).toBeTruthy();
+    expect(document.querySelector('[data-browser-page="forward-failed"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(navigations()).toEqual([{ tabId: T1, to: 'reload' }]); // main's reload opens the forward again
+    useMachines.setState({ machines: new Map() });
   });
 
   it('suspended with a URL: its title, Open <url> loading it as parsed, the restored note', () => {

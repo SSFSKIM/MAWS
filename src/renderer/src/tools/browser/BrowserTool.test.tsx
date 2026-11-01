@@ -154,6 +154,18 @@ describe('the tool and the main tab', () => {
     useMachines.setState({ machines: new Map() });
   });
 
+  // P5 O7 M3c fix wave 1: the app-wide list is this Mac's sessions only, so another machine's main tab is gone only once
+  // its own session's list says so
+  it('a main tab of another machine’s session is not called closed while its session’s list is out', async () => {
+    const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+    browser.setState({ ready: true });
+    main = installFakeMain((name) => (name === 'browser.tabs.list' ? new Promise(() => {}) : ok()));
+    render(<BrowserTab tab={{ id: `browser:${R}:${T2}`, kind: 'browser', appSessionId: R, browserTabId: T2, pinned: false }} />);
+    await act(async () => {});
+    expect(main.callsOf('browser.tabs.list')).toHaveLength(1);
+    expect(screen.queryByText(BROWSER_COPY.tabGone)).toBeNull();
+  });
+
   it('a main tab whose tab is gone is headed “That tab was closed”; one that exists is not', async () => {
     render(<BrowserTab tab={{ id: `browser:${A}:${T2}`, kind: 'browser', appSessionId: A, browserTabId: T2, pinned: false }} />);
     await act(async () => {});

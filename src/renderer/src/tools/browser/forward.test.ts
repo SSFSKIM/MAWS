@@ -1,7 +1,7 @@
 // P5 O7 M3 ("Forwarding"): a loopback link out of another machine's session is a forward. The rule's edges (whose
 // session, which link), the open through `remote.forward.open` (this app's own command: no machine to invoke it on) and
 // the page on the local listener's port, the mark a tab on that port carries, and what a refused open says.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import { addressOf } from '@shared/machine/address';
@@ -61,30 +61,13 @@ describe('openForward', () => {
     fake = fakeClient({ 'browser.tabs.open': { tab: browserTab(T1, R), reused: false } });
   });
 
-  it('opens the forward on this app, then the page on its local port in the session, selected; a tab there is marked', async () => {
+  it('opens the forward on this app, then the page on its local port in the session, selected', async () => {
     const done = openForward(fake.client, R, 'http://localhost:5173/app?x=1#top', FORWARD, 'r1');
     expect(fake.invoked('remote.forward.open')).toEqual([FORWARD]);
     expect(fake.machines('remote.forward.open'), 'the input names the machine; the command is this app’s').toEqual([undefined]);
     await fake.reply('remote.forward.open', { localPort: 54321 });
     await done;
     expect(fake.invoked('browser.tabs.open')).toEqual([{ appSessionId: R, url: 'http://127.0.0.1:54321/app?x=1#top', select: true, reuse: 'url', requestId: 'r1' }]);
-    const { ports } = forwards.getState();
-    expect(forwardMarkOf('http://127.0.0.1:54321/elsewhere', ports)).toEqual(FORWARD);
-    expect(forwardMarkOf('http://127.0.0.1:54322/', ports)).toBeNull();
-    expect(forwardMarkOf('http://localhost:54321/', ports), 'only the listener’s own address').toBeNull();
-    expect(forwardMarkOf('', ports)).toBeNull();
-  });
-
-  it('a port reopened on another local port moves its mark there', async () => {
-    const first = openForward(fake.client, R, 'http://localhost:5173/', FORWARD);
-    await fake.reply('remote.forward.open', { localPort: 54321 });
-    await first;
-    const second = openForward(fake.client, R, 'http://localhost:5173/', FORWARD);
-    await fake.reply('remote.forward.open', { localPort: 60000 });
-    await second;
-    const { ports } = forwards.getState();
-    expect(forwardMarkOf('http://127.0.0.1:54321/', ports)).toBeNull();
-    expect(forwardMarkOf('http://127.0.0.1:60000/', ports)).toEqual(FORWARD);
   });
 
   it('a refused open opens no tab and is kept for the session’s browser, with the tab then selected; a retry that opens clears it', async () => {
@@ -115,14 +98,15 @@ describe('forwardErrorWords', () => {
   });
 });
 
-describe('the kept forwards', () => {
-  it('outlive a reload of the page through its session storage', async () => {
-    const fake = fakeClient({ 'browser.tabs.open': { tab: browserTab(T1, R), reused: false } });
-    const done = openForward(fake.client, R, 'http://localhost:5173/', FORWARD);
-    await fake.reply('remote.forward.open', { localPort: 54321 });
-    await done;
-    vi.resetModules();
-    const reloaded = await import('./forward');
-    expect(reloaded.forwardMarkOf('http://127.0.0.1:54321/', reloaded.forwards.getState().ports)).toEqual(FORWARD);
+// M3c fix wave 1: the mark reads main's `tab.forward`, while the tab's page is on that forward's listener
+describe('forwardMarkOf', () => {
+  const forward = { machine: OTHER_MACHINE, port: 5173, localPort: 54321 };
+  it('answers the tab’s forward while its page is at 127.0.0.1 on the forward’s local port, and nothing otherwise', () => {
+    expect(forwardMarkOf(browserTab(T1, R, { url: 'http://127.0.0.1:54321/elsewhere', forward }))).toEqual(forward);
+    expect(forwardMarkOf(browserTab(T1, R, { url: 'https://127.0.0.1:54321/', forward }))).toEqual(forward);
+    expect(forwardMarkOf(browserTab(T1, R, { url: 'http://127.0.0.1:54322/', forward }))).toBeNull();
+    expect(forwardMarkOf(browserTab(T1, R, { url: 'http://localhost:54321/', forward })), 'only the listener’s own address').toBeNull();
+    expect(forwardMarkOf(browserTab(T1, R, { url: '', forward }))).toBeNull();
+    expect(forwardMarkOf(browserTab(T1, R, { url: 'http://127.0.0.1:54321/' })), 'no forward main keeps').toBeNull();
   });
 });

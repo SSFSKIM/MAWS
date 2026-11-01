@@ -7,14 +7,15 @@
 //   that machine's loopback all the same, so it opens nowhere;
 // - the open (`openForward`, the Browser tool's): `remote.forward.open` on this app, then the page on the local
 //   listener's port, in the session's browser, reusing a tab already at that URL;
-// - the forwards this page opened, by local port, so a tab at `127.0.0.1:<localPort>` is marked "forwarded from
-//   <machine>" for as long as its page is there; kept in the window's session storage, so a reload of the page keeps the
-//   marks of the listeners main still holds. No listener is closed from here: main closes them with the machine's link
-//   and at quit, and a page's history and a round trip through another site come back to the same local port;
+// - the mark (`forwardMarkOf`): main keeps `tab.forward` for a tab it opened at a forward's listener (persisted, and
+//   re-forwarded at a restored tab's first load), and the tab is "forwarded from <machine>" while its page is on that
+//   listener. No listener is closed from here: main closes them with the machine's link and at quit, and a page's
+//   history and a round trip through another site come back to the same local port;
 // - a refused open, kept per session and drawn in place of the pane (pages/ForwardFailed.tsx) while the session's
 //   selected tab is the one it was over, with a retry.
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
+import type { BrowserTab, BrowserTabForward } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -39,28 +40,15 @@ export interface ForwardFailure {
 }
 
 export interface ForwardsState {
-  ports: ReadonlyMap<number, ForwardTarget>; // by the local listener's port
   failures: ReadonlyMap<AppSessionId, ForwardFailure>;
 }
 
-const STORAGE_KEY = 'maws.browser.forwards';
-
-function storedPorts(): Map<number, ForwardTarget> {
-  try {
-    const rows = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? '[]') as [number, ForwardTarget][];
-    return new Map(rows.filter(([port, target]) => Number.isInteger(port) && typeof target?.machine === 'string' && Number.isInteger(target.port)));
-  } catch {
-    return new Map();
-  }
-}
-
-export const forwards = createStore<ForwardsState>()(() => ({ ports: storedPorts(), failures: new Map() }));
+export const forwards = createStore<ForwardsState>()(() => ({ failures: new Map() }));
 export const useForwards = <T>(selector: (state: ForwardsState) => T): T => useStore(forwards, selector);
 
-// Tests: forget every forward and failure, and what the window kept.
+// Tests: forget every failure.
 export function resetForwards(): void {
-  sessionStorage.removeItem(STORAGE_KEY);
-  forwards.setState({ ports: new Map(), failures: new Map() });
+  forwards.setState({ failures: new Map() });
 }
 
 /** The forward a link out of a session opens through: a loopback link of a session on another machine; else null. */
@@ -76,26 +64,17 @@ export function loopbackElsewhere(appSessionId: AppSessionId, url: string, local
   return isLoopbackLink(url) ? machineOf(appSessionId) : null; // the shared rule's never-open-here test
 }
 
-/** The forward a page is served through, when its URL is on the local listener of a forward this page opened. */
-export function forwardMarkOf(url: string, ports: ReadonlyMap<number, ForwardTarget>): ForwardTarget | null {
+/** The forward a tab's page is served through: main's `tab.forward`, while the page is on that forward's listener. */
+export function forwardMarkOf(tab: Pick<BrowserTab, 'url' | 'forward'>): BrowserTabForward | null {
+  const { forward } = tab;
+  if (forward === undefined) return null;
   let parsed: URL;
   try {
-    parsed = new URL(url);
+    parsed = new URL(tab.url);
   } catch {
     return null;
   }
-  return parsed.hostname === '127.0.0.1' && parsed.port !== '' ? (ports.get(Number(parsed.port)) ?? null) : null;
-}
-
-function remember(localPort: number, forward: ForwardTarget): void {
-  const ports = new Map([...forwards.getState().ports].filter(([, kept]) => kept.machine !== forward.machine || kept.port !== forward.port));
-  ports.set(localPort, forward);
-  forwards.setState({ ports });
-  try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...ports]));
-  } catch {
-    // a window that keeps nothing loses only the marks at its next reload
-  }
+  return parsed.hostname === '127.0.0.1' && parsed.port === String(forward.localPort) ? forward : null;
 }
 
 function setFailure(appSessionId: AppSessionId, failure: ForwardFailure | null): void {
@@ -116,8 +95,7 @@ export async function openForward(client: MawsBridge, appSessionId: AppSessionId
     return;
   }
   const { localPort } = opened.value;
-  remember(localPort, forward);
-  setFailure(appSessionId, null);
+  setFailure(appSessionId, null); // main marks the tab it opens at the listener (`tab.forward`)
   const request = { appSessionId, url: forwardedUrl(url, localPort), select: true, reuse: 'url' as const, ...(requestId !== undefined && { requestId }) };
   const result = await client.invoke('browser.tabs.open', request);
   if (!result.ok) console.warn(`[browser] opening the forwarded page refused: ${result.error.message}`);
