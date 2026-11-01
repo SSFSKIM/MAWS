@@ -11,9 +11,10 @@
 // is fixed by the key itself: no command moves a session to another machine.
 //
 // Where the key leaves main it becomes the bare id again, said for its machine:
-// - every browser event naming such a session goes to the windows from its machine (`emitFrom`), its `appSessionId` and
-//   its `tabs[].appSessionId` bare, so the renderer lifts them to the session's address; comment mode's pick likewise
-//   (comment/mode.ts, `away`);
+// - every browser event naming such a session goes to the windows from its machine (`emitFrom`), every place it names
+//   the key (a field's value or a record's key, at any depth: a tab's `appSessionId` wherever the tab sits) said by the
+//   bare id, so the renderer lifts them to the session's address; comment mode's pick likewise (comment/mode.ts, `away`).
+//   An event naming sessions of two machines can't be said from one, and is not sent;
 // - the handlers' answers (`browser.tabs.list`, `.open`) carry the bare id, lifted with the invoke's machine
 //   (register.ts); a list of every session is the invoke machine's sessions only.
 // tabs.json keeps the keys, and `machines` each remote key's machine, so a relaunch keeps the session's tabs (the spine
@@ -72,16 +73,34 @@ export class SessionMachines {
     return Object.keys(machines).length === 0 ? {} : { machines };
   }
 
-  /** `emit`, but an event naming another machine's session goes from that machine, with the session's bare id. */
+  /**
+   * `emit`, but an event naming another machine's session goes from that machine, every mention of the session's key
+   * (a value or a record's key, at any depth) said by its bare id.
+   */
   stamped(emit: BrowserEmit, emitFrom: EmitFrom): BrowserEmit {
     return (name, payload) => {
-      const key = (payload as { appSessionId?: unknown }).appSessionId;
-      const away = typeof key === 'string' ? this.#away.get(key) : undefined;
-      if (away === undefined) return emit(name, payload);
-      const { tabs } = payload as { tabs?: unknown };
-      const bare = (value: object) => ({ ...value, appSessionId: away.bare });
-      const said = { ...bare(payload as object), ...(Array.isArray(tabs) && { tabs: tabs.map((tab: { appSessionId?: unknown }) => (tab.appSessionId === key ? bare(tab) : tab)) }) };
-      return emitFrom(away.machine, name, said as typeof payload);
+      if (this.#away.size === 0) return emit(name, payload);
+      const named = new Set<MachineRef>();
+      const said = this.#said(payload, named);
+      if (named.size === 0) return emit(name, payload);
+      if (named.size > 1) {
+        console.error(`[browser] ${name} names sessions of ${[...named].join(' and ')}: not sent`);
+        return false;
+      }
+      return emitFrom([...named][0]!, name, said as typeof payload);
     };
+  }
+
+  /** `value` with each remote key it holds said by its bare id, the machines it named added to `named`. */
+  #said(value: unknown, named: Set<MachineRef>): unknown {
+    if (typeof value === 'string') {
+      const away = this.#away.get(value);
+      if (away === undefined) return value;
+      named.add(away.machine);
+      return away.bare;
+    }
+    if (Array.isArray(value)) return value.map((item) => this.#said(item, named));
+    if (value === null || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [this.#said(key, named) as string, this.#said(item, named)]));
   }
 }

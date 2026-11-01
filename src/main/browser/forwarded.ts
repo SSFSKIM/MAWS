@@ -6,7 +6,7 @@
 // - Provenance is main's listener ownership, read again whenever the tab's page moves: at `browser.tabs.open`
 //   (`opened`), at each committed navigation (a new document or an in-page move), and when a page's `window.open` child
 //   is made. A URL on a live listener takes that forward; a URL on the tab's own listener's port while that listener is
-//   gone (its link dropped) keeps the forward it has; any other URL clears it. So a tab moved from one forward's page to
+//   gone (its link dropped) keeps the forward it has (a child: its opener's); any other URL clears it. So a tab moved from one forward's page to
 //   another's names the second, and one that left every forward names none, before a relaunch reads it.
 // - `route`, the tab store's load seam: a load of a forwarded tab at its listener's URL whose listener is gone (a
 //   relaunch) opens the forward again first, and loads the page on the new listener once it answers. Lazily, at the
@@ -69,8 +69,8 @@ export function forwardedTabs({ store, forwards, log }: { store: Store; forwards
     if (owner !== null) return { ...owner, localPort };
     return was?.localPort === localPort ? was : undefined;
   }
-  function reread(entry: TabEntry, url: string): void {
-    const forward = provenance(url, entry.tab.forward);
+  function reread(entry: TabEntry, url: string, was: BrowserTabForward | undefined = entry.tab.forward): void {
+    const forward = provenance(url, was);
     if (!same(forward, entry.tab.forward)) store.update(entry.tab.tabId, { forward });
   }
   // every committed navigation (TabStore sets `committedUrl` before it patches the tab); a restored tab has none yet
@@ -81,9 +81,11 @@ export function forwardedTabs({ store, forwards, log }: { store: Store; forwards
     committed.set(entry, url);
     reread(entry, url);
   });
-  // a page's `window.open` child, at its first URL
+  // a page's `window.open` child, at its first URL: a live listener's forward, else its opener's while the URL is on the
+  // opener's listener's port (that listener gone, the child re-forwards past a relaunch as its opener does)
   store.onViewCreated((entry) => {
-    if (entry.openerTabId !== null && entry.tab.url !== '') reread(entry, entry.tab.url);
+    if (entry.openerTabId === null || entry.tab.url === '') return;
+    reread(entry, entry.tab.url, store.entry(entry.openerTabId)?.tab.forward);
   });
 
   async function reopen(tabId: string, forward: BrowserTabForward): Promise<void> {

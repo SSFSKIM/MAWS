@@ -106,6 +106,19 @@ describe('a forwarded tab’s provenance, read from the listeners at each move o
     next.store.load(child.tab.tabId, next.tab(child.tab.tabId).url);
     expect(next.opens.map(({ machine, port }) => ({ machine, port }))).toEqual([A]);
   });
+
+  it('gives a child made after its opener’s listener went its opener’s forward, which it opens again past a relaunch', () => {
+    const w = world({ 49001: A });
+    const opener = w.open('http://127.0.0.1:49001/');
+    w.live.delete(49001); // the link dropped: its listener closed
+    const child = w.store.adoptChild(w.store.require(opener), { url: 'http://127.0.0.1:49001/popup', select: false, webContents: contents() as unknown as WebContents });
+    expect(child.tab.forward).toEqual({ ...A, localPort: 49001 });
+    const other = w.store.adoptChild(w.store.require(opener), { url: 'http://127.0.0.1:49555/', select: false, webContents: contents() as unknown as WebContents });
+    expect(other.tab.forward).toBeUndefined(); // off the opener's port: no forward
+    const next = w.relaunch();
+    next.store.load(child.tab.tabId, next.tab(child.tab.tabId).url);
+    expect(next.opens.map(({ machine, port }) => ({ machine, port }))).toEqual([A]);
+  });
 });
 
 describe('a forwarded tab’s forward opened again past a relaunch', () => {
