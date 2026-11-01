@@ -198,6 +198,23 @@ describe('the scope', () => {
     expect(scope.admits(null, 'Page.frameNavigated')).toBe(false);
   });
 
+  it('Page.disable ends the lease\'s chooser interception, as Chromium clears it; a failed disable rolls back to it', () => {
+    const scope = createEventScope();
+    scope.willSend(null, 'Page.enable', {})(true);
+    scope.willSend(null, 'Page.setInterceptFileChooserDialog', { enabled: true })(true);
+    const disable = scope.willSend(null, 'Page.disable', {});
+    expect(scope.admits(null, 'Page.fileChooserOpened'), 'off as the disable is sent').toBe(false);
+    disable(true);
+    expect(scope.admits(null, 'Page.fileChooserOpened'), 'another consumer\'s interception is not the lease\'s').toBe(false);
+    const failing = createEventScope();
+    failing.willSend(null, 'Page.enable', {})(true);
+    failing.willSend(null, 'Page.setInterceptFileChooserDialog', { enabled: true })(true);
+    const refused = failing.willSend(null, 'Page.disable', {});
+    expect(failing.admits(null, 'Page.fileChooserOpened')).toBe(false);
+    refused(false);
+    expect(failing.admits(null, 'Page.fileChooserOpened'), 'the interception still the lease\'s').toBe(true);
+  });
+
   it('tracing is the lease\'s from its start until its completion is told, past its end', () => {
     const scope = createEventScope();
     expect(scope.admits(null, 'Tracing.dataCollected')).toBe(false);

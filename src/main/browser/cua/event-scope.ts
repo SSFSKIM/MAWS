@@ -63,9 +63,10 @@ function changesOf(method: string, params: unknown): Change[] {
       return [['screencast', method === 'Page.startScreencast']];
     case 'Page.setInterceptFileChooserDialog':
       return [['fileChooser', on(params, 'enabled')]];
-    case 'Page.enable': // Chromium sets the chooser's event to each enable's value and clears it at the disable
-    case 'Page.disable':
-      return [['domain:Page', method === 'Page.enable'], ['fileChooserEvent', on(params, 'enableFileChooserOpenedEvent')]];
+    case 'Page.enable': // Chromium sets the chooser's event to each enable's value
+      return [['domain:Page', true], ['fileChooserEvent', on(params, 'enableFileChooserOpenedEvent')]];
+    case 'Page.disable': // and clears it and the chooser's interception at the disable (blink's ClearAllFields)
+      return [['domain:Page', false], ['fileChooserEvent', false], ['fileChooser', false]];
     case 'Page.setLifecycleEventsEnabled':
       return [['lifecycle', on(params, 'enabled')]];
     case 'Target.setAutoAttach':
