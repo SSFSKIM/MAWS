@@ -53,7 +53,8 @@ const GO = /o16-holder go ([a-z0-9]{1,16}) (\d{1,4})/;
  *   the first request              Bash `sleep <s>` in the background
  *   after that tool's result        Bash `curl` to a closed port, which no rule allows: the permission
  *   after the permission's tool     the turn's text, `o16-holder done <tag>`
- *   after that (a new turn: the background shell's completion)   `o16-holder notified <tag>`
+ *   after that, a new turn: `o16-holder notified <tag>` for the engine's notification that the run's own shell
+ *     completed, else `o16-holder unrelated <tag>`
  */
 export function holderStep(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
@@ -66,7 +67,24 @@ export function holderStep(body) {
   const used = (Array.isArray(last.content) ? last.content : []).filter((b) => b?.type === 'tool_use').map((b) => b.id);
   if (used.includes(`toolu_o16_${tag}_bg`)) return { tool: { id: `toolu_o16_${tag}_ask`, name: 'Bash', input: { command: `curl -sS --max-time 2 http://127.0.0.1:9/o16-holder-${tag}`, description: `o16 holder permission ${tag}` } } };
   if (used.includes(`toolu_o16_${tag}_ask`)) return { text: `o16-holder done ${tag}` };
-  return { text: `o16-holder notified ${tag}` };
+  // A turn of its own after the run's turn: `notified` only for the engine's notification that the run's own shell (the
+  // task id its tool result named) completed; anything else, another task's, a failed or killed one, a person's message,
+  // gets a text the driver never accepts.
+  const task = /Command running in background with ID: ([A-Za-z0-9_-]+)/.exec(resultOf(messages, `toolu_o16_${tag}_bg`))?.[1];
+  const lastUser = textOf([...messages].reverse().find((m) => m?.role === 'user')?.content);
+  const notes = lastUser.match(/<task-notification>[\s\S]*?<\/task-notification>/g) ?? [];
+  const completed = task !== undefined && notes.some((note) => note.includes(`<task-id>${task}</task-id>`) && note.includes(`<tool-use-id>toolu_o16_${tag}_bg</tool-use-id>`) && note.includes('<status>completed</status>'));
+  return { text: `o16-holder ${completed ? 'notified' : 'unrelated'} ${tag}` };
+}
+
+/** The text of the tool result answering `toolUseId`, or ''. */
+function resultOf(messages, toolUseId) {
+  for (const m of messages) {
+    if (m?.role !== 'user' || !Array.isArray(m.content)) continue;
+    const block = m.content.find((b) => b?.type === 'tool_result' && b.tool_use_id === toolUseId);
+    if (block) return textOf(block.content);
+  }
+  return '';
 }
 
 const isMainLoop = (body) => Array.isArray(body.tools) && body.tools.some((t) => t?.name === 'Bash');
