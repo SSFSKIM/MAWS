@@ -42,9 +42,11 @@ const PNG = { ok: true, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErr
 class StandInRenderChild implements RenderChild {
   readonly pid = 4_242;
   readonly killed: string[] = [];
+  holdsTerm = false; // it outlives a SIGTERM (the test ends it)
   private readonly listeners: ((code: number | null, signal: string | null) => void)[] = [];
   kill(signal: NodeJS.Signals): void {
     this.killed.push(signal);
+    if (signal === 'SIGTERM' && this.holdsTerm) return;
     this.exit(null, signal);
   }
   onExit(listener: (code: number | null, signal: string | null) => void): void {
@@ -229,11 +231,13 @@ describe('the render seam in mawsd (P5 O5 M4)', () => {
     await until(() => render.children.length === 1, 3_000, 'the render host’s spawn');
     const host = await render.connect();
     await until(() => requests(host).length === 1, 3_000, 'the request handed over');
+    render.children[0]!.holdsTerm = true; // a daemon stop sends SIGTERM with render.exit: the host outlives it here
 
     const stopping = daemon.stop('restart', 75);
     await until(() => host.events('render.exit').length === 1, 3_000, 'render.exit');
     expect(engine.named('maws.artifact.captured'), 'answered while the link lived').toEqual([{ appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: `the render service is restarting on ${MACHINE}` } }]);
-    expect(stops, 'the spine still running').not.toHaveBeenCalled();
+    expect(render.children[0]!.killed, 'SIGTERM with render.exit').toEqual(['SIGTERM']);
+    expect(stops, 'the spine still running while the render host is').not.toHaveBeenCalled();
     render.children[0]!.exit(0);
     await stopping;
     expect(stops).toHaveBeenCalledOnce();
