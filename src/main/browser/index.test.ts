@@ -507,3 +507,128 @@ describe("startBrowser: cua's primitive server (E13)", () => {
   });
 });
 // E13 end
+
+// P5 O7 M3: the in-app browser for a session on another machine (src/main/browser/machines.ts, forwarded.ts): its tabs
+// are this Mac's, keyed by the session's address, kept across a relaunch, said from its machine with its bare id; a
+// forwarded port's tab opens its forward again lazily.
+describe('startBrowser: a session on another machine', () => {
+  const LOCAL = 'LocalMachineRef0000' as never;
+  const OTHER = 'OtherMachineRef0000' as never;
+  const THIRD = 'ThirdMachineRef0000' as never;
+  const R = 'App-Remote' as AppSessionId;
+  const R_KEY = `${OTHER}/${R}`; // the store's key of OTHER's session R (machines.ts)
+  const FORWARDED = { tabId: 'b_cccccccccccc', appSessionId: R_KEY, partition: DEFAULT_PARTITION, url: 'http://127.0.0.1:49152/app/?q=1', title: 'Dev', favicon: null, zoom: 1, createdAt: 'c', lastShownAt: 'l', forward: { machine: OTHER, port: 5173, localPort: 49152 } };
+  type Handler = (input: unknown, context: unknown) => unknown;
+  type Listed = { tabs: { tabId: string; appSessionId: string; forward?: unknown }[]; selected: Record<string, string | null> };
+
+  function lab(answer: () => Promise<unknown> = async () => ({ ok: true, value: { localPort: 50001 } })) {
+    mkdirSync(join(userData, 'browser'));
+    const file = join(userData, 'browser', 'tabs.json');
+    writeFileSync(file, JSON.stringify({ version: 1, tabs: [tab('b_aaaaaaaaaaaa', A), FORWARDED], selected: { [A]: 'b_aaaaaaaaaaaa', [R_KEY]: FORWARDED.tabId }, machines: { [R_KEY]: OTHER } }));
+    const handlers = new Map<string, Handler>();
+    const here: Array<[string, unknown]> = [];
+    const fromThere: Array<[unknown, string, unknown]> = [];
+    let live: number | null = null;
+    const listeners = new Map<number, { machine: never; port: number }>();
+    const opens: Array<[unknown, number]> = [];
+    const forwards = {
+      open: vi.fn(async (machine: never, port: number) => {
+        opens.push([machine, port]);
+        const result = (await answer()) as { ok: boolean; value?: { localPort: number } };
+        if (result.ok) live = result.value!.localPort;
+        return result as never;
+      }),
+      listening: () => live,
+      at: (localPort: number) => listeners.get(localPort) ?? null,
+    };
+    const browser = start(fakeIndex([A]).index, {
+      register: ((name: string, handler: Handler) => void handlers.set(name, handler)) as never,
+      emit: ((name: string, payload: unknown) => void here.push([name, payload])) as never,
+      remote: { local: LOCAL, emitFrom: ((machine: unknown, name: string, payload: unknown) => void fromThere.push([machine, name, payload])) as never, forwards },
+    });
+    const call = (name: string, input: unknown, target: unknown) => handlers.get(name)!(input, { ...contextOf(fakes.win.webContents), target });
+    return { file, browser, call, here, fromThere, opens, listeners };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const changed = (events: Array<[unknown, string, unknown]>) =>
+    events.filter(([, name]) => name === 'browser.tabs.changed').map(([machine, , payload]) => {
+      const { appSessionId, tabs } = payload as { appSessionId: string; tabs: { tabId: string; appSessionId: string }[] };
+      return [machine, appSessionId, tabs.map((t) => `${t.tabId}@${t.appSessionId}`)];
+    });
+
+  it('keeps its tabs at boot, lists them only for its machine with its bare id, and says their changes from it', async () => {
+    const l = lab();
+    expect(l.browser.store.list().tabs.map((t) => t.tabId)).toEqual(['b_aaaaaaaaaaaa', FORWARDED.tabId]); // the spine knows only A
+    expect(l.opens).toEqual([]); // restored suspended, its forward not opened
+    const mine = l.call('browser.tabs.list', {}, LOCAL) as Listed;
+    expect([mine.tabs.map((t) => t.tabId), mine.selected]).toEqual([['b_aaaaaaaaaaaa'], { [A]: 'b_aaaaaaaaaaaa' }]);
+    const theirs = l.call('browser.tabs.list', { appSessionId: R }, OTHER) as Listed;
+    expect(theirs).toMatchObject({ tabs: [{ tabId: FORWARDED.tabId, appSessionId: R, forward: { machine: OTHER, port: 5173, localPort: 49152 } }], selected: { [R]: FORWARDED.tabId } });
+    l.browser.store.update(FORWARDED.tabId, { title: 'Dev server' });
+    l.browser.store.update('b_aaaaaaaaaaaa', { title: 'Local' });
+    await settle();
+    expect(changed(l.fromThere)).toEqual([[OTHER, R, [`${FORWARDED.tabId}@${R}`]]]);
+    expect(l.here.map(([name, payload]) => [name, (payload as { appSessionId: string }).appSessionId])).toEqual([['browser.tabs.changed', A]]);
+    l.browser.stop();
+    expect(JSON.parse(readFileSync(l.file, 'utf8'))).toMatchObject({ machines: { [R_KEY]: OTHER }, tabs: [{ tabId: 'b_aaaaaaaaaaaa' }, { tabId: FORWARDED.tabId, appSessionId: R_KEY, forward: FORWARDED.forward }] });
+  });
+
+  it('keeps two machines’ sessions of one bare id apart: their tabs, selections and events, whichever is listed last', async () => {
+    const l = lab();
+    const TWIN = 'App-Twin' as AppSessionId;
+    const a = (l.call('browser.tabs.open', { appSessionId: TWIN, url: 'https://a.test/', select: true }, OTHER) as { tab: { tabId: string; appSessionId: string } }).tab;
+    const b = (l.call('browser.tabs.open', { appSessionId: TWIN, url: 'https://b.test/', select: true }, THIRD) as { tab: { tabId: string; appSessionId: string } }).tab;
+    expect([a.appSessionId, b.appSessionId]).toEqual([TWIN, TWIN]); // each said by its bare id
+    const listedOn = (machine: never) => l.call('browser.tabs.list', { appSessionId: TWIN }, machine) as Listed;
+    expect(listedOn(OTHER)).toMatchObject({ tabs: [{ tabId: a.tabId }], selected: { [TWIN]: a.tabId } });
+    expect(listedOn(THIRD)).toMatchObject({ tabs: [{ tabId: b.tabId }], selected: { [TWIN]: b.tabId } });
+    expect(listedOn(OTHER).tabs).toHaveLength(1); // a list never moves a session to another machine
+    // a tab of THIRD's session can't be selected for OTHER's
+    expect(() => l.call('browser.tabs.select', { appSessionId: TWIN, tabId: b.tabId }, OTHER)).toThrow();
+    l.fromThere.length = 0;
+    l.browser.store.update(a.tabId, { title: 'A' });
+    l.browser.store.update(b.tabId, { title: 'B' });
+    await settle();
+    expect(changed(l.fromThere)).toEqual([
+      [OTHER, TWIN, [`${a.tabId}@${TWIN}`]],
+      [THIRD, TWIN, [`${b.tabId}@${TWIN}`]],
+    ]);
+    l.browser.stop();
+    expect(JSON.parse(readFileSync(l.file, 'utf8')).machines).toEqual({ [R_KEY]: OTHER, [`${OTHER}/${TWIN}`]: OTHER, [`${THIRD}/${TWIN}`]: THIRD });
+  });
+
+  it('records the forward of a tab opened at its listener', async () => {
+    const l = lab();
+    l.listeners.set(49999, { machine: OTHER, port: 8000 });
+    const opened = l.call('browser.tabs.open', { appSessionId: 'App-Spawned', url: 'http://127.0.0.1:49999/', select: true }, OTHER) as { tab: { forward?: unknown } };
+    expect(opened.tab.forward).toEqual({ machine: OTHER, port: 8000, localPort: 49999 });
+    l.browser.stop();
+  });
+
+  it('opens a restored tab’s forward again at its first load and loads the same page on the new listener', async () => {
+    const l = lab();
+    expect(l.call('browser.tabs.navigate', { tabId: FORWARDED.tabId, to: 'reload' }, LOCAL)).toEqual({ accepted: true });
+    expect(l.opens).toEqual([[OTHER, 5173]]);
+    await settle();
+    const { tab: reopened } = l.browser.store.require(FORWARDED.tabId);
+    expect([reopened.url, reopened.forward, reopened.failed, reopened.suspended]).toEqual(['http://127.0.0.1:50001/app/?q=1', { machine: OTHER, port: 5173, localPort: 50001 }, null, false]);
+    // its listener live: a load on it asks nothing more
+    expect(l.call('browser.tabs.navigate', { tabId: FORWARDED.tabId, to: { url: 'http://127.0.0.1:50001/other' } }, LOCAL)).toEqual({ accepted: true });
+    expect([l.opens.length, l.browser.store.require(FORWARDED.tabId).tab.url]).toEqual([1, 'http://127.0.0.1:50001/other']);
+    l.browser.stop();
+  });
+
+  it('marks the tab failed with main’s words when its forward can’t be opened again, and retries only when asked', async () => {
+    const l = lab(async () => ({ ok: false, error: { code: 'host_unavailable', message: 'remote.forward.open: machine Other is not connected' } }));
+    l.call('browser.tabs.navigate', { tabId: FORWARDED.tabId, to: 'reload' }, LOCAL);
+    await settle();
+    const { tab: failed } = l.browser.store.require(FORWARDED.tabId);
+    expect([failed.failed, failed.loading, failed.url, failed.forward?.localPort]).toEqual([{ message: 'remote.forward.open: machine Other is not connected' }, false, FORWARDED.url, 49152]);
+    await settle();
+    expect(l.opens).toHaveLength(1);
+    l.call('browser.tabs.navigate', { tabId: FORWARDED.tabId, to: 'reload' }, LOCAL); // the error page's Retry
+    expect(l.opens).toHaveLength(2);
+    await settle();
+    l.browser.stop();
+  });
+});

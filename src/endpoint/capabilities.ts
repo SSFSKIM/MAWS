@@ -12,4 +12,9 @@ export const ENDPOINT_CAPABILITIES = [
   'rl2.feeds',
   // M4 (acceptance 12): `session.events` takes `maxBytes` and answers `omitted` (the registry this build's front reads).
   'rl2.events-budget',
+  // M3: `query.executor` may be `pty-host`, the pty host's ledger (`pty.opQuery`), which `pty.spawn`, `.attach`, `.kill`
+  // and `.listFor` go to.
+  'rl2.executor.pty-host',
+  // M3: the stream kinds (`streamOpen` … `streamClose`, §N): a terminal's bytes and a forwarded port's connections.
+  'rl2.streams',
 ] as const;

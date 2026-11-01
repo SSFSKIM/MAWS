@@ -60,6 +60,7 @@ const NOTICE_EDGE: Record<ChromeNotice['kind'], Edge> = {
   commentCropFailed: 'warning', // P2-E2
   commentCannotOpen: 'warning', // P4 W2-C
   commentOpenedElsewhere: 'info', // P4 W2-C
+  forwardRefused: 'warning', // P5 O7 M3
   // E4d end
   dialogAnswered: 'info', // E4c
   extensionPopupFailed: 'warning', // cua #90
@@ -98,6 +99,8 @@ export function noticeText(notice: Pick<ChromeNotice, 'kind' | 'name' | 'count' 
       return COMMENT_COPY.cannotOpen(notice.name ?? '');
     case 'commentOpenedElsewhere':
       return COMMENT_COPY.openedElsewhere(notice.name ?? '');
+    case 'forwardRefused': // P5 O7 M3
+      return BROWSER_COPY.forwarded.refused(notice.name ?? '');
     // E4d end
     // E4c start
     case 'dialogAnswered':

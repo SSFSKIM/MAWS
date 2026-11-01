@@ -451,7 +451,8 @@ export async function item8(scene: Scene, report: ItemReport): Promise<void> {
     });
     await report.check('8', 'what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', async () => {
       const said: string[] = [];
-      said.push(await refusedAs(mine, mine.device.action({ machine: scene.ref, action: 'pty.spawn', args: {} }), 'not-offered'));
+      // pty.write's bytes cross only as a stream (P5 O7 M3 offers pty.spawn, which this probed before)
+      said.push(await refusedAs(mine, mine.device.action({ machine: scene.ref, action: 'pty.write', args: {} }), 'not-offered'));
       // files.reveal acts on the asking client, which no remote row offers (P5 O7 M4 offers files.read, which this probed before)
       for (const name of ['settings.get', 'files.reveal', 'host.op']) {
         const answer = await mine.call(name, {});

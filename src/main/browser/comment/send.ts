@@ -8,11 +8,12 @@
 import { eventChannel } from '@shared/ipc/schema';
 import type { BrowserCommentPicked } from '@shared/ipc/schema/browser';
 import { validateEventPayload } from '@shared/ipc/validate';
+import type { MachineRef } from '@shared/machine/ref';
 
 // The owner's `BrowserWindow` as this reads it (`entry.placement?.window`).
 export interface PickOwner {
   isDestroyed(): boolean;
-  webContents: { isDestroyed(): boolean; send(channel: string, payload: unknown): void; focus(): void };
+  webContents: { isDestroyed(): boolean; send(channel: string, ...args: unknown[]): void; focus(): void };
 }
 
 export function ownerAlive(owner: PickOwner | null): owner is PickOwner {
@@ -28,11 +29,14 @@ export function pickedPayload(payload: BrowserCommentPicked): BrowserCommentPick
 }
 
 // False, and nothing sent, when there is no owner window alive or the payload is refused; the caller drops the pick.
-export function sendPicked(owner: PickOwner | null, payload: BrowserCommentPicked): boolean {
+// P5 O7 M3: `machine`, the tab's session's when it is another machine's (src/main/browser/machines.ts): the pick is said
+// from it, as `emitFrom` says an event, so the renderer lifts the session to its address.
+export function sendPicked(owner: PickOwner | null, payload: BrowserCommentPicked, machine: MachineRef | null = null): boolean {
   if (!ownerAlive(owner)) return false;
   const checked = pickedPayload(payload);
   if (checked === null) return false;
-  owner.webContents.send(eventChannel('browser.comment.picked'), checked);
+  if (machine === null) owner.webContents.send(eventChannel('browser.comment.picked'), checked);
+  else owner.webContents.send(eventChannel('browser.comment.picked'), checked, machine);
   owner.webContents.focus(); // P2-E2
   return true;
 }

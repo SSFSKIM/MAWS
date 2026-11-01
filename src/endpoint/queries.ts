@@ -65,11 +65,13 @@ export class Queries {
     const queried = (fields: Omit<QueriedMessage, 't' | 'opId'>): QueriedMessage => ({ t: 'queried', opId, ...fields });
     if (this.ctx.now() - Date.parse(opCreated) > OP_HORIZON_S * 1000) return queried({ state: 'expired' });
     const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
-    // P5 O7 M2: `machine` (the services' ledger) is RL2's since 1.1, behind `rl2.executor.machine`
+    // P5 O7 M2: `machine` (the services' ledger) is RL2's since 1.1, behind `rl2.executor.machine`; M3: `pty-host` (the pty
+    // host's, `pty.opQuery`) since 1.3, behind `rl2.executor.pty-host`
     const { executor } = m;
     const answer =
       executor === 'engine-host' ? await this.#ledger('engine-host', 'host.opQuery', opId, opCreated, channel.client)
       : executor === 'machine' ? await this.#ledger('machine', 'machine.opQuery', opId, opCreated, channel.client)
+      : executor === 'pty-host' ? await this.#ledger('pty-host', 'pty.opQuery', opId, opCreated, channel.client)
       : executor === 'endpoint' ? this.#own(opId, opCreated)
       : await this.#sminos(opId, opCreated, who.clientClass);
     if (SILENT.has(answer.state)) return queried({ state: answer.state as QueriedMessage['state'] });
@@ -84,10 +86,10 @@ export class Queries {
   }
 
   /**
-   * The engine host's ledger (lane B) or the services' (`machine.opQuery`, P5 O3-D M4), looked up and tombstoned in one
-   * turn. Its target is an appSessionId, or none (the machine).
+   * The engine host's ledger (lane B), the services' (`machine.opQuery`, P5 O3-D M4) or the pty host's (`pty.opQuery`, P5
+   * O7 M3), looked up and tombstoned in one turn. Its target is an appSessionId, or none (the machine; always a pty op's).
    */
-  async #ledger(owner: 'engine-host' | 'machine', name: 'host.opQuery' | 'machine.opQuery', opId: string, opCreated: string, client: ClientRef | undefined): Promise<Answer> {
+  async #ledger(owner: 'engine-host' | 'machine' | 'pty-host', name: 'host.opQuery' | 'machine.opQuery' | 'pty.opQuery', opId: string, opCreated: string, client: ClientRef | undefined): Promise<Answer> {
     const dispatch = dispatchAs(this.ctx.dispatch, client);
     const response = await dispatch(owner, name, { opId, opCreated, tombstoneIfAbsent: true });
     if (response.ok && owner === 'engine-host') this.ctx.engineHostLedger?.(closedLedgerOf(response.value));
@@ -96,9 +98,10 @@ export class Queries {
     if (!REVEALING.has(value.state as string)) return { state: value.state as string, binding: null };
     if (!isText(value.member) || !isText(value.name)) return { state: value.state as string, binding: null };
     // The stored target is the lane B session's stable id; its record is read through the engine session it has now.
+    // A pty op acts on the machine (`shell`), whatever session its claim names: its standing is the machine's right.
     let target: SessionTarget | null = null;
     let launchedBy: Spawner | undefined; // P5 O12 M11
-    if (value.target !== null && value.target !== undefined) {
+    if (owner !== 'pty-host' && value.target !== null && value.target !== undefined) {
       const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, { dispatch, log: (line) => this.ctx.log(line) }) : null;
       if ((resolved?.kind === 'refused' && resolved.reason === 'unavailable') || (resolved?.kind === 'session' && resolved.unavailable === true)) return { state: value.state as string, binding: 'unplaceable' };
       if (resolved?.kind !== 'session') return { state: value.state as string, binding: null };

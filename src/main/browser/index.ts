@@ -14,15 +14,18 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
+import type { MachineRef } from '@shared/machine/ref';
 import type { BrowserData } from './data';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
 import { attachContextMenu } from './context-menu';
 import { Downloads, e2eSaveDir } from './downloads';
 import { Favicons } from './favicon';
+import { forwardedTabs, type BrowserForwards } from './forwarded';
 import { browserInspector } from './inspect';
 import { attachInputSeams } from './input';
 import { attachKeys, canShowBookmarksBar } from './keys';
+import { SessionMachines, type EmitFrom } from './machines';
 import { MemorySampler } from './memory';
 import { Navigator } from './navigation';
 import { Partitions, readProfiles, tabPartition, type BrowserProfile } from './partition';
@@ -74,6 +77,9 @@ export interface BrowserDeps {
   // dialogs' and parking's agent rules) and an agent download's deliverable; without them (E4a's own tests) none starts
   hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;
   // E4c end
+  // P5 O7 M3: a session of another machine's tabs (machines.ts: this machine, and its events said from theirs) and the
+  // forwarded ports their loopback links load from (forwarded.ts); without them (E4a's own tests) every session is local
+  remote?: { local: MachineRef; emitFrom: EmitFrom; forwards: BrowserForwards };
 }
 
 export interface Browser {
@@ -88,7 +94,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, view, data, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, remote }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -96,6 +102,10 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
   const profiles = listProfiles ?? (() => readProfiles(profilesFile));
 
   const { file, broken } = readTabsFile(tabsFile);
+  // P5 O7 M3: another machine's session keyed by its address, and every browser event naming one said from its machine
+  // with its bare id (machines.ts)
+  const machines = remote ? new SessionMachines(remote.local, file.machines) : null;
+  const emit: BrowserEmit = machines && remote ? machines.stamped(emitHere, remote.emitFrom) : emitHere;
   const restored = knownSessionsOnly(file, view);
   // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
   // and `downloads`, declared below: a partition is first opened by a tab's open or load (resolvePartition,
@@ -105,7 +115,10 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
     (partition) => session.fromPartition(partition),
     [(ses) => registerBrowserPreload(ses), (ses, partition) => preparePermissions(store)(ses, partition), (ses, partition) => downloads.prepare()(ses, partition)],
   );
-  const writer = new TabsFileWriter(tabsFile, () => store.snapshot());
+  const writer = new TabsFileWriter(tabsFile, () => {
+    const snapshot = store.snapshot();
+    return { ...snapshot, ...machines?.kept(snapshot.tabs.map((tab) => tab.appSessionId)) };
+  });
   const store: TabStore = new TabStore({
     emit,
     createView: createTabView(partitions),
@@ -121,7 +134,9 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
     newTabId: e2eTabIds(env, restored.tabs),
     // E4c end
     driven: (tabId) => cua.holds(tabId), // E13: the cap never suspends a tab an agent drives through cua
+    routeLoad: (tab, url) => (forwarded ? forwarded.route(tab, url) : url), // P5 O7 M3: a forwarded port's tab past a relaunch
   });
+  const forwarded = remote ? forwardedTabs({ store, forwards: remote.forwards, log: (line) => console.warn(line) }) : null;
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();
   const focusEmulation = focusEmulationMode(env);
   const windowOf = (sender: Electron.WebContents) => {
@@ -164,6 +179,8 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
   registerBrowserHandlers({
     store, views, navigator, downloads, history: data.history, profiles, register,
     bookmarks: data.bookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
+    ...(machines && { sessions: machines }), // P5 O7 M3
+    ...(forwarded && { forwarded }),
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
   const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
@@ -261,7 +278,7 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
   if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
-  const commentMode = startCommentMode({ store, emit, register, userData, env });
+  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { away: (key: string) => machines.away(key) }) });
   // E4d end
   // E4c start: the agent's presence (the dialogs' wrap, parking, the e2e seam's `agent`), re-homed from E4c's browser
   // tools when they left (the in-app browser spec of 2026-10-08, M4)
@@ -304,9 +321,10 @@ function sessionSnapshot(view: BrowserDeps['view']): string[] | null {
 }
 
 // The restored tabs whose session the spine knows; all of them while the view is unavailable (nothing is known then).
+// P5 O7 M3: a session of another machine (`machines`) is never the spine's: its tabs are kept.
 function knownSessionsOnly(file: TabsFile, view: BrowserDeps['view']): TabsFile {
   if (view.unavailable() !== null) return file;
-  const knows = (appSessionId: string) => view.record(appSessionId as AppSessionId) !== null;
+  const knows = (appSessionId: string) => file.machines?.[appSessionId as AppSessionId] !== undefined || view.record(appSessionId as AppSessionId) !== null;
   const tabs = file.tabs.filter((tab) => knows(tab.appSessionId));
   const selected = Object.fromEntries(Object.entries(file.selected).filter(([appSessionId]) => knows(appSessionId)));
   return { ...file, tabs, selected };

@@ -814,6 +814,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     each(eventListeners, 'engine-host', message);
   });
   hosts.onState('pty-host', (state) => {
+    // P5 O7 M3: the endpoint's remote terminals tell the host's loss (a restart counted) from a reconnect (`ready` again)
+    each(eventListeners, 'pty-host', { name: 'pty.hostState', payload: state });
     if (state.state === 'ready') return void settleCredit(); // every link while no app holds the credit
     ptyRelay.dropApp(`the pty host is ${state.state}`);
   });
@@ -1090,12 +1092,19 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       // P5 O3-D M4: the front's table, as a machine.sock client's request (the spine loaded for a spine command), the
       // endpoint's ref for its device the asking client (the client port answers it noClient until O7 M5)
       if (host === 'machine') return { t: 'res', id: 'endpoint', ...(await front.dispatch(name, input, client)) } as HostResponse;
-      if (host === 'pty-host' && (name === 'pty.ack' || name === 'pty.checkpoint')) return refused(`${name} through the endpoint: the credit is the app's or the daemon's`);
+      // P5 O7 M3: `pty.op`'s inner name and args are read by the same rules as a bare command's (belt and braces: the pty
+      // host's own rule for its ledger is the authority)
+      const ptyOp = host === 'pty-host' && name === 'pty.op' && isRecord(input) ? input : null;
+      const ptyName = ptyOp === null ? name : ptyOp.name;
+      if (host === 'pty-host' && (ptyName === 'pty.ack' || ptyName === 'pty.checkpoint')) return refused(`${String(ptyName)} through the endpoint: the credit is the app's or the daemon's`);
       if (host === 'engine-host' && name === 'host.interest') return refused('a remote viewer’s interest arrives through interest.report');
       if (host === 'engine-host' && name === 'host.stopAll') return stopAll({ input, ...(client && { client: client.id }) });
       if (host === 'engine-host' && name === 'host.exitWhenIdle') return exitWhenIdle({ input, ...(client && { client: client.id }) });
       // a remote viewer never holds a pty's output credit: every attach through the seam reads without taking it
-      const sent = host === 'pty-host' && name === 'pty.attach' ? { ...(input as object), credit: false } : input;
+      const sent =
+        host === 'pty-host' && name === 'pty.attach' ? { ...(input as object), credit: false }
+        : ptyOp !== null && ptyName === 'pty.attach' && isRecord(ptyOp.input) ? { ...ptyOp, input: { ...ptyOp.input, credit: false } }
+        : input;
       // P5 O3-D M5a (D44(3), D47): under claimSpine, an intercepted name (a phone's claimed `host.op` of one included)
       // goes through the spine's intercept, the spine loaded for it, so its rewind is noted with the spine cold; one the
       // spine cannot take goes on raw, as every one does with claimSpine off
@@ -1463,6 +1472,7 @@ function listen(server: Server, path: string): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref());
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value); // P5 O7 M3
 
 function unlinkQuietly(path: string): void {
   try {

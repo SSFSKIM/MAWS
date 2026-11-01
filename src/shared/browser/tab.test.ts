@@ -48,6 +48,14 @@ describe('BrowserTab (E4a, the cross-child model)', () => {
     expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: undefined }).success).toBe(false);
   });
 
+  it('P5 O7 M3: carries a forwarded port\'s tab\'s forward, or none', () => {
+    const forward = { machine: 'OtherMachineRef0000', port: 5173, localPort: 49152 };
+    expect(BrowserTabSchema.parse({ ...TAB, forward }).forward).toEqual(forward);
+    expect(BrowserTabSchema.parse(TAB).forward).toBeUndefined();
+    expect(BrowserTabSchema.safeParse({ ...TAB, forward: { ...forward, port: 0 } }).success).toBe(false);
+    expect(BrowserTabSchema.safeParse({ ...TAB, forward: { ...forward, machine: 'mini' } }).success).toBe(false);
+  });
+
   it('accepts the Interfaces shape, the fields filled in', () => {
     expect(BrowserTabSchema.parse(TAB)).toEqual(TAB);
     const busy = {

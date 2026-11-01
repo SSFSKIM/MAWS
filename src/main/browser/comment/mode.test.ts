@@ -410,6 +410,19 @@ describe('the report gate (Design §8, §9)', () => {
     expect(discard).not.toHaveBeenCalled();
   });
 
+  // P5 O7 M3: a tab of a session on another machine (machines.ts): its pick is said from that machine
+  it('sends a pick of a session on another machine from that machine', async () => {
+    const OTHER = 'OtherMachineRef0000';
+    mode.dispose();
+    // the store keys another machine's session by its address (machines.ts); the pick names it by its bare id
+    mode = new CommentMode({ store: store as never, emit: () => {}, capture, discard, now: () => now, away: (key) => (key === 'App-A' ? { machine: OTHER as never, bare: 'app-there' as never } : null) });
+    const { wc, send } = store.add(A);
+    arm(A);
+    await mode.receive(wc as never, report());
+    const calls = send.mock.calls.filter(([channel]) => channel === eventChannel('browser.comment.picked'));
+    expect(calls.map((call) => [call[1].tabId, call[1].appSessionId, call[2]])).toEqual([[A, 'app-there', OTHER]]);
+  });
+
   // P2-E2: the pin is in the pane's pixels, so the page's zoom scales it
   it('sends the element\'s position in the pane\'s pixels at the page\'s zoom', async () => {
     const { wc, send } = store.add(A);

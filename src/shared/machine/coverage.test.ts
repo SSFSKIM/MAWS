@@ -209,6 +209,10 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   // P5 O7 M4: the sealed action a device sent, beside machine.op's claim and as a remote spawn's launchedBy (free data, RL9's
   // proof for O12's observer, never read for an id)
   'commands.machine.op.input.action': JSON_OBJECT,
+  // P5 O7 M3: pty.op has machine.op's shape: a remote act's args (validated by the pty host against the act's own schema)
+  // and the sealed action, which the pty host does not keep
+  'commands.pty.op.input.input': JSON_OBJECT,
+  'commands.pty.op.input.action': JSON_OBJECT,
   'commands.session.create.output.intent.launchedBy.action': JSON_OBJECT,
   'commands.session.get.output.launchedBy.action': JSON_OBJECT,
   'commands.session.intent.get.output.launchedBy.action': JSON_OBJECT,

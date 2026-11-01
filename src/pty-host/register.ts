@@ -12,16 +12,22 @@
 // start and each time its last terminal exits; terminals left running with no app are a quiet it cannot see. The table
 // answers it again at the moment of collecting. Its shutdown's kills are not an exit into quiet: the collector stops as
 // the shutdown begins.
+//
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `pty.listFor`, `pty.replay`, and
+// `pty.op` and `pty.opQuery` over the ledger in `opsDir` (ops.ts), the socket host's directory, opened here because the
+// register runs once the host holds that directory's lock; a utility host has none and answers every op unavailable.
 import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment, invalidateShellEnvironment } from '@shared/host/shell-env';
 import { baseEnvironment, terminalEnvironment } from './env';
+import { openPtyOpsLedger, ptyOps } from './ops';
 import { createPtyTable, type PtyTable } from './table';
 
 export interface PtyHostRegisterOptions {
   hostVersion: string;
   capture?: () => Promise<Record<string, string>>; // the login-shell capture (shell-env.ts's, cached per process)
   launcher?: NodeJS.ProcessEnv; // the environment the host inherited
+  opsDir?: string; // P5 O7 M3: the socket host's directory, where `pty.op`'s ledger lives; absent for a utility host
 }
 
 export interface PtyHostRegister {
@@ -29,7 +35,7 @@ export interface PtyHostRegister {
   table(): PtyTable | null; // once the register has run
 }
 
-export function ptyHostRegister({ hostVersion, capture = captureShellEnvironment, launcher = process.env }: PtyHostRegisterOptions): PtyHostRegister {
+export function ptyHostRegister({ hostVersion, capture = captureShellEnvironment, launcher = process.env, opsDir }: PtyHostRegisterOptions): PtyHostRegister {
   let table: PtyTable | null = null;
   const environment = () => baseEnvironment(capture).then((base) => terminalEnvironment(base, { appVersion: hostVersion, launcher }));
   const register: HostRegister = (on, emit) => {
@@ -48,6 +54,11 @@ export function ptyHostRegister({ hostVersion, capture = captureShellEnvironment
     on('pty.checkpoint', async (input) => ptys.checkpoint(input));
     on('pty.attach', async (input) => ptys.attach(input));
     on('pty.list', async () => ptys.list());
+    on('pty.listFor', async (input) => ptys.listFor(input)); // P5 O7 M3
+    on('pty.replay', async (input) => ptys.replay(input)); // P5 O7 M3
+    const ops = ptyOps({ ledger: opsDir === undefined ? null : openPtyOpsLedger(opsDir), table: ptys }); // P5 O7 M3
+    on('pty.op', (input) => ops.op(input));
+    on('pty.opQuery', async (input) => ops.opQuery(input));
     on('pty.foreground', (input) => ptys.foreground(input));
     // P5 O2 M4: answered at once; the capture runs (within its own bound) behind it
     on('pty.recaptureEnv', async () => {

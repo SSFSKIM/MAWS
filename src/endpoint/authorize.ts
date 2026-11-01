@@ -28,6 +28,9 @@
 // certificates, the policy, the grants or a record it read moved meanwhile, it is taken again, once, against the state
 // now; moved again, it is `unavailable`. Presence is checked last, once, on the decision that stood (a WebAuthn counter
 // is spent by its check).
+// A `stream` (P5 O7 M3) is decided as a query is, over the binding the act it opens under stored (`#stream`): the act's
+// own decision stood when it ran, and only what can change since (the member's machine grade, the device, the policy) is
+// asked again.
 // The endpoint's own actions (`endpoint.grant`, `endpoint.state`) carry their authority in their signatures and take no
 // grade. A `sub` takes `view` on its session, or ownership for the `cards` view, and a feed (P5 O7 M4) one the offer
 // table lists: a session's `checkout` feed takes `view` on it; a `query` is answered only to the member
@@ -62,8 +65,11 @@ import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from 
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
 import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Resolved, type Spawner } from './targets';
 
-/** `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. */
-export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub'; name: string; input: unknown; action?: Action; session?: SessionRef };
+/**
+ * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
+ * names the act its stream opens under, its `input` the binding that act's ledger stored (`StreamBinding`).
+ */
+export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub' | 'stream'; name: string; input: unknown; action?: Action; session?: SessionRef };
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
 export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
 export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reason: RefusalReason };
@@ -72,6 +78,8 @@ export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reaso
  * `launchedBy`, the spawner the placement of a lane B target read from the spine's record.
  */
 export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner };
+/** The sender an act's ledger stored, which a stream opened under the act (or kept open) is authorized against. */
+export type StreamBinding = { member: string; device: string };
 
 export type AuthorizeContext = {
   ref(): string | null;
@@ -199,6 +207,7 @@ export class Authorizer {
       let standing: Standing;
       try {
         if (request.kind === 'query') standing = decided(await this.#query(request, who, reads));
+        else if (request.kind === 'stream') standing = decided(await this.#stream(request, who));
         else if (request.kind === 'sub') standing = decided(await this.#sub(request.input, who, reads));
         else standing = await this.#command(request, who, org, ref, reads);
       } catch (error) {
@@ -244,7 +253,7 @@ export class Authorizer {
     if (spec === undefined) return no('ungraded');
     const floor = spec === null || typeof spec === 'string' ? spec : spec.floor;
     if (floor !== null && isRoutingClass(floor)) return no('grade');
-    if (row.grade === undefined && !this.#validInput(name, input)) return no('malformed');
+    if (row.grade === undefined ? !this.#validInput(name, input) : row.accepts?.(input) === false) return no('malformed');
 
     // 3. The class.
     const webCards = who.clientClass === 'web-cards';
@@ -380,6 +389,28 @@ export class Authorizer {
     return { ok: true, target: resolved.target };
   }
 
+  /**
+   * A stream (P5 O7 M3, §N): the act it opens under, as that act's ledger stored it, is this channel's own (its member and
+   * device), and its machine grade (`shell`) is still the member's, the device still the head's and the machine not
+   * read-only. The act's step-up and the rest of its decision stood when it ran: this is the query path's check, asked
+   * again at every refresh of the member's rights, and a stream it no longer grants ends.
+   */
+  async #stream(request: AuthorizeRequest, who: Who): Promise<Decision> {
+    const binding = request.input as StreamBinding;
+    if (who.clientClass === 'web-cards') return refuse('class');
+    if (binding.member !== who.member || binding.device !== who.device) return refuse('grade');
+    const row = Object.hasOwn(this.#offers.commands, request.name) ? this.#offers.commands[request.name] : undefined;
+    if (row === undefined || row.kind !== 'act') return refuse('not-offered');
+    const spec = this.#gradeOf(request.name, row);
+    if (typeof spec !== 'string' || !isMachineGrade(spec)) return refuse('grade');
+    const org = this.ctx.org();
+    if (org === null) return refuse('unavailable');
+    if (deviceOf(org.head, who.member, who.device) === undefined) return refuse('removed');
+    if (!(await this.ctx.rights(who.member)).includes(spec)) return refuse('grade');
+    if (this.ctx.policy().read_only) return refuse('read-only');
+    return { ok: true };
+  }
+
   /** A query, against the binding its executing side stored: the same member, still holding `view` (or the right) on it. */
   async #query(request: AuthorizeRequest, who: Who, reads: Reads): Promise<Decision> {
     const binding = request.input as QueryBinding;
@@ -394,6 +425,7 @@ export class Authorizer {
     // The machine's own target: a spawn's (or another machine-graded operation's) right, still held.
     const row = Object.hasOwn(this.#offers.commands, request.name) ? this.#offers.commands[request.name] : undefined;
     const spec = row === undefined ? undefined : this.#gradeOf(request.name, row);
+    if (row !== undefined && spec === undefined) return refuse('grade');
     if (typeof spec === 'string' && isMachineGrade(spec) && !(await this.ctx.rights(who.member)).includes(spec)) return refuse('grade');
     return { ok: true };
   }

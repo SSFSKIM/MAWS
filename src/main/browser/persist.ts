@@ -9,6 +9,7 @@ import * as z from 'zod';
 import { AppSessionIdSchema } from '@shared/graph/ids';
 import { BrowserTabIdSchema, BrowserTabSchema } from '@shared/browser/tab';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
+import { MachineRefSchema } from '@shared/machine/ref';
 
 const WRITE_INTERVAL_MS = 300;
 
@@ -22,6 +23,7 @@ export const PersistedTabSchema = BrowserTabSchema.pick({
   zoom: true,
   createdAt: true,
   lastShownAt: true,
+  forward: true, // P5 O7 M3: a forwarded port's tab, opened again at its first load past the relaunch
 });
 export type PersistedTab = z.infer<typeof PersistedTabSchema>;
 
@@ -29,6 +31,8 @@ export const TabsFileSchema = z.strictObject({
   version: z.literal(1),
   tabs: z.array(PersistedTabSchema),
   selected: z.record(AppSessionIdSchema, BrowserTabIdSchema.nullable()),
+  // P5 O7 M3: the sessions of another machine that have tabs here, by their bare id, with their machine (machines.ts)
+  machines: z.record(AppSessionIdSchema, MachineRefSchema).optional(),
 });
 export type TabsFile = z.infer<typeof TabsFileSchema>;
 

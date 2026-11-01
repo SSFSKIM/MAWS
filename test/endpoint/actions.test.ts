@@ -364,17 +364,18 @@ describe('the endpoint’s checks, before anything is handed on', () => {
     expect(f.host.runs).toEqual([]);
   });
 
-  it('refuses an action for an executor that keeps no ledger (`no-ledger`): pty.spawn', async () => {
+  // P5 O7 M3: the pty host keeps a ledger now (`pty.op`); main's commands still have none.
+  it('refuses an action for an executor that keeps no ledger (`no-ledger`): one of main’s', async () => {
     const offers: Offers = {
       ...OFFERS,
       commands: {
         ...OFFERS.commands,
-        'pty.spawn': { kind: 'act', executor: 'pty-host', target: 'machine', grade: 'shell' },
+        'settings.set': { kind: 'act', executor: 'main', target: 'machine', grade: 'shell' },
       },
     };
     const f = await start({ offers });
     const a = await open(f, a1, A);
-    expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'pty.spawn', args: {} })))).toBe('no-ledger');
+    expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'settings.set', args: {} })))).toBe('no-ledger');
   });
 
   // P5 O3-D M4 (Interfaces §H; D28): the services' ledger. No production row names the executor yet (O7's, O8's), so the

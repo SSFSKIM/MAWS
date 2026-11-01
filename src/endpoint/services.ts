@@ -15,7 +15,10 @@ export interface EndpointServices {
    * `machine` is `mawsd`'s services front (the daemon's own namespace and the spine's commands, which load the spine).
    */
   dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>;
-  /** Lane B events whenever they are available (`onAttachment`); P5 O3-D M4: the spine's events (owner `machine`) whenever it emits them. */
+  /**
+   * Lane B events whenever they are available (`onAttachment`); P5 O3-D M4: the spine's events (owner `machine`) whenever
+   * it emits them; P5 O7 M3: the pty host's state (`pty.hostState`, owner `pty-host`, a HostState) at each transition.
+   */
   onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void;
   /**
    * Whether lane B events are available (P5 O3-D M3): with `mawsd`'s permanent client, true from its link's streaming on,

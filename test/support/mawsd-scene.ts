@@ -49,7 +49,7 @@ const ENGINE_REGISTRY = {
 } as const satisfies WireRegistry;
 
 const PTY_ANY = { input: z.unknown(), output: z.unknown(), owner: 'pty-host' as const };
-export const PTY_COMMANDS = ['pty.ping', 'pty.list', 'pty.ack', 'pty.attach', 'pty.recaptureEnv', 'pty.checkpoint'] as const;
+export const PTY_COMMANDS = ['pty.ping', 'pty.list', 'pty.ack', 'pty.attach', 'pty.recaptureEnv', 'pty.checkpoint', 'pty.op' /* P5 O7 M3: the seam's inner-name guard */] as const;
 const PTY_REGISTRY = {
   commands: Object.fromEntries(PTY_COMMANDS.map((name) => [name, PTY_ANY])),
   events: { 'pty.exit': z.unknown() },

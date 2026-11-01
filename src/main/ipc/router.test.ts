@@ -166,6 +166,50 @@ describe('main ipc router', () => {
       await expect(invoke(appWindow(), 'attention.viewing', { appSessionId: 'app-1' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
       expect(handler).not.toHaveBeenCalled();
     });
+
+    // P5 O7 M3: another machine's pty host state is its link's (remote lane B's), and a link out of its session is main's
+    it('hands pty.hostState for another machine to the connection manager, and answers a link opened from one of its sessions here with that machine as ctx.target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { state: 'ready', pid: null, restarts: 0, revision: 1 } }));
+      await load(DEV_URL, undefined, remote);
+      await expect(invoke(appWindow(), 'pty.hostState', undefined, OTHER)).resolves.toEqual({ ok: true, value: { state: 'ready', pid: null, restarts: 0, revision: 1 } });
+      expect(remote.mock.calls.map(([machine, name]) => [machine, name])).toEqual([[OTHER, 'pty.hostState']]);
+      const opened = vi.fn<(input: unknown, context: MainContext) => { opened: boolean }>(() => ({ opened: true }));
+      router.registerMainHandler('pty.openLink', opened);
+      const external = vi.fn<(input: unknown, context: MainContext) => void>(() => undefined);
+      router.registerMainHandler('layout.openExternal', external);
+      await expect(invoke(appWindow(), 'pty.openLink', { url: 'https://example.com/' }, OTHER)).resolves.toEqual({ ok: true, value: { opened: true } });
+      await expect(invoke(appWindow(), 'layout.openExternal', { url: 'https://example.com/' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
+      expect([...opened.mock.calls, ...external.mock.calls].map(([, context]) => context.target)).toEqual([OTHER, OTHER]);
+      expect(remote).toHaveBeenCalledOnce();
+    });
+
+    // P5 O7 M3: the in-app browser is this Mac's: the Browser tool's commands that name a remote session are answered here,
+    // from an explicit list; any other browser command for another machine is refused, an agent's above all
+    it('answers the Browser tool’s session commands for another machine here with that machine as ctx.target, and refuses every browser command off the list', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
+      await load(DEV_URL, undefined, remote);
+      const targets: string[] = [];
+      const seen =
+        <T,>(value: T) =>
+        (_input: unknown, context: MainContext): T => {
+          targets.push(context.target);
+          return value;
+        };
+      router.registerMainHandler('browser.tabs.list', seen({ tabs: [], selected: {} }));
+      router.registerMainHandler('browser.tabs.select', seen(undefined));
+      router.registerMainHandler('browser.tabs.open', seen({ tab: null, reused: false }) as never);
+      router.registerMainHandler('browser.agent.activities.list', seen({ activities: [] }));
+      router.registerMainHandler('browser.tabs.navigate', seen({ accepted: true }));
+      await expect(invoke(appWindow(), 'browser.tabs.list', { appSessionId: 'app-1' }, OTHER)).resolves.toEqual({ ok: true, value: { tabs: [], selected: {} } });
+      await expect(invoke(appWindow(), 'browser.tabs.select', { appSessionId: 'app-1', tabId: 'b_0123456789ab' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
+      await invoke(appWindow(), 'browser.tabs.open', { appSessionId: 'app-1', url: 'http://127.0.0.1:49152/', select: true }, OTHER);
+      expect(targets).toEqual([OTHER, OTHER, OTHER]);
+      // off the list: the agent's surface, and a command of the tool that names a tab alone (never sent for another machine)
+      await expect(invoke(appWindow(), 'browser.agent.activities.list', { appSessionId: 'app-1' }, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      await expect(invoke(appWindow(), 'browser.tabs.navigate', { tabId: 'b_0123456789ab', to: 'reload' }, OTHER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(targets).toHaveLength(3);
+      expect(remote).not.toHaveBeenCalled();
+    });
   });
 
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { eventChannel } from '@shared/ipc/schema';
 import type { BrowserCommentPicked } from '@shared/ipc/schema/browser';
+import type { MachineRef } from '@shared/machine/ref';
 import { sendPicked, type PickOwner } from './send';
 
 const payload: BrowserCommentPicked = {
@@ -24,6 +25,15 @@ describe('sendPicked (Design §8, Decision Log 14): the owner window alone, or n
     expect(sendPicked(win, payload)).toBe(true);
     expect(send).toHaveBeenCalledExactlyOnceWith(eventChannel('browser.comment.picked'), payload);
     expect(focus).toHaveBeenCalledOnce();
+  });
+
+  // P5 O7 M3: a tab of a session on another machine (src/main/browser/machines.ts): the pick is said from that machine, as
+  // the browser's events are, so the renderer lifts its session to that session's address
+  it('sends a pick of a session on another machine from that machine', () => {
+    const { win, send } = owner();
+    const OTHER = 'OtherMachineRef0000' as MachineRef;
+    expect(sendPicked(win, payload, OTHER)).toBe(true);
+    expect(send).toHaveBeenCalledExactlyOnceWith(eventChannel('browser.comment.picked'), payload, OTHER);
   });
 
   it('answers false and sends nothing with no owner window, or one closed', () => {

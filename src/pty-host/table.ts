@@ -23,12 +23,18 @@
 // `shutdown` ends every live pty through the kill ladder, for the socket mode's exit order; from its start every spawn is
 // refused, before and after its wait on the environment, so none outlives it. `setEnvironment` (pty.recaptureEnv) swaps
 // in a fresh capture once it resolves; a spawn already waiting keeps the environment it awaited.
+//
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M3 "The pty stream", Interfaces §O): a remote viewer
+// reads where a pty stands and its ring without the flow ever seeing it: `attachMetadata` is what a remote attach keeps
+// (`pty.op`, ops.ts), the info, the ring's oldest offset and `nextOffset`, with no bytes and no checkpoint; `replay` reads
+// the ring from the viewer's own offset (`pty.replay`), independent of the local app's checkpoint. Both flush first, as
+// an attach does, and neither steps the flow. `listFor` is `list` filtered to one session (`pty.listFor`).
 import { randomUUID } from 'node:crypto';
 import * as nodePty from 'node-pty';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
 import { loginShell } from '@shared/host/shell-env';
-import type { CommandInput, CommandOutput, PtyCheckpoint, PtyId, PtyInfo } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput, PtyCheckpoint, PtyId, PtyInfo, PtyOpAttach } from '@shared/ipc/schema';
 import { HIGH_WATERMARK, INITIAL_FLOW, stepFlow, type Flow, type FlowInput } from './flow';
 import { foregroundOf } from './foreground';
 import { RingBuffer } from './ring';
@@ -82,6 +88,9 @@ export interface PtyTable {
   checkpoint(input: CommandInput<'pty.checkpoint'>): void;
   attach(input: CommandInput<'pty.attach'>): CommandOutput<'pty.attach'>;
   list(): CommandOutput<'pty.list'>;
+  listFor(input: CommandInput<'pty.listFor'>): CommandOutput<'pty.listFor'>; // P5 O7 M3
+  replay(input: CommandInput<'pty.replay'>): CommandOutput<'pty.replay'>; // P5 O7 M3: never steps the flow
+  attachMetadata(ptyId: string): PtyOpAttach; // P5 O7 M3: a remote attach's answer; never steps the flow
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
   shutdown(): Promise<void>; // P5 O2 M4: every live pty killed, each through its ladder; resolves once all have settled
   setEnvironment(next: Promise<Record<string, string>>): void; // P5 O2 M4: the spawns after it resolves start with it
@@ -283,6 +292,23 @@ export function createPtyTable({ emit, environment: initial, onLive, onShutdown 
 
     list() {
       return { ptys: [...entries.values()].map(infoOf) };
+    },
+
+    listFor({ appSessionId }) {
+      return { ptys: [...entries.values()].filter((entry) => entry.info.appSessionId === appSessionId).map(infoOf) };
+    },
+
+    replay({ ptyId, from }) {
+      const entry = get(ptyId);
+      flush(ptyId, entry); // nextOffset covers every byte read; what was pending goes out as a live event below it
+      const replayFrom = Math.max(from, entry.ring.start);
+      return { replay: entry.ring.since(replayFrom), replayFrom, nextOffset: entry.flow.total };
+    },
+
+    attachMetadata(ptyId) {
+      const entry = get(ptyId);
+      flush(ptyId, entry);
+      return { info: infoOf(entry), ringStart: entry.ring.start, nextOffset: entry.flow.total };
     },
 
     async foreground({ ptyId }) {

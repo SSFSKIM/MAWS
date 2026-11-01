@@ -13,7 +13,9 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { openExternalUrl } from './open-external';
+import type { MachineRef } from '@shared/machine/ref';
+import { bindLocalMachine } from './machine/local';
+import { forwardedElsewhere, openExternalUrl } from './open-external';
 
 describe('openExternalUrl', () => {
   beforeEach(() => {
@@ -64,5 +66,19 @@ describe('openExternalUrl', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(openExternalUrl('https://unopenable.example/')).toBe(true);
     await vi.waitFor(() => expect(error).toHaveBeenCalledExactlyOnceWith('[open-external] could not open the URL', expect.any(Error)));
+  });
+
+  // P5 O7 M3: a loopback link of a session on another machine opens through a forward, never here
+  it('tells a loopback link of another machine’s session from one of this Mac’s, and from any other link', () => {
+    const local = 'LocalMachineRef0000000' as MachineRef;
+    const other = 'OtherMachineRef0000000' as MachineRef;
+    bindLocalMachine(local);
+    expect(forwardedElsewhere('http://localhost:5173/', other)).toBe(true);
+    expect(forwardedElsewhere('http://0.0.0.0:8000/x', other)).toBe(true);
+    expect(forwardedElsewhere('http://localhost:5173/', local)).toBe(false);
+    expect(forwardedElsewhere('https://example.com:8443/', other)).toBe(false);
+    // a default port, written or implied, and a loopback host no forward reaches are refused all the same
+    for (const url of ['http://localhost/', 'http://localhost:80/', 'https://127.0.0.1:443/', 'http://[::1]:8080/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/', 'http://[::ffff:0.0.0.0]:3000/', 'http://[::ffff:0:0]:3000/', 'http://[::ffff:127.0.0.1]:3000/', 'http://[::ffff:7f00:1]:3000/']) expect(forwardedElsewhere(url, other), url).toBe(true);
+    expect(forwardedElsewhere('http://[::1]:8080/', local)).toBe(false);
   });
 });
