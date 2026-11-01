@@ -118,6 +118,26 @@ describe('launch mapping', () => {
     expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: null }).extraSettings).toBeNull();
     expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null }).extraSettings).toBeNull();
   });
+
+  // P5 O12 M11 (Interfaces §H): a launch names the spawner of its own session, the intent's at the start and the record's
+  // at a resume, less the sealed action, which goes to the proof file it names; a session without one, a fork (its
+  // intent carries none) and the trust bootstrap name none
+  it('P5 O12 M11: names the session’s own spawner at its start and its resume, with the proof file, and nobody for the rest', () => {
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', action: { action: 'session.spawn', brief: 'x'.repeat(64) } };
+    const proofFile = `/u/sessions/launched-by/${APP}.json`;
+    const named = { appSessionId: APP, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile };
+    const started = intentLaunchSpec(intent({ launchedBy }), { cwd: REPO, trust: null, replay: null, proofFile });
+    expect(LaunchSpecSchema.parse(started)).toEqual(started);
+    expect(started.launchedBy).toEqual(named);
+    const resumed = resumeLaunchSpec(record(APP, { launchedBy }), {}, { trust: null, replay: null, proofFile });
+    expect(LaunchSpecSchema.parse(resumed)).toEqual(resumed);
+    expect(resumed.launchedBy).toEqual(named);
+    expect(intentLaunchSpec(intent(), { cwd: REPO, trust: null, replay: null, proofFile })).not.toHaveProperty('launchedBy');
+    expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null, proofFile })).not.toHaveProperty('launchedBy');
+    const fork = intent({ kind: 'fork', source: { appSessionId: APP, engineSessionId: SOURCE_ENGINE, rewindTo: null }, appSessionId: BOOT });
+    expect(intentLaunchSpec(fork, { cwd: REPO, trust: null, replay: null, proofFile })).not.toHaveProperty('launchedBy');
+    expect(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null })).not.toHaveProperty('launchedBy');
+  });
 });
 
 // P4-R8: the app's MCP servers (settings v16, `engine.mcpServers`) reach the engine as one `--mcp-config` on every launch

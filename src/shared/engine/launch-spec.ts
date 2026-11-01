@@ -8,6 +8,10 @@ import { AppSessionIdSchema, SessionIdSchema } from '../graph/ids';
 export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 export type Effort = z.infer<typeof EffortSchema>;
 
+const Text = z.string().min(1);
+export const LaunchedBySpecSchema = z.strictObject({ appSessionId: AppSessionIdSchema, member: Text, device: Text, opId: Text, proofFile: Text }); // P5 O12 M11
+export type LaunchedBySpec = z.infer<typeof LaunchedBySpecSchema>;
+
 export const LaunchSpecSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   cwd: z.string(), // absolute; the engine canonicalises (realpath) and reports it in system/init.cwd
@@ -46,5 +50,11 @@ export const LaunchSpecSchema = z.strictObject({
   appendSystemPrompt: z.string().min(1).max(16_384).nullable().optional(),
   systemPromptSnapshot: z.literal('off').nullable().optional(),
   // P2-C end
+  // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, Interfaces §H): the spawner of a session a
+  // remote member spawned, its own record's `launchedBy` less the sealed action, which the spine writes to `proofFile`
+  // before the launch; the engine host passes it as MAWS_LAUNCHED_BY, which sminos's record reads from the session's
+  // first SessionStart. Absent for a session without one, a fork (its own record has none) and the trust bootstrap. Not
+  // saved with the host's stored spec, as P2-C's keys are not: each launch takes it from the record.
+  launchedBy: LaunchedBySpecSchema.optional(),
 });
 export type LaunchSpec = z.infer<typeof LaunchSpecSchema>;
