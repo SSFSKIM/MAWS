@@ -124,7 +124,9 @@ async function run({ directory, tag, nextPack, seconds, stubPort, profile }) {
   try {
     await until(() => globalThis.fetch(`http://127.0.0.1:${stubPort}/api/hello`).then((r) => r.status), (s) => s === 200, 'the stub model', 20_000, 250);
     mkdirSync(join(directory, '.claude'), { recursive: true });
-    writeFileSync(join(directory, '.claude', 'settings.json'), `${JSON.stringify({ permissions: { allow: ['Bash(sleep:*)'] } }, null, 2)}\n`);
+    // The shell is allowed by rule; `curl` is asked by rule, so the permission is raised whatever the session's mode (a
+    // MAWS launch's default is auto, whose classifier would otherwise decide it).
+    writeFileSync(join(directory, '.claude', 'settings.json'), `${JSON.stringify({ permissions: { allow: ['Bash(sleep:*)'], ask: ['Bash(curl:*)'] } }, null, 2)}\n`);
 
     let link = await reach(dir);
     const relink = async (what) => {
@@ -144,11 +146,21 @@ async function run({ directory, tag, nextPack, seconds, stubPort, profile }) {
     const started = await link.request('session.start', { appSessionId: app, message: { content: text, display: text }, options: { gateway: 'gateway', trust: 'accepted' } }, 120_000);
     if (started?.status !== 'starting') throw new Error(`session.start answered ${JSON.stringify(started).slice(0, 400)}`);
     say(`session ${app} started: ${text}`);
-    const allowed = new Set(); // permissions for the shell itself, if a rule did not cover it, are allowed at once
+    // Answered at once, never the run's permission: the shell's own permission, if a rule did not cover it, and the
+    // engine's notice that auto mode's classifier is billed as before behind a gateway (`auto_mode_server_fallback`,
+    // which 2.1.316 raises on a gateway route, continued as a person at the card would)
+    const allowed = new Set();
     const raised = await until(
       async () => {
         for (const e of await eventsOf(link, app)) {
-          if (e.kind !== 'permission.requested' || allowed.has(e.requestId)) continue;
+          if (allowed.has(e.requestId)) continue;
+          if (e.kind === 'dialog.requested' && e.dialogKind === 'auto_mode_server_fallback') {
+            allowed.add(e.requestId);
+            const { outcome } = await link.request('session.answer', { appSessionId: app, requestId: e.requestId, answer: { kind: 'dialog', behavior: 'completed', result: 'continue' } });
+            say(`continued the engine's ${e.dialogKind} dialog ${e.requestId}: ${outcome}`);
+            continue;
+          }
+          if (e.kind !== 'permission.requested') continue;
           const command = String(e.input?.command ?? '');
           if (command.startsWith('sleep ')) {
             allowed.add(e.requestId);
