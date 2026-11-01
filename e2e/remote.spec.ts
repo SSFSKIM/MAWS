@@ -515,6 +515,25 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const lines = b.log().split('\n').filter((line) => /spawn|session\.(create|start|intent)|machine\.op|step-up|refus|setup|replay|endpoint/i.test(line));
       return `B's intents: ${JSON.stringify(intents)}\nB's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
     };
+    // sminos's part in a spawn (the harness's fake stands in for it, as for B's first session): B's sminos lists every
+    // session on its machine, which is what gives its owners a rank on it at B's endpoint; until it does, A's pane can't
+    // place the session. Listed as soon as B's engine host runs the pinned engine session, as sminos would on its start.
+    const listSpawned = async (engine: string, cwd: string, title: string): Promise<string> => {
+      type Live = { appSessionId: string; engineSessionId: string | null };
+      let spawnedApp: string | undefined;
+      await expect
+        .poll(async () => (spawnedApp = (await b.request<Live[]>('engine.sessions')).find((s) => s.engineSessionId === engine)?.appSessionId), {
+          timeout: 120_000,
+          intervals: [100],
+          message: `B's engine host runs the spawned session ${engine}`,
+        })
+        .toBeDefined()
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(again)}\n${mainSaid(again)}\n${await bSaid()}`);
+        });
+      await scene!.sminos.list({ engine, app: spawnedApp!, owners: [scene!.member], project: PROJECT, title, cwd });
+      return spawnedApp!;
+    };
     let first = '';
     await test.step('M4: "+ Session" on B starts a session that opens in A’s pane', async () => {
       await newChat(again, A_PROJECT);
@@ -522,7 +541,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await composerOf(again).click();
       await again.keyboard.type(SPAWN_BRIEF);
       await again.keyboard.press('Enter');
+      const spawnedApp = await listSpawned(SPAWNED_SESSION, checkout, 'B’s spawned session');
       first = await movedTo(again, b.ref, address, bSaid); // the pane showed B’s first session before the New chat tab
+      expect(bareOf(first), 'the tab moved to the session B started').toBe(spawnedApp);
       await expect(main(again).getByText(SPAWN_REPLY).first(), `the new session's reply in A's pane\n${mainSaid(again)}\nB's log:\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 60_000 });
       expect(JSON.stringify(await writtenOn(bareOf(first))), 'B’s new session was written the brief').toContain(SPAWN_BRIEF);
       type Spawned = { directory: string; launchedBy?: { member: string } };
@@ -552,7 +573,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await dropTextFile(again, WORKTREE_FILE);
       await again.keyboard.type(WORKTREE_TEXT);
       await again.keyboard.press('Enter');
+      const worktreeApp = await listSpawned(WORKTREE_SESSION, worktree, 'B’s worktree session');
       const second = bareOf(await movedTo(again, b.ref, first, bSaid));
+      expect(second, 'the tab moved to the session B started').toBe(worktreeApp);
       await expect(main(again).getByText(WORKTREE_REPLY).first(), `the worktree session's reply in A's pane\n${mainSaid(again)}\nB's log:\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 120_000 });
       type Spawned = { worktree: { path: string } | null };
       expect((await b.request<Spawned | null>('session.get', { appSessionId: second }))?.worktree?.path, 'B’s session runs in the new worktree').toBe(worktree);
