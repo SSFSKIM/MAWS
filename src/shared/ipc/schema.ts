@@ -85,7 +85,7 @@ export {
   type Namespace,
   type Owner,
 } from './schema/common';
-export { PtyIdSchema, type PtyAttach, type PtyCheckpoint, type PtyExit, type PtyId, type PtyInfo } from './schema/pty';
+export { PtyIdSchema, PtyOpAttachSchema, type PtyAttach, type PtyCheckpoint, type PtyExit, type PtyId, type PtyInfo, type PtyOpAttach, type PtyReplay } from './schema/pty'; // P5 O7 M3: PtyOpAttach, PtyReplay
 export {
   SettingsPatchSchema,
   SettingsSchema,

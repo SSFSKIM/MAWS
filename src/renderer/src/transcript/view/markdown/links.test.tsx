@@ -28,7 +28,14 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     expect(link.getAttribute('title')).toBe('https://example.com/docs');
     const click = fireEvent.click(link);
     expect(click).toBe(false); // default prevented
-    expect(actions.openExternal).toHaveBeenCalledWith('https://example.com/docs');
+    expect(actions.openExternal).toHaveBeenCalledWith('https://example.com/docs', null);
+  });
+
+  // P5 O7 M3: the row's session goes with the link, so a loopback link of another machine's session opens forwarded
+  it('a web link in a session’s transcript carries that session', () => {
+    const { actions } = renderWith('Running at [localhost:5173](http://localhost:5173/).', live, 'OtherMachineRef0000000/session-r');
+    fireEvent.click(screen.getByRole('link', { name: 'localhost:5173' }));
+    expect(actions.openExternal).toHaveBeenCalledWith('http://localhost:5173/', 'OtherMachineRef0000000/session-r');
   });
 
   it('a scheme-less link is a path chip that opens the file, with a line when the path names one', () => {

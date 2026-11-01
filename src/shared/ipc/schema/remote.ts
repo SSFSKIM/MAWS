@@ -11,6 +11,7 @@
 //   journal lost, an event too large to carry): the transcript draws "Earlier history isn't available" here.
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
+import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
 
 // Every control a session's port names (the renderer's `session/controls/types.ts` keeps the same list), so main can say
@@ -61,7 +62,16 @@ export const RemoteSessionSchema = z.strictObject({
 });
 export type RemoteSession = z.infer<typeof RemoteSessionSchema>;
 
-export const commands = {} as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P5 O7 M3 ("Forwarding", Interfaces §K): a port of a machine's loopback forwarded to a listener on this Mac's
+// (`127.0.0.1:<localPort>`), over the machine's link, for the in-app browser to load a loopback link of a session there.
+// Open is idempotent per machine and port (the listener and its forward are kept); close ends the listener and its
+// connections. The renderer names the machine in the input and invokes it on this app (a `client` command).
+const ForwardTargetSchema = z.strictObject({ machine: MachineRefSchema, port: z.number().int().min(1).max(65535) });
+
+export const commands = {
+  'remote.forward.open': { input: ForwardTargetSchema, output: z.strictObject({ localPort: z.number().int().min(1).max(65535) }), owner: 'main' },
+  'remote.forward.close': { input: ForwardTargetSchema, output: z.void(), owner: 'main' },
+} as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'remote.session': RemoteSessionSchema,

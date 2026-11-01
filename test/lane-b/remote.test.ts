@@ -7,6 +7,8 @@
 // are a `main.tabs` value the suite moves.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, get as httpGet, type Server } from 'node:http';
+import { connect as dialTcp, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { keyId, memoryOrgView, signRecord, SIGNING_DOMAINS, type Action, type ByteDuplex, type Grant, type SignedOrgState } from 'org-protocol';
@@ -17,6 +19,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { endableClientRef, type ClientRef, type HandlerOp } from '@shared/ipc/client';
 import type { FilesListOutput, FilesReadOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { PtyAttach } from '@shared/ipc/schema/pty';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
@@ -30,6 +33,7 @@ import { harnessConfirmation } from '../../src/main/device/step-up-sheet';
 import { DEVICE_CAPABILITIES } from '../../src/main/machines/remote/capabilities';
 import type { MainContext } from '../../src/main/ipc/router';
 import { createRemoteLaneB, ENGINE_HOST_ACTS, MACHINE_ACTS, routeLaneB, type RemoteLaneB, type RemoteLaneBTiming } from '../../src/main/lane-b/remote';
+import { PTY_ACTS } from '../../src/main/lane-b/remote-pty';
 import { dialDirect } from '../../src/main/machines/remote/carriers';
 import { dispatchOverLink } from '../../src/main/machines/remote/dispatch';
 import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remote/link';
@@ -43,7 +47,8 @@ import { createGitRunner } from '../../src/services/git/runner';
 import { GitService } from '../../src/services/git/service';
 import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
-import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org } from '../endpoint/sub-harness';
+import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
+import { FakePtyHost } from '../endpoint/fake-pty-host';
 import { record, status } from '../support/builders';
 import { DaemonClocks } from '../../src/mawsd/clocks';
 import { engineRequests } from '../../src/mawsd/engine-requests';
@@ -215,23 +220,31 @@ type Device = {
   direct: { dead: boolean };
   /** What step-up was asked to confirm, by summary. */
   confirmed: string[];
+  /** P5 O7 M3: the app quit and started again on this Mac: a new link and a new adapter under the same device keys. */
+  restart(): Promise<Device>;
+  /** P5 O7 M3: `remote.forward.open` and `.close`, as main's handlers take them. */
+  forward(op: 'open' | 'close', port: number): Promise<CommandResult<CommandName>>;
   tabs(...apps: string[]): void;
   /** `from`: the page and the session a path-class command is made from (MainContext's `client` and `session`). */
   route(name: string, input: unknown, from?: Partial<MainContext>): Promise<CommandResult<CommandName>>;
   cmd(name: string, input: unknown, from?: Partial<MainContext>): Promise<unknown>;
 };
-type Lab = { f: Fixture; host: LaneBHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
+type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
 type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B' };
+/** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
+type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions'>; ring?: number };
 
-/** The endpoint with the suite's engine host, and device `mac1` of its owner (A) up on it. */
-async function lab(options: DeviceOptions = {}): Promise<Lab> {
+/** The endpoint with the suite's engine host and a pty host, and device `mac1` of its owner (A) up on it. */
+async function lab(options: LabOptions = {}): Promise<Lab> {
   const host = new LaneBHost();
-  const f = await startEndpoint(org, started, { limits: OPEN, host });
+  const pty = new FakePtyHost(options.ring);
+  const f = await startEndpoint(org, started, { limits: OPEN, host, pty, ...options.endpoint });
   host.attach(true); // lane B events available (mawsd's permanent link)
   const l = {
     f,
     host,
+    pty,
     chain: [...f.chain],
     device: (id: string, o: DeviceOptions = {}) => device(l, id, o),
     // A session the machine's owners own, its record in the spine's index under `engine`.
@@ -255,6 +268,12 @@ async function device(l: Lab, id: string, options: DeviceOptions): Promise<Devic
   const listed = await successor(l.chain.at(-1)!, [org.a1], (st) => void st.members.find((m) => m.id === member)!.devices.push(mac.device));
   await deliver(f, [listed]);
   l.chain.push(listed);
+  return connect(l, id, keys, member, mac, options);
+}
+
+/** The app on the device: its org session under the device's keys, its link up, its adapter reached through `routeLaneB`. */
+async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadDeviceKeys>>, member: string, mac: Device['mac'], options: DeviceOptions): Promise<Device> {
+  const { f } = l;
   const session = heldOrgSession();
   const confirmed: string[] = [];
   const signedIn: SignedIn = {
@@ -321,6 +340,12 @@ async function device(l: Lab, id: string, options: DeviceOptions): Promise<Devic
     logs,
     carriers,
     direct,
+    restart() {
+      adapter.stop();
+      link.close();
+      return connect(l, id, keys, member, mac, options);
+    },
+    forward: (op, port) => (op === 'open' ? adapter.forward.open({ machine, port }) : adapter.forward.close({ machine, port })),
     tabs(...apps) {
       const list = apps.map((app) => ({ id: `session:${addressOf(machine, app as AppSessionId)}`, kind: 'session', appSessionId: addressOf(machine, app as AppSessionId), pinned: false }));
       tabs = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { panes: [{ tabs: list, activeTabId: list[0]?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
@@ -406,6 +431,8 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
   it('builds only acts the endpoint offers, each as the act its row names', () => {
     for (const name of ENGINE_HOST_ACTS) expect([name, OFFERS.commands[name]]).toMatchObject([name, { kind: 'act', executor: 'engine-host' }]);
     for (const name of MACHINE_ACTS) expect([name, OFFERS.commands[name]]).toMatchObject([name, { kind: 'act', executor: 'machine' }]);
+    for (const name of PTY_ACTS) expect([name, OFFERS.commands[name]]).toMatchObject([name, { kind: 'act', executor: 'pty-host' }]); // P5 O7 M3
+    expect(OFFERS.commands['forward.open']).toMatchObject({ kind: 'act', executor: 'endpoint' });
     // The substitutes' reads, as calls.
     for (const name of ['session.pendingRequest', 'session.listModels']) expect([name, OFFERS.commands[name]]).toMatchObject([name, { kind: 'call' }]);
   });
@@ -1078,4 +1105,289 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await sleep(200);
     expect(filesChanges(l.a, 'app-1')).toEqual([]);
   });
+
+  // ---- P5 O7 M3: terminals and forwarded ports ----------------------------------------------------------------------
+
+  it('spawns a shell as a member with a `shell` grant, types into it and reads it back across a forced drop: nothing repeated, nothing lost, no second prompt', async () => {
+    const l = await lab();
+    expect(await grantRights(l.f, org.B, ['shell'])).toContain('shell');
+    const b = await l.device('macb', { member: 'B' });
+    const { ptyId } = (await b.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    expect(b.confirmed).toHaveLength(1); // the spawn, at the sheet
+    l.pty.emit(ptyId, 'prompt$ ');
+    await until(() => screen(b, ptyId) === 'prompt$ ', 'the prompt');
+    await b.cmd('pty.write', { ptyId, data: 'ls\r' });
+    await until(() => typed(l, ptyId) === 'ls\r', 'the keystrokes');
+    l.pty.emit(ptyId, 'ls\r\nfile\r\nprompt$ ');
+    await until(() => screen(b, ptyId).endsWith('file\r\nprompt$ '), 'the echo');
+
+    b.carriers.at(-1)!.carrier.close('dropped');
+    // typed and printed while the channel is away
+    await b.cmd('pty.write', { ptyId, data: 'pwd\r' });
+    l.pty.emit(ptyId, 'pwd\r\n/work\r\n');
+    await until(() => typed(l, ptyId) === 'ls\rpwd\r' && screen(b, ptyId).endsWith('/work\r\n'), 'the terminal on the next channel', 10_000);
+    expect(b.carriers.length).toBeGreaterThan(1);
+    expect(screen(b, ptyId)).toBe('prompt$ ls\r\nfile\r\nprompt$ pwd\r\n/work\r\n');
+    await sleep(100);
+    expect(typed(l, ptyId)).toBe('ls\rpwd\r'); // nothing written twice
+    expect(b.confirmed).toHaveLength(1); // the stream opened again under the spawn's act
+    expect(l.pty.runs).toEqual(['pty.spawn']);
+  });
+
+  it('types from a new app run under the same device keys without its first keystrokes dropped, restoring from the ring’s start', async () => {
+    const l = await lab();
+    const { ptyId } = (await l.a.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    await l.a.cmd('pty.write', { ptyId, data: 'one\r' });
+    await until(() => typed(l, ptyId) === 'one\r', 'the first run’s keystrokes');
+    l.pty.emit(ptyId, 'one\r\n');
+    const a2 = await l.a.restart();
+    expect(await a2.cmd('pty.listFor', { appSessionId: 'app-1' })).toMatchObject({ ptys: [{ ptyId, label: 't1' }] });
+    const attached = (await a2.cmd('pty.attach', { ptyId })) as PtyAttach;
+    expect(attached).toMatchObject({ checkpoint: null, replayFrom: 0, nextOffset: 5, info: { ptyId, alive: true } });
+    expect(Buffer.from(attached.replay).toString()).toBe('one\r\n');
+    await a2.cmd('pty.write', { ptyId, data: 'two\r' }); // as long as the first run's: each run's input counts from zero
+    await until(() => typed(l, ptyId) === 'one\rtwo\r', 'the new run’s keystrokes');
+  });
+
+  it('re-attaches a reloaded page (a new registry) from the adapter’s checkpoint and the ring past it, whatever the machine’s own viewer checkpointed', async () => {
+    const l = await lab();
+    const { ptyId } = (await l.a.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    l.pty.emit(ptyId, 'hello world\r\n');
+    await until(() => screen(l.a, ptyId) === 'hello world\r\n', 'the output');
+    await l.a.cmd('pty.ack', { ptyId, offset: 13 });
+    await l.a.cmd('pty.checkpoint', { ptyId, offset: 6, state: 'SCREEN@6' });
+    l.pty.checkpoint(ptyId, 13); // the machine's own app checkpointed further
+    l.pty.emit(ptyId, 'again');
+    // The reload: the new page lists the session's terminals and attaches.
+    expect(await l.a.cmd('pty.listFor', { appSessionId: 'app-1' })).toMatchObject({ ptys: [{ ptyId }] });
+    const attached = (await l.a.cmd('pty.attach', { ptyId })) as PtyAttach;
+    expect(attached).toMatchObject({ checkpoint: { offset: 6, state: 'SCREEN@6' }, replayFrom: 6, nextOffset: 18 });
+    expect(Buffer.from(attached.replay).toString()).toBe('world\r\nagain');
+    const said = ptyChunks(l.a, ptyId).length;
+    l.pty.emit(ptyId, 'live');
+    await until(() => ptyChunks(l.a, ptyId).length > said, 'live output after the attach');
+    expect(ptyChunks(l.a, ptyId).slice(said).map((c) => [c.offset, Buffer.from(c.data).toString()])).toEqual([[18, 'live']]);
+  });
+
+  it('opens a terminal’s stream refused `unavailable` again on the backoff, resending the input the machine hadn’t taken', async () => {
+    const l = await lab({ adapter: { streamRetryMs: [50, 200] } });
+    const { ptyId } = (await l.a.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    l.pty.emit(ptyId, 'a');
+    await until(() => screen(l.a, ptyId) === 'a', 'the stream open');
+    // the pty host's ledger can't answer for a while: a reopen is refused `unavailable`
+    let ledgerDown = true;
+    let refused = 0;
+    const dispatch = l.pty.dispatch.bind(l.pty);
+    l.pty.dispatch = async (name, input) => {
+      if (!ledgerDown || name !== 'pty.opQuery') return dispatch(name, input);
+      refused += 1;
+      return { t: 'res', id: 'pty', ok: false, error: { code: 'host_unavailable', message: 'down' } };
+    };
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await l.a.cmd('pty.write', { ptyId, data: 'typed while away' });
+    l.pty.emit(ptyId, 'b');
+    await until(() => refused >= 2, 'two refused opens', 10_000);
+    ledgerDown = false;
+    await until(() => screen(l.a, ptyId) === 'ab' && typed(l, ptyId) === 'typed while away', 'the stream open again', 10_000);
+    await sleep(100);
+    expect(typed(l, ptyId)).toBe('typed while away');
+  });
+
+  it('says a pty’s exit with its status once its output is in', async () => {
+    const l = await lab();
+    const { ptyId } = (await l.a.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    l.pty.emit(ptyId, 'bye\r\n');
+    await until(() => screen(l.a, ptyId) === 'bye\r\n', 'the output');
+    l.pty.exit(ptyId);
+    await until(() => l.a.emitted.some((e) => e.name === 'pty.exit'), 'the exit');
+    expect(l.a.emitted.filter((e) => e.name === 'pty.exit').map((e) => e.payload)).toEqual([{ ptyId, exitCode: 0, signal: null }]);
+  });
+
+  it('opens a stream the endpoint closed `behind` again from its last offset once the renderer has taken what it was given; what the ring no longer holds is a gap', async () => {
+    const l = await lab();
+    const { ptyId } = (await l.a.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    l.pty.emit(ptyId, 'ready');
+    await until(() => screen(l.a, ptyId) === 'ready', 'the stream open');
+    const flood = randomBytes(MiB + 600 * 1024);
+    for (let i = 0; i < flood.byteLength; i += 64 * 1024) l.pty.emit(ptyId, flood.subarray(i, i + 64 * 1024));
+    await until(() => l.a.logs.some((line) => line.includes(`terminal ${ptyId} on mini: behind`)), 'the endpoint closing the stream behind', 10_000);
+    const saidBytes = () => ptyChunks(l.a, ptyId).reduce((n, c) => n + c.data.byteLength, 0);
+    const said = saidBytes(); // within the stream's credit, which the renderer hasn't given back
+    expect(said).toBeLessThanOrEqual(MiB);
+    await sleep(150);
+    expect(saidBytes()).toBe(said); // not opened again until the renderer takes what it was given
+    await l.a.cmd('pty.ack', { ptyId, offset: said });
+    const total = 5 + flood.byteLength;
+    await until(() => ptyChunks(l.a, ptyId).at(-1)!.offset + ptyChunks(l.a, ptyId).at(-1)!.data.byteLength === total, 'the rest from the ring', 10_000);
+    const after = ptyChunks(l.a, ptyId).filter((c) => c.offset >= said);
+    const ringStart = total - 512 * 1024;
+    expect(after[0].offset).toBe(ringStart); // the gap the renderer draws as lost output
+    expect(Buffer.concat(after.map((c) => c.data))).toEqual(flood.subarray(ringStart - 5));
+  });
+
+  it('serves a fetch through a forwarded port, again after a forced drop with no new act within the window, and with one new act (one more confirmation for a non-owner) past it', async () => {
+    const l = await lab({ endpoint: { subscriptions: { resumeMs: 400 } } });
+    const server = await httpServer();
+    expect(await grantRights(l.f, org.B, ['shell'])).toContain('shell');
+    const b = await l.device('macb', { member: 'B', link: { BACKOFF_MS: [0, 100, 100] } });
+    const opened = await b.forward('open', server.port);
+    if (!opened.ok) throw new Error(`refused: ${opened.error.message}`);
+    const { localPort } = opened.value as { localPort: number };
+    expect(await get(localPort, '/one')).toBe('hello from /one');
+    expect(b.confirmed).toHaveLength(1);
+    expect(await b.forward('open', server.port)).toEqual({ ok: true, value: { localPort } }); // kept: no act
+
+    // A drop within the window: the forward is named again on the next channel.
+    b.carriers.at(-1)!.carrier.close('dropped');
+    expect(await get(localPort, '/two')).toBe('hello from /two');
+    expect(b.confirmed).toHaveLength(1);
+
+    // A drop past it: the endpoint forgot the forward; one fresh act.
+    b.direct.dead = true;
+    b.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => l.f.endpoint.forwards.list().length === 0, 'the endpoint forgetting the forward', 5000);
+    b.direct.dead = false;
+    b.link.probe('network');
+    expect(await get(localPort, '/three')).toBe('hello from /three');
+    expect(b.confirmed).toHaveLength(2);
+    expect(await get(localPort, '/four')).toBe('hello from /four');
+    expect(b.confirmed).toHaveLength(2);
+    expect(await b.forward('close', server.port)).toEqual({ ok: true, value: undefined });
+    await expect(get(localPort, '/closed')).rejects.toThrow();
+  });
+
+  it('answers a forward a member without `shell` asks for as the machine’s refusal, running nothing again', async () => {
+    const l = await lab();
+    const server = await httpServer();
+    const b = await l.device('macb', { member: 'B' });
+    expect(await b.forward('open', server.port)).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } });
+    expect(l.f.endpoint.forwards.list()).toEqual([]);
+    expect(server.sockets).toEqual([]);
+  });
+
+  it('resets a connection to a port nothing listens on, and keeps the forward', async () => {
+    const l = await lab();
+    const server = await httpServer();
+    const port = server.port;
+    await closeServer(server);
+    const opened = await l.a.forward('open', port);
+    if (!opened.ok) throw new Error(`refused: ${opened.error.message}`);
+    const { localPort } = opened.value as { localPort: number };
+    await expect(get(localPort, '/nothing')).rejects.toThrow();
+    expect(await l.a.forward('open', port)).toEqual({ ok: true, value: { localPort } });
+  });
+
+  it('ends a terminal and a forward when the `shell` grant is withdrawn mid-stream (`removed`), opening neither again', async () => {
+    const l = await lab();
+    const server = await httpServer();
+    expect(await grantRights(l.f, org.B, ['shell'])).toContain('shell');
+    const b = await l.device('macb', { member: 'B' });
+    const { ptyId } = (await b.cmd('pty.spawn', SPAWN)) as { ptyId: string };
+    l.pty.emit(ptyId, 'x');
+    await until(() => screen(b, ptyId) === 'x', 'the terminal’s stream open');
+    const opened = await b.forward('open', server.port);
+    if (!opened.ok) throw new Error(`refused: ${opened.error.message}`);
+    const { localPort } = opened.value as { localPort: number };
+    // A connection held open (a request not yet whole), so its stream is open when the grant goes.
+    const held = await dial(localPort);
+    held.on('error', () => {});
+    held.write('GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n');
+    await until(() => server.sockets.length === 1, 'the held connection reaching the machine’s port');
+    const reset = new Promise<void>((resolve) => held.once('close', () => resolve()));
+
+    expect(await grantRights(l.f, org.B, [], 2)).toBe(`kept: version 2 for member ${org.B}, no rights`);
+    await until(() => b.emitted.some((e) => e.name === 'pty.exit'), 'the terminal ended');
+    expect(b.emitted.filter((e) => e.name === 'pty.exit').map((e) => e.payload)).toEqual([{ ptyId, exitCode: null, signal: null }]);
+    await reset;
+    const asked = l.pty.calls.filter((c) => c.name === 'pty.opQuery').length;
+    await sleep(300);
+    expect(l.pty.calls.filter((c) => c.name === 'pty.opQuery')).toHaveLength(asked); // the terminal's stream never opened again
+    await expect(dial(localPort)).rejects.toThrow(); // the forward's listener closed with it
+    expect(await b.route('pty.write', { ptyId, data: 'late' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  it('answers a terminal and a forward locally `not-offered` against an endpoint that lists no `rl2.streams`, running no act', async () => {
+    endpointWithout('rl2.streams');
+    const l = await lab();
+    expect(await l.a.route('pty.spawn', SPAWN)).toMatchObject({ ok: false, error: { issues: { refusal: 'not-offered' } } });
+    expect(await l.a.forward('open', 8080)).toMatchObject({ ok: false, error: { issues: { refusal: 'not-offered' } } });
+    expect(l.pty.runs).toEqual([]);
+    expect(l.f.endpoint.forwards.list()).toEqual([]);
+  });
+
+  it('answers `pty.hostState` for the machine from its link: ready while up, starting while down, said again as it changes', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100, BACKOFF_MS: [0, 100, 100] } });
+    expect(await l.a.cmd('pty.hostState', undefined)).toMatchObject({ state: 'ready', pid: null });
+    const states = () => l.a.emitted.filter((e) => e.name === 'pty.hostState').map((e) => e.payload.state);
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => states().at(-1) === 'starting', 'the link down');
+    expect(await l.a.cmd('pty.hostState', undefined)).toMatchObject({ state: 'starting' });
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    await until(() => states().at(-1) === 'ready', 'the link up again', 5000);
+  });
 });
+
+const SPAWN = { appSessionId: 'app-1', label: 't1', cwd: '/work', cols: 80, rows: 24 };
+type PtyData = { ptyId: string; offset: number; data: Uint8Array };
+const ptyChunks = (d: Device, ptyId: string) => d.emitted.filter((e) => e.name === 'pty.data' && e.payload.ptyId === ptyId).map((e) => e.payload as PtyData);
+/** The terminal's output as said, each chunk at the offset after the one before (nothing repeated, nothing skipped). */
+function screen(d: Device, ptyId: string): string {
+  let at = 0;
+  let text = '';
+  for (const chunk of ptyChunks(d, ptyId)) {
+    expect(chunk.offset).toBe(at);
+    text += Buffer.from(chunk.data).toString();
+    at += chunk.data.byteLength;
+  }
+  return text;
+}
+/** What the machine's pty host was written, in order. */
+const typed = (l: Lab, ptyId: string) => l.pty.writes.filter((w) => w.ptyId === ptyId).map((w) => w.data).join('');
+
+/** A grant of `rights` on the machine to `member`, signed by its admin (A). */
+async function grantRights(f: Fixture, member: string, rights: Grant['rights'], version = 1): Promise<string> {
+  const body: Grant = { org: ORG, machine: f.ref, machineKey: await keyId(f.key.pub), member, rights, version, issued: iso(Date.now()) };
+  return (await f.endpoint.cli('grant', ['-'], JSON.stringify(await signRecord(SIGNING_DOMAINS.grant, body, org.a1.stepUp.privateKey, org.a1.stepUp.pub)))).out;
+}
+
+const servers: Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) await closeServer(server);
+});
+/** A dev server on the machine's loopback (this Mac's, in the suite). */
+async function httpServer(): Promise<{ port: number; sockets: Socket[]; server: Server }> {
+  const sockets: Socket[] = [];
+  const server = createServer((req, res) => res.end(`hello from ${req.url}`));
+  server.on('connection', (socket) => void sockets.push(socket));
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { port: (server.address() as AddressInfo).port, sockets, server };
+}
+async function closeServer(server: Server | { server: Server }): Promise<void> {
+  const s = 'server' in server ? server.server : server;
+  if (!s.listening) return;
+  s.closeAllConnections();
+  await new Promise((resolve) => s.close(resolve));
+}
+/** One GET on its own connection. */
+function get(port: number, path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = httpGet({ host: '127.0.0.1', port, path, agent: false }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => (body += chunk));
+      res.on('end', () => resolve(body));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(10_000, () => req.destroy(new Error(`GET ${path} timed out`)));
+  });
+}
+function dial(port: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = dialTcp(port, '127.0.0.1', () => resolve(socket));
+    socket.once('error', reject);
+  });
+}

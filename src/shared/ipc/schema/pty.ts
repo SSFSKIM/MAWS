@@ -7,6 +7,8 @@
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
+import { HostOpOutputSchema, HostOpQueryOutputSchema, OpIdSchema } from './host';
+import { MachineOpInputSchema } from './machine';
 
 export const PtyIdSchema = z.string().brand<'PtyId'>();
 export type PtyId = z.infer<typeof PtyIdSchema>;
@@ -55,6 +57,21 @@ export const PtyAttachSchema = z.strictObject({
 });
 export type PtyAttach = z.infer<typeof PtyAttachSchema>;
 
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): what `pty.op` keeps and answers
+// for a remote attach: where the pty's output stands, no bytes and no checkpoint (the ring crosses as a stream, read by
+// `pty.replay` from the viewer's own offset; the checkpoint is the local app's). JSON throughout, so it reads back whole
+// from the ledger.
+export const PtyOpAttachSchema = z.strictObject({ info: PtyInfoSchema, ringStart: Offset, nextOffset: Offset });
+export type PtyOpAttach = z.infer<typeof PtyOpAttachSchema>;
+
+// P5 O7 M3: the ring from an offset, independent of any checkpoint and taking no credit.
+export const PtyReplaySchema = z.strictObject({
+  replay: z.instanceof(Uint8Array), // the ring's bytes for [replayFrom, nextOffset)
+  replayFrom: Offset, // max(from, ring start): above `from` when the ring moved past it
+  nextOffset: Offset,
+});
+export type PtyReplay = z.infer<typeof PtyReplaySchema>;
+
 export const commands = {
   // Snapshot command, answered by the supervisor in main so a crashed host still reports; same name as the event.
   'pty.hostState': { input: z.void(), output: HostStateSchema, owner: 'main' },
@@ -98,6 +115,15 @@ export const commands = {
   },
   // Handler in main: the one scheme-checked `shell.openExternal` (`openExternalUrl`, src/main/open-external.ts).
   'pty.openLink': { input: z.strictObject({ url: z.url() }), output: z.strictObject({ opened: z.boolean() }), owner: 'main' },
+  // P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M3 "Acts, then streams", Interfaces §O; the pty
+  // host's ledger, src/pty-host/ops.ts): `pty.listFor`, a session's ptys (`pty.list` takes no input, which an act cannot
+  // carry), a remote act's and the renderer's for a remote session; `pty.op` and `pty.opQuery`, the shapes of
+  // `machine.op` and `machine.opQuery`, sent by the endpoint in `mawsd` for a remote act (`pty.spawn`, `pty.attach`,
+  // `pty.kill`, `pty.listFor`) and its query; `pty.replay`, the endpoint's in-process read of the ring at a stream's open.
+  'pty.listFor': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ ptys: z.array(PtyInfoSchema) }), owner: 'pty-host' },
+  'pty.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'pty-host' },
+  'pty.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'pty-host' },
+  'pty.replay': { input: z.strictObject({ ptyId: PtyIdSchema, from: Offset }), output: PtyReplaySchema, owner: 'pty-host' },
 } as const satisfies Record<`pty.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

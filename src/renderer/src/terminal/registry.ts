@@ -6,8 +6,13 @@
 // checkpoint*), the key filter and the ⌘ rule for links, the WebGL budget, lifecycle (lost on a host crash, respawn,
 // close) and theme pushes. P5 O2 M4: a running terminal waits through the pty host's `restarting` and reattaches when the
 // host is `ready` again as the same process (a socket-mode host whose link closed); another pid, or `crashed`, ends it.
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The terminal's machine"): a terminal of another
+// machine's session lists that session's ptys through `pty.listFor` (an act, so a non-owner confirms each list: the answer
+// is kept per session until a spawn or an exit there), reads its readiness from that machine's `pty.hostState`, asked
+// through its link, routes its links through the page's forwarder (a loopback link opens forwarded in the in-app browser),
+// and draws "[output lost]" where the stream skipped bytes the machine's ring no longer had.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { EventPayload, HostState, IpcError, MawsBridge, PtyAttach, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
+import type { CommandResult, EventPayload, HostState, IpcError, MawsBridge, PtyAttach, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
@@ -26,6 +31,7 @@ import {
   WEBGL_BUDGET,
 } from './constants';
 import { terminalKeyFilter } from './keys';
+import { terminalMachine } from './machine';
 import { createRenderer, type Acceleration, type RendererOptions, type TerminalFont, type TerminalRenderer, type TerminalTheme } from './renderer';
 import { alignReplay, atBoundary, checkpointState, INITIAL_STREAM, resizedStream, trackStream, type StreamState } from './replay';
 import { readDocumentFont, readDocumentTheme } from './theme';
@@ -79,6 +85,14 @@ export interface RegistryDeps {
 }
 
 type Held = { kind: 'data'; offset: number; data: Uint8Array } | { kind: 'exit'; exit: PtyExit };
+
+// What a terminal writes where its stream skipped bytes (a remote stream reopened past the ring's start): the pen reset,
+// then a dim line, so the reader sees that something is missing between the output above and below.
+export const OUTPUT_LOST = '\x1b[0m\r\n\x1b[2m[output lost]\x1b[22m\r\n';
+
+// A page's answer for a link out of a terminal: true when it took the link (a loopback link of another machine's session,
+// opened forwarded in the in-app browser), false to let the terminal open it as any link.
+export type LinkForwarder = (appSessionId: AppSessionId, url: string) => boolean;
 
 // Events held for a pty nobody has bound yet, oldest data dropped past the host ring's size (the replay has it).
 class HeldEvents {
@@ -197,6 +211,11 @@ export class TerminalRegistry {
   private readonly readyPids = new Map<MachineRef, number | null>();
   private readonly waiting = new Set<Entry>();
   private readonly webglBudget: number;
+  // P5 O7 M3: each remote session's `pty.listFor` answer while it holds (a spawn or an exit there drops it), and the
+  // remote machines whose pty host state has been asked through their link
+  private readonly listings = new Map<AppSessionId, Promise<CommandResult<'pty.listFor'>>>();
+  private readonly hostsAsked = new Set<MachineRef>();
+  private forwardLink: LinkForwarder = () => false;
 
   constructor(private readonly deps: RegistryDeps) {
     this.webglBudget = deps.webglBudget ?? WEBGL_BUDGET;
@@ -208,7 +227,7 @@ export class TerminalRegistry {
     this.started = true;
     const { ipc: bridge } = this.deps;
     bridge.on('pty.data', (event) => this.receive(event));
-    bridge.on('pty.exit', (event) => this.receiveExit(event));
+    bridge.on('pty.exit', (event, from) => this.receiveExit(event, from.machine));
     bridge.on('pty.hostState', (state, from) => this.applyHost(state, from.machine));
     bridge.on('layout.selectAll', () => this.selectAllFocused());
     bridge.on('settings.changed', () => this.refreshTheme());
@@ -236,11 +255,13 @@ export class TerminalRegistry {
   // asks for the attach, then restores the screen exactly or lossily. Resolves with the adopted ids. `onListed` hears,
   // once `pty.list` has answered (with nothing when it failed), each handle created and its attach still under way, and
   // whether the host answered (E10: a restored tab the host listed nothing for lost its shell when MAWS quit).
-  async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[], listed: boolean) => void): Promise<TerminalId[]> {
+  // P5 O7 M3: given another machine's session, the ptys listed are that session's on its machine (`pty.listFor`).
+  async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[], listed: boolean) => void, session?: AppSessionId): Promise<TerminalId[]> {
     this.start();
-    const listed = await this.deps.ipc.invoke('pty.list', undefined);
+    const remote = session !== undefined && this.isRemote(session);
+    const listed = remote ? await this.listFor(session) : await this.deps.ipc.invoke('pty.list', undefined);
     if (!listed.ok) {
-      console.error('[terminal] pty.list failed', listed.error);
+      console.error(`[terminal] ${remote ? 'pty.listFor' : 'pty.list'} failed`, listed.error);
       onListed?.([], false);
       return [];
     }
@@ -266,6 +287,19 @@ export class TerminalRegistry {
 
   host(): HostState | null {
     return this.hostStates.get(this.deps.ipc.localMachine) ?? null;
+  }
+
+  // Each machine's pty host state as last heard (P5 O7 M3: a terminal's readiness is its own machine's).
+  hosts(): ReadonlyMap<MachineRef, HostState> {
+    return new Map(this.hostStates);
+  }
+
+  // P5 O7 M3: the page's forwarder for terminal links (App.tsx registers the browser tool's); the disposer restores none.
+  forwardLinksWith(forwarder: LinkForwarder): () => void {
+    this.forwardLink = forwarder;
+    return () => {
+      if (this.forwardLink === forwarder) this.forwardLink = () => false;
+    };
   }
 
   subscribe(cb: (infos: TerminalInfo[], host: HostState | null) => void): () => void {
@@ -380,9 +414,47 @@ export class TerminalRegistry {
   private createEntry(init: TerminalInit, status: TerminalStatus): Entry {
     const entry = new Entry(crypto.randomUUID() as TerminalId, init, status);
     this.entries.set(entry.info.id, entry);
+    this.askHost(this.machineOfSession(init.appSessionId));
     void this.startRenderer(entry);
     this.publish();
     return entry;
+  }
+
+  private machineOfSession(appSessionId: AppSessionId): MachineRef {
+    return terminalMachine(appSessionId, this.deps.ipc.localMachine);
+  }
+
+  private isRemote(appSessionId: AppSessionId): boolean {
+    return this.machineOfSession(appSessionId) !== this.deps.ipc.localMachine;
+  }
+
+  // P5 O7 M3: a remote session's ptys, from the list kept since its last spawn or exit, else a new `pty.listFor` (an act:
+  // a non-owner confirms it). A failed list is not kept.
+  private listFor(appSessionId: AppSessionId): Promise<CommandResult<'pty.listFor'>> {
+    const kept = this.listings.get(appSessionId);
+    if (kept) return kept;
+    const listing = this.deps.ipc.invoke('pty.listFor', { appSessionId });
+    this.listings.set(appSessionId, listing);
+    void listing.then((result) => {
+      if (!result.ok && this.listings.get(appSessionId) === listing) this.listings.delete(appSessionId);
+    });
+    return listing;
+  }
+
+  // A spawn or an exit changes what a session's list would say.
+  private listingStale(machine: MachineRef, appSessionId?: AppSessionId): void {
+    for (const session of [...this.listings.keys()]) if (appSessionId === undefined ? this.machineOfSession(session) === machine : session === appSessionId) this.listings.delete(session);
+  }
+
+  // P5 O7 M3: a remote machine's pty host state, asked once through its link; its events follow from then on. A failed
+  // ask is asked again at the next terminal there.
+  private askHost(machine: MachineRef): void {
+    if (machine === this.deps.ipc.localMachine || this.hostsAsked.has(machine)) return;
+    this.hostsAsked.add(machine);
+    void this.deps.ipc.invoke('pty.hostState', undefined, { machine }).then((result) => {
+      if (result.ok) this.applyHost(result.value, machine);
+      else this.hostsAsked.delete(machine);
+    });
   }
 
   private startRenderer(entry: Entry): Promise<TerminalRenderer | null> {
@@ -423,8 +495,14 @@ export class TerminalRegistry {
     });
     // ⌘-click opens (Residue *Copy, paste and links*). xterm activates links on any click, and under Playwright's
     // ⌘-click the activating `mouseup` arrived without `metaKey` (M1), so a ⌘ held since its keydown counts too.
+    // P5 O7 M3: the page's forwarder sees the link first; one it leaves opens through main, which for another machine's
+    // terminal is told that machine, so it refuses a loopback link there rather than open this Mac's.
     renderer.setLinkHandler((url, ev) => {
-      if (ev.metaKey || this.metaHeld) void this.deps.ipc.invoke('pty.openLink', { url });
+      if (!ev.metaKey && !this.metaHeld) return;
+      const { appSessionId } = entry.info;
+      if (this.forwardLink(appSessionId, url)) return;
+      if (this.isRemote(appSessionId)) void this.deps.ipc.invoke('pty.openLink', { url }, { machine: this.machineOfSession(appSessionId) });
+      else void this.deps.ipc.invoke('pty.openLink', { url });
     });
     if (entry.size) renderer.resize(entry.size.cols, entry.size.rows);
     if (entry.parent) this.shown(entry);
@@ -484,6 +562,7 @@ export class TerminalRegistry {
     const result = await this.deps.ipc.invoke('pty.spawn', { appSessionId, label, cwd, ...spawned, ...(command ? { command } : {}) });
     this.spawnsInFlight--;
     entry.spawning = null;
+    if (result.ok) this.listingStale(this.machineOfSession(appSessionId), appSessionId);
     const held = result.ok ? this.unclaimed.get(result.value.ptyId) : undefined;
     if (result.ok) this.unclaimed.delete(result.value.ptyId);
     if (this.spawnsInFlight === 0) this.unclaimed.clear();
@@ -625,7 +704,8 @@ export class TerminalRegistry {
     this.route(event.ptyId, { kind: 'data', offset: event.offset, data: event.data });
   }
 
-  private receiveExit(event: EventPayload<'pty.exit'>): void {
+  private receiveExit(event: EventPayload<'pty.exit'>, machine: MachineRef): void {
+    this.listingStale(machine, this.byPty.get(event.ptyId)?.info.appSessionId);
     this.route(event.ptyId, { kind: 'exit', exit: { exitCode: event.exitCode, signal: event.signal } });
   }
 
@@ -648,8 +728,20 @@ export class TerminalRegistry {
     if (item.kind === 'exit') return this.exited(entry, item.exit);
     if (item.offset < entry.nextOffset) return; // the replay (or an earlier chunk) covered it
     const end = item.offset + item.data.byteLength;
+    if (item.offset > entry.nextOffset) return this.skipped(entry, item.data, end);
     entry.nextOffset = end;
     this.writeStream(entry, item.data, end);
+  }
+
+  // P5 O7 M3: the stream skipped `[nextOffset, offset)` (a remote stream reopened after `behind`, the ring past what this
+  // page had). As a lossy restore does, the chunk is written from its first whole line and a full-screen program nudged
+  // to repaint; the screen above stays, with "[output lost]" between.
+  private skipped(entry: Entry, data: Uint8Array, end: number): void {
+    entry.nextOffset = end;
+    this.writeTracked(entry, OUTPUT_LOST);
+    this.writeStream(entry, alignReplay(data), end);
+    const { ptyId, status } = entry.info;
+    if (ptyId && status === 'running' && entry.size && entry.size.rows > 1) this.nudgeRepaint(entry, ptyId, entry.size.cols, entry.size.rows);
   }
 
   // Writes stream bytes; when the renderer has parsed them the tracker follows, and acks and checkpoints are due.

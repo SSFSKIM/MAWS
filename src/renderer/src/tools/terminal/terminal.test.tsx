@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PtyInfo } from '@shared/ipc/schema';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { useMachines } from '../../stores/machines';
 import { ensureShownInstances, instanceOf, panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
@@ -24,6 +28,7 @@ const registry = vi.hoisted(() => {
   const listeners = new Set<Listener>();
   let infos: TerminalInfo[] = [];
   let host: HostState | null = { state: 'ready', pid: 1, restarts: 0, revision: 1 };
+  let others = new Map<string, HostState>(); // P5 O7 M3: other machines' pty host states, by machine
   const renderer = { getSelection: vi.fn(() => 'picked'), hasSelection: vi.fn(() => true), selectAll: vi.fn(), clear: vi.fn(), paste: vi.fn() };
   const publish = () => listeners.forEach((cb) => cb(infos, host));
   let next = 0;
@@ -32,6 +37,7 @@ const registry = vi.hoisted(() => {
     reset() {
       infos = [];
       host = { state: 'ready', pid: 1, restarts: 0, revision: 1 };
+      others = new Map();
       next = 0;
     },
     remove(id: string) {
@@ -46,9 +52,15 @@ const registry = vi.hoisted(() => {
       host = state;
       publish();
     },
+    setMachineHost(machine: string, state: HostState) {
+      others = new Map(others).set(machine, state);
+      publish();
+    },
     terminals: {
       list: () => infos,
       host: () => host,
+      // the local machine is the page's (`window.maws` carries TEST_MACHINE in every happy-dom suite)
+      hosts: () => new Map([...(host ? [['TestMachineRef00000000', host] as const] : []), ...others]),
       subscribe(cb: Listener) {
         listeners.add(cb);
         return () => listeners.delete(cb);
@@ -90,8 +102,9 @@ const registry = vi.hoisted(() => {
         infos = infos.filter((info) => info.id !== id);
         publish();
       }),
-      adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[], listed: boolean) => void): Promise<string[]> => {
+      adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[], listed: boolean) => void, session?: string): Promise<string[]> => {
         void accept;
+        void session;
         onListed?.([], true);
         return [];
       }),
@@ -101,7 +114,8 @@ const registry = vi.hoisted(() => {
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 
-const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, REMOTE_ATTACH_TIMEOUT_MS, REMOTE_LIST_TIMEOUT_MS, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } = await import('@shared/machine/remote-pending');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -472,6 +486,182 @@ describe('a restored tab whose shell closed when MAWS quit', () => {
   });
 });
 
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The terminal's machine"): a restored tab of
+// another machine's session re-adopts its shell through that session's `pty.listFor` (the registry's adopt given the
+// session), for its own label only (the machine's own app has tabs there too), waiting on no local list; a new tab lists
+// nothing. Every list is an act a non-owner confirms, so the wait outlasts main's 60 s pending bound.
+const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+const SESSION_R = session(R, '/srv/r', '/srv/r-wt');
+const restoredRemote = (instanceId: string) => terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId, params: undefined as never, restored: true });
+
+describe('a restored tab of another machine’s session', () => {
+  beforeEach(() => resetTerminalAdoption());
+  afterEach(() => {
+    resetTerminalAdoption();
+    vi.useRealTimers();
+  });
+
+  // The page's local adoption, whose `pty.list` never answers.
+  const localListHangs = () => registry.terminals.adopt.mockImplementationOnce(() => new Promise<string[]>(() => {}));
+
+  // What the registry's adopt does for a remote session: `list(labels)` answers its `pty.listFor` with ptys under those
+  // labels (null: the list failed), an entry under each accepted one; `attach()` answers the last accepted one's attach.
+  function remoteAdoption() {
+    let list!: (labels: string[] | null) => void;
+    let attach: () => void = () => {};
+    registry.terminals.adopt.mockImplementationOnce(
+      (accept = () => true, onListed, session) =>
+        new Promise<string[]>((resolveAll) => {
+          list = (labels) => {
+            if (labels === null) {
+              onListed?.([], false);
+              return resolveAll([]);
+            }
+            const adopting = labels
+              .filter((label) => accept({ label, appSessionId: session } as PtyInfo))
+              .map((label) => {
+                const id = registry.terminals.open({ appSessionId: session!, label, cwd: '/srv/r-wt' });
+                const attached = new Promise<string | null>((resolve) => (attach = () => resolve(id)));
+                return { label, id, attached };
+              });
+            registry.terminals.open.mockClear();
+            onListed?.(adopting, true);
+            void Promise.all(adopting.map(({ attached }) => attached)).then((ids) => resolveAll(ids.filter((id): id is string => id !== null)));
+          };
+        }),
+    );
+    return { list: (labels: string[] | null) => list(labels), attach: () => attach() };
+  }
+
+  it('lists its session’s ptys for its own label, waiting on no local list, and takes the one re-adopted', async () => {
+    localListHangs();
+    void adoptTerminals();
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    expect(registry.terminals.adopt).toHaveBeenLastCalledWith(expect.any(Function), expect.any(Function), R);
+    expect(state.terminalId).toBeNull();
+    expect(state.ui.getState().adopting).toBe(true);
+    remote.list(['their-tab', 'terminal:r']); // the machine's own app's tab is not taken
+    await Promise.resolve();
+    expect(state.terminalId).toBeNull(); // listed: it waits for the attach
+    remote.attach();
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(state.ui.getState()).toMatchObject({ adopting: false, lostAtQuit: false });
+  });
+
+  it('a new tab of another machine’s session lists nothing and opens its shell in the session’s worktree at once', () => {
+    localListHangs();
+    void adoptTerminals();
+    registry.terminals.adopt.mockClear();
+    const state = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:new', params: {} });
+    expect(state.terminalId).toBe('t1');
+    expect(registry.terminals.adopt).not.toHaveBeenCalled();
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: R, label: 'terminal:new', cwd: '/srv/r-wt' });
+  });
+
+  it('opens a new shell when the machine listed none under its label and says the previous one is gone; a failed list says nothing', async () => {
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    remote.list(['their-tab']);
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(state.ui.getState().lostAtQuit).toBe(true);
+
+    const failed = remoteAdoption();
+    const other = restoredRemote('terminal:r2');
+    failed.list(null);
+    await vi.waitFor(() => expect(other.terminalId).toBe('t2'));
+    expect(other.ui.getState().lostAtQuit).toBe(false);
+  });
+
+  it('bounds the list above main’s act bound; a late list leaves the shell it re-adopted running', async () => {
+    expect(REMOTE_LIST_TIMEOUT_MS).toBeGreaterThan(REMOTE_ACT_PENDING_MS);
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:slow');
+    await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS);
+    expect(state.terminalId).toBeNull(); // a non-owner may still be at the sheet
+    await vi.advanceTimersByTimeAsync(REMOTE_LIST_TIMEOUT_MS - ADOPTION_TIMEOUT_MS);
+    expect(state.terminalId).toBe('t1');
+    expect(state.ui.getState()).toMatchObject({ adopting: false, lostAtQuit: false });
+    remote.list(['terminal:slow']);
+    expect(registry.terminals.release).toHaveBeenCalledWith('t2');
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledTimes(2);
+    logged.mockRestore();
+  });
+
+  // M3c fix wave 1: main's attach is an act (up to its act bound, a non-owner at the sheet) and then the ring's replay under
+  // a bound of its own, so the renderer waits above both together
+  it('adopts the same shell after a slow confirmation and a delayed replay that main still answers in time', async () => {
+    expect(REMOTE_ATTACH_TIMEOUT_MS).toBeGreaterThan(REMOTE_ATTACH_PENDING_MS);
+    vi.useFakeTimers();
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    remote.list(['terminal:r']);
+    await vi.advanceTimersByTimeAsync(55_000 + 15_000); // confirmed at 55 s, the ring's bytes in 15 s more
+    expect(state.terminalId).toBeNull();
+    remote.attach();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.terminalId).toBe('t1');
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(registry.terminals.release).not.toHaveBeenCalled();
+  });
+
+  it('lets an attach go past main’s whole budget: the shell is left running and the tab opens a new one', async () => {
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    remote.list(['terminal:r']);
+    await vi.advanceTimersByTimeAsync(REMOTE_ATTACH_TIMEOUT_MS - 1);
+    expect(state.terminalId).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(registry.terminals.release).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    expect(state.terminalId).toBe('t2');
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+  });
+
+  // M3c fix wave 1: closing the Terminal tab is the kill gesture (beforeClose kills, as locally); a dispose nobody asked for
+  // (the session removed or archived, its machine settling without it) lets another machine's shell go and kills nothing
+  // there, where a kill is an act a non-owner would be asked to confirm out of nowhere
+  it('a dispose nobody asked for releases another machine’s shell instead of killing it; closing the tab still kills it', async () => {
+    const disposedTab = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:r', params: {} });
+    terminalTool.dispose(disposedTab);
+    expect(registry.terminals.release).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+
+    const closedTab = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:r2', params: {} });
+    await expect(terminalTool.beforeClose(closedTab)).resolves.toBe(true);
+    expect(registry.terminals.close).toHaveBeenCalledWith('t2');
+  });
+
+  it('a restored tab disposed while it re-adopts releases the shell re-adopted under its label', async () => {
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:gone');
+    terminalTool.dispose(state);
+    remote.list(['terminal:gone']);
+    remote.attach();
+    await vi.waitFor(() => expect(registry.terminals.release).toHaveBeenCalledWith('t1'));
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+  });
+
+  it('says it is reconnecting while it looks for its shell, and names the machine when the previous shell is gone', async () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    render(<View state={state} ctx={context({ appSessionId: R, session: SESSION_R })} />);
+    expect(screen.getByRole('status', { name: 'terminal pending' }).textContent).toBe('Reconnecting to this tab’s shell…');
+    await act(async () => remote.list([]));
+    await vi.waitFor(() => expect(screen.getByRole('status', { name: 'previous shell' }).textContent).toContain('The previous shell no longer runs on mini'));
+    useMachines.setState({ machines: new Map() });
+  });
+});
+
 // The same through C8a's real host: the + menu's `addTool` gives no params either, so only the host's restore path
 // (`ensureShownInstances`, as the strip shows a restored ref) may mark a tab restored.
 describe('the lost-terminal line through the panel host', () => {
@@ -673,6 +863,26 @@ describe('terminal view', () => {
     expect((screen.getByRole('button', { name: 'New terminal' }) as HTMLButtonElement).disabled).toBe(true);
     act(() => registry.setHost({ state: 'ready', pid: 2, restarts: 1, revision: 3 }));
     expect((screen.getByRole('button', { name: 'New terminal' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // P5 O7 M3: a terminal's readiness is its own machine's pty host (closes the tracker row "`hostReady` reads the local
+  // pty host even for another machine's terminal"); a remote terminal lost to this app says so in its machine's name.
+  it('reads New terminal’s readiness from a lost remote terminal’s own machine, and names that machine', () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    const state = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:r', params: {} });
+    render(<View state={state} ctx={context({ appSessionId: R, session: SESSION_R })} />);
+    act(() => {
+      registry.setMachineHost(OTHER_MACHINE, { state: 'starting', pid: null, restarts: 0, revision: 1 });
+      registry.patch(state.terminalId!, { status: 'lost', exit: { exitCode: null, signal: null } });
+    });
+    expect(screen.getByRole('status', { name: 'terminal status' }).textContent).toContain('Terminal lost, this Mac can no longer reach it on mini');
+    const respawn = () => (screen.getByRole('button', { name: 'New terminal' }) as HTMLButtonElement).disabled;
+    expect(respawn(), 'the local pty host is ready, the machine’s link is not').toBe(true);
+    act(() => registry.setMachineHost(OTHER_MACHINE, { state: 'ready', pid: null, restarts: 0, revision: 2 }));
+    expect(respawn()).toBe(false);
+    act(() => registry.setHost({ state: 'restarting', pid: null, restarts: 1, revision: 2 }));
+    expect(respawn(), 'the local pty host restarting is not this terminal’s').toBe(false);
+    useMachines.setState({ machines: new Map() });
   });
 
   it('shows the lossy reconnect notice', () => {

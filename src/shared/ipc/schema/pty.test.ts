@@ -36,8 +36,30 @@ describe('pty schema validates and rejects', () => {
       'pty.foreground': 'pty-host',
       'pty.openLink': 'main',
       'pty.recaptureEnv': 'pty-host', // P5 O2 M4: main-only
+      'pty.listFor': 'pty-host', // P5 O7 M3
+      'pty.op': 'pty-host', // P5 O7 M3: main-only, the endpoint's
+      'pty.opQuery': 'pty-host', // P5 O7 M3: main-only, the endpoint's
+      'pty.replay': 'pty-host', // P5 O7 M3: main-only, the endpoint's
     });
     expect(Object.keys(events).filter((name) => name.startsWith('pty.')).sort()).toEqual(['pty.data', 'pty.exit', 'pty.hostState']);
+  });
+
+  // P5 O7 M3
+  it('takes pty.op in machine.op’s shape, keeps a remote attach as metadata only, and reads the ring from an offset', () => {
+    const op = { opId: 'op-0001-abcdefghijkl', opCreated: '2026-11-01T00:00:00.000Z', claim: { member: 'm', device: 'd', fingerprint: 'f' }, name: 'pty.attach', input: { ptyId: 'p1' } };
+    expect(validateCommandInput('pty.op', op).ok).toBe(true);
+    expect(validateCommandInput('pty.op', { ...op, action: { v: 1 } }).ok).toBe(true);
+    expect(validateCommandInput('pty.op', { ...op, opId: 'short' }).ok).toBe(false);
+    expect(validateCommandInput('pty.op', { ...op, context: {} }).ok).toBe(false);
+    expect(validateCommandOutput('pty.op', { state: 'done', result: { ok: true, value: { info, ringStart: 0, nextOffset: 1024 } } }).ok).toBe(true);
+    expect(validateCommandInput('pty.opQuery', { opId: op.opId, opCreated: op.opCreated, tombstoneIfAbsent: true }).ok).toBe(true);
+    expect(validateCommandInput('pty.listFor', { appSessionId: 'app-1' }).ok).toBe(true);
+    expect(validateCommandInput('pty.listFor', {}).ok).toBe(false);
+    expect(validateCommandOutput('pty.listFor', { ptys: [info] }).ok).toBe(true);
+    expect(validateCommandInput('pty.replay', { ptyId: 'p1', from: 0 }).ok).toBe(true);
+    expect(validateCommandInput('pty.replay', { ptyId: 'p1', from: -1 }).ok).toBe(false);
+    expect(validateCommandOutput('pty.replay', { replay: new Uint8Array([1]), replayFrom: 0, nextOffset: 1 }).ok).toBe(true);
+    expect(validateCommandOutput('pty.replay', { replay: 'AQ==', replayFrom: 0, nextOffset: 1 }).ok).toBe(false);
   });
 
   it('takes a spawn with a session, a label and an optional command, and refuses the removed env key', () => {

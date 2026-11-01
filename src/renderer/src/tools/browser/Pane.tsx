@@ -177,7 +177,7 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
 // What the pane draws for the tab's state; nothing over a live page but its picture while a layer covers it.
 function TabPage({ tab }: { tab: BrowserTab }) {
   const placeholder = useBrowser((s) => s.placeholders.get(tab.tabId) ?? null);
-  if (tab.failed) return <ViewFailedPage tabId={tab.tabId} message={tab.failed.message} />;
+  if (tab.failed) return <ViewFailedPage tabId={tab.tabId} message={tab.failed.message} forward={tab.forward} />; // P5 O7 M3: forward
   if (tab.crashed) return <CrashPage tabId={tab.tabId} reason={tab.crashed.reason} />;
   if (tab.loadError) return <ErrorPage tabId={tab.tabId} loadError={tab.loadError} />;
   if (tab.url === '') return <EmptyState />;

@@ -18,6 +18,9 @@
 // awaited, so a slow call holds nothing behind it; `state` is adopted through the org view; a kind this version doesn't
 // know is ignored (OX1), and a known kind out of shape closes the channel (`malformed`).
 //
+// P5 O7 M3: the stream kinds go to the stream table (streams.ts), and every `caps` refresh (a grant kept or ended, an
+// owner changed, a new head) authorizes its streams again (`refreshed`), as the subscriptions are at every new head.
+//
 // P5 O7 M2: each admitted channel is one asker on the machine, its `client` a `ClientRef` minted at admission
 // (`<device>/<RL2 channel id>`) and ended at the channel's close, which every request it carries passes to `dispatch`, so
 // whatever the machine keys by its asker (a watch, a hold) is released with the channel.
@@ -32,6 +35,7 @@ import {
   type ChannelMessage,
   type CreditMessage,
   type DeviceClass,
+  type DeviceStreamMessage,
   type DevicePeer,
   type EndpointMessage,
   type MachineIdentity,
@@ -85,6 +89,8 @@ export type ChannelRoutes = {
   sub(channel: RemoteChannel, message: SubMessage): void;
   credit(channel: RemoteChannel, message: CreditMessage): void;
   unsub(channel: RemoteChannel, message: UnsubMessage): void;
+  /** P5 O7 M3: the stream kinds (§N), to the stream table. */
+  stream(channel: RemoteChannel, message: DeviceStreamMessage): void;
 };
 
 /** A carrier as a channel runs on it: RL2's duplex and, for one with a send buffer (CarrierDuplex), when it has room. */
@@ -99,6 +105,7 @@ const NOT_OFFERED: ChannelRoutes = {
   sub: (channel, m) => void channel.send({ t: 'ended', sub: m.sub, reason: 'not-offered' }),
   credit: () => {},
   unsub: () => {},
+  stream: (channel, m) => void (m.t === 'streamOpen' && channel.send({ t: 'streamRefused', id: m.id, reason: 'unavailable' })),
 };
 
 export type ChannelsContext = {
@@ -115,6 +122,11 @@ export type ChannelsContext = {
   now?(): number;
   /** The silence before a ping, drawn anew each period from this range (RL §4.5's 5–7 s). */
   pingMs?: readonly [number, number];
+  /**
+   * The members' rights are read again (`refreshCaps`: a grant kept or ended, an owner changed, a new head): what rests
+   * on them beyond `caps` is authorized again (P5 O7 M3: the open streams and the kept forwards).
+   */
+  refreshed?(): void;
 };
 
 export const PING_MS: readonly [number, number] = [5000, 7000];
@@ -440,6 +452,11 @@ export class Channels {
   refreshCaps(): void {
     this.#capsEpoch++;
     for (const entry of this.#entries.values()) this.#refresh(entry);
+    try {
+      this.#ctx.refreshed?.();
+    } catch (error) {
+      this.#ctx.log(`endpoint: what rests on the members' rights could not be checked again: ${(error as Error).message}`);
+    }
   }
 
   /** Closes every channel (a sealed close with `reason`) and every handshake; resolves once all ended, or after `waitMs`. */
@@ -533,6 +550,12 @@ export class Channels {
           return routes.credit(remote, message);
         case 'unsub':
           return routes.unsub(remote, message);
+        case 'streamOpen':
+        case 'streamData':
+        case 'streamControl':
+        case 'streamCredit':
+        case 'streamClose':
+          return routes.stream(remote, message);
       }
     } catch (error) {
       this.#ctx.log(`endpoint: channel ${remote.key}'s \`${message.t}\` route failed: ${(error as Error).message}`);

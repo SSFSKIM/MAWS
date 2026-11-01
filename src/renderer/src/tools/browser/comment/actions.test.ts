@@ -19,7 +19,13 @@ import { browserTool } from '../BrowserTool';
 import { noticeText } from '../chrome/Notices';
 import { coverPane, resetCovering } from '../covering';
 import { browser, resetBrowser } from '../store';
-import { browserSessionOf, openBrowserUrl } from './actions';
+import { browserSessionOf, openBrowserUrl, openForwardedLink } from './actions';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../../../test/support/machine';
+import { instanceOf } from '../../../panel/host';
+import { resetForwards } from '../forward';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { useMachines } from '../../../stores/machines';
 import { COMMENT_COPY } from './copy';
 
 const URL = 'http://127.0.0.1:4000/comment.html';
@@ -36,7 +42,11 @@ beforeEach(() => {
   records.set(THREAD, { ...record(THREAD), lineage: { kind: 'side-thread', parentAppSessionId: B, parentEngineSessionId: null, openedBy: 'comment' } });
   useSessions.setState({ records });
   registerPanelTool(browserTool);
-  main = installFakeMain((name, input) => (name === 'browser.tabs.open' ? ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url: URL }), reused: false }) : ok()));
+  main = installFakeMain((name, input) => {
+    if (name === 'browser.tabs.open') return ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url: URL }), reused: false });
+    if (name === 'remote.forward.open') return ok({ localPort: 54321 }); // P5 O7 M3
+    return ok();
+  });
 });
 afterEach(() => {
   delete (window as { maws?: unknown }).maws;
@@ -136,5 +146,37 @@ describe('openBrowserUrl beside a browser on screen', () => {
     openBrowserUrl(A, 'not a url');
     expect(lines()).toEqual([]);
     expect(toasts()).toEqual([COMMENT_COPY.openedElsewhere(C), COMMENT_COPY.cannotOpen('not a url')]);
+  });
+});
+
+// P5 O7 M3 ("Forwarding"): a loopback link of another machine's session opens in the in-app browser carrying its forward,
+// without asking; every other link, and every link of this machine's sessions, is left to its surface.
+describe('openForwardedLink', () => {
+  const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+  afterEach(() => resetForwards());
+
+  it('takes a loopback link of another machine’s session: the Browser tool in that session’s panel, its forward opened first', () => {
+    expect(openForwardedLink(R, 'http://localhost:5173/app')).toBe(true);
+    const [tab] = browserTabs(R);
+    expect(tab).toBeDefined();
+    expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 5173 }]);
+    expect(instanceOf(tab!.id)?.state).toBeDefined();
+  });
+
+  it('takes a loopback link of another machine’s session that cannot be forwarded and opens it nowhere, saying why', () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    for (const url of ['http://[::ffff:127.0.0.1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) expect(openForwardedLink(R, url), url).toBe(true);
+    expect(browserTabs(R)).toEqual([]);
+    expect(main.calls.map(({ name }) => name)).toEqual([]); // no forward, and nothing sent to main to open
+    expect(toasts()).toEqual(Array(3).fill('This link points at mini’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1, 0.0.0.0, [::] or [::1])'));
+    useMachines.setState({ machines: new Map() });
+  });
+
+  it('leaves a local session’s localhost and another machine’s non-loopback link', () => {
+    expect(openForwardedLink(A, 'http://localhost:5173/app')).toBe(false);
+    expect(openForwardedLink(R, 'https://example.com/')).toBe(false);
+    expect(browserTabs(A)).toEqual([]);
+    expect(browserTabs(R)).toEqual([]);
+    expect(main.callsOf('remote.forward.open')).toEqual([]);
   });
 });

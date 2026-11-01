@@ -10,6 +10,8 @@ import { currentSet } from '../../stores/layout-model';
 import { useLayout } from '../../stores/layout';
 import { BROWSER_NOTICE_MS, browser, connectBrowser, dismissNotice, listSession, loadedTabs, onChromeCommand, onExtensionReveal, onShowRequest, raiseNotice, requestShow, resetBrowser, tabOpened, tabTitle } from './store';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -58,6 +60,17 @@ describe('connectBrowser', () => {
     await fake.reply('browser.tabs.list', { tabs: [], selected: { [A]: null } });
     expect(sessionOf(A)).toEqual({ tabs: [], selected: null });
     expect(sessionOf(B)).toEqual({ tabs: [browserTab(T2, B)], selected: T2 });
+  });
+
+  // P5 O7 M3c fix wave 1: main's app-wide list answers this Mac's sessions only; another machine's session is listed when
+  // its surface mounts, and an app-wide answer landing after that leaves it as listed
+  it('the app-wide list leaves another machine’s session as its own list left it', async () => {
+    const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+    listSession(R, fake.client);
+    await fake.reply('browser.tabs.list', { tabs: [browserTab(T3, R)], selected: { [R]: T3 } }, 1); // the session's, first
+    await fake.reply('browser.tabs.list', { tabs: [browserTab(T1, A)], selected: { [A]: T1 } }); // then the app-wide one
+    expect(sessionOf(R)).toEqual({ tabs: [browserTab(T3, R)], selected: T3 });
+    expect(sessionOf(A)).toEqual({ tabs: [browserTab(T1, A)], selected: T1 });
   });
 
   it('control moves patch the tab wherever it is listed', async () => {

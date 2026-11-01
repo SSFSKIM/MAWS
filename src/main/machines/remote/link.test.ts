@@ -347,6 +347,7 @@ describe('verdicts', () => {
     await settle();
     expect(h.link.state()).toBe('down');
     expect(h.link.refusal()).toBe('removed');
+    expect(h.link.ended()).toBe('removed');
     expect(sub.heard).toContainEqual(['ended', 'removed']);
     expect(await sentAct.outcome).toEqual({ state: 'unknown', reason: 'removed' });
     expect(await call).toMatchObject({ ok: false, error: { code: 'removed' } });
@@ -365,6 +366,7 @@ describe('verdicts', () => {
     await settle();
     expect(h.link.state()).toBe('up');
     expect(h.link.refusal()).toBeNull();
+    expect(h.link.ended()).toBeNull();
     h.last().end('removed');
     await settle();
     h.session.changed();
@@ -706,5 +708,17 @@ describe('close()', () => {
     const tried = h.attempts.length;
     await advance(60_000);
     expect(h.attempts).toHaveLength(tried);
+  });
+  it('is heard as the link’s end (`ended`), also when the link was down already', async () => {
+    const h = await harness();
+    await settle();
+    h.last().end('removed');
+    await settle();
+    expect(h.link.state()).toBe('down');
+    const heard: string[] = [];
+    h.link.onState((state) => heard.push(state));
+    h.link.close();
+    expect(h.link.ended()).toBe('closed');
+    expect(heard).toEqual(['down']);
   });
 });

@@ -3,10 +3,14 @@
 // panel close and session switch under a pin; and `openTerminal`, C10's entry point for "attach in a terminal tab".
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { PtyInfo } from '@shared/ipc/schema';
+import type { HostState, PtyInfo } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '@shared/machine/remote-pending';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { ipc } from '../../ipc/client';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
+import { terminalMachine } from '../../terminal/machine';
 import { terminals, type Adopting, type TerminalId } from '../../terminal/registry';
 import { sessionDirectory, TerminalIcon, TerminalView } from './TerminalView';
 
@@ -28,6 +32,7 @@ export interface TerminalTabUi {
   closeError: string | null;
   terminalId: TerminalId | null; // null until the tab has a session and a directory to start in
   lostAtQuit: boolean; // E10: the tab's previous shell closed when MAWS quit; its line shows until dismissed
+  adopting: boolean; // P5 O7 M3: a restored tab of another machine's session is still looking for its shell there
 }
 
 export interface TerminalTabState {
@@ -69,12 +74,12 @@ const abandoned = new Set<TerminalId>(); // re-adopted handles released, never t
 const timers = new Set<ReturnType<typeof setTimeout>>();
 let generation = 0; // tests reset the page's adoption; an earlier one's answers are then ignored
 
-function bounded<T>(work: Promise<T>, expired: () => T): Promise<T> {
+function bounded<T>(work: Promise<T>, expired: () => T, ms = ADOPTION_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve) => {
     const timer = setTimeout(() => {
       timers.delete(timer);
       resolve(expired());
-    }, ADOPTION_TIMEOUT_MS);
+    }, ms);
     timers.add(timer);
     void work.then((value) => {
       clearTimeout(timer);
@@ -142,6 +147,74 @@ export function adoptTerminals(accept: (info: PtyInfo) => boolean = () => true):
   adoption = waits.then((all) => Promise.all(all)).then((ids) => ids.filter((id): id is TerminalId => id !== null));
   return adoption;
 }
+// P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The terminal's machine"): another machine's
+// shell outlives this app, so a restored tab of a session there re-adopts it through that session's `pty.listFor` (the
+// registry's adopt given the session; the registry keeps the answer for the session's other tabs until a spawn or an exit
+// there). Each tab adopts for its own label alone: the machine's own app lists its tabs' shells under the same session. A
+// new tab lists nothing (no shell can be under a label minted now), and no remote tab waits on the local `pty.list`.
+// Every list and attach is an act a non-owner confirms at the sheet, which main answers within its act bound, and an
+// attach then waits for the ring's replay under a bound of its own (src/shared/machine/remote-pending.ts); each wait here
+// is bounded a margin above main's, so main's typed answer comes first. A shell re-adopted late is left running, as a
+// local one is.
+const REMOTE_ADOPTION_MARGIN_MS = 5_000;
+export const REMOTE_LIST_TIMEOUT_MS = REMOTE_ACT_PENDING_MS + REMOTE_ADOPTION_MARGIN_MS;
+export const REMOTE_ATTACH_TIMEOUT_MS = REMOTE_ATTACH_PENDING_MS + REMOTE_ADOPTION_MARGIN_MS;
+interface RemoteAdoption {
+  done: boolean;
+  listed: boolean; // the machine answered the list
+  listedOwn: boolean; // and listed a pty under the tab's label
+  wait: Promise<void>;
+}
+const remoteAdoptions = new WeakMap<TerminalTabState, RemoteAdoption>();
+
+const isRemote = (appSessionId: AppSessionId): boolean => terminalMachine(appSessionId, ipc.localMachine) !== ipc.localMachine;
+
+function adoptRemote(state: TerminalTabState, owner: AppSessionId): RemoteAdoption {
+  const known = remoteAdoptions.get(state);
+  if (known) return known;
+  const label = state.instanceId;
+  const adoption: RemoteAdoption = { done: false, listed: false, listedOwn: false, wait: Promise.resolve() };
+  let expired = false;
+  let inTime!: (adopting: Adopting[]) => void;
+  const listed = new Promise<Adopting[]>((resolve) => (inTime = resolve));
+  const heard = (adopting: Adopting[], answered: boolean) => {
+    if (expired) {
+      for (const { id } of adopting) leave(id, `pty.listFor answered late with ${label}, which has a new shell`);
+      return;
+    }
+    adoption.listed = answered;
+    adoption.listedOwn = adopting.length > 0;
+    inTime(adopting);
+  };
+  terminals.adopt((info) => info.label === label, heard, owner).catch((error: unknown) => {
+    console.error(`[terminal] re-adoption of ${label} failed; the tab opens a new shell`, error);
+    heard([], false);
+  });
+  const expire = (): Adopting[] => {
+    expired = true;
+    console.error(`[terminal] pty.listFor did not answer within ${REMOTE_LIST_TIMEOUT_MS} ms; ${label} opens a new shell`);
+    return [];
+  };
+  const attach = ({ id, attached }: Adopting) =>
+    bounded(attached, () => {
+      leave(id, `pty.attach for ${label} did not answer within ${REMOTE_ATTACH_TIMEOUT_MS} ms`);
+      return null;
+    }, REMOTE_ATTACH_TIMEOUT_MS);
+  adoption.wait = bounded(listed, expire, REMOTE_LIST_TIMEOUT_MS)
+    .then((adopting) => Promise.all(adopting.map(attach)))
+    .then(() => {
+      adoption.done = true;
+    });
+  remoteAdoptions.set(state, adoption);
+  return adoption;
+}
+
+// P5 O7 M3: whether a terminal's own machine's pty host is ready (a remote one's is its link). Closes the tracker row
+// "`hostReady` reads the local pty host even for another machine's terminal".
+export function hostReadyOf(hosts: ReadonlyMap<MachineRef, HostState>, appSessionId: AppSessionId): boolean {
+  return hosts.get(terminalMachine(appSessionId, ipc.localMachine))?.state === 'ready';
+}
+
 // Tests: forget the page's adoption.
 export function resetTerminalAdoption(): void {
   generation++;
@@ -171,25 +244,29 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   // label gone or the close already under way, and re-closing is idempotent; expected, not a leak.
   if (disposed.has(state)) {
     const orphan = terminals.list().find((info) => info.label === state.instanceId);
-    if (orphan) terminals.close(orphan.id).catch((error: unknown) => console.error(`[terminal] could not end ${orphan.id} of a closed tab`, error));
+    if (orphan) endUnasked(orphan.id, orphan.appSessionId, 'of a closed tab');
     return null;
   }
   const current = state.ui.getState().terminalId;
   if (current) return current;
-  const wait = adoptionWait(state.instanceId);
+  const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
+  const remote = owner !== null && isRemote(owner) ? (state.restored ? adoptRemote(state, owner) : null) : undefined; // undefined: local
+  const wait = remote === undefined ? adoptionWait(state.instanceId) : remote !== null && !remote.done ? remote.wait : null;
   if (wait) {
+    if (remote && !state.ui.getState().adopting) state.ui.setState({ adopting: true });
     void wait.then(() => ensureTerminal(state, shown));
     return null;
   }
+  if (state.ui.getState().adopting) state.ui.setState({ adopting: false });
   const adopted = terminals.list().find((info) => info.label === state.instanceId && !abandoned.has(info.id));
-  const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
   const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
   let terminalId: TerminalId | null = adopted?.id ?? null;
   let lostAtQuit = false;
   if (!terminalId && owner && cwd) {
     const { command } = state.params;
     terminalId = terminals.open({ appSessionId: owner, label: state.instanceId, cwd, ...(command ? { command } : {}) });
-    lostAtQuit = state.restored && listedLabels !== null && !listedLabels.has(state.instanceId); // E10, §Design 5
+    // E10, §Design 5; P5 O7 M3: another machine's shell is gone when its machine listed none under the label
+    lostAtQuit = remote === undefined ? state.restored && listedLabels !== null && !listedLabels.has(state.instanceId) : remote !== null && remote.listed && !remote.listedOwn;
   }
   if (terminalId) state.ui.setState(lostAtQuit ? { terminalId, lostAtQuit } : { terminalId });
   return terminalId;
@@ -203,7 +280,7 @@ export function takeFocusRequest(state: TerminalTabState, request: number): bool
 }
 
 function createState({ appSessionId, session, instanceId, params, restored }: PanelToolInit<TerminalParams>): TerminalTabState {
-  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null, lostAtQuit: false }));
+  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null, lostAtQuit: false, adopting: false }));
   const state: TerminalTabState = {
     get terminalId() {
       return ui.getState().terminalId;
@@ -264,8 +341,17 @@ function dispose(state: TerminalTabState): void {
   disposed.add(state);
   const { terminalId } = state.ui.getState();
   state.ui.setState({ confirmClose: false, process: null, confirmed: false, closeError: null });
-  if (!terminalId || !terminals.get(terminalId)) return;
-  terminals.close(terminalId).catch((error: unknown) => console.error(`[terminal] could not end ${terminalId} on dispose`, error));
+  const handle = terminalId ? terminals.get(terminalId) : undefined;
+  if (handle) endUnasked(handle.info.id, handle.info.appSessionId, 'on dispose');
+}
+
+// A terminal whose tab went without the owner's close: a local shell is killed, as before; P5 O7 M3 (fix wave 1) another
+// machine's is let go and lives on there (the spec's "the shell lives with the machine until killed"), since a kill there
+// is an act a non-owner would be asked to confirm with nothing on screen asking for it. The tab's own close
+// (`beforeClose`) still kills it.
+function endUnasked(id: TerminalId, appSessionId: AppSessionId, why: string): void {
+  if (isRemote(appSessionId)) return terminals.release(id);
+  terminals.close(id).catch((error: unknown) => console.error(`[terminal] could not end ${id} ${why}`, error));
 }
 
 export const terminalTool: PanelTool<TerminalTabState, TerminalParams> = {
