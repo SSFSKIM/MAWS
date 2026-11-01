@@ -9,9 +9,11 @@
 //   Chromium does. An event of a domain with no enable and no rule below is never admitted.
 // - What a specialised producer emits follows the lease's own request for it, never its domain's enable: a screencast's
 //   frames its `Page.startScreencast` (so `Page.enable` alone never subscribes frames), Fetch interception its
-//   `Fetch.enable` (auth challenges only with `handleAuthRequests`), target attach events its auto-attach or an explicit
-//   attach of a target until that target's child detaches, the file chooser and lifecycle events their switches, a
-//   binding's calls its `Runtime.addBinding`, tracing its `Tracing.start` until that trace's completion is told.
+//   `Fetch.enable` (auth challenges only with `handleAuthRequests`), a child's attach its auto-attach or an explicit
+//   attach of that child's target (until that target's child detaches), a child's detach that child's attach having been
+//   told (so auto-attach turned off, which detaches its children, still tells each detach), the file chooser its
+//   interception or `Page.enable`'s `enableFileChooserOpenedEvent`, lifecycle events their switch, a binding's calls that
+//   binding's own `Runtime.addBinding`, tracing its `Tracing.start` until that trace's completion is told.
 // - A command is scoped as it is sent, since an enable can emit before it answers, and settled by its own answer through
 //   what `willSend` returns: kept, or rolled back if it failed. Send order decides, whatever order the answers come in
 //   (neither the RPC dispatcher nor TabDebugger.send orders completions): a switch reads the most recently sent command
@@ -27,7 +29,7 @@
 export interface CuaEventScope {
   // scope provisionally as the command is sent; returns its settlement, called with its answer: kept, or rolled back
   willSend(childSession: string | null, method: string, params: unknown): (ok: boolean) => void;
-  admits(childSession: string | null, event: string): boolean; // read before each outgoing notification
+  admits(childSession: string | null, event: string, params?: unknown): boolean; // read before each outgoing notification, with its params
   detached(childSession: string, targetId: string | null): void; // the child and its target, from Target.detachedFromTarget
   released(): void; // the lease ended
 }
@@ -43,17 +45,15 @@ interface Command {
 interface SessionScope {
   settled: Map<string, { seq: number; on: boolean }>; // per switch, the newest answered command or terminal event
   pending: Command[]; // sent and unanswered, in send order
+  children: Set<string>; // the child sessions whose attach this session was told: their detach is told too
 }
 
 const BINDING = 'binding:';
 const ATTACHED = 'attached:'; // an explicit attach, by its target
-const ATTACH_EVENTS = new Set(['Target.attachedToTarget', 'Target.detachedFromTarget']);
 
 const on = (params: unknown, key: string) => (params as Record<string, unknown> | null)?.[key] === true;
-const named = (params: unknown) => {
-  const name = (params as Record<string, unknown> | null)?.name;
-  return typeof name === 'string' ? name : null;
-};
+const text = (value: unknown) => (typeof value === 'string' ? value : null);
+const named = (params: unknown) => text((params as Record<string, unknown> | null)?.name);
 
 // The switches a command sets, none for a command that subscribes nothing.
 function changesOf(method: string, params: unknown): Change[] {
@@ -63,6 +63,9 @@ function changesOf(method: string, params: unknown): Change[] {
       return [['screencast', method === 'Page.startScreencast']];
     case 'Page.setInterceptFileChooserDialog':
       return [['fileChooser', on(params, 'enabled')]];
+    case 'Page.enable': // Chromium sets the chooser's event to each enable's value and clears it at the disable
+    case 'Page.disable':
+      return [['domain:Page', method === 'Page.enable'], ['fileChooserEvent', on(params, 'enableFileChooserOpenedEvent')]];
     case 'Page.setLifecycleEventsEnabled':
       return [['lifecycle', on(params, 'enabled')]];
     case 'Target.setAutoAttach':
@@ -97,7 +100,7 @@ export function createEventScope(): CuaEventScope {
 
   const sessionOf = (child: string | null): SessionScope => {
     let scope = sessions.get(child);
-    if (!scope) sessions.set(child, (scope = { settled: new Map(), pending: [] }));
+    if (!scope) sessions.set(child, (scope = { settled: new Map(), pending: [], children: new Set() }));
     return scope;
   };
 
@@ -110,33 +113,40 @@ export function createEventScope(): CuaEventScope {
     return newest.on;
   };
 
-  // Every switch with a prefix the session has heard of, read as above.
-  const anyOn = (scope: SessionScope, prefix: string): boolean => {
-    const flags = new Set([...scope.settled.keys(), ...scope.pending.flatMap((command) => command.changes.map(([flag]) => flag))]);
-    return [...flags].some((flag) => flag.startsWith(prefix) && isOn(scope, flag));
-  };
-
   // A terminal event: the switch is off from now on, newer than every command sent before it.
   const end = (scope: SessionScope, flag: string) => void scope.settled.set(flag, { seq: ++sent, on: false });
 
   // The switch an event reads.
-  const admitted = (scope: SessionScope, event: string): boolean => {
+  const admitted = (scope: SessionScope, event: string, params: unknown): boolean => {
+    const p = (params ?? {}) as { name?: unknown; sessionId?: unknown; targetInfo?: { targetId?: unknown } };
     switch (event) {
       case 'Page.screencastFrame':
       case 'Page.screencastVisibilityChanged':
         return isOn(scope, 'screencast');
       case 'Page.fileChooserOpened':
-        return isOn(scope, 'fileChooser');
+        return isOn(scope, 'fileChooser') || isOn(scope, 'fileChooserEvent');
       case 'Page.lifecycleEvent':
         return isOn(scope, 'lifecycle');
       case 'Fetch.requestPaused':
         return isOn(scope, 'fetch');
       case 'Fetch.authRequired':
         return isOn(scope, 'fetchAuth');
-      case 'Runtime.bindingCalled':
-        return anyOn(scope, BINDING);
+      case 'Runtime.bindingCalled': {
+        const name = text(p.name);
+        return name !== null && isOn(scope, `${BINDING}${name}`);
+      }
+      case 'Target.attachedToTarget': {
+        const child = text(p.sessionId);
+        const targetId = text(p.targetInfo?.targetId);
+        const told = isOn(scope, 'autoAttach') || (targetId !== null && isOn(scope, `${ATTACHED}${targetId}`));
+        if (told && child !== null) scope.children.add(child);
+        return told;
+      }
+      case 'Target.detachedFromTarget': {
+        const child = text(p.sessionId);
+        return child !== null && scope.children.delete(child); // told once, whatever has been switched off since
+      }
     }
-    if (ATTACH_EVENTS.has(event)) return isOn(scope, 'autoAttach') || anyOn(scope, ATTACHED);
     const domain = event.split('.', 1)[0]!;
     if (domain === 'Tracing') {
       const tracing = isOn(scope, 'tracing');
@@ -165,9 +175,9 @@ export function createEventScope(): CuaEventScope {
         }
       };
     },
-    admits(child, event) {
+    admits(child, event, params) {
       const scope = sessions.get(child);
-      return scope !== undefined && admitted(scope, event);
+      return scope !== undefined && admitted(scope, event, params);
     },
     detached(child, targetId) {
       sessions.delete(child);

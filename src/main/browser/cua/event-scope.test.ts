@@ -12,6 +12,9 @@ import { harness, takeDown } from './server.fake';
 
 afterEach(takeDown);
 
+// Target.attachedToTarget's params, as Chromium sends them
+const attachedTo = (sessionId: string, targetId: string) => ({ sessionId, targetInfo: { targetId, type: 'iframe', title: '', url: 'https://x.test/' }, waitingForDebugger: false });
+
 describe('the scope', () => {
   it('a domain enable admits that domain\'s events on that session alone; its disable ends them at once', () => {
     const scope = createEventScope();
@@ -101,15 +104,15 @@ describe('the scope', () => {
     const scope = createEventScope();
     expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
     scope.willSend(null, 'Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: false });
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true);
-    expect(scope.admits(null, 'Target.detachedFromTarget')).toBe(true);
-    expect(scope.admits('C1', 'Target.attachedToTarget')).toBe(false); // a child's own auto-attach is the child's
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(true);
+    expect(scope.admits(null, 'Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' })).toBe(true);
+    expect(scope.admits('C1', 'Target.attachedToTarget', attachedTo('C2', 'T2'))).toBe(false); // a child's own auto-attach is the child's
     scope.willSend(null, 'Target.setAutoAttach', { autoAttach: false });
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(false);
     const attach = scope.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true });
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(true);
     attach(false);
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C3', 'T1'))).toBe(false);
   });
 
   it('an explicit attach ends with its own child\'s detach, keeping any other live explicit attach', () => {
@@ -117,28 +120,82 @@ describe('the scope', () => {
     scope.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true })(true);
     scope.willSend(null, 'Target.attachToTarget', { targetId: 'T2', flatten: true })(true);
     scope.detached('C1', 'T1');
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true); // T2's attach is still live
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(false);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C2', 'T2'))).toBe(true); // T2's attach is still live
     scope.detached('C2', 'T2');
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false); // another consumer's attaches are not the lease's
-    expect(scope.admits(null, 'Target.detachedFromTarget')).toBe(false);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C4', 'T2'))).toBe(false); // another consumer's attaches are not the lease's
+    expect(scope.admits(null, 'Target.detachedFromTarget', { sessionId: 'C4', targetId: 'T2' })).toBe(false);
     // a detach while the attach's answer is still out ends it too: the late answer does not bring it back
     const late = scope.willSend(null, 'Target.attachToTarget', { targetId: 'T3', flatten: true });
     scope.detached('C3', 'T3');
     late(true);
-    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C5', 'T3'))).toBe(false);
   });
 
   it('a binding\'s calls follow the lease\'s own Runtime.addBinding, not Runtime.enable, until its last binding is removed', () => {
     const scope = createEventScope();
     scope.willSend(null, 'Runtime.enable', {});
-    expect(scope.admits(null, 'Runtime.bindingCalled')).toBe(false);
+    expect(scope.admits(null, 'Runtime.bindingCalled', { name: 'one' })).toBe(false);
     scope.willSend(null, 'Runtime.addBinding', { name: 'one' });
     scope.willSend(null, 'Runtime.addBinding', { name: 'two' });
-    expect(scope.admits(null, 'Runtime.bindingCalled')).toBe(true);
+    expect(scope.admits(null, 'Runtime.bindingCalled', { name: 'one' })).toBe(true);
     scope.willSend(null, 'Runtime.removeBinding', { name: 'one' });
-    expect(scope.admits(null, 'Runtime.bindingCalled')).toBe(true);
+    expect(scope.admits(null, 'Runtime.bindingCalled', { name: 'one' })).toBe(false);
+    expect(scope.admits(null, 'Runtime.bindingCalled', { name: 'two' })).toBe(true);
     scope.willSend(null, 'Runtime.removeBinding', { name: 'two' });
-    expect(scope.admits(null, 'Runtime.bindingCalled')).toBe(false);
+    expect(scope.admits(null, 'Runtime.bindingCalled', { name: 'two' })).toBe(false);
+  });
+
+  it('a binding\'s calls are admitted by the binding\'s name: a second consumer on the attachment hears nothing of the first\'s', () => {
+    const first = createEventScope();
+    const second = createEventScope();
+    first.willSend(null, 'Runtime.addBinding', { name: 'own' })(true);
+    second.willSend(null, 'Runtime.addBinding', { name: 'other' })(true);
+    const call = (name: string) => ({ name, payload: '{"secret":1}', executionContextId: 1 });
+    expect(first.admits(null, 'Runtime.bindingCalled', call('own'))).toBe(true);
+    expect(first.admits(null, 'Runtime.bindingCalled', call('other'))).toBe(false);
+    expect(second.admits(null, 'Runtime.bindingCalled', call('own'))).toBe(false);
+    expect(second.admits(null, 'Runtime.bindingCalled', call('other'))).toBe(true);
+    expect(first.admits(null, 'Runtime.bindingCalled', {})).toBe(false); // no name, no binding
+  });
+
+  it('with auto-attach off, an explicit attach admits its own target\'s attach and that child\'s detach alone', () => {
+    const first = createEventScope();
+    const second = createEventScope();
+    first.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true })(true);
+    second.willSend(null, 'Target.attachToTarget', { targetId: 'T2', flatten: true })(true);
+    expect(first.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(true);
+    expect(first.admits(null, 'Target.attachedToTarget', attachedTo('C2', 'T2'))).toBe(false);
+    expect(second.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(false);
+    expect(second.admits(null, 'Target.attachedToTarget', attachedTo('C2', 'T2'))).toBe(true);
+    expect(first.admits(null, 'Target.detachedFromTarget', { sessionId: 'C2', targetId: 'T2' })).toBe(false);
+    expect(second.admits(null, 'Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' })).toBe(false);
+    expect(first.admits(null, 'Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' })).toBe(true);
+    expect(second.admits(null, 'Target.detachedFromTarget', { sessionId: 'C2' })).toBe(true); // targetId is deprecated: the session decides
+  });
+
+  it('turning auto-attach off keeps the detach of each child it announced, which Chromium sends as it detaches them', () => {
+    const scope = createEventScope();
+    scope.willSend(null, 'Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: false })(true);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C1', 'T1'))).toBe(true);
+    scope.willSend(null, 'Target.setAutoAttach', { autoAttach: false, flatten: true, waitForDebuggerOnStart: false })(true);
+    expect(scope.admits(null, 'Target.attachedToTarget', attachedTo('C2', 'T2'))).toBe(false);
+    expect(scope.admits(null, 'Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' })).toBe(true);
+    expect(scope.admits(null, 'Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' }), 'once').toBe(false);
+    expect(scope.admits(null, 'Target.detachedFromTarget', { sessionId: 'C2', targetId: 'T2' }), 'never announced').toBe(false);
+  });
+
+  it('Page.enable\'s enableFileChooserOpenedEvent admits the file chooser\'s event until a Page.enable without it or Page.disable', () => {
+    const scope = createEventScope();
+    scope.willSend(null, 'Page.enable', { enableFileChooserOpenedEvent: true })(true);
+    expect(scope.admits(null, 'Page.fileChooserOpened')).toBe(true);
+    expect(scope.admits(null, 'Page.frameNavigated')).toBe(true);
+    scope.willSend(null, 'Page.enable', {})(true); // Chromium sets the switch to each enable's value
+    expect(scope.admits(null, 'Page.fileChooserOpened')).toBe(false);
+    scope.willSend(null, 'Page.enable', { enableFileChooserOpenedEvent: true })(true);
+    scope.willSend(null, 'Page.disable', {})(true);
+    expect(scope.admits(null, 'Page.fileChooserOpened')).toBe(false);
+    expect(scope.admits(null, 'Page.frameNavigated')).toBe(false);
   });
 
   it('tracing is the lease\'s from its start until its completion is told, past its end', () => {
@@ -364,6 +421,48 @@ describe('through the primitive server', () => {
     t.cdp.event('Runtime.executionContextCreated', { context: { id: 3 } }, 'C1');
     await settle();
     expect(t.told(after)).toEqual([]);
+  });
+
+  it('a second consumer on the attachment: its binding\'s calls and its explicit attach never reach the lease; the lease\'s own do', async () => {
+    const t = await uidStand();
+    await t.attach();
+    const dbg = t.entry.debugger!;
+    await dbg.attach('shared');
+    // two children auto-attach announced to no one: tracked, so the lease may attach one of them
+    t.cdp.event('Target.attachedToTarget', attachedTo('A1', 'T1'));
+    t.cdp.event('Target.attachedToTarget', attachedTo('A2', 'T2'));
+    await t.send('Runtime.addBinding', { name: 'own' });
+    await dbg.send('Runtime.addBinding', { name: 'other' });
+    await t.send('Target.attachToTarget', { targetId: 'T1' });
+    await dbg.send('Target.attachToTarget', { targetId: 'T2', flatten: true });
+    const before = t.host.notifications.length;
+    t.cdp.event('Runtime.bindingCalled', { name: 'other', payload: 'theirs', executionContextId: 1 });
+    t.cdp.event('Runtime.bindingCalled', { name: 'own', payload: 'ours', executionContextId: 1 });
+    t.cdp.event('Target.attachedToTarget', attachedTo('C2', 'T2'));
+    t.cdp.event('Target.attachedToTarget', attachedTo('C1', 'T1'));
+    t.cdp.event('Target.detachedFromTarget', { sessionId: 'C2', targetId: 'T2' });
+    t.cdp.event('Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' });
+    await t.host.waitFor('debugger.event', (p) => p.method === 'Target.detachedFromTarget');
+    await settle();
+    const told = t.host.notifications.slice(before).filter((n) => n.method === 'debugger.event').map((n) => n.params.params);
+    expect(told).toEqual([
+      { name: 'own', payload: 'ours', executionContextId: 1 },
+      attachedTo('C1', 'T1'),
+      { sessionId: 'C1', targetId: 'T1' },
+    ]);
+  });
+
+  it('auto-attach turned off: the host is told the detach of each child it was told of, so its session ends with it', async () => {
+    const t = await uidStand();
+    await t.attach();
+    await t.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    t.cdp.event('Target.attachedToTarget', attachedTo('C1', 'T1'));
+    await t.host.waitFor('debugger.event', (p) => p.method === 'Target.attachedToTarget');
+    await t.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
+    const before = t.host.notifications.length;
+    t.cdp.event('Target.detachedFromTarget', { sessionId: 'C1', targetId: 'T1' }); // Chromium detaches what auto-attach attached
+    await settle();
+    expect(t.told(before)).toEqual([['Target.detachedFromTarget', null]]);
   });
 
   it('Fetch continuation: the lease\'s interception is told its paused requests and continues them; after its disable nothing pauses for it', async () => {

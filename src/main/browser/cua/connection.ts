@@ -612,7 +612,7 @@ export class CuaConnection {
       this.tell(leased.entry, { kind: 'screenshot' });
     }
     // P5 O17 M2: told only when the lease asked for it; everything above and below reads it all the same
-    if (leased.scope.admits(sessionId || null, method)) {
+    if (leased.scope.admits(sessionId || null, method, params)) {
       const tabId = this.idOf(leased.entry.tab.tabId);
       this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
       const child = sessionId ? leased.children.get(sessionId) : undefined;
