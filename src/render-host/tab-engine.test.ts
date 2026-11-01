@@ -731,6 +731,20 @@ describe('a viewer’s subscription', () => {
     expect(await t.op(B, { op: 'input', subscriptionId: 'v1', seq: 2, event: { kind: 'blur' } }), 'bound to its session').toMatchObject({ ok: false });
   });
 
+  it('answers a text input once the page has inserted it, and one whose insertion failed with the reason', async () => {
+    const t = await viewed();
+    await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: true });
+    let insert!: () => void;
+    newestPage().insertion = new Promise((resolve) => (insert = resolve));
+    const id = t.send(A, { op: 'input', subscriptionId: 'v1', seq: 1, event: { kind: 'text', text: 'slow' } });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(t.answerOf(id), 'not before the insertion settles').toBeUndefined();
+    insert();
+    await expect.poll(() => t.answerOf(id)).toEqual({ ok: true, value: null });
+    newestPage().insertion = Promise.reject(new Error('the frame went away'));
+    expect(await t.op(A, { op: 'input', subscriptionId: 'v1', seq: 2, event: { kind: 'text', text: 'lost' } })).toEqual({ ok: false, error: 'the text could not be inserted: the frame went away' });
+  });
+
   it('ends a subscription tab_closed when cua closes its tab, and closes one whose frame mawsd refused', async () => {
     const t = await viewed({ frameRefused: true });
     await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: false });

@@ -30,9 +30,10 @@ export class FakePage extends FakeContents {
   sendInputEvent(event: Record<string, unknown>) {
     this.input.push(event);
   }
+  insertion: Promise<void> | null = null; // what insertText answers (resolved at once unless a case says)
   insertText(text: string) {
     this.input.push({ type: 'insertText', text });
-    return Promise.resolve();
+    return this.insertion ?? Promise.resolve();
   }
 }
 

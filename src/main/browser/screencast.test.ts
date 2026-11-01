@@ -37,9 +37,10 @@ class Contents extends EventEmitter {
   sendInputEvent(event: Record<string, unknown>) {
     this.sent.push(event);
   }
+  insertion: Promise<void> | null = null; // what insertText answers (the page's; resolved at once unless a case says)
   insertText(text: string) {
     this.sent.push({ type: 'insertText', text });
-    return Promise.resolve();
+    return this.insertion ?? Promise.resolve();
   }
 }
 const view = () => {
@@ -278,13 +279,13 @@ describe('the producer’s frames (§G; acceptance 7.2)', () => {
 });
 
 describe('a viewer’s input (§G: a person’s, through the takeover gate)', () => {
-  it('lets one subscription per tab control it: a second gets control_busy, a read-only one is taken and sends no input', () => {
+  it('lets one subscription per tab control it: a second gets control_busy, a read-only one is taken and sends no input', async () => {
     const t = stand();
     const entry = t.tab();
     t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
     expect(() => t.screencast.open({ subscriptionId: 'v2', appSessionId: A, tabId: entry.tab.tabId, control: true })).toThrow('control_busy');
     t.screencast.open({ subscriptionId: 'v3', appSessionId: A, tabId: entry.tab.tabId, control: false });
-    expect(() => t.screencast.input(A, 'v3', 1, { kind: 'blur' })).toThrow('read_only');
+    await expect(t.screencast.input(A, 'v3', 1, { kind: 'blur' })).rejects.toThrow('read_only');
     t.screencast.close(A, 'v1');
     t.screencast.open({ subscriptionId: 'v4', appSessionId: A, tabId: entry.tab.tabId, control: true });
   });
@@ -348,6 +349,39 @@ describe('a viewer’s input (§G: a person’s, through the takeover gate)', ()
     expect(entry.input.lastHumanAt).toBe(Date.now());
     expect(entry.input.lastHumanActivationAt).toBe(Date.now());
     expect(t.controls.personHolds(entry), 'the agent’s acting commands wait').toBe(true);
+  });
+
+  it('answers text once the page has inserted it, and an insertion that fails as the input’s failure', async () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    let insert!: () => void;
+    t.contents(entry).insertion = new Promise((resolve) => (insert = resolve));
+    let answered = false;
+    const typed = t.screencast.input(A, 'v1', 1, { kind: 'text', text: 'slow' }).then(() => void (answered = true));
+    await vi.advanceTimersByTimeAsync(50);
+    expect(answered, 'not before the insertion settles').toBe(false);
+    insert();
+    await typed;
+    expect(answered).toBe(true);
+    t.contents(entry).insertion = Promise.reject(new Error('the frame went away'));
+    await expect(t.screencast.input(A, 'v1', 2, { kind: 'text', text: 'lost' })).rejects.toThrow('the text could not be inserted: the frame went away');
+  });
+
+  it('takes Escape and a chord the browser keeps as the person’s input but no activation, as native keys are (input.ts)', () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    const key = (seq: number, name: string, modifiers: string[] = []) => void t.screencast.input(A, 'v1', seq, { kind: 'key', type: 'down', key: name, code: name, repeat: false, modifiers });
+    key(1, 'Escape');
+    expect(entry.input.lastHumanAt).toBe(Date.now());
+    expect(entry.input.lastHumanActivationAt, 'Escape opens no gate').toBeNull();
+    expect(entry.input.lastActivationAt).toBeNull();
+    key(2, 'r', ['Meta']); // ⌘R, the browser's reload
+    key(3, 'l', ['Meta']); // ⌘L
+    expect(entry.input.lastHumanActivationAt, 'a reserved chord opens no gate').toBeNull();
+    key(4, 'a');
+    expect(entry.input.lastHumanActivationAt, 'an ordinary key is an activation').toBe(Date.now());
   });
 
   it('closes a session’s subscriptions at its drop, telling no one (mawsd ended them first)', () => {

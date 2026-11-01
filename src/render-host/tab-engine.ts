@@ -21,9 +21,9 @@
 //   (src/main/browser/screencast.ts): its frames go to `mawsd` as `browserEngine.frame` and its own end as
 //   `browserEngine.ended`. `open` joins the session's serial chain, so it follows a prepare it was sent after and a drop
 //   sent after it finds its subscription; it does no waiting of its own, so a drop behind it is never held up. `ack`,
-//   `input` and `close` act on a subscription already open and answer at once. A drop closes the session's
-//   subscriptions first, telling no one (`mawsd` ended them when it made the connection retiring); a frame `mawsd`
-//   refuses (a subscription it has settled) closes it here too.
+//   `input` and `close` act on a subscription already open, off the chain; an input answers once the page has it. A
+//   drop closes the session's subscriptions first, telling no one (`mawsd` ended them when it made the connection
+//   retiring); a frame `mawsd` refuses (a subscription it has settled) closes it here too.
 // The inventory is pushed again at each change of the session's tabs (the store's coalesced `browser.tabs.changed`), only
 // when it changed; nothing polls.
 //
@@ -429,10 +429,11 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return null;
   }
 
-  // M6: what a viewer does with an open subscription, at once
-  function subscription(appSessionId: AppSessionId, operation: Extract<BrowserEngineRequest['operation'], { op: 'ack' | 'input' | 'close' }>): null {
+  // M6: what a viewer does with an open subscription, at once; an input answered once the page has it (text's insertion
+  // settled, its failure the answer's)
+  async function subscription(appSessionId: AppSessionId, operation: Extract<BrowserEngineRequest['operation'], { op: 'ack' | 'input' | 'close' }>): Promise<null> {
     if (operation.op === 'ack') screencast.ack(appSessionId, operation.subscriptionId, operation.seq);
-    else if (operation.op === 'input') screencast.input(appSessionId, operation.subscriptionId, operation.seq, operation.event);
+    else if (operation.op === 'input') await screencast.input(appSessionId, operation.subscriptionId, operation.seq, operation.event);
     else {
       screencast.close(appSessionId, operation.subscriptionId);
       if (subscriptions.get(operation.subscriptionId) === appSessionId) subscriptions.delete(operation.subscriptionId);
@@ -445,7 +446,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       let run: Promise<EngineInventory | null>;
       if (operation.op === 'inventory') run = Promise.resolve(inventory(appSessionId));
       else if (operation.op === 'open') run = serially(appSessionId, () => open(appSessionId, operation));
-      else if (operation.op === 'ack' || operation.op === 'input' || operation.op === 'close') run = new Promise((resolve) => resolve(subscription(appSessionId, operation)));
+      else if (operation.op === 'ack' || operation.op === 'input' || operation.op === 'close') run = subscription(appSessionId, operation);
       else if (operation.op === 'drop') {
         cancelPrepares(appSessionId, `the headless browser on ${machine} dropped this session while preparing it`);
         run = serially(appSessionId, () => drop(appSessionId));

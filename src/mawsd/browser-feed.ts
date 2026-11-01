@@ -19,12 +19,14 @@
 // A controlling viewer's input is read here (the validators of §G, against the viewport of the frame it last received),
 // a sequence taken once, then queued in order with one request in flight: a pointer's moves coalesce while they wait, a
 // key or a button never drops silently; past 32 waiting, control ends (`input_overflow`), the engine told to close, which
-// releases what is held down.
+// releases what is held down. A replaced move's caller is answered then, so nothing waits beyond the queue's 32 places.
 //
 // The end (D4) is disposed exactly once, whichever comes first: the engine's `browserEngine.ended` (its reason), the
 // viewer's `close` (nothing told the viewer), the engine connection's end (`engine_changed`) or the route's period end
 // (`periodEnds`: `engine_changed` or `tab_closed`). Its pending input is refused then, an `open` still waiting is
-// refused rather than resolved, and the engine is told to close unless the end was its own or its connection's.
+// refused rather than resolved, and the engine is told to close unless the end was its own or its connection's. Its
+// requests still unanswered stop being pending then: their late answers (and the close's) are taken and ignored, for at
+// most RETIRED_ANSWERS of them, and none is kept past the connection's end or the feed's.
 import { BROWSER_LIMITS, BrowserRefused, BrowserSeqSchema, readBrowserInput, type BrowserEndReason, type BrowserFeed, type BrowserFrame, type BrowserInput, type BrowserRefusalReason, type BrowserSubscription } from '@shared/browser/screencast';
 import { BrowserTabIdSchema } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -46,7 +48,7 @@ export interface BrowserFeedService {
   frame(engine: EngineConnection, input: CommandInput<'browserEngine.frame'>): boolean; // false: refused
   ended(engine: EngineConnection, input: CommandInput<'browserEngine.ended'>): boolean; // false: no subscription of that connection
   gone(engine: EngineConnection): void; // the connection ended
-  inspect(): { subscriptions: number; pending: number };
+  inspect(): { subscriptions: number; pending: number; retired: number };
   dispose(): void;
 }
 
@@ -79,22 +81,40 @@ interface Subscription {
   sending: Queued | null;
 }
 
+export const RETIRED_ANSWERS = 256; // late answers of ended subscriptions' requests still taken (and ignored)
+
 // The reasons an engine's refusal of `open` names (tab-engine.ts, screencast.ts), passed on as they are
 const ENGINE_REASONS: ReadonlySet<string> = new Set<BrowserEndReason>(['tab_closed', 'view_gone', 'control_busy', 'producer_failed']);
 
 export function createBrowserFeed(options: BrowserFeedOptions): BrowserFeedService {
   const { route, log } = options;
   const subscriptions = new Map<string, Subscription>();
-  const pending = new Map<string, { engine: EngineConnection; settle(result: BrowserEngineResult | null): void }>(); // null: the connection ended unanswered
+  // Requests awaiting their answer, each its subscription's; null: the connection ended unanswered
+  const pending = new Map<string, { engine: EngineConnection; subscription: Subscription; settle(result: BrowserEngineResult | null): void }>();
+  // Requests of a subscription already ended (its pending ones at its end, and its close), whose late answers are taken
+  // and ignored: at most RETIRED_ANSWERS, the oldest forgotten first (its answer then refused, which the engine logs)
+  const retired = new Map<string, EngineConnection>();
   let next = 0;
 
-  // A request to the subscription's connection; `settle` hears its answer (null: none will come)
+  const retire = (id: string, engine: EngineConnection) => {
+    retired.set(id, engine);
+    for (const oldest of retired.keys()) {
+      if (retired.size <= RETIRED_ANSWERS) break;
+      retired.delete(oldest);
+    }
+  };
+
+  // A request to the subscription's connection; `settle` hears its answer (null: none will come). A subscription ended
+  // already sends only its close, owed nothing back
   const request = (subscription: Subscription, operation: BrowserEngineOperation, settle: (result: BrowserEngineResult | null) => void = () => {}) => {
     const id = `feed-${++next}`;
-    pending.set(id, { engine: subscription.engine, settle });
+    const ended = subscription.phase === 'closed';
+    if (ended) retire(id, subscription.engine);
+    else pending.set(id, { engine: subscription.engine, subscription, settle });
     if (options.post(subscription.engine, { id, appSessionId: subscription.appSessionId, operation })) return;
+    retired.delete(id);
     pending.delete(id);
-    settle(null);
+    if (!ended) settle(null);
   };
 
   // The end, once: the waiters refused, the viewer told (`tell`), the engine told to close (`close`)
@@ -107,6 +127,11 @@ export function createBrowserFeed(options: BrowserFeedOptions): BrowserFeedServi
     for (const queued of [...(subscription.sending ? [subscription.sending] : []), ...subscription.queue]) for (const waiter of queued.waiters) waiter.reject(refused);
     subscription.queue = [];
     subscription.sending = null;
+    for (const [id, asked] of [...pending]) {
+      if (asked.subscription !== subscription) continue;
+      pending.delete(id);
+      retire(id, asked.engine);
+    }
     if (how.close) request(subscription, { op: 'close', subscriptionId: subscription.id });
     if (wasOpening) return subscription.opened.reject(refused);
     if (how.tell) {
@@ -152,9 +177,11 @@ export function createBrowserFeed(options: BrowserFeedOptions): BrowserFeedServi
       const waiter = { resolve, reject };
       const last = subscription.queue.at(-1);
       if (read.input.kind === 'pointer' && read.input.type === 'move' && last?.event.kind === 'pointer' && last.event.type === 'move') {
-        last.seq = seq; // a move waiting is replaced by the newer one
+        // a move waiting is replaced by the newer one, which carries the pointer there: the replaced one is done
+        for (const superseded of last.waiters) superseded.resolve();
+        last.seq = seq;
         last.event = read.input;
-        last.waiters.push(waiter);
+        last.waiters = [waiter];
         return;
       }
       if (subscription.queue.length + (subscription.sending ? 1 : 0) >= BROWSER_LIMITS.inputQueue) {
@@ -214,7 +241,7 @@ export function createBrowserFeed(options: BrowserFeedOptions): BrowserFeedServi
     open,
     answer(engine, { id, result }) {
       const asked = pending.get(id);
-      if (!asked || asked.engine !== engine) return false;
+      if (!asked || asked.engine !== engine) return retired.get(id) === engine && retired.delete(id);
       pending.delete(id);
       asked.settle(result);
       return true;
@@ -253,12 +280,15 @@ export function createBrowserFeed(options: BrowserFeedOptions): BrowserFeedServi
         pending.delete(id);
         asked.settle(null);
       }
+      for (const [id, of] of [...retired]) if (of === engine) retired.delete(id);
       for (const subscription of live()) if (subscription.engine === engine) settle(subscription, 'engine_changed', { tell: true, close: false });
     },
-    inspect: () => ({ subscriptions: subscriptions.size, pending: pending.size }),
+    inspect: () => ({ subscriptions: subscriptions.size, pending: pending.size, retired: retired.size }),
     dispose() {
       offPeriods();
       for (const subscription of live()) settle(subscription, 'engine_changed', { tell: true, close: false });
+      pending.clear();
+      retired.clear();
     },
   };
 }

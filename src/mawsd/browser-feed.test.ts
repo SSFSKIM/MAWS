@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BrowserRefused, type BrowserFrame, type BrowserInput, type BrowserInventory } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserEngineRequest, BrowserEngineResult } from '@shared/ipc/schema/browser-engine';
-import { createBrowserFeed } from './browser-feed';
+import { createBrowserFeed, RETIRED_ANSWERS } from './browser-feed';
 import type { PeriodEnd } from './browser-route';
 import type { BrowserRouteState } from './cua-broker';
 
@@ -174,6 +174,27 @@ describe('a controlling viewer’s input (§G)', () => {
     expect(inputs().map((request) => (request.operation as { seq: number }).seq)).toEqual([1, 4, 5]);
   });
 
+  it('answers a replaced move at once, so a stalled request and endless moves retain one waiter (fix 1)', async () => {
+    const t = stand();
+    const { subscription, id } = await t.opened(true);
+    t.frameOf(id, 1);
+    let stalledDone = false;
+    void subscription.input(1, click()).then(() => void (stalledDone = true)); // the engine never answers it
+    let answered = 0;
+    const moves = Array.from({ length: 100 }, (_, at) => subscription.input(at + 2, move(at)).then(() => void (answered += 1)));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(answered, 'every replaced move answered').toBe(99);
+    expect(stalledDone).toBe(false);
+    expect(t.ops().filter((op) => op === 'input'), 'one request in flight').toHaveLength(1);
+    t.answer(t.last('input'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(t.last('input').operation).toMatchObject({ seq: 101, event: { x: 99 } });
+    t.answer(t.last('input'));
+    await Promise.all(moves);
+    expect(answered).toBe(100);
+    expect(t.feed.inspect()).toEqual({ subscriptions: 1, pending: 0, retired: 0 });
+  });
+
   it('closes control at an overflow past 32 queued inputs: the viewer told input_overflow, the engine told to close (releasing held keys and buttons), every pending input refused', async () => {
     const t = stand();
     const { viewer, subscription, id } = await t.opened(true);
@@ -207,7 +228,7 @@ describe('a subscription’s end, disposed exactly once (D4)', () => {
     expect(viewer.closed).toEqual(['producer_failed']);
     expect(refusals).toBe(1);
     expect(t.ops().filter((op) => op === 'close'), 'the engine ended it: nothing to close there').toEqual([]);
-    expect(t.feed.inspect(), 'the connection’s end settled the input’s request').toEqual({ subscriptions: 0, pending: 0 });
+    expect(t.feed.inspect(), 'the connection’s end forgot the input’s request').toEqual({ subscriptions: 0, pending: 0, retired: 0 });
   });
 
   it('ends at the route’s period end with its reason, the engine told to close, and at the connection’s end engine_changed', async () => {
@@ -237,6 +258,38 @@ describe('a subscription’s end, disposed exactly once (D4)', () => {
     expect(t.answer(request), 'its late answer taken and ignored').toBe(true);
     void t.feed.open({ appSessionId: S, epoch: 'e.1+', tabId: TAB, control: true }, viewer.sinkOf);
     expect(t.ops(), 'the tab’s control is free again').toEqual(['open', 'close', 'open']);
+  });
+
+  it('stops counting an ended subscription’s requests as pending while its engine stays connected: a late answer taken once, then nothing (fix 2)', async () => {
+    const t = stand();
+    const { subscription, id } = await t.opened(true);
+    t.frameOf(id, 1);
+    void subscription.input(1, click()).catch(() => {});
+    const input = t.last('input');
+    expect(t.feed.inspect()).toEqual({ subscriptions: 1, pending: 1, retired: 0 });
+    t.feed.ended(t.engine, { subscriptionId: id, reason: 'producer_failed' });
+    expect(t.feed.inspect(), 'nothing of it pending').toEqual({ subscriptions: 0, pending: 0, retired: 1 });
+    expect(t.answer(input), 'its late answer taken and ignored').toBe(true);
+    expect(t.answer(input), 'once').toBe(false);
+    expect(t.feed.inspect()).toEqual({ subscriptions: 0, pending: 0, retired: 0 });
+    const closing = await t.opened();
+    closing.subscription.close();
+    expect(t.feed.inspect(), 'a close is owed nothing').toEqual({ subscriptions: 0, pending: 0, retired: 1 });
+    t.feed.dispose();
+    expect(t.feed.inspect(), 'the feed’s end keeps nothing').toEqual({ subscriptions: 0, pending: 0, retired: 0 });
+  });
+
+  it('keeps at most RETIRED_ANSWERS late answers of ended subscriptions, the oldest forgotten first', async () => {
+    const t = stand();
+    const closes: BrowserEngineRequest[] = [];
+    for (let at = 0; at <= RETIRED_ANSWERS; at += 1) {
+      const { subscription } = await t.opened();
+      subscription.close();
+      closes.push(t.last('close'));
+    }
+    expect(t.feed.inspect().retired).toBe(RETIRED_ANSWERS);
+    expect(t.answer(closes[0]!), 'the oldest forgotten').toBe(false);
+    expect(t.answer(closes.at(-1)!)).toBe(true);
   });
 
   it('passes an engine’s reason this build does not know on as it came (a string, so a new reason stays additive)', async () => {

@@ -22,10 +22,13 @@
 // an agent holding the tab yields it, `human`, and its acting commands wait), never `TabDebugger.send('Input.dispatch…')`,
 // which is the agent's (input.ts). Coordinates are the tab's viewport's (DIP), whatever the frame's pixels. Keys and
 // buttons held down are released at a blur, at the subscription's close and at its end; one controlling subscription per
-// tab (`control_busy`). Sequences are taken once within a subscription; nothing carries over to another.
+// tab (`control_busy`). Sequences are taken once within a subscription; nothing carries over to another. An input is
+// answered once the page has it: text once `insertText` settles, its failure the input's. A key press is an activation as
+// a native one is (input.ts's `classify`): Escape and the browser's chords are the person's input but open no gate.
 import type { MouseInputEvent, MouseWheelInputEvent, NativeImage, WebContents } from 'electron';
 import { BROWSER_LIMITS, type BrowserEndReason, type BrowserInput } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
+import { classify } from './input';
 import type { TabEntry, TabStore } from './tabs';
 
 export const SCREENCAST_JPEG_QUALITY = 60;
@@ -72,7 +75,7 @@ export interface ScreencastInspection {
 export interface Screencast {
   open(input: { subscriptionId: string; appSessionId: AppSessionId; tabId: string; control: boolean }): void; // throws the reason
   ack(appSessionId: AppSessionId, subscriptionId: string, seq: number): void;
-  input(appSessionId: AppSessionId, subscriptionId: string, seq: number, event: BrowserInput): void;
+  input(appSessionId: AppSessionId, subscriptionId: string, seq: number, event: BrowserInput): Promise<void>; // resolves once the page has it
   close(appSessionId: AppSessionId, subscriptionId: string): void; // an unknown one: nothing to do
   closeSession(appSessionId: AppSessionId): void; // its drop: every subscription of its tabs closed, no one told
   inspect(): ScreencastInspection;
@@ -215,8 +218,13 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
     return contents && !contents.isDestroyed() ? contents : null;
   };
 
-  // What the person did, on the tab's input seam, before the page has it: the takeover gate's reading (control.ts)
-  const person = (viewer: Viewer<Image>, kind: 'key' | 'mouse' | 'wheel') => viewer.cast.entry.input.emit({ kind, source: 'human', at: Date.now() });
+  // What the person did, on the tab's input seam, before the page has it: the takeover gate's reading (control.ts). A key
+  // is classified as a native one is (input.ts's `classify`): Escape and a chord the browser takes are the person's input
+  // but no activation, so neither opens the clipboard's or `window.open`'s gate (permissions.ts, window-open.ts)
+  const person = (viewer: Viewer<Image>, kind: 'key' | 'mouse' | 'wheel', activation = true) =>
+    viewer.cast.entry.input.emit({ kind, source: 'human', at: Date.now(), ...(!activation && { activation: false as const }) });
+  const keyActivates = (event: Extract<BrowserInput, { kind: 'key' }>) =>
+    classify('before-input-event', { type: 'keyDown', key: event.key, meta: event.modifiers.includes('Meta'), control: event.modifiers.includes('Control'), alt: event.modifiers.includes('Alt'), shift: event.modifiers.includes('Shift') }, () => false)?.activation !== false;
 
   function releaseHeld(viewer: Viewer<Image>): void {
     const contents = contentsOf(viewer);
@@ -229,7 +237,8 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
     for (const [button, clickCount] of buttons) contents.sendInputEvent({ type: 'mouseUp', x: viewer.at.x, y: viewer.at.y, button, clickCount, modifiers: [] } as MouseInputEvent);
   }
 
-  function inject(viewer: Viewer<Image>, event: BrowserInput): void {
+  // Given to the page; text is answered once the page has it (an insertion that fails rejects)
+  function inject(viewer: Viewer<Image>, event: BrowserInput): void | Promise<void> {
     if (event.kind === 'blur') return releaseHeld(viewer);
     const contents = contentsOf(viewer);
     if (!contents) throw new Error('view_gone');
@@ -255,14 +264,16 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
         const keyCode = keyName(event.key);
         const modifiers = [...modifiersOf(event.modifiers), ...(event.repeat ? ['isAutoRepeat'] : [])] as MouseInputEvent['modifiers'];
         if (event.type === 'down') {
-          person(viewer, 'key');
+          person(viewer, 'key', keyActivates(event));
           viewer.keys.set(event.code || event.key, keyCode);
         } else viewer.keys.delete(event.code || event.key);
         return contents.sendInputEvent({ type: event.type === 'down' ? 'keyDown' : 'keyUp', keyCode, modifiers });
       }
       case 'text':
         person(viewer, 'key');
-        return void contents.insertText(event.text).catch(() => {});
+        return contents.insertText(event.text).catch((error: unknown) => {
+          throw new Error(`the text could not be inserted: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        });
     }
   }
 
@@ -305,12 +316,12 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
       viewer.outstanding = false;
       pump(viewer);
     },
-    input(appSessionId, subscriptionId, seq, event) {
+    async input(appSessionId, subscriptionId, seq, event) {
       const viewer = viewerOf(appSessionId, subscriptionId);
       if (!viewer.control) throw new Error('read_only');
       if (seq <= viewer.inputSeq) return; // taken already
       viewer.inputSeq = seq;
-      inject(viewer, event);
+      await inject(viewer, event);
     },
     close(appSessionId, subscriptionId) {
       const viewer = viewers.get(subscriptionId);
