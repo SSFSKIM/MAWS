@@ -6,7 +6,7 @@
 // left is verified and completed, or cleaned; two installers at once leave one entry; an entry nothing pins and nothing
 // runs from is pruned. Each case runs in a scratch home with the downloads, `unzip`, `sudo`, `ldd` and /proc faked, and
 // the helper's ownership read from what the fake `sudo` did (a test cannot chown to root).
-import { fork, spawnSync } from 'node:child_process';
+import { fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningProcess } from './release';
 import { releasesRoot } from './release';
-import { installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type RenderInstallDeps } from './render-install';
+import { flockFile, installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type FileLock, type RenderInstallDeps } from './render-install';
 import { readRenderRuntime, renderCacheRoot, runtimeName, stagingName, type ElectronPin } from './render-runtime';
 
 let dir: string;
@@ -29,6 +29,9 @@ let privileged: boolean;
 let configured: Set<string>;
 let running: RunningProcess[];
 let unzipped: number;
+let lockHeld: boolean;
+let lockWaiters: (() => void)[];
+let waitsExpected: boolean;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-render-install-'));
@@ -44,8 +47,27 @@ beforeEach(() => {
   configured = new Set();
   running = [];
   unzipped = 0;
+  lockHeld = false;
+  lockWaiters = [];
+  waitsExpected = false;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+// The cache root's lock as flock holds it, in this process (a Mac has no flock): exclusive, handed to the next waiter at
+// release. A wait throws unless the case runs two at once on purpose, so no case can hang on a lock nobody releases.
+const lock: FileLock = async (_path, waiting) => {
+  if (lockHeld) {
+    if (!waitsExpected) throw new Error('an unexpected wait for the cache lock');
+    waiting();
+    await new Promise<void>((resolve) => lockWaiters.push(resolve));
+  }
+  lockHeld = true;
+  return async () => {
+    const next = lockWaiters.shift();
+    if (next !== undefined) next();
+    else lockHeld = false;
+  };
+};
 
 const ok = { status: 0, stdout: '', stderr: '' };
 function deps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
@@ -80,6 +102,7 @@ function deps(over: Partial<RenderInstallDeps> = {}): RenderInstallDeps {
     processes: () => running,
     helperConfigured: (path) => configured.has(path),
     now: () => Date.parse('2026-10-31T12:00:00Z'),
+    lock,
     ...over,
   };
 }
@@ -209,10 +232,10 @@ describe('an install', () => {
     expect(unzipped).toBe(2); // the whole one completed, not unpacked again
   });
 
-  // Two installers as two processes (render-install-racer.fixture.ts), started together: one takes the install lock and
-  // goes through every step, each released once the other is known to be waiting for the lock; the other is let go once
-  // the first has finished, and finds the published entry
-  it('two processes at once leave one entry and nothing else', async () => {
+  // Two installers as two processes (render-install-racer.fixture.ts) holding the real lock (flock, so Linux's): started
+  // together, one takes the lock and goes through every step, each released once the other is known to be waiting for
+  // it; the other gets the lock once the first has finished, and finds the published entry
+  it.runIf(process.platform === 'linux')('two processes at once leave one entry and nothing else', async () => {
     const bundle = join(dir, 'racer.mjs');
     buildSync({ entryPoints: [join(__dirname, 'render-install-racer.fixture.ts')], bundle: true, platform: 'node', format: 'esm', outfile: bundle, logLevel: 'silent' });
     const zip = join(dir, 'electron-v44.4.5-linux-x64.zip');
@@ -223,8 +246,8 @@ describe('an install', () => {
     const steps: string[] = [];
     await new Promise<void>((done, fail) => {
       const timer = setTimeout(() => fail(new Error(`the racers did not finish: ${JSON.stringify({ at, results })}`)), 20_000);
-      // a step is released once every racer still running has reached it, a racer waiting for the lock released only
-      // once no other racer runs (a racer let go while the lock is held would wait again)
+      // a step is released once every racer still running and not waiting for the lock has reached it; a racer waiting
+      // for the lock (the kernel holds it there) is marked through once no other racer runs
       const release = () => {
         const running = [0, 1].filter((k) => results[k] === undefined);
         if (running.length === 0) return clearTimeout(timer), done();
@@ -249,7 +272,7 @@ describe('an install', () => {
     }).finally(() => racers.forEach((racer) => racer.kill()));
     expect(steps).toEqual(['unpacked', 'chown', 'chmod', 'publishing', 'lock']); // the second held at the lock throughout
     expect(results.map((result) => (result as { state?: string }).state).sort()).toEqual(['installed', 'present']);
-    expect(listing()).toEqual([runtimeName(pin)]);
+    expect(listing()).toEqual(['.install-lock', runtimeName(pin)]); // the lock's file stays: a lock is on the file
     expect(readdirSync(entry()).sort()).toEqual(['.maws-unpacked', 'chrome-sandbox', 'chrome-sandbox.suid', 'electron', 'manifest.json']);
   });
 
@@ -292,11 +315,13 @@ describe('an install', () => {
   // lands after A's final helper check, clearing the set-user-ID bit A set, before A renames the staging into place.
   // The install lock, held from the staging through publication, keeps B off the staging until A has published.
   it('a second installer never touches a staging another is publishing: no entry is published with its helper cleared', async () => {
+    waitsExpected = true;
     const a = stepper(['chown', 'chmod', 'publishing']);
     const b = stepper(['chown', 'chmod', 'lock']);
-    const installedA = installRenderRuntime(markerDeps({ checkpoint: a.pass, waitForLock: () => a.pass('lock') }));
+    const said: string[] = [];
+    const installedA = installRenderRuntime(markerDeps({ checkpoint: a.pass }));
     await a.reached('chown'); // A owns the staging, found its helper unset; its chown next
-    const installedB = installRenderRuntime(markerDeps({ checkpoint: b.pass, waitForLock: () => b.pass('lock') }));
+    const installedB = installRenderRuntime(markerDeps({ checkpoint: b.pass, notice: (line) => (said.push(line), void b.pass('lock')) }));
     const bAt = await b.at(); // held off at the lock, or (with nothing excluding it) at its own chown of A's staging
     await a.release('chown');
     await a.release('chmod');
@@ -312,6 +337,7 @@ describe('an install', () => {
     expect(outcomeA).toMatchObject({ state: 'installed', entry: entry() });
     expect(existsSync(join(entry(), 'chrome-sandbox.suid')), 'the published helper keeps the mode A set').toBe(true);
     expect(outcomeB).toEqual({ state: 'present', entry: entry(), pruned: [] });
+    expect(said).toEqual(['waiting for another runtime install to finish']); // once
     expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`, `sudo -n chmod 4755 ${join(staging(), 'chrome-sandbox')}`]); // A's alone
     expect(listing()).toEqual([runtimeName(pin)]);
   });
@@ -341,56 +367,28 @@ describe('an install', () => {
     expect(listing()).toEqual([runtimeName(pin)]);
   });
 
-  it('breaks an install lock a killed install left, and leaves no lock behind', async () => {
-    mkdirSync(root(), { recursive: true });
-    const gone = spawnSync(process.execPath, ['-e', '']).pid!; // a process that has exited
-    writeFileSync(join(root(), '.install-lock'), `${gone} 0123456789abcdef\n`);
-    let waited = 0;
-    expect(await installRenderRuntime(deps({ waitForLock: async () => void (waited += 1) }))).toMatchObject({ state: 'installed' });
-    expect(waited, 'a lock whose holder is gone is not waited for').toBe(0);
-    expect(listing()).toEqual([runtimeName(pin)]);
-  });
-
-  // A killed install's pid reused by another process: alive, but not the process that took the lock (its start differs)
-  it('takes over an install lock whose pid is now another process’s', async () => {
-    mkdirSync(root(), { recursive: true });
-    writeFileSync(join(root(), '.install-lock'), `${process.pid} 4242 0123456789abcdef\n`); // live pid, the killed holder's start
-    const notices: string[] = [];
-    let waited = 0;
-    const waitForLock = async () => {
-      if ((waited += 1) > 3) throw new Error('still waiting on a lock its holder can no longer release');
-    };
-    const outcome = await installRenderRuntime(deps({ startOf: (pid) => (pid === process.pid ? '9999' : null), notice: (line) => notices.push(line), waitForLock }));
-    expect(outcome).toMatchObject({ state: 'installed' });
-    expect(waited, 'a pid whose start is not the lock’s is not waited for').toBe(0);
-    expect(notices).toEqual([]);
-    expect(listing()).toEqual([runtimeName(pin)]);
-  });
-
-  // The real reader of a process's start (/proc/<pid>/stat), where there is one: the same takeover with nothing injected
-  it.runIf(existsSync('/proc/self/stat'))('reads a process’s start from /proc: a lock recording another start for a live pid is taken over', async () => {
-    mkdirSync(root(), { recursive: true });
-    writeFileSync(join(root(), '.install-lock'), `${process.pid} 1 0123456789abcdef\n`); // this process never started at tick 1
-    const waitForLock = async () => {
-      throw new Error('waited: the start /proc gives for this process was taken as the lock’s');
-    };
-    expect(await installRenderRuntime(deps({ waitForLock }))).toMatchObject({ state: 'installed' });
-  });
-
-  it('waits for an install lock its live holder holds, saying so once however long it waits', async () => {
-    mkdirSync(root(), { recursive: true });
-    const lock = join(root(), '.install-lock');
-    writeFileSync(lock, `${process.pid} 9999 0123456789abcdef\n`); // this process, as it started: a live holder
-    const notices: string[] = [];
-    let waited = 0;
-    const waitForLock = async (holder: number) => {
-      expect(holder).toBe(process.pid);
-      if ((waited += 1) === 3) rmSync(lock); // the holder finishes after three polls
-    };
-    const outcome = await installRenderRuntime(deps({ startOf: (pid) => (pid === process.pid ? '9999' : null), notice: (line) => notices.push(line), waitForLock }));
-    expect(outcome).toMatchObject({ state: 'installed' });
-    expect(waited).toBe(3);
-    expect(notices).toEqual([`waiting for the runtime install by pid ${process.pid}`]);
+  // The panel's third interleaving (PR #428 task review): an uninstall's removal of the staging lands while an installer
+  // that has checked its helper renames the staging into place. The uninstall holds the same lock, so it runs once the
+  // entry is published whole.
+  it('an uninstall while an install publishes waits for it: no entry is published without its helper', async () => {
+    waitsExpected = true;
+    const a = stepper(['publishing']);
+    const installed = installRenderRuntime(markerDeps({ checkpoint: a.pass }));
+    await a.reached('publishing'); // A's helper set and checked, its manifest written; its rename next
+    let whole: boolean | null = null;
+    const uninstalled = uninstallRenderRuntime(
+      markerDeps({
+        processes: () => {
+          whole ??= existsSync(join(entry(), 'chrome-sandbox.suid')) && existsSync(join(entry(), 'manifest.json'));
+          return running;
+        },
+      }),
+    );
+    await a.release('publishing');
+    await expect(installed).resolves.toMatchObject({ state: 'installed', entry: entry() });
+    await expect(uninstalled).resolves.toEqual({ removed: [runtimeName(pin)] });
+    expect(whole, 'the uninstall began on the entry as published, helper and all').toBe(true);
+    expect(listing()).toEqual([]);
   });
 
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {
@@ -432,10 +430,10 @@ describe('an uninstall', () => {
   it('refuses while a render host runs from the entry; otherwise removes it, and the runtime reads absent', async () => {
     await installRenderRuntime(deps());
     running = [{ exe: join(entry(), 'electron'), cmdline: 'electron --headless' }];
-    expect(() => uninstallRenderRuntime(deps())).toThrow(/a render host runs from .* \(1 process\)/);
+    await expect(uninstallRenderRuntime(deps())).rejects.toThrow(/a render host runs from .* \(1 process\)/);
     expect(existsSync(entry())).toBe(true);
     running = [];
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [runtimeName(pin)] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [runtimeName(pin)] });
     expect(listing()).toEqual([]);
     expect(reading()).toEqual({ available: false, reason: 'the render runtime 44.4.5 is not installed on vm-1: run mawsd render install' });
   });
@@ -443,8 +441,47 @@ describe('an uninstall', () => {
   it('removes a staging that waits for privilege, and with nothing installed removes nothing', async () => {
     privileged = false;
     await installRenderRuntime(deps());
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [stagingName(pin)] });
-    expect(uninstallRenderRuntime(deps())).toEqual({ removed: [] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [stagingName(pin)] });
+    expect(await uninstallRenderRuntime(deps())).toEqual({ removed: [] });
+  });
+});
+
+// The real lock (flock(1), util-linux: Linux's)
+describe.runIf(process.platform === 'linux')('the cache lock', () => {
+  it('is exclusive: a second taker waits, says so once, and holds it once the first lets go', async () => {
+    const path = join(dir, '.install-lock');
+    const first = await flockFile(path, () => expect.unreachable('the first taker waited'));
+    let said = 0;
+    let saidOnce: () => void = () => {};
+    const waiting = new Promise<void>((resolve) => (saidOnce = resolve));
+    let secondHolds = false;
+    const second = flockFile(path, () => (said += 1, saidOnce())).then((release) => ((secondHolds = true), release));
+    await waiting; // its try without blocking found the lock held
+    expect(secondHolds).toBe(false);
+    await first();
+    await (await second)();
+    expect(secondHolds).toBe(true);
+    expect(said).toBe(1);
+  });
+
+  it('is let go when its holder dies, however it dies', async () => {
+    const path = join(dir, '.install-lock');
+    const bundle = join(dir, 'holder.mjs');
+    buildSync({
+      stdin: { contents: `import { flockFile } from './render-install';\nawait flockFile(process.argv[2], () => {});\nprocess.send('held');\nsetInterval(() => {}, 60_000);\n`, resolveDir: __dirname, loader: 'ts' },
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      outfile: bundle,
+      logLevel: 'silent',
+    });
+    const holder = fork(bundle, [path], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    await new Promise<void>((resolve) => holder.once('message', () => resolve()));
+    let said = 0;
+    const taken = flockFile(path, () => (said += 1));
+    holder.kill('SIGKILL'); // no release ran: its pipe to the flock ends with it
+    await (await taken)();
+    expect(said).toBeLessThanOrEqual(1);
   });
 });
 

@@ -46,7 +46,9 @@ fi
 packages=(xvfb libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libgbm1 libgtk-3-0t64 libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 libpango-1.0-0 libcairo2 libatspi2.0-0t64 libxshmfence1 fontconfig fonts-dejavu-core fonts-noto-core unzip)
 if ! command -v xvfb-run >/dev/null || ldd "$electron" | grep -q 'not found'; then
   log "installing packages"
+  # shellcheck disable=SC2024 # apt.txt is this user's log: only apt-get runs as root, the redirect is meant to be ours
   sudo -n apt-get update -q >"$results/apt.txt" 2>&1
+  # shellcheck disable=SC2024 # as above
   sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -yq "${packages[@]}" >>"$results/apt.txt" 2>&1 || log "apt-get install failed (see apt.txt)"
 fi
 ldd "$electron" | grep 'not found' >"$results/ldd-missing.txt" || true
@@ -58,7 +60,7 @@ node "$here/build.mjs" 2>&1 | tee -a "$results/run.log"
 xvfb=(xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp")
 modes=${U3_MODES:-hidden,hidden-unthrottled,offscreen,shown} # the tab modes to run, comma-separated (host/main.ts VARIANTS names them all)
 for mode in ${modes//,/ }; do
-  rm -rf "$results/$mode"
+  rm -rf "${results:?}/${mode:?}"
   log "mode $mode"
   timeout -k 10 300 node "$here/driver.mjs" --out "$results/$mode" --mode "$mode" --repo "$repo" -- "${xvfb[@]}" "$electron" --headless --hide-scrollbars "$here/build/host.cjs" 2>"$results/$mode.driver-stderr.txt"
   log "mode $mode: driver exit $?"

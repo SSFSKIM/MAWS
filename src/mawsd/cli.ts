@@ -31,7 +31,7 @@ import { PTY_HOST_FILES } from '../pty-host/files';
 import { installDaemon, resolveLabel, uninstallDaemon, unitFor, type InstallDeps } from './install';
 import { reachMachine, REQUEST_TIMEOUT_MS, type MachineLink } from './machine-client';
 import { packOf, procProcesses, releasesRoot, type InstalledRelease, type RunningProcess } from './release';
-import { downloadTo, installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type RenderInstallDeps } from './render-install'; // P5 O5 M6
+import { downloadTo, installRenderRuntime, renderRuntimeStatus, uninstallRenderRuntime, type FileLock, type RenderInstallDeps } from './render-install'; // P5 O5 M6
 import { readElectronPin, readRenderRuntime, zipName } from './render-runtime';
 import { USAGE as RUN_USAGE } from './run-args';
 import { DEFAULT_LABEL, UnitError, type CommandRunner, type UnitProgram } from './units/unit';
@@ -85,6 +85,7 @@ export interface CliDeps {
   arch?: string;
   download?(url: string, to: string): Promise<void>;
   processes?(): RunningProcess[];
+  renderLock?: FileLock; // the render cache's lock (flock(1) unless a test gives its own)
 }
 
 interface Context {
@@ -566,6 +567,7 @@ async function render(context: Context, args: readonly string[]): Promise<number
     download: deps.download ?? downloadTo,
     processes: deps.processes ?? procProcesses,
     now: deps.now,
+    lock: deps.renderLock,
     notice: (line) => deps.err(`${line}\n`), // fix wave (PR #428 panel): a wait for another install's lock shows
   };
   if (command === 'install') {
@@ -581,7 +583,7 @@ async function render(context: Context, args: readonly string[]): Promise<number
     return EXIT.done;
   }
   if (command === 'uninstall') {
-    const { removed } = uninstallRenderRuntime(install);
+    const { removed } = await uninstallRenderRuntime(install);
     deps.out(removed.length > 0 ? `removed ${removed.join(', ')}\n` : 'nothing to remove\n');
     return EXIT.done;
   }

@@ -553,6 +553,7 @@ describe('mawsd render', () => {
     return managers.run(command, args);
   };
   const entryName = `44.4.5-${sha.slice(0, 12)}`;
+  const renderLock: CliDeps['renderLock'] = async () => async () => {}; // a Mac has no flock; the lock's own cases are render-install.test.ts's
   const cacheRoot = () => join(scene.root, 'home', '.local', 'share', 'maws', 'mawsd', 'render');
 
   it('is Linux’s: on a Mac the app’s own binary renders, so there is nothing to install (exit 2)', async () => {
@@ -570,7 +571,7 @@ describe('mawsd render', () => {
 
   it('install from the pack’s zip unpacks it without a download; with the helper not root-owned it publishes nothing and says so (exit 1)', async () => {
     ran.length = 0;
-    const installed = await cli(['render', 'install'], { platform: 'linux', self: pack(), run });
+    const installed = await cli(['render', 'install'], { platform: 'linux', self: pack(), run, renderLock });
     expect(installed.code).toBe(1);
     expect(installed.err).toContain('sandbox missing: setting Chromium\'s sandbox helper needs sudo -n to work for u');
     expect(installed.err).toContain('then run mawsd render install again as u, not as root');
@@ -579,7 +580,7 @@ describe('mawsd render', () => {
     expect(ran.filter((line) => line.startsWith('sudo'))).toHaveLength(2);
     const status = await cli(['render', 'status', '--json'], { platform: 'linux', self: pack(), run });
     expect(JSON.parse(status.out)).toMatchObject({ state: 'staged', sandbox: 'not configured', missingLibraries: ['libgtk-3.so.0'], reading: { available: false, reason: expect.stringMatching(/^Chromium’s sandbox is not configured on /) } });
-    const removed = await cli(['render', 'uninstall'], { platform: 'linux', self: pack(), run });
+    const removed = await cli(['render', 'uninstall'], { platform: 'linux', self: pack(), run, renderLock });
     expect(removed.code).toBe(0);
     expect(removed.out).toBe(`removed .staged-${entryName}\n`);
   });
