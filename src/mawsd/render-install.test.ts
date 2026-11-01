@@ -32,7 +32,6 @@ let unzipped: number;
 let lockHeld: boolean;
 let lockWaiters: (() => void)[];
 let waitsExpected: boolean;
-let lockLost: string | null;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-render-install-'));
@@ -51,13 +50,11 @@ beforeEach(() => {
   lockHeld = false;
   lockWaiters = [];
   waitsExpected = false;
-  lockLost = null;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 // The cache root's lock as flock holds it, in this process (a Mac has no flock): exclusive, handed to the next waiter at
 // release. A wait throws unless the case runs two at once on purpose, so no case can hang on a lock nobody releases.
-// `loseLock` is its holder ending before the release (flock's child killed): `check` says so from then on.
 const lock: FileLock = async (_path, waiting) => {
   if (lockHeld) {
     if (!waitsExpected) throw new Error('an unexpected wait for the cache lock');
@@ -65,21 +62,11 @@ const lock: FileLock = async (_path, waiting) => {
     await new Promise<void>((resolve) => lockWaiters.push(resolve));
   }
   lockHeld = true;
-  return {
-    check: () => {
-      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
-    },
-    release: async () => {
-      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
-      const next = lockWaiters.shift();
-      if (next !== undefined) next();
-      else lockHeld = false;
-    },
+  return () => {
+    const next = lockWaiters.shift();
+    if (next !== undefined) next();
+    else lockHeld = false;
   };
-};
-const loseLock = (status: string) => {
-  lockLost = status;
-  lockHeld = false; // the kernel let it go
 };
 
 const ok = { status: 0, stdout: '', stderr: '' };
@@ -417,64 +404,7 @@ describe('an install', () => {
     }
     expect(downloads).toEqual([]);
     expect(unzipped).toBe(0);
-    expect(listing()).toEqual([]);
-  });
-
-  // The lock lost midway (its holder ended while the installer lives: PR #428 re-review): nothing that no rerun undoes is
-  // done after the loss, nothing is published, and a whole staging is left for the next run
-  it('stops when the lock is lost during the download: no helper set, nothing published, the staging left', async () => {
-    const download = async (_url: string, to: string) => {
-      writeFileSync(to, zipBytes);
-      loseLock('9');
-    };
-    await expect(installRenderRuntime(markerDeps({ download }))).rejects.toThrow(/lost the install lock: its holder exited \(status 9\)/);
-    expect(sudoCalls()).toEqual([]);
-    expect(listing()).toEqual([stagingName(pin)]);
-  });
-
-  it('stops when the lock is lost at the helper step or before the rename: nothing published', async () => {
-    for (const step of ['chown', 'chmod', 'publishing']) {
-      rmSync(root(), { recursive: true, force: true });
-      lockLost = null;
-      calls = [];
-      const checkpoint = (at: string) => void (at === step && loseLock('SIGKILL'));
-      await expect(installRenderRuntime(markerDeps({ checkpoint })), step).rejects.toThrow(/lost the install lock/);
-      expect(existsSync(entry()), `lost at ${step}`).toBe(false);
-      expect(sudoCalls(), `lost at ${step}`).toEqual(step === 'chown' ? [] : step === 'chmod' ? [`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`] : expect.any(Array));
-      expect(listing(), `lost at ${step}`).toEqual([stagingName(pin)]);
-    }
-  });
-
-  // The holder ending while a synchronous step runs (the sudo): node reads no exit until the step returns, so the check
-  // reads the holder itself. flockFile's own hold, with flock(1) a stand-in that runs its command without locking (a
-  // Mac has none) and the holder's state given by the test.
-  it('stops when the lock’s holder ends inside a synchronous step: the next check sees it, and nothing is published', async () => {
-    writeFileSync(join(bin, 'flock'), '#!/bin/sh\nwhile [ "${1#-}" != "$1" ]; do [ "$1" = --conflict-exit-code ] && shift; shift; done\nshift\nexec "$@"\n');
-    chmodSync(join(bin, 'flock'), 0o755);
-    const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path ?? ''}`;
-    let holderRuns = true;
-    const base = markerDeps();
-    try {
-      const run: RenderInstallDeps['run'] = (command, args, options) => {
-        const done = base.run(command, args, options);
-        if (args[1] === 'chown') holderRuns = false; // the holder killed while the chown ran
-        return done;
-      };
-      await expect(installRenderRuntime(markerDeps({ lock: (at, waiting) => flockFile(at, waiting, () => holderRuns), run }))).rejects.toThrow(/lost the install lock .*: its holder exited \(status unreaped\)/);
-    } finally {
-      process.env.PATH = path;
-    }
-    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
-    expect(existsSync(entry())).toBe(false);
-    expect(listing()).toEqual([stagingName(pin)]);
-  });
-
-  it('an uninstall stops when the lock is lost before it removes anything', async () => {
-    await installRenderRuntime(markerDeps());
-    const outcome = uninstallRenderRuntime(markerDeps({ processes: () => (loseLock('9'), running) }));
-    await expect(outcome).rejects.toThrow(/lost the install lock/);
-    expect(listing()).toEqual([runtimeName(pin)]);
+    expect(listing()).toEqual(['.install-lock']); // the lock's file, opened before flock ran; nothing else
   });
 
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {
@@ -532,71 +462,119 @@ describe('an uninstall', () => {
   });
 });
 
-// The real lock (flock(1), util-linux: Linux's)
-describe.runIf(process.platform === 'linux')('the cache lock', () => {
-  it('is exclusive: a second taker waits, says so once, and holds it once the first lets go', async () => {
-    const path = join(dir, '.install-lock');
-    const first = await flockFile(path, () => expect.unreachable('the first taker waited'));
+// flockFile's use of flock(1), with a stand-in on PATH (a Mac has none): it records each call, proves its fd 3 is open
+// (`true >&3`), answers a --nonblock try with flock's contention exit (1) while $FLOCK_BUSY exists, and otherwise says
+// $FLOCK_SAY on stderr and exits $FLOCK_EXIT (0)
+describe('the cache lock’s flock(1) calls', () => {
+  const saved = { ...process.env };
+  let log: string;
+  beforeEach(() => {
+    writeFileSync(join(bin, 'flock'), '#!/bin/sh\necho "$*" >> "$FLOCK_LOG"\ntrue >&3 || exit 66\ncase " $* " in *" --nonblock "*) [ -e "$FLOCK_BUSY" ] && exit 1;; esac\n[ -n "${FLOCK_SAY:-}" ] && echo "$FLOCK_SAY" >&2\nexit "${FLOCK_EXIT:-0}"\n');
+    chmodSync(join(bin, 'flock'), 0o755);
+    log = join(dir, 'flock.log');
+    Object.assign(process.env, { PATH: `${bin}:${saved.PATH ?? ''}`, FLOCK_LOG: log, FLOCK_BUSY: join(dir, 'busy') });
+  });
+  afterEach(() => {
+    for (const key of ['PATH', 'FLOCK_LOG', 'FLOCK_BUSY', 'FLOCK_EXIT', 'FLOCK_SAY']) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+  const flockCalls = () => readFileSync(log, 'utf8').trim().split('\n');
+
+  it('free: one flock --exclusive --nonblock on its own fd 3, nothing said', async () => {
     let said = 0;
-    let saidOnce: () => void = () => {};
-    const waiting = new Promise<void>((resolve) => (saidOnce = resolve));
-    let secondHolds = false;
-    const second = flockFile(path, () => (said += 1, saidOnce())).then((hold) => ((secondHolds = true), hold));
-    await waiting; // its try without blocking found the lock held
-    expect(secondHolds).toBe(false);
-    await first.release();
-    await (await second).release();
-    expect(secondHolds).toBe(true);
+    const release = await flockFile(join(dir, '.install-lock'), () => (said += 1));
+    expect(flockCalls()).toEqual(['--exclusive --nonblock 3']);
+    expect(said).toBe(0);
+    release();
+  });
+
+  it('held elsewhere: says so once, then waits with a blocking flock on the same fd', async () => {
+    writeFileSync(join(dir, 'busy'), '');
+    let said = 0;
+    const release = await flockFile(join(dir, '.install-lock'), () => (said += 1));
+    expect(flockCalls()).toEqual(['--exclusive --nonblock 3', '--exclusive 3']);
     expect(said).toBe(1);
+    release();
   });
 
-  it('says it is lost when its holder child ends before the release', async () => {
-    const hold = await flockFile(join(dir, '.install-lock'), () => expect.unreachable('waited'));
-    hold.check();
-    expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
-    const lost = () => {
-      try {
-        hold.check();
-        return false;
-      } catch {
-        return true;
-      }
-    };
-    expect(lost()).toBe(true); // read from /proc at once (a zombie until node reaps it), before any exit event
-    expect(() => hold.check()).toThrow(/lost the install lock .*: its holder exited \(status (?:unreaped|SIGKILL)\)/);
-    await expect(hold.release()).rejects.toThrow(/lost the install lock/); // said at the release too
+  it('any other failure of flock refuses with its exit and what it said', async () => {
+    Object.assign(process.env, { FLOCK_EXIT: '71', FLOCK_SAY: 'flock: 3: Bad file descriptor' });
+    await expect(flockFile(join(dir, '.install-lock'), () => {})).rejects.toThrow(/cannot lock .*\.install-lock: flock exited 71: flock: 3: Bad file descriptor/);
   });
+});
 
-  it('a holder killed inside a synchronous step of an install: the next check sees it, and nothing is published', async () => {
-    const base = markerDeps();
-    const run: RenderInstallDeps['run'] = (command, args, options) => {
-      const done = base.run(command, args, options);
-      if (args[1] === 'chown') expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
-      return done;
-    };
-    await expect(installRenderRuntime(markerDeps({ lock: undefined, run }))).rejects.toThrow(/lost the install lock .*: its holder exited/);
-    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`]);
-    expect(existsSync(entry())).toBe(false);
-  });
-
-  it('is let go when its holder dies, however it dies', async () => {
-    const path = join(dir, '.install-lock');
+// The real lock (flock(1), util-linux: Linux's), on the taker's own open file description. A holder is a process of its
+// own that takes the lock through flockFile and, when told, runs a child as the install runs sudo (index.ts's runner:
+// spawnSync, stdin ignored, stdout and stderr piped), whose pid it writes to a marker file.
+describe.runIf(process.platform === 'linux')('the cache lock', () => {
+  const path = () => join(dir, '.install-lock');
+  const holding = async (marker = join(dir, 'child.pid')) => {
     const bundle = join(dir, 'holder.mjs');
     buildSync({
-      stdin: { contents: `import { flockFile } from './render-install';\nawait flockFile(process.argv[2], () => {});\nprocess.send('held');\nsetInterval(() => {}, 60_000);\n`, resolveDir: __dirname, loader: 'ts' },
+      stdin: {
+        contents: [
+          `import { spawnSync } from 'node:child_process';`,
+          `import { flockFile } from './render-install';`,
+          `const [path, marker] = process.argv.slice(2);`,
+          `await flockFile(path, () => {});`,
+          `process.on('message', () => spawnSync('sh', ['-c', 'echo $$ > "$0.tmp" && mv "$0.tmp" "$0"; exec sleep 120', marker], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }));`,
+          `process.send('held');`,
+          `setInterval(() => {}, 60_000);`,
+        ].join('\n'),
+        resolveDir: __dirname,
+        loader: 'ts',
+      },
       bundle: true,
       platform: 'node',
       format: 'esm',
       outfile: bundle,
       logLevel: 'silent',
     });
-    const holder = fork(bundle, [path], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    const holder = fork(bundle, [path(), marker], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     await new Promise<void>((resolve) => holder.once('message', () => resolve()));
+    return holder;
+  };
+
+  it('is exclusive: a second taker waits, says so once, and holds it once the first lets go', async () => {
+    const first = await flockFile(path(), () => expect.unreachable('the first taker waited'));
     let said = 0;
-    const taken = flockFile(path, () => (said += 1));
-    holder.kill('SIGKILL'); // no release ran: its pipe to the flock ends with it
-    await (await taken).release();
+    let saidOnce: () => void = () => {};
+    const waiting = new Promise<void>((resolve) => (saidOnce = resolve));
+    let secondHolds = false;
+    const second = flockFile(path(), () => (said += 1, saidOnce())).then((release) => ((secondHolds = true), release));
+    await waiting; // its try without blocking found the lock held
+    expect(secondHolds).toBe(false);
+    first();
+    (await second)();
+    expect(secondHolds).toBe(true);
+    expect(said).toBe(1);
+  });
+
+  it('is let go when its holder dies, however it dies', async () => {
+    const holder = await holding();
+    let said = 0;
+    const taken = flockFile(path(), () => (said += 1));
+    holder.kill('SIGKILL'); // no release ran: the kernel closes its file, and the lock with it
+    (await taken)();
     expect(said).toBeLessThanOrEqual(1);
+  });
+
+  it('reaches flock(1) alone: a child the holder runs, still running when the holder dies, does not keep the lock', async () => {
+    const marker = join(dir, 'child.pid');
+    const holder = await holding(marker);
+    expect(spawnSync('pgrep', ['-P', String(holder.pid), '-x', 'flock']).status, 'the flock child is gone once the lock is taken').toBe(1);
+    holder.send('run');
+    while (!existsSync(marker)) await new Promise((resolve) => setTimeout(resolve, 10)); // its child runs
+    const child = Number(readFileSync(marker, 'utf8'));
+    try {
+      holder.kill('SIGKILL');
+      (await flockFile(path(), () => {}))(); // a child holding the description would keep the lock past the holder
+      expect(process.kill(child, 0), 'the child was still running when the lock was taken').toBe(true);
+    } finally {
+      process.kill(child, 'SIGKILL');
+    }
   });
 });
 

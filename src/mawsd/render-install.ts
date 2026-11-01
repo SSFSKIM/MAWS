@@ -2,8 +2,8 @@
 // decisions, Interfaces §J): the Linux render runtime's install as a transaction, in the command line's chunk (the daemon
 // only reads what this publishes, render-runtime.ts).
 //
-// An install, for the pin of the build it runs from, holds the cache root's lock throughout (`flock(1)` on
-// `.install-lock`, which the kernel drops when its holder ends, however it ends; an uninstall holds it too): nothing when
+// An install, for the pin of the build it runs from, holds the cache root's lock throughout (flock(2) on its own open
+// `.install-lock`, dropped when it closes the file or ends, however it ends; an uninstall holds it too): nothing when
 // the entry is published already. Otherwise the zip, from beside the pack (`pnpm mawsd:pack --render` leaves it there)
 // or downloaded from Electron's GitHub release, is checked against the pin's sha256 before anything is unpacked; it is
 // unpacked into a directory of this installer's own (`.unpack-<entry>-<pid>`), marked whole, and renamed into the
@@ -23,7 +23,7 @@
 // the next one.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -34,8 +34,7 @@ import type { CommandRunner } from './units/unit';
 const WHOLE = '.maws-unpacked'; // an unpack's mark: written once unzip finished, holding the zip's sha256
 const UNZIP_TIMEOUT_MS = 300_000;
 const LOCK = '.install-lock'; // the cache root's lock file (flock(1)'s; never removed, since a lock is on the file)
-const LOCKED = 'locked'; // what the lock's holder process prints once it holds the lock
-const CONTENDED = 75; // flock --nonblock's exit when another holds the lock
+const CONTENDED = 1; // flock --nonblock's exit when another holds the lock
 
 export interface RenderInstallDeps {
   home: string;
@@ -53,12 +52,9 @@ export interface RenderInstallDeps {
   notice?(line: string): void; // a line for the person running the install (the command line's stderr)
 }
 
-// An exclusive lock on `path`, resolved once held; `waiting` is called once if another holder makes it wait
-export type FileLock = (path: string, waiting: () => void) => Promise<LockHold>;
-export interface LockHold {
-  check(): void; // throws once the lock is lost (its holder ended before the release): checked before each step no rerun undoes
-  release(): Promise<void>; // resolved once let go
-}
+// An exclusive lock on `path`, resolved once held, with its release; `waiting` is called once if another holder makes it
+// wait
+export type FileLock = (path: string, waiting: () => void) => Promise<() => void>;
 
 export type InstallOutcome =
   | { state: 'present'; entry: string; pruned: string[] }
@@ -74,10 +70,9 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
   const root = renderCacheRoot(deps.home);
   const entry = join(root, runtimeName(pin));
   const staging = join(root, stagingName(pin));
-  const pruned = (): string[] => (hold.check(), prune(deps, root)); // under the lock, still held
-  const present = (): InstallOutcome => ({ state: 'present', entry, pruned: pruned() });
+  const present = (): InstallOutcome => ({ state: 'present', entry, pruned: prune(deps, root) });
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const hold = await lockCache(root, deps);
+  const release = await lockCache(root, deps);
   try {
     sweepAbandoned(root);
     // The entry, if there: published (nothing to do), or unusable (its helper lost its mode, its manifest is gone or
@@ -89,7 +84,6 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
       const users = usersOf(entry, deps.processes());
       if (published(entry, pin, helperConfigured)) return present();
       if (users > 0) throw new Error(`refusing to replace ${entry}, whose sandbox helper is not configured: a render host runs from it (${users} process${users === 1 ? '' : 'es'}); run mawsd render install again after its quiet period`);
-      hold.check();
       const aside = join(root, `.retired-${runtimeName(pin)}-${process.pid}`);
       rmSync(aside, { recursive: true, force: true });
       renameSync(entry, aside);
@@ -105,19 +99,16 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
     if (!helperConfigured(helper)) {
       for (const args of [['-n', 'chown', 'root:root', helper], ['-n', 'chmod', '4755', helper]] as const) {
         await deps.checkpoint?.(args[1]); // a test's barrier: each privileged step next
-        hold.check(); // the lock lost (during the download, say): the staging stays, whole, for the next run
         const done = deps.run('sudo', [...args]);
         if (done.status !== 0) return { state: 'staged', staging, why: `sudo ${args.join(' ')} failed: ${(done.stderr || done.stdout).trim() || `exit ${done.status ?? 'signal'}`}` };
       }
       if (!helperConfigured(helper)) return { state: 'staged', staging, why: `${helper} is not root-owned with mode 4755 after sudo` };
     }
     const manifest: RuntimeManifest = { version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: new Date(deps.now()).toISOString() };
-    hold.check();
     const written = join(staging, `.${RUNTIME_MANIFEST}.${process.pid}`);
     writeFileSync(written, `${JSON.stringify(manifest, null, 2)}\n`);
     renameSync(written, join(staging, RUNTIME_MANIFEST));
     await deps.checkpoint?.('publishing'); // a test's barrier: the staging whole and ready, its rename next
-    hold.check(); // never published after the lock is lost
     try {
       // The staging keeps its whole-unpack mark into the entry: until this rename it is a whole unpack a later installer
       // may complete, and after it the mark is inert (an entry is read by its manifest)
@@ -131,16 +122,16 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
       rmSync(staging, { recursive: true, force: true });
       return present();
     }
-    return { state: 'installed', entry, source, pruned: pruned() };
+    return { state: 'installed', entry, source, pruned: prune(deps, root) };
   } finally {
-    await hold.release();
+    release();
   }
 }
 
 export async function uninstallRenderRuntime(deps: RenderInstallDeps): Promise<{ removed: string[] }> {
   const root = renderCacheRoot(deps.home);
   if (!existsSync(root)) return { removed: [] };
-  const hold = await lockCache(root, deps);
+  const release = await lockCache(root, deps);
   try {
     const removed: string[] = [];
     if (deps.pin !== null) {
@@ -149,15 +140,13 @@ export async function uninstallRenderRuntime(deps: RenderInstallDeps): Promise<{
       if (users > 0) throw new Error(`refusing to remove ${join(root, name)}: a render host runs from it (${users} process${users === 1 ? '' : 'es'}); it ends after its quiet period`);
       for (const dir of [name, stagingName(deps.pin)]) {
         if (!existsSync(join(root, dir))) continue;
-        hold.check();
         rmSync(join(root, dir), { recursive: true, force: true });
         removed.push(dir);
       }
     }
-    hold.check();
     return { removed: [...removed, ...prune({ ...deps, pin: null }, root)] };
   } finally {
-    await hold.release();
+    release();
   }
 }
 
@@ -255,76 +244,39 @@ function published(entry: string, pin: ElectronPin, helperConfigured: (path: str
 }
 
 // The cache root's lock, held; its release
-function lockCache(root: string, deps: RenderInstallDeps): Promise<LockHold> {
+function lockCache(root: string, deps: RenderInstallDeps): Promise<() => void> {
   return (deps.lock ?? flockFile)(join(root, LOCK), () => deps.notice?.('waiting for another runtime install to finish'));
 }
 
-// The lock as flock(1) holds it (util-linux; the runtime is Linux's): a child `flock` holding the lock runs a `cat` on a
-// pipe from this process, so it is held until the pipe ends, which this process's release does and its exit, however it
-// exits, does too; the kernel then drops the lock. Tried without blocking first, so a wait is said once. The child
-// ending before the release is the lock lost, which `check` and the release then say: read from the child's exit once
-// node has seen it, and from /proc at each check, since the exit is not seen while synchronous work (a sudo) runs.
-export async function flockFile(path: string, waiting: () => void, running: (pid: number) => boolean = procRunning): Promise<LockHold> {
-  const held = await holdFlock(path, true, running);
-  if (held !== null) return held;
-  waiting();
-  return (await holdFlock(path, false, running))!;
-}
-
-// Whether a child of this process still runs: its /proc/<pid>/stat there and its state not Z (exited, not yet reaped)
-function procRunning(pid: number): boolean {
-  let stat: string;
+// The lock as flock(1) takes it (util-linux; the runtime is Linux's): on this process's own open file description of the
+// lock file, handed to `flock` as its fd 3 and to no other child (Node opens files close-on-exec; only that spawn's
+// stdio carries it). A flock(2) lock belongs to the description, so it outlives the `flock` child and lasts until the
+// release closes the fd or this process ends; nothing else can drop it mid-transaction. Tried without blocking first,
+// so a wait is said once.
+export async function flockFile(path: string, waiting: () => void): Promise<() => void> {
+  const fd = openSync(path, 'a', 0o600);
   try {
-    stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-  } catch {
-    return false;
+    if (!(await flockOn(fd, path, true))) {
+      waiting();
+      await flockOn(fd, path, false);
+    }
+  } catch (error) {
+    closeSync(fd);
+    throw error;
   }
-  return stat[stat.lastIndexOf(')') + 2] !== 'Z';
+  return () => closeSync(fd);
 }
 
-function holdFlock(path: string, nonblock: boolean, running: (pid: number) => boolean): Promise<LockHold | null> {
+// `flock --exclusive [--nonblock] 3` on `fd`: whether it took the lock (false: another holds it, without blocking)
+function flockOn(fd: number, path: string, nonblock: boolean): Promise<boolean> {
   return new Promise((resolve, reject) => {
-    const args = ['--exclusive', ...(nonblock ? ['--nonblock', '--conflict-exit-code', String(CONTENDED)] : []), path, 'sh', '-c', `echo ${LOCKED}; exec cat`];
-    const child = spawn('flock', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    const exited = new Promise<void>((done) => child.once('exit', () => done()));
-    let out = '';
+    const child = spawn('flock', ['--exclusive', ...(nonblock ? ['--nonblock'] : []), '3'], { stdio: ['ignore', 'ignore', 'pipe', fd] });
     let err = '';
-    let holding = false;
-    let released = false;
-    let lost: string | null = null; // the holder's exit status, when it ended before the release
-    child.stdin.on('error', () => {}); // a holder already gone: its pipe refuses the end
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-      out += chunk;
-      if (holding || !out.includes(`${LOCKED}\n`)) return;
-      holding = true;
-      const check = () => {
-        if (lost === null && !released && !running(child.pid!)) lost = 'unreaped';
-        if (lost !== null) throw new Error(`lost the install lock ${path}: its holder exited (status ${lost}); run mawsd render install again`);
-      };
-      resolve({
-        check,
-        release: async () => {
-          let loss: unknown = null;
-          try {
-            check(); // a loss found only now is said, not let go with the lock
-          } catch (error) {
-            loss = error;
-          }
-          released = true;
-          child.stdin.end();
-          await exited;
-          if (loss !== null) throw loss;
-        },
-      });
-    });
-    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (err += chunk));
+    child.stderr!.setEncoding('utf8').on('data', (chunk: string) => (err += chunk)); // stdio[2] is a pipe
     child.once('error', (error) => reject(new Error(`cannot lock ${path}: flock (util-linux) did not run (${error.message})`, { cause: error })));
-    child.once('exit', (code, signal) => {
-      if (holding) {
-        if (!released) lost = String(code ?? signal);
-        return;
-      }
-      if (nonblock && code === CONTENDED) resolve(null);
+    child.once('close', (code, signal) => {
+      if (code === 0) resolve(true);
+      else if (nonblock && code === CONTENDED) resolve(false);
       else reject(new Error(`cannot lock ${path}: flock exited ${code ?? signal}${err.trim() === '' ? '' : `: ${err.trim()}`}`));
     });
   });
