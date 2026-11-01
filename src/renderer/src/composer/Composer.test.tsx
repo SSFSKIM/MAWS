@@ -5,7 +5,8 @@ import { useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -16,12 +17,14 @@ import { digest, humanTurn, item, record, status } from '../../../../test/suppor
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
-import { remoteRow } from '../../../../test/support/builders'; // P5 O7 M2
+import { project, remoteRow } from '../../../../test/support/builders'; // P5 O7 M2; M4: project
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
+import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
+import { queueFirstSend, resetRemoteSpawn, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -38,7 +41,7 @@ import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
-import { Composer } from './Composer';
+import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
@@ -815,7 +818,7 @@ describe('one Stop handler for every pane', () => {
 });
 
 // A stub of C10's hook over a small mutable intent: `start` answers when the test says.
-function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}) {
+function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}, project?: SetupIntentHook['project']) {
   let resolveStart: ((r: HookResult) => void) | null = null;
   const state = {
     intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
@@ -837,7 +840,7 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
   function useStub(): SetupIntentHook {
     const intent = useSyncExternalStore(subscribe, () => state.intent);
     const phase = useSyncExternalStore(subscribe, () => state.phase);
-    return { intent, options: { models: [], autoModeNote: null, ...options }, phase, patch, start };
+    return { intent, options: { models: [], autoModeNote: null, ...options }, phase, patch, start, ...(project && { project }) }; // P5 O7 M4: the project row's facts
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
   const setPhase = (phase: string | null) => {
@@ -846,6 +849,53 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
   };
   return { patch, start, set, setPhase, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
 }
+
+// P5 O7 M4 ("The machine menu", "`session.spawn`"): a New chat tab whose machine menu chose another machine starts there:
+// Send makes one `session.spawn` on that machine with the composer's mode and the text as the brief, never C10's start;
+// the composer says it is starting there, and a refusal keeps the text with the words a person can act on.
+describe('a New chat tab started on another machine', () => {
+  const P = at('p-app' as ProjectId);
+  const KEY = 'repo:github.com/acme/app' as OrgKey;
+  const chosen = { projectId: P, label: 'app', path: '/repo', branch: null, worktree: null, choose: async () => ({ ok: true }) as const, newProject: async () => ({ ok: true }) as const, setWorktree: async () => ({ ok: true }) as const };
+  beforeEach(() => {
+    resetRemoteSpawn();
+    useSessions.setState({ projects: new Map(useSessions.getState().projects).set(P, project(P, 0, { name: 'app', directory: '/repo', org: { key: KEY, name: 'app', source: 'remote', smnsId: null } })) });
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+  });
+
+  it('spawns on the chosen machine with the composer’s mode, says so while it runs, and keeps the text on a refusal', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' }]);
+    expect(fake.machines('session.spawn')).toEqual([OTHER_MACHINE]);
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe('Starting on mini…');
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['This project isn’t trusted on mini yet; open it there and trust it first']));
+    expect(editorOf().editor.getText()).toBe('build it');
+    expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull();
+    expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('takes a file for the chosen machine, and back on this Mac refuses to start without it', async () => {
+    const stub = stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    queueComposerAttachment(A, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    act(() => useRemoteSpawn.getState().choose(A, null));
+    await type('read it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual([FILES_FOR_ANOTHER_MACHINE(['notes.txt'])]));
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(isStarting(useComposerStore.getState(), A)).toBe(false);
+    expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt');
+  });
+});
 
 describe('unstarted send holds a starting state', () => {
   it('starts through C10 in the same tick, refuses a second Enter and a keystroke while starting, and keeps the text on a refusal', async () => {
@@ -1202,6 +1252,7 @@ describe('a lane B session on another machine', () => {
     });
     resetRemoteDrafts();
     resetRemoteUploads(); // P5 O7 M4
+    resetRemoteSpawn(); // P5 O7 M4
     remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
     window.maws = preloadOf(remote);
   });
@@ -1286,6 +1337,23 @@ describe('a lane B session on another machine', () => {
     expect(remote.invoked('session.send')).toEqual([]);
     expect(editorOf().editor.getText().trim()).toBe('look');
     expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt');
+  });
+
+  // P5 O7 M4 (the M4b report's order for a spawn with attachments): the session a New chat tab spawned is handed that
+  // tab's document; its composer, once open, sends it once through the remote path: the files up, then one message
+  it('sends the document a spawn handed it once it opens: its file goes up, then one message names it', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    const notes = { id: 'h1', kind: 'file' as const, name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true };
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], [notes]));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.txt'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(takeFirstSend(R)).toBe(false);
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

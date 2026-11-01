@@ -10,6 +10,8 @@
 // found", then "New project" and "Don't work in a project". Once the session starts the row is gone and the toolbar's
 // location chip reads where it runs. W10 (C9): the directories the "+" menu's Add directory… gave this tab are listed
 // read-only in the chip's tooltip and at the foot of its menu, as the location popover lists them once started.
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The machine menu", A5): beside the project chip,
+// the machine the chat runs on (MachineMenu.tsx), and under the row the line naming another machine once it is chosen.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
 import { useMemo, useState } from 'react';
@@ -24,6 +26,7 @@ import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 import { formatCwd } from './LocationChip';
+import { MachineLine, MachineMenu } from './MachineMenu'; // P5 O7 M4
 
 export const CHOOSE_PROJECT = 'Choose a project';
 export const NEW_PROJECT = 'New project';
@@ -128,8 +131,10 @@ function DirectoriesNote({ directories }: { directories: readonly string[] }) {
   );
 }
 
-export function ProjectRow({ binding, directories = [] }: { binding: ProjectRowBinding; directories?: readonly string[] }) {
+export function ProjectRow({ binding, directories = [], appSessionId }: { binding: ProjectRowBinding; directories?: readonly string[]; appSessionId?: AppSessionId }) {
   const [open, setOpen] = useState(false);
+  // P5 O7 M4: the org project the chosen project is, which another machine's checkout must be of
+  const projectKey = useSessions((s) => (binding.projectId === null ? null : (s.projects.get(binding.projectId)?.org?.key ?? null)));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const chosen = binding.label !== null;
@@ -166,6 +171,7 @@ export function ProjectRow({ binding, directories = [] }: { binding: ProjectRowB
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
+          {appSessionId !== undefined && <MachineMenu appSessionId={appSessionId} projectKey={projectKey} disabled={binding.disabled} />}
           {binding.branch !== null && (
             <span aria-label={`Branch ${binding.branch}`} title={binding.branch} className="max-w-40 truncate font-mono text-ui-sm text-fg-muted">
               ⎇ {binding.branch}
@@ -185,6 +191,7 @@ export function ProjectRow({ binding, directories = [] }: { binding: ProjectRowB
           </label>
         )}
       </div>
+      {appSessionId !== undefined && <MachineLine appSessionId={appSessionId} projectKey={projectKey} />}
       {error !== null && (
         <p role="alert" className="m-0 px-2 pb-1 text-ui-sm text-danger">
           {error}

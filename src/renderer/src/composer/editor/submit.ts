@@ -32,7 +32,7 @@ export interface SubmitOptions {
   retry?: () => void; // offered on the refusal's toast
 }
 
-const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */, label = 'Retry') => {
+export const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */, label = 'Retry') => {
   const id = toast({ ...(notice !== undefined && { id: notice }), level: 'warning', text, actions: retry ? [{ label, run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
 };
 // P5 O7 M2 (A4): a message to a session on another machine that did not go keeps its text, offered as Send again

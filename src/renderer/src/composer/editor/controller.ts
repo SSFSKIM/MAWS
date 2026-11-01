@@ -60,6 +60,7 @@ export interface EditorHandle {
   // composer store's attachment queue); whether the editor took them (false while busy, once unmounted, or once the
   // options' `signal` aborted, nothing added then)
   attachFiles(files: File[], options?: AttachOptions): Promise<boolean>;
+  restored(): Promise<void>; // P5 O7 M4: settles once this mount's stored draft is restored (or found empty)
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -683,6 +684,7 @@ export class EditorController {
         }
       },
       attachFiles: (files, options) => this.attachFromOutside(files, options?.signal), // P3-G
+      restored: () => this.restoring, // P5 O7 M4
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

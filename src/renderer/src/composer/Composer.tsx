@@ -52,7 +52,8 @@ import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/rem
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { acquireBeforeMode, submitHumanSerialized, submitRemoteSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
+import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
+import { SPAWN_WORDS, spawnOnMachine, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -68,6 +69,9 @@ import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { isBusy, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
+
+// P5 O7 M4: a New chat tab back on this Mac with files dropped for another machine, which have no path here.
+export const FILES_FOR_ANOTHER_MACHINE = (names: readonly string[]): string => `${names.join(', ')} can go only to another machine; remove ${names.length === 1 ? 'it' : 'them'}, or choose that machine again`;
 
 // W3 (B7): how close two Escs must come to count as the terminal's Esc Esc.
 export const ESC_ESC_MS = 800;
@@ -197,9 +201,15 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
   const sendingRemote = useRemoteSending(appSessionId);
   const machineName = useMachineMark(appSessionId).name;
-  // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts)
+  // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts), and so
+  // does a New chat tab whose machine menu chose another machine (sessions/remote-spawn.ts), where Send spawns it
   const remoteB = useIsRemoteLaneB(appSessionId);
-  const uploadsTo = !setup && remoteB ? machineName : null;
+  const setupProject = setup?.project?.projectId ?? null;
+  const projectKey = useSessions((s) => (setupProject === null ? null : (s.projects.get(setupProject)?.org?.key ?? null)));
+  const spawnTarget = useSpawnTarget(appSessionId, projectKey);
+  const spawnAt = setup ? spawnTarget : null;
+  const spawning = useSpawning(appSessionId);
+  const uploadsTo = setup ? (spawnAt?.name ?? null) : remoteB ? machineName : null;
   // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
   // availability decides the control, and a terminal or job holding it is named
   const holder = record?.holder ?? null;
@@ -293,6 +303,26 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       const where = setup.intent.location; // New chat: Send waits for a project
       if (where === null || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
       setStarting(appSessionId, true);
+      // P5 O7 M4: another machine chosen: one `session.spawn` there, the tab moving to its session once it answers
+      if (spawnAt !== null) {
+        try {
+          const doc = handle.current?.doc() ?? emptyDoc();
+          if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
+          const error = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default' }, client);
+          if (error === null) return true;
+          warn(error, retry);
+          return false;
+        } finally {
+          setStarting(appSessionId, false);
+        }
+      }
+      // P5 O7 M4: a file held for another machine has no path here: say so rather than start without it
+      const elsewhere = attachmentsOf(handle.current?.doc() ?? emptyDoc()).filter((a) => a.kind === 'file');
+      if (elsewhere.length > 0) {
+        setStarting(appSessionId, false);
+        toast({ level: 'warning', text: FILES_FOR_ANOTHER_MACHINE(elsewhere.map((a) => a.name)), actions: [], dismissible: true });
+        return false;
+      }
       try {
         const start: Dispatch = async () => {
           const result = await setup.start({ content: s.content, display: s.display });
@@ -393,6 +423,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   }, [docked]);
   if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
   useEffect(() => handle.current?.refreshPlaceholder(), [suggestion]);
+  // P5 O7 M4: a session the machine menu spawned with attachments sends the document it was handed (its draft) once,
+  // when it can take a message: its files go up, then one message names their paths (sessions/remote-spawn.ts)
+  const takesMessages = !setup && controls !== null && controls.capability('send').available;
+  useEffect(() => {
+    if (takesMessages && takeFirstSend(appSessionId)) void handle.current?.restored().then(() => handle.current?.submit());
+  }, [takesMessages, appSessionId]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 
   return (
@@ -401,6 +437,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
           {phase}
+        </p>
+      )}
+      {/* P5 O7 M4: a New chat tab's session starting on another machine (the sheet and Touch ID come first) */}
+      {spawning !== null && (
+        <p role="status" aria-label="Starting" className="m-0 text-ui-sm text-fg-muted">
+          {SPAWN_WORDS.starting(spawning)}
         </p>
       )}
       {/* P5 O7 M2: a send on its way to a session on another machine */}
