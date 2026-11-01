@@ -39,10 +39,18 @@ const STRANGER = 6000; // a Terminal's nc, under launchd
 const DAEMON = 4000; // the attached mawsd (P5 O5 M5), the engine's ancestor through its engine host
 const ENGINE_HOST = 4500;
 const NEXT_DAEMON = 4001; // a mawsd that replaced it
+const NEXT_ENGINE = 5100; // an engine that replaced the session's
 const MACHINE_FD = 901; // the app's machine.sock connection: its peer is the daemon actually attached
 const uid = process.getuid!();
 
-function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: number; start: number }>; fds: Map<number, { pid: number; uid: number } | 'closed'> } {
+// `onPeer` runs at each read of a socket's peer (other than the machine link's), before it answers: the seam a case uses
+// to change the process tree at a chosen read
+function fakeAddon(): PeerAddon & {
+  peerPid: number;
+  table: Map<number, { ppid: number; start: number }>;
+  fds: Map<number, { pid: number; uid: number } | 'closed'>;
+  onPeer: (() => void) | null;
+} {
   const table = new Map([
     [ENGINE, { ppid: 1, start: 10 }],
     [CHILD, { ppid: ENGINE, start: 20 }],
@@ -50,15 +58,18 @@ function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: 
     [DAEMON, { ppid: 1, start: 5 }],
     [ENGINE_HOST, { ppid: DAEMON, start: 6 }],
     [NEXT_DAEMON, { ppid: 1, start: 8 }],
+    [NEXT_ENGINE, { ppid: 1, start: 50 }],
   ]);
   const addon = {
     table,
     fds: new Map<number, { pid: number; uid: number } | 'closed'>(), // a descriptor's own peer; any other's is `peerPid`
     peerPid: CHILD,
+    onPeer: null as (() => void) | null,
     version: PEER_AUTH_VERSION,
     peer: (fd: number) => {
       const own = addon.fds.get(fd);
       if (own === 'closed') throw new Error('EBADF');
+      if (!own) addon.onPeer?.();
       return own ?? { pid: addon.peerPid, uid };
     },
     process: (pid: number) => table.get(pid) ?? null,
@@ -328,6 +339,60 @@ describe('the wait for the session\'s engine', () => {
 // checked by `mawsd`, which relays the connection from its own process; the app admits it by the daemon's exact instance
 // (the peer of the app's live machine.sock connection, its start read then), at once, without waiting for the session's
 // engine; a change of that identity ends what the old one relayed.
+// What was admitted as a descendant of the session's engine is that engine's (the embedded shape's direct path): it ends
+// when the root changes or goes, its leases with it; the same engine's next status keeps it, and what the daemon relayed
+// follows the relay's own rules
+describe('a change of the session\'s engine', () => {
+  it.each([
+    ['replaced by another', NEXT_ENGINE],
+    ['gone', null],
+  ])('ends the connections admitted under the old engine once it is %s, releasing their leases; the relay\'s stay', async (_, next) => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const tab = h.personTab();
+    const own = await connectFakeHost(h.backend.socketPathFor(A)!); // CHILD, under ENGINE
+    tracked.hosts.push(own);
+    await own.request('debugger.attach', { tabId: await h.idOf(own, tab) });
+    await attach(h.backend, addon, DAEMON);
+    addon.peerPid = DAEMON;
+    const relayed = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(relayed);
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 2, leased: [tab.tab.tabId] });
+    h.backend.engineProcess(A, ENGINE); // the same engine's next status
+    expect(await own.request('tabs.query', {})).toHaveLength(1);
+    h.backend.engineProcess(A, next);
+    await until(() => !own.socketState().open);
+    expect(own.socketState()).toMatchObject({ open: false, endedByMaws: true });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, leased: [] });
+    expect(await relayed.request('tabs.query', {})).toHaveLength(1);
+  });
+
+  // the root that let the peer in is the check's own: an engine that exits as the check ends leaves its child under
+  // launchd, and a second walk would find no engine to tie the connection to
+  it('ties the connection to the engine that admitted it even when that engine exits as the check ends', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const tab = h.personTab();
+    let reads = 0;
+    addon.onPeer = () => {
+      if (++reads !== 2) return; // the check's last read: the walk has found ENGINE
+      addon.table.delete(ENGINE);
+      addon.table.set(CHILD, { ppid: 1, start: 20 }); // reparented to launchd
+    };
+    const own = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(own);
+    addon.onPeer = null;
+    await own.request('debugger.attach', { tabId: await h.idOf(own, tab) });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, leased: [tab.tab.tabId] });
+    h.backend.engineProcess(A, NEXT_ENGINE);
+    await until(() => !own.socketState().open);
+    expect(own.socketState()).toMatchObject({ open: false, endedByMaws: true });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 0, leased: [] });
+  });
+});
+
 describe('the daemon\'s relay', () => {
   it('is admitted by its exact instance at once, with no engine known for the session', async () => {
     const addon = fakeAddon();
@@ -510,6 +575,41 @@ describe('the daemon\'s relay', () => {
       tracked.hosts.push(host);
       expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
       expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, refused: 0 });
+    });
+
+    // nothing queued under one link is served under the next, even when the next reaches the same daemon (panel
+    // scalpel-1#2): its old confirmation's waiting sockets go with the link
+    it('a relayed socket waiting for a confirmation is destroyed unread when the link goes, and the next link\'s confirmation never serves it', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      await attach(h.backend, addon, DAEMON, uid, () => new Promise(() => {}));
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!); // its tabs.query sits unread while the confirmation is under way
+      await until(() => accepted.length === 1);
+      await settled();
+      h.backend.relay(null); // the link went down
+      await attach(h.backend, addon, DAEMON); // and came back to the same daemon, confirmed at once
+      await until(() => client.closed() || client.heard() > 0);
+      expect(client.heard()).toBe(0);
+      expect(client.closed()).toBe(true);
+      expect(accepted[0]!.bytesRead).toBe(0);
+      expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 0 });
+    });
+
+    it('a socket from the daemon\'s pid accepted while no link was up is not admitted as the relay of a later link', async () => {
+      const addon = fakeAddon();
+      const h = harness({ peer: { addon } });
+      addon.peerPid = DAEMON;
+      const client = rawClient(h.backend.socketPathFor(A)!); // no link: it waits for the session's engine
+      await until(() => accepted.length === 1);
+      await settled();
+      await attach(h.backend, addon, DAEMON); // a link comes up, confirmed at once
+      await settled();
+      expect([client.heard(), client.closed()]).toEqual([0, false]); // not let in by the confirmation
+      h.backend.engineProcess(A, ENGINE); // judged now, with no relay of its own link's to pass as
+      await until(client.closed);
+      expect(client.heard()).toBe(0);
+      expect(h.logs).toEqual([`cua socket of A: refused peer pid ${DAEMON} (not_descendant)`]);
     });
 
     it('a relayed socket accepted while the confirmation is under way is let in once it comes', async () => {

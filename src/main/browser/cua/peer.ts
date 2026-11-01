@@ -66,28 +66,44 @@ export function socketFd(socket: Socket): number | null {
 
 const isLive = (root: ProcessRoot, lookup: ProcessLookup): boolean => lookup(root.pid)?.start === root.start;
 
-// Whether `pid`, or a parent of it at most ANCESTRY_LIMIT steps up, is a root whose live start is the stored one. The
-// walk ends at launchd (1), the kernel (0), a gone process or the limit.
-export function descends(pid: number, roots: readonly ProcessRoot[], lookup: ProcessLookup): boolean {
+// The root (the object in `roots`) that `pid`, or a parent of it at most ANCESTRY_LIMIT steps up, is, with its live start
+// the stored one: the nearest such ancestor, or null. The walk ends at launchd (1), the kernel (0), a gone process or the
+// limit.
+export function descendantRoot(pid: number, roots: readonly ProcessRoot[], lookup: ProcessLookup): ProcessRoot | null {
   let current = pid;
   for (let steps = 0; steps <= ANCESTRY_LIMIT; steps += 1) {
-    if (current === 0 || current === 1) return false;
+    if (current === 0 || current === 1) return null;
     const info = lookup(current);
-    if (!info) return false;
-    if (roots.some((root) => root.pid === current && root.start === info.start)) return true;
+    if (!info) return null;
+    const root = roots.find((candidate) => candidate.pid === current && candidate.start === info.start);
+    if (root) return root;
     current = info.ppid;
   }
-  return false;
+  return null;
 }
+
+export const descends = (pid: number, roots: readonly ProcessRoot[], lookup: ProcessLookup): boolean => descendantRoot(pid, roots, lookup) !== null;
+
+// What let an accepted peer in, as the check saw it (never looked up again: the tree can change right after): the relay's
+// exact instance, or the root it descends from (the object passed in `roots`).
+export type PeerAdmission = { via: 'relay' } | { via: 'root'; root: ProcessRoot };
+
+type PeerCheck = { addon: PeerAddon | null; now: number; uid: number; relay?: ProcessRoot | null };
 
 // The verdict on an accepted socket's peer: the first refusal, or null to accept. `roots` is every root the socket
 // answers to (a session's engine beside any trusted root); `now` is the accept time in milliseconds since the epoch, and
 // `uid` this process's user; `relay` the attached daemon's instance, admitted as itself alone (P5 O5 M5).
-export function authorizePeer(
+export function authorizePeer(fd: number | null | undefined, roots: readonly ProcessRoot[], check: PeerCheck): PeerRefusal | null {
+  const verdict = judgePeer(fd, roots, check);
+  return 'reason' in verdict ? verdict : null;
+}
+
+// authorizePeer's verdict with what admitted the peer: the refusal, or the admission.
+export function judgePeer(
   fd: number | null | undefined,
   roots: readonly ProcessRoot[],
-  { addon, now, uid, relay = null }: { addon: PeerAddon | null; now: number; uid: number; relay?: ProcessRoot | null },
-): PeerRefusal | null {
+  { addon, now, uid, relay = null }: PeerCheck,
+): PeerRefusal | PeerAdmission {
   if (!addon) return { reason: 'module_unavailable', pid: null };
   const read = (): { pid: number; uid: number } | null => {
     if (typeof fd !== 'number') return null;
@@ -101,14 +117,19 @@ export function authorizePeer(
   if (!peer) return { reason: 'peer_unavailable', pid: null };
   const { pid } = peer;
   if (peer.uid !== uid) return { reason: 'uid_mismatch', pid };
-  // the daemon's relay, by its exact instance; its pid with another start is a stranger, judged as any peer below
-  if (relay !== null && pid === relay.pid && isLive(relay, addon.process)) return read()?.pid === pid ? null : { reason: 'not_descendant', pid };
+  // the daemon's relay, by its exact instance; its pid with another start is a stranger, judged as any peer below. Held
+  // to the accept-time rule too: a daemon started after the accept did not connect (the socket's pid is reused)
+  if (relay !== null && pid === relay.pid && isLive(relay, addon.process)) {
+    if (relay.start > now * 1000) return { reason: 'not_descendant', pid };
+    return read()?.pid === pid ? { via: 'relay' } : { reason: 'not_descendant', pid };
+  }
   const live = roots.filter((root) => isLive(root, addon.process));
   if (live.length === 0) return { reason: 'no_root', pid };
   // A peer started after the accept is not the process that connected: that one is gone and its pid reused.
   const info = addon.process(pid);
-  if (!info || info.start > now * 1000 || !descends(pid, live, addon.process)) return { reason: 'not_descendant', pid };
+  const root = info && info.start <= now * 1000 ? descendantRoot(pid, live, addon.process) : null;
+  if (!root) return { reason: 'not_descendant', pid };
   // LOCAL_PEERPID names the peer socket's last operator: a descriptor handed to another process during the walk shows here.
   if (read()?.pid !== pid) return { reason: 'not_descendant', pid };
-  return null;
+  return { via: 'root', root };
 }
