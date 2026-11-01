@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
 import { createNavigationRelay } from './navigation';
+
+const MINI = 'MiniMachineRef00000000' as MachineRef;
 
 const nav = (n: number) => ({ appSessionId: `app-${n}` as AppSessionId, attentionId: `att-${n}` as AttentionId, source: 'notification' as const });
 
@@ -55,5 +58,26 @@ describe('navigation relay (attention.pendingNavigate)', () => {
     relay.deliver(nav(4));
     expect(emit).toHaveBeenCalledOnce();
     expect(relay.take()).toEqual(nav(4));
+  });
+
+  // P5 O7 M6: a click on another machine's item opens its session there: the navigation is that machine's (`emitFrom`), its
+  // ids lifted to the machine's addresses by the page; one queued is told the page as an event at its announcement, since
+  // the command's answer is this Mac's
+  it('emits another machine’s navigation from that machine, and tells one queued for it at the page’s announcement', () => {
+    const emit = vi.fn();
+    const emitFrom = vi.fn();
+    const relay = createNavigationRelay(emit, emitFrom);
+    relay.deliver(nav(5), MINI);
+    expect(emitFrom).not.toHaveBeenCalled();
+    expect(relay.take()).toBeNull();
+    expect(emitFrom).toHaveBeenCalledExactlyOnceWith(MINI, 'attention.navigate', nav(5));
+    relay.deliver(nav(6), MINI);
+    expect(emitFrom).toHaveBeenLastCalledWith(MINI, 'attention.navigate', nav(6));
+    expect(emit).not.toHaveBeenCalled();
+    relay.pageGone();
+    relay.deliver(nav(7), MINI);
+    relay.deliver(nav(8)); // the latest only, this Mac's
+    expect(relay.take()).toEqual(nav(8));
+    expect(emitFrom).toHaveBeenCalledTimes(2);
   });
 });

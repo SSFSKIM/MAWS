@@ -9,15 +9,19 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientId } from '@shared/ipc/client';
 import type { Settings } from '@shared/ipc/schema';
 import { clientOf } from '../ipc/clients';
-import { emit } from '../ipc/events';
+import { emit, emitFrom } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { appWindows, isAppWindow } from '../windows'; // E2
 import { createNavigationRelay } from './navigation';
 import type { NotificationActions } from './actions';
-import { startNotifier, type NotifierView } from './notifier';
+import { startNotifier, type NotifierDeps, type NotifierView } from './notifier';
 
 // P5 O3-C (reader R1): the notifier reads the spine through its view (`view`), restored items marked silent in band.
-export function startAttention(view: NotifierView, deps: { actions?: NotificationActions; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> }): () => void {
+// P5 O7 M6: and other machines' attention beside it (`remote`, remote lane B's feeds; `remoteTitle`, the org rows').
+export function startAttention(
+  view: NotifierView,
+  deps: { actions?: NotificationActions; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> } & Pick<NotifierDeps, 'remote' | 'remoteTitle'>,
+): () => void {
   const viewing = new Map<ClientId, { appSessionId: AppSessionId | null; release(): void }>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { client }) => {
     let page = viewing.get(client.id);
@@ -40,13 +44,13 @@ export function startAttention(view: NotifierView, deps: { actions?: Notificatio
   });
   // A window's page views what its live client last reported; a page that has not reported since it loaded views nothing.
   const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(clientOf(win.webContents).id)?.appSessionId === id);
-  const relay = createNavigationRelay(emit);
+  const relay = createNavigationRelay(emit, emitFrom);
   registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
   followAppPages(app, relay.pageGone);
 
   const isFocused = () => appWindows().some((win) => win.isFocused()); // E2: app windows only
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  const stop = startNotifier(view, { port: deps.port, actions: deps.actions, isFocused, isViewing, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
+  const stop = startNotifier(view, { port: deps.port, actions: deps.actions, isFocused, isViewing, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit, emitFrom, remote: deps.remote, remoteTitle: deps.remoteTitle });
   return () => { stop(); for (const page of viewing.values()) page.release(); };
 }
 

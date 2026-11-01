@@ -217,4 +217,23 @@ describe('feeds', () => {
     expect(later.heard).toEqual([['ended', 'not-offered']]);
     expect(later.table.size).toBe(0);
   });
+
+  // P5 O7 M6: the machine's attention feed names no session
+  it('sends the machine’s attention feed with no session, view or cursor, again on each channel, and ends it `not-offered` for a peer without `rl2.feeds`', async () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds'];
+    const s = h.table.subscribe({ feed: 'attention' }, h.sink, null);
+    expect(h.subs()).toEqual([{ t: 'sub', sub: s.id, feed: 'attention', cursor: null, credit: 1024 * 1024 }]);
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'attention:boot', seq: 0 });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'attention:boot', seq: 1, body: { appSessionId: 'app-1', items: [] } });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'attention:boot', seq: 1, body: { appSessionId: 'app-1', items: [] } });
+    expect(h.heard.filter((x) => x[0] === 'event')).toHaveLength(1);
+    h.table.onCurrent();
+    expect(h.subs().at(-1)).toEqual({ t: 'sub', sub: s.id, feed: 'attention', cursor: null, credit: 1024 * 1024 });
+    h.channel.peer = [];
+    h.table.onCurrent();
+    await Promise.resolve();
+    expect(h.subs()).toHaveLength(2);
+    expect(h.heard.at(-1)).toEqual(['ended', 'not-offered']);
+  });
 });

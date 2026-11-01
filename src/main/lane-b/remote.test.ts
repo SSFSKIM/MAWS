@@ -82,7 +82,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
 /** The session's stream live on `launch`: its record read, its subscription's snapshot delivered. */
 async function live(l: ReturnType<typeof lab>, app = APP, launch = 'L1') {
   await vi.advanceTimersByTimeAsync(0);
-  const sub = l.link.open().find((s) => s.request.session.id === app)!;
+  const sub = l.link.open().find((s) => s.request.session?.id === app)!;
   sub.sink.subbed('snapshot', { epoch: launch, seq: 0 });
   sub.sink.snapshot({ epoch: launch, seq: 0 }, { status: statusOf(app, launch) });
   return sub;
@@ -394,7 +394,7 @@ describe('the tabs and the links', () => {
     const l = lab({ tabs: ['la-1', APP], laneA: ['la-1'] });
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.calls.map((c) => (c.input as { appSessionId: string }).appSessionId)).toEqual([APP]);
-    expect(l.link.open().map((s) => s.request.session.id)).toEqual([APP]);
+    expect(l.link.open().map((s) => s.request.session?.id)).toEqual([APP]);
   });
 
   it('says a held session’s state again after a page’s `session.get` of it, for a page that just subscribed (a reload, a second window)', async () => {

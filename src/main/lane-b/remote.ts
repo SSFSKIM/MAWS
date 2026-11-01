@@ -44,6 +44,8 @@
 //   and its byte stream (./remote-pty.ts), across the link's channels; `pty.hostState` of the machine is its link's. A
 //   loopback port of the machine is forwarded to a listener on this Mac's (./remote-forward.ts, `remote.forward.open`
 //   and `.close`, which main's handlers bring here), each connection a stream.
+// - P5 O7 M6: each machine's attention, on one machine-wide feed per link (./remote-attention.ts), which the badge and
+//   the notifier read beside this Mac's (`attention`).
 import type { Socket } from 'node:net';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -60,6 +62,7 @@ import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
+import { createRemoteAttention, type RemoteAttention } from './remote-attention';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
@@ -145,7 +148,9 @@ export interface RemoteLaneB {
     listening: RemoteForwards['listening'];
     at: RemoteForwards['at'];
   };
-  /** Every subscription, stream and forwarded port's listener closed: before the links, in the shutdown order. */
+  /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
+  attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange'>;
+  /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
   spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
@@ -220,6 +225,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
   const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
+  // P5 O7 M6: one machine-wide attention feed per link
+  const attention = createRemoteAttention({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, timing, log: deps.log });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -496,6 +503,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
+    attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener) },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
@@ -504,6 +512,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       interest.stop();
       offRemote();
       checkout.stop();
+      attention.stop();
       spawns.stop();
       ptys.stop();
       forwards.stop();

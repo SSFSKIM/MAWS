@@ -32,7 +32,7 @@ vi.mock('electron', () => ({
   },
 }));
 vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
-vi.mock('../ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('../ipc/events', () => ({ emit: vi.fn(), emitFrom: vi.fn() }));
 vi.mock('../windows', () => ({ appWindows: vi.fn(() => []), isAppWindow: vi.fn(() => true) }));
 
 // The silence of restored items end to end in process (P5 O3-C): the attention service marks them, the spine's view
