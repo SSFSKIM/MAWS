@@ -206,7 +206,7 @@ async function startUnitDaemon(userData: string, held: Held, extraEnv: Record<st
 interface SceneOptions { daemonKind?: 'private' | 'unit'; unitEnv?: Record<string, string>; stub?: StubEngine }
 async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape, { daemonKind = 'private', unitEnv = {}, stub }: SceneOptions = {}): Promise<{ id: AppSessionId; electron: string; holder: number | null }> {
   const daemon = shape === 'daemon';
-  const engine = stub === undefined ? {} : { MAWS_E2E_ENGINE_BIN: stub.bin };
+  const engine: Record<string, string> = stub === undefined ? {} : { MAWS_E2E_ENGINE_BIN: stub.bin };
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
   // No idle release and no idle exit (null: never), so the kept session holds through the window.
