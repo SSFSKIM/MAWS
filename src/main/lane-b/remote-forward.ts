@@ -168,21 +168,20 @@ export function createRemoteForwards(deps: RemoteForwardsDeps): RemoteForwards {
     dial(fwd, socket, grant, true);
   }
 
-  async function open({ machine, port }: Target): Promise<CommandResult<CommandName>> {
+  async function open(target: Target): Promise<CommandResult<CommandName>> {
+    const { port } = target;
+    const machine = target.machine as MachineRef; // the schema's ref, validated at the boundary
     const link = deps.remote(machine);
     if (link === null) return failure('host_unavailable', `${NAME}: machine ${machine} is not connected`);
     if (link.peerCapabilities()?.includes('rl2.streams') === false) return refusalError(NAME, link.name, { code: 'not-offered' });
     const key = keyOf(machine, port);
-    let fwd = forwards.get(key);
-    if (fwd !== undefined && fwd.link !== link) {
-      closeForward(fwd, true);
-      fwd = undefined;
+    let held = forwards.get(key);
+    if (held !== undefined && held.link !== link) {
+      closeForward(held, true);
+      held = undefined;
     }
-    if (fwd === undefined) {
-      fwd = { machine, port, link, listener: null, opening: null, grant: null, granting: null, streams: new Set(), generation: 0 };
-      forwards.set(key, fwd);
-    }
-    const mine = fwd;
+    const mine: Forward = held ?? { machine, port, link, listener: null, opening: null, grant: null, granting: null, streams: new Set(), generation: 0 };
+    forwards.set(key, mine);
     if (mine.listener !== null) return { ok: true, value: { localPort: mine.listener.port } } as CommandResult<CommandName>;
     mine.opening ??= (async (): Promise<CommandResult<CommandName>> => {
       const generation = mine.generation;
@@ -206,7 +205,7 @@ export function createRemoteForwards(deps: RemoteForwardsDeps): RemoteForwards {
   return {
     open: (target) => open(target) as Promise<CommandResult<'remote.forward.open'>>,
     close({ machine, port }) {
-      const fwd = forwards.get(keyOf(machine, port));
+      const fwd = forwards.get(keyOf(machine as MachineRef, port));
       if (fwd !== undefined) closeForward(fwd, false);
     },
     linksChanged() {
