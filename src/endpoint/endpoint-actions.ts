@@ -26,7 +26,7 @@ export type EndpointActionsContext = {
   /** A delivered state adopted (on disk, then applied). */
   deliver(states: unknown, transitions: unknown): Promise<EffectResult>;
   /** A forward of the machine's `port` opened for the device (P5 O7 M3), answering `{forward, port}`. */
-  openForward(who: { member: string; device: string }, port: number): EffectResult;
+  openForward(who: { member: string; device: string }, port: number): Promise<EffectResult>;
   /** The device's forward `forward`, held by `channel` while it is kept (an answered reseal's channel too). */
   holdForward(device: string, forward: string, channel: RemoteChannel): void;
   now(): number;
@@ -83,7 +83,7 @@ export class EndpointActions {
   async #effect(action: Action, who: { member: string; device: string }): Promise<EffectResult> {
     try {
       if (action.action === 'endpoint.grant') return await this.ctx.grant(action.args.grant);
-      if (action.action === 'forward.open') return this.ctx.openForward(who, action.args.port as number);
+      if (action.action === 'forward.open') return await this.ctx.openForward(who, action.args.port as number);
       return await this.ctx.deliver(action.args.states, action.args.transitions);
     } catch (error) {
       return { ok: false, error: { code: 'internal', message: (error as Error).message } };

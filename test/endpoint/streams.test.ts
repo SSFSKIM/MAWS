@@ -6,7 +6,7 @@
 // channel (and past its window), a grant withdrawn mid-stream, two devices on one pty.
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo, Socket } from 'node:net';
+import { createServer as createTcpServer, type AddressInfo, type Server as TcpServer, type Socket } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
 import { OFFERS } from '../../src/endpoint/offers';
@@ -17,7 +17,7 @@ import { act, done, drop, makeOrg, openRemote, ORG, sleep, startEndpoint, stopAl
 
 let org: Org;
 const started: Fixture[] = [];
-const servers: Server[] = [];
+const servers: Array<Server | TcpServer> = [];
 
 beforeAll(async () => {
   org = await makeOrg();
@@ -25,7 +25,7 @@ beforeAll(async () => {
 afterEach(async () => {
   await stopAll(started);
   for (const server of servers.splice(0)) {
-    server.closeAllConnections();
+    if ('closeAllConnections' in server) server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 });
@@ -504,5 +504,135 @@ describe('a grant withdrawn', () => {
     expect(await grant(f, org.B, ['shell'], 3)).toContain('shell');
     expect((await openTcp(b, forward.action.opId, name)).answer).toMatchObject({ reason: 'unknown' });
     expect((await openPty(b, attach.action.opId, ptyId)).answer).toMatchObject({ t: 'streamOpened' });
+  });
+});
+
+// ---- Fix wave 1 (the task review): overlapping re-checks, the opening's races, a failed write, the opening's bound ----
+
+describe('re-checks and the opening’s races', () => {
+  it('lets output and input flow after two overlapping refreshes, both granted', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const { id } = await openPty(a, action.opId, ptyId);
+    f.endpoint.channels.refreshCaps();
+    f.endpoint.channels.refreshCaps();
+    f.endpoint.channels.refreshCaps();
+    await sleep(30);
+    f.pty.emit(ptyId, 'after');
+    await a.channel.send({ t: 'streamData', id, offset: 0, data: b64('typed') });
+    await until(() => output(a, id).to === 5 && f.pty.writes.length === 1, 'output and input after the refreshes');
+    expect(output(a, id).text).toBe('after');
+    expect(f.pty.writes.map((w) => w.data)).toEqual(['typed']);
+    expect(closeOf(a, id)).toBeUndefined();
+  });
+
+  it('opens nothing when `shell` is withdrawn while the ring is read: no answer but `grade`, no bytes either way, nothing left live', async () => {
+    const f = await start();
+    expect(await grant(f, org.B, ['shell'])).toContain('shell');
+    const ptyId = f.pty.spawn('app-1');
+    f.pty.emit(ptyId, 'ring');
+    const b = await openRemote(f, org.b1, org.B);
+    const { action } = await run(f, b, 'pty.attach', { ptyId });
+    const release = f.pty.holdReplay();
+    const id = id16();
+    await b.channel.send({ t: 'streamOpen', id, kind: 'pty', op: action.opId, credit: 1024 * 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } });
+    await until(() => f.pty.replayAsked(), 'the ring’s read');
+    expect(await grant(f, org.B, [], 2)).toContain('no rights');
+    f.pty.emit(ptyId, ' meanwhile');
+    release();
+    await until(() => ofStream(b, id).length > 0, 'the answer');
+    await b.channel.send({ t: 'streamData', id, offset: 0, data: b64('x') });
+    f.pty.emit(ptyId, ' later');
+    await sleep(50);
+    expect(ofStream(b, id)).toEqual([{ t: 'streamRefused', id, reason: 'grade' }]);
+    expect(f.pty.writes).toEqual([]);
+    expect(b.channel.closed).toBe(false);
+    expect(f.endpoint.channels.size).toBe(1);
+  });
+
+  it('makes no forward when `shell` is withdrawn between the act’s decision and its effect, and a stream under the act is refused', async () => {
+    const f = await start();
+    const server = await http();
+    expect(await grant(f, org.B, ['shell'])).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    const own = f.endpoint.own;
+    const runOwn = own.run.bind(own);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    own.run = async (...args) => {
+      await held;
+      return runOwn(...args);
+    };
+    const action = await shellAct(f, b, 'forward.open', { port: server.port });
+    const from = b.inbox.length;
+    expect(await act(b, action)).toBe('ok');
+    expect(await grant(f, org.B, [], 2)).toContain('no rights');
+    release();
+    expect(await done(b, action, from)).toEqual({ state: 'failed', error: { code: 'grade' } });
+    expect(f.endpoint.forwards.list()).toEqual([]);
+    expect(await grant(f, org.B, ['shell'], 3)).toContain('shell');
+    expect((await openTcp(b, action.opId, 'any')).answer).toMatchObject({ t: 'streamRefused', reason: 'grade' });
+    expect(server.sockets).toEqual([]);
+    expect(b.channel.closed).toBe(false);
+  });
+
+  it('bounds the frames that come while the ring is read: past the backlog the stream opens and closes `behind`, with nothing sent', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const release = f.pty.holdReplay();
+    const id = id16();
+    await a.channel.send({ t: 'streamOpen', id, kind: 'pty', op: action.opId, credit: 4 * 1024 * 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } });
+    await until(() => f.pty.replayAsked(), 'the ring’s read');
+    for (let i = 0; i < 3; i++) f.pty.emit(ptyId, 'y'.repeat(STREAM_BACKLOG_BYTES / 2));
+    release();
+    await until(() => closeOf(a, id), 'the close');
+    expect(ofStream(a, id).map((m) => m.t)).toEqual(['streamOpened', 'streamClose']);
+    expect(closeOf(a, id)).toBe('behind');
+  });
+});
+
+describe('a failed write', () => {
+  it('closes the stream `unavailable` with the chunk unwritten and unacknowledged, and the reopen’s resend is written once', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const epoch = id16();
+    const first = await openPty(a, action.opId, ptyId, { epoch });
+    f.pty.failWrites = 1;
+    await a.channel.send({ t: 'streamData', id: first.id, offset: 0, data: b64('ls\n') });
+    await until(() => closeOf(a, first.id), 'the close');
+    expect(closeOf(a, first.id)).toBe('unavailable');
+    expect(ofStream(a, first.id).some((m) => m.t === 'streamCredit')).toBe(false);
+    const second = await openPty(a, action.opId, ptyId, { epoch, inputFrom: 0 });
+    await a.channel.send({ t: 'streamData', id: second.id, offset: 0, data: b64('ls\n') });
+    await until(() => f.pty.writes.length === 1, 'the resend written');
+    await sleep(30);
+    expect(f.pty.writes.map((w) => w.data)).toEqual(['ls\n']);
+  });
+});
+
+describe('a device’s close of a forwarded connection', () => {
+  it('resets the machine’s side at once, even against a server that keeps a half-closed connection open', async () => {
+    const f = await start();
+    const sockets: Socket[] = [];
+    const server = createTcpServer({ allowHalfOpen: true }, (socket) => {
+      sockets.push(socket);
+      socket.on('error', () => {});
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const a = await openRemote(f, org.a1, org.A);
+    const { action, outcome } = await run(f, a, 'forward.open', { port: (server.address() as AddressInfo).port });
+    const { id } = await openTcp(a, action.opId, outcome.result!.forward as string);
+    await until(() => sockets.length === 1, 'the connection');
+    const closed = new Promise<void>((resolve) => sockets[0].once('close', () => resolve()));
+    await a.channel.send({ t: 'streamClose', id, reason: 'closed' });
+    await Promise.race([closed, sleep(2000).then(() => Promise.reject(new Error('the machine’s side was not reset')))]);
+    expect(sockets[0].destroyed).toBe(true);
   });
 });

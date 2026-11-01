@@ -70,8 +70,10 @@ export type EndedMessage = { t: 'ended'; sub: string; reason: string };
  * Streams (P5 O7 M3, behind `rl2.streams`; RL2_PROTOCOL 1.3; O7's Interfaces §N): a byte flow inside the channel, opened
  * by the device under an act it sent (`op`, the act's opId), its bytes base64url (RFC 4648 §5, unpadded) in chunks of at
  * most STREAM_CHUNK_BYTES, each direction within the other side's credit (`streamCredit`, at most STREAM_CREDIT_MAX at
- * once). `id` is the device's, 16 random bytes base64url, unique on its channel. Sent only to a peer that listed the
- * capability: an older one closes the channel on an unknown kind.
+ * once). `id` is the device's, 16 random bytes base64url, unique on its channel. A device opens one only on a channel
+ * whose endpoint listed the capability, and the endpoint sends stream kinds only on a stream the device opened, so a
+ * device that never listed it never receives one. An older reader would ignore the kinds as unknown (`readMessage`); what
+ * closes a channel is a known kind out of shape, which a peer reading these at 1.3 holds them to.
  */
 export type StreamKind = 'pty' | 'tcp';
 const STREAM_KINDS: readonly string[] = ['pty', 'tcp'] satisfies readonly StreamKind[];

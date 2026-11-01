@@ -30,6 +30,9 @@ export class FakePtyHost {
   /** Each pty whose metadata a remote attach read (no credit taken). */
   readonly attaches: string[] = [];
   #ops: ReturnType<typeof ptyOps> | null = null;
+  #replayHeld: Promise<void> | null = null;
+  /** The next this many `pty.write`s fail (`internal`), writing nothing. */
+  failWrites = 0;
   readonly #frames = new Set<FrameListener>();
   readonly #events = new Set<EventListener>();
   #next = 0;
@@ -83,6 +86,21 @@ export class FakePtyHost {
     for (const listener of this.#frames) listener({ owner: 'pty-host', ptyId, offset, data });
   }
 
+  /** Holds every `pty.replay` until the returned release; frames emitted meanwhile go out before the answer. */
+  holdReplay(): () => void {
+    let release!: () => void;
+    this.#replayHeld = new Promise((resolve) => (release = resolve));
+    return () => {
+      this.#replayHeld = null;
+      release();
+    };
+  }
+
+  /** Whether a `pty.replay` has arrived (one held waits for its release). */
+  replayAsked(): boolean {
+    return this.calls.some((c) => c.name === 'pty.replay');
+  }
+
   /** A local viewer's checkpoint (the app on the machine), which an attach's own replay starts at. */
   checkpoint(ptyId: string, offset: number): void {
     this.ptys.get(ptyId)!.checkpoint = offset;
@@ -109,18 +127,32 @@ export class FakePtyHost {
       case 'pty.list':
         return ok({ ptys: [...this.ptys.values()].map((p) => ({ ...p.info })) });
       case 'pty.replay': {
+        // A held replay answers at its release, from the ring as it stands then: frames emitted meanwhile reach the
+        // endpoint first, as the real host flushes its output before it replies.
+        if (this.#replayHeld !== null) await this.#replayHeld;
         const pty = this.ptys.get(i.ptyId as string);
         if (pty === undefined) return no('invalid_input');
         const from = Math.max(i.from as number, pty.ringStart);
         return ok({ replay: pty.ring.slice(Math.min(from - pty.ringStart, pty.ring.byteLength)), replayFrom: from, nextOffset: pty.info.offset });
       }
-      case 'pty.write':
-        if (!this.ptys.has(i.ptyId as string)) return no('invalid_input');
+      // A live pty's only (table.ts's `live`: an unknown or exited pty throws, which the host answers `internal`).
+      case 'pty.write': {
+        const pty = this.ptys.get(i.ptyId as string);
+        if (pty === undefined || !pty.info.alive) return no('internal');
+        if (this.failWrites > 0) {
+          this.failWrites--;
+          return no('internal');
+        }
         this.writes.push({ ptyId: i.ptyId as string, data: i.data as string });
         return ok(undefined);
-      case 'pty.resize':
+      }
+      case 'pty.resize': {
+        const pty = this.ptys.get(i.ptyId as string);
+        if (pty === undefined || !pty.info.alive) return no('internal');
+        pty.info = { ...pty.info, cols: i.cols as number, rows: i.rows as number };
         this.resizes.push({ ptyId: i.ptyId as string, cols: i.cols as number, rows: i.rows as number });
         return ok(undefined);
+      }
       default:
         return no('unknown_command');
     }

@@ -8,9 +8,10 @@
 // (the pty host's, `pty.opQuery`, for `pty`; the endpoint's own for `tcp`), without a tombstone: it must answer `done`
 // with a binding of this channel's member and device and a name the kind allows (STREAM_ACTS), and the act's kept result
 // must name the pty or forward the open names; else `grade` (`unknown` for an op the ledger holds nothing of, and for a
-// forward past its window: a fresh act may open it; `unavailable` when the ledger can't say now). Then the binding is
-// authorized as a query is (authorize.ts's `stream`): the member still holds the act's machine grade (`shell`), the device
-// is still the head's. Step-up and the rest of the act's decision stood when the act ran, so a reopen under it asks
+// forward past its window: a fresh act may open it; `unavailable` when the ledger can't say now). Then, after every read
+// the opening makes (the ring, the connect) and before anything crosses, the binding is authorized as a query is
+// (authorize.ts's `stream`, `decide`): the member still holds the act's machine grade (`shell`), the device is still the
+// head's; one decided while a re-check began is decided again, so a grant ended during the opening opens nothing. Step-up and the rest of the act's decision stood when the act ran, so a reopen under it asks
 // nothing of the person. A ledger keeps an op for a day (KEPT_S); a stream reopened past that needs a new act. The ledger
 // is read as of now (its `opCreated`), since the horizon bounds an act's resends, not what its binding authorizes.
 //
@@ -24,22 +25,26 @@
 // viewer's checkpoint) and sends `[max(from, ringStart), nextOffset)`, then each later `pty.data` frame of that pty at its
 // offset (`onFrame`), frames from before the replay's answer trimmed against it. Output past the device's credit is held
 // up to STREAM_BACKLOG_BYTES (the ring's size), and then the stream closes `behind`: the device reopens from its last
-// offset and the ring fills the gap. The pty's own flow control is untouched (the endpoint takes no credit, `mawsd`'s
+// offset and the ring fills the gap; frames that come while the ring is read count against the same bound, and past it the
+// stream opens and closes `behind` at once. The pty's own flow control is untouched (the endpoint takes no credit, `mawsd`'s
 // seam). Input is written through `pty.write` in order; the endpoint keeps the next input offset per `(device, ptyId,
 // inputEpoch)` while a stream holds it and for RESUME_MS after, drops what it already wrote (a resend after a reopen), and
 // forgets an older epoch when a new one opens, which starts at its `inputFrom` (zero for an app run's first stream).
-// Bytes are UTF-8 to `pty.write`'s string, decoded across chunks and reopens. Resize is `streamControl {resize: {cols,
+// Bytes are UTF-8 to `pty.write`'s string, a character split across chunks or reopens written whole. The offset moves
+// past a chunk only once its write landed: one that failed, threw or timed out closes the stream `unavailable`, its chunk
+// unrefunded, so the reopen's resend is written (an unknown outcome may so land twice, never silently not). Resize is `streamControl {resize: {cols,
 // rows}}`, through `pty.resize`. A pty that exits closes its streams `exit` after the output they hold.
 //
 // A tcp stream connects to `127.0.0.1:<port>` at its open (`streamOpened` after the connect, `unreachable` on failure),
-// and ends whole with either side's close. The socket is paused while the device's credit is out, so its own flow
+// and ends whole with either side's close (the device's resets the socket at once: nothing could carry what it still
+// sends). The socket is paused while the device's credit is out, so its own flow
 // control holds the peer (it is never closed `behind`).
 //
 // A stream dies with its channel (a tcp socket reset, a pty stream dropped: the device reopens it on its next channel
 // from its offsets, under the same act). Open streams, and the forwards the table keeps, are authorized again at every
 // refresh of the members' rights (channels.ts's `caps` refresh: a grant kept, an owner changed, a new head): one whose
 // member no longer holds the grade closes `removed` at once, its held input dropped, its forward removed and its socket
-// reset. While the check runs, its output and input wait. Streams carry no liveness of their own.
+// reset. While a check runs (one hold however many overlap), its output and input wait. Streams carry no liveness of their own.
 import { createConnection, type Socket } from 'node:net';
 import { TextDecoder } from 'node:util';
 import {
@@ -89,6 +94,9 @@ export type StreamsContext = {
 
 type Queued = { offset: number; bytes: Uint8Array } | { close: string };
 
+/** An open past its ledger read: what it opens and on whose behalf, its placeholder in the table, and how it takes its place. */
+type Opening = { channel: RemoteChannel; m: StreamOpenMessage; act: string; binding: StreamBinding; who: Who; placeholder: Stream; install(stream: Stream): void };
+
 /** An act's ledger answer, as a stream's admission reads it. */
 type Ledgered = { kind: 'done'; member: string; device: string; name: string; outcome: unknown } | { kind: 'refused'; reason: StreamRefusal };
 
@@ -103,7 +111,7 @@ abstract class Stream implements StreamSource {
   #credit: number;
   readonly #queue: Queued[] = [];
   #backlog = 0;
-  #held = 0;
+  #held = false;
   #release: (() => void) | null = null;
   #gate: Promise<void> = Promise.resolve();
   /** What the device may still send. */
@@ -158,14 +166,19 @@ abstract class Stream implements StreamSource {
     this.window.ready(this);
   }
 
-  /** Its access is checked again: nothing goes either way until a current decision grants it. */
+  /**
+   * Its access is checked again: nothing goes either way until a current decision grants it. One hold however many
+   * checks overlap (a check superseded by a newer one is never answered), released by the latest one's grant.
+   */
   hold(): void {
-    if (this.#held++ > 0) return;
+    if (this.#held) return;
+    this.#held = true;
     this.#gate = new Promise((resolve) => (this.#release = resolve));
   }
 
   unhold(): void {
-    if (this.#held === 0 || --this.#held > 0) return;
+    if (!this.#held) return;
+    this.#held = false;
     this.#release?.();
     this.#release = null;
     this.window.ready(this);
@@ -195,7 +208,7 @@ abstract class Stream implements StreamSource {
 
   /** The stream window's turn: its next chunk the device's credit allows, or its close once it holds nothing before it. */
   next(): { message: EndpointMessage; bytes: number } | null {
-    if (this.ended || this.#held > 0 || this.#queue.length === 0) return null;
+    if (this.ended || this.#held || this.#queue.length === 0) return null;
     const head = this.#queue[0];
     if ('close' in head) {
       this.#queue.shift();
@@ -249,13 +262,17 @@ abstract class Stream implements StreamSource {
 }
 
 /** What the endpoint keeps of one device's input to one pty: the epoch, the next offset, the decoder, the write order. */
-type InputRecord = { epoch: string; next: number; decoder: TextDecoder; chain: Promise<void>; holders: number; forget: (() => void) | null };
+/** `carry`: the bytes of a UTF-8 character the last landed chunk began and didn't finish, written with the next. */
+type InputRecord = { epoch: string; next: number; carry: Uint8Array; chain: Promise<void>; holders: number; forget: (() => void) | null };
 
 class PtyStream extends Stream {
   /** The next output offset the device is owed; earlier bytes of a frame are trimmed. */
   sent = 0;
   /** Frames that came while the ring was read, applied after it. */
   pending: Array<{ offset: number; data: Uint8Array }> | null = [];
+  #pendingBytes = 0;
+  /** More than the backlog came while the ring was read: the frames are dropped, and the stream closes `behind` once open. */
+  overrun = false;
   /** The pty exited while the stream opened. */
   exited = false;
   #writing = 0;
@@ -278,7 +295,15 @@ class PtyStream extends Stream {
 
   /** A `pty.data` frame of its pty, at the pty host's offset. */
   frame(offset: number, data: Uint8Array): void {
-    if (this.pending !== null) return void this.pending.push({ offset, data });
+    if (this.ended) return;
+    if (this.pending !== null) {
+      if (this.overrun) return;
+      this.#pendingBytes += data.byteLength;
+      if (this.#pendingBytes <= STREAM_BACKLOG_BYTES) return void this.pending.push({ offset, data });
+      this.overrun = true;
+      this.pending = [];
+      return;
+    }
     const end = offset + data.byteLength;
     if (end <= this.sent) return;
     const start = Math.max(0, this.sent - offset);
@@ -294,13 +319,21 @@ class PtyStream extends Stream {
     return this.#writing === 0;
   }
 
-  protected closed(): void {}
+  protected closed(): void {
+    this.pending = null;
+  }
 
+  /**
+   * The device's input, written in order. The record moves past a chunk only once its write landed: a write that failed,
+   * threw or timed out ends the stream `unavailable` with the chunk unrefunded and the record where the last landed write
+   * left it, so the device's reopen resends it and it is written (a write whose outcome is unknown may so land twice).
+   */
   input(m: StreamDataMessage): void {
     const bytes = Buffer.from(m.data, 'base64url');
     if (!this.take(bytes.byteLength)) return;
     const record = this.record;
     this.#writing++;
+    let landed = true;
     record.chain = record.chain
       .then(() => this.gate)
       .then(async () => {
@@ -308,17 +341,22 @@ class PtyStream extends Stream {
         const end = m.offset + bytes.byteLength;
         if (m.offset > record.next) return this.end('malformed'); // a gap: bytes the device never sent here
         if (end <= record.next) return; // a resend of what was written
-        const fresh = bytes.subarray(record.next - m.offset);
+        const { text, carry } = utf8Cut(record.carry, bytes.subarray(record.next - m.offset));
+        if (text !== '') {
+          const written = await this.host('pty-host', 'pty.write', { ptyId: this.ptyId, data: text });
+          if (!written.ok) throw new Error(written.error.code);
+        }
         record.next = end;
-        const text = record.decoder.decode(fresh, { stream: true });
-        if (text === '') return;
-        const written = await this.host('pty-host', 'pty.write', { ptyId: this.ptyId, data: text });
-        if (!written.ok) this.log(`endpoint: a remote terminal's input could not be written: ${written.error.code}`);
+        record.carry = carry;
       })
-      .catch((error: unknown) => this.log(`endpoint: a remote terminal's input could not be written: ${(error as Error).message}`))
+      .catch((error: unknown) => {
+        landed = false;
+        this.log(`endpoint: a remote terminal's input could not be written: ${(error as Error).message}`);
+        this.end('unavailable');
+      })
       .finally(() => {
         this.#writing--;
-        this.refund(bytes.byteLength);
+        if (landed) this.refund(bytes.byteLength);
       });
   }
 
@@ -403,16 +441,9 @@ class TcpStream extends Stream {
     this.end('malformed');
   }
 
-  /** The device's side closed: what it sent is written, then the connection ends (and is reset if it lingers). */
+  /** The device's side closed: the stream is gone, so nothing could carry what the machine's side still sends: reset now. */
   closedByDevice(): void {
-    const socket = this.socket;
-    this.socket = null;
     this.end(null);
-    if (socket === null || socket.destroyed) return;
-    socket.end();
-    const linger = setTimeout(() => socket.destroy(), 10_000);
-    linger.unref?.();
-    socket.once('close', () => clearTimeout(linger));
   }
 }
 
@@ -426,7 +457,7 @@ export class Streams {
   readonly #inputs = new Map<string, InputRecord>();
   /** Re-checks begun per stream or forward: only the latest one's verdict is taken. */
   readonly #checks = new Map<unknown, number>();
-  /** Counts `recheck` calls, so a stream authorized before one and opened after it is checked again. */
+  /** Counts `recheck` calls, so a decision asked while one began is asked again (`decide`). */
   #epoch = 0;
   readonly #offRemoved: () => void;
 
@@ -482,10 +513,7 @@ export class Streams {
     for (const forward of this.#ctx.forwards.list()) this.checkForward(forward);
   }
 
-  /**
-   * A forward authorized again: removed, its streams with it, once its member no longer holds `shell`. The endpoint asks
-   * at each one's opening too, since the act that opened it was decided before the effect ran.
-   */
+  /** A forward authorized again: removed, its streams with it, once its member no longer holds `shell`. */
   checkForward(forward: Forward): void {
     const binding = { member: forward.member, device: forward.device };
     this.#check(forward, 'forward.open', binding, { ...binding, clientClass: forward.clientClass }, (verdict) => verdict === 'refused' && this.#ctx.forwards.remove(forward.device, forward.id));
@@ -541,25 +569,31 @@ export class Streams {
       const named = m.kind === 'pty' ? ptyOf(ledgered.name, ledgered.outcome) : forwardOf(ledgered.outcome);
       if (named === null || named !== (m.kind === 'pty' ? m.pty!.ptyId : m.tcp!.forward)) return refuse('grade');
       const binding: StreamBinding = { member: ledgered.member, device: ledgered.device };
-      const epoch = this.#epoch;
-      const decision = await this.#ctx.authorize({ kind: 'stream', name: ledgered.name, input: binding }, who, this.#ctx.now());
-      if (placeholder.ended) return;
-      if (!decision.ok) return refuse(decision.reason === 'unavailable' ? 'unavailable' : 'grade');
       // The stream takes the open's place in the table as it answers, so what the device sends next reaches it.
-      // One authorized before a re-check that missed it (it wasn't open yet) is checked again now.
-      const install = (stream: Stream) => {
-        if (streams.get(m.id) !== placeholder) return;
-        streams.set(m.id, stream);
-        if (this.#epoch !== epoch) queueMicrotask(() => stream.opened && !stream.ended && this.#recheckStream(stream));
-      };
-      if (m.kind === 'pty') await this.#openPty(channel, m, ledgered.name, binding, placeholder, install);
-      else await this.#openTcp(channel, m, ledgered.name, binding, placeholder, install);
+      const install = (stream: Stream) => void (streams.get(m.id) === placeholder && streams.set(m.id, stream));
+      const open = { channel, m, act: ledgered.name, binding, who, placeholder, install };
+      if (m.kind === 'pty') await this.#openPty(open);
+      else await this.#openTcp(open);
     } catch (error) {
       this.#ctx.log(`endpoint: a stream on channel ${channel.key} could not be opened: ${(error as Error).message}`);
       refuse('unavailable');
     } finally {
       if (streams.get(m.id) === placeholder) streams.delete(m.id);
     }
+  }
+
+  /**
+   * A stream's binding decided against the rights now: asked again when a re-check began while it was asked (a grant
+   * kept or ended meanwhile), so nothing opened on its answer missed a revocation; `unavailable` after three such.
+   * The endpoint asks it too before a forward is made, since the `forward.open` act was decided before its effect ran.
+   */
+  async decide(act: string, binding: StreamBinding, who: Who): Promise<Decision> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const epoch = this.#epoch;
+      const decision = await this.#ctx.authorize({ kind: 'stream', name: act, input: binding }, who, this.#ctx.now());
+      if (epoch === this.#epoch) return decision;
+    }
+    return { ok: false, reason: 'unavailable' };
   }
 
   /** The pty host's ledger, read for the act's binding and result. */
@@ -574,7 +608,7 @@ export class Streams {
     return ledgered(this.#ctx.own.query(op, new Date(this.#ctx.now()).toISOString(), false));
   }
 
-  async #openPty(channel: RemoteChannel, m: StreamOpenMessage, act: string, binding: StreamBinding, placeholder: Cancelled, install: (stream: Stream) => void): Promise<void> {
+  async #openPty({ channel, m, act, binding, who, placeholder, install }: Opening): Promise<void> {
     const { ptyId, from, inputEpoch, inputFrom } = m.pty!;
     const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
     const dispatch = dispatchAs(this.#ctx.dispatch, channel.client);
@@ -600,8 +634,14 @@ export class Streams {
     const nextOffset = replay.nextOffset as number;
     // An offset past what the pty has emitted is none the device read from it.
     if (from > nextOffset) return fail('malformed');
+    // The binding decided now, after every read and before anything crosses: a grant ended while the ring was read opens nothing.
+    const decision = await this.decide(act, binding, who);
+    if (placeholder.ended || channel.closed || stream.ended) return fail(null);
+    if (!decision.ok) return fail(decision.reason === 'unavailable' ? 'unavailable' : 'grade');
     install(stream);
     stream.open({ pty: { info, ringStart, nextOffset } });
+    // Past the backlog while the ring was read: open and at once `behind`, the device reopening from its offset.
+    if (stream.overrun) return stream.end('behind');
     stream.push(ringStart, bytes);
     stream.sent = nextOffset;
     const pending = stream.pending ?? [];
@@ -610,7 +650,7 @@ export class Streams {
     if (stream.exited || info.alive === false) stream.closeAfter('exit');
   }
 
-  async #openTcp(channel: RemoteChannel, m: StreamOpenMessage, act: string, binding: StreamBinding, placeholder: Cancelled, install: (stream: Stream) => void): Promise<void> {
+  async #openTcp({ channel, m, act, binding, who, placeholder, install }: Opening): Promise<void> {
     const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
     const forward = this.#ctx.forwards.hold(binding.device, m.tcp!.forward, channel);
     if (forward === null) return refuse('unknown');
@@ -623,9 +663,10 @@ export class Streams {
       socket.destroy();
       return refuse('unreachable');
     }
-    if (placeholder.ended || channel.closed || this.#ctx.forwards.get(forward.device, forward.id) !== forward) {
+    const decision = await this.decide(act, binding, who);
+    if (placeholder.ended || channel.closed || !decision.ok || this.#ctx.forwards.get(forward.device, forward.id) !== forward) {
       socket.resetAndDestroy();
-      if (!placeholder.ended && !channel.closed) refuse('unknown');
+      if (!placeholder.ended && !channel.closed) refuse(decision.ok ? 'unknown' : decision.reason === 'unavailable' ? 'unavailable' : 'grade');
       return;
     }
     const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward);
@@ -640,7 +681,7 @@ export class Streams {
     let record = this.#inputs.get(key);
     if (record === undefined || record.epoch !== epoch) {
       record?.forget?.();
-      record = { epoch, next: inputFrom, decoder: new TextDecoder(), chain: Promise.resolve(), holders: 0, forget: null };
+      record = { epoch, next: inputFrom, carry: new Uint8Array(0), chain: Promise.resolve(), holders: 0, forget: null };
       this.#inputs.set(key, record);
     } else {
       // A reopen in the same epoch: what the endpoint wrote stands; bytes the device says it won't send again are skipped.
@@ -756,4 +797,25 @@ function unavailableOr(response: { ok: false; error: { code: string } }, fallbac
 
 function connectLoopback(port: number): Socket {
   return createConnection({ host: '127.0.0.1', port });
+}
+
+const UTF8 = new TextDecoder();
+
+/**
+ * `carry` and `fresh` as text up to the last whole UTF-8 character, and the bytes of one begun and not finished (at most
+ * three), which wait for the next chunk. Bytes that are no UTF-8 read as U+FFFD.
+ */
+function utf8Cut(carry: Uint8Array, fresh: Uint8Array): { text: string; carry: Uint8Array } {
+  const bytes = new Uint8Array(carry.byteLength + fresh.byteLength);
+  bytes.set(carry);
+  bytes.set(fresh, carry.byteLength);
+  let cut = bytes.byteLength;
+  for (let back = 1; back <= Math.min(3, bytes.byteLength); back++) {
+    const byte = bytes[bytes.byteLength - back];
+    if ((byte & 0xc0) === 0x80) continue; // a continuation byte: look further back for its lead
+    const need = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    if (need > back) cut = bytes.byteLength - back;
+    break;
+  }
+  return { text: UTF8.decode(bytes.subarray(0, cut)), carry: bytes.slice(cut) };
 }
