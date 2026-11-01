@@ -3,7 +3,7 @@
 // spikes/).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rate, clickStats, summarizeVariant, verdict } from './summarize.mjs';
+import { CLICK_SAMPLES, rate, clickStats, summarizeVariant, verdict } from './summarize.mjs';
 
 test('rate: callbacks per second over the window, and their spacing', () => {
   const times = Array.from({ length: 31 }, (_, i) => i * 166.7); // a ~6 Hz timer over 5 s
@@ -27,11 +27,12 @@ test('clickStats: landed clicks only in the median and p95; a click without a pa
   assert.equal(clickStats(undefined).medianMs, null);
 });
 
-const variant = ({ clickMs, t100Count, missing = 0 }) =>
+const variant = ({ clickMs, t100Count, missing = 0, done = true, errors = [], clicks = CLICK_SAMPLES }) =>
   summarizeVariant({
-    done: true,
+    done,
+    errors,
     clocks: { windowMs: 5000, raf: [], t16: [], t100: Array.from({ length: t100Count }, (_, i) => i * (5000 / t100Count)) },
-    clicks: Array.from({ length: 20 }, (_, i) => ({ i, toPaintMs: i < missing ? null : clickMs })),
+    clicks: Array.from({ length: clicks }, (_, i) => ({ i, toPaintMs: i < missing ? null : clickMs })),
   });
 
 test('verdict: a variant qualifies only with >= 30% faster clicks, a >= 9 Hz 100 ms timer and few missing clicks', () => {
@@ -55,7 +56,7 @@ test('verdict: the fastest of several qualifying variants is best; too many miss
     baseline: variant({ clickMs: 110, t100Count: 31 }),
     fps30: variant({ clickMs: 70, t100Count: 50 }),
     fps60: variant({ clickMs: 60, t100Count: 50 }),
-    beginframe: variant({ clickMs: 30, t100Count: 50, missing: 5 }), // 25% missing
+    beginframe: variant({ clickMs: 30, t100Count: 50, missing: 8 }), // 27% missing
   });
   assert.deepEqual(v.qualifying, ['fps30', 'fps60']);
   assert.equal(v.best, 'fps60');
@@ -67,4 +68,24 @@ test('verdict: no baseline, no comparison; none qualifying names the limit', () 
   const v = verdict({ baseline: variant({ clickMs: 110, t100Count: 31 }), fps30: variant({ clickMs: 108, t100Count: 31 }) });
   assert.equal(v.best, null);
   assert.match(v.reading, /no variant qualifies/);
+});
+
+test('verdict: a variant that did not finish, recorded an error or sampled fewer clicks than the probe sends never qualifies', () => {
+  const v = verdict({
+    baseline: variant({ clickMs: 110, t100Count: 31 }),
+    fps30: variant({ clickMs: 50, t100Count: 50, done: false, errors: [{ name: 'selfTimeout', message: 'still running' }] }),
+    fps60: variant({ clickMs: 50, t100Count: 50, errors: [{ name: 'samplePixel', message: 'x' }] }),
+    beginframe: variant({ clickMs: 50, t100Count: 50, clicks: 12 }),
+  });
+  assert.deepEqual(v.qualifying, []);
+  assert.equal(v.variants.fps30.incomplete, 'did not finish; errors: selfTimeout');
+  assert.equal(v.variants.fps60.incomplete, 'errors: samplePixel');
+  assert.equal(v.variants.beginframe.incomplete, `12 of ${CLICK_SAMPLES} clicks sampled`);
+  assert.match(v.reading, /no variant qualifies/);
+});
+
+test('verdict: an incomplete baseline gives nothing to compare against', () => {
+  const v = verdict({ baseline: variant({ clickMs: 110, t100Count: 31, done: false }), fps30: variant({ clickMs: 50, t100Count: 50 }) });
+  assert.equal(v.best, null);
+  assert.match(v.reading, /^the baseline is incomplete \(did not finish\): nothing to compare against$/);
 });

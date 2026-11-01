@@ -1164,7 +1164,7 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
   test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
   test.setTimeout(420_000);
-  const IDLE_MS = 45_000; // the engine host's idle time (MAWS_E2E_SUPERVISOR_IDLE_MS), room for the creation sequence after the quit
+  const IDLE_MS = 60_000; // the engine host's idle time (MAWS_E2E_SUPERVISOR_IDLE_MS): room for the tabs, then the busy session's turn at its half
   const QUIET_MS = 15_000; // the render host's quiet period
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const pages = await startHeadlessPages();
@@ -1221,8 +1221,13 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
         const b = await headlessTab(busy, repos[1]!);
         expect((await render()).browserTabs).toBe(2);
 
+        // The busy session's turn at half its idle time: its clock restarts no earlier than the turn's start, so between its
+        // first deadline (quitAt + IDLE_MS) and the earliest reset one (turnAt + IDLE_MS) nothing of it may close
+        let turnAt = 0;
         await test.step('a turn before the idle time', async () => {
-          expect(Date.now() - quitAt, 'both tabs made well before the idle time').toBeLessThan(IDLE_MS / 2);
+          await sleep(Math.max(0, quitAt + IDLE_MS / 2 - Date.now()));
+          turnAt = Date.now();
+          if (turnAt >= quitAt + IDLE_MS - 10_000) throw new Error(`the tabs took until ${turnAt - quitAt} ms after the quit: no room for a turn before the idle time`);
           await ask('session.send', { appSessionId: busy, content: 'a turn before the idle time' });
           await readyAfter(busy);
         });
@@ -1234,8 +1239,10 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
           expect(s.daemonLog(), 'the engine host’s host.browserIdle dropped the tab').toContain(`[browser] ${quiet}: headless → cold (idle for the machine’s whole idle time)`);
         });
 
-        await test.step('at the busy session’s first due time it still holds its tab', async () => {
-          await sleep(Math.max(0, quitAt + IDLE_MS + 5_000 - Date.now()));
+        await test.step('past the busy session’s first deadline and before its reset one, it still holds its tab', async () => {
+          const checkAt = (quitAt + IDLE_MS + turnAt + IDLE_MS) / 2;
+          if (Date.now() > checkAt) throw new Error(`the quiet session's release took until ${Date.now() - quitAt} ms after the quit, past the busy session's check at ${Math.round(checkAt - quitAt)} ms`);
+          await sleep(checkAt - Date.now());
           expect(released(busy), 'not released').toBeUndefined();
           expect((await status(busy)).work?.holds?.browser).toBe('held');
           expect((await render()).browserTabs, 'its tab open').toBe(1);

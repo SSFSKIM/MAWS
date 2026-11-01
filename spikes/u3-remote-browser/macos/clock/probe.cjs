@@ -44,7 +44,7 @@ const VIEWPORT = { width: 1280, height: 800 }; // offscreen-views.ts HEADLESS_VI
 const BUTTON = { x: 40 + 120, y: 40 + 40 }; // page.html #target's centre
 const SAMPLE = { x: 640, y: 480 }; // inside page.html #panel (y >= 160)
 const MEASURE_MS = 5000;
-const CLICKS = 30;
+const CLICKS = 30; // summarize.mjs's CLICK_SAMPLES: a variant with fewer is read as incomplete
 const CLICK_SPACING_MS = 300;
 const CLICK_TIMEOUT_MS = 2000;
 const SETTLE_MS = 1000;

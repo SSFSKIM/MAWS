@@ -82,6 +82,7 @@ export interface HeadlessScene {
   userData: string;
   daemon: ProfileDaemon;
   bin: string; // the engine's wrapper (MAWS_E2E_ENGINE_BIN)
+  repos: number; // how many working directories the scene made
   repo(n: number): string; // each session's working directory: its connector's report and control socket live there
   status(): Promise<DaemonStatus>;
   render(): Promise<DaemonRender>;
@@ -139,6 +140,7 @@ export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<
     userData,
     daemon,
     bin,
+    repos: repos.length,
     repo: (n) => repos[n]!,
     status,
     render: async () => (await status()).render!,

@@ -973,6 +973,7 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
 const LIVENESS_BOUNDS = {
   'e2e/browser-cua.spec.ts': {
     'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',
+    "expect(Date.now() - lostAt, 'served within cua’s 5 s retry, and the poll’s slack').toBeLessThan(5_000 + 3_000);": 'the connector\'s own 5 s retry timer (cua\'s CLIENT_RETRY_MS, P5 O17 M8 scene 2) after the handover closed its connection, then one accept on the app\'s socket: a timer, against 3 s of margin; a slower reach is cua waiting another cycle, the finding',
   },
   'e2e/c12-quit.spec.ts': {
     "expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);": 'the daemon shape\'s quit (P5 O3-D): the same probe and quit path as the embedded bound below, with nothing to stop',

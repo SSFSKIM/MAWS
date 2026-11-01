@@ -536,6 +536,12 @@ export interface E2eResources {
   at: string;
   resources: string[];
   modules: string[];
+  browser?: BrowserFacts | null; // P5 O17 M8: the daemon's e2eBrowser(), when it runs
+}
+export interface BrowserFacts {
+  broker: { cold: number; promoting: number; spliced: number; buffered: number } | null;
+  sockets: Record<string, { listening: boolean; relayed: number; refused: number; waiting: number }>;
+  holds: string[];
 }
 
 // The deferred chunks O17 keeps off the cold start and the idle (their file names are the module's and a hash)
@@ -556,5 +562,28 @@ export function o17IdleProblems(moment: string, report: E2eResources, o: { liste
   }
   for (const [prefix, why] of BROWSER_CHUNKS) for (const module of report.modules.filter((name) => name.startsWith(prefix))) problems.push(`${moment}: ${module} loaded (${why})`);
   if (o.cold !== undefined && timerCount(report) > timerCount(o.cold)) problems.push(`${moment}: ${timerCount(report)} timers, ${timerCount(report) - timerCount(o.cold)} more than at the cold start`);
+  return problems;
+}
+
+// What the measured browser cases (e2e:daemon-idle-render) assert at their window's edges, M8's Decisions: every
+// connector still connected and served cold by the broker, no render child, render.starts where the first exit left it,
+// no pending broker request (no promotion, nothing spliced or buffered, no peer waiting on its root), no browser timer
+// (the feed's chunk absent; the render host, which holds the frame timers, gone) and no browser-work hold. Empty when idle.
+export function browserWindowProblems(moment: string, report: E2eResources, o: { sessions: number; connected: number; renderPid: number | null; starts: number; startsAtFirstExit: number }): string[] {
+  const browser = report.browser ?? null;
+  if (browser === null) return [`${moment}: mawsd reported no browser facts`];
+  const problems: string[] = [];
+  if (o.connected !== o.sessions) problems.push(`${moment}: ${o.connected} of ${o.sessions} connectors connected`);
+  if (o.renderPid !== null) problems.push(`${moment}: a render child, pid ${o.renderPid}`);
+  if (o.starts !== o.startsAtFirstExit) problems.push(`${moment}: render.starts ${o.starts}, ${o.startsAtFirstExit} at the first exit`);
+  const { broker } = browser;
+  if (broker === null) problems.push(`${moment}: the broker’s chunk is not loaded, though cua is connected`);
+  else if (broker.promoting > 0 || broker.spliced > 0 || broker.buffered > 0 || broker.cold !== o.sessions) {
+    problems.push(`${moment}: the broker holds ${broker.promoting} promoting, ${broker.spliced} spliced, ${broker.buffered} bytes buffered (${broker.cold} cold served of ${o.sessions})`);
+  }
+  const waiting = Object.values(browser.sockets).reduce((sum, socket) => sum + socket.waiting, 0);
+  if (waiting > 0) problems.push(`${moment}: ${waiting} peer${waiting === 1 ? '' : 's'} waiting on ${waiting === 1 ? 'its' : 'their'} root`);
+  for (const module of report.modules.filter((name) => name.startsWith('browser-feed-'))) problems.push(`${moment}: ${module} loaded (the feed’s frame timers)`);
+  if (browser.holds.length > 0) problems.push(`${moment}: browser work held for ${browser.holds.join(', ')}`);
   return problems;
 }

@@ -31,6 +31,7 @@ import {
   spineLine,
   mawsdSpineLine,
   o17IdleProblems,
+  browserWindowProblems,
   topMem,
   topOutside,
 } from './daemon-idle';
@@ -523,5 +524,42 @@ describe('O17 at mawsd’s cold start and idle', () => {
 
   it('names a session listener at the cold start, where none is allowed', () => {
     expect(o17IdleProblems('cold start', cold, { listeners: 1, allowedListeners: 0 })).toEqual(['cold start: 1 session listener (none allowed)']);
+  });
+});
+
+// P5 O17 M8 (fix 1): what the measured browser cases assert at their window's edges (M8's Decisions): every connector
+// still connected and served cold, no render child, render.starts where the first exit left it, no pending broker
+// request (no promotion, nothing buffered, no peer waiting on its root), no browser timer (the feed's chunk absent, the
+// render host gone), no browser-work hold
+describe('O17 at the measured browser window', () => {
+  const facts = (over: Partial<{ broker: unknown; sockets: unknown; holds: string[] }> = {}) => ({
+    broker: { cold: 1, promoting: 0, spliced: 0, buffered: 0 },
+    sockets: { s1: { listening: true, relayed: 0, refused: 0, waiting: 0 } },
+    holds: [] as string[],
+    ...over,
+  });
+  const report = (browser: unknown, modules = ['mawsd.js', 'cua-broker-1a.js']) => ({ at: '2026-11-01T00:00:00.000Z', resources: ['Timeout'], modules, browser: browser as never });
+  const idle = { sessions: 1, connected: 1, renderPid: null, starts: 1, startsAtFirstExit: 1 };
+
+  it('finds nothing in an idle window', () => {
+    expect(browserWindowProblems('the window’s start', report(facts()), idle)).toEqual([]);
+  });
+
+  it('names each thing that is not idle', () => {
+    const busy = facts({ broker: { cold: 0, promoting: 1, spliced: 1, buffered: 12 }, sockets: { s1: { listening: true, relayed: 0, refused: 0, waiting: 1 } }, holds: ['s1'] });
+    expect(browserWindowProblems('the window’s end', report(busy, ['mawsd.js', 'cua-broker-1a.js', 'browser-feed-2b.js']), { ...idle, connected: 0, renderPid: 4242, starts: 2 })).toEqual([
+      'the window’s end: 0 of 1 connectors connected',
+      'the window’s end: a render child, pid 4242',
+      'the window’s end: render.starts 2, 1 at the first exit',
+      'the window’s end: the broker holds 1 promoting, 1 spliced, 12 bytes buffered (0 cold served of 1)',
+      'the window’s end: 1 peer waiting on its root',
+      'the window’s end: browser-feed-2b.js loaded (the feed’s frame timers)',
+      'the window’s end: browser work held for s1',
+    ]);
+  });
+
+  it('names a report without the browser’s facts, and a broker never loaded', () => {
+    expect(browserWindowProblems('the window’s start', report(null), idle)).toEqual(['the window’s start: mawsd reported no browser facts']);
+    expect(browserWindowProblems('the window’s start', report(facts({ broker: null })), idle)).toEqual(['the window’s start: the broker’s chunk is not loaded, though cua is connected']);
   });
 });

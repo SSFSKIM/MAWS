@@ -18,6 +18,20 @@ export const VARIANTS = ['baseline', 'fps30', 'fps60', 'beginframe'];
 export const CLICK_GAIN = 0.3;
 export const TIMER100_HZ = 9;
 export const MAX_MISSING = 0.1;
+// the clicks probe.cjs sends (its CLICKS): a variant that sampled fewer, did not finish or recorded an error is read as
+// incomplete and never compared or recommended
+export const CLICK_SAMPLES = 30;
+
+// why a variant's reading is incomplete, or null when it finished with its whole click sample and no error
+export function incompleteness(v) {
+  if (!v || v.missing || v.unreadable) return v?.unreadable ? `unreadable: ${v.unreadable}` : 'no result file';
+  const why = [];
+  if (v.done !== true) why.push('did not finish');
+  if ((v.errors ?? []).length > 0) why.push(`errors: ${v.errors.join(', ')}`);
+  const clicks = v.clickToPaint?.clicks ?? 0;
+  if (why.length === 0 && clicks !== CLICK_SAMPLES) why.push(`${clicks} of ${CLICK_SAMPLES} clicks sampled`);
+  return why.length ? why.join('; ') : null;
+}
 
 const round = (value, digits = 1) => (value === null || value === undefined || Number.isNaN(value) ? null : Math.round(value * 10 ** digits) / 10 ** digits);
 
@@ -79,6 +93,8 @@ export function summarizeVariant(raw) {
 export function verdict(variants) {
   const rule = `qualifies: click-to-paint median >= ${CLICK_GAIN * 100}% below baseline's, 100 ms timer >= ${TIMER100_HZ} Hz, <= ${MAX_MISSING * 100}% of clicks missing`;
   const base = variants.baseline;
+  const baseIncomplete = base && !base.missing && !base.unreadable ? incompleteness(base) : null;
+  if (baseIncomplete !== null) return { rule, baseline: null, variants: {}, qualifying: [], best: null, reading: `the baseline is incomplete (${baseIncomplete}): nothing to compare against` };
   const baseMedian = base?.clickToPaint?.medianMs ?? null;
   if (baseMedian === null) return { rule, baseline: null, variants: {}, qualifying: [], best: null, reading: 'no baseline click-to-paint median: nothing to compare against' };
   const compared = {};
@@ -89,8 +105,9 @@ export function verdict(variants) {
     const gain = medianMs === null ? null : (baseMedian - medianMs) / baseMedian;
     const missingShare = c && c.clicks > 0 ? c.missing / c.clicks : 1;
     const timer100Hz = v?.timer100Hz ?? null;
-    const qualifies = gain !== null && gain >= CLICK_GAIN && timer100Hz !== null && timer100Hz >= TIMER100_HZ && missingShare <= MAX_MISSING;
-    compared[name] = { clickMedianMs: medianMs, clickGainPct: round(gain === null ? null : gain * 100), timer100Hz, missing: c?.missing ?? null, qualifies };
+    const incomplete = incompleteness(v);
+    const qualifies = incomplete === null && gain !== null && gain >= CLICK_GAIN && timer100Hz !== null && timer100Hz >= TIMER100_HZ && missingShare <= MAX_MISSING;
+    compared[name] = { clickMedianMs: medianMs, clickGainPct: round(gain === null ? null : gain * 100), timer100Hz, missing: c?.missing ?? null, ...(incomplete !== null && { incomplete }), qualifies };
   }
   const qualifying = Object.keys(compared).filter((name) => compared[name].qualifies);
   const best = qualifying.length ? qualifying.reduce((a, b) => (compared[b].clickMedianMs < compared[a].clickMedianMs ? b : a)) : null;

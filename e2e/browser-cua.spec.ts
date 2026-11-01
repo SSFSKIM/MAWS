@@ -51,6 +51,7 @@ import { daemonPaths, renderCuaSocketDir } from '@shared/daemon/files';
 import { BROWSER_ENGINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { reachMachine } from '../src/mawsd/machine-client';
 import type { ConnectorControl } from '../test/support/cua-engine';
+import { latencyBudgets } from './support/latency';
 import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, PAGE_MARKER, SCREENCAST, startHeadlessScene, startPages as startHeadlessPages, type HeadlessScene } from './support/headless-browser';
 // P5 O17 M8 end
 import { collectMainOutput } from './support/browser-import-scene';
@@ -636,45 +637,66 @@ test('on the daemon shape the engine\'s connector reaches the app through mawsd\
   }
 });
 
-test('a session launched with no app is refused by capability until the app attaches, then served; the app\'s quit mid-lease cuts it cleanly, and its relaunch serves it again on the same socket', async () => {
+// P5 O17 M8 (fix 1): O17's §I reading with no app. Before O17 M7 no engine host lists host.browserWork, so the session
+// reads the old-host reason and nothing listens for it (the route `none`); from M7 it reads the screencast and the broker
+// serves cua cold at once. Either way the app's attachment serves it, its quit mid-lease cuts it cleanly, and its
+// relaunch serves it again on the same socket: the counts below are read against what the connector had before each.
+test('a session launched with no app reads O17’s no-app capability until the app attaches, then is served; the app\'s quit mid-lease cuts it cleanly, and its relaunch serves it again on the same socket', async () => {
   test.setTimeout(240_000);
   const live = liveRoot([], { retry: true, lease: true });
   // the daemon reads its own scratch engine store (<profile>/claude-config): the transcript is seeded there before it starts
   let seeded = '';
   const daemon = await startProfileDaemon({ userData: live.userData, env: { MAWS_E2E_ENGINE_BIN: live.bin }, prepare: ({ claudeConfigDir }) => void ([seeded] = seedTranscripts(claudeConfigDir, live.repo, ['the cua engine stub, before any app'])) });
   const launches: MawsLaunch[] = [];
+  const noApp = ENGINE_HOST_BROWSER_WORK ? SCREENCAST : { available: false, reason: expect.stringMatching(/^the engine host on .+ predates browser work holds; it is replaced when idle$/) };
   try {
     const id = await sessionOf(() => daemon.request<Listed>('session.list', {}), seeded);
     const path = daemonSocketOf(live.userData, id);
-    expect(await daemon.request<{ browser: { available: boolean; reason?: string } }>('session.capabilities', { appSessionId: id })).toMatchObject({ browser: { available: false, reason: expect.stringMatching(/^no browser is attached on /) } });
+    const capability = async () => (await daemon.request<{ browser: { available: boolean; reason?: string } }>('session.capabilities', { appSessionId: id })).browser;
+    expect(await capability(), 'O17’s reading with no app').toMatchObject(noApp);
     expect(await daemon.request('session.launch', { spec: launchSpec(id, live.repo, path) })).toMatchObject({ status: 'launching' });
     const report = join(live.repo, 'cua-connector.json');
-    await expect.poll(() => retryingOf(report)?.refused ?? 0, { timeout: 20_000, message: 'cua\'s host finds nothing listening while no app is attached' }).toBeGreaterThan(1);
-    expect(retryingOf(report)).toMatchObject({ hellos: 0, connected: false });
-    expect(existsSync(path), 'nothing listens').toBe(false);
+    if (ENGINE_HOST_BROWSER_WORK) {
+      await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'the broker serves cua cold with no app' }).toBeGreaterThan(0);
+      expect(existsSync(path), 'the session’s cold listener').toBe(true);
+    } else {
+      await expect.poll(() => retryingOf(report)?.refused ?? 0, { timeout: 20_000, message: 'cua\'s host finds nothing listening while no app is attached' }).toBeGreaterThan(1);
+      expect(retryingOf(report)).toMatchObject({ hellos: 0, connected: false });
+      expect(existsSync(path), 'nothing listens').toBe(false);
+    }
 
+    const beforeApp = retryingOf(report)!;
     const first = await launchMaws({ userData: live.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: live.bin } });
     launches.push(first);
-    await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'served once the app attaches' }).toBe(1);
-    expect(value(await invoke(first.page, 'session.capabilities', { appSessionId: id }))).toMatchObject({ browser: { available: true } });
+    await expect.poll(async () => (await seam(first).inspect())[id]?.connections ?? 0, { timeout: 20_000, message: 'served once the app attaches' }).toBe(1);
+    expect(retryingOf(report)!.hellos!, 'a hello from the app’s side').toBeGreaterThan(beforeApp.hellos!);
+    expect(value(await invoke(first.page, 'session.capabilities', { appSessionId: id }))).toMatchObject({ browser: { available: true, viewed: 'local' } });
     // mid-lease: cua's host holds a tab of the session's browser with its debugger attached
-    await expect.poll(() => retryingOf(report)?.leases ?? 0, { timeout: 20_000, message: 'the lease taken through the relay' }).toBe(1);
+    await expect.poll(async () => (await seam(first).inspect())[id]?.leased.length ?? 0, { timeout: 20_000, message: 'the lease taken through the relay' }).toBe(1);
     expect((await seam(first).inspect())[id]).toMatchObject({ connections: 1, refused: 0, leased: [expect.any(String)] });
+    const served = retryingOf(report)!;
 
     // the app quits mid-lease: its quit completes, and cua's host loses the connection within the poll (no hang)
     const exited = new Promise<void>((done) => first.app.process().once('exit', () => done()));
     await first.app.evaluate(({ app: electron }) => electron.quit());
     await exited;
-    await expect.poll(() => retryingOf(report)?.closes ?? 0, { timeout: 10_000, message: 'the relayed connection ends with the app, the lease with it' }).toBe(1);
-    expect(retryingOf(report)).toMatchObject({ connected: false });
-    await expect.poll(() => existsSync(path), { timeout: 5_000, message: 'the socket stops listening' }).toBe(false);
-    expect(await daemon.request('session.capabilities', { appSessionId: id })).toMatchObject({ browser: { available: false } });
+    await expect.poll(() => retryingOf(report)?.closes ?? 0, { timeout: 10_000, message: 'the relayed connection ends with the app, the lease with it' }).toBeGreaterThan(served.closes!);
+    if (ENGINE_HOST_BROWSER_WORK) {
+      await expect.poll(capability, { timeout: 10_000, message: 'the screencast again with no app' }).toEqual(SCREENCAST);
+      await expect.poll(() => existsSync(path), { timeout: 5_000, message: 'the session listens cold again' }).toBe(true);
+    } else {
+      expect(retryingOf(report)).toMatchObject({ connected: false });
+      await expect.poll(() => existsSync(path), { timeout: 5_000, message: 'the socket stops listening' }).toBe(false);
+      expect(await capability()).toMatchObject(noApp);
+    }
 
+    const away = retryingOf(report)!;
     const second = await launchMaws({ userData: live.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: live.bin } });
     launches.push(second);
-    await expect.poll(() => retryingOf(report)?.hellos ?? 0, { timeout: 20_000, message: 'served again after the relaunch, on the path the engine was told at its launch' }).toBe(2);
+    await expect.poll(async () => (await seam(second).inspect())[id]?.connections ?? 0, { timeout: 20_000, message: 'served again after the relaunch, on the path the engine was told at its launch' }).toBe(1);
     expect(retryingOf(report)).toMatchObject({ connected: true, hello: { extensionInstanceId: `maws:${id}` } });
-    await expect.poll(() => retryingOf(report)?.leases ?? 0, { timeout: 20_000, message: 'a lease again, in the relaunched app' }).toBe(2);
+    expect(retryingOf(report)!.hellos!).toBeGreaterThan(away.hellos!);
+    await expect.poll(async () => (await seam(second).inspect())[id]?.leased.length ?? 0, { timeout: 20_000, message: 'a lease again, in the relaunched app' }).toBe(1);
     expect((await seam(second).inspect())[id]).toMatchObject({ connections: 1, leased: [expect.any(String)] });
     expect(mawsdLogOf(live.userData)).not.toContain(`cua socket of ${id}: refused`);
   } finally {
@@ -720,6 +742,7 @@ test('one session\'s engine cannot reach another session\'s tab engine directly:
 // and tabs. A scene that needs a real engine host listing `host.browserWork` (M7) skips with BEFORE_M7 until this build's
 // engine host lists it: then no real engine host selects the headless route.
 const QUIET_MS = 15_000; // the render host's quiet period under these scenes (MAWS_RENDER_QUIET_MS)
+const CUA_BROWSER_START_MS = 4_000; // cua's bound on its browser's start, from the first real primitive to the tab
 const LONG_QUIET_MS = 120_000; // a scene that must find the render host still running
 const appCuaSocket = (userData: string, id: AppSessionId) => join(userData, 'browser', 'cua', `${id}.sock`);
 const launchOver = (scene: HeadlessScene) => launchMaws({ userData: scene.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: scene.bin } });
@@ -735,6 +758,7 @@ const evaluated = async (cua: ConnectorControl, tabId: number, expression: strin
 test('O17 scene 1, the first browser: with no app a session through the start path reads the screencast; cua is answered cold, its creation sequence starts the render host within 4 s and reaches 127.0.0.1; the render host ends after its quiet period while cua stays connected', async () => {
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
   test.setTimeout(180_000);
+  const within = latencyBudgets(); // the load the run starts under (e2e/support/latency.ts)
   const pages = await startHeadlessPages();
   const scene = await startHeadlessScene({ env: { MAWS_RENDER_QUIET_MS: String(QUIET_MS) } });
   try {
@@ -750,7 +774,8 @@ test('O17 scene 1, the first browser: with no app a session through the start pa
 
     const created = await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
     const startMs = created.steps.filter((step) => step.method === 'windows.create' || step.method === 'tabs.create').reduce((sum, step) => sum + step.ms, 0);
-    expect(startMs, `the first real primitive through to the tab within CUA_BROWSER_START_MS (${JSON.stringify(created.steps)})`).toBeLessThanOrEqual(4_000);
+    // cua's CUA_BROWSER_START_MS, a latency the machine's load reaches (Chromium's start): the load-aware budget
+    within('O17 the creation sequence to its tab', startMs, CUA_BROWSER_START_MS, `the first real primitive through to the tab within CUA_BROWSER_START_MS (${JSON.stringify(created.steps)})`);
     expect(created.screenshotBytes, 'a screenshot through the lease').toBeGreaterThan(0);
     expect(await evaluated(cua, created.tabId, 'document.querySelector("#marker").textContent'), 'the page from 127.0.0.1').toBe(PAGE_MARKER);
     expect(await scene.render()).toMatchObject({ starts: 1, browserSessions: 1, browserTabs: 1, pid: expect.any(Number) });
@@ -777,7 +802,8 @@ test('O17 scene 2, handover: the app attaching during a start and during an acti
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
   test.setTimeout(360_000);
   const pages = await startHeadlessPages();
-  const scene = await startHeadlessScene({ engine: { retryMs: 5_000 /* cua's CLIENT_RETRY_MS */, lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS) } });
+  // MAWS_E2E_BROWSER_START_HOLD (mawsd's e2e seam): the first headless start waits for the first app's attachment
+  const scene = await startHeadlessScene({ engine: { retryMs: 5_000 /* cua's CLIENT_RETRY_MS */, lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS), MAWS_E2E_BROWSER_START_HOLD: '1' } });
   const launches: MawsLaunch[] = [];
   try {
     const repo = scene.repo(0);
@@ -789,15 +815,18 @@ test('O17 scene 2, handover: the app attaching during a start and during an acti
       expect((await scene.capabilities(id)).browser).toEqual({ available: true, viewed: 'local' });
     };
 
-    await test.step('the app attaches during a start: whatever the start had made is dropped, and cua is served by the app', async () => {
+    await test.step('the app attaches during a start: the held start is settled by the handover, its trigger lost, nothing started, and cua is served by the app', async () => {
       const creating = cua.sequence(pages.url('/'));
-      await expect.poll(async () => (await scene.render()).state, { timeout: 10_000, message: 'the render host starting' }).not.toBe('off');
+      await expect.poll(scene.mawsdLog, { timeout: 15_000, message: 'the start is held until an app attaches' }).toContain(`[browser] e2e: the start of ${id} held until an app attaches`);
+      expect((await scene.render()).starts, 'nothing started while held').toBe(0);
       const first = await launchOver(scene);
       launches.push(first);
       const outcome = await creating;
+      expect(outcome, 'the pending creation ends with its connection, unanswered').toMatchObject({ ok: false, error: 'lost' });
+      expect(scene.mawsdLog(), 'the hold released by the attachment').toContain('[browser] e2e: the held starts released by an app’s attachment');
       await servedByApp(first);
-      await expect.poll(async () => ((await scene.render()).browserTabs ?? 0), { message: 'the session’s headless tabs closed' }).toBe(0);
-      console.log(`[O17 scene 2] the creation sequence across the attachment: ${outcome.ok ? 'it finished before the handover' : outcome.error}`);
+      const after = await scene.render();
+      expect({ starts: after.starts, sessions: after.browserSessions ?? 0, tabs: after.browserTabs ?? 0 }, 'the released start began nothing: no Chromium, no session, no tab').toEqual({ starts: 0, sessions: 0, tabs: 0 });
       await quitApp(first);
     });
 

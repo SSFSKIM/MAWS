@@ -107,7 +107,7 @@ import { supervisorEnv } from '@shared/host/detached-transport';
 // P5 O17 M8 start
 import { cuaSocketDir } from '@shared/daemon/files';
 import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, startHeadlessScene, startPages, type HeadlessScene } from './support/headless-browser';
-import { o17IdleProblems, type E2eResources } from '../test/support/daemon-idle';
+import { browserWindowProblems, o17IdleProblems, type E2eResources } from '../test/support/daemon-idle';
 // P5 O17 M8 end
 
 test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba, e2e:daemon-idle-spine and e2e:daemon-idle-mawsd-spine (MAWS_DAEMON_IDLE_PERF=1)');
@@ -383,26 +383,46 @@ test('daemon idle render: the footprint and CPU the daemon shape keeps after a r
 // whose engines are the cua engine stub that comes ready (the ordinary start path) with its connector, cua's host,
 // connected throughout; no idle release, so the sessions stay live through the window. Both measure mawsd, the engine
 // host and the pty host against DAEMON_IDLE_BOUND: the broker's code, each session's listener and connected socket are
-// counted, never excluded. Before O17 M7 no engine host selects the headless route, so neither runs (BEFORE_M7).
+// counted, never excluded. M8's Decisions are asserted at the window's start, after the settle, and again at its end
+// (browserWindowProblems, from mawsd's SIGUSR2 report), and a render child at any sample fails the case. Before O17 M7 no
+// engine host selects the headless route, so neither runs (BEFORE_M7).
 const CUA_RETRY_MS = 5_000; // cua's CLIENT_RETRY_MS
 const BROWSER_QUIET_MS = 30_000;
 const browserElectron = () => execFileSync(electronBinary(), ['-p', 'process.versions.electron'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' }).trim();
-const workHeld = async (scene: HeadlessScene, id: AppSessionId) => ((await scene.sessionStatus(id)).work as { holds?: { browser?: string } } | undefined)?.holds?.browser;
-const renderHosts = (root: string) => processesNaming(root).filter((p) => p.command.includes('--render-host') || p.command.includes(join('mawsd', 'render-host'))).map((p) => p.command);
+const renderHosts = (root: string) => processesNaming(root).filter((p) => p.command.includes('--render-host') || p.command.includes(join('mawsd', 'render-host'))).map((p) => `${p.pid} ${p.command}`);
 
-// The window over a headless scene's daemon processes, its report written as `file`, the bound asserted
-async function measuredHeadless(scene: HeadlessScene, ids: readonly AppSessionId[], file: string, extra: Record<string, unknown>): Promise<void> {
+// The browser's idle at one edge of the window: what mawsd reports, the connectors' own reports, the render host's status
+async function browserWindow(scene: HeadlessScene, moment: string, startsAtFirstExit: number): Promise<{ problems: string[]; facts: E2eResources }> {
+  const repos = Array.from({ length: scene.repos }, (_, n) => scene.repo(n));
+  const facts = await mawsdResources(scene.userData, scene.daemon.pid);
+  const render = await scene.render();
+  const connected = repos.filter((repo) => { const report = scene.report(repo); return report?.connected === true && isAlive(report.pid); }).length; // prettier-ignore
+  const problems = browserWindowProblems(moment, facts, { sessions: repos.length, connected, renderPid: render.pid, starts: render.starts, startsAtFirstExit });
+  if ((render.browserTabs ?? 0) > 0) problems.push(`${moment}: ${render.browserTabs} headless tabs`);
+  for (const host of renderHosts(scene.root)) problems.push(`${moment}: a render host process: ${host}`);
+  return { problems, facts };
+}
+
+// The settle, then the window over a headless scene's daemon processes, M8's Decisions asserted at both edges and a render
+// child watched for at every sample; its report written as `file`, the bound asserted
+async function measuredHeadless(scene: HeadlessScene, ids: readonly AppSessionId[], file: string, startsAtFirstExit: number, extra: Record<string, unknown>): Promise<void> {
   await sleep(IDLE_RUN.settleS * 1_000);
   const procs = measured(processesNaming(scene.root), scene.root, measuredOn('daemon'));
   expect(procs.map((p) => p.pid), "the profile's mawsd is measured").toContain(scene.daemon.pid);
+  const atStart = await browserWindow(scene, 'the window’s start', startsAtFirstExit);
+  expect(atStart.problems, 'the browser idle as the window starts').toEqual([]);
   const electron = browserElectron();
-  const measurement = await measureWindow(procs);
+  const renderSeen: string[] = [];
+  const measurement = await measureWindow(procs, IDLE_RUN, () => renderSeen.push(...renderHosts(scene.root)));
+  const atEnd = await browserWindow(scene, 'the window’s end', startsAtFirstExit);
   const ended = (await Promise.all(ids.map(async (id) => (await scene.sessionStatus(id)).process === 'exited'))).some(Boolean);
   const reasons = windowReasons(measurement, ended);
   const { footprintKiB, rssKiB, cpuS, load } = measurement;
   const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound: DAEMON_IDLE_BOUND, electron, load, loadPair: measurement.loadPair });
   const misses = footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, DAEMON_IDLE_BOUND);
-  report(file, line, reasons, { shape: 'daemon', electron, bound: DAEMON_IDLE_BOUND, misses, ...extra, ...measurement.record, sessionEnded: ended });
+  report(file, line, reasons, { shape: 'daemon', electron, bound: DAEMON_IDLE_BOUND, misses, ...extra, browserAtStart: atStart.facts, browserAtEnd: atEnd.facts, renderSeen, ...measurement.record, sessionEnded: ended });
+  expect(renderSeen, 'no render child during the window').toEqual([]);
+  expect(atEnd.problems, 'the browser idle as the window ends').toEqual([]);
   expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
 }
 
@@ -422,21 +442,14 @@ test('daemon idle render: the agent’s browser warm to idle, a real cua connect
     await expect.poll(scene.mawsdLog, { timeout: BROWSER_QUIET_MS + 60_000, message: 'the first quiet period ends the render host' }).toContain(exitLine);
     await expect.poll(async () => (await scene.render()).pid, { timeout: 15_000 }).toBeNull();
     const starts = (await scene.render()).starts;
+    // cua's spliced connection ended with the render host: its retry reaches the broker, which serves it cold
+    await expect.poll(async () => (await cua.state()).connected, { timeout: 2 * CUA_RETRY_MS + 5_000, message: 'cua back on the broker' }).toBe(true);
     const { closes, hellos } = await cua.state();
     // a second quiet period, spanning two of cua's retry intervals, with nothing asked: cua stays on the broker
     await sleep(Math.max(BROWSER_QUIET_MS, 2 * CUA_RETRY_MS) + 5_000);
     expect(await cua.state(), 'cua stayed connected: no close, no new hello').toMatchObject({ connected: true, closes, hellos });
     cua.close(); // the scene's control link only; the connector stays connected to the session's socket
-
-    const render = await scene.render();
-    expect(render, 'no render child and no tab; no start since the first exit').toMatchObject({ pid: null, starts });
-    expect(render.browserTabs ?? 0).toBe(0);
-    expect(await workHeld(scene, id), 'no browser-work hold').toBeUndefined();
-    expect(renderHosts(scene.root), 'no render host process').toEqual([]);
-    const resources = await mawsdResources(scene.userData, scene.daemon.pid);
-    expect(resources.modules.some((name) => name.startsWith('cua-broker-')), 'the broker’s code is resident, and counted').toBe(true);
-    expect(sessionListeners(scene.userData), 'the session’s listener, counted').toBe(1);
-    await measuredHeadless(scene, [id], 'daemon-idle-render-browser.json', { case: 'browser warm to idle', starts, resources });
+    await measuredHeadless(scene, [id], 'daemon-idle-render-browser.json', starts, { case: 'browser warm to idle', starts });
   } finally {
     await scene.stop();
     await pages.close();
@@ -457,8 +470,7 @@ test('daemon idle render: four kept sessions with live stub engines and connecte
       cua.close();
     }
     expect(sessionListeners(scene.userData), 'one listener per live session with no app').toBe(4);
-    expect((await scene.render()).starts, 'no Chromium started').toBe(0);
-    await measuredHeadless(scene, ids, 'daemon-idle-render-kept.json', { case: 'four kept sessions' });
+    await measuredHeadless(scene, ids, 'daemon-idle-render-kept.json', 0, { case: 'four kept sessions' });
   } finally {
     await scene.stop();
   }
@@ -886,7 +898,7 @@ function electronBinary(): string {
 // the first sample, and `ps -o time=` at the start and the end; the window's 30 s pair from its loads. Each sample's one
 // process table (`ps -axo`) tells which measured processes are still the ones it started with and, with the cores' CPU
 // times read beside the load, gives the sample's diagnostics.
-async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN) {
+async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN, onSample?: () => void /* P5 O17 M8: a scene's own watch at each sample */) {
   const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
   const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
   const cpuAtEnd = new Map<number, number>();
@@ -900,6 +912,7 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     await sleep(Math.max(0, windowStart + k * run.everyS * 1_000 - Date.now()));
     const atS = Math.round((Date.now() - windowStart) / 1_000);
     const table = readProcessTable();
+    onSample?.();
     const topProcess = topOutside(lastTable, table, procs.map((p) => p.pid));
     lastTable = table;
     const live = procs.filter((p) => table.get(p.pid)?.started === started.get(p.pid));

@@ -132,7 +132,10 @@ async function startScene(more: Record<string, FrontHandler> = {}): Promise<Scen
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   const fromRoot = createRequire(join(REPO_ROOT, 'package.json'));
   const binary = executable ?? (fromRoot('electron') as string);
-  const entry = executable ? [] : ['-r', join(dirname(fromRoot.resolve('playwright-core/package.json')), 'lib/server/electron/loader.js'), join(REPO_ROOT, 'out/main/index.js')];
+  // a checkout's Electron is given the app root, as mawsd's renderCommand gives it (src/mawsd/render-seam.ts), never the
+  // entry file: the render host finds the peer identity addon under app.getAppPath(), which a file argument would make
+  // out/main (P5 O17 M8 fix 1: pass 3's relay could not be confirmed with no addon loaded)
+  const entry = executable ? [] : ['-r', join(dirname(fromRoot.resolve('playwright-core/package.json')), 'lib/server/electron/loader.js'), REPO_ROOT];
   const wrapped = stderrFromSpawn(fixtures, binary);
   const app = await _electron.launch({ executablePath: wrapped.executablePath, args: [...entry, '--render-host', profile], env, cwd: REPO_ROOT });
   const child = app.process();
@@ -451,7 +454,11 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
     await expect.poll(() => wire.answers.has(id), { timeout: 30_000, message: `the answer to ${operation.op}` }).toBe(true);
     return wire.answers.get(id)!;
   };
-  const ok = async (operation: BrowserEngineRequest['operation']) => expect(await ask(operation), operation.op).toEqual({ ok: true, value: operation.op === 'inventory' ? expect.anything() : null });
+  // a refusal names the render host's own lines with it (its stderr since the spawn), so a CI run says why
+  const ok = async (operation: BrowserEngineRequest['operation']) => {
+    const answer = await ask(operation);
+    expect(answer, `${operation.op}${answer.ok ? '' : `; the render host said:\n${scene!.stderr().split('\n').filter((line) => line.includes('[browser]') || line.includes('[render-host]') || line.includes('peer')).slice(-40).join('\n')}`}`).toEqual({ ok: true, value: operation.op === 'inventory' ? expect.anything() : null });
+  };
   // a page's own reading, in the render host's main (never through cua's lease, which a person's input may hold)
   const inPage = <T>(urlPart: string, expression: string) =>
     app.evaluate(async ({ webContents }, [part, code]) => {
@@ -508,14 +515,18 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       for (const type of ['down', 'up'] as const) await input({ kind: 'pointer', type, ...centre, button: 'left', buttons: type === 'down' ? 1 : 0, clickCount: 1, modifiers: [] });
       await expect.poll(() => inPage<string>('/input', 'document.querySelector("#state").textContent'), { message: 'the click landed' }).toBe('clicked');
       await expect.poll(() => wire.states.at(-1)?.tabs.find((each) => each.tabId === tabId)?.control, { message: 'the tab is the person’s while they act' }).toBe('human');
-      await input({ kind: 'wheel', x: 300, y: 300, deltaX: 0, deltaY: 400, modifiers: [] });
-      await expect.poll(() => inPage<number>('/input', 'scrollY'), { message: 'a positive deltaY scrolls down (the DOM’s sense)' }).toBeGreaterThan(0);
-      expect((await inPage<number[]>('/input', '__wheel'))!.every((delta) => delta > 0), 'the page heard a downward wheel').toBe(true);
+      // the click left focus on the button: the person focuses the field through the same viewer, then types
+      const field = (await inPage<{ x: number; y: number }>('/input', '(() => { const r = document.querySelector("#field").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()'))!;
+      for (const type of ['down', 'up'] as const) await input({ kind: 'pointer', type, ...field, button: 'left', buttons: type === 'down' ? 1 : 0, clickCount: 1, modifiers: [] });
+      await expect.poll(() => inPage<string>('/input', 'document.activeElement?.id ?? null'), { message: 'the field has focus' }).toBe('field');
       await input({ kind: 'key', type: 'down', key: 'a', code: 'KeyA', repeat: false, modifiers: [] });
       await input({ kind: 'key', type: 'up', key: 'a', code: 'KeyA', repeat: false, modifiers: [] });
       await expect.poll(() => inPage<string[]>('/input', '__keys'), { message: 'a key reaches the unfocused offscreen view' }).toContain('a');
       await input({ kind: 'text', text: 'hello' });
-      await expect.poll(() => inPage<string>('/input', 'document.querySelector("#field").value'), { message: 'text through insertText' }).toContain('hello');
+      await expect.poll(() => inPage<string>('/input', 'document.querySelector("#field").value'), { message: 'text through insertText into the focused field' }).toContain('hello');
+      await input({ kind: 'wheel', x: 300, y: 300, deltaX: 0, deltaY: 400, modifiers: [] });
+      await expect.poll(() => inPage<number>('/input', 'scrollY'), { message: 'a positive deltaY scrolls down (the DOM’s sense)' }).toBeGreaterThan(0);
+      expect((await inPage<number[]>('/input', '__wheel'))!.every((delta) => delta > 0), 'the page heard a downward wheel').toBe(true);
       await ok({ op: 'close', subscriptionId: 'person' });
       await new Promise((resolve) => setTimeout(resolve, 3_500)); // the person's hand-back: the agent acts again 3 s after their last input
       await host!.request('tabs.remove', { tabId: tab.id });
