@@ -907,6 +907,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // its tab closed again, for its second ask
       await menu(againApp, 'tab.close');
       await expect(waitingComposer(), 'B’s session’s tab closed').toHaveCount(0, { timeout: 30_000 });
+      console.log(`[e2e:remote] M6: B's permission (${waitingAddress}) in Needs you and the badge, opened by ⌘⇧J, answered in A's pane, both cleared`);
     });
 
     await test.step('M6: conversation search finds a word of B’s transcript, its hit under B', async () => {
@@ -933,6 +934,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const underB = palette.getByRole('group', { name: B_NAME, exact: true });
       await quoting(expect(underB.getByRole('option').filter({ hasText: SEARCHED }), 'the hit under B').toHaveCount(1, { timeout: 60_000 }), async () => `the palette: ${await palette.innerText().catch(() => '')}\n${mainSaid(again)}`);
       expect(await underB.evaluate((el) => el.closest('[data-search-machine]')?.getAttribute('data-search-machine') ?? null), 'the group is B’s').toBe(b.ref);
+      console.log(`[e2e:remote] M6: search for "${SEARCHED}" found under B: ${(await underB.getByRole('option').filter({ hasText: SEARCHED }).innerText()).replace(/\s+/g, ' ')}`);
       await again.keyboard.press('Escape');
       await expect(palette).toHaveCount(0);
       await field.fill('');
@@ -944,12 +946,14 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await quoting(expect(row, 'the second ask in A’s Needs you').toHaveAccessibleName(/ · Approval needed$/, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
       await expect(needsYouCount(again, 1)).toBeVisible();
       await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the second ask counts in the dock badge' }).toBe('1');
+      const stoppedAt = Date.now();
       await b.stop();
       // main greys a machine's items at its link's `down`: drawn after the live rows, out of the count and the badge
       await quoting(expect(row, 'greyed once B is gone').toHaveAttribute('data-greyed', 'true', { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
       await expect(row).toHaveAccessibleName(/ · Approval needed, machine offline$/);
       await expect(needsYouCount(again, 0)).toBeVisible();
       await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'a greyed item leaves the dock badge' }).toBe('');
+      console.log(`[e2e:remote] M6: B's item greyed and out of the badge ${Date.now() - stoppedAt} ms after B's daemon was told to stop`);
     });
   } finally {
     await a?.cleanup();
