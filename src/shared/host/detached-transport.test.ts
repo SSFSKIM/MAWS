@@ -1263,6 +1263,7 @@ describe('the detached transport: the handover', () => {
     const drain = { inFlight: 1, armed: false };
     const asked: unknown[] = [];
     const answered: unknown[] = [];
+    const stops: unknown[] = []; // fix wave 3d: a stop-all it was sent, answered, then its exit order (it exits)
     const status = { hold: false, held: false, release: () => {} };
     const fake: FakeSupervisor = await startFake({
       register: (on) => {
@@ -1279,6 +1280,7 @@ describe('the detached transport: the handover', () => {
           return drain.inFlight > 0 ? { state: 'deferred' as const, inFlight: drain.inFlight } : { state: 'detaching' as const };
         });
         on('maws.pane.answer', async (input) => (answered.push(input), { outcome: 'delivered' as const }));
+        on('host.stopAll', async (input) => (stops.push(input), setImmediate(() => void fake.die()), { stopped: 1, forced: 0 }));
       },
     });
     await supervisor.start();
@@ -1286,7 +1288,7 @@ describe('the detached transport: the handover', () => {
     await until(() => fake.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore()); // announced once the link said ready
     await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
     expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'deferred', inFlight: 1 } });
-    return { fake, asked, answered, status };
+    return { fake, asked, answered, stops, status };
   }
 
   it('a completion held while its raiser reconnects mid-drain goes out on the link that meets it draining, once; held work stays for the successor', { timeout: 15_000 }, async () => {
@@ -1319,6 +1321,36 @@ describe('the detached transport: the handover', () => {
     await expect(completion).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
     expect(answered).toEqual([ANSWER]);
     expect([state().restarts, supervisor.facts('engine-host').lastExit], 'no crash: the host lives').toEqual([0, null]);
+  });
+
+  // fix wave 3d: a deliberate stop-all sent while a drain's close awaits the exit's settle is held for the draining
+  // process, as a completion is: the same process met draining again is sent it (D61(4)); one known gone leaves it to
+  // the successor, which has adopted the sessions
+  it('a stop-all sent in a drain’s exit settle reaches the same host when it is met draining again: it stops, and its close is no crash', { timeout: 15_000 }, async () => {
+    const { fake: old, asked, stops } = await paneDrainingFake();
+    old.dropClient(); // the host lives on, draining
+    await sleep(50); // inside the settle
+    const stopped = supervisor.dispatch('engine-host', 'host.stopAll', { graceMs: 1 });
+    await vi.waitFor(() => expect(stops, 'the stop reached the host that owns the drain').toHaveLength(1), { timeout: 5_000, interval: 5 });
+    await expect(stopped).resolves.toEqual({ ok: true, value: { stopped: 1, forced: 0 } });
+    expect(asked.length, 'met draining and taken back first').toBeGreaterThanOrEqual(2);
+    await until(() => state().state === 'ready' && state().pid !== old.pid); // its close, the drain's: the successor starts
+    expect([state().restarts, supervisor.facts('engine-host').lastExit]).toEqual([0, null]);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('a stop-all sent in a drain’s exit settle whose host then dies goes to the successor once it is ready', { timeout: 15_000 }, async () => {
+    const successorStops: unknown[] = [];
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid!, register: (on) => on('host.stopAll', async (input) => (successorStops.push(input), { stopped: 1, forced: 0 })) });
+    const { fake: old, stops } = await paneDrainingFake();
+    old.dropClient();
+    await sleep(50); // inside the settle
+    const stopped = supervisor.dispatch('engine-host', 'host.stopAll', { graceMs: 1 });
+    await old.die({ keepLock: true }); // gone before the settle ends
+    await expect(stopped).resolves.toEqual({ ok: true, value: { stopped: 1, forced: 0 } });
+    expect(successorStops).toEqual([{ graceMs: 1 }]);
+    expect(stops).toEqual([]);
+    expect(states.filter((s) => s.state === 'ready').map((s) => s.pid)).toEqual([old.pid, candidates[0]!.pid]); // sent once the successor read ready
   });
 
   it('a host that said its rows detached, then exited, handed over as planned: no crash count, no backoff, no toast', async () => {
