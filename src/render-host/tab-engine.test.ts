@@ -230,6 +230,47 @@ describe('the tab engine under a stand-in Electron', () => {
     expect(t.engine.inspect().sessions.A).toMatchObject({ tabs: 2, held: 'held' });
   });
 
+  // M8 fix 8: the agent hears of the popup at its adoption (`tabs.adopted`) and may attach before the sizing has gone out;
+  // its lease waits for the sizing, so its first command meets a page at the viewport
+  it('holds the agent’s lease on an adopted popup until its page is sized, and its commands go after the sizing', async () => {
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    const opener = await host.request<{ id: number }>('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    await host.request('debugger.attach', { tabId: opener.id }); // the agent drives the opener, so the popup is its own
+    const child = new (await import('./electron.fake')).FakePage();
+    const answerSizing = child.debugger.defer('Emulation.setVisibleSize');
+    (popup(activated(newestPage()), 'http://127.0.0.1:4000/popup') as { createWindow(options: unknown): unknown }).createWindow({ webContents: child });
+    const adopted = (await host.waitFor('tabs.adopted')).params.tabId as number;
+    let attached = false;
+    const attach = host.request('debugger.attach', { tabId: adopted }).then(() => (attached = true));
+    await expect.poll(() => child.debugger.methods()).toEqual(['Emulation.setVisibleSize']);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(attached, 'the lease waits for the sizing').toBe(false);
+    answerSizing();
+    await attach;
+    await host.request('debugger.sendCommand', { debuggee: { tabId: adopted }, method: 'Runtime.evaluate', params: { expression: 'innerWidth' } });
+    expect(child.debugger.methods()).toEqual(['Emulation.setVisibleSize', 'Runtime.evaluate']);
+    expect(child.debugger.attached, 'the sizing’s lease given back, the agent’s kept').toBe(true);
+  });
+
+  // M8 fix 8: a page Chromium would not size (an Electron or Chromium without the command) is said, with Chromium's own
+  // words, in the render host's log, which pass 3's failure carries; the agent's lease waits for it no longer
+  it('says why an adopted popup’s page could not be sized, in Chromium’s words, and lets the agent’s lease go on', async () => {
+    const t = stand();
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    const opener = await host.request<{ id: number }>('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    await host.request('debugger.attach', { tabId: opener.id });
+    const child = new (await import('./electron.fake')).FakePage();
+    child.debugger.failures.set('Emulation.setVisibleSize', "'Emulation.setVisibleSize' wasn't found");
+    (popup(activated(newestPage()), 'http://127.0.0.1:4000/popup') as { createWindow(options: unknown): unknown }).createWindow({ webContents: child });
+    const adopted = (await host.waitFor('tabs.adopted')).params.tabId as number;
+    await host.request('debugger.attach', { tabId: adopted });
+    const tabId = t.engine.inspect().views.find((view) => view.contentsId === child.id)!.tabId;
+    expect(t.logs).toContain(`[browser] the adopted popup ${tabId}'s page could not be sized to the viewport: 'Emulation.setVisibleSize' wasn't found`);
+  });
+
   it('keeps view.ts’s page preferences and WebRTC policy, offscreen', () => {
     expect(offscreenPreferences()).toEqual({ ...tabWebPreferences(), offscreen: true });
     expect(readFileSync(resolve(__dirname, '../main/browser/view.ts'), 'utf8')).toContain(`const TAB_WEBRTC_IP_POLICY = '${HEADLESS_WEBRTC_IP_POLICY}';`);

@@ -38,3 +38,29 @@ describe('TabClaims: the orphan policy', () => {
     expect(claims.isOrphan('popup')).toBe(false);
   });
 });
+
+// What a tab's next lease waits for (connection.ts's attach): a let-go lease's undo, and P5 O17 M8 fix 8's sizing of an
+// adopted popup's page, each settling by itself; both at once are both waited for.
+describe('TabClaims: what the next lease waits for', () => {
+  it('waits for every pending piece of work on the tab, and for nothing once each has settled or the tab is forgotten', async () => {
+    const claims = new TabClaims<string>('session');
+    expect(claims.awaitedByNextLease('t1')).toBeUndefined();
+    let undone!: () => void;
+    let sized!: () => void;
+    claims.beforeNextLease('t1', new Promise<void>((resolve) => (undone = resolve)));
+    claims.beforeNextLease('t1', new Promise<void>((resolve) => (sized = resolve)));
+    const awaited = claims.awaitedByNextLease('t1')!;
+    let settled = false;
+    void awaited.then(() => (settled = true));
+    undone();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled, 'the sizing is still under way').toBe(false);
+    sized();
+    await awaited;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(claims.awaitedByNextLease('t1')).toBeUndefined();
+    claims.beforeNextLease('t2', new Promise<void>(() => {}));
+    claims.forget('t2');
+    expect(claims.awaitedByNextLease('t2')).toBeUndefined();
+  });
+});

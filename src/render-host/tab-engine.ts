@@ -79,7 +79,8 @@ export const headlessPartition = (appSessionId: AppSessionId): string => `maws-h
 export interface TabEngineViews {
   readonly childPreferences: WebPreferences;
   createView(tab: BrowserTab, adopted?: WebContents): WebContentsView;
-  place(entry: TabEntry): void;
+  // the placement's work still under way once it returns (an adopted popup's sizing), which rejects with Chromium's error
+  place(entry: TabEntry): Promise<void> | undefined;
   unplace(entry: TabEntry): void;
   dispose(): void;
 }
@@ -202,7 +203,12 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     guardPage(entry);
     attachWindowOpen(entry, { store: popups, linkTarget: () => 'in-app', seam, childPreferences: views.childPreferences });
     attachInputSeams(entry);
-    views.place(entry);
+    const sizing = views.place(entry);
+    // M8 fix 8: the agent's lease on an adopted popup waits for its page's sizing; a failure is said with Chromium's error
+    if (sizing) {
+      const { tabId } = entry.tab;
+      cua.beforeNextLease(tabId, sizing.catch((error: unknown) => log(`[browser] the adopted popup ${tabId}'s page could not be sized to the viewport: ${error instanceof Error ? error.message : String(error)}`)));
+    }
   });
   store.onViewDestroying((entry) => views.unplace(entry));
   const controls = new TabControls({ store });

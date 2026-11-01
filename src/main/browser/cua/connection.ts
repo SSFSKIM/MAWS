@@ -358,11 +358,12 @@ export class CuaConnection {
     if (this.leases.has(tabId)) return { alreadyHeld: true };
     this.adoptOrphan(entry); // P5 O17 M4
     this.refuseHeld(entry);
-    // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS): the new lease
-    // starts once it settles, so none of its own toggles is undone and the page reads its own size again
-    const undoing = this.ctx.claims.undoOf(tabId);
-    if (undoing) {
-      await undoing;
+    // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS), or the sizing
+    // of an adopted popup's page (P5 O17 M8): the new lease starts once they settle, so none of its own toggles is undone
+    // and the page reads its own size, the viewport's, before its first command
+    const awaited = this.ctx.claims.awaitedByNextLease(tabId);
+    if (awaited) {
+      await awaited;
       return this.attach(debuggee);
     }
     if (!entry.view && entry.tab.url !== '') this.ctx.store.load(tabId, entry.tab.url); // a suspended tab resumes, as Chrome reloads a discarded one
@@ -655,7 +656,7 @@ export class CuaConnection {
   }
 
   // The undo holds the release (the host's detach reply) for RESET_BOUND_MS at most; what is still out then goes on, and
-  // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `undoing`).
+  // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `beforeNextLease`).
   private async release(leased: Leased, why: string): Promise<void> {
     leased.closing = true;
     leased.scope.released(); // the agent let go: nothing more is told of the tab, the undo's events included
@@ -664,7 +665,7 @@ export class CuaConnection {
     const commands = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });
     if (commands.length > 0 && leased.dbg.attached) {
       const undo = this.undo(leased, commands);
-      this.ctx.claims.undoing(tabId, undo.done);
+      this.ctx.claims.beforeNextLease(tabId, undo.done);
       if ((await within(undo.done.then(() => true), RESET_BOUND_MS)) === null && undo.out.size > 0) {
         this.ctx.log(`${this.undoLine(tabId, RESET_BOUND_MS, undo.out)}: its lease is released, and the tab's next lease waits for the undo`);
       }

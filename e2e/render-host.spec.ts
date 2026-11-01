@@ -614,10 +614,30 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
         const page = await readPage(path, '({ inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], devicePixelRatio })').catch((error: unknown) => ({ missing: String(error) }));
         return { ...main, page };
       };
+      // An Electron offscreen child is never sized by its window; the render host sizes its page through CDP's
+      // Emulation.setVisibleSize (offscreen-views.ts). The upgrade tripwire: an Electron or Chromium that drops or ignores
+      // the command fails here, on the exact size, with the render host's line carrying Chromium's error
+      const sizingLines = () => scene!.stderr().split('\n').filter((line) => line.includes('could not be sized to the viewport'));
       await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { timeout: 15_000, message: 'the popup at the agent’s viewport, once it commits and is placed' }).toEqual([1280, 800]).catch(async (error: unknown) => {
         const facts = { child: await sizingFacts('/child'), opener: await sizingFacts('/popup') };
-        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe sizing facts: ${JSON.stringify(facts)}`, { cause: error });
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe render host's sizing lines: ${JSON.stringify(sizingLines())}\nthe sizing facts: ${JSON.stringify(facts)}`, { cause: error });
       });
+      expect(sizingLines(), 'Chromium sized the popup’s page without an error').toEqual([]);
+      // M6's frame source (beginFrameSubscription) on the adopted popup: frames at the size a tab's own view gives (the
+      // still page's first frame, earlier in this pass)
+      const childTabId = tabIdOf('/child')!;
+      await ok({ op: 'open', subscriptionId: 'popup', tabId: childTabId, control: false });
+      await expect.poll(() => wire.frames.some((f) => f.subscriptionId === 'popup'), { timeout: 10_000, message: 'a frame of the adopted popup through beginFrameSubscription' }).toBe(true).catch(async (error: unknown) => {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe sizing facts: ${JSON.stringify(await sizingFacts('/child'))}`, { cause: error });
+      });
+      const popupFrame = wire.frames.find((f) => f.subscriptionId === 'popup')!.frame;
+      const stillFrame = wire.frames.find((f) => f.subscriptionId === 'still')!.frame;
+      expect(popupFrame, 'the popup’s frame').toMatchObject({ tabId: childTabId, seq: 1, viewport: { width: 1280, height: 800 } });
+      expect({ width: popupFrame.width, height: popupFrame.height }, 'the popup’s frame at the size a tab’s own view gives').toEqual({ width: stillFrame.width, height: stillFrame.height });
+      expect(popupFrame.width / popupFrame.height, 'the viewport’s aspect').toBeCloseTo(1280 / 800, 2);
+      const popupJpeg = await app.evaluate(({ nativeImage }, base64) => nativeImage.createFromBuffer(Buffer.from(base64, 'base64')).getSize(), popupFrame.jpegBase64);
+      expect(popupJpeg, 'a JPEG of the frame’s own size').toEqual({ width: popupFrame.width, height: popupFrame.height });
+      await ok({ op: 'close', subscriptionId: 'popup' });
       const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
       await host!.request('tabs.remove', { tabId: child.id });
       await host!.request('tabs.remove', { tabId: opener.id });

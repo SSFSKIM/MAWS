@@ -121,6 +121,9 @@ export interface CuaBackend extends LeaseHolds {
   // M3 fix wave: the session's agent activity, oldest first (`browser.agent.activities.list`); since cua board #93 an
   // earlier app run's too, from the browser's data
   activities(appSessionId: AppSessionId): BrowserAgentActivity[];
+  // P5 O17 M8: work on the tab that the next lease, any connection's, waits for (TabClaims `beforeNextLease`): the render
+  // host's sizing of an adopted popup's page. `done` settles by itself and never rejects.
+  beforeNextLease(tabId: string, done: Promise<void>): void;
   dispose(): void;
 }
 
@@ -456,6 +459,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     downloads,
     dialogs: { holds: (tabId) => claims.leasedTo(tabId) !== undefined, hold: (entry, info, callback) => held.hold(entry, info, callback) },
     activities: (appSessionId) => feed?.list(appSessionId) ?? [],
+    beforeNextLease: (tabId, done) => claims.beforeNextLease(tabId, done),
     inspect: () => ({
       peerModule: addon ? 'loaded' : 'unavailable',
       sessions: Object.fromEntries(

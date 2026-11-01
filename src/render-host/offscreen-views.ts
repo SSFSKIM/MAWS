@@ -53,33 +53,31 @@ export class OffscreenViews {
     return view;
   };
 
-  // The store's `onViewCreated`: into the sizing window, at the viewport
-  place(entry: TabEntry): void {
+  // The store's `onViewCreated`: into the sizing window, at the viewport; for an adopted popup, its page's sizing (see the
+  // head), under way after this returns, rejecting with Chromium's error
+  place(entry: TabEntry): Promise<void> | undefined {
     const view = entry.view;
-    if (!view || this.placed.has(entry)) return;
+    if (!view || this.placed.has(entry)) return undefined;
     const { width, height } = HEADLESS_VIEWPORT;
     if (!this.window || this.window.isDestroyed()) this.window = new BaseWindow({ show: false, width, height, useContentSize: true, frame: false, skipTaskbar: true });
     this.window.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width, height });
     this.placed.add(entry);
+    if (!this.adopted.has(view.webContents)) return undefined;
     // after Electron's `createWindow` has the child back: nothing attaches to it inside Electron's own open
-    if (this.adopted.has(view.webContents)) setImmediate(() => void this.sizeAdopted(entry, view));
+    return new Promise<void>((resolve) => setImmediate(resolve)).then(() => this.sizeAdopted(entry, view));
   }
 
   // An adopted popup's page at the viewport (see the head): one command under a lease, given back at once, so the
-  // attachment ends unless the agent holds one too
+  // attachment ends unless the agent holds one too. A tab gone meanwhile has no page to size.
   private async sizeAdopted(entry: TabEntry, view: WebContentsView): Promise<void> {
     const tabDebugger = entry.debugger;
     if (entry.view !== view || !tabDebugger || view.webContents.isDestroyed()) return;
+    const lease = await tabDebugger.lease();
     try {
-      const lease = await tabDebugger.lease();
-      try {
-        await tabDebugger.send('Emulation.setVisibleSize', { ...HEADLESS_VIEWPORT });
-      } finally {
-        lease.release();
-      }
-    } catch (error) {
-      console.error('[render-host] an adopted popup could not be sized to the viewport:', error);
+      await tabDebugger.send('Emulation.setVisibleSize', { ...HEADLESS_VIEWPORT });
+    } finally {
+      lease.release();
     }
   }
 
