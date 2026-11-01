@@ -9,10 +9,12 @@ import { readFileSync } from 'node:fs';
 import type { PeerAddon } from '../../../src/main/browser/cua/peer';
 
 const ticksPerSecond = 100; // USER_HZ on every Linux the devcloud images run
-const bootSeconds = (() => {
+let boot: number | null = null; // read at the first lookup, never at load: the bundle imports this module on darwin too
+const bootSeconds = (): number => {
+  if (boot !== null) return boot;
   const line = readFileSync('/proc/stat', 'utf8').split('\n').find((l) => l.startsWith('btime '));
-  return line ? Number(line.split(/\s+/)[1]) : 0;
-})();
+  return (boot = line ? Number(line.split(/\s+/)[1]) : 0);
+};
 
 function processOf(pid: number): { ppid: number; start: number } | null {
   try {
@@ -20,7 +22,7 @@ function processOf(pid: number): { ppid: number; start: number } | null {
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' '); // after "pid (comm) "
     const ppid = Number(fields[1]);
     const startTicks = Number(fields[19]);
-    return { ppid, start: Math.round((bootSeconds + startTicks / ticksPerSecond) * 1e6) };
+    return { ppid, start: Math.round((bootSeconds() + startTicks / ticksPerSecond) * 1e6) };
   } catch {
     return null;
   }
