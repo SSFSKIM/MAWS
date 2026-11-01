@@ -119,7 +119,7 @@ describe('an install', () => {
     const first = await installRenderRuntime(deps());
     expect(first).toEqual({ state: 'staged', staging: staging(), why: expect.stringContaining('sudo: a password is required') });
     expect(listing()).toEqual([stagingName(pin)]);
-    expect(reading()).toEqual({ available: false, reason: 'Chromium’s sandbox is not configured on vm-1: run mawsd render install with sudo' });
+    expect(reading()).toEqual({ available: false, reason: 'Chromium’s sandbox is not configured on vm-1: make sudo -n work for the user mawsd runs as, then run mawsd render install as that user, not as root' });
 
     privileged = true;
     const second = await installRenderRuntime(deps());

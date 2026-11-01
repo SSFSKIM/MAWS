@@ -152,6 +152,7 @@ export interface ServicesFront {
   appReady(): boolean;
   clients(): number;
   renderClients(): number; // P5 O5 M4: the render clients among them, which the daemon's clocks do not count
+  eventClients(): number; // P5 O5 M6: the ready clients the bus's events reach (render clients never do); `readiness` follows each change
   postRender(name: 'render.request' | 'render.exit' | 'render.hostGeneration', payload: unknown): boolean; // P5 O5 M4: to the newest ready render client; false with none
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go
@@ -478,6 +479,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
     renderClients: () => [...clients].filter((client) => client.renders).length,
+    eventClients: () => [...clients].filter((client) => !client.renders && client.isReady()).length,
     postRender(name, payload) {
       const newest = [...clients].filter((client) => client.renders && client.isReady()).sort((a, b) => b.readyAt - a.readyAt)[0];
       return newest?.send(name, payload) ?? false;

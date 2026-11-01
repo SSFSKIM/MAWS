@@ -202,6 +202,8 @@ async function renderUnderUnit(packaged: string | null): Promise<void> {
     const host = Number(started![1]);
     pids.add(host);
     expect(log()).toContain(`[render] the render host is ready (pid ${host})`);
+    // its own line, which mawsd reads from the stderr it piped at the spawn (render-seam.ts's spawnRenderHost)
+    expect(log(), 'the render host announces the profile it serves').toContain(`[render-host] ready: serving ${profile} `);
     if (packaged !== null || isAlive(host)) {
       // the packaged case reads it within its 5 s quiet period: the export has just returned
       expect(ps(host, 'ppid'), 'the unit’s mawsd spawned it').toBe(String(unit.pid));

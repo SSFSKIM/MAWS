@@ -200,5 +200,36 @@ describe('the render cache’s flips on Linux (P5 O5 M6, fix wave 1)', () => {
     await new Promise((resolve) => setTimeout(resolve, 800)); // past the watch's quiet period
     expect(watch.changes()).toHaveLength(3); // one event per flip
   });
+
+  it('the watch is open only while a session is tracked and a client hears the events: no client, no watch; released at the last client, at the session’s end and at the exit', async () => {
+    const watches: { open: boolean }[] = [];
+    const watchCache = () => {
+      const watch = { open: true };
+      watches.push(watch);
+      return { close: () => void (watch.open = false) };
+    };
+    const open = () => watches.filter((watch) => watch.open).length;
+    const daemon = await scene.start({ permanentClient: true, tmp: TMP, render: { runtime: () => ({ available: true as const }), cacheRoot: join(scene.root, 'render'), watchCache } });
+    const engine = await awake(daemon);
+    await until(() => engine.emitRaw('session.status', running(4_321)), 3_000, 'the link’s ready line');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(watches, 'a tracked session with no client to hear of a flip (a VM no app ever attached to): no watch').toHaveLength(0);
+
+    const first = await observer();
+    await until(() => open() === 1, 3_000, 'the watch opened by the first client (S was tracked all along)');
+    first.client.leave();
+    await until(() => open() === 0, 3_000, 'the watch released at the last client’s departure, S still tracked');
+    await observer();
+    await until(() => open() === 1, 3_000, 'the watch reopened by the next client');
+    expect(watches).toHaveLength(2);
+
+    engine.emitRaw('session.status', { appSessionId: S, status: { appSessionId: S, process: 'exited', pid: null } }); // no launch here was told it: forgotten
+    await until(() => open() === 0, 3_000, 'the watch released at the last session, the client still there');
+    engine.emitRaw('session.status', running(4_322));
+    await until(() => open() === 1, 3_000, 'reopened by a session again');
+    await daemon.stop('test over');
+    expect(open(), 'released at the exit').toBe(0);
+    expect(watches).toHaveLength(3);
+  });
 });
 

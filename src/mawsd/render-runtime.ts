@@ -76,7 +76,7 @@ export function sandboxHelperConfigured(path: string): boolean {
 }
 
 export const notInstalled = (pin: ElectronPin | null, machine: string): string => (pin === null ? `the render runtime is not installed on ${machine}` : `the render runtime ${pin.version} is not installed on ${machine}: run mawsd render install`);
-export const sandboxNotConfigured = (machine: string): string => `Chromium’s sandbox is not configured on ${machine}: run mawsd render install with sudo`;
+export const sandboxNotConfigured = (machine: string): string => `Chromium’s sandbox is not configured on ${machine}: make sudo -n work for the user mawsd runs as, then run mawsd render install as that user, not as root`;
 export const noDisplay = (machine: string): string => `the virtual display the render host needs (xvfb-run, the xvfb package) is not installed on ${machine}`;
 
 // `name` on `path` (a PATH value), or null

@@ -186,8 +186,8 @@ export interface DaemonOptions {
   claimSpine?: boolean;
   singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
   // P5 O5 M4: the render seam's chunk, the render host's spawn and the runtime's report (a fake host and platform)
-  // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's)
-  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string };
+  // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's), and the watch itself (a double)
+  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string; watchCache?: typeof watchRenderCache };
   cua?: { addon?: PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon (a double), the relay's wait
 }
 
@@ -949,19 +949,26 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let cua: CuaSockets | null = null; // made at step (6), with the other sockets
   const launchedHere = new Set<AppSessionId>(); // told to a launch: kept past its engine's exit (its next launch names it)
   // P5 O5 M6: on Linux, `mawsd render install` and `uninstall` flip the render entries with nothing else changing, so the
-  // cache is watched (one descriptor) while a session's capabilities are tracked, and released when none is: nothing
-  // runs for it at start or at idle
+  // cache is watched (one descriptor) while a flip has somewhere to go: a session's capabilities are tracked and a client
+  // the bus's events reach (the app, an observer on machine.sock) is ready. It is released at the last of either, and at
+  // the exit: nothing runs for it at start, at idle, or for sessions no one is there to hear about
   let cacheWatch: { close(): void } | null = null;
-  const watchCache = (any: boolean) => {
-    if (platform !== 'linux') return;
-    cacheWatch?.close();
-    cacheWatch = any ? watchRenderCache(options.render?.cacheRoot ?? renderCacheRoot(homedir()), () => sessionCapabilities.refresh()) : null;
+  let tracked = false;
+  let eventClients = () => 0; // the front's, once it exists (below)
+  let cacheWatchEnded = false;
+  const syncCacheWatch = () => {
+    const wanted = platform === 'linux' && !cacheWatchEnded && tracked && eventClients() > 0;
+    if (wanted && cacheWatch === null) cacheWatch = (options.render?.watchCache ?? watchRenderCache)(options.render?.cacheRoot ?? renderCacheRoot(homedir()), () => sessionCapabilities.refresh());
+    if (!wanted && cacheWatch !== null) {
+      cacheWatch.close();
+      cacheWatch = null;
+    }
   };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
     browser: (appSessionId) => browserCapability({ machine, path: daemonCuaSocketPath(cuaDir, appSessionId), targeted: cua?.targeted() ?? false }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
-    tracking: watchCache,
+    tracking: (any) => ((tracked = any), syncCacheWatch()),
   });
   // The attached app's cua directory, as its machine.client said it (none while no app is attached): the sockets listen
   // or stop; and whatever a session's capabilities read may have changed with it
@@ -1010,7 +1017,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
-    readiness: () => presenceChanged(),
+    readiness: () => (presenceChanged(), syncCacheWatch()), // P5 O5 M6: the cache's watch follows the event clients too
     beforeSpineCommand: wakeForDiscovery,
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
@@ -1019,6 +1026,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     browserChanged: followTabEngine, // P5 O5 M5
     log,
   });
+  eventClients = () => front.eventClients(); // P5 O5 M6: the cache's watch reads them from here on
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
   // P5 O5 M5: a removed session's cua socket goes with it
   front.events((name, payload) => {
@@ -1248,7 +1256,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
       cua?.close(); // P5 O5 M5: every session's socket, its relayed connections with it
-      watchCache(false);
+      cacheWatchEnded = true; // P5 O5 M6
+      syncCacheWatch();
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);

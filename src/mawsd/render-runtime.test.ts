@@ -91,7 +91,7 @@ describe('the reading the seam takes at each check', () => {
 
   it('says the sandbox is not configured while the install waits for privilege (its staging directory), or the helper was changed since', () => {
     mkdirSync(join(renderCacheRoot(home), stagingName(X64)), { recursive: true });
-    const sandbox = { available: false, reason: 'Chromium’s sandbox is not configured on vm-1: run mawsd render install with sudo' };
+    const sandbox = { available: false, reason: 'Chromium’s sandbox is not configured on vm-1: make sudo -n work for the user mawsd runs as, then run mawsd render install as that user, not as root' };
     expect(read()).toEqual(sandbox);
     publish(X64);
     expect(read({ helperConfigured: () => false })).toEqual(sandbox);
