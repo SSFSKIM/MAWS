@@ -11,7 +11,7 @@
 // client whose hello lists render.client and browser.engine, its per-session socket a real Unix socket that greets as
 // MAWS's backend does and makes a tab only after the fence (`browserEngine.work`). cua is a raw client of the
 // extension protocol on the daemon's socket for the session.
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -267,7 +267,8 @@ interface Stand {
 
 // The daemon on a stand-in Mac with the session's engine live (ENGINE), and an observer that hears the capability events
 // `connect: false`: a spawned render host connects when the test says (`host().connect()`); `holdBack`: each holds those
-async function stand(options: { quietMs?: number; addon?: null; engineHost?: boolean; connect?: boolean; holdBack?: ('prepare' | 'drop')[] } = {}): Promise<Stand> {
+// `asked`: the observer reads the session's capabilities before its first status, so it is told each change from then on
+async function stand(options: { quietMs?: number; addon?: null; engineHost?: boolean; connect?: boolean; holdBack?: ('prepare' | 'drop')[]; asked?: (reading: Record<string, unknown>) => void } = {}): Promise<Stand> {
   const hosts: RenderHost[] = [];
   const addon = options.addon === null ? null : fakeAddon();
   const daemon = await scene.start({
@@ -310,6 +311,7 @@ async function stand(options: { quietMs?: number; addon?: null; engineHost?: boo
     changes: () => observer.events('session.capabilitiesChanged') as never,
     snapshots: () => engine!.named('host.browserWork').map((input) => (input as { held: string[] }).held),
   };
+  if (options.asked) options.asked(await stood.capabilities());
   if (engine) {
     await status(ENGINE);
     await until(() => scene.logs.some((line) => line.includes('[cua] the peer identity addon')), 3_000, 'the session’s socket');
@@ -549,11 +551,33 @@ describe('the browser capability (Interfaces §I)', () => {
     expect(cua.hellos()).toBe(0);
   });
 
-  it('reads the addon’s reason on a Mac where it did not load', async () => {
-    const t = await stand({ addon: null });
-    await until(() => scene.logs.some((line) => line.includes('[browser] 0b6f3c1e')) || scene.logs.some((line) => line.includes('did not load')), 3_000, 'the load');
-    await sleep(50);
-    expect((await t.capabilities()).browser).toEqual({ available: false, reason: `the peer identity check did not load on ${MACHINE}, so the agent's browser is refused` });
+  // The architect's condition on reading an untried addon as usable (M5, decision 9): its failed load answers at once
+  // with the reason the capability then reads. The load is the session socket's own, before it listens: with no app the
+  // route is `none` from that instant, so the socket never listens and cua's connect is refused by the system at once,
+  // never held for a timeout (cua reads "no browser"; the reason is the capability's, posted once)
+  it('reads the addon’s reason on a Mac where it did not load: the socket never listens, a peer is refused at once, one change', async () => {
+    const ADDON = { available: false, reason: `the peer identity check did not load on ${MACHINE}, so the agent's browser is refused` };
+    const dir = cuaSocketDir(scene.root, TMP);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const appeared: string[] = [];
+    const watcher = watch(dir, (_event, name) => void (name && appeared.push(String(name))));
+    closers.push(() => watcher.close());
+    let before: unknown;
+    const t = await stand({ addon: null, asked: (reading) => (before = reading.browser) });
+    expect(before, 'untried, the addon reads usable (a capability read loads none)').toEqual(SCREENCAST);
+    await until(() => t.changes().length === 1, 3_000, 'the reading’s change');
+    expect(t.changes()[0]!.capabilities.browser).toEqual(ADDON);
+
+    const startedAt = performance.now();
+    const cua = Connector.open();
+    const failure = await new Promise<string>((resolve) => cua.socket.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? error.message)));
+    expect(performance.now() - startedAt, 'answered at once, no timeout waited out').toBeLessThan(500);
+    expect(['ENOENT', 'ECONNREFUSED']).toContain(failure);
+    expect(cua.hellos()).toBe(0);
+    await sleep(100);
+    expect(appeared.filter((name) => name.endsWith('.sock')), 'the session’s socket never listened, not even for a turn').toEqual([]);
+    expect((await t.capabilities()).browser).toEqual(ADDON);
+    expect(t.changes(), 'one change').toHaveLength(1);
   });
 
   it('posts one change per change of reading, screencast ↔ local, loading no chunk at an attachment', async () => {

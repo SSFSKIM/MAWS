@@ -1315,8 +1315,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const addon = loadAddon();
         if (addon === null) log(platform === 'darwin' ? '[cua] the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)' : '[cua] no peer identity addon on this platform: the uid is the cua sockets\' boundary');
         else log('[cua] the peer identity addon loaded');
-        peerAddonLoad = addon === null ? 'failed' : 'loaded'; // P5 O17 M5: on darwin, whether the headless browser is usable
-        queueMicrotask(() => browserInputs()); // after the socket that loaded it is set up
+        // P5 O17 M5: on darwin, whether the headless browser is usable. The routes read it before the socket that loads it
+        // decides whether to listen (the load is the first socket's, before it is kept, so no socket is told of the move):
+        // with no app a failed load is `none` at once, and the socket never listens, so cua's connect is refused at once
+        peerAddonLoad = addon === null ? 'failed' : 'loaded';
+        browserInputs();
         return addon;
       },
       uidBoundary: platform !== 'darwin',
