@@ -61,7 +61,7 @@ export interface RenderSeamOptions {
   answerEngine(name: 'maws.artifact.captured' | 'maws.artifact.exported', input: unknown): Promise<'delivered' | 'not_pending' | null>;
   quietMs(): number; // MAWS_RENDER_QUIET_MS, else DEFAULT_QUIET_MS
   runtime(): RenderRuntime; // whether this machine can run the render host (a Mac with the app binary always can; M6 reads Linux's cache)
-  engineHostRenders(): boolean; // the engine host's welcome lists host.render: its bridges send with no app attached
+  engineHostRenders(): boolean; // none is connected (a cold one starts as this build), or its welcome lists host.render: its bridges send with no app attached
   appAttached(): boolean; // an app is attached to the engine host (an older host's bridges send then)
   // the Word comment authors, sent with each export: the request waits for them before it is handed over (its deadlines
   // running from its admission), the host's start meanwhile; the daemon bounds what it waits for them

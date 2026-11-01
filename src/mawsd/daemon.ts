@@ -569,6 +569,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let toldPresent = false; // the last attachment told the permanent link's host
   // P5 O5 M4 (Interfaces §F): `render: true` to a host whose welcome lists host.render, an older one never hearing the field
   const engineHostRenders = () => hosts.peer('engine-host')?.capabilities.includes(HOST_RENDER_CAPABILITY) ?? false;
+  // What the render entries read (the panel's sweep#2): only a connected engine host whose welcome lists no host.render
+  // predates rendering; none connected is a cold host, which starts on demand as this build
+  const engineHostMayRender = () => hosts.peer('engine-host') === null || engineHostRenders();
   const tellAttachment = (attached: boolean): Promise<void> => {
     if (hosts.parked('engine-host')) return Promise.resolve();
     const input = engineHostRenders() ? { attached, render: true } : { attached };
@@ -938,7 +941,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       answerEngine,
       quietMs: () => renderQuietMs ?? chunk.DEFAULT_QUIET_MS,
       runtime: renderRuntime,
-      engineHostRenders,
+      engineHostRenders: engineHostMayRender,
       appAttached: () => appPresent(),
       // the session titles a document's comments name are the spine's records: a cold or released spine is loaded for
       // the export (a trigger, never at idle: acceptance 14), waited for at most RENDER_AUTHORS_SPINE_WAIT_MS of the
@@ -966,7 +969,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log,
     }),
     answerEngine,
-    facts: () => ({ machine, runtime: renderRuntime(), engineHostRenders: engineHostRenders(), appAttached: appPresent() }), // P5 O5 M5
+    facts: () => ({ machine, runtime: renderRuntime(), engineHostRenders: engineHostMayRender(), appAttached: appPresent() }), // P5 O5 M5
     log,
   });
 
@@ -974,6 +977,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const cuaDir = cuaSocketDir(profileDir, options.tmp ?? tmpdir());
   let cua: CuaSockets | null = null; // made at step (6), with the other sockets
   const launchedHere = new Set<AppSessionId>(); // told to a launch: kept past its engine's exit (its next launch names it)
+  const askedAbout = new Set<AppSessionId>(); // a client asked for its capabilities: followed past its engine's exit, to its removal
   // P5 O5 M6: on Linux, `mawsd render install` and `uninstall` flip the render entries with nothing else changing, so the
   // cache is watched (one descriptor) while a flip has somewhere to go: a session's capabilities are tracked and a client
   // the bus's events reach (the app, an observer on machine.sock) is ready. It is released at the last of either, and at
@@ -1022,11 +1026,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     cua.engineProcess(id, running && typeof status.pid === 'number' ? status.pid : null);
     if (!running && !launchedHere.has(id)) {
       cua.remove(id);
-      sessionCapabilities.forget(id);
+      if (!askedAbout.has(id)) sessionCapabilities.forget(id); // the panel's scalpel-4#2: an asker hears its next flip
     }
   };
   const sessionRemoved = (appSessionId: AppSessionId) => {
     launchedHere.delete(appSessionId);
+    askedAbout.delete(appSessionId);
     cua?.remove(appSessionId);
     sessionCapabilities.forget(appSessionId);
   };
@@ -1048,8 +1053,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
     render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady()) },
-    // P5 O5 M5: a session asked about is followed from then on, so the asker hears its next flip (forgotten at its removal)
-    capabilities: (appSessionId) => (sessionCapabilities.track(appSessionId), sessionCapabilities.of(appSessionId)),
+    // P5 O5 M5: a session asked about is followed from then on, so the asker hears its next flip (forgotten at its removal);
+    // the answer is what the next flip compares against (the panel's scalpel-4#3: `ask` posts it first when it changed)
+    capabilities: (appSessionId) => (askedAbout.add(appSessionId), sessionCapabilities.ask(appSessionId)),
     browserChanged: followTabEngine, // P5 O5 M5
     log,
   });

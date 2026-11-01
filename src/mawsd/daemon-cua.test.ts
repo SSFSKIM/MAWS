@@ -154,6 +154,23 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     expect(scene.logs.some((line) => line.includes('[spine] loaded'))).toBe(false);
   });
 
+  // The panel's scalpel-4#2: a session a client asked about stays followed until its removal, whatever its engine does.
+  // An engine from an earlier daemon (adopted: no launch here named its socket) exits after the asking; the attachment
+  // that follows is still posted
+  it('a session asked about stays followed past its adopted engine’s exit: the next flip is posted', async () => {
+    const daemon = await scene.start({ permanentClient: true, tmp: TMP });
+    const engine = await awake(daemon);
+    const watch = await observer();
+    await until(() => engine.emitRaw('session.status', running(4_321)), 3_000, 'the link’s ready line');
+    expect(await watch.client.request('session.capabilities', { appSessionId: S })).toMatchObject({ ok: true, value: { browser: NO_BROWSER } });
+    engine.emitRaw('session.status', { appSessionId: S, status: { appSessionId: S, process: 'exited', pid: null } });
+    // a round trip on the same link: its answer comes after the exit line, so the exit is handled before the attachment
+    expect(await daemon.hosts.forward('engine-host', { name: 'engine.ping', input: undefined } as never)).toMatchObject({ ok: true });
+    await attachApp();
+    await until(() => watch.changes().length === 1, 3_000, 'the flip’s event for the session asked about');
+    expect(watch.changes()[0]).toMatchObject({ appSessionId: S, capabilities: { browser: { available: true } } });
+  });
+
   it('an exited engine whose socket no launch here was told (a trust bootstrap’s) gives it up', async () => {
     const daemon = await scene.start({ permanentClient: true, tmp: TMP });
     const engine = await awake(daemon);
@@ -179,6 +196,18 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     engine.emitRaw('session.status', running(4_322));
     await until(() => scene.logs.some((line) => line.includes('[cua] no peer identity addon on this platform')), 1_000, 'the load’s line');
     expect(loads).toBe(1);
+  });
+
+  // The panel's sweep#2: no engine host connected is a cold one, started on demand as this build, never one that
+  // predates rendering
+  it('answers the render entries available with the runtime installed and no engine host or app connected', async () => {
+    const daemon = await scene.start({ permanentClient: true, tmp: TMP, render: { runtime: () => ({ available: true as const }) } });
+    const client = await scene.app('machine', { capabilities: [] });
+    expect(daemon.hosts.peer('engine-host')).toBeNull();
+    expect(await client.request('session.capabilities', { appSessionId: S })).toMatchObject({
+      ok: true,
+      value: { artifact_screenshot: { available: true }, artifact_export: { available: true }, browser: NO_BROWSER },
+    });
   });
 
   it('answers session.capabilities cold with the render entries\' reason where the runtime is absent, loading nothing', async () => {
