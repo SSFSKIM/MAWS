@@ -143,6 +143,8 @@
 | `BrowserRefused`, `BrowserEndReason` (with `input_overflow`), `BrowserRefusalReason` (`unavailable`, `viewers`, `invalid`, `read_only`, `closed`), `BrowserInputSchema`, `BrowserSeqSchema`, `BrowserFrameMetaSchema`, `JPEG_BASE64_MAX`, `BROWSER_MODIFIERS`, `readBrowserInput` | `src/shared/browser/screencast.ts` | O17 M6 | O17 M8 and M9 (M9 maps the feed's reasons to RL2's words) |
 | `startScreencast`, `Screencast`, `ScreencastDeps`, `ProducedFrame`, `EncodedFrame`, `contentsFrameSource`, `encodeJpeg`, `SCREENCAST_*` | `src/main/browser/screencast.ts` | O17 M6 | O17 M8 and M9 |
 | `createBrowserFeed`, `BrowserFeedService`, `BrowserFeedOptions`; `DaemonServices.browser`; `FrontBrowser.frame`, `.ended` and `.gone`; `TabEngineDeps.frames` | `src/mawsd/browser-feed.ts`, `src/mawsd/front.ts`, the tab engine | O17 M6 | O17 M8 and M9 |
+| `session.search`'s optional `sessions` input (at most 10,000, applied in SQL before the 50-hit limit) and its `incomplete: true` answer; the `attention` feed (`src/endpoint/attention-feed.ts`, owned by `PlaneFeeds`); the `each-session` target rule and `attention.list` | machine wire (WIRE 19) | O7 M6 | main's lane B, O10 (desk Web, paused) |
+| `remote.attention {machine, items, greyed}` (main-owned event); `RemoteAttention.fed(machine)` (`src/main/lane-b/remote-attention.ts`), the one predicate for who speaks for a machine's sessions | renderer event and main member | O7 M6 | the renderer's attention store, the notifier, O7 M5b |
 
 ## Shared files and who goes first
 
@@ -196,6 +198,7 @@
 | `src/mawsd/daemon.ts` | O7 M3 (landed: one line relaying the pty host's state to the endpoint as `pty.hostState`), O16, O17 | additions beside additions; whoever lands second rebases |
 | `src/mawsd/engine-requests.ts` | O5 (landing 1), O16 (adoption and handover across a park), O7 M5b (an open endpoint document channel is a park need) | separate spots; the later lander keeps every park need |
 | `src/mawsd/endpoint-seam.test.ts` (the `DaemonServices` and `EndpointServices` type pin) | O17 M6 (checks `Omit<DaemonServices, 'browser'>` until O17 M9 restores full equality), O7 M5 (`EndpointServices.clientPort` and `documents`) | the later lander keeps the pin exact; O17 M9 restores full equality |
+| `src/shared/machine/address-paths.json` | O17 M5 (`prepare.parent`), O7 M6 (`session.search.input.sessions[]`) | the later lander regenerates it and keeps every row |
 
 ## Start order
 
@@ -227,3 +230,4 @@
 - 2026-11-01, the architect: O17 M5's two names (`prepare.parent`, `CuaSockets.incarnationChanged`).
 - 2026-11-01, the architect: O7 M5's re-plan (PR #434) adds the read open's stream row and refusal word, which O17 M9 builds on, and a park need in `mawsd`'s engine requests; the `artifacts.export` row's consumers are corrected (`delivery.send`'s retag is O7 M5c's).
 - 2026-11-01, the architect: O17 M6's names (the screencast's shared schema, main's producer, `mawsd`'s feed) and the endpoint seam's type pin as a shared file.
+- 2026-11-01, the architect: O7 M6's names (the search's sessions input, the attention feed, remote.attention and fed) and the shared address-paths.json row, at its landing (PR #439).
