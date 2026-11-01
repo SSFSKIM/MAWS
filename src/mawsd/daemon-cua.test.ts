@@ -143,6 +143,17 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     expect(watch.changes()).toHaveLength(2); // one event per flip
   });
 
+  // A cold reading enrols the session for the event: a window that asked before any launch hears the flip
+  it('posts session.capabilitiesChanged for a session only ever asked about, at the attachment, loading nothing', async () => {
+    await scene.start({ permanentClient: true, tmp: TMP });
+    const watch = await observer();
+    expect(await watch.client.request('session.capabilities', { appSessionId: S })).toMatchObject({ ok: true, value: { browser: NO_BROWSER } });
+    await attachApp();
+    await until(() => watch.changes().length === 1, 3_000, 'the flip’s event for the session asked about');
+    expect(watch.changes()[0]).toMatchObject({ appSessionId: S, capabilities: { browser: { available: true } } });
+    expect(scene.logs.some((line) => line.includes('[spine] loaded'))).toBe(false);
+  });
+
   it('an exited engine whose socket no launch here was told (a trust bootstrap’s) gives it up', async () => {
     const daemon = await scene.start({ permanentClient: true, tmp: TMP });
     const engine = await awake(daemon);
@@ -152,6 +163,22 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     await until(() => existsSync(path), 1_000, 'the running engine’s socket');
     engine.emitRaw('session.status', { appSessionId: S, status: { appSessionId: S, process: 'exited', pid: null } });
     await until(() => !existsSync(path), 3_000, 'a trust bootstrap’s socket gone at its exit');
+  });
+
+  // Acceptance 14: an idle mawsd holds no native addon; the peer check's loads at the first session's socket, once
+  it('loads the peer identity addon at no start, attachment or capability reading, and once at the first session\'s socket', async () => {
+    let loads = 0;
+    const daemon = await scene.start({ permanentClient: true, tmp: TMP, cua: { loadAddon: () => (loads++, null) } });
+    const engine = await awake(daemon);
+    const watch = await observer();
+    await attachApp();
+    expect(await watch.client.request('session.capabilities', { appSessionId: S })).toMatchObject({ ok: true });
+    expect(loads).toBe(0);
+    await until(() => engine.emitRaw('session.status', running(4_321)), 3_000, 'the link’s ready line');
+    await until(() => existsSync(socketOf()), 1_000, 'the running engine’s socket');
+    engine.emitRaw('session.status', running(4_322));
+    await until(() => scene.logs.some((line) => line.includes('[cua] no peer identity addon on this platform')), 1_000, 'the load’s line');
+    expect(loads).toBe(1);
   });
 
   it('answers session.capabilities cold with the render entries\' reason where the runtime is absent, loading nothing', async () => {

@@ -3,6 +3,7 @@
 // it), and `session.capabilitiesChanged` posted for each session `mawsd` holds a cua socket for at each flip, once. The
 // render entries come from the render seam's state, or from the facts it reads when it is not loaded (render-handle.ts);
 // the browser entry from the cua sockets' (cua-socket.ts). The reasons are exact sentences the renderer and O7 show.
+import { cuaSocketPath } from '@shared/browser/cua-socket';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionCapabilities, SessionCapability } from '@shared/ipc/schema/session-capabilities';
 
@@ -28,10 +29,13 @@ export function renderCapabilities({ machine, runtime, failure, engineHostRender
   return { artifact_screenshot: entry, artifact_export: entry };
 }
 
-// `path`: the daemon's socket for the session (none past sun_path); `targeted`: a tab engine is attached.
-export function browserCapability({ machine, path, targeted }: { machine: string; path: string | null; targeted: boolean }): SessionCapability {
-  if (path === null) return { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${machine}` };
-  return targeted ? { available: true } : { available: false, reason: `no browser is attached on ${machine}` };
+// `path`: the daemon's socket for the session (none past sun_path); `tabEngine`: the attached tab engine's cua directory,
+// null while none is attached. The relay connects to the tab engine's own socket for the session, so a path that does
+// not fit on either side is no browser.
+export function browserCapability({ machine, appSessionId, path, tabEngine }: { machine: string; appSessionId: AppSessionId; path: string | null; tabEngine: string | null }): SessionCapability {
+  const tooLong = path === null || (tabEngine !== null && cuaSocketPath(tabEngine, appSessionId) === null);
+  if (tooLong) return { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${machine}` };
+  return tabEngine !== null ? { available: true } : { available: false, reason: `no browser is attached on ${machine}` };
 }
 
 export interface SessionCapabilitiesOptions {

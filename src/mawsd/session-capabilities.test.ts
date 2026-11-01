@@ -28,10 +28,24 @@ describe('the render entries', () => {
 });
 
 describe('the browser entry', () => {
+  const TOO_LONG = { available: false, reason: 'the browser socket of this session is longer than a Unix socket allows on mini' };
+
   it('is available while a tab engine is attached, and says why when none is or the path does not fit', () => {
-    expect(browserCapability({ machine: 'mini', path: '/p/mawsd/cua/A.sock', targeted: true })).toEqual(available);
-    expect(browserCapability({ machine: 'mini', path: '/p/mawsd/cua/A.sock', targeted: false })).toEqual({ available: false, reason: 'no browser is attached on mini' });
-    expect(browserCapability({ machine: 'mini', path: null, targeted: true })).toEqual({ available: false, reason: 'the browser socket of this session is longer than a Unix socket allows on mini' });
+    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: '/u/browser/cua' })).toEqual(available);
+    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: null })).toEqual({ available: false, reason: 'no browser is attached on mini' });
+    expect(browserCapability({ machine: 'mini', appSessionId: A, path: null, tabEngine: '/u/browser/cua' })).toEqual(TOO_LONG);
+  });
+
+  // the relay connects to the tab engine's own socket for the session: a daemon socket that fits (102 bytes) is no browser
+  // when the app's (104) does not
+  it('says the path does not fit when the tab engine\'s socket for the session does not, though the daemon\'s does', () => {
+    const id = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73' as AppSessionId;
+    const daemonDir = `/${'d'.repeat(59)}`; // + '/' + 36 + '.sock' = 102 bytes
+    const appDir = `/${'a'.repeat(61)}`; // 104 bytes
+    expect(Buffer.byteLength(`${daemonDir}/${id}.sock`)).toBe(102);
+    expect(Buffer.byteLength(`${appDir}/${id}.sock`)).toBe(104);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: appDir })).toEqual(TOO_LONG);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: daemonDir })).toEqual(available);
   });
 });
 
