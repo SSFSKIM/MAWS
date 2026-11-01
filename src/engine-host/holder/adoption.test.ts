@@ -221,6 +221,10 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
   // conversation reseeded from the transcript, the lost range passed by the map (so the frontier advances past it), and
   // the adoption still becomes ready and completes the turn with the same engine. The first read's catch-up may have
   // reached the socket before the burst (an exact `host_attach`, then the gap's) or not (the gap's only).
+  // P5 O16 M3b fix wave 4: the ring holds everything the engine writes before the kill (about 39 KB of the fixture's
+  // turn up to its permission request, one record near 20 KB), so only the burst can overflow it. At 16 KiB the old
+  // manager itself could fall behind during the turn on a loaded runner (class 1a run 41275824193): its own reconnect
+  // journaled a gap before the kill, giving gap, exact, gap.
   it('the ring overflowing while the adoption folds: the D45 gap, the reseed, the frontier passed, then ready', { timeout: LONG }, async () => {
     const trigger = join(userData, 'burst-now');
     const stub = writeStubEngine(join(scratch, 'claude-burst'), stubBundle, { fixture: PERMISSION, burst: { file: trigger, lines: 400 } });
@@ -228,7 +232,7 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
     const configDir = join(userData, 'config');
     mkdirSync(configDir);
     const env = { CLAUDE_CONFIG_DIR: configDir };
-    const old = startHostedManager(managerBundle, { userData, stub, binary: BINARY, version: TESTED_ENGINE_VERSION, hostArgs: ['--ring-cap-bytes', '16384'], env });
+    const old = startHostedManager(managerBundle, { userData, stub, binary: BINARY, version: TESTED_ENGINE_VERSION, hostArgs: ['--ring-cap-bytes', '65536'], env });
     managers.push(old);
     await old.call('session.launch', { spec: spec(id) });
     await until(async () => (await old.status(id))?.process === 'ready', 'ready');

@@ -72,6 +72,9 @@ export interface SupervisionDeps {
   // O16 M5: the gate (holder/gate.ts): its socket's path while it serves (null when it could not listen) and the live
   // rows' counts by reap and observer (the table's); absent in a harness, which reports neither
   gate?: { path(): string | null; counts(): { armed: number; observed: number; unhealthy: number; absent: number } };
+  // P5 O16 M3b fix wave 4: told once the drain is armed, to fail the host's work that cannot finish before it goes (the
+  // dataset refreshes, whose connector leg runs only on a ready host); their calls answer, and the drain waits for that
+  handingOver?(): void;
 }
 
 const NO_STATEFUL: ReadonlySet<string> = new Set(); // a stateful server holds a row's release, not its quiet
@@ -221,6 +224,7 @@ export class Supervision {
     this.drain = new HandoverDrain(rows, { log: this.deps.log, settled: () => this.handoverDue() });
     this.clearIdle();
     this.deps.log(`handover armed: ${rows.length} hosted rows frozen, ${this.drain.inFlight()} calls in flight`);
+    this.deps.handingOver?.(); // fix wave 4
     this.tellQuiet();
     this.publish(false);
     return this.drain;

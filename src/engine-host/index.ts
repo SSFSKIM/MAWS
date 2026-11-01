@@ -217,6 +217,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     collector: idle,
     startup: designSystems.ready, // the register's gate: no collection lands mid-seed
     gate: { path: () => (gateFailed ? null : gatePath), counts: () => rows.gateCounts() }, // O16 M5
+    handingOver: () => datasetRefresh.handOver(), // P5 O16 M3b fix wave 4: a refresh in flight fails, retryable
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run
