@@ -27,6 +27,11 @@ import {
   median,
   processTable,
   readerMismatches,
+  SESSION_HOST_BOUND_KIB,
+  SESSION_HOST_RUN,
+  sessionHostLine,
+  sessionHostMisses,
+  sessionHosts,
   SPINE_RELEASED_RUN,
   spineLine,
   mawsdSpineLine,
@@ -495,5 +500,51 @@ describe("mawsd with the spine's line", () => {
     const line = mawsdSpineLine({ windows: { ...windows, reexecuted: null }, reasons: { ...valid, released: ['the 1-minute load reached 5.2 and its 30 s pair 4.9'] }, counts });
     expect(line).toContain(' · released: mawsd 41000 KiB, engine host 60200 KiB (medians of 11), cpu 0.04 s, load 4.2 (30 s pair 3.0), invalid: the 1-minute load reached 5.2 and its 30 s pair 4.9 · re-executed: not read, valid · ');
     expect(line).toContain(' · released mawsd over the 33048 KiB headroom, re-executed mawsd not read · ');
+  });
+});
+
+// P5 O16 M6 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §I; D3, D18): one session host holding an idle
+// stub-engine session on the daemon shape, measured alone against its own bound.
+describe("the session host's case", () => {
+  const root = '/private/var/folders/x/T/maws-di-sh-abc';
+  const hosts = `${root}/ud/supervisor/hosts`;
+
+  it('settles 60 s, then reads every 30 s for 300 s: 11 samples, under the same load rule; the bound is 4 MiB', () => {
+    expect(SESSION_HOST_RUN).toEqual({ settleS: 60, windowS: 300, everyS: 30, samples: 11, maxLoad: 5, pairLoad: 4.7 });
+    expect(SESSION_HOST_BOUND_KIB).toBe(4_096);
+  });
+
+  it("measures the profile's session hosts by their argv0's name, a checkout's prebuild or a packaged one: never the engine host, the engine, a look-alike, a process naming the binary in an argument, or another profile's host", () => {
+    const processes = [
+      { pid: 20, command: `/repo/native/session-host/prebuilds/darwin-arm64/maws-session-host ${hosts}/abcd1234.sock --hosts ${hosts}` },
+      { pid: 21, command: `maws-supervisor /repo/out/engine-host/index.js --detached ${root}/ud/supervisor` },
+      { pid: 22, command: `node ${root}/stub-engine/claude -p --session-id x` },
+      { pid: 23, command: `/repo/bin/maws-session-host-old ${hosts}/efgh5678.sock --hosts ${hosts}` },
+      { pid: 24, command: `file /repo/native/session-host/prebuilds/darwin-arm64/maws-session-host ${hosts}` },
+      { pid: 25, command: '/repo/native/session-host/prebuilds/darwin-arm64/maws-session-host /x/T/maws-session-hosts-0123456789ab/ijkl9012.sock --hosts /private/var/folders/x/T/maws-di-other/ud/supervisor/hosts' },
+      { pid: 26, command: `/Applications/MAWS.app/Contents/Resources/session-host/maws-session-host /x/T/maws-session-hosts-0123456789ab/mnop3456.sock --hosts ${hosts}` },
+      { pid: 27, command: `maws-session-host ${hosts}/qrst7890.sock --hosts ${hosts}` },
+    ];
+    expect(sessionHosts(processes, root)).toEqual([
+      { pid: 20, argv0: 'maws-session-host', command: processes[0]!.command },
+      { pid: 26, argv0: 'maws-session-host', command: processes[6]!.command },
+      { pid: 27, argv0: 'maws-session-host', command: processes[7]!.command },
+    ]);
+  });
+
+  it('misses nothing at or under the bound, rounding the footprint as the line prints it, and names a miss and by how much', () => {
+    expect(sessionHostMisses(3_089)).toEqual([]);
+    expect(sessionHostMisses(4_096.4)).toEqual([]);
+    expect(sessionHostMisses(4_096.6)).toEqual(["the footprint 4097 KiB is 1 KiB over the session host's bound 4096 KiB"]);
+    expect(sessionHostMisses(5_000)).toEqual(["the footprint 5000 KiB is 904 KiB over the session host's bound 4096 KiB"]);
+  });
+
+  it('reads as the document quotes it, `session host: footprint <KiB> (bound 4096) <verdict>`, then the samples, the RSS and CPU as diagnostics and the load with its pair', () => {
+    expect(sessionHostLine({ footprintKiB: 3_089.4, rssKiB: 4_784, samples: 11, cpuS: 0.01, load: 2.31, loadPair: 1.52 })).toBe(
+      '[daemon-idle] session host: footprint 3089 KiB (bound 4096) within · median of 11 · rss 4784 KiB · cpu 0.01 s over 300 s · load 2.3 (30 s pair 1.5)',
+    );
+    expect(sessionHostLine({ footprintKiB: 5_000, rssKiB: 6_000, samples: 11, cpuS: 0.2, load: 3, loadPair: 2 })).toBe(
+      '[daemon-idle] session host: footprint 5000 KiB (bound 4096) over by 904 KiB · median of 11 · rss 6000 KiB · cpu 0.20 s over 300 s · load 3.0 (30 s pair 2.0)',
+    );
   });
 });

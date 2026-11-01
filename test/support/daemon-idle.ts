@@ -527,3 +527,37 @@ export function mawsdSpineLine(run: { windows: Record<SpineWindow, ShapeReading 
   const verdict = `released mawsd ${released === 'not read' ? 'not read' : `${released} the ${MAWSD_HEADROOM_KIB} KiB headroom`}, re-executed mawsd ${reexecuted === 'not read' ? 'not read' : released === 'not read' ? `${reexecuted} the ${MAWSD_HEADROOM_KIB} KiB headroom` : `${reexecuted} it`}`;
   return `[daemon-idle] mawsd with the spine · ${SPINE_WINDOWS.map(window).join(' · ')} · peak load ${peak === null ? 'not read' : loadText(peak.load, peak.loadPair)} · ${verdict} · fixture ${run.counts.sessions} sessions in ${run.counts.projects} projects`;
 }
+
+// P5 O16 M6 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §I; D3, D18): the session host's own cost, one
+// `maws-session-host` holding an idle stub-engine session on the daemon shape, read alone against its own bound, outside
+// DAEMON_IDLE_BOUND's two processes (D18: a session host exists only with a live session, which the idle scene's replay
+// never spawns). The bound is 4 MiB of physical footprint: D3's Go prototype read 3,089 KiB idle on the MacBook, and with
+// the writer's acks trimming the ring at idle the host holds little beyond the binary's own, so about a third's margin.
+// The window settles 60 s and reads 300 s under IDLE_RUN's load rule.
+export const SESSION_HOST_RUN = { settleS: 60, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad, pairLoad: IDLE_RUN.pairLoad } as const;
+export const SESSION_HOST_BOUND_KIB = 4_096;
+const SESSION_HOST_ARGV0 = 'maws-session-host';
+
+// The profile's session hosts: those naming the profile's root (each host's `--hosts <profile>/supervisor/hosts`) whose
+// argv0 is the binary. The engine host spawns it by path (a checkout's prebuild, or the packaged app's or a release's
+// copy) and sets no argv0, so argv0 is compared by its name, as `measured` compares the names MAWS sets.
+export function sessionHosts(processes: readonly { pid: number; command: string }[], root: string): MeasuredProcess[] {
+  return processes
+    .filter((p) => p.command.includes(root) && basename(p.command.split(' ')[0]!) === SESSION_HOST_ARGV0)
+    .map((p) => ({ pid: p.pid, argv0: SESSION_HOST_ARGV0, command: p.command }));
+}
+
+// Where the session host's footprint exceeds its bound, one line; empty when within it. Compared in whole KiB, as the
+// line prints it.
+export function sessionHostMisses(footprintKiB: number): string[] {
+  const footprint = Math.round(footprintKiB);
+  return footprint > SESSION_HOST_BOUND_KIB ? [`the footprint ${footprint} KiB is ${footprint - SESSION_HOST_BOUND_KIB} KiB over the session host's bound ${SESSION_HOST_BOUND_KIB} KiB`] : [];
+}
+
+// The job log's line, its head as the O16 document quotes it (`session host: footprint <KiB> (bound 4096) <verdict>`),
+// then the sample count, the RSS and CPU as diagnostics, and the load with its 30 s pair.
+export function sessionHostLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; load: number; loadPair: number }): string {
+  const footprint = Math.round(run.footprintKiB);
+  const verdict = footprint <= SESSION_HOST_BOUND_KIB ? 'within' : `over by ${footprint - SESSION_HOST_BOUND_KIB} KiB`;
+  return `[daemon-idle] session host: footprint ${footprint} KiB (bound ${SESSION_HOST_BOUND_KIB}) ${verdict} · median of ${run.samples} · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${SESSION_HOST_RUN.windowS} s · load ${loadText(run.load, run.loadPair)}`;
+}
