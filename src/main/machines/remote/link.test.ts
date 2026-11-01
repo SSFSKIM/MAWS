@@ -637,6 +637,47 @@ describe('calls', () => {
     expect(h.last().of('call')).toEqual([{ t: 'call', id: expect.any(String), name: 'machine.identity', input: null }]);
   });
 
+  // P5 O7 M4 (§M): `call.session` only to a peer that reads it, judged per channel for a call carried over.
+  it('names the call’s session to a peer that lists `rl2.call-session`, and leaves it out for one that does not', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.call-session'];
+    await settle();
+    const session = { lane: 'B' as const, id: 'app-1' };
+    void h.link.call('git.status', { directory: '/r' }, { session });
+    expect(h.last().of('call')).toEqual([{ t: 'call', id: expect.any(String), name: 'git.status', input: { directory: '/r' }, session }]);
+    const carried = h.link.call('git.status', { directory: '/r' }, { session });
+    h.peer.capabilities = [];
+    h.last().end('carrier');
+    await settle();
+    // both calls in flight carried to the new channel, neither with the session its peer would not read
+    const bare = { t: 'call', id: expect.any(String), name: 'git.status', input: { directory: '/r' } };
+    expect(h.last().of('call')).toEqual([bare, bare]);
+    void carried;
+  });
+
+  // P5 O7 M4 fix wave 2: an input field only some peers read (session.events' `maxBytes`) is judged per transmission too.
+  it('sends a call’s input for a peer lacking a capability to such a peer, on its first send and when carried, and says so', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.events-budget'];
+    await settle();
+    const lacking = { capability: 'rl2.events-budget', input: { appSessionId: 'app-1' } };
+    const budgeted = { appSessionId: 'app-1', maxBytes: 4096 };
+    const first = h.link.call('session.events', budgeted, { lacking });
+    const sent = h.last().of('call') as unknown as Array<{ id: string; input: unknown }>;
+    expect(sent.map((c) => c.input)).toEqual([budgeted]);
+    h.last().deliver({ t: 'result', id: sent[0].id, ok: true, output: { events: [] } });
+    expect(await first).toEqual({ ok: true, output: { events: [] } });
+
+    const carried = h.link.call('session.events', budgeted, { lacking });
+    h.peer.capabilities = [];
+    h.last().end('carrier');
+    await settle();
+    const resent = h.last().of('call') as unknown as Array<{ id: string; input: unknown }>;
+    expect(resent.map((c) => c.input)).toEqual([lacking.input]); // never the field to a peer that doesn't list it
+    h.last().deliver({ t: 'result', id: resent[0].id, ok: true, output: { events: [] } });
+    expect(await carried).toEqual({ ok: true, output: { events: [] }, fellBack: true });
+  });
+
   it('fails `timeout` when the channel holds and the endpoint never answers', async () => {
     const h = await harness();
     await settle();

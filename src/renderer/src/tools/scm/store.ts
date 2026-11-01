@@ -46,7 +46,8 @@ export { settled };
 export const SCM_REFRESH_MS = HELD_DIFF_REFRESH_MS; // trailing, as Review's
 
 // P5 O6 M4: the directory is its session's machine's.
-export type ScmDiffTarget = { machine: MachineRef; directory: string } & ({ scope: 'staged' | 'worktree' } | { scope: 'untracked'; path: string });
+// P5 O7 M4: `session`, the session the diff is read for, named on its reads (not part of its key).
+export type ScmDiffTarget = { machine: MachineRef; directory: string; session?: AppSessionId } & ({ scope: 'staged' | 'worktree' } | { scope: 'untracked'; path: string });
 export type ScmMutationResult = CommandResult<'scm.stage'>; // every mutation answers ScmMutation
 
 export interface ScmStore {

@@ -21,7 +21,7 @@ import { PlanCommand, plannedOf, PlanProblem, PlanRow, PlanRows, SheetNote, useR
 import { prTitleDefault } from './remote-actions';
 import { openLink, settled } from './store';
 import type { ScmUi } from './view-state';
-import { machineFor } from '../../ipc/machine';
+import { machineFor, pathTarget } from '../../ipc/machine';
 
 export const PR_REPLAN_MS = 300;
 
@@ -54,8 +54,8 @@ export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessi
   useEffect(() => {
     let live = true;
     void Promise.all([
-      settled(ipc.invoke('git.log', { directory, limit: 1 }, { machine })),
-      branch === '' ? null : settled(ipc.invoke('git.worktree.branch', { repoRoot, branch }, { machine })),
+      settled(ipc.invoke('git.log', { directory, limit: 1 }, pathTarget(machine, appSessionId))),
+      branch === '' ? null : settled(ipc.invoke('git.worktree.branch', { repoRoot, branch }, pathTarget(machine, appSessionId))),
     ]).then(([log, distance]) => {
       if (!live) return;
       const subject = log.ok ? (log.value.commits[0]?.subject ?? null) : null;
@@ -65,7 +65,7 @@ export function PrSheet({ appSessionId, ui, status, scm, directory }: { appSessi
     return () => {
       live = false;
     };
-  }, [machine, directory, repoRoot, branch, defaultBase]);
+  }, [machine, appSessionId, directory, repoRoot, branch, defaultBase]);
 
   const plan = useCallback(
     async (asking: Fields) => {

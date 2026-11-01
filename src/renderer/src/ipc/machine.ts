@@ -10,6 +10,13 @@ export function machineFor(appSessionId: AppSessionId | null): MachineRef {
   return appSessionId === null ? ipc.localMachine : machineOf(appSessionId);
 }
 
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The checkout rule and its boundary"): a path
+// command's options, with the session it is made from when there is one; another machine reads a path of its checkout
+// only for a session whose roots hold it, so a panel tool's read names the tool's session.
+export function pathTarget(machine: MachineRef, session?: AppSessionId | null): { machine: MachineRef; session?: AppSessionId } {
+  return session === undefined || session === null ? { machine } : { machine, session };
+}
+
 // P5 O6 M4 ("Path-keyed stores"): the key of a directory or file on a machine, since the same path on two machines is two
 // checkouts. It is the codec's join, as an address is.
 export function checkoutKey(machine: MachineRef, path: string): string {

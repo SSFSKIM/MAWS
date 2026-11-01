@@ -7,9 +7,10 @@
 // the arrows, so Enter neither sends the half-typed `@token` nor picks a row an older query found.
 import type { Editor, Range } from '@tiptap/core';
 import { useEffect, useMemo, useState } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
-import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
+import { pathTarget } from '../../ipc/machine';
 import { mentionNode, textNode } from '../editor/doc';
 import { mentionLabel } from '../editor/recall';
 import { atItems, type AtItem } from './items';
@@ -48,7 +49,9 @@ const rootsFor = (cwd: string, additional: readonly string[], query: string) => 
 
 // Files for the query: the session's directory, and in path mode each additional directory (absolute paths); `null`
 // while the search has not answered this query yet.
-function useFiles(machine: MachineRef, cwd: string, additional: readonly string[], query: string): AtItem[] | null {
+// P5 O7 M4: the search is made from the composer's session (another machine's checkout is read by its session).
+function useFiles(appSessionId: AppSessionId, cwd: string, additional: readonly string[], query: string): AtItem[] | null {
+  const machine = machineOf(appSessionId);
   const settled = useDebounced(query, 80);
   const [files, setFiles] = useState<{ query: string | null; items: AtItem[] }>({ query: null, items: [] });
   useEffect(() => {
@@ -58,7 +61,7 @@ function useFiles(machine: MachineRef, cwd: string, additional: readonly string[
     const q = pathMode ? settled.replace(/^(~\/?|\.\.\/?|\/)/, '') : settled;
     void Promise.all(
       roots.map(async (root) => {
-        const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT }, { machine });
+        const result = await ipc.invoke('git.lsFiles', { directory: root, query: q, limit: FILE_LIMIT }, pathTarget(machine, appSessionId));
         if (!result.ok) return [];
         return result.value.paths.map((path): AtItem => {
           const directory = path.endsWith('/');
@@ -74,7 +77,7 @@ function useFiles(machine: MachineRef, cwd: string, additional: readonly string[
     return () => {
       live = false;
     };
-  }, [machine, cwd, additional, settled]);
+  }, [machine, appSessionId, cwd, additional, settled]);
   if (rootsFor(cwd, additional, query).length === 0) return []; // nowhere to search: known empty at once
   return files.query === query ? files.items : null;
 }
@@ -85,9 +88,12 @@ const GROUPS: { group: AtItem['group']; label: string }[] = [
   { group: 'skills', label: 'Skills' },
 ];
 
+const NO_DIRECTORIES: readonly string[] = [];
+
 export function AtMenu(props: PopupProps) {
-  const { appSessionId, cwd, additionalDirectories, catalog } = props.ctx;
-  const files = useFiles(machineOf(appSessionId), cwd, additionalDirectories, props.query);
+  const { appSessionId, cwd, additionalDirectories, catalog, searchesFiles = true } = props.ctx;
+  // P5 O7 M4 (fix wave 1): a chat to start on another machine is offered none of this Mac's files
+  const files = useFiles(appSessionId, searchesFiles ? cwd : '', searchesFiles ? additionalDirectories : NO_DIRECTORIES, props.query);
   const others = useMemo(() => atItems(catalog, props.query), [catalog, props.query]);
   const rows = useMemo(() => (files === null ? [SEARCHING, ...others.slice(0, ROW_LIMIT - 1).map(rowOf)] : [...files, ...others].slice(0, ROW_LIMIT).map(rowOf)), [files, others]);
   const { active, setActive, choose } = useListKeys(props, rows);

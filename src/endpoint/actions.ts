@@ -23,6 +23,12 @@
 //
 // What reaches the engine host or the machine's services carries the asking channel's `ClientRef` (P5 O7 M2).
 //
+// P5 O7 M4: a `machine` act goes to `machine.op` with the sealed action beside its claim (`action`), which the services'
+// ledger keeps and hands to the handler as the requester's proof (`session.spawn`'s `launchedBy`, RL9's `ownersProof`).
+// `files.upload` goes without it: its args are the file's bytes, which the ledger would keep for a day, and the claim's
+// fingerprint binds the op to its action already. The services are this build's own, in `mawsd`'s process, so every
+// field this build sends (`action`, an upload's `part`, `session.spawn`) is one they read.
+//
 // Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
 // result by the nonce it answers.
 //
@@ -40,6 +46,9 @@ import type { Rl10, RpcResult } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
 
 export const STOP_WAIT_MS = 2000;
+
+/** `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4). */
+export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload']);
 
 export type ActionsContext = {
   freshness: Freshness;
@@ -171,7 +180,8 @@ export class Actions {
       accept();
       const release = this.#hold();
       try {
-        const answer = await dispatch('machine', 'machine.op', { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args });
+        const kept = KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
+        const answer = await dispatch('machine', 'machine.op', { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args, ...kept });
         channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
       } finally {
         release();

@@ -5,10 +5,13 @@
 import type { JSONContent } from '@tiptap/core';
 
 // An image or PDF held beside the text and sent as a content block. `data` is base64; `persisted` is false when the
-// draft's byte budget left it out (the strip labels it "not kept in draft").
+// draft's byte budget left it out (the strip labels it "not kept in draft"). P5 O7 M4: `file`, any other file dropped for
+// a lane B session on another machine, which goes up to that machine at the send and is mentioned by its path there
+// (remote-uploads.ts); never a content block.
 export type Attachment =
   | { id: string; kind: 'image'; name: string; mediaType: string; bytes: number; data: string; persisted: boolean }
-  | { id: string; kind: 'document'; name: string; mediaType: 'application/pdf'; bytes: number; data: string; persisted: boolean };
+  | { id: string; kind: 'document'; name: string; mediaType: 'application/pdf'; bytes: number; data: string; persisted: boolean }
+  | { id: string; kind: 'file'; name: string; mediaType: string; bytes: number; data: string; persisted: boolean };
 
 // `file`: `id` is the path as inserted (relative to cwd, or absolute); `agent`: `id` is the agent name.
 export interface MentionAttrs {

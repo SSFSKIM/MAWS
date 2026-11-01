@@ -143,9 +143,18 @@ export const UPLOAD_FILES_MAX = 8;
 const encodedLength = (bytes: number) => 4 * Math.ceil(bytes / 3); // padded
 // The bytes a string the base64 pattern took decodes to: three per four characters, less one per pad
 const decodedLength = (base64: string) => (base64.length / 4) * 3 - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O, "Uploads in parts"): an upload from
+// another machine crosses a channel whose message is 4 MiB, so one file goes as parts, each its own act: `part` names
+// the upload (an id the sender mints), the part's index from 0, and whether it is the last. With it, `files` holds the
+// one file's part: every part before the last exactly REMOTE_UPLOAD_PART_BYTES decoded, the last at most that. The
+// service stages the parts in order and moves the whole into place at the last, which alone answers its path.
+export const REMOTE_UPLOAD_PART_BYTES = 2 * MiB;
+export const UploadPartSchema = z.strictObject({ upload: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/), index: z.number().int().nonnegative(), last: z.boolean() });
+export type UploadPart = z.infer<typeof UploadPartSchema>;
 export const FilesUploadInputSchema = z
   .strictObject({
     appSessionId: AppSessionIdSchema,
+    part: UploadPartSchema.optional(),
     files: z
       .array(
         z.strictObject({
@@ -162,7 +171,15 @@ export const FilesUploadInputSchema = z
   .refine((input) => input.files.reduce((sum, file) => sum + decodedLength(file.bytes), 0) <= UPLOAD_CALL_MAX_BYTES, {
     message: `the files of one upload exceed ${UPLOAD_CALL_MAX_BYTES / MiB} MiB together`,
     path: ['files'],
+  })
+  .refine((input) => input.part === undefined || input.files.length === 1, { message: 'a part carries one file', path: ['files'] })
+  .refine((input) => input.part === undefined || input.files.length !== 1 || partSizeFits(input.part, decodedLength(input.files[0]!.bytes)), {
+    message: `a part before the last carries exactly ${REMOTE_UPLOAD_PART_BYTES / MiB} MiB, the last at most that`,
+    path: ['files'],
   });
+function partSizeFits(part: UploadPart, bytes: number): boolean {
+  return part.last ? bytes <= REMOTE_UPLOAD_PART_BYTES : bytes === REMOTE_UPLOAD_PART_BYTES;
+}
 export type FilesUploadInput = z.infer<typeof FilesUploadInputSchema>;
 export const FilesUploadOutputSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('ok'), paths: z.array(z.string()) }),

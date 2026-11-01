@@ -35,6 +35,8 @@ import { commandChannel, type CommandInput, type CommandName, type CommandOutput
 import { codecOf } from '@shared/ipc/validate';
 import { gradeOf } from '@shared/ipc/grades';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
+import { AppSessionIdSchema, type AppSessionId } from '@shared/graph/ids';
+import * as z from 'zod';
 import { clientOf } from './clients';
 
 export { emit } from './events';
@@ -43,7 +45,10 @@ export { emit } from './events';
 // counts), keyed by `client.id` and released on `client.onGone`. A client-shell handler that acts on the page itself gets
 // it with `pageOf(client)` (./clients).
 // P5 O6 M2: `target` is the machine the command goes to: the local one, or (a `client` command) the machine its ids name.
-export type MainContext = HandlerContext & { readonly target: MachineRef };
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §J, §O): `session` is the session a
+// path-class command was made from (a panel tool's), from the preload envelope's `{machine, session}` form: the bare id of
+// a session on the target machine, which an RL2 link sends as the call's `session` for the machine's `checkout` rule.
+export type MainContext = HandlerContext & { readonly target: MachineRef; readonly session?: AppSessionId };
 export type MainHandler<N extends CommandName> = (input: CommandInput<N>, context: MainContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 export type MachineHandler<N extends CommandName> = (input: CommandInput<N>, context: HandlerContext) => CommandOutput<N> | Promise<CommandOutput<N>>;
 // The supervisor interface M4 implements (`HostSupervisor.dispatch`): forward to the owning host, answer its result.
@@ -106,6 +111,10 @@ const hostsNotStarted: HostDispatch = async (owner, name) => ({
 
 type AnyHandler = (input: unknown, context: MainContext) => unknown;
 
+// The invoke's last argument (src/preload/bridge.ts): a machine, or (P5 O7 M4) a machine with the session a path-class
+// command is made from.
+const InvokeTargetSchema = z.union([MachineRefSchema, z.strictObject({ machine: MachineRefSchema, session: AppSessionIdSchema.optional() })]);
+
 // A router's handler tables, which take registrations before or after `install` (main's startup registers both ways).
 function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'install'> & { install(options: RouterOptions): void } {
   let installed: RouterOptions | null = null; // P5 O6 M3: what dispatchLocal routes with
@@ -138,12 +147,15 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     }
     if (mainOnly.has(name)) return mainOnlyRefusal(name);
     let target = options.local;
+    let session: AppSessionId | undefined;
     if (rawMachine !== undefined) {
-      const parsed = MachineRefSchema.safeParse(rawMachine);
+      // P5 O7 M4: the machine alone, or `{machine, session?}` (the session a path-class command was made from)
+      const parsed = InvokeTargetSchema.safeParse(rawMachine);
       if (!parsed.success) return { ok: false, error: ipcError('invalid_input', `${name}: not a machine: ${JSON.stringify(rawMachine)}`, parsed.error.issues) };
-      target = parsed.data;
+      if (typeof parsed.data === 'string') target = parsed.data;
+      else ({ machine: target, session } = parsed.data);
     }
-    return dispatch(name, rawInput, { client: clientOf(event.sender), target }, options);
+    return dispatch(name, rawInput, { client: clientOf(event.sender), target, ...(session !== undefined && { session }) }, options);
   }
 
   // Everything after the sender check, the main-only refusal and the machine's parse: `route`'s rest, (P5 O6 M3)

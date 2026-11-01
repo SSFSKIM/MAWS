@@ -18,13 +18,14 @@ import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal, syncSelectionFromDOM } from './dictation-plugin'; // E9
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
-import { classifyFile, classifyText, mentionPath } from './paste';
+import { classifyFile, classifyText, mentionPath, type FileAction } from './paste';
+import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
@@ -59,6 +60,7 @@ export interface EditorHandle {
   // composer store's attachment queue); whether the editor took them (false while busy, once unmounted, or once the
   // options' `signal` aborted, nothing added then)
   attachFiles(files: File[], options?: AttachOptions): Promise<boolean>;
+  restored(): Promise<void>; // P5 O7 M4: settles once this mount's stored draft is restored (or found empty)
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -98,9 +100,17 @@ export interface ControllerInputs {
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
+  // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
+  uploadsTo?: string | null;
+  // P5 O7 M4 (fix wave 1): whether the @-menu offers this Mac's files (false: the chat is to start on another machine,
+  // where none of them can be read)
+  searchesFiles?: boolean;
 }
 
 // The component's state the controller sets.
+// P5 O7 M4: what a file becomes for this composer: classifyFile's here, remote-uploads.ts's for another machine
+type DropAction = FileAction | { kind: 'upload' };
 export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
   setCommandEmpty(empty: boolean): void;
@@ -147,6 +157,8 @@ export const TYPED_DECIDE_MS = 300;
 // only the initiating flight writes the stored draft, even if no editor remains mounted.
 interface Submission { doc: ComposerDoc; done: Promise<boolean> }
 const submissions = new Map<AppSessionId, Submission>();
+/** A page reload (tests): the new page holds no submission of the old one's, whose answer it never sees. */
+export const forgetSubmissions = (): void => submissions.clear();
 
 // E9: the open dictation sink's bookkeeping.
 interface Dictation { ended: boolean; onEnded(): void }
@@ -183,7 +195,16 @@ export class EditorController {
   }
 
   update(inputs: ControllerInputs): void {
+    const before = this.inputs.uploadsTo ?? null;
     this.inputs = inputs;
+    // P5 O7 M4 (fix wave 1): the chat is now to run on another machine: a local drop's mention becomes its upload
+    const after = inputs.uploadsTo ?? null;
+    if (before === null && after !== null && this.heldDrops.size > 0) {
+      const converting = this.heldDropsToUploads(after).finally(() => {
+        if (this.converting === converting) this.converting = null;
+      });
+      this.converting = converting;
+    }
   }
 
   attach(editor: TiptapEditor): void {
@@ -198,6 +219,7 @@ export class EditorController {
       additionalDirectories,
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
+      searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
       placeholder: this.inputs.suggestion ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
@@ -316,6 +338,18 @@ export class EditorController {
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
   async submit(): Promise<void> {
+    // M4c fix wave 2: a local drop's conversion to its upload under way: the submission waits for it
+    const converting = this.converting;
+    if (converting !== null) {
+      if (this.submitAfterConverting) return; // one submission waits; another Send meanwhile adds none
+      this.submitAfterConverting = true;
+      try {
+        await converting;
+      } finally {
+        this.submitAfterConverting = false;
+      }
+      return this.submit();
+    }
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
@@ -500,14 +534,73 @@ export class EditorController {
       .run();
   }
 
-  private insertMention(path: string): void {
-    if (this.busy) return;
+  private insertMention(path: string): string | null {
+    if (this.busy) return null;
     const id = mentionPath(path, this.inputs.cwd);
     this.editor
       ?.chain()
       .focus()
       .insertContent([mentionNode({ id, label: mentionLabel(id), kind: 'file' }), textNode(' ')])
       .run();
+    return id;
+  }
+
+  // P5 O7 M4 (fix wave 1): each local drop's mention (by its id) with the file it named, while this mount lives: if the
+  // chat is then to run on another machine, the bytes go up instead (a path on this Mac names nothing there)
+  private heldDrops = new Map<string, File>();
+  // M4c fix wave 2: the conversion under way; a submission waits for it, so it never goes without the files
+  private converting: Promise<void> | null = null;
+  private submitAfterConverting = false;
+
+  // M4c fix wave 2: transactional. Every file is judged and read first; then, in one transaction, the mentions of those
+  // that can go are replaced by their attachments. A refused or unreadable one keeps its mention, with words that say
+  // why; a document changed meanwhile (an unmount, a submission) takes nothing.
+  private async heldDropsToUploads(machine: string): Promise<void> {
+    const editor = this.editor;
+    if (!editor) return;
+    const ids = new Set<string>();
+    editor.state.doc.descendants((node) => {
+      const id = String(node.attrs.id);
+      if (node.type.name === MENTION && node.attrs.kind === 'file' && this.heldDrops.has(id)) ids.add(id);
+    });
+    const ready = new Map<string, Attachment>();
+    const said: string[] = [];
+    for (const id of ids) {
+      const file = this.heldDrops.get(id)!;
+      const action = classifyRemoteFile(file, machine);
+      if (action.kind === 'refused') {
+        said.push(action.reason);
+        continue;
+      }
+      try {
+        ready.set(id, await this.remoteAttachmentOf(file, action.kind));
+      } catch {
+        said.push(`${file.name} could not be read`);
+      }
+    }
+    if (!this.live || this.busy || this.editor !== editor) return;
+    said.forEach((words) => warn(words));
+    if (ready.size === 0) return;
+    const tr = editor.state.tr;
+    const spans: { from: number; to: number }[] = [];
+    tr.doc.descendants((node, pos) => {
+      if (node.type.name === MENTION && ready.has(String(node.attrs.id))) spans.push({ from: pos, to: pos + node.nodeSize });
+    });
+    // the mentions go (their trailing space with them), the attachments come in, in one step
+    for (const { from, to } of spans.reverse()) tr.delete(from, tr.doc.textBetween(to, Math.min(to + 1, tr.doc.content.size)) === ' ' ? to + 1 : to);
+    tr.setDocAttribute('attachments', markPersisted([...attachmentsOf(editor.getJSON()), ...ready.values()]));
+    editor.view.dispatch(tr);
+    for (const id of ready.keys()) this.heldDrops.delete(id);
+  }
+
+  // What a file becomes on a session on another machine, read whole (no refusal: classified first).
+  private async remoteAttachmentOf(file: File, kind: 'image' | 'pdf' | 'upload'): Promise<Attachment> {
+    if (kind === 'pdf') return { id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data: await fileBase64(file), persisted: true };
+    if (kind === 'image') {
+      const out = await downscaleImage(file, file.type).catch(() => null);
+      if (out !== null && imageRefusal(file.name, out.bytes) === null) return { id: atomId('attachment'), kind: 'image', name: file.name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true };
+    }
+    return this.uploadOf(file.name, file, file.type);
   }
 
   private setAttachments(next: Attachment[]): void {
@@ -533,12 +626,22 @@ export class EditorController {
       const out = await downscaleImage(blob, mediaType);
       if (!this.taking(epoch, signal)) return false;
       const refusal = imageRefusal(name, out.bytes);
-      if (refusal) warn(refusal);
+      // P5 O7 M4 (fix wave 1): to another machine, an image past the inline bound goes up as the file it is
+      if (refusal && this.inputs.uploadsTo) {
+        const upload = await this.uploadOf(name, blob, mediaType);
+        if (!this.taking(epoch, signal)) return false;
+        this.addAttachment(upload);
+      } else if (refusal) warn(refusal);
       else this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
     } catch {
       warn(`${name} could not be read as an image`);
     }
     return true;
+  }
+
+  // P5 O7 M4: a file to go up to the session's machine at the send, its bytes held as a PDF's are
+  private async uploadOf(name: string, blob: Blob, mediaType: string): Promise<Attachment> {
+    return { id: atomId('attachment'), kind: 'file', name, mediaType: mediaType === '' ? 'application/octet-stream' : mediaType, bytes: blob.size, data: await fileBase64(blob), persisted: true };
   }
 
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
@@ -550,16 +653,24 @@ export class EditorController {
     const taking = () => this.taking(epoch, signal);
     if (!taking()) return false;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
+    const machine = this.inputs.uploadsTo ?? null; // P5 O7 M4
     for (const file of files) {
       if (!taking()) return false;
-      const action = classifyFile(file, this.client.pathForFile(file));
+      const action: DropAction = machine === null ? classifyFile(file, this.client.pathForFile(file)) : classifyRemoteFile(file, machine);
       if (action.kind === 'image') {
         if (!(await this.attachImage(file.name, file, file.type, epoch, signal))) return false;
       } else if (action.kind === 'pdf') {
         const data = await fileBase64(file);
         if (!taking()) return false;
         this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
-      } else if (action.kind === 'mention') this.insertMention(action.path);
+      } else if (action.kind === 'upload') {
+        const upload = await this.uploadOf(file.name, file, file.type);
+        if (!taking()) return false;
+        this.addAttachment(upload);
+      } else if (action.kind === 'mention') {
+        const id = this.insertMention(action.path);
+        if (id !== null) this.heldDrops.set(id, file);
+      }
       else if (action.kind === 'text') {
         const text = await file.text();
         if (!taking()) return false;
@@ -656,7 +767,12 @@ export class EditorController {
         const epoch = this.attachmentEpoch;
         for (const file of files) {
           if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
-          if (file.data === null) this.insertMention(file.path);
+          if (file.data === null) {
+            // P5 O7 M4: a path names nothing on another machine, and the + menu read no bytes of this file
+            const machine = this.inputs.uploadsTo ?? null;
+            if (machine === null) this.insertMention(file.path);
+            else warn(PICKED_BY_PATH(file.name, machine));
+          }
           else if (file.mediaType === 'application/pdf')
             this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.bytes, data: file.data, persisted: true });
           else {
@@ -666,6 +782,7 @@ export class EditorController {
         }
       },
       attachFiles: (files, options) => this.attachFromOutside(files, options?.signal), // P3-G
+      restored: () => this.restoring, // P5 O7 M4
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

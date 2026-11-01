@@ -4,7 +4,7 @@
 // per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed.
 import { existsSync, renameSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import type { Migration, Repair } from './migrations';
+import type { AddedColumn, Migration, Repair } from './migrations';
 
 export type Row = Record<string, SQLInputValue>;
 // What a column may be given: SQLite's own values, plus booleans stored as 0/1.
@@ -135,8 +135,9 @@ export function moveAside(path: string): string {
 // is opened read-only, with one logged error, and marked unavailable: its schema may not be the one this app reads, so
 // every statement fails with `index unavailable: <reason>` rather than reading or writing it. Before the pending
 // migrations, in their transaction, each repair the file lacks is applied and logged (`Repair`); a pending entry's
-// `before` step runs just before its SQL, in the same transaction (P5 O3-A).
-export function openDb(path: string, migrations: readonly Migration[], repairs: readonly Repair[]): Db {
+// `before` step runs just before its SQL, in the same transaction (P5 O3-A). Then each added column the file lacks is
+// added, `user_version` unmoved (`AddedColumn`; P5 O7 M4).
+export function openDb(path: string, migrations: readonly Migration[], repairs: readonly Repair[], added: readonly AddedColumn[] = []): Db {
   const known = migrations.length;
   let db: DatabaseSync;
   let version: number;
@@ -191,6 +192,18 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
     for (const repair of missing) {
       console.warn(`[index] ${path}: added ${repair.table}.${repair.column}, which migration ${repair.version} was amended to create after this database had applied it`);
     }
+  }
+  try {
+    const absent = added.filter((column) => !hasColumn(db, column.table, column.column));
+    if (absent.length > 0) {
+      db.exec('BEGIN IMMEDIATE');
+      for (const column of absent) db.exec(`ALTER TABLE ${column.table} ADD COLUMN ${column.column} ${column.definition}`);
+      db.exec('COMMIT');
+    }
+  } catch (error) {
+    if (db.isTransaction) db.exec('ROLLBACK');
+    db.close();
+    throw error;
   }
   return new Db(
     db,

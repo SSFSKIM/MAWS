@@ -42,7 +42,7 @@ export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorH
       {/* the toolbar's menus close as the draft hides (draft-shown.ts) */}
       <DraftShownContext.Provider value={!isDocked}>
         <div data-composer-draft hidden={isDocked} className="flex min-w-0 flex-col gap-1">
-          {bindings.project && <ProjectRow binding={bindings.project} directories={bindings.directories.value} />}
+          {bindings.project && <ProjectRow binding={bindings.project} directories={bindings.directories.value} appSessionId={appSessionId} />}
           <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
           {/* W2 (C1, Codex's): 22px corners and the faint shadow, no border; 44px at rest, the editor's 20px line inside
               12px above and below, the submit control 8px in from the box's foot */}

@@ -177,6 +177,44 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(push.mock.calls.length).toBe(2 * (lastRow + 1)); // from the start: a fresh rebuild
   });
 
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): a live page within a byte budget,
+  // the answer's UTF-8 JSON, whole rows while they fit; `lastSeq` reaches the rest, and a row alone past it is left out,
+  // said, and stepped over
+  it('a byte budget pages whole rows within it from the ring and from the journal, each answer within it, stepping over a row alone past it', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const maxBytes = 4096;
+    const bytesOf = (answer: object) => Buffer.byteLength(JSON.stringify(answer));
+    for (const ringSize of [undefined, 5]) {
+      const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ...(ringSize && { ringSize }) });
+      stream.events(events);
+      stream.flush();
+      const pages = [await stream.snapshot(null, null, maxBytes)];
+      while (!pages.at(-1)!.complete) pages.push(await stream.snapshot(pages.at(-1)!.lastSeq, null, maxBytes));
+      for (const page of pages) expect(bytesOf(page), `ring ${ringSize ?? 'whole'}`).toBeLessThanOrEqual(maxBytes);
+      expect(pages.length).toBeGreaterThan(3);
+      const left = new Set(pages.flatMap((page) => (page.omitted ? [page.omitted.seq] : [])));
+      for (const page of pages.filter((p) => p.omitted)) {
+        expect(page.events).toEqual([]);
+        expect(page.lastSeq).toBe(page.omitted!.seq);
+        expect(page.omitted!.events).toBe(events.filter((e) => e.seq === page.omitted!.seq).length);
+      }
+      expect(pages.flatMap((page) => page.events)).toEqual(events.filter((e) => !left.has(e.seq))); // no row split, lost or repeated
+      for (const page of pages.slice(0, -1)) expect(page.events.at(-1)?.seq ?? page.lastSeq).toBe(page.lastSeq);
+    }
+  });
+
+  it('a byte budget leaves out a row alone past it with its seq and size, and the next page goes on after it', async () => {
+    const stream = new SessionStream({ appSessionId: 'app-b' as AppSessionId, launchId: 'L', sessionId: null, journalPath: join(dir, 'none.jsonl'), emit: recorder().emit });
+    const small = ev('notice.posted', { seq: 1, text: 'first' });
+    const huge = ev('notice.posted', { seq: 2, text: '가'.repeat(2000) }); // 6 KB of UTF-8, 2 K characters of JSON
+    const after = [ev('notice.posted', { seq: 3, text: 'third' }), ev('notice.posted', { seq: 3, text: 'third, its second event' })];
+    stream.events([small, huge, ...after]);
+    expect(await stream.snapshot(null, null, 4096)).toEqual({ events: [small], lastSeq: 1, complete: false });
+    expect(await stream.snapshot(1, null, 4096)).toEqual({ events: [], lastSeq: 2, complete: false, omitted: { events: 1, bytes: Buffer.byteLength(JSON.stringify(huge)), seq: 2 } });
+    expect(await stream.snapshot(2, null, 4096)).toEqual({ events: after, lastSeq: 3, complete: true });
+    expect(await stream.snapshot(null, null)).toEqual({ events: [small, huge, ...after], lastSeq: 3, complete: true }); // unbounded, as before
+  });
+
   it('a journal that can no longer be read answers what the ring holds, incomplete', async () => {
     const { events, launchId, sessionId, appSessionId } = await recordedInit();
     const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath: join(dir, 'gone', 'LAUNCHS1.jsonl'), emit: recorder().emit, ringSize: 5 });

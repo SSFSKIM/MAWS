@@ -95,6 +95,28 @@ describe('lane B placement', () => {
     expect(await call(a, 'session.queue.list', { appSessionId: 'app-2' })).toMatchObject({ ok: false, error: { code: 'unavailable' } });
   });
 
+  // P5 O7 M4 fix wave 2: the host's absence is the machine's condition, said alike for every id before anyone's rank, so a
+  // caller who holds nothing tells an indexed session from an absent id by no answer: not a call's, a subscription's or an
+  // engine host act's (whose placement reads the live row too).
+  it('answers a caller below view alike for an indexed session and an absent id while the engine host can’t answer', async () => {
+    const f = await startEndpoint(org, started);
+    const s = f.host.add('app-1');
+    f.spine.set('app-1', s.engineSessionId);
+    owned(f, 'app-1', s.engineSessionId!);
+    const b = await openRemote(f, org.b1, org.B);
+    f.host.fail('session.status');
+    const answers = async (app: string) => {
+      const read = await call(b, 'session.queue.list', { appSessionId: app });
+      const sub = await subscribe(b, `s-${app}`, { lane: 'B', id: app });
+      const send = await act(b, b.device.action({ machine: f.ref, action: 'session.send', session: app, context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: app, content: 'hi' } }));
+      return [(read.error as { code: string }).code, sub.t, sub.reason, send];
+    };
+    const indexed = await answers('app-1');
+    expect(indexed).toEqual(['unavailable', 'ended', 'unavailable', 'unavailable']);
+    expect(await answers('app-absent')).toEqual(indexed);
+    expect(f.host.runs).toEqual([]);
+  });
+
   it('places a `machine` act on a released session, and the query of it, by the record', async () => {
     const f = await startEndpoint(org, started);
     f.spine.set('app-r', 'eng-r');
@@ -133,6 +155,25 @@ describe('the engine session authorized is the one the request runs on', () => {
     expect(await act(b, acquire)).toBe('unavailable');
     // Nothing reached an executor: no read past placement, no stream, no op.
     expect(f.host.calls.filter((c) => ['session.events', 'host.op', 'machine.op'].includes(c.name))).toEqual([]);
+    expect(f.host.runs).toEqual([]);
+    expect(f.spine.acquired).toEqual([]);
+  });
+
+  // P5 O7 M4 fix wave 1: the lag is said only to a caller who stands on the recorded engine session. One who owns only the
+  // live engine session is placed on the recorded one like anyone, and holds nothing there: `grade`, as for a session
+  // they can't see, and nothing past placement is read for them.
+  it('answers `grade`, not `unavailable`, to a caller who owns only the live engine session during the lag', async () => {
+    const { f, s, a } = await lagging();
+    const from = f.host.calls.length;
+    expect(await call(a, 'session.status', { appSessionId: 'app-1' })).toMatchObject({ ok: false, error: { code: 'grade' } });
+    expect(await call(a, 'session.get', { appSessionId: 'app-1' })).toMatchObject({ ok: false, error: { code: 'grade' } });
+    expect(await subscribe(a, 's1', { lane: 'B', id: 'app-1' })).toMatchObject({ t: 'ended', reason: 'grade' });
+    const send = a.device.action({ machine: f.ref, action: 'session.send', session: 'app-1', context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: 'app-1', content: 'not yet' } });
+    expect(await act(a, send)).toBe('grade');
+    const acquire = a.device.action({ machine: f.ref, action: 'session.acquire', args: { appSessionId: 'app-1', reason: 'send' } });
+    expect(await act(a, acquire)).toBe('grade');
+    // Placement's reads only: the record and the live row.
+    expect(f.host.calls.slice(from).map((c) => c.name).filter((name) => name !== 'session.get' && name !== 'session.status')).toEqual([]);
     expect(f.host.runs).toEqual([]);
     expect(f.spine.acquired).toEqual([]);
   });

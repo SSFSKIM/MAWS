@@ -17,12 +17,16 @@
 //   map is read once at the session's load: `directMap: true` maps B's address to its listener (the direct carrier);
 //   `false` maps it to a closed loopback port, so the direct dial fails at once and the link goes through the hub (the
 //   relay), with no dial leaving this Mac.
+// - A's way to the hub (P5 O7 M4): a loopback TCP pipe in front of the hub, which `devOrgDir` names as A's hub, so a spec
+//   cuts A off from B (and from the hub) and joins it again, as a lost network would: the pipe ends every connection
+//   through it and refuses new ones until restored. B's own hub link does not go through it. With the relay launch's
+//   direct dial failing at once, the cut leaves A no carrier to B.
 //
 // The scene changes nothing the machine checks: the device keys, the handshakes, the endpoint's authorization and the
 // listings are all production's. Nothing reaches beyond 127.0.0.1.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer, type AddressInfo } from 'node:net';
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@playwright/test';
@@ -53,6 +57,9 @@ export interface RemoteScene {
   };
   /** A's MAWS_DEV_ORG directory; `directMap` says whether the link may reach B's listener directly. */
   devOrgDir(directMap: boolean): string;
+  /** A's way to the hub (the pipe `devOrgDir` names): `cut` ends every connection through it and refuses new ones until
+   * `restore`. */
+  aHub: { cut(): void; restore(): void };
   stop(): Promise<void>;
 }
 
@@ -94,6 +101,49 @@ function freePort(): Promise<number> {
       server.close(() => done(port));
     });
   });
+}
+
+// A loopback TCP pipe to `target` (an http://127.0.0.1:<port> URL), which `cut` ends and keeps refusing until `restore`.
+async function pipeTo(target: string): Promise<{ url: string; cut(): void; restore(): void; close(): Promise<void> }> {
+  const port = Number(new URL(target).port);
+  const open = new Set<Socket>();
+  let cut = false;
+  const server = createServer((socket) => {
+    if (cut) return void socket.destroy();
+    const upstream = connect({ host: '127.0.0.1', port });
+    for (const [side, other] of [[socket, upstream], [upstream, socket]] as const) {
+      open.add(side);
+      side.on('error', () => undefined); // a cut's reset, on either side; the close below ends the other
+      side.on('close', () => {
+        open.delete(side);
+        other.destroy();
+      });
+    }
+    socket.pipe(upstream).pipe(socket);
+  });
+  await new Promise<void>((done, fail) => {
+    server.once('error', fail);
+    server.listen(0, '127.0.0.1', () => done());
+  });
+  const endAll = () => {
+    for (const socket of open) socket.destroy();
+  };
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    cut() {
+      cut = true;
+      endAll();
+    },
+    restore() {
+      cut = false;
+    },
+    close: () =>
+      new Promise<void>((done) => {
+        cut = true;
+        endAll();
+        server.close(() => done());
+      }),
+  };
 }
 
 // B's preload: its interface table is one tailnet-shaped address, which it listens on through loopback.
@@ -158,6 +208,9 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     const sminos: FakeSminos = await startFakeSminos(scratch, rl10, B_NAME);
     undo.push(() => sminos.close());
 
+    const aHub = await pipeTo(org.url);
+    undo.push(() => aHub.close());
+
     // Read once every amendment is made (A listed, B enrolled): what A's dev session pins and holds.
     const chain = await org.chain();
     const advertised = `ws://${TAILNET}:${directPort}`;
@@ -170,7 +223,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
         member: org.admin.member,
         device: aDevice.device,
         pins: chain.pins,
-        hub: { url: org.url, standinUser: org.admin.email },
+        hub: { url: aHub.url, standinUser: org.admin.email },
         directMap: { [advertised]: `ws://127.0.0.1:${directMap ? directPort : deadPort}` },
       };
       writeFileSync(join(dir, 'session.json'), JSON.stringify(session, null, 2));
@@ -201,6 +254,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
         },
       },
       devOrgDir,
+      aHub: { cut: () => aHub.cut(), restore: () => aHub.restore() },
       stop: unwind,
     };
   } catch (error) {

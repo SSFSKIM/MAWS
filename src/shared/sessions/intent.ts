@@ -10,7 +10,7 @@ import * as z from 'zod';
 import { PermissionModeSchema } from '../graph/enums';
 import { ContentBlockSchema } from '../graph/events';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from '../graph/ids';
-import { LineageSchema } from '../graph/session'; // E3
+import { LaunchedBySchema, LineageSchema } from '../graph/session'; // E3; P5 O7 M4: LaunchedBySchema
 import { EffortSchema } from '../engine/launch-spec';
 import { SETUP_PHASES, SetupResourcesSchema } from './setup';
 
@@ -72,6 +72,9 @@ export const SetupIntentSchema = z.strictObject({
   // E3 (X11): the lineage the launched record carries (a side thread's, or C10's Fork's); optional because persisted
   // intents are parsed strictly and the ones written before E3 have none
   lineage: LineageSchema.optional(),
+  // P5 O7 M4: a remote spawn's requester and its signed action (`session.spawn`), which the launched record carries;
+  // optional for the same reason as `lineage`, and never patched from the renderer
+  launchedBy: LaunchedBySchema.optional(),
 });
 export type SetupIntent = z.infer<typeof SetupIntentSchema>;
 

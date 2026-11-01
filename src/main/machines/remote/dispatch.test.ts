@@ -1,12 +1,13 @@
 // The router's path to an RL2 machine (P5 O7 M1, "The router's path", Interfaces §F).
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
 import { dispatchOverLink } from './dispatch';
 import type { CallResult } from './link';
 
 function link(answer: CallResult) {
-  const calls: Array<[string, unknown]> = [];
-  return { calls, name: 'mini', call: async (name: string, input: unknown) => (calls.push([name, input]), answer) };
+  const calls: Array<[string, unknown, ...unknown[]]> = [];
+  return { calls, name: 'mini', call: async (name: string, input: unknown, ...options: unknown[]) => (calls.push([name, input, ...options]), answer) };
 }
 
 const STATUS = 'session.status' as CommandName;
@@ -21,10 +22,27 @@ describe('dispatch over an RL2 link', () => {
     expect(bad).toMatchObject({ ok: false, error: { code: 'internal' } });
   });
 
+  // JSON has no undefined: the endpoint answers a void command's output as null (calls.ts), which is the void it ran.
+  it('reads a null output as the undefined of a command whose output takes no null', async () => {
+    expect(await dispatchOverLink(link({ ok: true, output: null }), 'files.watch' as CommandName, { appSessionId: 'a', path: '/r' })).toEqual({ ok: true, value: undefined });
+    expect(await dispatchOverLink(link({ ok: true, output: null }), 'engine.ping' as CommandName, undefined)).toMatchObject({ ok: false, error: { code: 'internal' } });
+  });
+
   it('refuses an act-graded command locally, `act-required`, without a round trip', async () => {
     const l = link({ ok: true, output: null });
     expect(await dispatchOverLink(l, 'session.send' as CommandName, {})).toEqual({ ok: false, error: { code: 'internal', message: 'session.send: refused act-required by machine mini', issues: { refusal: 'act-required' } } });
     expect(l.calls).toEqual([]);
+  });
+
+  // P5 O7 M4: the session a path-class read is made from rides the call; the link decides whether the peer reads it.
+  it('names the session a read is made from as the call’s lane B session, and nothing when none was', async () => {
+    const l = link({ ok: false, error: { code: 'no-target' } });
+    await dispatchOverLink(l, 'git.status' as CommandName, { directory: '/r/src' }, 'app-1' as AppSessionId);
+    await dispatchOverLink(l, 'git.status' as CommandName, { directory: '/r/src' });
+    expect(l.calls).toEqual([
+      ['git.status', { directory: '/r/src' }, { session: { lane: 'B', id: 'app-1' } }],
+      ['git.status', { directory: '/r/src' }],
+    ]);
   });
 
   it('answers host_unavailable for a command that does not cross a machine link', async () => {

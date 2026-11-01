@@ -21,7 +21,7 @@ import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
-import { HISTORY_GAP, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2
+import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
@@ -431,6 +431,42 @@ describe('ipcSource', () => {
       reads()[2]!.answer({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } } as never);
       await vi.waitFor(() => expect(gapTexts()).toEqual([HISTORY_TOO_LARGE.older('mini')]));
       expect(HISTORY_TOO_LARGE.newest('mini')).not.toBe(HISTORY_GAP); // a lost range keeps the generic words (the cases above)
+    });
+
+    // P5 O7 M4 (acceptance 12): a machine whose endpoint takes the byte budget answers every window in pages the channel
+    // carries, so no too-large bar; an item alone past the budget is left out (`omitted`), just after the page's rows,
+    // and a bar there says so, at the newest window's end and at an older page's
+    it('marks where a budgeted read left out items too large for the channel, after the rows of the page that says so', async () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+      const MiB = 1024 * 1024;
+      const disk = (b: ReturnType<typeof builder>, tag: string) => b.events.map((event, i) => ({ ...event, seq: null, id: `app-r:${tag}:${i}` as EventId }));
+      const b1 = builder();
+      turnOf(b1, 1);
+      const b2 = builder();
+      turnOf(b2, 2);
+      const [older, newer] = [disk(b1, 'older'), disk(b2, 'newer')];
+      const gapTexts = () => useTranscriptStore.getState().entries[REMOTE].rows.flatMap((row) => (row.kind === 'gap' ? [row.text] : []));
+      useTranscriptStore.getState().detach(REMOTE);
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, REMOTE);
+      const reads = () => fake.calls.filter((call) => call.name === 'session.events');
+      const hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      reads()[0]!.answer({ ok: true, value: { events: newer, lastSeq: 0, complete: true, earlier: newer[0]!.id, omitted: { events: 1, bytes: 5 * MiB, seq: null } } } as never);
+      await hydrated;
+      expect(gapTexts()).toEqual([HISTORY_OMITTED(1, 5 * MiB, 'mini')]);
+      expect(kinds(REMOTE).at(-1)).toBe('gap'); // after the newest window's rows
+      source.older!.loadOlder();
+      await vi.waitFor(() => expect(reads()).toHaveLength(2));
+      expect(reads()[1]!.input).toMatchObject({ before: newer[0]!.id });
+      reads()[1]!.answer({ ok: true, value: { events: older, lastSeq: 0, complete: true, omitted: { events: 2, bytes: 9 * MiB, seq: null } } } as never);
+      await vi.waitFor(() => expect(gapTexts()).toHaveLength(2));
+      expect(gapTexts()).toEqual([HISTORY_OMITTED(2, 9 * MiB, 'mini'), HISTORY_OMITTED(1, 5 * MiB, 'mini')]);
+      const order = kinds(REMOTE);
+      expect(order.indexOf('gap')).toBeGreaterThan(order.indexOf('assistant_text')); // the older page's bar after its rows
+      expect(order.indexOf('gap')).toBeLessThan(order.lastIndexOf('user')); // and before the newer window's
+      expect(gapTexts()).not.toContain(HISTORY_TOO_LARGE.newest('mini'));
+      expect(HISTORY_OMITTED(1, 5 * MiB, 'mini')).toBe('One item (5.0 MB) is too large to show from mini');
+      expect(HISTORY_OMITTED(2, 9 * MiB, 'mini')).toBe('2 items (9.0 MB) are too large to show from mini');
     });
 
     it('draws it at the start of a page whose range is partly gone, once however often the key is read again', async () => {

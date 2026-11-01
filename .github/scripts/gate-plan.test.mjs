@@ -1845,6 +1845,34 @@ test('packaged shards only on direct hosted Macs; every self-hosted route builds
   ]) assert.deepEqual(JSON.parse(plan({ ...base, ...override }).outputs.packaged_shards), [{ shard: '', slug: '', checks: true }], JSON.stringify(override));
 });
 
+// render-host.spec.ts:144 went red only under the packaged binary and landed unseen (architect 882): no default run built it.
+test('the default set holds packaged wherever it would take a hosted Mac, and leaves it explicit everywhere else', () => {
+  const base = { HEAD_MESSAGE: 'Runner: macos', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_JOBS: workflowList(readWorkflow(), 'HOSTED_MAC_JOBS') };
+  const { outputs, summary } = plan(base);
+  assert.equal(outputs.packaged, 'true');
+  assert.equal(outputs.packaged_runner, '"macos-26"');
+  assert.deepEqual(JSON.parse(outputs.packaged_shards).map((entry) => entry.shard), ['1/2', '2/2']);
+  assert.match(summary, /^- `packaged`$/m);
+  assert.match(summary, /From: the default \(class 1a, with unit:darwin and class 1 e2e on a macOS lane, and packaged where it takes a hosted Mac\)\./);
+  assert.match(summary, / Hosted Mac \(direct, macos-26\): packaged 1\/2, packaged 2\/2\./);
+  assert.equal(plan({ ...base, EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', HEAD_MESSAGE: '' }).outputs.packaged, 'true');
+  // Lane moves e2e groups only, so neither hosted lane takes packaged out.
+  for (const lane of ['hosted', 'no-hosted']) assert.equal(plan({ ...base, HEAD_MESSAGE: `Runner: macos\nLane: ${lane}` }).outputs.packaged, 'true', lane);
+  // Where it would build on the mini, or nowhere, the default set leaves it out; a narrowed set is its caller's.
+  for (const override of [
+    { HOSTED_MAC_ROUTE: 'mirror' },
+    { HOSTED_MAC_ROUTE: '' },
+    { HOSTED_MAC_JOBS: '' },
+    { HEAD_MESSAGE: 'Runner: linux' },
+    { HEAD_MESSAGE: 'Gates: static,unit,probes,unit:darwin\nRunner: macos' },
+    ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
+  ]) {
+    const { outputs: narrowed, summary: said } = plan({ ...base, ...override });
+    assert.equal(narrowed.packaged, 'false', JSON.stringify(override));
+    assert.doesNotMatch(said, /packaged/, JSON.stringify(override));
+  }
+});
+
 test('packaged workflow gives each shard its own bare command and report, and runs small checks once', () => {
   const workflow = readWorkflow();
   assert.match(workflow, /packaged_shards: \$\{\{ steps\.plan\.outputs\.packaged_shards \}\}/);

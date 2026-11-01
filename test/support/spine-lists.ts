@@ -37,7 +37,7 @@ export const SPINE_COMMANDS = [
   'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
   'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',
-  'session.setVisible', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
+  'session.setVisible', 'session.spawn', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
   'session.visible', // P5 O3-D M5b: the visible set, for main's mirror
   'settings.engineApplied', 'settings.userEngineDefaults',
   'side.screenshot.preview', 'side.sendToMain', 'side.thread.open',

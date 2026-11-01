@@ -511,6 +511,9 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-delivery-name { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .transcript-delivery-actions { display: inline-flex; gap: 10px; margin-left: auto; }
 .transcript-delivery-actions .transcript-quiet-button { margin-top: 0; }
+/* P5 O7 M4: a remote session's file: the desktop actions greyed, and where the file is */
+.transcript-delivery-actions .transcript-quiet-button:disabled { color: var(--fg-faint); cursor: default; }
+.transcript-delivery-elsewhere { color: var(--fg-faint); font-size: var(--text-ui-sm); }
 .transcript-delivery-problem { flex-basis: 100%; color: var(--danger); }
 .transcript-question-refused { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 /* E1 end */

@@ -219,6 +219,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       // anchored first message (whose lead, preamble and tag would title it until the engine's title is read back)
       firstPrompt: intent.lineage?.kind === 'side-thread' ? sideThreadTitle(intent.lineage) : (intent.message?.display ?? null),
       lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
+      ...(intent.launchedBy && { launchedBy: intent.launchedBy }), // P5 O7 M4: a remote spawn's requester, for O12's observer
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);
     // P2-C start (2026-10-09): a fork and a side thread take their parent's to-human override with their record

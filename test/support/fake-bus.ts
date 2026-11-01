@@ -33,9 +33,9 @@ export function fakeBus(): FakeBus {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const asker = endableClientRef('page:1.1');
 
-  const answer = async <N extends CommandName>(name: N, handler: AnyHandler, input: unknown, client: ClientRef): Promise<CommandResult<N>> => {
+  const answer = async <N extends CommandName>(name: N, handler: AnyHandler, input: unknown, context: HandlerContext): Promise<CommandResult<N>> => {
     try {
-      const output = validateCommandOutput(name, await handler(input, { client }));
+      const output = validateCommandOutput(name, await handler(input, context));
       return output.ok ? output : { ok: false, error: ipcError('internal', output.error.message, output.error.issues) };
     } catch (error) {
       return { ok: false, error: error instanceof HostCommandError ? thrownError(error) : ipcError('internal', error instanceof Error ? error.message : String(error)) };
@@ -44,11 +44,11 @@ export function fakeBus(): FakeBus {
 
   // A client's command past the main-only gate: the input validated, an interceptor before the handler
   const route = async <N extends CommandName>(name: N, rawInput: unknown, asked: ClientRef | HandlerContext): Promise<CommandResult<N>> => {
-    const client = 'client' in asked ? asked.client : asked;
+    const context: HandlerContext = 'client' in asked ? asked : { client: asked }; // the whole context, `op` included (P5 O7 M4)
     const input = validateCommandInput(name, rawInput);
     if (!input.ok) return input;
     const handler = interceptors.get(name) ?? handlers.get(name);
-    if (handler) return answer(name, handler, input.value, client);
+    if (handler) return answer(name, handler, input.value, context);
     const { owner } = REGISTRY.commands[name];
     if (owner !== 'main' && owner !== 'machine') return { ok: false, error: ipcError('host_unavailable', `${owner} is not running; cannot answer ${name}`) };
     return { ok: false, error: ipcError('internal', `no handler registered for ${name}`) };

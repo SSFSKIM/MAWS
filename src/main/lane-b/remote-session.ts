@@ -9,6 +9,11 @@
 //   then the stream ends "can't place"; a later `start` (a click: the tab's interest read again) tries again. A read the
 //   link could not carry (offline, a timeout, the machine's index unavailable) is asked again on the idle backoff without
 //   counting. The subscription opens once the record is had.
+// - A session this app spawned (P5 O7 M4, the architect's ruling on M4d's gap): the machine's endpoint ranks a lane B
+//   session by its sminos listing, so a session just spawned here answers `grade` until sminos lists it. While the spawn
+//   settled less than `listWaitMs` ago (`spawnedAt`), a read that can't place it says "Waiting for <machine> to list the
+//   new session…" (`listing`) and is asked again on the retries' last interval until the minute is up; then the stream
+//   ends "can't place" as for any session. The wait is let go (`spawnWaitOver`) at the first record had or at the cap.
 // - The stream. One `full` subscription. Its parts become `session.status`, `session.queue`, `session.catalogChanged`
 //   and, for the broker's items still waiting on a person, `attention.changed` for that session (the renderer never reads
 //   `session.brokerItems`); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
@@ -22,9 +27,17 @@
 //   delivers: its gap is told just before that event, with its place (`at`), or with none when the stream ends or answers
 //   another `subbed` first; an omitted event's names its own place.
 // - Idle. An `ended('unavailable')` is a placed session that isn't live (released as idle, or the host parked): the stream
-//   is `idle`, its status forgotten, and it is subscribed again from its cursor on a backoff from 1 s doubling to 30 s
-//   while the tab is open, so a session resumed by anyone streams within the backoff (`kick` subscribes at once, after a
-//   resume this app asked for). `removed` and `closed` end it for good; any other end ends the stream with its reason.
+//   is `idle`, its status forgotten. Each try of a subscription places the session on the machine's engine host (waking a
+//   parked one) and reports the session as watched, which restarts the machine's park clock (O5's landing audit), so it
+//   is not tried again blindly. While the session's checkout feed carries its record (`followed`, P5 O7 M4), it is
+//   subscribed again from its cursor only when the record says it runs (its holder `self`) or names another engine
+//   session (`recordChanged`), or when the feed opens again (`kick`: what changed meanwhile went untold). Without such a
+//   feed (a peer without `rl2.feeds`) it is tried on a backoff from 1 s doubling to `idleProbeMaxMs`, well past the
+//   machine's park window, so the host parks between tries. `kick` subscribes at once (a resume this app asked for, the
+//   feed's opening). A record that says the session runs while a try is still out, unanswered (the opening's first try
+//   too: fix wave 2), is kept for that try, and taken once it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
+//   channel's peer without feeds) puts a waiting stream on the backoff (fix wave 1). `removed` and `closed` end it for
+//   good; any other end ends the stream with its reason.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
@@ -57,12 +70,22 @@ export interface RemoteSessionState {
   sends: number;
   /** Why the stream ended, while it has: `unplaced`, `closed`, `removed`, or the endpoint's reason. */
   ended: string | null;
+  /** Waiting for the machine to list a session this app spawned (its record can't be read until it does). */
+  listing: boolean;
 }
+
+/** How long after a spawn here settled main waits for the machine to list the new session (M4d's gap). */
+export const LIST_WAIT_MS = 60_000;
 
 export interface RemoteSessionTiming {
   recordRetryMs: readonly number[];
+  /** A record read the link couldn't carry is asked again after the first, doubling to the second. */
   idleRetryMs: readonly [number, number];
+  /** With no feed carrying the record, an idle stream is tried again on the idle backoff doubling to this. */
+  idleProbeMaxMs: number;
   batchMax: number;
+  /** A session this app spawned is asked for this long after the spawn settled (LIST_WAIT_MS). */
+  listWaitMs?: number;
 }
 
 export interface RemoteSessionDeps {
@@ -73,6 +96,16 @@ export interface RemoteSessionDeps {
   timing: RemoteSessionTiming;
   /** The revision a `session.changed` carries: rising across the app's run. */
   revision(): number;
+  /** P5 O7 M4: the stream was subscribed (the session is placed): what follows it beside the stream opens now. */
+  subscribed?(): void;
+  /** Whether the session's checkout feed carries its record now (`recordChanged`): an idle stream waits for it. */
+  followed?(): boolean;
+  /** When this app's spawn of the session settled (epoch ms), or null when it didn't spawn it (or the wait is over). */
+  spawnedAt?(): number | null;
+  /** The wait for the machine to list it is over: the record was had, or the minute is up. */
+  spawnWaitOver?(): void;
+  /** The clock `spawnedAt` is read against (Date.now). */
+  now?(): number;
   log(line: string): void;
 }
 
@@ -95,6 +128,10 @@ export class RemoteSession {
   #cursor: Cursor | null = null;
   #pendingGap: string | null = null; // the launch of a `missing` gap not told yet: its place is the next event's
   #timer: ReturnType<typeof setTimeout> | null = null;
+  /** A record said the session runs while the try out was not yet answered: one more try once it ends. */
+  #started = false;
+  /** The subscription out has had its `subbed`. */
+  #answered = false;
   #backoffMs: number;
   #batch: SessionEvent[] = [];
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,7 +144,7 @@ export class RemoteSession {
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
     this.#backoffMs = deps.timing.idleRetryMs[0];
-    this.state = { machine: deps.machine, app: deps.app, status: null, record: null, stream: 'opening', launch: null, sends: 0, ended: null };
+    this.state = { machine: deps.machine, app: deps.app, status: null, record: null, stream: 'opening', launch: null, sends: 0, ended: null, listing: false };
   }
 
   get link(): RemoteLink {
@@ -147,6 +184,26 @@ export class RemoteSession {
     this.#timer = null;
     this.#backoffMs = this.#deps.timing.idleRetryMs[0];
     this.#subscribe();
+  }
+
+  /**
+   * The session's record as the machine changed it (its checkout feed): told, and an idle stream subscribed again at once
+   * when it says the session runs (its holder `self`) or names another engine session.
+   */
+  recordChanged(record: SessionRecord): void {
+    if (!this.#running) return;
+    const before = this.state.record;
+    this.state.record = record;
+    this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
+    if (record.holder.kind !== 'self' && record.engineSessionId === before?.engineSessionId) return;
+    if (this.#sub !== null && !this.#answered) this.#started = true; // a try out, unanswered: kept for its end
+    else if (this.state.stream === 'idle') this.kick();
+  }
+
+  /** The record no longer follows (the feed ended for good, not as a stop): a stream waiting on it tries on the backoff. */
+  unfollowed(): void {
+    if (!this.#running || this.state.stream !== 'idle' || this.#sub !== null || this.#timer !== null) return;
+    this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
   }
 
   /**
@@ -223,6 +280,7 @@ export class RemoteSession {
     if (answer.ok) {
       const read = link.readCommandOutput('session.get', answer.output);
       if (read.ok && read.value !== null) {
+        this.#listed();
         this.state.record = read.value as SessionRecord;
         this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
         this.#subscribe();
@@ -235,7 +293,23 @@ export class RemoteSession {
     } else if (TRANSIENT.has(answer.error.code)) {
       return this.#later(() => void this.#readRecord(attempt, token));
     }
-    if (attempt >= timing.recordRetryMs.length) {
+    // A session this app spawned, not listed yet: asked again until the minute after its spawn is up.
+    const spawned = this.#deps.spawnedAt?.() ?? null;
+    const left = spawned === null ? 0 : spawned + (timing.listWaitMs ?? LIST_WAIT_MS) - (this.#deps.now?.() ?? Date.now());
+    if (left > 0) {
+      if (!this.state.listing) {
+        this.state.listing = true;
+        this.publish();
+      }
+      const interval = timing.recordRetryMs[Math.min(attempt, timing.recordRetryMs.length - 1)] ?? 1000;
+      this.#timer = setTimeout(() => {
+        this.#timer = null;
+        void this.#readRecord(attempt + 1, token);
+      }, Math.min(interval, left));
+      return;
+    }
+    if (spawned !== null) this.#listed();
+    if (attempt >= timing.recordRetryMs.length || spawned !== null) {
       this.state.stream = 'ended';
       this.state.ended = 'unplaced';
       this.publish();
@@ -247,11 +321,18 @@ export class RemoteSession {
     }, timing.recordRetryMs[attempt]);
   }
 
+  /** The wait for the machine to list a session spawned here is over. */
+  #listed(): void {
+    if (this.state.listing) this.state.listing = false;
+    if (this.#deps.spawnedAt?.() != null) this.#deps.spawnWaitOver?.();
+  }
+
   // ---- The stream ------------------------------------------------------------------------------------------------------
 
   #subscribe(): void {
     const token = {};
     this.#token = token;
+    this.#answered = false;
     const mine = () => this.#token === token && this.#running;
     let first = true; // this subscription's first `subbed`
     const carried = this.#cursor !== null;
@@ -261,6 +342,8 @@ export class RemoteSession {
         this.#flush();
         const gap = first ? mode === 'missing' && carried : mode !== 'replay';
         first = false;
+        this.#started = false;
+        this.#answered = true;
         this.#backoffMs = this.#deps.timing.idleRetryMs[0];
         this.state.launch = at.epoch;
         this.#tellPendingGap();
@@ -324,10 +407,15 @@ export class RemoteSession {
         }
         this.state.stream = 'idle';
         this.publish();
-        this.#later(() => this.#subscribe());
+        if (this.#started) {
+          this.#started = false;
+          return this.#subscribe();
+        }
+        if (!this.#deps.followed?.()) this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
       },
     };
     this.#sub = this.link.subscribe({ session: { lane: 'B', id: this.state.app }, view: 'full', cursor: this.#cursor }, sink);
+    this.#deps.subscribed?.();
   }
 
   /** The replace-whole parts of a snapshot, the status first. */
@@ -391,10 +479,10 @@ export class RemoteSession {
     for (let i = 0; i < batch.length; i += batchMax) this.#emit('session.eventBatch', { appSessionId: this.state.app, events: batch.slice(i, i + batchMax) });
   }
 
-  /** Runs `again` on the idle backoff, doubling up to its cap. */
-  #later(again: () => void): void {
+  /** Runs `again` on the idle backoff, doubling up to `cap`. */
+  #later(again: () => void, cap = this.#deps.timing.idleRetryMs[1]): void {
     const delay = this.#backoffMs;
-    this.#backoffMs = Math.min(this.#backoffMs * 2, this.#deps.timing.idleRetryMs[1]);
+    this.#backoffMs = Math.min(this.#backoffMs * 2, cap);
     this.#timer = setTimeout(() => {
       this.#timer = null;
       if (this.#running) again();
@@ -404,6 +492,7 @@ export class RemoteSession {
   /** Every timer, subscription and wait of the run before. */
   #halt(): void {
     this.#token = {};
+    this.#started = false;
     this.#pendingGap = null; // the next subscription's opening from the cursor says it again
     if (this.#sub !== null) this.#cursor = this.#sub.cursor() ?? this.#cursor;
     this.#sub?.close();

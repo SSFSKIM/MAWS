@@ -216,6 +216,69 @@ export class ActTable {
     return handle;
   }
 
+  /**
+   * P5 O7 M4 (the architect's ruling on a spawn that answered `unknown`): the executing side's ledger asked again about an
+   * op this table settled `unknown`, which may still have run and whose ledger may since record its outcome. A handle on
+   * that answer: only `query` is sent, never the act; past the op's horizon no ledger answers, so it settles `unknown`
+   * (`expired`) at once.
+   */
+  requery(op: { opId: string; opCreated: string; executor: Executor }, ended: 'removed' | 'closed' | null): ActHandle {
+    let resolve!: (outcome: ActOutcome) => void;
+    const outcome = new Promise<ActOutcome>((done) => (resolve = done));
+    const entry: Entry = {
+      opId: op.opId,
+      opCreated: op.opCreated,
+      executor: op.executor,
+      mode: 'never',
+      action: null as unknown as Action, // never sent: `signed`, `outstanding` and `acked` keep every path to a query
+      signed: true,
+      signing: false,
+      windowFrom: this.#deps.now(),
+      sendBy: null,
+      outstanding: true,
+      ambiguous: true,
+      acked: true,
+      querying: false,
+      queryAttempt: 0,
+      progress: 'unknown',
+      listeners: new Set(),
+      timers: new Set(),
+      horizon: null,
+      settled: false,
+      resolve,
+    };
+    const handle: ActHandle = {
+      opId: op.opId,
+      opCreated: op.opCreated,
+      progress: () => entry.progress,
+      onProgress(listener) {
+        entry.listeners.add(listener);
+        return () => void entry.listeners.delete(listener);
+      },
+      outcome,
+    };
+    const held = this.#entries.get(op.opId);
+    if (held !== undefined) {
+      // still out here (sent, or asked again already): its own outcome, shared
+      const first = held.resolve;
+      let also!: (outcome: ActOutcome) => void;
+      const shared = new Promise<ActOutcome>((done) => (also = done));
+      held.resolve = (settled) => (first(settled), also(settled));
+      return { ...handle, progress: () => held.progress, onProgress: (listener) => (held.listeners.add(listener), () => void held.listeners.delete(listener)), outcome: shared };
+    }
+    this.#entries.set(op.opId, entry);
+    if (ended !== null) {
+      this.#settle(entry, { state: 'unknown', reason: ended });
+      return handle;
+    }
+    this.#query(entry); // settles `expired` past the horizon
+    if (!entry.settled) {
+      entry.horizon = setTimeout(() => this.#settle(entry, { state: 'unknown', reason: 'expired' }), Date.parse(op.opCreated) + OP_HORIZON_S * 1000 + 1 - this.#deps.now());
+      entry.horizon.unref?.();
+    }
+    return handle;
+  }
+
   /** A channel became current: every unsettled act is sent, resealed or queried on it. */
   onCurrent(): void {
     for (const entry of [...this.#entries.values()]) {

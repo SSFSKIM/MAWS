@@ -7,14 +7,18 @@
 // A registry command takes its grade from O1's declaration (`gradeOf`, `ungraded` when its namespace declares none) and
 // its input is held to the registry's schema. Lane A's actions are sminos's RPC names, `sminos.<rpc>`, graded here
 // (§G's table); the endpoint's own take no grade (`null`): the grant's or the state's own signatures are the authority.
+import type { Feed } from 'org-protocol';
 import type { GradeSpec } from '@shared/ipc/grades';
 
 /**
  * Where a request's session is read: `appSessionId` (lane B, mapped to the engine session through the spine's record,
  * `session.get`, else the engine host's `session.status`: targets.ts),
- * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), or none: the machine itself.
+ * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), none: the machine itself, or
+ * `checkout` (P5 O7 M4: a path-class read of a lane B session's checkout: the call's own `session` names the session,
+ * placed as an `appSessionId`, and the input's `directory` or `repoRoot` must lie in that session's roots or their
+ * repositories: targets.ts).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -27,12 +31,17 @@ export type OfferRow = {
   grade?: GradeSpec | null;
 };
 
-/** The table, and the lanes a `sub` may name (M8: `full` or `cards` on either). */
-export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[] };
+/**
+ * The table, the lanes a `sub` may name (M8: `full` or `cards` on either), and the feeds it may name (P5 O7 M4, §R: a
+ * session's `checkout` feed; M6 adds the machine's `attention`).
+ */
+export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[]; feeds: readonly Feed[] };
 
 const laneB = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'engine-host', target: 'appSessionId' });
 /** A lane B session's command the machine's services run (the spine: its record, its app events, the resume). */
 const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'machine', target: 'appSessionId' });
+/** A read of a lane B session's checkout by a path (`git.*`): the call names its session, the input a directory in it. */
+const checkout: OfferRow = { kind: 'call', executor: 'machine', target: 'checkout' };
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
 
 export const OFFERS: Offers = {
@@ -82,6 +91,47 @@ export const OFFERS: Offers = {
     'session.setKeep': laneB('act'),
     'session.generateTitle': laneB('act'),
     'session.acquire': laneBMachine('act'),
+    // P5 O7 M4: a remote session's checkout. The files and scm reads name their session; the files service's allowlist
+    // bounds their paths, and a watch is owned by the channel's `ClientRef`, so it ends with the channel. Their changes,
+    // and git's, reach the device on the session's `checkout` feed (plane-feeds.ts).
+    'files.list': laneBMachine('call'),
+    'files.read': laneBMachine('call'),
+    'files.watch': laneBMachine('call'),
+    'files.unwatch': laneBMachine('call'),
+    'scm.status': laneBMachine('call'),
+    'scm.push.plan': laneBMachine('call'),
+    'scm.pr.plan': laneBMachine('call'),
+    'scm.remote.last': laneBMachine('call'),
+    'scm.pr.state': laneBMachine('call'),
+    // git's reads name a directory or a repository, which the git service answers for the whole repository: the call's
+    // `session` names the session, whose roots and their repositories bound the path (the `checkout` rule).
+    'git.status': checkout,
+    'git.branches': checkout,
+    'git.diff': checkout,
+    'git.log': checkout,
+    'git.watch': checkout,
+    'git.unwatch': checkout,
+    'git.lsFiles': checkout,
+    'git.worktree.list': checkout,
+    'git.worktree.status': checkout,
+    'git.worktree.branch': checkout,
+    // A child agent's events, the engine host's read.
+    'fs.agentEvents': laneB('call'),
+    // The checkout's writes, under the services' ledger (`machine.op`), placed by their session with no launch context,
+    // so the editor saves to an idle session's checkout without resuming it.
+    'files.write': laneBMachine('act'),
+    'files.upload': laneBMachine('act'),
+    'scm.stage': laneBMachine('act'),
+    'scm.unstage': laneBMachine('act'),
+    'scm.discard': laneBMachine('act'),
+    'scm.commit': laneBMachine('act'),
+    'scm.push': laneBMachine('act'),
+    'scm.pr.create': laneBMachine('act'),
+    'scm.remote.cancel': laneBMachine('act'),
+    // A lane B session started here at a member's request (graded `spawn`, held to the spawn guard as `sminos.spawn` is),
+    // and the projects "+ Session"'s machine menu lists (`list`).
+    'session.spawn': { kind: 'act', executor: 'machine', target: 'machine' },
+    'session.projects.list': { kind: 'call', executor: 'machine', target: 'machine' },
     // Lane A's bridge-fenced RPCs and spawn, through RL10 (M6); `resume`, `retire` and `stop` run outside the bridge's
     // fence and are not offered.
     'sminos.steer': laneA('act', 'converse'),
@@ -110,4 +160,5 @@ export const OFFERS: Offers = {
     'machine.identity': { kind: 'call', executor: 'machine', target: 'machine' },
   },
   subscriptions: ['A', 'B'],
+  feeds: ['checkout'],
 };

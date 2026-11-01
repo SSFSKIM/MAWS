@@ -5,7 +5,8 @@ import { useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -16,12 +17,15 @@ import { digest, humanTurn, item, record, status } from '../../../../test/suppor
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
-import { remoteRow } from '../../../../test/support/builders'; // P5 O7 M2
+import { project, remoteRow } from '../../../../test/support/builders'; // P5 O7 M2; M4: project
 import { REATTACHING_STOP_REMOTE } from './submit/submit-state'; // P5 O16 M3b fix wave 2
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
+import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
+import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
+import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -38,11 +42,13 @@ import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
-import { Composer } from './Composer';
+import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, paragraph, textNode } from './editor/doc';
+import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
+import { ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
+import { forgetSubmissions } from './editor/controller'; // M4c re-review: a reload's fresh modules
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
@@ -155,7 +161,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -815,7 +821,7 @@ describe('one Stop handler for every pane', () => {
 });
 
 // A stub of C10's hook over a small mutable intent: `start` answers when the test says.
-function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}) {
+function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}, project?: SetupIntentHook['project']) {
   let resolveStart: ((r: HookResult) => void) | null = null;
   const state = {
     intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
@@ -837,7 +843,7 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
   function useStub(): SetupIntentHook {
     const intent = useSyncExternalStore(subscribe, () => state.intent);
     const phase = useSyncExternalStore(subscribe, () => state.phase);
-    return { intent, options: { models: [], autoModeNote: null, ...options }, phase, patch, start };
+    return { intent, options: { models: [], autoModeNote: null, ...options }, phase, patch, start, ...(project && { project }) }; // P5 O7 M4: the project row's facts
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
   const setPhase = (phase: string | null) => {
@@ -846,6 +852,136 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
   };
   return { patch, start, set, setPhase, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
 }
+
+// P5 O7 M4 ("The machine menu", "`session.spawn`"): a New chat tab whose machine menu chose another machine starts there:
+// Send makes one `session.spawn` on that machine with the composer's mode and the text as the brief, never C10's start;
+// the composer says it is starting there, and a refusal keeps the text with the words a person can act on.
+describe('a New chat tab started on another machine', () => {
+  const P = at('p-app' as ProjectId);
+  const KEY = 'repo:github.com/acme/app' as OrgKey;
+  const chosen = { projectId: P, label: 'app', path: '/repo', branch: null, worktree: null, choose: async () => ({ ok: true }) as const, newProject: async () => ({ ok: true }) as const, setWorktree: async () => ({ ok: true }) as const };
+  beforeEach(() => {
+    resetRemoteSpawn();
+    useSessions.setState({ projects: new Map(useSessions.getState().projects).set(P, project(P, 0, { name: 'app', directory: '/repo', org: { key: KEY, name: 'app', source: 'remote', smnsId: null } })) });
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+  });
+
+  it('spawns on the chosen machine with the composer’s mode, says so while it runs, and keeps the text on a refusal', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' }]);
+    expect(fake.machines('session.spawn')).toEqual([OTHER_MACHINE]);
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe('Starting on mini…');
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['This project isn’t trusted on mini yet; open it there and trust it first']));
+    expect(editorOf().editor.getText()).toBe('build it');
+    expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull();
+    expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('after a timeout offers Check again, which asks after the same start rather than starting another', async () => {
+    stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    await act(() => fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((x) => x.label)])).toEqual([[SPAWN_WORDS.unconfirmed('mini'), ['Check again']]]));
+    await type(' and test it');
+    act(() => useNotices.getState().notices[0].actions[0].run());
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe(SPAWN_WORDS.checking('mini', true));
+    expect(invoked('session.spawn')).toEqual([
+      { checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' },
+      { checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' },
+    ]);
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' })); // settled: the next try starts afresh
+    await waitFor(() => expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull());
+    expect(editorOf().editor.getText()).toBe('build it and test it'); // the edit stayed
+  });
+
+  // M4's milestone review: a reload keeps the start the tab was checking on, so its next Send goes to that attempt
+  it('after a reload checks on the held start rather than starting on this Mac', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    await act(() => fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout'));
+    cleanup(); // the page reloads
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe(SPAWN_WORDS.checking('mini', false));
+    expect(invoked('session.spawn')).toHaveLength(2);
+    expect(stub.start).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+  });
+
+  // the milestone re-review: the target is kept before the first spawn is asked, so a reload while it is out keeps it
+  it('after a reload during the first start, sends to that machine again and never starts on this Mac', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    cleanup(); // the page reloads before mini answers: a new page's modules, with only the window's session storage
+    useRemoteSpawn.setState({ chosen: new Map(), spawning: new Map() });
+    useComposerStore.setState({ starting: new Set() });
+    forgetSubmissions();
+    restoreHeldAttempts();
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(2));
+    expect(invoked('session.spawn')).toHaveLength(2);
+    expect(stub.start).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+  });
+
+  // M4c fix wave 1 (review finding 2): this Mac's files are not offered, and a mention of one never goes to the machine
+  it('offers none of this Mac’s files once another machine is chosen, and refuses to start with a mention of one', async () => {
+    const stub = stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('@no');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the search's debounce
+    expect(invoked('git.lsFiles')).toEqual([]);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('read '), mentionNode({ id: 'notes.txt', label: 'notes.txt', kind: 'file' }))])));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual([ON_THIS_MAC(['notes.txt'], 'mini')]));
+    expect(invoked('session.spawn')).toEqual([]);
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(editorOf().editor.getText()).toContain('read');
+  });
+
+  it('takes a file for the chosen machine, and back on this Mac refuses to start without it', async () => {
+    const stub = stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    queueComposerAttachment(A, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    act(() => useRemoteSpawn.getState().choose(A, null));
+    await type('read it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual([FILES_FOR_ANOTHER_MACHINE(['notes.txt'])]));
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(isStarting(useComposerStore.getState(), A)).toBe(false);
+    expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt');
+  });
+});
 
 describe('unstarted send holds a starting state', () => {
   it('starts through C10 in the same tick, refuses a second Enter and a keystroke while starting, and keeps the text on a refusal', async () => {
@@ -1201,6 +1337,8 @@ describe('a lane B session on another machine', () => {
       recordsVersion: s.recordsVersion + 1,
     });
     resetRemoteDrafts();
+    resetRemoteUploads(); // P5 O7 M4
+    resetRemoteSpawn(); // P5 O7 M4
     remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
     window.maws = preloadOf(remote);
   });
@@ -1261,6 +1399,102 @@ describe('a lane B session on another machine', () => {
     expect(primary().disabled).toBe(true);
     expect(primary().title).toBe(REATTACHING_STOP_REMOTE);
     expect(remote.invoked('session.stop')).toEqual([]);
+  });
+
+  // P5 O7 M4 ("What a drop sends", "Uploads in parts"): a file goes up to the machine first, once, its parts shown on its
+  // tile; then one send carries the text with the file's path there as a mention relative to the working directory
+  it('uploads a dropped file before the message, which mentions its path on the machine', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '/Users/me/notes.txt' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    expect(editorOf().editor.getText().trim()).toBe('look'); // no local path mentioned
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    expect(remote.invoked('files.upload')).toEqual([{ appSessionId: 'app-r', files: [{ name: 'notes.txt', bytes: 'aGk=' }] }]);
+    expect(within(composerOf(0)).getByRole('status', { name: 'Sending' }).textContent).toBe('Sending to mini…');
+    act(() => remote.event('remote.upload', { appSessionId: 'app-r', file: 0, name: 'notes.txt', sent: 1, parts: 1 }, OTHER_MACHINE));
+    expect(within(composerOf(0)).getByRole('status', { name: 'notes.txt upload' }).textContent).toBe('Uploading 1 of 1');
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.txt'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'look\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(within(composerOf(0)).queryByRole('list', { name: 'attachments' })).toBeNull();
+  });
+
+  it('keeps the text and the file when its upload fails, with the words and Send again, and sends nothing', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.fail('files.upload', 'Not sent: mini is offline', 'host_unavailable'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Not sent: mini is offline', ['Send again']]]));
+    expect(remote.invoked('session.send')).toEqual([]);
+    expect(editorOf().editor.getText().trim()).toBe('look');
+    expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt');
+  });
+
+  // P5 O7 M4 (the M4b report's order for a spawn with attachments): the session a New chat tab spawned is handed that
+  // tab's document; its composer, once open, sends it once through the remote path: the files up, then one message
+  // M4c fix wave 1 (review finding 3): an idle worktree session (no engine status) runs in its worktree, where main
+  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from
+  const idleInWorktree = () => {
+    const WT = '/work/app-r/.claude/worktrees/feature';
+    const s = useSessions.getState();
+    const engine = new Map(s.engine);
+    engine.delete(R);
+    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: '/work/app-r', worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
+    return `${WT}/.claude/desk-uploads/app-r/u.0.txt`;
+  };
+
+  it('mentions an upload to an idle worktree session relative to its worktree', async () => {
+    const uploaded = idleInWorktree();
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: [uploaded] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'look\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  it('sends the document a spawn handed to a session in a worktree relative to that worktree', async () => {
+    const uploaded = idleInWorktree();
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], [{ id: 'h2', kind: 'file', name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true }]));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: [uploaded] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  it('sends the document a spawn handed it once it opens: its file goes up, then one message names it', async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    const notes = { id: 'h1', kind: 'file' as const, name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true };
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], [notes]));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.txt'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(takeFirstSend(R)).toBe(false);
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

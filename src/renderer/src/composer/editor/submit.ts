@@ -16,9 +16,11 @@ import type { SessionControls } from '../../session/controls/types'; // P5 O9 M4
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
-import { isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2
+import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2; M4: beginRemoteSend
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
+import type { Attachment } from './doc';
+import { composeRemoteSend, planRemoteSend } from './remote-uploads'; // P5 O7 M4
 import type { Serialized } from './serialize';
 
 // A dispatch answers null when the host accepted the submission, else the error to show.
@@ -30,7 +32,7 @@ export interface SubmitOptions {
   retry?: () => void; // offered on the refusal's toast
 }
 
-const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */, label = 'Retry') => {
+export const warn = (text: string, retry?: () => void, notice?: string /* P2-A: one notice per start */, label = 'Retry') => {
   const id = toast({ ...(notice !== undefined && { id: notice }), level: 'warning', text, actions: retry ? [{ label, run: () => (useNotices.getState().dismiss(id), retry()) }] : [], dismissible: true });
 };
 // P5 O7 M2 (A4): a message to a session on another machine that did not go keeps its text, offered as Send again
@@ -113,6 +115,38 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
   }
   afterAccepted(client, appSessionId, s);
   return true;
+}
+
+// P5 O7 M4 ("What a drop sends", "Uploads in parts"): a message to a lane B session on another machine. Its images go
+// inline while the message fits the channel; every other attachment goes up to the machine first (remote-uploads.ts),
+// counted as the send on its way ("Sending to <machine>…"), and the message then carries their paths there as mentions.
+// An upload that fails keeps the text and the attachments, with the words and Send again, and sends nothing; what went
+// up stays known, so a send again sends it once. A session that can't take the message uploads nothing: the send path
+// refuses it as for any message.
+export async function submitRemoteSerialized(
+  controls: SessionControls,
+  client: MawsBridge,
+  appSessionId: AppSessionId,
+  s: Serialized,
+  attachments: readonly Attachment[],
+  cwd: string,
+  retry?: () => void,
+): Promise<boolean> {
+  const { upload } = planRemoteSend(s.text, attachments);
+  if (s.empty || upload.length === 0 || !controls.capability('send').available) return submitHumanSerialized(controls, client, appSessionId, s, retry);
+  const sending = beginRemoteSend(appSessionId);
+  let message: Serialized;
+  try {
+    const composed = await composeRemoteSend(client, appSessionId, s, attachments, cwd);
+    if (!composed.ok) {
+      warn(composed.error, retry, undefined, retryLabel(appSessionId));
+      return false;
+    }
+    message = composed.message;
+  } finally {
+    sending();
+  }
+  return submitHumanSerialized(controls, client, appSessionId, message, retry);
 }
 
 // P2-A: a `!` or `#` submission on a record with no ready process acquires the session first. Whether it may go on: a

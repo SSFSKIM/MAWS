@@ -3,9 +3,9 @@
 // subscription's messages) and moves the link's state and caps.
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
-import type { Cursor } from 'org-protocol';
+import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
-import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallResult, DeviceCaps, RemoteLink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
+import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, RemoteLink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
 export const MINI = 'MiniMachineRef00000000' as MachineRef;
 
@@ -54,7 +54,8 @@ export class FakeLink implements RemoteLink {
   #refusal: string | null = null;
   #caps: DeviceCaps | null = { member: 'member-a', device: 'mac1', clientClass: 'native-mac', machine: { grades: ['spawn'] }, stateVersion: 2 };
   peers: string[] = ['rl2.executor.machine'];
-  readonly calls: Array<{ name: string; input: unknown }> = [];
+  /** Each call, with the session it named (P5 O7 M4's `call.session`) when it named one. */
+  readonly calls: Array<{ name: string; input: unknown; session?: SessionRef }> = [];
   readonly answers = new Map<string, (input: Record<string, unknown>) => CallResult | Promise<CallResult>>();
   readonly acts: FakeAct[] = [];
   /** The progress a new act starts in, and an outcome to settle it with at once, if any. */
@@ -113,11 +114,15 @@ export class FakeLink implements RemoteLink {
     for (const listener of [...this.#capsListeners]) listener(caps);
   }
 
-  async call(name: string, input: unknown): Promise<CallResult> {
-    this.calls.push({ name, input });
+  /** As the RL2 link: `lacking`'s input to a peer without its capability, said `fellBack` (null peers: no channel, the input). */
+  async call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> {
+    const fellBack = options?.lacking !== undefined && this.peerCapabilities() !== null && !this.peers.includes(options.lacking.capability);
+    const sent = fellBack ? options!.lacking!.input : input;
+    this.calls.push({ name, input: sent, ...(options?.session !== undefined && { session: options.session }) });
     const answer = this.answers.get(name);
     if (answer === undefined) return { ok: false, error: { code: 'not-offered' } };
-    return answer((input ?? {}) as Record<string, unknown>);
+    const result = await answer((sent ?? {}) as Record<string, unknown>);
+    return fellBack ? { ...result, fellBack: true } : result;
   }
 
   act(request: ActRequest): ActHandle {
@@ -129,6 +134,16 @@ export class FakeLink implements RemoteLink {
       setTimeout(() => {
         if (act.settled === null && act.progress() === 'waiting') act.settle({ state: 'refused', reason: 'offline' });
       }, Math.max(0, request.sendBy - Date.now()));
+    return act;
+  }
+
+  /** P5 O7 M4: each op asked about again (`requery`), as an act the suite answers; it never sends the act. */
+  readonly requeries: FakeAct[] = [];
+  onRequery: (act: FakeAct) => void = () => {};
+  requery(op: { opId: string; opCreated: string; executor: string }): ActHandle {
+    const act = new FakeAct({ action: `requery ${op.opId}`, args: {}, executor: op.executor as ActRequest['executor'] }, 'unknown');
+    this.requeries.push(act);
+    this.onRequery(act);
     return act;
   }
 

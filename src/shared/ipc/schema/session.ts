@@ -85,7 +85,13 @@ export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 // disk read's `seek`: where the page stands to the message a jump looks for (HistorySoughtSchema). `cronHistory`, on a
 // disk-backed newest window with older history, is the cron calls before it that a whole-history read counts, with their
 // results and their turns' starts (history-window.ts `cronHistoryOf`), so the Scheduled section lists every job.
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional() });
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): `omitted` (present only with a
+// `maxBytes` read) is what a page left out because it alone passes the budget: one transcript event (`seq` null), or one
+// row of a live launch (its `seq`, its `events`). Such a page carries no events, and its cursor moves past what it left
+// out (`earlier` for a window, `lastSeq` for a live page), so the next page goes on beyond it.
+export const EVENTS_MIN_BYTES = 4096; // the least `maxBytes`: an answer's envelope and cursor always fit
+export const EventsOmittedSchema = z.strictObject({ events: z.number().int().positive(), bytes: z.number().int().positive(), seq: z.number().int().nullable() });
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional(), omitted: EventsOmittedSchema.optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.
@@ -109,7 +115,10 @@ const c3Commands = {
   // the transcript, a live session's too), `agentId` that agent's events and its parent's reports on it. A live stream
   // answers from `afterSeq` as before, `agentId` filtering it alike (2026-10-30, the long-transcript window). `seek` on a
   // read from the transcript names a message a jump into history looks for; the answer's `sought` says where it is.
-  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional() }), EventsSnapshotSchema),
+  // P5 O7 M4 (acceptance 12): `maxBytes` bounds the answer's UTF-8 JSON: a window's whole turns end where the next would
+  // pass it (a turn alone past it is cut, never kept whole), a live page's whole rows likewise, and `earlier` or `lastSeq`
+  // reaches what it left out, so a reader behind a bounded channel pages every window within it.
+  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional(), maxBytes: z.number().int().min(EVENTS_MIN_BYTES).optional() }), EventsSnapshotSchema),
   // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
   // step as the stop); otherwise nothing happens and the answer says `skipped`
   'session.stop': host(input({ reason: z.enum(['stop', 'archive']), ifIdle: z.boolean().optional() }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable(), skipped: z.literal(true).optional() })),
@@ -710,6 +719,33 @@ const o3dEvents = {
   'session.visibleChanged': z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), // one session's change of the union
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 
+// P5 O7 M4 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O; O10's "lane B spawn"): a lane
+// B session started on this machine at another's request, composed by the spine from what the renderer does for a New
+// chat (`session.create`, `.intent.patch`, `.start`) on the machine's own settings. Its input is exactly DX6's spawn fields,
+// so the endpoint's `spawnRefusal` judges it as it judges `sminos.spawn`, with the mode required (an absent one reads as
+// the ceiling there and as the user's default here, which can be looser). `checkout` is a project's directory on this
+// machine; `worktree`, a new worktree of that name on a new branch of that name from HEAD. Answered once the start is
+// `launching` (the record exists); a checkout this machine has not trusted is refused `untrusted` with nothing created.
+export const SessionSpawnInputSchema = z.strictObject({
+  checkout: z.string().min(1),
+  worktree: z.string().min(1).optional(),
+  brief: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  effort: z.string().min(1).optional(),
+  permission_mode: z.string().min(1),
+});
+export type SessionSpawnInput = z.infer<typeof SessionSpawnInputSchema>;
+export const SPAWN_REFUSALS = ['untrusted', 'unknown-checkout', 'worktree-exists'] as const; // the reasons a caller words; any other is a sentence
+export const SessionSpawnOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ok'), appSessionId: AppSessionIdSchema }),
+  z.strictObject({ status: z.literal('refused'), reason: z.string() }),
+]);
+export type SessionSpawnOutput = z.infer<typeof SessionSpawnOutputSchema>;
+const o7Commands = {
+  'session.spawn': { input: SessionSpawnInputSchema, output: SessionSpawnOutputSchema, owner: 'machine' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// P5 O7 M4 end
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -725,6 +761,7 @@ export const commands = {
   ...p5o2Commands, // P5 O2 M2
   ...o10Commands, // P5 O10 M8
   ...o3dCommands, // P5 O3-D
+  ...o7Commands, // P5 O7 M4
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

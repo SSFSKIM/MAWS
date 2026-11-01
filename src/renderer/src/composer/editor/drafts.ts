@@ -79,6 +79,11 @@ export function createDraftWriter(save: (draft: Draft | null) => void, options: 
 // drafts go where its machine is as the stores know it then.
 const remoteDrafts = new Map<AppSessionId, Draft>();
 export const resetRemoteDrafts = (): void => remoteDrafts.clear(); // for suites
+// P5 O7 M4: a session spawned on another machine from a New chat tab takes that tab's document as its draft, whole (its
+// attachments go up from the new session's composer, so no byte budget applies to a draft that lives in this memory)
+export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
+  remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
+}
 export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean): P {
   return {
     ...port,

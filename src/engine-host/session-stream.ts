@@ -14,6 +14,7 @@ import { basename, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
+import { eventUtf8Bytes } from '@shared/graph/history-window'; // P5 O7 M4
 import type { AppSessionId, EventId, RequestId, SessionId } from '@shared/graph/ids';
 import type { QueueState } from '@shared/engine/session-state-store';
 import type { Catalog } from './session-status'; // C7
@@ -186,9 +187,13 @@ export class SessionStream {
   // about `limit`; `complete` is false when the answer stops short (the limit, or a journal that cannot be read back).
   // O10 M8: a range the ring dropped and the journal can't give back is answered from the ring alone and marked
   // `historyUnavailable`, so a reader paging on (the endpoint's remote subscriptions) knows events are missing.
-  async snapshot(afterSeq: number | null, limit: number | null): Promise<EventsSnapshot> {
-    if (this.evictedThrough === null || (afterSeq !== null && afterSeq >= this.evictedThrough)) return page(this.ring, afterSeq, limit, true);
-    return (await this.fromJournal(afterSeq, limit)) ?? { ...page(this.ring, afterSeq, limit, false), historyUnavailable: true };
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): `maxBytes` bounds the answer's
+  // UTF-8 JSON: whole rows while they fit, the answer then incomplete with `lastSeq` its cursor, and a row alone past the
+  // bound left out (`omitted`, its seq the answer's `lastSeq`), so the next page goes on after it.
+  async snapshot(afterSeq: number | null, limit: number | null, maxBytes: number | null = null): Promise<EventsSnapshot> {
+    const bound = maxBytes === null ? null : maxBytes - LIVE_ENVELOPE_BYTES;
+    if (this.evictedThrough === null || (afterSeq !== null && afterSeq >= this.evictedThrough)) return page(this.ring, afterSeq, limit, true, bound);
+    return (await this.fromJournal(afterSeq, limit, bound)) ?? { ...page(this.ring, afterSeq, limit, false, bound), historyUnavailable: true };
   }
 
   dispose(): void {
@@ -262,7 +267,7 @@ export class SessionStream {
   // paging reads each row once (whole-branch review); the journal is append-only, so rows written meanwhile are simply
   // read next. Any other `afterSeq` starts over from the first row. Null when the files cannot be read back whole (a
   // rotated file pruned, a file removed by an archive).
-  private async fromJournal(afterSeq: number | null, limit: number | null): Promise<EventsSnapshot | null> {
+  private async fromJournal(afterSeq: number | null, limit: number | null, bound: number | null = null): Promise<EventsSnapshot | null> {
     const prefix = `${basename(this.opts.journalPath, '.jsonl')}.`; // `<file id>.jsonl`, then `<file id>.<n>.jsonl`
     const files = JournalReader.forSession(dirname(this.opts.journalPath)).filter((file) => basename(file).startsWith(prefix));
     const resumable = this.cursor !== null && afterSeq !== null && afterSeq >= this.cursor.through;
@@ -270,11 +275,31 @@ export class SessionStream {
     this.cursor = null; // re-armed only by a page that read cleanly
     if (files.length === 0) return null;
     const wanted = (e: SessionEvent) => afterSeq === null || (e.seq !== null && e.seq > afterSeq);
-    const events = cursor.carried.filter(wanted);
+    const events: SessionEvent[] = [];
+    let bytes = 0;
+    let omitted: EventsSnapshot['omitted'] | null = null;
+    // A row's place on this page: taken; or the page is full and the row opens the next one (carried); or, alone past the
+    // byte bound, left out and the page ends after it (P5 O7 M4).
+    const admit = (row: SessionEvent[]): boolean => {
+      if (limit !== null && events.length >= limit) return (cursor.carried = row), false;
+      if (bound !== null) {
+        const size = rowBytes(row);
+        if (bytes + size > bound) {
+          if (events.length > 0) return (cursor.carried = row), false;
+          omitted = { events: row.length, bytes: size - row.length, seq: row[0]!.seq };
+          return false;
+        }
+        bytes += size;
+      }
+      events.push(...row);
+      return true;
+    };
+    const carried = cursor.carried.filter(wanted);
     cursor.carried = [];
     let complete = true;
     try {
-      reading: for (;;) {
+      if (carried.length > 0 && !admit(carried)) complete = false;
+      else reading: for (;;) {
         const input = createReadStream(files[cursor.file]!, { encoding: 'utf8', start: cursor.offset });
         const lines = createInterface({ input, crlfDelay: Infinity });
         try {
@@ -286,12 +311,10 @@ export class SessionStream {
             cursor.expected += 1;
             const out = cursor.normalizer.push(row).filter(wanted);
             if (out.length === 0) continue;
-            if (limit !== null && events.length >= limit) {
-              cursor.carried = out; // the page is full and more follows: this row opens the next page
-              complete = false;
+            if (!admit(out)) {
+              complete = false; // the page is full and more follows (the row carried opens the next page), or a row was left out
               break reading;
             }
-            events.push(...out);
           }
         } finally {
           lines.close();
@@ -304,10 +327,11 @@ export class SessionStream {
     } catch {
       return null;
     }
-    const lastSeq = events.at(-1)?.seq ?? afterSeq ?? 0;
+    const left = omitted as EventsSnapshot['omitted'] | null;
+    const lastSeq = left?.seq ?? events.at(-1)?.seq ?? afterSeq ?? 0;
     cursor.through = lastSeq;
     this.cursor = cursor;
-    return { events, lastSeq, complete }; // `lastSeq` is the cursor for the next call
+    return { events, lastSeq, complete, ...(left && { omitted: left }) }; // `lastSeq` is the cursor for the next call
   }
 }
 
@@ -324,8 +348,15 @@ function burstBatchEnd(ring: SessionEvent[], start: number): number {
   return end;
 }
 
-// `session.events` from the ring: every event after `afterSeq`, whole rows at a time up to about `limit`.
-function page(source: SessionEvent[], afterSeq: number | null, limit: number | null, complete: boolean): EventsSnapshot {
+// P5 O7 M4: what a bounded live answer's envelope may take beside its events (`lastSeq`, `complete`, `historyUnavailable`
+// and an `omitted` of three numbers: under 200 bytes whatever their values).
+const LIVE_ENVELOPE_BYTES = 256;
+// A row's share of a bounded answer: its events' UTF-8 JSON and their commas.
+const rowBytes = (row: readonly SessionEvent[]): number => row.reduce((bytes, event) => bytes + eventUtf8Bytes(event), 0);
+
+// `session.events` from the ring: every event after `afterSeq`, whole rows at a time up to about `limit`, and within
+// `bound` bytes of UTF-8 when one is given (P5 O7 M4).
+function page(source: SessionEvent[], afterSeq: number | null, limit: number | null, complete: boolean, bound: number | null = null): EventsSnapshot {
   let events = afterSeq === null ? [...source] : source.filter((e) => e.seq !== null && e.seq > afterSeq);
   if (limit !== null && events.length > limit) {
     let end = limit;
@@ -335,5 +366,25 @@ function page(source: SessionEvent[], afterSeq: number | null, limit: number | n
       complete = false;
     }
   }
+  if (bound !== null) return withinBytes(events, afterSeq, complete, bound);
   return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete }; // the cursor for the next call
+}
+
+// A page's whole rows within `bound`: the rest left for the next page; a first row alone past it left out.
+function withinBytes(events: SessionEvent[], afterSeq: number | null, complete: boolean, bound: number): EventsSnapshot {
+  let bytes = 0;
+  let end = 0;
+  while (end < events.length) {
+    let rowEnd = end + 1;
+    while (rowEnd < events.length && events[rowEnd]!.seq === events[end]!.seq) rowEnd += 1;
+    const size = rowBytes(events.slice(end, rowEnd));
+    if (bytes + size > bound) {
+      if (end > 0) return { events: events.slice(0, end), lastSeq: events[end - 1]!.seq ?? afterSeq ?? 0, complete: false };
+      const seq = events[0]!.seq;
+      return { events: [], lastSeq: seq ?? afterSeq ?? 0, complete: false, omitted: { events: rowEnd, bytes: size - rowEnd, seq } };
+    }
+    bytes += size;
+    end = rowEnd;
+  }
+  return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete };
 }

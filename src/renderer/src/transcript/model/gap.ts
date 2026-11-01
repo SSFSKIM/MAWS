@@ -19,6 +19,15 @@ export const HISTORY_TOO_LARGE = {
   older: (machine: string) => `Earlier history on ${machine} is too large to show here yet`,
 } as const;
 
+// P5 O7 M4 (acceptance 12): a machine whose endpoint takes `session.events`' byte budget answers every window in pages the
+// channel carries; an item alone past the budget is left out of its page (`omitted`), and a bar just after the page's
+// rows says how many and how large, so the person knows something is there that this Mac can't show.
+const MiB = 1024 * 1024;
+export const HISTORY_OMITTED = (count: number, bytes: number, machine: string): string => {
+  const size = `${(bytes / MiB).toFixed(1)} MB`;
+  return count === 1 ? `One item (${size}) is too large to show from ${machine}` : `${count} items (${size}) are too large to show from ${machine}`;
+};
+
 export const isHistoryGap = (event: SessionEvent): boolean => event.kind === 'notice.posted' && event.key === HISTORY_GAP_KEY;
 
 /** The gap's event: `bareApp` is the session's bare app id, `tag` what makes this gap's id its own, `text` its words. */

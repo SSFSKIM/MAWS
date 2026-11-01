@@ -98,7 +98,7 @@ export class Queries {
     let target: SessionTarget | null = null;
     if (value.target !== null && value.target !== undefined) {
       const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, { dispatch, log: (line) => this.ctx.log(line) }) : null;
-      if (resolved?.kind === 'refused' && resolved.reason === 'unavailable') return { state: value.state as string, binding: 'unplaceable' };
+      if ((resolved?.kind === 'refused' && resolved.reason === 'unavailable') || (resolved?.kind === 'session' && resolved.unavailable === true)) return { state: value.state as string, binding: 'unplaceable' };
       if (resolved?.kind !== 'session') return { state: value.state as string, binding: null };
       target = resolved.target;
     }

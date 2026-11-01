@@ -608,10 +608,11 @@ jobs:
       - uses: ./.github/actions/setup
       - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
 
-  # The unsigned packaged app (Decision Log 35), only by `Gates: packaged`: HOSTED_MAC_JOBS admits two jobs on direct
-  # macos-26, each building dist/ and checking its fuses before half the bare suite. Shard 1 alone runs the small checks
-  # (supervisor, daemon shape and voice), in their existing order. Every job sweeps launchd, even after a failed check.
-  # Mirror, an unlisted job or a reserved final ref keeps one unsharded build and all checks on the mini.
+  # The unsigned packaged app (Decision Log 35): HOSTED_MAC_JOBS admits two jobs on direct macos-26, each building dist/
+  # and checking its fuses before half the bare suite, and there the default set holds it. Shard 1 alone runs the small
+  # checks (supervisor, daemon shape and voice), in their existing order. Every job sweeps launchd, even after a failed
+  # check. Mirror, an unlisted job or a reserved final ref keeps one unsharded build and all checks on the mini, only by
+  # `Gates: packaged`.
   packaged:
     name: ${{ matrix.shard && format('packaged {0}', matrix.shard) || 'packaged' }}
     needs: plan

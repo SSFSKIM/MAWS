@@ -121,6 +121,9 @@ export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> 
   // a process still exiting, the configure gate, and the launch to ready (the watch fails one silent for WATCHDOG_MS;
   // a launch whose SessionStart hooks keep it reporting for longer answers `timeout` here and still becomes ready)
   'session.acquire': EXIT_WAIT_MS + CONFIGURE_WAIT_MS + WATCHDOG_MS + MARGIN_MS,
+  // P5 O7 M4: a spawn answers at its setup's `launching`: the configure gate, a new worktree's git, and the trust
+  // bootstrap's launch (watched for WATCHDOG_MS) before the record
+  'session.spawn': CONFIGURE_WAIT_MS + GIT_TIMEOUT_MS + WATCHDOG_MS + MARGIN_MS,
   'settings.engineApplied': CONFIGURE_WAIT_MS + MARGIN_MS, // the engine host's verdict on the settings
   'laneA.interrupt': BRIDGE_MS + MARGIN_MS,
   'laneA.command': BRIDGE_MS + MARGIN_MS,

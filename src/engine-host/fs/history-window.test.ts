@@ -133,6 +133,86 @@ describe('a long transcript is read in windows', () => {
     expect((await fs.eventsSnapshot(APP, null, { before: first.earlier! })).cronHistory).toBeUndefined();
   });
 
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): a read behind a bounded channel
+  // names its budget, the answer's UTF-8 JSON size; the window keeps within it as a hard bound, and `earlier` reaches
+  // what it left out
+  describe('within a byte budget', () => {
+    const answerBytes = (page: object) => Buffer.byteLength(JSON.stringify({ ...page, lastSeq: 0 })); // as ipc.ts answers it
+    // Every page from the newest back under `maxBytes`, oldest first, and those that left an event out.
+    async function boundedPages(fs: FsService, maxBytes: number) {
+      const pages: SessionEvent[][] = [];
+      const omitted: { page: number; omitted: NonNullable<Awaited<ReturnType<FsService['eventsSnapshot']>>['omitted']>; cursor: EventId | undefined }[] = [];
+      let page = await fs.eventsSnapshot(APP, null, { maxBytes });
+      for (let n = 0; ; n++) {
+        expect(answerBytes(page), `page ${n}`).toBeLessThanOrEqual(maxBytes);
+        pages.unshift(page.events);
+        if (page.omitted) omitted.push({ page: n, omitted: page.omitted, cursor: page.earlier });
+        if (page.earlier === undefined) break;
+        page = await fs.eventsSnapshot(APP, null, { before: page.earlier, maxBytes });
+      }
+      return { pages, whole: pages.flat(), omitted };
+    }
+    // One turn whose reply is `blocks`, one assistant block each.
+    const turnOf = (n: number, parent: string, blocks: string[]) => {
+      const base = { sessionId: SESSION, cwd: DIR, version: '2.1.312', isSidechain: false, userType: 'external', timestamp: new Date(Date.parse('2026-09-01T01:00:00.000Z') + n * 1000).toISOString() };
+      return [
+        JSON.stringify({ ...base, type: 'user', uuid: `u${n}`, parentUuid: parent, message: { role: 'user', content: `prompt ${n}` } }),
+        ...blocks.map((text, b) => JSON.stringify({ ...base, type: 'assistant', uuid: `a${n}-${b}`, parentUuid: b === 0 ? `u${n}` : `a${n}-${b - 1}`, message: { id: `msg_${n}_${b}`, role: 'assistant', model: 'm', content: [{ type: 'text', text }] } })),
+        JSON.stringify({ ...base, type: 'system', subtype: 'turn_duration', uuid: `d${n}`, parentUuid: `a${n}-${blocks.length - 1}`, durationMs: 1000 }),
+      ];
+    };
+
+    it('counts UTF-8, not JSON length, and pages back through `earlier` to the first event with no gap or overlap', async () => {
+      // Hangul in place of the padding: three UTF-8 bytes to each character the JSON length counts once
+      await fixture.addTranscript(DIR, SESSION, transcript(40).map((line) => line.replaceAll('xxxxxxxxxx', '가나다라마바사아자차')));
+      const fs = await start();
+      const open = await fs.eventsSnapshot(APP, null);
+      expect(answerBytes(open)).toBeGreaterThan(6 * 1024); // unbounded, the window passes the budget below
+      const { whole: unbounded } = await allPages(fs);
+      const { pages, whole, omitted } = await boundedPages(fs, 6 * 1024);
+      expect(omitted).toEqual([]);
+      expect(pages.length).toBeGreaterThan(10);
+      expect(ids(whole)).toEqual(ids(unbounded)); // no gap, no overlap
+      for (const page of pages.slice(1)) expect(page[0]!.kind).toBe('turn.started'); // whole turns where they fit
+    });
+
+    it('cuts a turn alone past the budget rather than keep it whole, and its cursor reaches the rest of that turn', async () => {
+      await fixture.addTranscript(DIR, SESSION, [...transcript(4), ...turnOf(5, 'd4', Array.from({ length: 10 }, (_, b) => `block ${b} ${'y'.repeat(2000)}`))]);
+      const fs = await start();
+      const maxBytes = 8 * 1024;
+      const newest = await fs.eventsSnapshot(APP, null, { maxBytes });
+      expect(answerBytes(newest)).toBeLessThanOrEqual(maxBytes);
+      expect(newest.events[0]!.kind).not.toBe('turn.started'); // the turn is about 21 KB: cut, not kept whole
+      expect(newest.earlier).toBe(newest.events[0]!.id);
+      const { whole: unbounded } = await allPages(fs);
+      const { whole, omitted } = await boundedPages(fs, maxBytes);
+      expect(omitted).toEqual([]);
+      expect(ids(whole)).toEqual(ids(unbounded));
+    });
+
+    it('leaves out an event alone past the budget, saying what it left, with a cursor past it, and pages on to the first event', async () => {
+      const big = `the long reply ${'z'.repeat(20_000)}`;
+      await fixture.addTranscript(DIR, SESSION, [...transcript(4), ...turnOf(5, 'd4', [big, 'a short close'])]);
+      const fs = await start();
+      const maxBytes = 8 * 1024;
+      const { whole: unbounded } = await allPages(fs);
+      const { whole, omitted } = await boundedPages(fs, maxBytes);
+      const left = unbounded.find((event) => event.kind === 'assistant.block.complete' && event.block.type === 'text' && event.block.text === big)!;
+      expect(omitted).toEqual([{ page: expect.any(Number), omitted: { events: 1, bytes: Buffer.byteLength(JSON.stringify(left)), seq: null }, cursor: left.id }]);
+      expect(ids(whole)).toEqual(ids(unbounded.filter((event) => event !== left))); // everything else, in order, once
+    });
+
+    it('bounds the first N events the same way', async () => {
+      await fixture.addTranscript(DIR, SESSION, transcript(12));
+      const fs = await start();
+      const maxBytes = 4096;
+      const first = await fs.eventsSnapshot(APP, null, { limit: 1000, maxBytes });
+      expect(answerBytes(first)).toBeLessThanOrEqual(maxBytes);
+      expect(first.events.length).toBeGreaterThan(0);
+      expect(ids(first.events)).toEqual(ids((await fs.eventsSnapshot(APP, null, { limit: 1000 })).events.slice(0, first.events.length)));
+    });
+  });
+
   it('answers the first N events for a limit, one agent\'s slice for an agent id, and refuses a cursor it never gave', async () => {
     await fixture.addTranscript(DIR, SESSION, transcript(12));
     const fs = await start();

@@ -440,3 +440,42 @@ describe('what the peer reads', () => {
     expect(h.sent).toEqual([]);
   });
 });
+
+// P5 O7 M4 (the architect's ruling on a spawn that answered `unknown`): an op settled unknown is asked about again, by
+// query alone, so a ledger that has since recorded its outcome is heard; past the horizon no ledger answers.
+describe('an op asked about again', () => {
+  it('sends only a query, never the act, and takes the ledger’s answer as its outcome', async () => {
+    const h = await harness();
+    const first = h.table.act(SEND, null);
+    h.answer({ t: 'ack', opId: first.opId, state: 'accepted' });
+    h.drop();
+    h.reconnect();
+    h.answer({ t: 'queried', opId: first.opId, state: 'refused', reason: 'grade' });
+    expect(await settled(first.outcome)).toEqual({ state: 'unknown', reason: 'grade' });
+    const sentBefore = h.acts().length;
+    const again = h.table.requery({ opId: first.opId, opCreated: first.opCreated, executor: 'engine-host' }, null);
+    expect(again.opId).toBe(first.opId);
+    expect(h.queries().at(-1)).toMatchObject({ t: 'query', opId: first.opId, opCreated: first.opCreated, executor: 'engine-host' });
+    h.answer({ t: 'queried', opId: first.opId, state: 'in-progress' });
+    await vi.advanceTimersByTimeAsync(60_000); // asked again on the backoff
+    h.answer({ t: 'queried', opId: first.opId, state: 'done', outcome: { state: 'done', result: { queueId: 'q1' } } });
+    expect(await settled(again.outcome)).toEqual({ state: 'done', result: { queueId: 'q1' } });
+    expect(h.acts()).toHaveLength(sentBefore); // the act itself never again
+  });
+
+  it('asks on the next channel when none is current, and settles `unknown` past the horizon or on a link that ended', async () => {
+    const h = await harness();
+    h.channel.current = false;
+    const op = { opId: 'op-x', opCreated: new Date().toISOString(), executor: 'engine-host' as const };
+    const later = h.table.requery(op, null);
+    expect(h.queries()).toEqual([]);
+    h.reconnect();
+    expect(h.queries()).toHaveLength(1);
+    vi.advanceTimersByTime(OP_HORIZON_S * 1000 + 1);
+    expect(await settled(later.outcome)).toEqual({ state: 'unknown', reason: 'expired' });
+    const stale = h.table.requery({ ...op, opId: 'op-y', opCreated: new Date(Date.now() - OP_HORIZON_S * 1000 - 1).toISOString() }, null);
+    expect(await settled(stale.outcome)).toEqual({ state: 'unknown', reason: 'expired' });
+    const closed = h.table.requery({ ...op, opId: 'op-z' }, 'closed');
+    expect(await settled(closed.outcome)).toEqual({ state: 'unknown', reason: 'closed' });
+  });
+});
