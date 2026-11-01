@@ -30,6 +30,7 @@ import {
   SPINE_RELEASED_RUN,
   spineLine,
   mawsdSpineLine,
+  o17IdleProblems,
   topMem,
   topOutside,
 } from './daemon-idle';
@@ -495,5 +496,32 @@ describe("mawsd with the spine's line", () => {
     const line = mawsdSpineLine({ windows: { ...windows, reexecuted: null }, reasons: { ...valid, released: ['the 1-minute load reached 5.2 and its 30 s pair 4.9'] }, counts });
     expect(line).toContain(' · released: mawsd 41000 KiB, engine host 60200 KiB (medians of 11), cpu 0.04 s, load 4.2 (30 s pair 3.0), invalid: the 1-minute load reached 5.2 and its 30 s pair 4.9 · re-executed: not read, valid · ');
     expect(line).toContain(' · released mawsd over the 33048 KiB headroom, re-executed mawsd not read · ');
+  });
+});
+
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8; OX7): what mawsd holds at its cold start and at
+// the window, from its e2e resource report: no session listener at the cold start and at most one per live session with
+// no app after it (P5 Decision Log 187), neither the broker's nor the feed's chunk, and no timer the cold start did not have.
+describe('O17 at mawsd’s cold start and idle', () => {
+  const report = (resources: string[], modules: string[] = ['mawsd.js', 'daemon-Ab12.js']) => ({ at: '2026-11-01T00:00:00.000Z', resources, modules });
+  const cold = report(['PipeServerWrap', 'PipeServerWrap', 'Timeout', 'FSEventWrap']);
+
+  it('finds nothing at a clean cold start and a clean window', () => {
+    expect(o17IdleProblems('cold start', cold, { listeners: 0, allowedListeners: 0 })).toEqual([]);
+    expect(o17IdleProblems('the window', report(['PipeServerWrap', 'Timeout']), { listeners: 1, allowedListeners: 1, cold })).toEqual([]);
+  });
+
+  it('names a listener beyond those allowed, each browser chunk loaded, and the timers the cold start did not have', () => {
+    const idle = report(['Timeout', 'Timeout', 'Timeout', 'PipeServerWrap'], ['mawsd.js', 'cua-broker-9f3a1c.js', 'browser-feed-0b2d.js', 'cua-socket-77aa.js']);
+    expect(o17IdleProblems('the window', idle, { listeners: 2, allowedListeners: 1, cold })).toEqual([
+      'the window: 2 session listeners (at most 1, one per live session with no app)',
+      'the window: cua-broker-9f3a1c.js loaded (the broker’s chunk loads at the first admitted peer)',
+      'the window: browser-feed-0b2d.js loaded (the feed’s chunk loads at the first viewer)',
+      'the window: 3 timers, 2 more than at the cold start',
+    ]);
+  });
+
+  it('names a session listener at the cold start, where none is allowed', () => {
+    expect(o17IdleProblems('cold start', cold, { listeners: 1, allowedListeners: 0 })).toEqual(['cold start: 1 session listener (none allowed)']);
   });
 });

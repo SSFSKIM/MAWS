@@ -527,3 +527,34 @@ export function mawsdSpineLine(run: { windows: Record<SpineWindow, ShapeReading 
   const verdict = `released mawsd ${released === 'not read' ? 'not read' : `${released} the ${MAWSD_HEADROOM_KIB} KiB headroom`}, re-executed mawsd ${reexecuted === 'not read' ? 'not read' : released === 'not read' ? `${reexecuted} the ${MAWSD_HEADROOM_KIB} KiB headroom` : `${reexecuted} it`}`;
   return `[daemon-idle] mawsd with the spine · ${SPINE_WINDOWS.map(window).join(' · ')} · peak load ${peak === null ? 'not read' : loadText(peak.load, peak.loadPair)} · ${verdict} · fixture ${run.counts.sessions} sessions in ${run.counts.projects} projects`;
 }
+
+// ---- P5 O17 M8: what O17 adds at mawsd's cold start and idle (OX7) -----------------------------------------------------
+
+// mawsd's e2e resource report (src/mawsd/e2e-seam.ts, SIGUSR2 under MAWS_E2E=1): Node's active resources, a `Timeout`
+// per armed timer, and the modules loaded so far by file name
+export interface E2eResources {
+  at: string;
+  resources: string[];
+  modules: string[];
+}
+
+// The deferred chunks O17 keeps off the cold start and the idle (their file names are the module's and a hash)
+const BROWSER_CHUNKS: readonly [string, string][] = [
+  ['cua-broker-', 'the broker’s chunk loads at the first admitted peer'],
+  ['browser-feed-', 'the feed’s chunk loads at the first viewer'],
+];
+const timerCount = (report: E2eResources) => report.resources.filter((name) => name === 'Timeout').length;
+
+// What O17 must not hold at `moment`: session listeners beyond those allowed (none at the cold start; after it one per
+// live session with no app, P5 Decision Log 187), the broker's or the feed's chunk, and, against the cold start's report,
+// a timer it did not have. Empty when there is none.
+export function o17IdleProblems(moment: string, report: E2eResources, o: { listeners: number; allowedListeners: number; cold?: E2eResources }): string[] {
+  const problems: string[] = [];
+  if (o.listeners > o.allowedListeners) {
+    const noun = `${o.listeners} session listener${o.listeners === 1 ? '' : 's'}`;
+    problems.push(`${moment}: ${noun} (${o.allowedListeners === 0 ? 'none allowed' : `at most ${o.allowedListeners}, one per live session with no app`})`);
+  }
+  for (const [prefix, why] of BROWSER_CHUNKS) for (const module of report.modules.filter((name) => name.startsWith(prefix))) problems.push(`${moment}: ${module} loaded (${why})`);
+  if (o.cold !== undefined && timerCount(report) > timerCount(o.cold)) problems.push(`${moment}: ${timerCount(report)} timers, ${timerCount(report) - timerCount(o.cold)} more than at the cold start`);
+  return problems;
+}

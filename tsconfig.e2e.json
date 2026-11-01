@@ -125,6 +125,7 @@
     "test/support/claude-env.ts",
     "test/support/daemon-idle.ts", // P5 O2 M1: the idle-cost measurement's statistics, baseline and bound
     "test/support/cua-fake-host.ts",
+    "test/support/cua-engine.ts", // P5 O17 M8: the cua engine stub's wrapper and its connector's report and control socket
     "test/support/engine-pin/index.ts",
     "test/support/fake-bridge.ts", // P5 O9 M5: e2e:lane-a's terminal sessions are served by the fake bridge
     "test/support/fake-front.ts", // P5 O5 M3: e2e:render-host's fake mawsd, its machine.sock
