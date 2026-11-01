@@ -7,8 +7,9 @@
 // bounce; it counts in the badge. The session's other notices (a turn, an owner-channel mark, a held message) are any
 // session's.
 // P5 O7 M6 ("Counting without a record"): another machine's items, as remote lane B's feeds hold them (`remote`), are
-// raised as this Mac's are, once each for the whole app, keyed by the item's address: one already waiting when this app
-// started is silent, as a restored local item is, and a greyed machine (offline since its last snapshot) raises none and
+// raised as this Mac's are, once each for the whole app, keyed by the item's address: those of a machine's first snapshot
+// are silent, as restored local items are, when it arrives within REMOTE_STARTUP_SILENCE_MS of the notifier's start (by
+// this Mac's clock: a machine's own clock decides nothing), and a greyed machine (offline since its last snapshot) raises none and
 // counts in no badge. Such a notification is titled by the machine and the session's listed row, offers no reply and no
 // Allow once (their actions are this Mac's), is reported from its machine (`emitFrom`), and its click opens the session
 // on that machine (the navigation is the machine's).
@@ -174,9 +175,12 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   };
 
   // ---- P5 O7 M6: other machines' items ----------------------------------------------------------------------------------
-  const startedAt = (deps.now ?? Date.now)();
+  const now = deps.now ?? Date.now;
+  const startedAt = now();
   /** Each remote item met, by machine and id: raised at most once. */
   const remoteSeen = new Set<string>();
+  /** Machines whose first snapshot has been met. */
+  const remoteMet = new Set<MachineRef>();
   const remotePending = (machine: MachineRef, app: string, id: AttentionId | null) => {
     const held = deps.remote?.machine(machine);
     return held !== null && held !== undefined && !held.greyed && (held.sessions.get(app) ?? []).some((i) => i.id === id && i.state === 'pending');
@@ -194,13 +198,16 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
       handle.close();
     }
     if (held !== null && !held.greyed && change.kind !== 'gone') {
+      // a machine's first snapshot, met at startup: what it holds was waiting before this app ran, as restored items are
+      const restoring = change.kind === 'snapshot' && !remoteMet.has(change.machine) && now() - startedAt <= REMOTE_STARTUP_SILENCE_MS;
+      if (change.kind === 'snapshot') remoteMet.add(change.machine);
       const apps = change.kind === 'session' ? [change.app] : [...held.sessions.keys()];
       for (const app of apps) {
         for (const item of held.sessions.get(app) ?? []) {
           const key = `${change.machine}\n${item.id}`;
           if (remoteSeen.has(key)) continue;
           remoteSeen.add(key);
-          if (!(Date.parse(item.createdAt) >= startedAt)) continue; // waiting before this app started: as a restored item
+          if (restoring) continue;
           if (item.state !== 'pending' || !isActionable(item)) continue;
           const settings = deps.settings().notifications;
           if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId: app as AppSessionId, attentionId: item.id, body: item.summary, remote: { machine: change.machine, title: titleOf(change.machine, held.name, app) } });
@@ -221,4 +228,6 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   updateBadge();
   return () => { offs.forEach((off) => off()); for (const n of live.keys()) n.close(); live.clear(); };
 }
+/** P5 O7 M6 fix wave 1: how long after the notifier's start a machine's first snapshot is taken as restored (silent, badged). */
+export const REMOTE_STARTUP_SILENCE_MS = 30_000;
 const unavailable = (reason: string) => `notifier: OS notifications unavailable (${reason}); using dock bounce and toasts`;

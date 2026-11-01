@@ -742,3 +742,75 @@ describe('the checkout and the spawn (M4)', () => {
     expect(l.link.open()).toEqual([]);
   });
 });
+
+// P5 O7 M6 fix wave 1: the machine's attention feed against a session's stream. The feed's items are the machine's whole
+// list (derived errors among them), the stream's the broker's alone, and both are `attention.changed`, which replaces: while
+// the feed follows, it alone speaks for the machine's sessions.
+describe('the attention feed beside a session’s stream', () => {
+  const T = '2026-10-31T00:00:00.000Z';
+  const itemOf = (app: string, kind: 'error' | 'permission', id: string) => ({
+    id, appSessionId: app, sessionId: null, kind, request: { requestId: kind === 'permission' ? 'req-1' : null, toolUseId: null, taskId: null, agentId: null },
+    summary: kind, createdAt: T, state: 'pending', stateChangedAt: T, expiresAt: null,
+  });
+  const error = itemOf(APP, 'error', 'att-err');
+  const asked = itemOf(APP, 'permission', 'att-req-1');
+  const parts = (pendingItems: unknown[]) => ({ queue: { entries: [], paused: false, pauseReason: null }, pendingItems, catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 } });
+  /** The machine's feed open and its first snapshot delivered. */
+  function fed(l: ReturnType<typeof lab>, items: unknown[]) {
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    l.setLinks(new Map([[MINI, l.link]]));
+    const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+    feed.sink.subbed('snapshot', { epoch: 'attention:boot', seq: 0 });
+    feed.sink.snapshot({ epoch: 'attention:boot', seq: 0 }, items);
+    return feed;
+  }
+  const attentionOf = (l: ReturnType<typeof lab>) => l.of('attention.changed').filter((p) => p.appSessionId === APP).map((p) => (p.items as Array<{ id: string }>).map((i) => i.id));
+
+  it('keeps a feed item the broker doesn’t hold through the stream’s opening and a page’s replay, which tells the feed’s items', async () => {
+    const l = lab();
+    fed(l, [error]);
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+    expect(attentionOf(l)).toEqual([]);
+    await l.cmd('session.get', { appSessionId: APP });
+    expect(attentionOf(l)).toEqual([['att-err']]);
+    expect(l.adapter.attention.machine(MINI)!.sessions.get(APP)).toEqual([error]);
+  });
+
+  it('never brings back an item the feed cleared with a late stream snapshot', async () => {
+    const l = lab();
+    const feed = fed(l, [asked]);
+    const sub = await live(l);
+    feed.sink.event({ epoch: 'attention:boot', seq: 1 }, { appSessionId: APP, items: [] });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toEqual([[]]);
+  });
+
+  it('leaves the stream the session’s attention against an endpoint without the feed, and gives it back when the feed ends `not-offered`', async () => {
+    const l = lab();
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toEqual([['att-req-1']]); // no rl2.feeds: no feed, the stream speaks
+
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    l.setLinks(new Map([[MINI, l.link]]));
+    const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    expect(attentionOf(l)).toHaveLength(1); // the feed is opening: it speaks now
+    feed.sink.ended('not-offered'); // an endpoint older than M6
+    expect(attentionOf(l)).toEqual([['att-req-1'], ['att-req-1']]);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+    expect(attentionOf(l).at(-1)).toEqual([]);
+  });
+
+  it('answers `session.search` of a machine whose endpoint offers none (older than M6) `host_unavailable`, as an offline one', async () => {
+    const l = lab();
+    const refused = routeLaneB(async () => ({ ok: false, error: { code: 'internal', message: 'session.search: refused not-offered by machine mini', issues: { refusal: 'not-offered' } } }) as CommandResult<CommandName>, (m) => (m === MINI ? l.link : null), l.adapter);
+    const ctx: MainContext = { client: endableClientRef('page-1'), target: MINI };
+    expect(await refused(MINI, 'session.search', { query: 'bisect' }, ctx)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    // any other refusal, and any other name, keeps the machine's word
+    const other = routeLaneB(async () => ({ ok: false, error: { code: 'internal', message: 'x', issues: { refusal: 'not-offered' } } }) as CommandResult<CommandName>, (m) => (m === MINI ? l.link : null), l.adapter);
+    expect(await other(MINI, 'session.list', {}, ctx)).toMatchObject({ ok: false, error: { code: 'internal' } });
+  });
+});
+

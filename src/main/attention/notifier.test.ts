@@ -56,12 +56,12 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: Fa
     records: [record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }), record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } })],
   });
   opts.before?.(view);
-  const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
+  const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS, clock: Date.parse(STARTED) };
   const emit = vi.fn(() => true);
   const emitFrom = vi.fn(() => true);
   const navigate = vi.fn();
   const failure = vi.fn();
-  const remote = opts.remote === undefined ? {} : { remote: opts.remote.view, emitFrom, remoteTitle: (machine: MachineRef, app: string) => opts.remote!.titles.get(`${machine}/${app}`) ?? null, now: () => Date.parse(STARTED) };
+  const remote = opts.remote === undefined ? {} : { remote: opts.remote.view, emitFrom, remoteTitle: (machine: MachineRef, app: string) => opts.remote!.titles.get(`${machine}/${app}`) ?? null, now: () => state.clock };
   const stop = startNotifier(view, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit, ...remote });
   const set = (appSessionId: AppSessionId, items: AttentionItem[], silent: AttentionItem['id'][] = []) => view.setAttention(appSessionId, items, silent);
   return { view, state, emit, emitFrom, navigate, failure, stop, set };
@@ -69,7 +69,7 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: Fa
 
 // P5 O7 M6: other machines' attention as remote lane B's feeds hold it (src/main/lane-b/remote-attention.ts)
 const MINI = 'MiniMachineRef00000000' as MachineRef;
-const STARTED = '2026-09-28T09:00:00Z'; // the notifier's start; T is after it
+const STARTED = '2026-09-28T09:00:00Z'; // the notifier's start, by this Mac's clock
 type FakeRemote = ReturnType<typeof fakeRemote>;
 function fakeRemote() {
   const machines = new Map<MachineRef, { machine: MachineRef; name: string; greyed: boolean; sessions: Map<string, AttentionItem[]> }>();
@@ -419,7 +419,7 @@ describe('another machine’s items', () => {
   it('raises none for a greyed machine, counting its items in no badge, and none again for them at its next snapshot; a new item then is raised', () => {
     const r = fakeRemote();
     const h = harness({ remote: r });
-    const held = remoteItem('permission', '2026-09-28T08:00:00Z'); // waiting before this app started: silent, as a restored item
+    const held = remoteItem('permission', '2026-09-28T08:00:00Z'); // in the first snapshot at startup: silent, as a restored item
     r.snapshot([held]);
     expect(posted()).toHaveLength(0);
     expect(os.badge).toHaveBeenLastCalledWith(null, 1);
@@ -473,4 +473,32 @@ describe('another machine’s items', () => {
     expect(posted().map((n) => n.options)).toEqual([{ title: 'mini', body: `question for ${REMOTE_APP}`, silent: true }]);
     expect(actions.canAllow).not.toHaveBeenCalled();
   });
+
+  // Fix wave 1: startup silence is this Mac's own clock, never the machine's `createdAt`
+  it('silences a machine’s first snapshot at startup whatever its items’ clocks say, and raises every later item once whatever they say', () => {
+    const r = fakeRemote();
+    harness({ remote: r });
+    const ahead = remoteItem('permission', '2026-09-28T10:00:00Z'); // a machine an hour ahead
+    const behind = remoteItem('question', '2026-09-28T08:00:00Z'); // one an hour behind
+    r.snapshot([ahead, behind]);
+    expect(posted()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    const fresh = item('app-2', 'permission', '2026-09-28T08:00:01Z'); // raised now, stamped an hour behind
+    r.session('app-2', [fresh]);
+    const early = item('app-3', 'question', '2026-09-28T10:00:01Z'); // raised now, stamped an hour ahead
+    r.session('app-3', [early]);
+    expect(posted().map((n) => n.options.body)).toEqual(['permission for app-2', 'question for app-3']);
+    r.snapshot([ahead, behind, fresh, early]); // a reconnect's snapshot re-announces nothing seen
+    expect(posted()).toHaveLength(2);
+  });
+
+  it('raises the first snapshot’s items of a machine first reached after the startup window (unreachable at launch)', async () => {
+    const { REMOTE_STARTUP_SILENCE_MS } = await import('./notifier');
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    h.state.clock += REMOTE_STARTUP_SILENCE_MS + 1;
+    r.snapshot([remoteItem('permission', '2026-09-28T08:00:00Z')]);
+    expect(posted().map((n) => n.options.body)).toEqual([`permission for ${REMOTE_APP}`]);
+  });
 });
+

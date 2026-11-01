@@ -11,7 +11,8 @@
 //   counting. The subscription opens once the record is had.
 // - The stream. One `full` subscription. Its parts become `session.status`, `session.queue`, `session.catalogChanged`
 //   and, for the broker's items still waiting on a person, `attention.changed` for that session (the renderer never reads
-//   `session.brokerItems`); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
+//   `session.brokerItems`), unless the machine's attention feed follows it (P5 O7 M6 fix wave 1, `attentionFed`: the
+//   feed's list is the machine's whole one, and the feed's cache is what a page is told again); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
 //   flushed before anything else is said. Every payload is read tolerantly first (the machine may be a newer build of the
 //   wire's major: its unknown keys are dropped), and an event that still doesn't read is left out, logged.
 // - Gaps. The first `subbed` of a subscription says nothing, nor does a later `replay`. A later `snapshot` (a relaunch, a
@@ -88,6 +89,12 @@ export interface RemoteSessionDeps {
   subscribed?(): void;
   /** Whether the session's checkout feed carries its record now (`recordChanged`): an idle stream waits for it. */
   followed?(): boolean;
+  /**
+   * P5 O7 M6 fix wave 1: whether the machine's attention feed is the session's attention now. Its items are the machine's
+   * whole list (derived errors and every other item), where the stream's are the broker's alone: while the feed follows,
+   * the stream keeps its items but says none, so neither overwrites the other.
+   */
+  attentionFed?(): boolean;
   log(line: string): void;
 }
 
@@ -233,8 +240,14 @@ export class RemoteSession {
     const { queue, catalog, items } = this.#lastParts;
     if (queue !== undefined) this.#emit('session.queue', { ...queue, appSessionId: app });
     if (catalog !== undefined) this.#emit('session.catalogChanged', { appSessionId: app, ...catalog });
-    if (items !== undefined) this.#emit('attention.changed', { appSessionId: app, items });
+    if (items !== undefined && this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
     this.publish(true);
+  }
+
+  /** P5 O7 M6 fix wave 1: the stream's items said again, once the machine's attention feed stopped following (an endpoint without it). */
+  replayAttention(): void {
+    const items = this.#lastParts.items;
+    if (items !== undefined && this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: this.state.app, items });
   }
 
   /** `remote.session` now, if it changed since it was last said (`force`: said whatever). */
@@ -401,7 +414,7 @@ export class RemoteSession {
         if (read.ok && WAITING.has(read.value.state)) items.push(read.value);
       }
       this.#lastParts.items = items;
-      this.#emit('attention.changed', { appSessionId: app, items });
+      if (this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
     }
   }
 

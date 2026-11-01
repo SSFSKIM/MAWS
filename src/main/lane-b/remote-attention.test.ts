@@ -31,7 +31,9 @@ function lab() {
   const emitted: Array<{ machine: MachineRef; name: EventName; payload: Record<string, unknown> }> = [];
   const logs: string[] = [];
   const changes: RemoteAttentionChange[] = [];
+  const unfed: MachineRef[] = [];
   const attention = createRemoteAttention({
+    unfed: (machine) => void unfed.push(machine),
     remote: (machine) => links.get(machine) ?? null,
     onRemote: (listener) => (roster.add(listener), () => void roster.delete(listener)),
     emit: (machine, name, payload) => {
@@ -56,7 +58,7 @@ function lab() {
   let seq = 0;
   const change = (app: string, items: AttentionItem[], sub: FakeSub = feed()) => sub.sink.event({ epoch: EPOCH, seq: ++seq }, { appSessionId: app, items });
   const said = (name: EventName, machine: MachineRef = MINI) => emitted.filter((e) => e.name === name && e.machine === machine).map((e) => e.payload);
-  return { links, add, mini, attention, emitted, logs, changes, rosterIs, feeds, feed, snapshot, change, said };
+  return { links, add, mini, attention, emitted, logs, changes, unfed, rosterIs, feeds, feed, snapshot, change, said };
 }
 
 const permission = (app: string, at = T) => item(app, 'permission', at);
@@ -224,4 +226,39 @@ describe('the attention feed', () => {
     expect(l.feeds()).toHaveLength(1);
     expect(l.emitted).toEqual([]);
   });
+
+  // fix wave 1: the feed speaks for the machine's sessions while it follows
+  it('follows a machine while its feed is open or opening again, and tells a page a session’s items, or every machine’s, from its cache', () => {
+    const l = lab();
+    expect(l.attention.follows(MINI)).toBe(false);
+    l.rosterIs(MINI);
+    expect(l.attention.follows(MINI)).toBe(true); // opening: its snapshot will speak
+    const a = permission('app-1');
+    l.snapshot([a]);
+    l.attention.replay(MINI, 'app-1');
+    l.attention.replay(MINI, 'app-2');
+    expect(l.said('attention.changed')).toEqual([{ appSessionId: 'app-1', items: [a] }, { appSessionId: 'app-2', items: [] }]);
+    l.attention.sayAgain();
+    expect(l.said('remote.attention')).toEqual([{ machine: MINI, items: [a], greyed: false }, { machine: MINI, items: [a], greyed: false }]);
+    l.feed().sink.ended('unavailable');
+    expect(l.attention.follows(MINI)).toBe(true); // opening again on the backoff
+    expect(l.unfed).toEqual([]);
+  });
+
+  it('stops following at a channel with no feed, saying so (`unfed`) so the sessions’ streams speak again; it tells a page nothing then', () => {
+    const l = lab();
+    l.add(STUDIO, ['rl2.executor.machine']);
+    l.rosterIs(MINI, STUDIO);
+    expect(l.attention.follows(STUDIO)).toBe(false);
+    expect(l.unfed).toEqual([STUDIO]); // asked for none
+    l.snapshot([permission('app-1')]);
+    l.feed().sink.ended('not-offered');
+    expect(l.attention.follows(MINI)).toBe(false);
+    expect(l.unfed).toEqual([STUDIO, MINI]);
+    const said = l.emitted.length;
+    l.attention.replay(MINI, 'app-1');
+    l.attention.sayAgain();
+    expect(l.emitted.slice(said)).toEqual([{ machine: MINI, name: 'remote.attention', payload: { machine: MINI, items: [], greyed: false } }]);
+  });
 });
+

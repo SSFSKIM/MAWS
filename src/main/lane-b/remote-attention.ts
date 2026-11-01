@@ -18,6 +18,10 @@
 //   channel (a different peer's `h2` list, or a new one after the link had none) asks again. Any other end but `behind`
 //   and `unavailable` is taken the same way.
 // - A machine the roster dropped is said gone: no items.
+// - Fix wave 1: while a machine's feed follows (open, or opening again), it is its sessions' attention: their streams
+//   (./remote-session.ts) say none of theirs, which are the broker's items alone and would overwrite the feed's whole
+//   list, and a page's `session.get` is told the session's items from here. When the channel has no feed, the streams
+//   say theirs again (`unfed`). A page that announces itself is told every machine's state again (`sayAgain`).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -43,6 +47,15 @@ export type RemoteAttentionChange = { machine: MachineRef; kind: 'snapshot' | 'g
 export interface RemoteAttention {
   machines(): readonly RemoteMachineAttention[];
   machine(machine: MachineRef): RemoteMachineAttention | null;
+  /**
+   * Fix wave 1: whether the machine's feed is its sessions' attention now (open, or opening again), so a session's
+   * stream says none of its own: the feed's items are the machine's whole list, the stream's the broker's alone.
+   */
+  follows(machine: MachineRef): boolean;
+  /** Fix wave 1: a session's items said again from the feed (a page's `session.get`), while the feed follows. */
+  replay(machine: MachineRef, app: string): void;
+  /** Fix wave 1: every machine's state said again (a page that just announced itself). */
+  sayAgain(): void;
   /** Heard after each change has been said to the renderer. */
   onChange(listener: (change: RemoteAttentionChange) => void): () => void;
   /** Every feed closed and every link let go. */
@@ -57,6 +70,8 @@ export interface RemoteAttentionDeps {
   /** emitFrom. */
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
   timing?: Partial<Pick<RemoteCheckoutTiming, 'feedRetryMs'>>;
+  /** Fix wave 1: the machine's feed stopped following (no feed on this channel): its sessions' streams speak again. */
+  unfed?(machine: MachineRef): void;
   log(line: string): void;
 }
 
@@ -128,10 +143,12 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
   function noFeed(machine: MachineRef, feed: Feed): void {
     feed.refusedOn = feed.link.peerCapabilities();
     feed.greyed = false;
-    if (!feed.said && feed.sessions.size === 0) return;
-    feed.sessions = new Map();
-    sayAll(machine, feed);
-    changed({ machine, kind: 'snapshot' });
+    if (feed.said || feed.sessions.size > 0) {
+      feed.sessions = new Map();
+      sayAll(machine, feed);
+      changed({ machine, kind: 'snapshot' });
+    }
+    deps.unfed?.(machine);
   }
 
   function subscribe(machine: MachineRef, feed: Feed): void {
@@ -247,6 +264,19 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
     machine(machine) {
       const feed = feeds.get(machine);
       return feed === undefined ? null : viewOf(machine, feed);
+    },
+    follows(machine) {
+      const feed = feeds.get(machine);
+      return !stopped && feed !== undefined && (feed.sub !== null || feed.timer !== null);
+    },
+    replay(machine, app) {
+      const feed = feeds.get(machine);
+      if (stopped || feed === undefined || (feed.sub === null && feed.timer === null)) return;
+      deps.emit(machine, 'attention.changed', { appSessionId: app as AppSessionId, items: feed.sessions.get(app) ?? [] });
+    },
+    sayAgain() {
+      if (stopped) return;
+      for (const [machine, feed] of feeds) if (feed.said) sayAll(machine, feed);
     },
     onChange(listener) {
       listeners.add(listener);

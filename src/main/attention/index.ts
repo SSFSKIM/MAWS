@@ -14,13 +14,14 @@ import { registerMainHandler } from '../ipc/router';
 import { appWindows, isAppWindow } from '../windows'; // E2
 import { createNavigationRelay } from './navigation';
 import type { NotificationActions } from './actions';
+import type { RemoteAttention } from '../lane-b/remote-attention';
 import { startNotifier, type NotifierDeps, type NotifierView } from './notifier';
 
 // P5 O3-C (reader R1): the notifier reads the spine through its view (`view`), restored items marked silent in band.
 // P5 O7 M6: and other machines' attention beside it (`remote`, remote lane B's feeds; `remoteTitle`, the org rows').
 export function startAttention(
   view: NotifierView,
-  deps: { actions?: NotificationActions; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> } & Pick<NotifierDeps, 'remote' | 'remoteTitle'>,
+  deps: { actions?: NotificationActions; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> } & Pick<NotifierDeps, 'remoteTitle'> & { remote?: NonNullable<NotifierDeps['remote']> & Pick<RemoteAttention, 'sayAgain'> },
 ): () => void {
   const viewing = new Map<ClientId, { appSessionId: AppSessionId | null; release(): void }>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { client }) => {
@@ -45,7 +46,12 @@ export function startAttention(
   // A window's page views what its live client last reported; a page that has not reported since it loaded views nothing.
   const isViewing = (id: AppSessionId) => appWindows().some((win) => win.isFocused() && viewing.get(clientOf(win.webContents).id)?.appSessionId === id);
   const relay = createNavigationRelay(emit, emitFrom);
-  registerMainHandler('attention.pendingNavigate', () => ({ navigate: relay.take() }));
+  // P5 O7 M6 fix wave 1: the call is the page's announcement, made after it subscribed: every other machine's attention is
+  // told it again too, which a reloaded page or a new window would otherwise lack until the machine's next snapshot
+  registerMainHandler('attention.pendingNavigate', () => {
+    deps.remote?.sayAgain();
+    return { navigate: relay.take() };
+  });
   followAppPages(app, relay.pageGone);
 
   const isFocused = () => appWindows().some((win) => win.isFocused()); // E2: app windows only

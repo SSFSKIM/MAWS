@@ -1564,5 +1564,15 @@ describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 },
     await until(() => l.a.link.state() === 'down', 'the link down');
     expect(await l.a.route('session.search', { query: 'bisect' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
   });
+
+  // fix wave 1: an endpoint older than M6 offers no `session.search`; main answers it as a machine left out
+  it('answers `session.search` of an endpoint that offers none `host_unavailable`, as an offline machine', async () => {
+    const commands = OFFERS.commands as Record<string, unknown>;
+    const row = commands['session.search'];
+    delete commands['session.search'];
+    cleanups.push(() => void (commands['session.search'] = row));
+    const l = await lab();
+    expect(await l.a.route('session.search', { query: 'bisect' })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'session.search: machine mini offers no search' } });
+  });
 });
 

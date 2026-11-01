@@ -149,7 +149,7 @@ export interface RemoteLaneB {
     at: RemoteForwards['at'];
   };
   /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
-  attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange'>;
+  attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
   /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
@@ -180,7 +180,7 @@ export const NOT_OPEN = 'open the session to drive it';
 
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
- * `base`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
+ * `base`; `session.search` refused `not-offered` (an endpoint older than M6) is answered `host_unavailable`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
  * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
@@ -190,6 +190,11 @@ export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) =
     const result = await base(machine, name, input, ctx);
     const app = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
     if (name === 'session.get' && typeof app === 'string' && remote(machine) !== null) laneB.replay(machine, app);
+    // P5 O7 M6 fix wave 1: an endpoint older than M6 offers no search; to the renderer's merge it is a machine left out, as
+    // an offline one is
+    if (name === 'session.search' && !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'not-offered' && remote(machine) !== null) {
+      return { ok: false, error: ipcError('host_unavailable', `session.search: machine ${remote(machine)!.name} offers no search`) };
+    }
     return result;
   };
 }
@@ -209,6 +214,18 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const machines = new Map<MachineRef, { link: RemoteLink; lanes: Map<string, Lane> }>();
   let revision = 0;
   const sessionOf = (machine: MachineRef, app: string) => machines.get(machine)?.lanes.get(app)?.session;
+  // P5 O7 M6: one machine-wide attention feed per link; while it follows, the sessions' streams say no attention of
+  // their own, and when it stops (no feed on the channel) they say theirs again (fix wave 1)
+  const attention = createRemoteAttention({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    emit: deps.emit,
+    timing,
+    unfed: (machine) => {
+      for (const lane of machines.get(machine)?.lanes.values() ?? []) lane.session.replayAttention();
+    },
+    log: deps.log,
+  });
   const checkout = createRemoteCheckout({
     remote: deps.remote,
     emit: deps.emit,
@@ -225,8 +242,6 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
   const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
-  // P5 O7 M6: one machine-wide attention feed per link
-  const attention = createRemoteAttention({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, timing, log: deps.log });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -255,6 +270,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
+        attentionFed: () => attention.follows(machine), // fix wave 1: the feed's items are the session's attention
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
@@ -503,10 +519,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
-    attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener) },
+    attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
+      attention.replay(machine, app); // fix wave 1: the feed's items, which the stream's replay leaves out while it follows
     },
     stop() {
       interest.stop();
