@@ -81,7 +81,7 @@ async function adopter(opts: { responder?: Responder; adoptMs?: number; spec?: t
     },
     ...opts.deps,
   };
-  return { adopt: createAdopter(deps, opts.adoptMs), table, transports, logs };
+  return { adopt: createAdopter(deps, opts.adoptMs), table, transports, logs, deps };
 }
 
 const caughtUp = (t: ScriptedTransport) => t.pushProblem({ kind: 'host_caught_up', message: 'caught up', length: 0, typeGuess: null });
@@ -118,6 +118,34 @@ describe('the launcher’s adoption', () => {
     expect(through, 'the spawn row, the initialize and its answer').toBe(3);
     caughtUp(a.transports[0]!);
     await adopting;
+    a.transports[0]!.exit(0);
+    await a.table.get(ID)!.exited;
+  });
+
+  // P5 O16 M4 (review of 33c3ecb06): `adoptable` takes a host holding no engine beside the newest host of the same
+  // session; its release ends its adoption with a failure, which must not wake the real adoption's reads
+  it('keeps the reads of a session waiting for its real adoption when a host of the same session holding no engine is released first', async () => {
+    const { entry } = launched();
+    const empty: RosterEntry = { ...entry, holderId: 'empty001', socket: '/x/empty.sock', state: 'ready', child: null, startedAt: '2026-10-31T11:00:00.000Z' };
+    let attach: () => void = () => {};
+    const attached = new Promise<void>((resolve) => (attach = resolve));
+    const a = await adopter();
+    const hosting = a.deps.holder!;
+    const adoptHost = hosting.adopt!;
+    hosting.adopt = async (...args) => (await attached, adoptHost(...args));
+    a.table.holdForAdoption([ID]); // the start's hold: the host holding an engine only
+    let woken = false;
+    void a.table.adoptionSettled(ID, 8_000)!.then(() => void (woken = true));
+    const real = a.adopt(entry);
+    await expect(a.adopt(empty)).rejects.toThrow(/holds no engine/); // released first
+    await sleep(20);
+    expect(woken).toBe(false);
+    expect(a.table.adoptionSettled(ID, 8_000)).not.toBeNull(); // a later read still waits for the real adoption
+    attach();
+    await until(() => woken, 'the reads woken at the real reservation');
+    expect(a.table.get(ID)).toBeDefined();
+    caughtUp(a.transports[0]!);
+    expect(await real).toBe(ID);
     a.transports[0]!.exit(0);
     await a.table.get(ID)!.exited;
   });

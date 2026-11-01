@@ -220,10 +220,12 @@ export const ADOPT_MS = 60_000;
 
 export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId> {
   // P5 O16 M4: an adoption that gives up wakes the reads waiting on its hold (ProcessTable.adoptionSettled), which then
-  // answer `unknown session` at once rather than run out their wait; one past its reservation has no hold to wake
+  // answer `unknown session` at once rather than run out their wait; one past its reservation has no hold to wake. Only
+  // a host that holds an engine has the hold (the start's rule, index.ts `adoptAtStart`): a host holding none, which
+  // `adoptable` takes beside the newest host of the same session, ends in its release and says nothing of that hold.
   return (entry) =>
     adoptOne(entry).catch((error: unknown) => {
-      if (entry.appSessionId !== null) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
+      if (entry.appSessionId !== null && entry.child !== null) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
       throw error;
     });
   async function adoptOne(entry: RosterEntry): Promise<AppSessionId> {

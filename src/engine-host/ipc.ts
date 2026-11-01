@@ -205,13 +205,17 @@ export interface EngineIpc {
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
 
 // P5 O16 M4 ("Stream redelivery"): the longest a stream's read of a session held for adoption waits for its row
-// (ProcessTable.adoptionSettled). A hold becomes the row after the adopter's spec and environment reads and the session
-// host's attach (launcher.ts `createAdopter`), well under a second, never after the re-initialize. The bound stays half
-// of the forwarded request's deadline (REQUEST_TIMEOUT_MS, 10 s, @shared/host/host-supervisor) so a stream's opening, a
-// status read then its parts and first page, still answers within it, with 5 s to spare. Past the bound the read answers
-// as it did before the wait (`unknown session`), which is safe: it is the answer every reader already handles, and
-// holding the read longer would only turn it into the caller's own timeout, which says less.
-export const ADOPTION_READ_WAIT_MS = 5_000;
+// (ProcessTable.adoptionSettled). The hold becomes the row after the adopter's spec read, its environment capture and
+// the session host's attach (launcher.ts `createAdopter`), never after the re-initialize. The capture is the host's
+// one login-shell capture (@shared/host/shell-env), which may take SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS
+// (5.25 s) before its fallback; the adoption cannot do without it (the launch's values were never recorded, only their
+// keys, so the plan is rebuilt from this host's capture), nor reserve before it (the row's session is built from that
+// plan and the attached transport). So the bound covers that capture with 2.75 s for the rest, and stays 2 s under the
+// forwarded request's deadline (REQUEST_TIMEOUT_MS, 10 s, @shared/host/host-supervisor) for the rest of a stream's
+// opening, its parts and first page. A reserve later than the bound (a slow capture and a slow attach together) gets
+// the answer it got before the wait (`unknown session`), which is safe: it is the answer every reader already handles,
+// and holding the read longer would only turn it into the caller's own timeout, which says less.
+export const ADOPTION_READ_WAIT_MS = 8_000;
 
 // A bounded handler: the host's own deadline reaches the renderer as `timeout`, never as the router's; so does a
 // `#` append refused because its budget ran out before the write (M5 review).

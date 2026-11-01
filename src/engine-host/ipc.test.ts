@@ -19,6 +19,7 @@ import { handshakeResponder, INIT_RESPONSE, scriptedSession } from './conformanc
 import { REQUEST_TIMEOUT_MS } from './controls';
 import { ADOPTION_READ_WAIT_MS, bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { REQUEST_TIMEOUT_MS as FORWARD_TIMEOUT_MS } from '@shared/host/host-supervisor'; // P5 O16 M4: a forwarded request's deadline
+import { SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env'; // P5 O16 M4
 import { MemoryAppendBudgetSpent } from './memory-append';
 import { RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
@@ -1400,7 +1401,8 @@ describe('a stream’s reads of a session held for adoption (P5 O16 M4)', () => 
     await expect(host.call('session.status', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow('unknown session app-none');
   });
 
-  it('bounds the wait below the forwarded request’s deadline', () => {
-    expect(ADOPTION_READ_WAIT_MS).toBeLessThanOrEqual(FORWARD_TIMEOUT_MS / 2);
+  it('bounds the wait to cover the host’s environment capture and stay 2 s under the forwarded request’s deadline', () => {
+    expect(ADOPTION_READ_WAIT_MS).toBeGreaterThan(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS);
+    expect(ADOPTION_READ_WAIT_MS).toBeLessThanOrEqual(FORWARD_TIMEOUT_MS - 2_000);
   });
 });
