@@ -224,6 +224,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     unfed: (machine) => {
       for (const lane of machines.get(machine)?.lanes.values() ?? []) lane.session.replayAttention();
     },
+    streamItems: (machine) => [...(machines.get(machine)?.lanes.values() ?? [])].flatMap((lane) => lane.session.attentionItems()), // fix wave 3
     log: deps.log,
   });
   const checkout = createRemoteCheckout({

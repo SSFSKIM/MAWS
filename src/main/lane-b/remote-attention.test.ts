@@ -32,8 +32,11 @@ function lab() {
   const logs: string[] = [];
   const changes: RemoteAttentionChange[] = [];
   const unfed: MachineRef[] = [];
+  /** What the machine's sessions' streams hold (fix wave 3). */
+  const streams = new Map<MachineRef, AttentionItem[]>();
   const attention = createRemoteAttention({
     unfed: (machine) => void unfed.push(machine),
+    streamItems: (machine) => streams.get(machine) ?? [],
     remote: (machine) => links.get(machine) ?? null,
     onRemote: (listener) => (roster.add(listener), () => void roster.delete(listener)),
     emit: (machine, name, payload) => {
@@ -58,7 +61,7 @@ function lab() {
   let seq = 0;
   const change = (app: string, items: AttentionItem[], sub: FakeSub = feed()) => sub.sink.event({ epoch: EPOCH, seq: ++seq }, { appSessionId: app, items });
   const said = (name: EventName, machine: MachineRef = MINI) => emitted.filter((e) => e.name === name && e.machine === machine).map((e) => e.payload);
-  return { links, add, mini, attention, emitted, logs, changes, unfed, rosterIs, feeds, feed, snapshot, change, said };
+  return { links, add, mini, attention, emitted, logs, changes, unfed, streams, rosterIs, feeds, feed, snapshot, change, said };
 }
 
 const permission = (app: string, at = T) => item(app, 'permission', at);
@@ -255,10 +258,57 @@ describe('the attention feed', () => {
     l.feed().sink.ended('not-offered');
     expect(l.attention.follows(MINI)).toBe(false);
     expect(l.unfed).toEqual([STUDIO, MINI]);
+    const fallback = question('app-1');
+    l.streams.set(MINI, [fallback]); // what the session's stream holds, said again on `unfed`
     const said = l.emitted.length;
     l.attention.replay(MINI, 'app-1');
     l.attention.sayAgain();
-    expect(l.emitted.slice(said)).toEqual([]); // the ended feed's cache speaks for nobody: the streams have the sessions back
+    // the ended feed's emptied cache speaks for nobody: the streams' items stand for the machine
+    expect(l.emitted.slice(said)).toEqual([{ machine: MINI, name: 'remote.attention', payload: { machine: MINI, items: [fallback], greyed: false } }]);
+  });
+
+  // fix wave 3 (the milestone review): an ended feed's machine greys and restores the streams' items, never its own empty cache
+  it('greys the streams’ items when the link of a machine whose feed ended goes down, and lifts them at `up` with no feed', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    l.snapshot([permission('app-1')]);
+    const fallback = permission('app-1');
+    l.streams.set(MINI, [fallback]);
+    l.feed().sink.ended('not-offered');
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: false });
+    l.mini.set('down', null);
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: true });
+    expect(l.attention.machine(MINI)!.greyed).toBe(true);
+    l.mini.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds either
+    l.mini.set('up');
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: false });
+    expect(l.feeds()).toHaveLength(1);
+  });
+
+  it('lets the feed go for its channel when a change or a snapshot couldn’t be carried (`omitted`), giving the machine back to its streams, once', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    l.snapshot([permission('app-1')]);
+    const fallback = permission('app-1');
+    l.streams.set(MINI, [fallback]);
+    const sub = l.feed();
+    sub.sink.event({ epoch: EPOCH, seq: 7 }, { omitted: 'too-large', bytes: 5 * 1024 * 1024 });
+    expect(sub.closed).toBe(true);
+    expect(l.attention.follows(MINI)).toBe(false);
+    expect(l.unfed).toEqual([MINI]);
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: false });
+    expect(l.logs.filter((line) => line.includes('too large'))).toHaveLength(1);
+    l.mini.setCaps({ ...l.mini.caps()!, stateVersion: 9 }); // the same channel: no reopening
+    vi.advanceTimersByTime(60_000);
+    expect(l.feeds()).toHaveLength(1);
+    // the next channel asks again, from a snapshot; one that is itself omitted ends it the same way
+    l.mini.set('down', null);
+    l.mini.set('up');
+    expect(l.feeds()).toHaveLength(2);
+    l.feed().sink.subbed('snapshot', { epoch: EPOCH, seq: 0 });
+    l.feed().sink.snapshot({ epoch: EPOCH, seq: 0 }, { omitted: 'too-large', bytes: 5 * 1024 * 1024 });
+    expect(l.attention.follows(MINI)).toBe(false);
+    expect(l.unfed).toEqual([MINI, MINI]);
   });
 });
 

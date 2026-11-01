@@ -244,6 +244,11 @@ export class RemoteSession {
     this.publish(true);
   }
 
+  /** P5 O7 M6 fix wave 3: the broker's items the stream last delivered (none before its first part). */
+  attentionItems(): AttentionItem[] {
+    return this.#lastParts.items ?? [];
+  }
+
   /** P5 O7 M6 fix wave 1: the stream's items said again, once the machine's attention feed stopped following (an endpoint without it). */
   replayAttention(): void {
     const items = this.#lastParts.items;

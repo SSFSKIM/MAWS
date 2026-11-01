@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { endableClientRef } from '@shared/ipc/client';
 import type { SessionEvent } from '@shared/graph/events';
 import { requestDigestOf } from '@shared/host/request-digest';
-import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,6 +17,7 @@ import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
+import { createAttentionStore } from '../../renderer/src/stores/attention';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -814,8 +815,61 @@ describe('the attention feed beside a session’s stream', () => {
     const said = l.emitted.length;
     l.adapter.attention.sayAgain(); // attention.pendingNavigate
     await l.cmd('session.get', { appSessionId: APP });
-    expect(l.emitted.slice(said).filter((e) => e.name === 'remote.attention')).toEqual([]);
+    // fix wave 3: the machine's state is the streams' items, never the ended feed's emptied cache
+    expect(l.emitted.slice(said).filter((e) => e.name === 'remote.attention').map((e) => e.payload)).toEqual([{ machine: MINI, items: [asked], greyed: false }]);
     expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+  });
+
+  // fix wave 3 (the milestone review's repro): the fallback items survive the next disconnect, greyed, and come back at `up`
+  it('greys the stream’s fallback items at the link’s `down` after the feed ended, rather than erasing them', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    feed.sink.ended('not-offered');
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    l.link.set('down', null);
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: true });
+    l.link.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds: the streams stay the machine's
+    l.link.set('up');
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
+  });
+
+  it('leaves the renderer’s store holding the fallback item greyed across the disconnect, and live again after it (the review’s repro, end to end)', async () => {
+    const store = createAttentionStore();
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    feed.sink.ended('not-offered');
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+    const apply = () => {
+      for (const e of l.emitted.splice(0)) {
+        if (e.name === 'remote.attention') store.getState().applyRemote(e.payload as EventPayload<'remote.attention'>);
+        if (e.name === 'attention.changed') store.getState().applyChanged(e.payload as EventPayload<'attention.changed'>, e.machine);
+      }
+    };
+    apply();
+    expect([...store.getState().bySession.values()].flat()).toEqual([asked]);
+    l.link.set('down', null);
+    apply();
+    expect([...store.getState().bySession.values()].flat()).toEqual([asked]);
+    expect(store.getState().greyed.has(APP as AppSessionId)).toBe(true);
+    l.link.peers = ['rl2.executor.machine'];
+    l.link.set('up');
+    apply();
+    expect([...store.getState().bySession.values()].flat()).toEqual([asked]);
+    expect(store.getState().greyed.size).toBe(0);
+  });
+
+  it('gives a machine’s sessions back to their streams when the feed couldn’t carry a change (`omitted`)', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const feed = fed(l, [asked]);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked])); // held, unsaid while the feed follows
+    feed.sink.event({ epoch: 'attention:boot', seq: 1 }, { omitted: 'too-large', bytes: 5 * 1024 * 1024 });
+    expect(l.adapter.attention.machine(MINI)!.sessions.size).toBe(0);
+    expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
+    expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
+    expect(feed.closed).toBe(true);
   });
 
   it('answers `session.search` of a machine whose endpoint offers none (older than M6) `host_unavailable`, as an offline one', async () => {
