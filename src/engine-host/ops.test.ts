@@ -4,7 +4,7 @@
 // nothing. `host.opQuery` answers RL4's states with the stored binding and tombstones an absent id when asked.
 // The first block drives the commands over a stand-in handler table; the second through registerEngineIpc's own handlers
 // and a replayed engine session, so a reseal shows one effect in a real session.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,10 +13,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { HandlerContext } from '@shared/ipc/client';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
+import { toWire } from '@shared/host/json-bytes';
 import { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { CommandName, CommandOutput } from '@shared/ipc/schema';
-import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
+import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import type { BinaryCheck } from './binary-info';
 import { registerEngineIpc } from './ipc';
 import { RELAY_URL } from './launch';
@@ -36,6 +37,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 // ---- Over a stand-in handler table ----------------------------------------------------------------------------------
 
+const ARTIFACT_ID = '11111111-1111-4111-8111-111111111111';
+const ASSET_ID = '22222222-2222-4222-8222-222222222222';
 const PENDING = { kind: 'permission.requested', requestId: 'rq-1', toolName: 'Bash', input: { command: 'ls' } } as unknown as SessionEvent;
 
 function ops(edit: Partial<OpsDeps> = {}) {
@@ -48,15 +51,21 @@ function ops(edit: Partial<OpsDeps> = {}) {
     ['session.steer', async () => {
       throw new Error('session app-1 is not ready (exited)');
     }],
+    // P5 O7 M5a: artifact writes, keyed by `artifactId` and naming no session
+    ['artifacts.saveVersion', async (input) => (ran.push({ name: 'artifacts.saveVersion', input }), { versionId: ran.length })],
+    ['artifacts.uploadAsset', async (input) => (ran.push({ name: 'artifacts.uploadAsset', input }), { assetId: ASSET_ID, ref: 'assets/logo.png' })],
+    ['artifacts.testWrite', async (input) => (ran.push({ name: 'artifacts.testWrite', input }), { revision: 1 })],
+    ['session.applyFlagSettings', async (input) => void ran.push({ name: 'session.applyFlagSettings', input })], // a free-form record
   ]);
+  const statusReads: string[] = [];
   const deps: OpsDeps = {
     ledger: OpLedger.open(dir, 'ops.jsonl'),
     handler: (name) => handlers.get(name),
-    status: (id) => (id === 'app-1' ? status : null),
+    status: (id) => (statusReads.push(id), id === 'app-1' ? status : null),
     pending: (id, requestId) => (id === 'app-1' && requestId === 'rq-1' ? PENDING : null),
     ...edit,
   };
-  return { ...opCommands(deps), ran, status, deps };
+  return { ...opCommands(deps), ran, status, statusReads, deps };
 }
 
 const op = (fields: Record<string, unknown> = {}) => ({
@@ -156,6 +165,111 @@ describe('host.op', () => {
   });
 });
 
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with
+// no session", Interfaces §O): an artifact write names no session, so the endpoint claims it through `host.artifactOp`,
+// with no context and the artifact it resolved as the claim's `target`, which a query answers as the binding's target
+describe('host.artifactOp (an act on no session)', () => {
+  const save = (fields: Record<string, unknown> = {}) => {
+    const claim: Record<string, unknown> = op({ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' }, target: `artifact:${ARTIFACT_ID}`, ...fields });
+    delete claim.context; // an act on no session carries none
+    return claim as Parameters<ReturnType<typeof opCommands>['artifactOp']>[0];
+  };
+
+  it('runs a command whose input names no session once, with no status check, and answers a reseal from the ledger', async () => {
+    const h = ops();
+    expect(validateCommandInput('host.artifactOp', save()).ok).toBe(true);
+    const first = await h.artifactOp(save(), CTX);
+    expect(first).toEqual({ state: 'done', result: { ok: true, value: { versionId: 1 } } });
+    expect(await h.artifactOp(save(), CTX)).toEqual(first);
+    expect(await ops({ ledger: OpLedger.open(dir, 'ops.jsonl') }).artifactOp(save(), CTX)).toEqual(first); // after a restart too
+    expect(h.ran).toEqual([{ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }]);
+    expect(h.statusReads).toEqual([]);
+  });
+
+  it('answers the claim’s target from a query, across a reopen; the orphan form too', async () => {
+    const h = ops();
+    await h.artifactOp(save(), CTX);
+    await h.artifactOp(save({ opId: 'op-000000000000002', target: 'artifact:' }), CTX);
+    const created = iso(Date.now());
+    const binding = { member: 'm-a', device: 'd-a', fingerprint: 'fp-1', name: 'artifacts.saveVersion' };
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: created, tombstoneIfAbsent: false })).toEqual({ state: 'done', outcome: { ok: true, value: { versionId: 1 } }, ...binding, target: `artifact:${ARTIFACT_ID}` });
+    const again = ops({ ledger: OpLedger.open(dir, 'ops.jsonl') });
+    expect(again.opQuery({ opId: 'op-000000000000001', opCreated: created, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: `artifact:${ARTIFACT_ID}` });
+    expect(again.opQuery({ opId: 'op-000000000000002', opCreated: created, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: 'artifact:' });
+  });
+
+  it('refuses a session’s command `unavailable`, its id present or optional in its schema, running nothing and reading no status', async () => {
+    const h = ops();
+    expect(await h.artifactOp(save({ name: 'session.send', input: { appSessionId: 'app-1', content: 'hello' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.artifactOp(save({ name: 'session.send', input: { content: 'no id' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.artifactOp(save({ name: 'artifacts.testWrite', input: { artifactId: ARTIFACT_ID, opId: 'w1', ops: [{ op: 'insertText', index: 0, text: 'x' }] } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' }); // its schema names a session
+    expect(await h.artifactOp(save({ name: 'host.op', input: {} }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.artifactOp(save({ name: 'artifacts.nonesuch', input: {} }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.artifactOp(save({ input: { artifactId: ARTIFACT_ID, label: 'Draft', extra: 1 } }), CTX)).toEqual({ state: 'refused', reason: 'malformed' });
+    expect(h.ran).toEqual([]);
+    expect(h.statusReads).toEqual([]);
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+    // and host.op still runs an artifact command only on a session: with a context it is `unavailable`, as before
+    expect(await h.op(op({ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+  });
+
+  it('answers an op id the other command claimed from the ledger, running nothing', async () => {
+    const h = ops();
+    const sent = await h.op(op(), CTX);
+    expect(await h.artifactOp(save({ opId: 'op-000000000000001' }), CTX)).toEqual(sent);
+    expect(h.ran).toHaveLength(1);
+  });
+
+  it('refuses a claim with no target, or one that names no artifact, at the schema', () => {
+    const bare: Record<string, unknown> = { ...save() };
+    delete bare.target;
+    expect(validateCommandInput('host.artifactOp', bare).ok).toBe(false);
+    for (const target of ['app-1', 'artifact:not-a-uuid', `artifact:${ARTIFACT_ID}/x`, '']) expect(validateCommandInput('host.artifactOp', save({ target })).ok, target).toBe(false);
+    expect(validateCommandInput('host.artifactOp', { ...save(), context: { launchId: 'launch-1', engineSessionId: 'eng-1' } }).ok).toBe(false);
+  });
+
+  // Bytes cross RL2 in json-bytes' tagged form (M5 "What crosses, as what"): the op's `input` is a JSON value, decoded by
+  // the ledger before its own validation, and nothing it keeps holds a decoded byte
+  it('runs an uploadAsset whose tagged bytes pass the real schema, decoded before the command’s validation, and keeps JSON', async () => {
+    const h = ops();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255]);
+    const tagged = toWire({ artifactId: ARTIFACT_ID, name: 'logo.png', mime: 'image/png', bytes }) as Record<string, unknown>;
+    expect(tagged.bytes).toEqual({ $bytes: Buffer.from(bytes).toString('base64') });
+    const upload = save({ name: 'artifacts.uploadAsset', input: tagged });
+    expect(validateCommandInput('host.artifactOp', upload).ok).toBe(true);
+    const done = await h.artifactOp(upload, CTX);
+    expect(done).toEqual({ state: 'done', result: { ok: true, value: { assetId: ASSET_ID, ref: 'assets/logo.png' } } });
+    const given = (h.ran[0]?.input as { bytes: unknown }).bytes;
+    expect(given).toBeInstanceOf(Uint8Array);
+    expect([...(given as Uint8Array)]).toEqual([...bytes]);
+    expect(tagged.bytes).toEqual({ $bytes: Buffer.from(bytes).toString('base64') }); // the copy was decoded, not the input
+    // the ledger holds JSON, and a reopened ledger answers the reseal from it, running nothing
+    const lines = readFileSync(join(dir, 'ops.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toEqual([
+      { opId: 'op-000000000000001', opCreated: upload.opCreated, at: expect.any(Number), claim: { member: 'm-a', device: 'd-a', fingerprint: 'fp-1', target: `artifact:${ARTIFACT_ID}`, name: 'artifacts.uploadAsset' } },
+      { opId: 'op-000000000000001', result: { ok: true, value: { assetId: ASSET_ID, ref: 'assets/logo.png' } } },
+    ]);
+    const again = ops({ ledger: OpLedger.open(dir, 'ops.jsonl') });
+    expect(await again.artifactOp(upload, CTX)).toEqual(done);
+    expect(again.ran).toEqual([]);
+    // a tagged value that is not base64 stays the object it was, which the command's schema refuses
+    expect(await h.artifactOp(save({ opId: 'op-000000000000002', name: 'artifacts.uploadAsset', input: { ...tagged, bytes: { $bytes: 'not base64!' } } }), CTX)).toEqual({ state: 'refused', reason: 'malformed' });
+  });
+});
+
+// P5 O7 M5a: host.op decodes its input as host.artifactOp does (the endpoint forwards every act's args tagged), so a
+// plain value that looks like the tagged form, which the device's encode escapes, arrives as it was sent
+describe('host.op’s tagged input', () => {
+  it('validates and runs a decoded copy: a look-alike arrives as it was sent', async () => {
+    const h = ops();
+    const settings = { look: { $bytes: 'AA==' }, raw: new Uint8Array([1, 2]) };
+    const tagged = toWire({ appSessionId: 'app-1', settings }) as Record<string, unknown>;
+    expect(tagged.settings).toEqual({ look: { $plain: { $bytes: 'AA==' } }, raw: { $bytes: 'AQI=' } });
+    expect(await h.op(op({ name: 'session.applyFlagSettings', input: tagged }), CTX)).toEqual({ state: 'done', result: { ok: true } });
+    expect(h.ran).toEqual([{ name: 'session.applyFlagSettings', input: { appSessionId: 'app-1', settings } }]);
+  });
+});
+
 describe('host.opQuery', () => {
   it('answers `done` with the outcome and the binding the claim stored', async () => {
     const h = ops();
@@ -207,7 +321,7 @@ function engineHost() {
 describe('through the engine host’s handlers (a replayed session)', () => {
   it('registers both commands; an answer is bound to its request and its context, and resealed shows one effect', async () => {
     const host = engineHost();
-    expect(host.handlers.has('host.op') && host.handlers.has('host.opQuery')).toBe(true);
+    expect(host.handlers.has('host.op') && host.handlers.has('host.artifactOp') && host.handlers.has('host.opQuery')).toBe(true);
     const id = 'app-op' as AppSessionId;
     const spec = LaunchSpecSchema.parse({
       appSessionId: id, cwd: '/tmp/maws-ops', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,

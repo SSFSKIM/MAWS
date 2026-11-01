@@ -1217,16 +1217,17 @@ describe('ipc schema validates both directions', () => {
       // P5 O2 M2 adds host.interest (main-only, below)
       // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
       // P5 O3-D: `host.attachment`, mawsd's signal of an app's attachment (main-only)
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.attachment', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O7 M5a: `host.artifactOp`, the same ledger's act on no session (main-only)
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.artifactOp', 'host.opQuery', 'host.attachment', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
         'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
-        'host.op': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host',
+        'host.op': 'engine-host', 'host.artifactOp': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.attachment']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.artifactOp', 'host.opQuery', 'host.attachment']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
     });
 

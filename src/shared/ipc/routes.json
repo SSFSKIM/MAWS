@@ -421,6 +421,7 @@
   "engine.shutdown",
   "fs.state",
   "fs.tasks",
+  "host.artifactOp",
   "host.attachment",
   "host.configure",
   "host.exitWhenIdle",

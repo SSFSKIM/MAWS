@@ -153,6 +153,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.fs.agentEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.fs.tasks.output.tasks[].metadata': "a task's metadata, as the engine's task store writes it",
   'commands.host.op.input.input': JSON_OBJECT, // P5 O10 M7: an action's args (main-only, mawsd's ledger)
+  'commands.host.artifactOp.input.input': JSON_OBJECT, // P5 O7 M5a: an artifact act's args, as host.op's (main-only)
   'commands.laneA.list.output.states[].controls': BRIDGE_CONTROLS, // P5 O9 M2
   'commands.laneA.list.output.states[].pending[].input': TOOL_ARGUMENTS,
   'commands.laneA.read.input.args': "a bridge read's argument names (DX5 `read`'s args)",

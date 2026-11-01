@@ -92,6 +92,18 @@ export const HostOpInputSchema = z.strictObject({
   context: z.strictObject({ launchId: z.string().min(1), engineSessionId: z.string().min(1) }),
   requestDigest: OpRequestDigestSchema.optional(),
 });
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with no
+// session"): an act on no session (an artifact write) under the same ledger: `host.op`'s claim with no `context` and no
+// `requestDigest`, and the artifact the endpoint resolved as `target`. A command of its own, since OX1 classes a required
+// property made optional (`host.op`'s `context`) as breaking; `host.opQuery` answers its ops as `host.op`'s.
+export const HostArtifactOpInputSchema = z.strictObject({
+  opId: OpIdSchema,
+  opCreated: z.string(),
+  ...OpBindingShape,
+  target: OpTargetSchema,
+  name: z.string().min(1),
+  input: JsonValueSchema, // may hold bytes in json-bytes' tagged form, which the ledger decodes for the run
+});
 // `result` is the command's own answer as the ledger keeps it: `{ok: true, value}` (no `value` for a command that answers
 // nothing, as a JSON copy of an undefined one reads) or `{ok: false, error}`.
 export const HostOpResultSchema = z.union([z.strictObject({ ok: z.literal(true), value: z.unknown().optional() }), z.strictObject({ ok: z.literal(false), error: IpcErrorSchema })]);
@@ -106,7 +118,7 @@ export const HostOpQueryOutputSchema = z.strictObject({
   member: z.string().optional(),
   device: z.string().optional(),
   fingerprint: z.string().optional(),
-  target: z.string().nullable().optional(), // the appSessionId the op acts on; P5 O7 M5a: or the claim's `artifact:` target
+  target: z.string().nullable().optional(), // the appSessionId the op acts on; P5 O7 M5a: a host.artifactOp's `artifact:` target
   name: z.string().optional(), // the command it ran
   ledger: z.string().optional(), // on any state: why the ledger is closed (op-ledger.ts's word)
 });
@@ -124,6 +136,7 @@ export const commands = {
   // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
   'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.op': host(HostOpInputSchema, HostOpOutputSchema), // P5 O10 M7: the endpoint's only
+  'host.artifactOp': host(HostArtifactOpInputSchema, HostOpOutputSchema), // P5 O7 M5a: the endpoint's only
   'host.opQuery': host(z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), HostOpQueryOutputSchema), // P5 O10 M7
   // P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D; O3X5): whether an app is attached, told
   // by a client that listed the capability `host.attachment` (ATTACHMENT_CAPABILITY), which only `mawsd` does; the engine
