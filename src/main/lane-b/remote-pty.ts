@@ -23,7 +23,8 @@
 // - Input is numbered per pty from zero in an `inputEpoch` minted once per adapter (an app run), so the machine drops a
 //   resend and a new app run under the same device keys is never read as one. What the machine has not yet taken (its
 //   refunds) is held here and sent again from its first offset on the next stream.
-// - Resize is a stream control; one asked while no stream is open goes on the next.
+// - Resize is a stream control. The latest geometry is sent again on every stream (one in flight may die with its
+//   channel; the pty takes a size it has as nothing).
 // - A pty's exit closes its stream `exit` after its output: the stream is opened once more from its end to read the exit
 //   status from the pty's info, said as `pty.exit`.
 // - `pty.hostState` of an RL2 machine is its link's state: `ready` while the link is up, else `starting`, said again as an
@@ -99,7 +100,8 @@ type Pty = {
   inputNext: number;
   held: Uint8Array[];
   heldBytes: number;
-  resize: { cols: number; rows: number } | null;
+  /** The latest geometry the renderer asked for: sent on every stream, since one in flight may die with its channel. */
+  geometry: { cols: number; rows: number } | null;
   attach: Attach | null;
   retries: number;
   retryTimer: ReturnType<typeof setTimeout> | null;
@@ -150,7 +152,7 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     const key = keyOf(link.machine, ptyId);
     let pty = ptys.get(key);
     if (pty === undefined) {
-      pty = { machine: link.machine, link, ptyId, op, stream: null, serial: 0, live: false, phase: 'streaming', next: 0, openedAt: 0, credited: 0, rendered: 0, inputNext: 0, held: [], heldBytes: 0, resize: null, attach: null, retries: 0, retryTimer: null, exitSaid: false };
+      pty = { machine: link.machine, link, ptyId, op, stream: null, serial: 0, live: false, phase: 'streaming', next: 0, openedAt: 0, credited: 0, rendered: 0, inputNext: 0, held: [], heldBytes: 0, geometry: null, attach: null, retries: 0, retryTimer: null, exitSaid: false };
       ptys.set(key, pty);
     }
     Object.assign(pty, { link, op, phase: 'streaming', exitSaid: false, retries: 0 });
@@ -190,8 +192,7 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     }
     if (pty.attach !== null && ring !== null) Object.assign(pty.attach, { ring, chunks: [], at: ring.ringStart });
     if (pty.heldBytes > 0) pty.stream!.send(concat(pty.held));
-    if (pty.resize !== null) pty.stream!.control({ resize: pty.resize });
-    pty.resize = null;
+    if (pty.geometry !== null) pty.stream!.control({ resize: pty.geometry }); // idempotent: the pty takes the size it has
     finishAttach(pty);
   }
 
@@ -258,13 +259,14 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     pty.stream = null;
     pty.live = false;
     if (pty.phase === 'ended') return;
-    const usable = !stopped && deps.remote(pty.machine) === pty.link && pty.link.refusal() === null;
+    const usable = !stopped && deps.remote(pty.machine) === pty.link && pty.link.ended() === null;
     switch (reason) {
       case 'carrier':
         return usable ? reopen(pty) : end(pty, reason);
       case 'behind':
-        if (pty.attach !== null) return reopen(pty);
-        if (pty.next === pty.openedAt) return later(pty); // it said nothing: no tighter loop than the backoff
+        // An attach collects its ring again from its start, and a stream that said nothing new opens again on the
+        // backoff (which starts over only when output is said): neither can loop tighter than it.
+        if (pty.attach !== null || pty.next === pty.openedAt) return later(pty);
         log(pty, 'behind: opened again from its last offset once the renderer has taken what it was given');
         pty.phase = 'behind';
         return caughtUp(pty);
@@ -415,9 +417,8 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
       case 'pty.resize': {
         const pty = attached(link, fields);
         if (pty === null) return notAttached(name, link);
-        const size = { cols: fields.cols as number, rows: fields.rows as number };
-        if (pty.live) pty.stream!.control({ resize: size });
-        else pty.resize = size;
+        pty.geometry = { cols: fields.cols as number, rows: fields.rows as number };
+        if (pty.live) pty.stream!.control({ resize: pty.geometry });
         return ok(undefined);
       }
       case 'pty.ack': {

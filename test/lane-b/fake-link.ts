@@ -44,6 +44,9 @@ export class FakeAct implements ActHandle {
   }
 }
 
+/** P5 O7 M3: a stream the adapter opened, which the suite drives through its sink. */
+export type FakeStream = { request: StreamRequest; sink: StreamSink; closed: string | null; sent: Uint8Array[]; controls: Array<Record<string, unknown>>; credited: number };
+
 export type FakeSub = { id: string; request: SubscribeRequest; sink: SubscriptionSink; closed: boolean; at: Cursor | null };
 
 export class FakeLink implements RemoteLink {
@@ -77,6 +80,15 @@ export class FakeLink implements RemoteLink {
   }
   refusal() {
     return this.#refusal;
+  }
+  /** P5 O7 M3: the link's permanent end, which the suite sets with `end`. */
+  #ended: 'removed' | 'closed' | null = null;
+  ended() {
+    return this.#ended;
+  }
+  end(reason: 'removed' | 'closed'): void {
+    this.#ended = reason;
+    this.set('down', null, reason === 'removed' ? 'removed' : null);
   }
   caps() {
     return this.#caps;
@@ -159,11 +171,18 @@ export class FakeLink implements RemoteLink {
   }
 
   /** P5 O7 M3: each stream opened, as the suite reads it; its sink is the suite's to drive. */
-  readonly streams: Array<{ request: StreamRequest; sink: StreamSink; closed: string | null }> = [];
+  readonly streams: FakeStream[] = [];
   openStream(request: StreamRequest, sink: StreamSink): RemoteStream {
-    const entry = { request, sink, closed: null as string | null };
+    const entry: FakeStream = { request, sink, closed: null, sent: [], controls: [], credited: 0 };
     this.streams.push(entry);
-    return { id: `stream-${this.streams.length}`, send: () => {}, control: () => {}, credit: () => {}, close: (reason = 'closed') => void (entry.closed = reason), queued: () => 0 };
+    return {
+      id: `stream-${this.streams.length}`,
+      send: (bytes) => void entry.sent.push(bytes),
+      control: (control) => void entry.controls.push(control),
+      credit: (bytes) => void (entry.credited += bytes),
+      close: (reason = 'closed') => void (entry.closed = reason),
+      queued: () => 0,
+    };
   }
 
   /** The subscriptions still open. */

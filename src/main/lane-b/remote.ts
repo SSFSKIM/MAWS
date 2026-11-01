@@ -66,11 +66,11 @@ import { outcomeAsResult, pendingResult } from './remote-outcomes';
 import { LIST_WAIT_MS, RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
-import { createRemoteForwards } from './remote-forward';
+import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwardsTiming } from './remote-forward';
 import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
 
-export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming, RemotePtyTiming {
+export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming, RemotePtyTiming, RemoteForwardsTiming {
   /** A closed tab's subscription outlives it this long. */
   unsubscribeLingerMs: number;
   /** An act answers the renderer by then: its outcome, or `timeout` with the pending words while it goes on querying. */
@@ -99,6 +99,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
   ...REMOTE_PTY_TIMING, // P5 O7 M3
+  ...REMOTE_FORWARDS_TIMING,
 };
 
 export interface RemoteLaneBDeps {
@@ -225,7 +226,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const spawns = createSpawnAttempts({ now, log: deps.log, pendingMs: timing.spawnPendingMs, tombstoneMs: timing.spawnKeptMs, bounded: (handle, deadline) => bounded(handle, deadline) });
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
-  const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, now, log: deps.log });
+  const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 

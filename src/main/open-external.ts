@@ -3,22 +3,23 @@
 //
 // P5 O7 M3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Forwarding"): a link opened out of a session on
 // another machine reaches these handlers with that machine as `ctx.target` (the router answers both here for any
-// machine). A loopback link of such a session names that machine's own loopback: it opens in the in-app browser through a
-// forwarded port (`remote.forward.open`), and is never opened here, where it would load this Mac's.
+// machine). A loopback link of such a session names that machine's own loopback (`isLoopbackLink`, any loopback host by
+// any scheme): the forwardable ones open in the in-app browser through a forwarded port (`remote.forward.open`), the
+// rest nowhere, and none is ever opened here, where it would load this Mac's.
 import { appendFile } from 'node:fs/promises';
 import { shell } from 'electron';
-import { loopbackPort } from '@shared/machine/loopback-link';
+import { isLoopbackLink } from '@shared/machine/loopback-link';
 import type { MachineRef } from '@shared/machine/ref';
 import { registerMainHandler } from './ipc/router';
 import { boundLocalMachine } from './machine/local';
 
 /** The words for a loopback link of another machine's session, refused here. */
-export const FORWARDED_ELSEWHERE = 'a localhost link of a session on another machine opens in the in-app browser, forwarded from that machine';
+export const FORWARDED_ELSEWHERE = 'a localhost link of a session on another machine names that machine, not this Mac: it opens only in the in-app browser, forwarded from that machine';
 
-/** Whether `url` is a loopback link of a session on another machine (`target`), which opens through a forward. */
+/** Whether `url` is a loopback link of a session on another machine (`target`): never opened on this Mac. */
 export function forwardedElsewhere(url: string, target: MachineRef | undefined): boolean {
   const local = boundLocalMachine();
-  return target !== undefined && local !== null && target !== local && loopbackPort(url) !== null;
+  return target !== undefined && local !== null && target !== local && isLoopbackLink(url);
 }
 
 const ALLOWED = new Set(['http:', 'https:', 'mailto:']);

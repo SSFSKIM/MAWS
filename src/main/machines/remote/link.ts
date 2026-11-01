@@ -78,6 +78,11 @@ export interface RemoteLink extends MachineLink {
   carrier(): Carrier | null;
   /** The permanent verdict holding it `refused`, else null. */
   refusal(): string | null;
+  /**
+   * P5 O7 M3: the link's end, heard on `onState`: `closed` once `close()` ran (for good), `removed` while a sealed
+   * `removed` holds it refused (until the session changes or a person acts on the machine); null while it lives.
+   */
+  ended(): 'removed' | 'closed' | null;
   /** The latest `caps`, null before the first. */
   caps(): DeviceCaps | null;
   onCaps(listener: (caps: DeviceCaps) => void): () => void;
@@ -237,7 +242,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   let standing: Carrier | null = null;
   function notify(): void {
     if (current !== null) standing = current.carrier;
-    const next = `${REPORTED[state]}|${REPORTED[state] === 'up' ? (standing ?? '') : ''}|${refusal ?? ''}`;
+    // P5 O7 M3: `close()` is heard too, also when the link was down already: its consumers end what they hold on it (`ended`)
+    const next = `${REPORTED[state]}|${REPORTED[state] === 'up' ? (standing ?? '') : ''}|${refusal ?? ''}${state === 'closed' ? '|closed' : ''}`;
     if (next === reported) return;
     reported = next;
     for (const listener of [...stateListeners]) listener(REPORTED[state]);
@@ -725,6 +731,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     state: () => REPORTED[state],
     carrier: () => (isCurrent() ? current!.carrier : null),
     refusal: () => refusal,
+    ended,
     caps: () => caps,
     peerCapabilities,
     onCaps(listener) {

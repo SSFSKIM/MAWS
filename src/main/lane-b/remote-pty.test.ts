@@ -1,0 +1,80 @@
+// P5 O7 M3's remote terminal over a link in memory (test/lane-b/fake-link.ts): the stream's reopen rules the end-to-end
+// suite (test/lane-b/remote.test.ts) can't time — the backoff of an attach whose stream keeps closing `behind` with
+// nothing said, and the geometry sent again on each stream.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CommandName } from '@shared/ipc/schema';
+import { FakeLink, type FakeStream } from '../../../test/lane-b/fake-link';
+import { createRemotePty } from './remote-pty';
+
+const INFO = { ptyId: 'pty-1', appSessionId: 'app-1', label: 'zsh', pid: 7, cwd: '/w', shell: '/bin/zsh', cols: 80, rows: 24, spawnedAt: '2026-11-01T00:00:00.000Z', alive: true, paused: false, exit: null, offset: 0 };
+const RETRY: readonly [number, number] = [50, 400];
+
+function lab() {
+  const link = new FakeLink();
+  link.peers = ['rl2.executor.machine', 'rl2.streams'];
+  link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'pty.spawn' ? { ptyId: 'pty-1', pid: 7 } : { info: INFO, ringStart: 0, nextOffset: 0 } });
+  const emitted: Array<{ name: string; payload: unknown }> = [];
+  const pty = createRemotePty({
+    remote: () => link,
+    emit: (_machine, name, payload) => void emitted.push({ name, payload }),
+    bounded: (handle) => handle.outcome,
+    pendingMs: 60_000,
+    timing: { streamRetryMs: RETRY, inputHeldMax: 4 << 20 },
+    now: Date.now,
+    log: () => {},
+  });
+  const cmd = (name: CommandName, fields: Record<string, unknown>) => pty.dispatch(link, name, fields);
+  const last = (): FakeStream => link.streams.at(-1)!;
+  return { link, pty, emitted, cmd, last };
+}
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+describe('remote terminal streams (P5 O7 M3)', () => {
+  it('an attach whose stream keeps closing behind with nothing said opens again on the doubling backoff', async () => {
+    const l = lab();
+    const answer = l.cmd('pty.attach', { ptyId: 'pty-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.streams).toHaveLength(1);
+    // Each open answers its ring (empty past the attach's start) and closes behind at once: no progress.
+    const gaps: number[] = [];
+    for (let round = 0; round < 4; round++) {
+      const opened = l.link.streams.length;
+      l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 5 }, credit: 1 << 20 });
+      l.last().sink.closed('behind');
+      expect(l.link.streams, `round ${round}: no reopen before the backoff`).toHaveLength(opened);
+      let waited = 0;
+      while (l.link.streams.length === opened) {
+        await vi.advanceTimersByTimeAsync(10);
+        waited += 10;
+      }
+      gaps.push(waited);
+    }
+    expect(gaps).toEqual([50, 100, 200, 400]);
+    // The ring's bytes, at last: the attach answers with them.
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 5 }, credit: 1 << 20 });
+    l.last().sink.data(0, new TextEncoder().encode('hello'));
+    expect(await answer).toMatchObject({ ok: true, value: { replayFrom: 0, nextOffset: 5 } });
+  });
+
+  it('sends the latest geometry again on every stream, so a resize lost with its channel is not lost', async () => {
+    const l = lab();
+    await l.cmd('pty.spawn', { appSessionId: 'app-1', cols: 80, rows: 24 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    expect(await l.cmd('pty.resize', { ptyId: 'pty-1', cols: 100, rows: 30 })).toEqual({ ok: true, value: undefined });
+    expect(l.last().controls).toEqual([{ resize: { cols: 100, rows: 30 } }]);
+    // The channel drops before the endpoint took the control: the next stream carries the size again.
+    l.last().sink.closed('carrier');
+    expect(l.link.streams).toHaveLength(2);
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    expect(l.last().controls).toEqual([{ resize: { cols: 100, rows: 30 } }]);
+    // One asked while no stream is open goes on the next, as the latest only.
+    l.last().sink.closed('carrier');
+    await l.cmd('pty.resize', { ptyId: 'pty-1', cols: 90, rows: 20 });
+    await l.cmd('pty.resize', { ptyId: 'pty-1', cols: 120, rows: 40 });
+    expect(l.last().controls).toEqual([]);
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    expect(l.last().controls).toEqual([{ resize: { cols: 120, rows: 40 } }]);
+  });
+});
