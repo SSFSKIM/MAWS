@@ -142,6 +142,36 @@ describe('session.spawn on the spine', () => {
     await expect.poll(() => launched.map((spec) => spec.appSessionId)).toEqual([appSessionId]); // one session, launched once
   });
 
+  // launchedBy write-once (O12 M11 reads it as a trust input): only session.spawn's handler writes it, from machine.op's
+  // claim. session.create's, session.intent.patch's and session.update's inputs are strict, so one carrying launchedBy
+  // is refused `invalid_input` before any handler; a spawned session's later updates keep the original.
+  it('writes launchedBy through the spawn alone: create, the intent patch and an update carrying one are refused, and updates keep it', async () => {
+    trust(checkout);
+    const { bus } = await composed();
+    const forged = { member: 'mallory', device: 'dev-x', opId: 'op-x', action: null };
+    const projectId = ((await bus.invoke('session.projects.list', undefined)) as { value: { projects: { id: string; directory: string }[] } }).value.projects.find((p) => p.directory === checkout)!.id;
+    expect(await bus.invoke('session.create', { projectId, location: null, launchedBy: forged })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    const created = await bus.invoke('session.create', { projectId, location: null });
+    if (!created.ok) throw new Error(created.error.message);
+    const id = created.value.appSessionId;
+    expect(created.value.intent.launchedBy).toBeUndefined();
+    expect(await bus.invoke('session.intent.patch', { appSessionId: id, patch: { launchedBy: forged } })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await bus.invoke('session.intent.get', { appSessionId: id })).toMatchObject({ ok: true, value: { appSessionId: id } });
+    expect(((await bus.invoke('session.intent.get', { appSessionId: id })) as { value: { launchedBy?: unknown } }).value.launchedBy).toBeUndefined();
+
+    const op = {
+      opId: '9b8f3a52-0000-4000-8000-0000000000b2', opCreated: new Date().toISOString(), claim: { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1' },
+      name: 'session.spawn', input: { checkout, permission_mode: 'default' }, action: ACTION,
+    };
+    const spawned = await bus.main('machine.op', op);
+    const appSessionId = (spawned as { value: { result: { value: { appSessionId: string } } } }).value.result.value.appSessionId;
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: op.opId, action: ACTION };
+    expect(await bus.invoke('session.update', { appSessionId, patch: { launchedBy: forged } })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await bus.invoke('session.update', { appSessionId, patch: { pinned: true, title: { text: 'Renamed', source: 'user' } } })).toMatchObject({ ok: true });
+    expect(await bus.invoke('session.update', { appSessionId, patch: { archived: true } })).toMatchObject({ ok: true });
+    expect(await record(bus, appSessionId)).toMatchObject({ pinned: true, archived: true, launchedBy });
+  });
+
   // #411's rule: the spawn's create waits on the session service's boot, which is a need for a parked engine host, and
   // nothing before the command wakes it
   it('wakes a parked engine host through its need, and spawns once the host is up', async () => {

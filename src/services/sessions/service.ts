@@ -422,8 +422,11 @@ export class SessionService {
 
   // `session.create`: an app id and a persisted intent; no process, no record, no row. With neither a project nor a
   // location it is a New chat (2026-10-01): no location until the composer's project picker patches one in.
-  // P5 O7 M4: `launchedBy`, a remote spawn's requester (`session.spawn`), which the launched record carries.
-  async create(req: { projectId: ProjectId | null; location: Location | null; launchedBy?: LaunchedBy }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
+  // P5 O7 M4: `spawned`, a remote spawn's requester (`launchedBy`), which the launched record carries and O12 reads as a
+  // trust input. Only `session.spawn`'s handler passes it, from the claim `machine.op` hands it after the endpoint
+  // authorized that member's spawn; it is a parameter of its own, never part of the request, so no command's input
+  // (`session.create`'s takes `projectId` and `location` alone) can carry one here.
+  async create(req: { projectId: ProjectId | null; location: Location | null }, spawned?: { launchedBy: LaunchedBy }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
     const s = await this.ready();
     const appSessionId = randomUUID() as AppSessionId;
     const now = this.now();
@@ -446,7 +449,7 @@ export class SessionService {
       message: null,
       draft: null,
       progress: emptyProgress(),
-      ...(req.launchedBy && { launchedBy: req.launchedBy }),
+      ...(spawned && { launchedBy: spawned.launchedBy }),
     };
     await this.putIntent(intent);
     return { appSessionId, intent };

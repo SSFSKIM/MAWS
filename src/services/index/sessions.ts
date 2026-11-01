@@ -611,11 +611,12 @@ export class SessionStore {
   }
 
   // A record discovery made and nobody has touched: no live MAWS process, and none of the owner's own state (pin,
-  // archive, a MAWS title, a draft, attention items, a last-seen cursor), so yielding it to the process that writes its transcript loses
+  // archive, a MAWS title, a draft, attention items, a last-seen cursor, a remote spawn's launchedBy), so yielding it to the process that writes its transcript loses
   // nothing. Anything else is refused rather than deleted.
   private bare(row: SessionRow): boolean {
     if ((JSON.parse(row.holder) as Holder).kind === 'self') return false;
     if (row.pinned === 1 || row.archived === 1 || row.title_override !== null || row.last_seen_uuid !== null || row.last_seen_at !== null) return false;
+    if (row.launched_by !== null) return false; // P5 O7 M4: a remote spawn's requester, written once, never yielded away
     const owned = (table: 'drafts' | 'attention_items') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ?`, row.app_id) !== null;
     return !owned('drafts') && !owned('attention_items'); // both would go with the row (ON DELETE CASCADE)
   }
@@ -663,7 +664,10 @@ export class SessionStore {
   // E3 end
 
   // Writes the columns that differ from the row (and `updated_at` with them); answers whether anything changed.
+  // P5 O7 M4: `launched_by` is written once, at the launch's insert, and never through here, since O12 reads it as a
+  // trust input: no update, discovery merge or rebind sets, changes or clears it.
   private write(existing: SessionRow, values: Record<string, Value>): boolean {
+    if ('launched_by' in values) throw new Error('launched_by is written once, when the launch inserts the record');
     const changed: Record<string, Value> = {};
     for (const [key, value] of Object.entries(values)) {
       const stored = existing[key as keyof SessionRow];

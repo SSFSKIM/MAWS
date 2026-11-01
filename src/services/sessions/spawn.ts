@@ -50,7 +50,7 @@ async function spawn(bus: Pick<ServicesBus, 'onEmitted'>, deps: SpawnDeps, input
       : { kind: 'newWorktree', repoRoot: input.checkout, name: input.worktree, branch: { kind: 'new', name: input.worktree, base: 'HEAD' } };
   const { op } = context;
   const launchedBy: LaunchedBy | undefined = op && { member: op.member, device: op.device, opId: op.opId, action: (op.action ?? null) as LaunchedBy['action'] };
-  const { appSessionId } = await deps.sessions.create({ projectId: project.id as ProjectId, location, ...(launchedBy && { launchedBy }) });
+  const { appSessionId } = await deps.sessions.create({ projectId: project.id as ProjectId, location }, launchedBy && { launchedBy });
 
   // Until the start hands the intent to its setup, a refusal leaves nothing behind: the intent goes.
   const abandon = async (reason: string): Promise<SpawnOutput> => {
