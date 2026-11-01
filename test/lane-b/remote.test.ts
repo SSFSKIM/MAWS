@@ -15,7 +15,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { endableClientRef, type ClientRef, type HandlerOp } from '@shared/ipc/client';
-import type { FilesListOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
+import type { FilesListOutput, FilesReadOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
@@ -831,6 +831,36 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(l.f.spine.claimed.filter((c) => c.name === 'files.upload').map((c) => (c.input as FilesUploadInput).part)).toEqual([0, 1, 2].map((index) => ({ upload: expect.any(String), index, last: index === 2 })));
     expect(new Set(l.f.spine.claimed.map((c) => c.op?.opId)).size).toBe(3);
     expect(of(l.a, 'remote.upload', 'app-1').map((p) => p.sent)).toEqual([0, 1, 2, 3]);
+  });
+
+  // M4's milestone review: a read whose answer the channel can't carry (an image the viewer reads whole, base64 past
+  // 4 MiB) crosses as ranged reads, assembled into the one answer the renderer asked for.
+  it('reads a 6 MiB image whole over the channel in pages, byte for byte', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    l.place('app-r', 'eng-r', { directory: repo.root });
+    checkoutServices(l, repo);
+    const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(6 * MiB - 8)]);
+    writeFileSync(repo.path('shot.png'), bytes);
+    const opening = l.host.calls.length;
+    const read = (await l.a.cmd('files.read', { appSessionId: 'app-r', path: repo.path('shot.png'), offset: 0, length: 8 * MiB })) as FilesReadOutput;
+    expect(read).toMatchObject({ encoding: 'base64', bytes: bytes.length, offset: 0, length: bytes.length, truncated: false, mime: 'image/png', hash: null });
+    expect(Buffer.from(read.content, 'base64').equals(bytes)).toBe(true);
+    const pages = l.host.calls.slice(opening).filter((c) => c.name === 'files.read');
+    expect(pages.length).toBeGreaterThan(2); // refused whole, then ranged
+  });
+
+  it('re-reads a text file whose escaped answer is past 4 MiB with its hash over the channel in pages, the hash the whole file’s (the editor’s conflict re-read)', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    l.place('app-r', 'eng-r', { directory: repo.root });
+    checkoutServices(l, repo);
+    const text = Array.from({ length: 6 * 1024 }, (_, i) => `${String(i).padStart(6, '0')} ${'é"\\'.repeat(200)}`.slice(0, 1023)).join('\n');
+    writeFileSync(repo.path('big.md'), text);
+    const read = (await l.a.cmd('files.read', { appSessionId: 'app-r', path: repo.path('big.md'), offset: 0, length: 8 * MiB, hash: true })) as FilesReadOutput;
+    expect(read).toMatchObject({ encoding: 'utf8', offset: 0, truncated: false, hash: sha256(text), utf8: true });
+    expect(read.content).toBe(text);
+    expect(read.length).toBe(Buffer.byteLength(text));
   });
 
   it('saves a file on an idle session as a `machine` act, without resuming it', async () => {

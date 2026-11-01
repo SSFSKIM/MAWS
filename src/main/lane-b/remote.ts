@@ -59,6 +59,7 @@ import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult } from './remote-outcomes';
 import { LIST_WAIT_MS, RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
+import { readFileInPages } from './remote-files-read';
 import { uploadInParts } from './remote-upload';
 
 export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming {
@@ -147,7 +148,7 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
 /** Reads the pane makes that no row offers, answered here from one that is. */
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
 /** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
-export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events']);
+export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events', 'files.read']); // files.read: M4's milestone review
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
 export const NOT_OPEN = 'open the session to drive it';
 
@@ -447,6 +448,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     }
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
+    if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
     if (name === 'session.events') {
       const app = String(fields.appSessionId);
       return readEventsInPages(link, fields, {

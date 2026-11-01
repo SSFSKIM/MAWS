@@ -424,10 +424,10 @@ describe('the checkout and the spawn (M4)', () => {
   const MiB = 1024 * 1024;
   const UPLOADS = '/work/app-1/.claude/desk-uploads/app-1';
 
-  it('takes the checkout’s writes, the spawn and the watches; the checkout’s reads stay the manager’s', () => {
+  it('takes the checkout’s writes, the spawn, the watches and `files.read` (in pages); the checkout’s other reads stay the manager’s', () => {
     const l = lab();
-    for (const name of ['files.write', 'files.upload', 'scm.stage', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel', 'session.spawn', 'git.watch', 'git.unwatch', 'files.watch', 'files.unwatch'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
-    for (const name of ['git.status', 'git.diff', 'files.list', 'files.read', 'scm.status', 'session.projects.list', 'fs.agentEvents'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+    for (const name of ['files.write', 'files.upload', 'scm.stage', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel', 'session.spawn', 'git.watch', 'git.unwatch', 'files.watch', 'files.unwatch', 'files.read'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+    for (const name of ['git.status', 'git.diff', 'files.list', 'scm.status', 'session.projects.list', 'fs.agentEvents'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
   });
 
   it('builds a checkout write as a `machine` act with neither a session nor a context, on a session no tab holds and with no status', async () => {
