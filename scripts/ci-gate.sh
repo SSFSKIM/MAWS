@@ -27,7 +27,8 @@
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            required: a comma list over static, unit, unit:darwin, packaged (macOS), probes and e2e:<group>, or
 #                      `all`, the whole set: class 1a (static, unit, probes), plus unit:darwin and every class-1 e2e group
-#                      when the e2e lane is macOS (about 35 jobs and 70 minutes on the one Mac). A call without --gates is
+#                      when the e2e lane is macOS (about 35 jobs and 70 minutes on the one Mac), and packaged where it
+#                      would take GitHub's hosted Macs (the direct route, HOSTED_MAC_JOBS). A call without --gates is
 #                      refused (exit 2) before anything is pushed: it used to mean `all`, and sessions meaning class 1a
 #                      queued the whole Mac set by leaving it out. e2e:default is the bare `pnpm e2e` less the specs the
 #                      run's other e2e groups collect

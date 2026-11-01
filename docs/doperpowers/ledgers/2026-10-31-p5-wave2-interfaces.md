@@ -87,6 +87,16 @@
 | `RelayLink`, `CuaBackend.relay(link: RelayLink or null)` (`src/main/browser/cua/index.ts`), the embedded root's `registerMachineHandler('session.capabilities', …)` in app.ts, `tellRelay` confirming over the existing `machine.identity` (no wire change) | main-private | O5 M5 | main only |
 | `src/renderer/src/tools/browser/agent/capability.tsx` (`useAgentBrowser`, `AgentBrowserNotice`, `data-browser-agent-unavailable`), `BROWSER_COPY.agentUnavailable(reason)` | renderer | O5 M5 | the browser tool |
 | env `MAWS_CUA_CONNECTOR_RETRY=1`, `MAWS_CUA_CONNECTOR_LEASE=1` for `test/support/cua-connector.mjs`; the mawsd-scene stand-in engine host emitting `session.status` | test support | O5 M5 | e2e:browser-cua |
+| `packaging/mawsd/electron.json` (new: the pinned Electron runtime manifest), `src/mawsd/render-runtime.ts` (new), `src/mawsd/render-install.ts` (new), `spikes/u4-render-service/vm/lane-b.mjs` (new) | `mawsd`'s Linux render runtime and its install | O5 M6 | O16 (daemon composition), devenv |
+| `mawsd render install`, `mawsd render uninstall`, `mawsd render status [--json]`; `mawsd status`'s `render` line | `mawsd` CLI | O5 M6 | operators, devenv validate |
+| `scripts/mawsd-pack.mjs --render`, `pack({render, electronManifest})`, `pinnedDownload` | packaging | O5 M6 | CI's mawsd pack, O2's LaunchAgent and unit installs |
+| `render-seam.ts`: `XVFB_SERVER_ARGS`, `RenderCommandFacts.linux`, `RenderCommand.group`; `host.ts`: `sandboxRefusal`, `EXIT_NO_SANDBOX` (3); `release.ts` exports `procProcesses` | render host seam and exit codes | O5 M6 | O16 (host supervision reads the exit code) |
+| `front.ts`: `eventClients()` (ready, non-render `machine.sock` clients, the set `session.capabilitiesChanged` reaches; the remote endpoint excluded); `DaemonOptions.render.{cacheRoot, watchCache}`; `CommandRunner`'s optional `{timeoutMs}` | `mawsd` members (the capability cache watch is open only while a session is tracked and an event client is connected) | O5 M6 | O16 (front and daemon re-homing), O7 (event subscribers) |
+| env `MAWS_RENDER_HOST_EXECUTABLE` (absolute path; unset keeps checkout Electron); package.json script `e2e:daemon-unit:packaged`; gate.yml's packaged-job step for it (hosted only, shard 1) | test support and CI | O5 M6 | CI-opt (gate.yml), e2e:daemon-unit |
+| `launchedBy` written once, by `session.spawn`'s handler alone (`SessionService.create(req, spawned?)`; the index's update refuses `launched_by`); `SessionStore.getByLaunchOp`; `OpLedger.open(..., {orphanAtOpen})`, taken by the services' ledger only | services: spawn identity and the op ledger's orphan claims | O7 M4 | O12 M11 (ranks `launchedBy.member`; the endpoint ledger's orphanAtOpen), O16 M3c (host.op's ledger) |
+| `InvokeOptions.from` and the spawn attempt key `<tab>~<n>`, carried as the envelope's session for `session.spawn` only and never treated as a session; `ActTable.requery`, `RemoteLink.requery`, `FakeLink.requery`, `requeries`, `onRequery` | main-private and test support | O7 M4 | main only |
+| `src/main/lane-b/remote-spawn.ts`: `SpawnAttempts.spawn(..., client)`, `SpawnRequest.fresh`, `SpawnOutcome.startNew`, `restoreHeldAttempts()`, `RemoteLaneB.spawnsKept()`, `REMOTE_LANE_B_TIMING.spawnKeptMs`, `SPAWN_UNKNOWN_WORDS`; `src/main/lane-b/remote-files-read.ts`; the link's per-call `lacking: {capability, input}` and the answer's `fellBack`; `RemoteSessionTiming.listWaitMs` and the adapter's spawned-here window | main: remote spawn, files and capability fallback | O7 M4 | O7 M5 to M7, O17's remote stage |
+| renderer: `InvokeOptions.session`, `pathTarget`, `useElsewhereMachine`, `ELSEWHERE_WORDS`, `HISTORY_OMITTED`, `withOmittedBar`; `remote-uploads.ts` (`classifyRemoteFile`, `planRemoteSend`, `composeRemoteSend`, `uploadAttachments`, `remoteMessage`, `useUploadProgress`); `MachineMenu.tsx` (`MachineMenu`, `MachineLine`, `MACHINE_WORDS`); `remote-spawn.ts` (`useRemoteSpawn`, `spawnOnMachine`, `SPAWN_WORDS`, `queueFirstSend`, `takeFirstSend`); `submitRemoteSerialized`, `rememberRemoteDraft`, `FILES_FOR_ANOTHER_MACHINE`; the git store's `watch(machine, directory, session?)` and `Hold`; controller.ts's `forgetSubmissions()` test hook | renderer | O7 M4 | O8 (machine menus), O17's remote view |
 
 ## Shared files and who goes first
 
@@ -129,6 +139,11 @@
 | `src/mawsd/daemon-render.test.ts` | O4 at its merge (the stand-in app lists `machine.connectors`) | O5 landing 2 keeps the capability |
 | `e2e/browser-cua.spec.ts` | O5 M5 (its P5 O5 M5 block) | the second lander keeps both blocks |
 | `src/services/spine-root.test.ts`, `src/mawsd/daemon-lock.test.ts` | O5 M5 (one constant; one case rewritten to the new contract) | the second lander keeps O5's contract |
+| `devenv/setup.sh`, `devenv/validate.sh` | O5 M6 (render install and its check) | the second lander keeps both blocks |
+| `scripts/mawsd-pack.mjs` | O5 M6 (`--render`) | the second lander keeps the render option |
+| `.github/workflows/gate.yml` | O5 M6 (CI-opt's packaged daemon-unit step, quoted in 0092c2212); CI-opt's #425 (packaged in the default set) | whichever lands second rebases onto the other; both are CI-opt's to reconcile |
+| `tsconfig.node.json` (lists `stores/git.ts`, `ipc/client.ts`, `ipc/machine.ts` explicitly), `src/renderer/src/ipc/client.ts` (reads the bridge as `globalThis.maws`) | O7 M4 | the second lander keeps the explicit list and the global read |
+| `test/support/fake-spine-host.ts` | O4 (typed `answer`), O7 M4 (spawn's launch stub against it) | keeps O4's typed form |
 
 ## Start order
 
@@ -151,3 +166,5 @@
 - 2026-10-31, the architect: rule 5 additions from O7 M4a2's fix waves and M4b (the placement flag, the checkout feed's session record, `remote.upload`, main's machine dispatch with a session, the remote link's capabilities and feed subscriptions, lane B main's checkout, upload, history and idle names).
 - 2026-11-01, p5-desk-track-owner, on the architect's routing: O12 M11's names (`LaunchSpec.launchedBy`, `MAWS_LAUNCHED_BY`, the proof file) and its shared files (the launch's environment and flows beside O16's re-homing and O5's landing 2; `targets.ts` and `authorize.ts` after O7 M4); `launchedBy`'s consumer row names M11 and the write-once rule O7 M4 pins.
 - 2026-11-01, the architect: O4 M4's names and shared files at O4's landing (PR #424), and O5 M5's names (the browser relay sockets, session capabilities, the live-peer identity read) ahead of O5's landing 2.
+- 2026-11-01, the architect: O5 M6's names (the Linux render runtime, its install and pack, the render seam's Linux facts, the front's event clients) and its shared files.
+- 2026-11-01, the architect: O7 M4 landed (PR #427, merge da1cc2563); its names and two shared files added.
