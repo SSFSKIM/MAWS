@@ -656,6 +656,7 @@ describe('the render host’s command line on a Mac (Interfaces §E)', () => {
 describe('the render host’s command line on Linux (Interfaces §E)', () => {
   const env = { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--max-old-space-size=64', PATH: '/usr/bin:/bin', MAWS_USER_DATA: '/old' };
   const linux = { electron: '/home/u/.local/share/maws/mawsd/render/44.4.5-04586a0ec46c/electron', xvfbRun: '/usr/bin/xvfb-run' };
+  beforeEach(() => vi.useRealTimers()); // real processes, real waits
 
   it('runs the release’s out/main/index.js under the cache’s Electron in xvfb-run, --headless and --hide-scrollbars, never --no-sandbox, as a group', () => {
     const command = renderCommand({ platform: 'linux', packaged: false, execPath: '/release/runtime/bin/node', appRoot: '/release', profile: '/home/u/.config/MAWS', env, linux });
@@ -685,6 +686,48 @@ describe('the render host’s command line on Linux (Interfaces §E)', () => {
       await exited;
       await until(() => !isAlive(display), 5_000, 'the display ended with the group');
       expect(lines).toContain('[render-host] ready: stand-in');
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
+  });
+
+  // Fix wave 1: the wrapper's exit is not the group's. A member that ignores SIGTERM (the stand-in's `trap '' TERM`)
+  // outlives the wrapper; the exit is reported only once it is gone, SIGKILLed at the grace, so the seam's escalation and
+  // its successor never run beside a survivor
+  const survivorScene = (at: string, command: string[]) => {
+    const script = join(at, 'xvfb-run');
+    writeFileSync(script, `#!/bin/sh\n(trap '' TERM; exec sleep 60) &\necho $! > ${join(at, 'member.pid')}\n"$@"\n`, { mode: 0o755 });
+    const lines: string[] = [];
+    const child = spawnRenderHost({ command: script, args: command, env: { PATH: process.env.PATH }, cwd: at, group: true }, (line) => lines.push(line), { groupGraceMs: 300 });
+    const exit = new Promise<{ memberAliveAtExit: boolean; at: number }>((resolve) => child.onExit(() => resolve({ memberAliveAtExit: isAlive(Number(readFileSync(join(at, 'member.pid'), 'utf8'))), at: Date.now() })));
+    return { child, lines, exit, member: () => Number(readFileSync(join(at, 'member.pid'), 'utf8')) };
+  };
+
+  it('a group member ignoring SIGTERM: the kill’s exit is reported only after it is SIGKILLed at the grace', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-survivor-'));
+    try {
+      const scene = survivorScene(at, ['sh', '-c', 'echo "[render-host] ready: stand-in"; exec sleep 60']);
+      await until(() => existsSync(join(at, 'member.pid')) && scene.lines.length > 0, 5_000, 'the stand-in started');
+      const member = scene.member();
+      const killedAt = Date.now();
+      scene.child.kill('SIGTERM');
+      const exited = await scene.exit;
+      expect(exited.memberAliveAtExit, 'no member of the group is left when the exit is reported').toBe(false);
+      expect(exited.at - killedAt).toBeGreaterThanOrEqual(300);
+      expect(isAlive(member)).toBe(false);
+      expect(scene.lines).toContain("[render] the render host's process group outlived its wrapper by 0.3 s: SIGKILL");
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
+  });
+
+  it('a wrapper that exits by itself leaving a member: the group is retired before its exit is reported', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-survivor-'));
+    try {
+      const scene = survivorScene(at, ['sh', '-c', 'echo "[render-host] ready: stand-in"; exit 0']);
+      const exited = await scene.exit;
+      expect(exited.memberAliveAtExit).toBe(false);
+      expect(isAlive(scene.member())).toBe(false);
     } finally {
       rmSync(at, { recursive: true, force: true });
     }

@@ -6,10 +6,12 @@
 // left is verified and completed, or cleaned; two installers at once leave one entry; an entry nothing pins and nothing
 // runs from is pruned. Each case runs in a scratch home with the downloads, `unzip`, `sudo`, `ldd` and /proc faked, and
 // the helper's ownership read from what the fake `sudo` did (a test cannot chown to root).
+import { fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningProcess } from './release';
 import { releasesRoot } from './release';
@@ -152,13 +154,77 @@ describe('an install', () => {
     expect(unzipped).toBe(2); // the whole one completed, not unpacked again
   });
 
-  it('two at once leave one entry and nothing else', async () => {
-    const [a, b] = await Promise.all([installRenderRuntime(deps()), installRenderRuntime(deps())]);
-    expect([a.state, b.state].sort()).toEqual(expect.arrayContaining(['installed']));
-    expect(['installed', 'present']).toContain(a.state);
-    expect(['installed', 'present']).toContain(b.state);
+  // Two installers as two processes (render-install-racer.fixture.ts), each step released to both at once: both unpack
+  // their own copy, both rename it to the staging (one wins, the other finds it whole), both set its helper and write its
+  // manifest, both rename it into place (one wins, the other finds the published entry and checks it as its own)
+  it('two processes at once leave one entry and nothing else', async () => {
+    const bundle = join(dir, 'racer.mjs');
+    buildSync({ entryPoints: [join(__dirname, 'render-install-racer.fixture.ts')], bundle: true, platform: 'node', format: 'esm', outfile: bundle, logLevel: 'silent' });
+    const zip = join(dir, 'electron-v44.4.5-linux-x64.zip');
+    writeFileSync(zip, zipBytes);
+    const racers = [0, 1].map(() => fork(bundle, [home, zip, JSON.stringify(pin)], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }));
+    const results: unknown[] = [undefined, undefined];
+    const at: (string | null)[] = [null, null];
+    const steps: string[] = [];
+    await new Promise<void>((done, fail) => {
+      const timer = setTimeout(() => fail(new Error(`the racers did not finish: ${JSON.stringify({ at, results })}`)), 20_000);
+      // a step is released once every racer still running has reached it
+      const release = () => {
+        const waiting = at.filter((step, k) => results[k] === undefined && step !== null);
+        const running = results.filter((result) => result === undefined).length;
+        if (running === 0) return clearTimeout(timer), done();
+        if (waiting.length < running || new Set(waiting).size !== 1) return;
+        steps.push(waiting[0]!);
+        racers.forEach((racer, k) => results[k] === undefined && (at[k] = null, racer.send({ go: waiting[0] })));
+      };
+      racers.forEach((racer, k) => {
+        racer.on('message', (message: { at?: string; outcome?: unknown; error?: string }) => {
+          if (message.at !== undefined) at[k] = message.at;
+          else results[k] = message.outcome ?? { error: message.error };
+          release();
+        });
+        racer.on('exit', () => results[k] === undefined && fail(new Error(`racer ${k} exited without an outcome`)));
+      });
+    }).finally(() => racers.forEach((racer) => racer.kill()));
+    expect(steps).toEqual(['unpacked', 'publishing']); // each step reached by both together
+    expect(results.map((result) => (result as { state?: string }).state).sort()).toEqual(['installed', 'present']);
     expect(listing()).toEqual([runtimeName(pin)]);
-    expect(readdirSync(entry()).sort()).toEqual(['chrome-sandbox', 'electron', 'libffmpeg.so', 'manifest.json']);
+    expect(readdirSync(entry()).sort()).toEqual(['.maws-unpacked', 'chrome-sandbox', 'chrome-sandbox.suid', 'electron', 'manifest.json']);
+  });
+
+  it('replaces an entry whose sandbox helper lost its mode, never taking it as installed', async () => {
+    await installRenderRuntime(deps());
+    configured.delete(join(staging(), 'chrome-sandbox')); // the helper is the entry's now, and unset (a chmod since)
+    calls = [];
+    const outcome = await installRenderRuntime(deps());
+    expect(outcome).toMatchObject({ state: 'installed', entry: entry() });
+    expect(sudoCalls()).toEqual([`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`, `sudo -n chmod 4755 ${join(staging(), 'chrome-sandbox')}`]);
+    expect(listing()).toEqual([runtimeName(pin)]);
+    configured.add(join(entry(), 'chrome-sandbox'));
+    expect(reading()).toMatchObject({ available: true });
+  });
+
+  it('refuses to replace an unusable entry a render host runs from, leaving it as it is', async () => {
+    await installRenderRuntime(deps());
+    configured.clear();
+    running = [{ exe: join(entry(), 'electron'), cmdline: 'electron --headless' }];
+    await expect(installRenderRuntime(deps())).rejects.toThrow(/refusing to replace .*whose sandbox helper is not configured: a render host runs from it \(1 process\); run mawsd render install again after its quiet period/);
+    expect(listing()).toEqual([runtimeName(pin)]);
+    expect(existsSync(join(entry(), 'manifest.json'))).toBe(true);
+  });
+
+  it('takes no unusable entry that appears meanwhile as the winner: says so and keeps its staging, and a rerun replaces it', async () => {
+    const download = async (_url: string, to: string) => {
+      writeFileSync(to, zipBytes);
+      // another install publishes an entry whose helper is not configured while this one downloads
+      mkdirSync(entry(), { recursive: true });
+      for (const name of ['electron', 'chrome-sandbox']) writeFileSync(join(entry(), name), name);
+      writeFileSync(join(entry(), 'manifest.json'), JSON.stringify({ version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: 'x' }));
+    };
+    await expect(installRenderRuntime(deps({ download }))).rejects.toThrow(/cannot publish .*: an entry another install left there is not usable; run mawsd render install again/);
+    expect(listing()).toEqual([stagingName(pin), runtimeName(pin)]);
+    expect(await installRenderRuntime(deps())).toMatchObject({ state: 'installed', source: 'staging' });
+    expect(listing()).toEqual([runtimeName(pin)]);
   });
 
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {

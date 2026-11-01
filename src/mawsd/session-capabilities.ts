@@ -38,6 +38,7 @@ export interface SessionCapabilitiesOptions {
   render(): RenderCapabilities;
   browser(appSessionId: AppSessionId): SessionCapability;
   emit(appSessionId: AppSessionId, capabilities: SessionCapabilities): void; // session.capabilitiesChanged
+  tracking?(any: boolean): void; // the first session tracked (true), the last forgotten (false): what watches for a flip runs only meanwhile
 }
 
 export interface SessionCapabilitiesTracker {
@@ -53,9 +54,13 @@ export function createSessionCapabilities(options: SessionCapabilitiesOptions): 
   return {
     of,
     track(appSessionId) {
-      if (!last.has(appSessionId)) last.set(appSessionId, JSON.stringify(of(appSessionId)));
+      if (last.has(appSessionId)) return;
+      last.set(appSessionId, JSON.stringify(of(appSessionId)));
+      if (last.size === 1) options.tracking?.(true);
     },
-    forget: (appSessionId) => void last.delete(appSessionId),
+    forget(appSessionId) {
+      if (last.delete(appSessionId) && last.size === 0) options.tracking?.(false);
+    },
     refresh() {
       for (const [appSessionId, was] of last) {
         const capabilities = of(appSessionId);

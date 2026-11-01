@@ -8,7 +8,10 @@
 // under a unit. The unit's `mawsd` (Electron as Node, under launchd) is asked an export over machine.sock with no app
 // anywhere; it spawns the app's binary windowless as its own child (this checkout's Electron with the app root, as every
 // scene launches the app), the PDF lands under the profile, `mawsd.log` shows the start and the quiet exit, and the
-// status reads no render host after it. Linux's half (the render cache's Electron under Xvfb and a systemd user unit) is
+// status reads no render host after it. Its packaged case (`pnpm e2e:daemon-unit:packaged`, on a hosted Mac's packaged
+// job) installs the packaged app's own `mawsd` as the unit, starts the packaged app on the profile first (its
+// single-instance lock taken), and checks the render host is the bundle's binary on Interfaces §E's packaged line and
+// no second instance of the app. Linux's half (the render cache's Electron under Xvfb and a systemd user unit) is
 // the acceptance VM's run (spikes/u4-render-service/FINDINGS.md §4): no gate lane runs Linux e2e.
 //
 // It loads real LaunchAgents, so it runs only in CI (the hosted Macs, or the gate's own Mac): `pnpm e2e:daemon-unit`
@@ -18,12 +21,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { ciRefusal, e2eLabel, homeInstanceRefusal, OWNER_UNIT_LABEL, runIdOf } from './support/daemon-unit-guard.mjs';
-import { REPO_ROOT } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
-import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon'; // P5 O5 M6
+import { installUnitDaemon, packagedProgram, type UnitDaemon } from './support/unit-daemon'; // P5 O5 M6
 
 const ON = process.env.MAWS_DAEMON_UNIT_E2E === '1';
 test.skip(!ON, 'the launchd group runs under pnpm e2e:daemon-unit (MAWS_DAEMON_UNIT_E2E=1), in CI only');
@@ -145,21 +148,48 @@ test('the LaunchAgent: launchd starts mawsd at load; a kill -9 is followed by a 
   if (leftover !== null) throw leftover;
 });
 
-test('the render host under the LaunchAgent: the unit’s mawsd spawns the app’s binary windowless for an export with no app, the PDF under the profile, then ends it when quiet', async () => {
-  test.setTimeout(240_000);
-  expect(existsSync(MAWSD), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+// The render host's binary: this checkout's Electron with the app root, or (P5 O5 M6, acceptance 6) the packaged app's
+// own binary MAWS_RENDER_HOST_EXECUTABLE names (`pnpm e2e:daemon-unit:packaged`, the packaged gate job on a hosted Mac),
+// resolved from the repository root as MAWS_E2E_EXECUTABLE is
+const PACKAGED = process.env.MAWS_RENDER_HOST_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_RENDER_HOST_EXECUTABLE) : null;
+
+// The export with no app anywhere (the checkout's), or with the packaged app running on the same profile first, holding
+// its single-instance lock: the render host is the same bundle's binary, and must come up beside it as no second
+// instance of it (no `second-instance` in the app, no window gained), from Interfaces §E's packaged line
+// `<bundle>/Contents/MacOS/MAWS --render-host <profile>`, no app root
+async function renderUnderUnit(packaged: string | null): Promise<void> {
+  test.setTimeout(packaged === null ? 240_000 : 360_000);
+  if (packaged === null) expect(existsSync(MAWSD), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  else expect(existsSync(packaged), `MAWS_RENDER_HOST_EXECUTABLE exists: ${packaged} (pnpm build:app)`).toBe(true);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o5-unit-')));
   const profile = join(root, 'profile');
   const pids = new Set<number>();
   let unit: UnitDaemon | null = null;
+  let app: MawsLaunch | null = null;
   let leftover: unknown = null;
   const log = () => (existsSync(join(profile, 'mawsd', 'mawsd.log')) ? readFileSync(join(profile, 'mawsd', 'mawsd.log'), 'utf8') : '');
+  const launchedExecutable = process.env.MAWS_E2E_EXECUTABLE;
   try {
     // the scratch engine store, as a launch gives a private daemon; a short quiet period so the scene sees the host end
     const env = { CLAUDE_CONFIG_DIR: join(profile, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(profile, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop', MAWS_RENDER_QUIET_MS: '5000' };
-    unit = await installUnitDaemon({ root: REPO_ROOT, userData: profile, label: e2eLabel(RUN, 'render'), env });
+    unit = await installUnitDaemon({ root: REPO_ROOT, userData: profile, label: e2eLabel(RUN, packaged === null ? 'render' : 'render-packaged'), env, ...(packaged !== null && { program: packagedProgram(packaged) }) });
     pids.add(unit.pid);
     expect((await unit.status()).render, 'no render host at the unit’s start').toMatchObject({ state: 'off', pid: null });
+
+    let windowsBefore = 0;
+    if (packaged !== null) {
+      // the app on the profile, its single-instance lock taken; its own start of a private mawsd loses to the unit's lock
+      // and it attaches to the unit (the same build: no restart asked)
+      process.env.MAWS_E2E_EXECUTABLE = packaged;
+      app = await launchMaws({ userData: profile, keepConfigHome: true, env: { MAWS_HOST_MODE: 'daemon', MAWS_MACHINE_ROLE: 'laptop' } });
+      pids.add(app.app.process().pid!);
+      windowsBefore = await app.app.evaluate(({ app: electronApp, BrowserWindow }) => {
+        const seen = globalThis as { secondInstances?: string[][] };
+        seen.secondInstances = [];
+        electronApp.on('second-instance', (_event, argv) => void seen.secondInstances!.push(argv));
+        return BrowserWindow.getAllWindows().length;
+      });
+    }
 
     const page = '<!doctype html><html><head><title>Unit</title></head><body><h1>UNIT_RENDER_HOST</h1></body></html>';
     const { artifact } = await unit.request<{ artifact: { id: string; revision: number } }>('artifacts.create', { kind: 'html', title: 'Unit page', content: { bytes: new TextEncoder().encode(page), name: 'index.html' } });
@@ -172,17 +202,37 @@ test('the render host under the LaunchAgent: the unit’s mawsd spawns the app�
     const host = Number(started![1]);
     pids.add(host);
     expect(log()).toContain(`[render] the render host is ready (pid ${host})`);
-    if (isAlive(host)) {
+    if (packaged !== null || isAlive(host)) {
+      // the packaged case reads it within its 5 s quiet period: the export has just returned
       expect(ps(host, 'ppid'), 'the unit’s mawsd spawned it').toBe(String(unit.pid));
-      expect(ps(host, 'command'), 'the app’s binary, windowless, on the profile').toContain(`--render-host ${profile}`);
+      expect(ps(host, 'ucomm'), 'the binary it runs').toBe(basename(packaged ?? electronBinary()));
+      if (packaged === null) expect(ps(host, 'command'), 'the app’s binary, windowless, on the app root and the profile').toContain(` ${REPO_ROOT} --render-host ${profile}`);
+      else expect(ps(host, 'command').split(' ').slice(1).join(' '), 'the bundle’s binary with no app root, on the profile').toBe(`--render-host ${profile}`);
+    }
+    if (app !== null) {
+      const after = await app.app.evaluate(({ BrowserWindow }) => ({ secondInstances: (globalThis as { secondInstances?: string[][] }).secondInstances, windows: BrowserWindow.getAllWindows().length }));
+      expect(after.secondInstances, 'the running app heard no second instance').toEqual([]);
+      expect(after.windows, 'and gained no window').toBe(windowsBefore);
     }
     await expect.poll(log, { timeout: 30_000, message: 'the render host ended after its quiet period' }).toContain('[render] quiet for 5 s: ending the render host');
     await expect.poll(() => isAlive(host), { timeout: 15_000, message: 'the render host exited' }).toBe(false);
     expect((await unit.status()).render, 'the status reads no render host after it').toMatchObject({ state: 'off', pid: null });
   } finally {
     unit?.remove(); // before the scratch's processes end: KeepAlive would restart a killed unit
-    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
+    if (app !== null) await app.cleanup().catch((error: unknown) => (leftover = error));
+    if (launchedExecutable === undefined) delete process.env.MAWS_E2E_EXECUTABLE;
+    else process.env.MAWS_E2E_EXECUTABLE = launchedExecutable;
+    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover ??= error));
     rmSync(root, { recursive: true, force: true });
   }
   if (leftover !== null) throw leftover;
+}
+
+test('the render host under the LaunchAgent: the unit’s mawsd spawns the app’s binary windowless for an export with no app, the PDF under the profile, then ends it when quiet', async () => {
+  await renderUnderUnit(null);
+});
+
+test('packaged: the packaged app’s unit spawns the bundle’s own binary as the render host beside the app holding the profile’s lock, no second instance of it and no window, then ends it when quiet', async () => {
+  test.skip(PACKAGED === null, 'pnpm e2e:daemon-unit:packaged names the packaged binary (MAWS_RENDER_HOST_EXECUTABLE)');
+  await renderUnderUnit(PACKAGED);
 });

@@ -7,9 +7,23 @@ const exits: number[] = [];
 const written: string[] = [];
 let started: Promise<void> = Promise.resolve();
 
-vi.mock('electron', () => ({ app: { exit: (code: number) => exits.push(code) }, session: {} }));
+const calls: string[] = []; // what the root's Electron side does, in order (acceptance 6: no Dock icon, no focus, no lock)
+vi.mock('electron', () => ({
+  app: {
+    exit: (code: number) => exits.push(code),
+    setPath: (name: string, path: string) => calls.push(`setPath ${name} ${path}`),
+    setActivationPolicy: (policy: string) => calls.push(`setActivationPolicy ${policy}`),
+    on: (event: string) => calls.push(`on ${event}`),
+    whenReady: async () => void calls.push('whenReady'),
+    dock: { hide: () => calls.push('dock.hide'), show: () => calls.push('dock.show') },
+    focus: () => calls.push('focus'),
+    requestSingleInstanceLock: () => (calls.push('requestSingleInstanceLock'), true),
+  },
+  session: {},
+}));
 vi.mock('node:fs', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:fs')>()), writeSync: (_fd: number, text: string) => written.push(text) }));
-vi.mock('./host', async (importOriginal) => ({ ...(await importOriginal<typeof import('./host')>()), startRenderHost: () => started }));
+let startedWith: import('./host').RenderHostDeps | null = null;
+vi.mock('./host', async (importOriginal) => ({ ...(await importOriginal<typeof import('./host')>()), startRenderHost: (deps: import('./host').RenderHostDeps) => ((startedWith = deps), started) }));
 
 const listeners = process.listeners('uncaughtException');
 let root: typeof import('./root');
@@ -41,4 +55,14 @@ describe('the render host root (src/render-host/root.ts)', () => {
     expect(exits).toEqual([EXIT_FAILED]);
     expect(written[0]).toMatch(/^\[render-host\] failed: Error: a request handler threw/);
   });
+
+  it('goes accessory before ready, so no Dock icon shows and nothing takes the focus, and never asks for the app’s lock (acceptance 6)', async () => {
+    started = Promise.resolve();
+    calls.length = 0;
+    await root.runRenderHost('/app/out/main');
+    startedWith!.userData('/profile/mawsd/render-host');
+    await startedWith!.ready();
+    expect(calls).toEqual(['setPath userData /profile/mawsd/render-host', 'setActivationPolicy accessory', 'on window-all-closed', 'whenReady', 'dock.hide']);
+  });
 });
+

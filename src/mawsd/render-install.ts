@@ -41,6 +41,7 @@ export interface RenderInstallDeps {
   processes(): RunningProcess[]; // /proc's, for the entries in use
   helperConfigured?(path: string): boolean; // a test's stand-in for the root-owned helper
   now(): number;
+  checkpoint?(step: 'unpacked' | 'publishing'): Promise<void> | void; // a test's barrier between the transaction's steps
 }
 
 export type InstallOutcome =
@@ -57,41 +58,64 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
   const root = renderCacheRoot(deps.home);
   const entry = join(root, runtimeName(pin));
   const staging = join(root, stagingName(pin));
+  const present = (): InstallOutcome => ({ state: 'present', entry, pruned: prune(deps, root) });
   mkdirSync(root, { recursive: true, mode: 0o700 });
   sweepAbandoned(root);
-  if (published(entry, pin, helperConfigured)) return { state: 'present', entry, pruned: prune(deps, root) };
+  if (published(entry, pin, helperConfigured)) return present();
+  // An entry is there but unusable (its helper lost its mode, its manifest is gone or another pin's): replaced whole,
+  // never repaired in place (an entry is immutable once published) and never taken as installed. Moved aside first, so
+  // the entry's name is absent at once and a reader never sees it half removed; refused while a render host runs from it.
+  if (existsSync(entry)) {
+    const users = usersOf(entry, deps.processes());
+    if (users > 0) throw new Error(`refusing to replace ${entry}, whose sandbox helper is not configured: a render host runs from it (${users} process${users === 1 ? '' : 'es'}); run mawsd render install again after its quiet period`);
+    const aside = join(root, `.retired-${runtimeName(pin)}-${process.pid}`);
+    rmSync(aside, { recursive: true, force: true });
+    renameSync(entry, aside);
+    rmSync(aside, { recursive: true, force: true });
+  }
 
   let source: 'pack' | 'download' | 'staging' = 'staging';
   if (!whole(staging, pin)) {
     rmSync(staging, { recursive: true, force: true }); // a killed install's half (no mark): cleaned
     source = await unpackInto(deps, pin, root, staging);
     if (published(entry, pin, helperConfigured)) {
-      rmSync(staging, { recursive: true, force: true }); // another installer published it while this one downloaded
-      return { state: 'present', entry, pruned: prune(deps, root) };
+      // another installer published it while this one unpacked: a staging this one's rename made after that is spare
+      // (any installer still holding it finds the entry published too)
+      rmSync(staging, { recursive: true, force: true });
+      return present();
     }
+    if (!whole(staging, pin)) throw new Error(`${staging} is not a whole unpack after unpacking: another install changed it; run mawsd render install again`);
   }
-  if (!helperConfigured(join(staging, SANDBOX_HELPER))) {
-    const helper = join(staging, SANDBOX_HELPER);
+  const helper = join(staging, SANDBOX_HELPER);
+  if (!helperConfigured(helper)) {
     for (const args of [['-n', 'chown', 'root:root', helper], ['-n', 'chmod', '4755', helper]]) {
       const done = deps.run('sudo', args);
       if (done.status === 0) continue;
-      if (published(entry, pin, helperConfigured)) return { state: 'present', entry, pruned: prune(deps, root) }; // another installer published it meanwhile
+      if (published(entry, pin, helperConfigured)) return present(); // another installer published it meanwhile
       return { state: 'staged', staging, why: `sudo ${args.join(' ')} failed: ${(done.stderr || done.stdout).trim() || `exit ${done.status ?? 'signal'}`}` };
     }
-    if (!helperConfigured(helper) && existsSync(staging)) return { state: 'staged', staging, why: `${helper} is not root-owned with mode 4755 after sudo` };
+    if (!helperConfigured(helper)) {
+      if (published(entry, pin, helperConfigured)) return present();
+      return { state: 'staged', staging, why: `${helper} is not root-owned with mode 4755 after sudo` };
+    }
   }
   const manifest: RuntimeManifest = { version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: new Date(deps.now()).toISOString() };
   try {
     const written = join(staging, `.${RUNTIME_MANIFEST}.${process.pid}`);
     writeFileSync(written, `${JSON.stringify(manifest, null, 2)}\n`);
     renameSync(written, join(staging, RUNTIME_MANIFEST));
-    rmSync(join(staging, WHOLE), { force: true });
+    await deps.checkpoint?.('publishing'); // a test's barrier: the staging whole and ready, its rename next
+    // The staging keeps its whole-unpack mark into the entry: until this rename it is a whole unpack any installer may
+    // complete, and after it the mark is inert (an entry is read by its manifest)
     renameSync(staging, entry);
   } catch (error) {
-    // another installer renamed the staging (or published) first
-    if (!published(entry, pin, () => true)) throw error;
+    // Another installer renamed the staging first (it is gone) or published beside it (the entry is there): taken as
+    // installed only if that entry passes the same check this install's own would, helper and all
+    if (!published(entry, pin, helperConfigured)) {
+      throw new Error(`cannot publish ${entry} (${error instanceof Error ? error.message : String(error)}): ${existsSync(entry) ? 'an entry another install left there is not usable' : 'its staging went away'}; run mawsd render install again`, { cause: error });
+    }
     rmSync(staging, { recursive: true, force: true });
-    return { state: 'present', entry, pruned: prune(deps, root) };
+    return present();
   }
   return { state: 'installed', entry, source, pruned: prune(deps, root) };
 }
@@ -180,10 +204,11 @@ async function unpackInto(deps: RenderInstallDeps, pin: ElectronPin, root: strin
     if (unzipped.status !== 0) throw new Error(`unzip ${zip} failed (${unzipped.status ?? 'signal'}): ${(unzipped.stderr || unzipped.stdout).trim()}${unzipped.status === 127 ? ' (the unzip package)' : ''}`);
     for (const name of [RUNTIME_BINARY, SANDBOX_HELPER]) if (!existsSync(join(own, name))) throw new Error(`${zipName(pin)} has no ${name}`);
     writeFileSync(join(own, WHOLE), `${pin.sha256}\n`);
+    await deps.checkpoint?.('unpacked'); // a test's barrier: this installer's own unpack whole, its rename next
     try {
       renameSync(own, staging);
-    } catch (error) {
-      if (!whole(staging, pin)) throw error; // another installer's whole unpack got there first: it serves
+    } catch {
+      // another installer's whole unpack got there first (it serves), or it was published already: the caller re-checks
     }
     return source;
   } finally {
@@ -212,7 +237,7 @@ function published(entry: string, pin: ElectronPin, helperConfigured: (path: str
 // An installer's own unpack or download whose process is gone
 function sweepAbandoned(root: string): void {
   for (const name of readdirSync(root)) {
-    const owner = /^\.(?:unpack|download)-.+-(\d+)(?:\.zip)?$/.exec(name)?.[1];
+    const owner = /^\.(?:unpack|download|retired)-.+-(\d+)(?:\.zip)?$/.exec(name)?.[1];
     if (owner !== undefined && !alive(Number(owner))) rmSync(join(root, name), { recursive: true, force: true });
   }
 }

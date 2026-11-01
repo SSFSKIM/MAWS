@@ -3,11 +3,11 @@
 // take at each check: available only with the entry published (its manifest), its sandbox helper setuid root, and a
 // virtual display to run under. Each case runs in a scratch home; the helper's ownership is injected (a test cannot chown
 // to root).
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readElectronPin, readRenderRuntime, renderCacheRoot, runtimeName, stagingName, type ElectronPin } from './render-runtime';
+import { readElectronPin, readRenderRuntime, renderCacheRoot, runtimeName, stagingName, watchRenderCache, type ElectronPin } from './render-runtime';
 
 let dir: string;
 let home: string;
@@ -111,3 +111,69 @@ describe('the reading the seam takes at each check', () => {
     expect(read({ path: '/nowhere:/neither' })).toEqual({ available: false, reason: 'the virtual display the render host needs (xvfb-run, the xvfb package) is not installed on vm-1' });
   });
 });
+
+// What an install's or an uninstall's publish looks like from the cache's root (fix wave 1): the daemon refreshes the
+// tracked sessions' capabilities at each settled change, so a flip of the runtime is posted with no other transition
+const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
+async function within(check: () => boolean, ms: number, what: string) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`not within ${ms} ms: ${what}`);
+    await settle(10);
+  }
+}
+
+describe('the watch on the render cache', () => {
+  let close: (() => void) | undefined;
+  afterEach(() => close?.());
+  // The watch in place before the scene acts: macOS's FSEvents, unlike Linux's inotify, starts its stream asynchronously
+  // and may report the setup's own changes made just before it, so what it tells meanwhile is set aside (a spare change
+  // costs the daemon one refresh that posts nothing)
+  const watchFrom = async (root: string) => {
+    const changes: number[] = [];
+    close = watchRenderCache(root, () => void changes.push(Date.now()), { debounceMs: 150 }).close;
+    await settle(400);
+    changes.length = 0;
+    return changes;
+  };
+
+  it('tells one settled change for an install’s staging, unpack and publish, and one for an uninstall', async () => {
+    const root = renderCacheRoot(home);
+    mkdirSync(root, { recursive: true });
+    const changes = await watchFrom(root);
+    const staging = join(root, stagingName(X64));
+    mkdirSync(staging);
+    writeFileSync(join(staging, 'electron'), 'elf');
+    writeFileSync(join(staging, 'manifest.json'), '{}');
+    renameSync(staging, join(root, runtimeName(X64)));
+    await within(() => changes.length === 1, 5_000, 'the publish’s change');
+    await settle(400);
+    expect(changes).toHaveLength(1);
+    rmSync(join(root, runtimeName(X64)), { recursive: true });
+    await within(() => changes.length === 2, 5_000, 'the uninstall’s change');
+    await settle(400);
+    expect(changes).toHaveLength(2);
+  });
+
+  it('watches the nearest directory that exists until the cache does, then the cache itself', async () => {
+    const root = renderCacheRoot(home);
+    mkdirSync(join(home, '.local', 'share'), { recursive: true });
+    const changes = await watchFrom(root);
+    mkdirSync(root, { recursive: true });
+    await within(() => changes.length === 1, 5_000, 'the cache’s making');
+    await settle(200);
+    mkdirSync(join(root, runtimeName(X64)));
+    await within(() => changes.length === 2, 5_000, 'an entry inside the cache');
+  });
+
+  it('tells nothing once closed', async () => {
+    const root = renderCacheRoot(home);
+    mkdirSync(root, { recursive: true });
+    const changes = await watchFrom(root);
+    close!();
+    mkdirSync(join(root, runtimeName(X64)));
+    await settle(400);
+    expect(changes).toEqual([]);
+  });
+});
+

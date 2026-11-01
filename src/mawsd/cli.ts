@@ -571,7 +571,8 @@ async function render(context: Context, args: readonly string[]): Promise<number
     const outcome = await installRenderRuntime(install);
     const pruned = 'pruned' in outcome && outcome.pruned.length > 0 ? ` · pruned ${outcome.pruned.join(', ')}` : '';
     if (outcome.state === 'staged') {
-      deps.err(`sandbox missing: run mawsd render install with sudo (${outcome.why}); the runtime waits, verified, at ${outcome.staging}\n`);
+      // fix wave 1: never "with sudo" (it refuses root): sudo -n made to work for this user, then this command again
+      deps.err(`sandbox missing: setting Chromium's sandbox helper needs sudo -n to work for ${deps.user} (${outcome.why}); make it work (sudo -v, or a NOPASSWD rule for chown and chmod), then run mawsd render install again as ${deps.user}, not as root. The runtime waits, verified, at ${outcome.staging}\n`);
       return EXIT.failed;
     }
     const how = outcome.state === 'present' ? 'is installed' : outcome.source === 'pack' ? 'installed from the pack’s zip' : outcome.source === 'download' ? 'downloaded and installed' : 'installed';
@@ -591,7 +592,7 @@ async function render(context: Context, args: readonly string[]): Promise<number
   }
   const head = status.pin === null ? `render runtime: none pinned for linux-${arch} by this build` : `render runtime ${status.pin.version} (${status.pin.target}) · ${status.state === 'absent' ? 'not installed' : status.state === 'staged' ? 'staged, waiting for its sandbox helper' : `installed ${status.installedAt}`}${status.dir ? ` · ${status.dir}` : ''}`;
   const lines = [head];
-  if (status.sandbox !== null) lines.push(`sandbox      ${status.sandbox === 'configured' ? 'configured (chrome-sandbox root-owned, mode 4755)' : 'not configured: run mawsd render install with sudo'}`);
+  if (status.sandbox !== null) lines.push(`sandbox      ${status.sandbox === 'configured' ? 'configured (chrome-sandbox root-owned, mode 4755)' : 'not configured: make sudo -n work for this user, then run mawsd render install'}`);
   if (status.missingLibraries !== null) lines.push(`libraries    ${status.missingLibraries.length === 0 ? 'nothing missing' : `missing ${status.missingLibraries.join(', ')}`}`);
   lines.push(`the render service: ${reading.available ? 'available' : `unavailable: ${reading.reason}`}`);
   deps.out(`${lines.join('\n')}\n`);

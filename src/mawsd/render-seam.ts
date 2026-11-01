@@ -632,8 +632,12 @@ export function renderCommand({ platform, packaged, execPath, appRoot, profile, 
 }
 
 // The render host started: its stderr read line by line into the daemon's log (its stdout too), its last `[render-host]`
-// line kept as its own reason for an exit.
-export function spawnRenderHost(command: RenderCommand, log: (line: string) => void): RenderChild {
+// line kept as its own reason for an exit. For a group (Linux: xvfb-run's shell, Electron and its helpers, the Xvfb), the
+// wrapper's exit is not the host's: the rest of the group is ended (SIGTERM, then SIGKILL at `groupGraceMs`) and the exit
+// is reported only once no member of the group remains, so the seam's escalation and its successor wait for all of it
+// (fix wave 1: a member ignoring SIGTERM outlived the wrapper).
+export const GROUP_POLL_MS = 50;
+export function spawnRenderHost(command: RenderCommand, log: (line: string) => void, { groupGraceMs = EXIT_GRACE_MS }: { groupGraceMs?: number } = {}): RenderChild {
   const group = command.group === true;
   const process: ChildProcess = spawnProcess(command.command, command.args, { env: command.env, cwd: command.cwd, ...(command.argv0 !== undefined && { argv0: command.argv0 }), stdio: ['ignore', 'pipe', 'pipe'], detached: group });
   let last: string | null = null;
@@ -659,7 +663,41 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
     ended = { code, signal };
     for (const listener of listeners) listener(code, signal);
   };
-  process.on('exit', (code, signal) => finish(code, signal));
+  // Whether any member of the group is still there (EPERM: one is, under another identity)
+  const groupAlive = (pgid: number): boolean => {
+    try {
+      globalThis.process.kill(-pgid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  };
+  const signalGroup = (pgid: number, signal: NodeJS.Signals) => {
+    try {
+      globalThis.process.kill(-pgid, signal);
+    } catch {
+      // the group is gone already
+    }
+  };
+  // The wrapper exited: the rest of its group retired before the exit is reported
+  const retireGroup = (pgid: number, code: number | null, signal: string | null) => {
+    if (!groupAlive(pgid)) return finish(code, signal);
+    signalGroup(pgid, 'SIGTERM');
+    const since = Date.now();
+    let killed = false;
+    const poll = setInterval(() => {
+      if (!groupAlive(pgid)) {
+        clearInterval(poll);
+        return finish(code, signal);
+      }
+      if (!killed && Date.now() - since >= groupGraceMs) {
+        killed = true;
+        log(`[render] the render host's process group outlived its wrapper by ${groupGraceMs / 1000} s: SIGKILL`);
+        signalGroup(pgid, 'SIGKILL');
+      }
+    }, GROUP_POLL_MS);
+  };
+  process.on('exit', (code, signal) => (group && process.pid !== undefined ? retireGroup(process.pid, code, signal) : finish(code, signal)));
   process.on('error', (error) => {
     last = `[render-host] ${error.message}`;
     finish(null, null);
@@ -668,11 +706,7 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
     pid: process.pid ?? null,
     kill: (signal) => {
       if (!group || process.pid === undefined) return void process.kill(signal);
-      try {
-        globalThis.process.kill(-process.pid, signal); // the group: Electron, its helpers, xvfb-run and its Xvfb
-      } catch {
-        // the group is gone already
-      }
+      signalGroup(process.pid, signal); // the group: Electron, its helpers, xvfb-run and its Xvfb
     },
     onExit(listener) {
       if (ended) return listener(ended.code, ended.signal);

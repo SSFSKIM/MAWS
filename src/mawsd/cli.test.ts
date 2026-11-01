@@ -572,7 +572,8 @@ describe('mawsd render', () => {
     ran.length = 0;
     const installed = await cli(['render', 'install'], { platform: 'linux', self: pack(), run });
     expect(installed.code).toBe(1);
-    expect(installed.err).toContain('sandbox missing: run mawsd render install with sudo');
+    expect(installed.err).toContain('sandbox missing: setting Chromium\'s sandbox helper needs sudo -n to work for u');
+    expect(installed.err).toContain('then run mawsd render install again as u, not as root');
     expect(installed.err).toContain(join(cacheRoot(), `.staged-${entryName}`));
     expect(ran[0]).toBe('unzip 300000');
     expect(ran.filter((line) => line.startsWith('sudo'))).toHaveLength(2);

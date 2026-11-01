@@ -9,8 +9,8 @@
 // On the daemon's run path, so it only reads: the pin, the entry's manifest, the sandbox helper's mode and the PATH for
 // xvfb-run, a few stats per check, nothing loaded or held. The reasons are the sentences the render tools answer and the
 // session capabilities carry (`the render service is unavailable on <machine>: <reason>`).
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { existsSync, lstatSync, readFileSync, watch, type FSWatcher } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 
 export const renderCacheRoot = (home: string): string => join(home, '.local', 'share', 'maws', 'mawsd', 'render'); // beside release.ts's releases
 export const ELECTRON_PIN = join('packaging', 'mawsd', 'electron.json');
@@ -114,3 +114,57 @@ export function readRenderRuntime({ appRoot, home, arch, machine, path, helperCo
   if (xvfbRun === null) return { available: false, reason: noDisplay(machine) };
   return { available: true, electron: join(entry, RUNTIME_BINARY), xvfbRun };
 }
+
+export const CACHE_WATCH_DEBOUNCE_MS = 500; // an install's unpack, sudo and publish settle well within it
+
+// The watch the daemon keeps on the cache while a session's capabilities are tracked (fix wave 1): an install publishes
+// by renames in the cache's root (its unpack, its staging, its entry) and an uninstall removes entries there, so one
+// non-recursive watch of the root sees each, and `onChange` is called once things have been quiet for `debounceMs`. While
+// the root does not exist, the nearest directory above it that does is watched instead, until the root appears. One
+// descriptor, holding no loop open; the caller decides what changed (the reading is taken again, nothing is cached here).
+export function watchRenderCache(root: string, onChange: () => void, { debounceMs = CACHE_WATCH_DEBOUNCE_MS }: { debounceMs?: number } = {}): { close(): void } {
+  let watcher: FSWatcher | null = null;
+  let watched: string | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+  const nearest = (): string => {
+    let dir = root;
+    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+    return dir;
+  };
+  const unwatch = () => {
+    watcher?.close();
+    watcher = null;
+    watched = null;
+  };
+  const changed = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (closed) return;
+      arm(); // first: a change after this reaches the new watch, one before it the reading onChange takes
+      onChange();
+    }, debounceMs);
+    timer.unref();
+  };
+  const arm = () => {
+    const dir = nearest();
+    if (dir === watched) return;
+    unwatch();
+    try {
+      watcher = watch(dir, { persistent: false }, changed);
+      watcher.on('error', () => (unwatch(), changed())); // the directory went away: the next arm finds what is left
+      watched = dir;
+    } catch {
+      changed(); // gone between the check and the watch: tried again once quiet
+    }
+  };
+  arm();
+  return {
+    close() {
+      closed = true;
+      clearTimeout(timer);
+      unwatch();
+    },
+  };
+}
+

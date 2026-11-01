@@ -7,6 +7,8 @@
 // under that build's Electron as Node), with the scene's environment added to the plist (the e2e mark, the scratch
 // engine store) and the job loaded again, then waits for its `mawsd` to answer `daemon.status` as a unit.
 //
+// P5 O5 M6: `program` installs another binary's `mawsd` the same way (a packaged app's: packagedProgram).
+//
 // It loads a LaunchAgent, so it runs in CI alone (./daemon-unit-guard.mjs's refusal) and on a Mac, and never on the
 // mini's home instance, where the owner's own unit lives (homeInstanceRefusal: thrown before anything is installed, a
 // failure, never a skip); `remove` boots the job
@@ -15,7 +17,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { expect } from '@playwright/test';
 import { daemonPaths } from '@shared/daemon/files';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
@@ -42,12 +44,21 @@ function jobPid(label: string): number | null {
   return pid ? Number(pid[1]) : null;
 }
 
-// `root`: the build's checkout, its out/ built; `env`: what the plist adds to the unit's own environment
-export async function installUnitDaemon(o: { root: string; userData: string; label: string; env: Record<string, string> }): Promise<UnitDaemon> {
+// A packaged app's `mawsd` (P5 O5 M6, acceptance 6): its own binary as Node, its entry inside the asar, as the app
+// installs its unit; the unit's `mawsd` then runs from the bundle and spawns the bundle's binary as the render host
+export const packagedProgram = (executable: string) => ({ runtime: executable, entry: join(dirname(dirname(executable)), 'Resources', 'app.asar', 'out', 'main', 'mawsd.js') });
+
+// `root`: the build's checkout, its out/ built; `env`: what the plist adds to the unit's own environment; `program`: the
+// binary and entry the command line runs under (the unit runs the same), the checkout's Electron and out/main/mawsd.js
+// unless named
+export async function installUnitDaemon(o: { root: string; userData: string; label: string; env: Record<string, string>; program?: { runtime: string; entry: string } }): Promise<UnitDaemon> {
   const refused = homeInstanceRefusal(process.env, spawnSync('launchctl', ['print', `gui/${UID}/${OWNER_UNIT_LABEL}`], { encoding: 'utf8' }).status === 0);
   if (refused !== null) throw new Error(`a unit mawsd for ${o.label}: ${refused}`);
-  const mawsd = join(o.root, 'out', 'main', 'mawsd.js');
-  expect(existsSync(mawsd), `${o.root} has out/main/mawsd.js`).toBe(true);
+  const { runtime, entry: mawsd } = o.program ?? { runtime: electronOf(o.root), entry: join(o.root, 'out', 'main', 'mawsd.js') };
+  expect(existsSync(runtime), `${runtime} exists`).toBe(true);
+  // an entry inside an asar is the bundle's to read (its binary as Node does); this process sees the archive alone
+  const onDisk = mawsd.includes(`.asar${sep}`) ? mawsd.slice(0, mawsd.indexOf(`.asar${sep}`) + '.asar'.length) : mawsd;
+  expect(existsSync(onDisk), `${onDisk} exists`).toBe(true);
   const plist = join(homedir(), 'Library', 'LaunchAgents', `${o.label}.plist`);
   const cliEnv: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
   delete cliEnv.MAWS_USER_DATA;
@@ -56,7 +67,7 @@ export async function installUnitDaemon(o: { root: string; userData: string; lab
     spawnSync('launchctl', ['bootout', `gui/${UID}/${o.label}`]);
     rmSync(plist, { force: true });
   };
-  const installed = spawnSync(electronOf(o.root), [mawsd, 'install', '--profile', o.userData, '--label', o.label], { encoding: 'utf8', env: cliEnv, timeout: 60_000 });
+  const installed = spawnSync(runtime, [mawsd, 'install', '--profile', o.userData, '--label', o.label], { encoding: 'utf8', env: cliEnv, timeout: 60_000 });
   expect(installed.status, `${installed.stdout}${installed.stderr}`).toBe(0);
   try {
     // the scene's environment, then the job loaded again with it (bootout ends the first mawsd, which served nothing yet)

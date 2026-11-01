@@ -5,11 +5,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const order: string[] = [];
+// What would make the render host a second instance of the app or show it (acceptance 6): the single-instance lock, the
+// app's ready, its events, the Dock and the activation policy, a window, the focus; each recorded if the entry called it
 vi.mock('electron', () => ({
   app: {
     setPath: (name: string, path: string) => order.push(`setPath ${name} ${path}`),
     exit: (code: number) => order.push(`exit ${code}`),
     commandLine: { appendSwitch: (name: string) => order.push(`switch ${name}`), getSwitchValue: () => '' },
+    requestSingleInstanceLock: () => (order.push('requestSingleInstanceLock'), true),
+    whenReady: () => (order.push('whenReady'), new Promise(() => {})),
+    on: (event: string) => order.push(`on ${event}`),
+    focus: () => order.push('focus'),
+    setActivationPolicy: (policy: string) => order.push(`setActivationPolicy ${policy}`),
+    dock: { show: () => order.push('dock.show'), hide: () => order.push('dock.hide') },
+  },
+  BrowserWindow: class {
+    constructor() {
+      order.push('BrowserWindow');
+    }
   },
 }));
 vi.mock('node:fs', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:fs')>()), writeSync: (fd: number, text: string) => order.push(`writeSync ${fd} ${text}`) }));
@@ -61,6 +74,17 @@ describe("main's entry", () => {
     expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', 'registerStoreSchemes', 'render-host root', `runRenderHost ${__dirname}`]); // the entry's own directory, where mawsd.js is
     expect(order).not.toContain('app');
     expect(process.listenerCount('SIGUSR1')).toBe(listeners.length + 1);
+  });
+
+  it('with --render-host, takes no single-instance lock and does no ready, Dock or window work before the root does (acceptance 6)', async () => {
+    // the app's lock is its root's (src/main/app.ts, through files/profile-lock.ts), which this mode never loads: the
+    // packaged binary run as a render host beside a running app is no second instance of it, and shows nothing
+    process.argv = [argv[0]!, '/Applications/MAWS.app/Contents/MacOS/MAWS', '--render-host', '/scratch/profile'];
+    await import('./index');
+    await vi.waitFor(() => expect(order).toContain(`runRenderHost ${__dirname}`));
+    const shown = /^(requestSingleInstanceLock|whenReady|on |focus|setActivationPolicy|dock\.|BrowserWindow)/;
+    expect(order.filter((step) => shown.test(step))).toEqual([]);
+    expect(order).not.toContain('app');
   });
 
   // The deferred callbacks the entry hands setImmediate, kept rather than run

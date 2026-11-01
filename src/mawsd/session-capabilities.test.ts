@@ -78,4 +78,20 @@ describe('the capabilities and their event', () => {
     caps.refresh();
     expect(events).toHaveLength(1);
   });
+
+  it('says when the first session is tracked and when the last is forgotten, once each (the Linux cache watch rides on it)', () => {
+    const tracking: boolean[] = [];
+    const caps = createSessionCapabilities({ render: () => ({ artifact_screenshot: available, artifact_export: available }), browser: () => available, emit: () => {}, tracking: (any) => void tracking.push(any) });
+    caps.forget(A);
+    caps.track(A);
+    caps.track(A);
+    caps.track(B);
+    caps.forget(A);
+    expect(tracking).toEqual([true]);
+    caps.forget(B);
+    caps.forget(B);
+    expect(tracking).toEqual([true, false]);
+    caps.track(B);
+    expect(tracking).toEqual([true, false, true]);
+  });
 });

@@ -5,7 +5,7 @@
 // and names its engine; `session.capabilities` answers cold and `session.capabilitiesChanged` follows each flip once.
 // Over the daemon in this process (the scene's platform is linux: no peer identity addon, the uid is the boundary) and
 // stand-in hosts on real sockets (test/support/mawsd-scene.ts).
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -170,3 +170,35 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     expect(scene.logs.some((line) => line.includes('[spine] loaded'))).toBe(false);
   });
 });
+
+describe('the render cache’s flips on Linux (P5 O5 M6, fix wave 1)', () => {
+  it('an install and an uninstall are each posted once, with no other transition, while a session is tracked', async () => {
+    const cacheRoot = join(scene.root, 'render');
+    mkdirSync(cacheRoot);
+    let installed = false;
+    const absent = `the render runtime 44.4.5 is not installed on ${MACHINE}: run mawsd render install`;
+    const runtime = () => (installed ? { available: true as const } : { available: false as const, reason: absent });
+    const daemon = await scene.start({ permanentClient: true, tmp: TMP, render: { runtime, cacheRoot } });
+    const engine = await awake(daemon);
+    const watch = await observer();
+    await until(() => engine.emitRaw('session.status', running(4_321)), 3_000, 'the link’s ready line');
+    await attachApp();
+    await until(() => watch.changes().length === 1, 3_000, 'the browser’s flip: S is tracked');
+
+    installed = true; // as render-install.ts publishes: its unpack, its staging, its entry, renamed in the cache's root
+    mkdirSync(join(cacheRoot, '.unpack-44.4.5-aaaaaaaaaaaa-1'));
+    mkdirSync(join(cacheRoot, '44.4.5-aaaaaaaaaaaa'));
+    rmSync(join(cacheRoot, '.unpack-44.4.5-aaaaaaaaaaaa-1'), { recursive: true });
+    await until(() => watch.changes().length === 2, 3_000, 'the install’s flip');
+    expect(watch.changes()[1]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: { available: true }, artifact_export: { available: true }, browser: { available: true } } });
+
+    installed = false;
+    rmSync(join(cacheRoot, '44.4.5-aaaaaaaaaaaa'), { recursive: true });
+    await until(() => watch.changes().length === 3, 3_000, 'the uninstall’s flip');
+    const unavailable = { available: false, reason: `the render service is unavailable on ${MACHINE}: ${absent}` };
+    expect(watch.changes()[2]).toEqual({ appSessionId: S, capabilities: { artifact_screenshot: unavailable, artifact_export: unavailable, browser: { available: true } } });
+    await new Promise((resolve) => setTimeout(resolve, 800)); // past the watch's quiet period
+    expect(watch.changes()).toHaveLength(3); // one event per flip
+  });
+});
+

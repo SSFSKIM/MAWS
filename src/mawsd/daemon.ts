@@ -123,7 +123,7 @@ import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOIN
 import { createServicesFront, spineTakes } from './front';
 import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
-import { readRenderRuntime } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
+import { readRenderRuntime, renderCacheRoot, watchRenderCache } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
@@ -186,7 +186,8 @@ export interface DaemonOptions {
   claimSpine?: boolean;
   singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
   // P5 O5 M4: the render seam's chunk, the render host's spawn and the runtime's report (a fake host and platform)
-  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime };
+  // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's)
+  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string };
   cua?: { addon?: PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon (a double), the relay's wait
 }
 
@@ -947,10 +948,20 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const cuaDir = cuaSocketDir(profileDir, options.tmp ?? tmpdir());
   let cua: CuaSockets | null = null; // made at step (6), with the other sockets
   const launchedHere = new Set<AppSessionId>(); // told to a launch: kept past its engine's exit (its next launch names it)
+  // P5 O5 M6: on Linux, `mawsd render install` and `uninstall` flip the render entries with nothing else changing, so the
+  // cache is watched (one descriptor) while a session's capabilities are tracked, and released when none is: nothing
+  // runs for it at start or at idle
+  let cacheWatch: { close(): void } | null = null;
+  const watchCache = (any: boolean) => {
+    if (platform !== 'linux') return;
+    cacheWatch?.close();
+    cacheWatch = any ? watchRenderCache(options.render?.cacheRoot ?? renderCacheRoot(homedir()), () => sessionCapabilities.refresh()) : null;
+  };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
     browser: (appSessionId) => browserCapability({ machine, path: daemonCuaSocketPath(cuaDir, appSessionId), targeted: cua?.targeted() ?? false }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
+    tracking: watchCache,
   });
   // The attached app's cua directory, as its machine.client said it (none while no app is attached): the sockets listen
   // or stop; and whatever a session's capabilities read may have changed with it
@@ -1237,6 +1248,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
       cua?.close(); // P5 O5 M5: every session's socket, its relayed connections with it
+      watchCache(false);
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
