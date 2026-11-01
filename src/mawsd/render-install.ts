@@ -2,24 +2,26 @@
 // decisions, Interfaces §J): the Linux render runtime's install as a transaction, in the command line's chunk (the daemon
 // only reads what this publishes, render-runtime.ts).
 //
-// An install, for the pin of the build it runs from: nothing when the entry is published already. Otherwise the zip,
-// from beside the pack (`pnpm mawsd:pack --render` leaves it there) or downloaded from Electron's GitHub release, is
-// checked against the pin's sha256 before anything is unpacked; it is unpacked into a directory of this installer's own
-// (`.unpack-<entry>-<pid>`), marked whole, and renamed into the staging directory (`.staged-<entry>`), so a staging
-// directory is always a whole, verified unpack. Then the one step that needs root: `sudo -n chown root:root` and
-// `chmod 4755` of the staging's `chrome-sandbox` (Ubuntu 24.04 refuses the user-namespace sandbox, FINDINGS §1.3), never
-// anything under the releases. Without privilege the staging stays and the install says so; a privileged retry finds it
-// and completes it. Last the manifest is written and the staging renamed into place: an entry is published only with
-// its helper configured. A second installer finding the entry present does nothing; two at once each unpack their own
-// copy, the first rename wins, and the other finds the staging or the entry and completes or stops. Then every entry
-// nothing pins (this build, the installed releases) and no process runs from (`/proc/<pid>/exe` under it, as release.ts
-// reads a running release) is pruned.
+// An install, for the pin of the build it runs from: nothing when the entry is published already. Otherwise it takes the
+// install lock (`.install-lock` in the cache root: one installer at a time, from its check of the entry through
+// publication) and checks again. The zip, from beside the pack (`pnpm mawsd:pack --render` leaves it there) or downloaded
+// from Electron's GitHub release, is checked against the pin's sha256 before anything is unpacked; it is unpacked into a
+// directory of this installer's own (`.unpack-<entry>-<pid>`), marked whole, and renamed into the staging directory
+// (`.staged-<entry>`), so a staging directory is always a whole, verified unpack. Then the one step that needs root:
+// `sudo -n chown root:root` and `chmod 4755` of the staging's `chrome-sandbox` (Ubuntu 24.04 refuses the user-namespace
+// sandbox, FINDINGS §1.3), never anything under the releases. Without privilege the staging stays and the install says
+// so; a privileged retry finds it and completes it. Last the manifest is written and the staging renamed into place: an
+// entry is published only with its helper configured. The lock is what makes that hold: another installer's chown
+// (which clears the set-user-ID bit) never lands on a staging between this one's helper check and its rename, and a
+// replacement never retires an entry another installer published. A second installer waits for the lock and then
+// finds the entry present. Then every entry nothing pins (this build, the installed releases) and no process runs from
+// (`/proc/<pid>/exe` under it, as release.ts reads a running release) is pruned.
 //
 // An uninstall removes this pin's entry (and its staging), refusing while a render host runs from it, and prunes as an
 // install does. A running daemon needs no telling: it reads the cache at each check, so it reports the runtime absent at
 // the next one.
-import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -29,6 +31,8 @@ import type { CommandRunner } from './units/unit';
 
 const WHOLE = '.maws-unpacked'; // an unpack's mark: written once unzip finished, holding the zip's sha256
 const UNZIP_TIMEOUT_MS = 300_000;
+const LOCK = '.install-lock'; // the install lock: its holder's pid and a token of the holder's own
+const LOCK_POLL_MS = 500; // the pause between tries of a lock another installer holds
 
 export interface RenderInstallDeps {
   home: string;
@@ -41,7 +45,8 @@ export interface RenderInstallDeps {
   processes(): RunningProcess[]; // /proc's, for the entries in use
   helperConfigured?(path: string): boolean; // a test's stand-in for the root-owned helper
   now(): number;
-  checkpoint?(step: 'unpacked' | 'publishing'): Promise<void> | void; // a test's barrier between the transaction's steps
+  checkpoint?(step: 'unpacked' | 'chown' | 'chmod' | 'publishing'): Promise<void> | void; // a test's barrier between the transaction's steps
+  waitForLock?(holder: number): Promise<void>; // a test's stand-in for the pause between tries of the install lock another installer holds
 }
 
 export type InstallOutcome =
@@ -62,62 +67,59 @@ export async function installRenderRuntime(deps: RenderInstallDeps): Promise<Ins
   mkdirSync(root, { recursive: true, mode: 0o700 });
   sweepAbandoned(root);
   if (published(entry, pin, helperConfigured)) return present();
-  // An entry is there but unusable (its helper lost its mode, its manifest is gone or another pin's): replaced whole,
-  // never repaired in place (an entry is immutable once published) and never taken as installed. Moved aside first, so
-  // the entry's name is absent at once and a reader never sees it half removed; refused while a render host runs from it.
-  if (existsSync(entry)) {
-    const users = usersOf(entry, deps.processes());
-    if (users > 0) throw new Error(`refusing to replace ${entry}, whose sandbox helper is not configured: a render host runs from it (${users} process${users === 1 ? '' : 'es'}); run mawsd render install again after its quiet period`);
-    const aside = join(root, `.retired-${runtimeName(pin)}-${process.pid}`);
-    rmSync(aside, { recursive: true, force: true });
-    renameSync(entry, aside);
-    rmSync(aside, { recursive: true, force: true });
-  }
+  const unlock = await lockInstall(root, deps);
+  try {
+    // An entry is there but unusable (its helper lost its mode, its manifest is gone or another pin's): replaced whole,
+    // never repaired in place (an entry is immutable once published) and never taken as installed. Read again under the
+    // lock, last before it is retired, so an entry another installer published usable meanwhile is kept. Moved aside
+    // first, so the entry's name is absent at once and a reader never sees it half removed; refused while a render host
+    // runs from it.
+    if (existsSync(entry)) {
+      const users = usersOf(entry, deps.processes());
+      if (published(entry, pin, helperConfigured)) return present();
+      if (users > 0) throw new Error(`refusing to replace ${entry}, whose sandbox helper is not configured: a render host runs from it (${users} process${users === 1 ? '' : 'es'}); run mawsd render install again after its quiet period`);
+      const aside = join(root, `.retired-${runtimeName(pin)}-${process.pid}`);
+      rmSync(aside, { recursive: true, force: true });
+      renameSync(entry, aside);
+      rmSync(aside, { recursive: true, force: true });
+    }
 
-  let source: 'pack' | 'download' | 'staging' = 'staging';
-  if (!whole(staging, pin)) {
-    rmSync(staging, { recursive: true, force: true }); // a killed install's half (no mark): cleaned
-    source = await unpackInto(deps, pin, root, staging);
-    if (published(entry, pin, helperConfigured)) {
-      // another installer published it while this one unpacked: a staging this one's rename made after that is spare
-      // (any installer still holding it finds the entry published too)
+    let source: 'pack' | 'download' | 'staging' = 'staging';
+    if (!whole(staging, pin)) {
+      rmSync(staging, { recursive: true, force: true }); // a killed install's half (no mark): cleaned
+      source = await unpackInto(deps, pin, root, staging);
+    }
+    const helper = join(staging, SANDBOX_HELPER);
+    if (!helperConfigured(helper)) {
+      for (const args of [['-n', 'chown', 'root:root', helper], ['-n', 'chmod', '4755', helper]] as const) {
+        await deps.checkpoint?.(args[1]); // a test's barrier: each privileged step next
+        const done = deps.run('sudo', [...args]);
+        if (done.status !== 0) return { state: 'staged', staging, why: `sudo ${args.join(' ')} failed: ${(done.stderr || done.stdout).trim() || `exit ${done.status ?? 'signal'}`}` };
+      }
+      if (!helperConfigured(helper)) return { state: 'staged', staging, why: `${helper} is not root-owned with mode 4755 after sudo` };
+    }
+    const manifest: RuntimeManifest = { version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: new Date(deps.now()).toISOString() };
+    try {
+      const written = join(staging, `.${RUNTIME_MANIFEST}.${process.pid}`);
+      writeFileSync(written, `${JSON.stringify(manifest, null, 2)}\n`);
+      renameSync(written, join(staging, RUNTIME_MANIFEST));
+      await deps.checkpoint?.('publishing'); // a test's barrier: the staging whole and ready, its rename next
+      // The staging keeps its whole-unpack mark into the entry: until this rename it is a whole unpack a later installer
+      // may complete, and after it the mark is inert (an entry is read by its manifest)
+      renameSync(staging, entry);
+    } catch (error) {
+      // Something that takes no install lock (an uninstall, a hand) put an entry there or took the staging meanwhile: an
+      // entry there is taken as installed only if it passes the same check this install's own would, helper and all
+      if (!published(entry, pin, helperConfigured)) {
+        throw new Error(`cannot publish ${entry} (${error instanceof Error ? error.message : String(error)}): ${existsSync(entry) ? 'an entry another install left there is not usable' : 'its staging went away'}; run mawsd render install again`, { cause: error });
+      }
       rmSync(staging, { recursive: true, force: true });
       return present();
     }
-    if (!whole(staging, pin)) throw new Error(`${staging} is not a whole unpack after unpacking: another install changed it; run mawsd render install again`);
+    return { state: 'installed', entry, source, pruned: prune(deps, root) };
+  } finally {
+    unlock();
   }
-  const helper = join(staging, SANDBOX_HELPER);
-  if (!helperConfigured(helper)) {
-    for (const args of [['-n', 'chown', 'root:root', helper], ['-n', 'chmod', '4755', helper]]) {
-      const done = deps.run('sudo', args);
-      if (done.status === 0) continue;
-      if (published(entry, pin, helperConfigured)) return present(); // another installer published it meanwhile
-      return { state: 'staged', staging, why: `sudo ${args.join(' ')} failed: ${(done.stderr || done.stdout).trim() || `exit ${done.status ?? 'signal'}`}` };
-    }
-    if (!helperConfigured(helper)) {
-      if (published(entry, pin, helperConfigured)) return present();
-      return { state: 'staged', staging, why: `${helper} is not root-owned with mode 4755 after sudo` };
-    }
-  }
-  const manifest: RuntimeManifest = { version: pin.version, sha256: pin.sha256, sandbox: 'suid', installedAt: new Date(deps.now()).toISOString() };
-  try {
-    const written = join(staging, `.${RUNTIME_MANIFEST}.${process.pid}`);
-    writeFileSync(written, `${JSON.stringify(manifest, null, 2)}\n`);
-    renameSync(written, join(staging, RUNTIME_MANIFEST));
-    await deps.checkpoint?.('publishing'); // a test's barrier: the staging whole and ready, its rename next
-    // The staging keeps its whole-unpack mark into the entry: until this rename it is a whole unpack any installer may
-    // complete, and after it the mark is inert (an entry is read by its manifest)
-    renameSync(staging, entry);
-  } catch (error) {
-    // Another installer renamed the staging first (it is gone) or published beside it (the entry is there): taken as
-    // installed only if that entry passes the same check this install's own would, helper and all
-    if (!published(entry, pin, helperConfigured)) {
-      throw new Error(`cannot publish ${entry} (${error instanceof Error ? error.message : String(error)}): ${existsSync(entry) ? 'an entry another install left there is not usable' : 'its staging went away'}; run mawsd render install again`, { cause: error });
-    }
-    rmSync(staging, { recursive: true, force: true });
-    return present();
-  }
-  return { state: 'installed', entry, source, pruned: prune(deps, root) };
 }
 
 export function uninstallRenderRuntime(deps: RenderInstallDeps): { removed: string[] } {
@@ -205,11 +207,7 @@ async function unpackInto(deps: RenderInstallDeps, pin: ElectronPin, root: strin
     for (const name of [RUNTIME_BINARY, SANDBOX_HELPER]) if (!existsSync(join(own, name))) throw new Error(`${zipName(pin)} has no ${name}`);
     writeFileSync(join(own, WHOLE), `${pin.sha256}\n`);
     await deps.checkpoint?.('unpacked'); // a test's barrier: this installer's own unpack whole, its rename next
-    try {
-      renameSync(own, staging);
-    } catch {
-      // another installer's whole unpack got there first (it serves), or it was published already: the caller re-checks
-    }
+    renameSync(own, staging);
     return source;
   } finally {
     rmSync(own, { recursive: true, force: true });
@@ -234,10 +232,70 @@ function published(entry: string, pin: ElectronPin, helperConfigured: (path: str
   return readManifest(entry, pin) !== null && existsSync(join(entry, RUNTIME_BINARY)) && helperConfigured(join(entry, SANDBOX_HELPER));
 }
 
-// An installer's own unpack or download whose process is gone
+// The install lock, taken; its release. Taken by linking a file that already holds this installer's pid and token into
+// place, since a link never replaces what is there and the lock is never seen empty. Held by a live process: waited for.
+// Held by a process that is gone (an install killed midway): broken, by moving it aside first and removing it only if
+// what moved is still that holder's, so two installers breaking it at once never both remove a live one (a live lock
+// moved by mistake is linked back).
+async function lockInstall(root: string, deps: RenderInstallDeps): Promise<() => void> {
+  const lock = join(root, LOCK);
+  const token = randomBytes(8).toString('hex');
+  const mine = `${process.pid} ${token}\n`;
+  const own = join(root, `.lock-${token}-${process.pid}`);
+  writeFileSync(own, mine);
+  try {
+    for (;;) {
+      try {
+        linkSync(own, lock);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+      const held = textOf(lock);
+      if (held === null) continue; // released meanwhile
+      const holder = Number(held.split(' ')[0]);
+      if (Number.isInteger(holder) && holder > 0 && alive(holder)) {
+        await (deps.waitForLock ?? pause)(holder);
+        continue;
+      }
+      const aside = join(root, `.lock-stale-${token}-${process.pid}`);
+      try {
+        renameSync(lock, aside);
+      } catch {
+        continue; // another installer moved it first
+      }
+      if (textOf(aside) !== held) {
+        try {
+          linkSync(aside, lock);
+        } catch {
+          // a third installer took it in the moment it was aside, so its holder and the third both hold it: the one
+          // window left, open only to installers racing for a lock a killed install left
+        }
+      }
+      rmSync(aside, { force: true });
+    }
+  } finally {
+    rmSync(own, { force: true });
+  }
+  return () => {
+    if (textOf(lock) === mine) rmSync(lock, { force: true });
+  };
+}
+
+const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+
+function textOf(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+// An installer's own unpack, download, retired entry or lock file whose process is gone
 function sweepAbandoned(root: string): void {
   for (const name of readdirSync(root)) {
-    const owner = /^\.(?:unpack|download|retired)-.+-(\d+)(?:\.zip)?$/.exec(name)?.[1];
+    const owner = /^\.(?:unpack|download|retired|lock)-.+-(\d+)(?:\.zip)?$/.exec(name)?.[1];
     if (owner !== undefined && !alive(Number(owner))) rmSync(join(root, name), { recursive: true, force: true });
   }
 }
