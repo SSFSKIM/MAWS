@@ -513,6 +513,31 @@ describe('the detached transport: a request held and never sent', () => {
 });
 
 describe('the detached transport: early exits and the crash ladder', () => {
+  // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it: `mawsd restart
+  // --engine-host`) leaves as planned, not as a crash: no crash count, no backoff, three of them within the window
+  it('the close of a host whose last status said it was handing over is no crash: three within the window, uncounted', async () => {
+    const draining = (pid: number) => ({ mode: 'detached', pid, startedAt: 't', buildId: buildIdOf(profile.modulePath), protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining' } });
+    let host = await startFake();
+    await supervisor.start();
+    for (let round = 0; round < 3; round += 1) {
+      const before = host.pid;
+      await until(() => host.emit('host.supervisorStatus', draining(before) as never));
+      await until(() => emit.mock.calls.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { pid: number }).pid === before));
+      await host.die();
+      await until(() => state().state === 'ready' && state().pid !== before);
+      host = fakes.at(-1)!;
+    }
+    expect(state()).toMatchObject({ state: 'ready', restarts: 0 });
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
+    // a real crash still counts
+    const crashed = host.pid;
+    await host.die();
+    await until(() => state().state === 'ready' && state().pid !== crashed);
+    expect(state().restarts).toBe(1);
+    expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
+  });
+
   it('backs off on repeated early exits and stays crashed after three within the window', async () => {
     const exitedAt: number[] = [];
     onSpawn = (candidate) => {

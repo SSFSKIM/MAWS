@@ -36,7 +36,7 @@ import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } f
 import { REGISTRY, type WireRegistry } from '../ipc/registry'; // P5 O1 M5
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '../ipc/schema';
 import type { Owner } from '../ipc/schema/common';
-import type { HostStatus } from '../ipc/schema/host'; // E10
+import type { HostStatus, SupervisorStatus } from '../ipc/schema/host'; // E10; P5 O16 M3c fix wave 1: SupervisorStatus
 import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
 import { codecOf } from '../ipc/validate';
 import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
@@ -305,6 +305,14 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // P5 O1 M6: one line per dropped field, and one per event name this build does not know
   const logDropped = tolerantLog((line) => console.warn(`[hosts] ${line}`));
   const unknownEvents = new Set<string>();
+  // P5 O16 M3c fix wave 1: the engine host pids whose last status said they were handing over (`holder.handover`
+  // draining), heard on whichever link carries the host's events (on the daemon shape, machine.sock); a close of one is
+  // that handover's, not a crash
+  const handingOver = new Set<number>();
+  const noteHandover = (status: SupervisorStatus) => {
+    if (status.holder?.handover === 'draining') handingOver.add(status.pid);
+    else handingOver.delete(status.pid);
+  };
   const hosts: Partial<Record<HostOwner, Host>> = {};
   // P5 O1 M5: for the calls that name a host this process runs
   const hostOf = (owner: HostOwner): Host => {
@@ -720,6 +728,13 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         }
         if (loss === 'quiet') return relaunch(restartBackoffMs[0]);
         if (loss === 'deliberate') return deliberate();
+        // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
+        // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
+        if (closed !== null && handingOver.delete(closed)) {
+          console.error(`[hosts] ${host.owner} pid ${closed} left after handing its sessions over; starting its successor`);
+          failSent(host, 'handed its sessions over');
+          return launch(host);
+        }
         unexpected(loss.crash);
       },
       exited(exit) {
@@ -811,6 +826,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       }
       logDropped(`event ${name}`, read.dropped);
       const payload = read.value;
+      if (name === 'host.supervisorStatus') noteHandover(payload as SupervisorStatus); // P5 O16 M3c fix wave 1
       const relayed = emit(name as EventName, payload as never);
       if (relayed && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
       if (relayed) notifyEvent(name as EventName, payload); // C3: emit validated it, and validators never transform
