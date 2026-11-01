@@ -122,4 +122,6 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
   };
 }
 
-export const ipc: MawsBridge = createClient(() => window.maws);
+// the page's bridge (`window.maws`, which is the global object's in a page), read through `globalThis` so the module also
+// type-checks in the node project, where a suite runs the git store over main's remote checkout (P5 O7 M4's milestone review)
+export const ipc: MawsBridge = createClient(() => (globalThis as typeof globalThis & { maws: PreloadBridge }).maws);

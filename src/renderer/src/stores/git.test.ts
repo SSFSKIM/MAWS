@@ -202,26 +202,38 @@ describe('git store', () => {
     expect(entryOn(OTHER_MACHINE)).toBeDefined();
   });
 
-  // P5 O7 M4: another machine's checkout is read by the session it is watched from (the endpoint's checkout rule), so
-  // each call names that session: the watch, its diffs, a re-ask and the unwatch, all with the first watcher's session.
-  it('names the session a watch is made from on every call of it, the first watcher’s for the shared checkout', async () => {
+  // P5 O7 M4: another machine's checkout is read by the session it is watched from (the endpoint's checkout rule), and
+  // main gives a watch back by the session whose feed reopened (remote-checkout.ts), so each session holds its own
+  // git.watch (M4 review fix): the shared entry's reads name a session still holding it.
+  it('holds a watch per session it is made from, its reads named by a session still holding it', async () => {
     const { fake, store } = setup();
     const S1 = `${OTHER_MACHINE}/app-1` as AppSessionId;
     const S2 = `${OTHER_MACHINE}/app-2` as AppSessionId;
     const first = store.getState().watch(OTHER_MACHINE, DIR, S1);
     const second = store.getState().watch(OTHER_MACHINE, DIR, S2);
-    await fake.fail('git.watch', 'machine did not answer git.watch within 40 s', 'timeout');
+    const again = store.getState().watch(OTHER_MACHINE, DIR, S2); // the same session twice: one hold
+    expect(fake.sessions('git.watch')).toEqual([S1, S2]);
+    await fake.fail('git.watch', 'machine did not answer git.watch within 40 s', 'timeout'); // S1's
+    await fake.reply('git.watch', status()); // S2's
+    expect(fake.sessions('git.diff')).toEqual([S1]);
+    await fake.reply('git.diff', diff(1));
     store.getState().retryUnanswered(OTHER_MACHINE);
+    expect(fake.sessions('git.watch')).toEqual([S1, S2, S1]); // only the unanswered one asked again
     await fake.reply('git.watch', status());
     await fake.reply('git.diff', diff(1));
     first();
+    await wait();
+    expect(fake.sessions('git.unwatch')).toEqual([S1]);
+    store.getState().applyChanged({ repoRoot: '/work/repo', status: status(), reason: 'changed' } as never, OTHER_MACHINE);
+    await wait();
+    expect(fake.sessions('git.diff').at(-1)).toBe(S2); // read by the session still holding it
+    again();
+    expect(fake.sessions('git.unwatch')).toEqual([S1]);
     second();
     await wait();
-    expect(fake.sessions('git.watch')).toEqual([S1, S1]);
-    expect(fake.sessions('git.diff')).toEqual([S1]);
-    expect(fake.sessions('git.unwatch')).toEqual([S1]);
+    expect(fake.sessions('git.unwatch')).toEqual([S1, S2]);
     store.getState().watch(M, DIR); // a local panel names none
-    expect(fake.sessions('git.watch')).toEqual([S1, S1, undefined]);
+    expect(fake.sessions('git.watch')).toEqual([S1, S2, S1, undefined]);
   });
 
   // P5 O3-E final review, fix 1's follow-up: main's watch replay answers a page's git.watch host_unavailable when the

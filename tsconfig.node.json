@@ -84,6 +84,11 @@
     "src/renderer/src/side/copy.ts",
     "src/renderer/src/composer/submit/submit-state.ts",
     // E3 end
+    // P5 O7 M4 (milestone review): src/main/lane-b/remote-checkout-git-store.test.ts runs the renderer's git store over
+    // main's remote checkout; listed for the same reason as C8a's
+    "src/renderer/src/stores/git.ts",
+    "src/renderer/src/ipc/client.ts",
+    "src/renderer/src/ipc/machine.ts",
     // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest,
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
     // sittings' pure parts and the OOPIF page (Task 6.1)
