@@ -341,6 +341,7 @@ describe('the services front', () => {
     expect(render.gone).toBe(1);
     expect(served.renderClients()).toBe(0);
     app.close();
+    served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never); // the closed port refuses: the client is gone
     expect(served.eventClients()).toBe(0);
   });
 
