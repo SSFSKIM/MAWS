@@ -13,7 +13,7 @@ import { hostCall, pathExists, transcriptPathOf } from './context';
 import { holderAuthority, type PausedHolder } from './holders';
 import { LaunchWatch, type LaunchEnd } from './launch-watch';
 import { resumeLaunchSpec } from './launch-mapping';
-import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
+import { passLaunchGate, runBootstrap, writeSpawnerProof } from './setup'; // C12: passLaunchGate; P5 O12 M11: writeSpawnerProof
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
@@ -67,13 +67,16 @@ export async function runResume(
     }
     const fixture = takeReplay(s, 'launching');
     // P2-C start (2026-10-09): the owner channel's decision for this launch, over the session's own transcript
-    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId) }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
+    // P5 O12 M11: the record's spawner, as at its start; the bootstrap above named none
+    const proofFile = s.spawnerProofs.pathOf(appSessionId);
+    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
     let spec = decided.spec;
     // P2-C end
     let end: LaunchEnd;
     let previousLaunchId: string | null = null;
     const scope = launchScopeOf(s.sessions, record.lineage); // P2-E1: a side thread's ancestors' artifacts, resolved at every resume
     for (;;) {
+      await writeSpawnerProof(s, appSessionId, record.launchedBy); // P5 O12 M11: from the record, before each launch that names it
       watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? PAUSED_READY_MS : undefined);
       const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...scope });
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);

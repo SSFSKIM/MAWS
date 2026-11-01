@@ -5,6 +5,7 @@
 // host's protected keys applied last. Nothing here spawns; `transport.ts` runs the plan.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { canonicalize } from 'org-protocol';
 import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionId } from '@shared/graph/ids';
@@ -97,6 +98,7 @@ const EXCLUDED_KEYS = new Set([
   'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_EFFORT', 'CLAUDECODE',
   'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS', 'CLAUDE_CODE_ENTRYPOINT',
   'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE',
+  'MAWS_LAUNCHED_BY', // P5 O12 M11: only the spec names a spawner (buildEnvironment)
 ]);
 const EXCLUDED_PREFIXES = ['CMUX_', 'ELECTRON_'];
 
@@ -139,6 +141,11 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   // only together with SMNS_MEMBER's parent check above, so a `claude` a tool starts under the engine, which inherits
   // both, stays a session of its own. Set over any value the capture holds (`MAWS_*` never passes the allowlist anyway).
   env.MAWS_LANE = 'B';
+  // P5 O12 M11 (Interfaces §H): the spawner of a session a remote member spawned, which sminos's record takes from its
+  // first SessionStart under the same parent check, the proof in the file it names. Set over any value the capture
+  // holds, and never passed from it: a mawsd started from a MAWS-launched session's shell holds that session's, which
+  // would hand every session this host launches that shell's spawner.
+  if (spec.launchedBy !== undefined) env.MAWS_LAUNCHED_BY = canonicalize(spec.launchedBy);
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;

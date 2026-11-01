@@ -127,7 +127,26 @@ export class Rl10 {
       const state = ctx.state();
       return ctx.identity()?.org ?? (state?.enrolled ? (state.enrollment?.org ?? null) : (state?.provisioning?.redeemed.org ?? null));
     });
-    this.members = new Members({ dispatch: ctx.dispatch, listings: ctx.listings, listed: () => ctx.listings.listedSessions(), forget: (s) => ctx.notifier.forget(s), log: ctx.log, now: ctx.now });
+    this.members = new Members({
+      dispatch: ctx.dispatch,
+      listings: ctx.listings,
+      listed: () => ctx.listings.listedSessions(),
+      forget: (s) => ctx.notifier.forget(s),
+      log: ctx.log,
+      now: ctx.now,
+      // P5 O12 M11: the handed-off mark, in the state directory (`handed-off.json`); unread while the state is refused
+      marks: {
+        read: () => {
+          const state = ctx.state();
+          return state === null || state.refusing !== null ? null : state.handedOff;
+        },
+        write: (marks) => {
+          const state = ctx.state();
+          if (state === null) throw new Error('the endpoint has not started');
+          state.setHandedOff(marks);
+        },
+      },
+    });
     this.relay = new LogRelay({
       org: () => {
         const head = ctx.head();

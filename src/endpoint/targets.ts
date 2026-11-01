@@ -13,9 +13,14 @@
 // reader gets is so the repository, with its worktrees, not the root alone: a session opened on a subfolder of a
 // repository reads that repository's status and diff, as its transcript already spans it. The checkout feed filters
 // git's changes by the same bounds (plane-feeds.ts).
+//
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): a lane B session's placement
+// also answers who spawned it, the `launchedBy` of the spine record it read, beside the target and never inside it, so the
+// decision's bridge (authorize.ts) rests on the read that placed it.
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
+import type { LaunchedBy } from '@shared/graph/session';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -27,11 +32,14 @@ export type Resolved =
    * they are known to stand on the recorded engine session, so a caller below the floor hears `grade` for a session
    * that lags as for one that doesn't exist.
    */
-  | { kind: 'session'; target: SessionTarget; unavailable?: true }
+  | { kind: 'session'; target: SessionTarget; unavailable?: true; launchedBy?: Spawner }
   /** A session the input names that this machine can't place: no record can be found for it, so nobody holds a rank. */
   | { kind: 'unknown' }
   | { kind: 'machine' }
   | { kind: 'refused'; reason: 'no-target' | 'malformed' | 'unavailable' };
+
+/** P5 O12 M11: the spine record's `launchedBy`, as far as the bridge reads it: the member who spawned the session. */
+export type Spawner = Pick<LaunchedBy, 'member'>;
 
 /**
  * How a lane B session is placed: the machine as the request reads it (on behalf of its asker), the log a spine's failure
@@ -88,12 +96,14 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
-  const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId } });
   const record = await dispatch('machine', 'session.get', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
   if (!record.ok) {
     log(`endpoint: lane B session ${appSessionId} not placed: the spine answered ${record.error.code} (${record.error.message})`);
     return unavailable;
   }
+  const spawner = field(field(record.value, 'launchedBy'), 'member'); // P5 O12 M11
+  const launchedBy = isId(spawner) ? { launchedBy: { member: spawner } } : {};
+  const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId }, ...launchedBy });
   const recorded = field(record.value, 'engineSessionId');
   const status = await dispatch('engine-host', 'session.status', { appSessionId });
   if (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout')) return unavailable;

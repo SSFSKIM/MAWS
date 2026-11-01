@@ -62,6 +62,7 @@ import { LaunchWatch } from './launch-watch';
 // P2-A end
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
 import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
+import { SpawnerProofs } from './spawner-proof'; // P5 O12 M11
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -116,6 +117,7 @@ export class SessionService {
   private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
   // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
   private readonly rewinds: RewindNotes;
+  private readonly spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, beside its record
   private offStatus: (() => void) | null = null;
   private readonly now: () => string;
   private readonly log: (message: string) => void;
@@ -125,6 +127,7 @@ export class SessionService {
     this.now = deps.now ?? (() => new Date().toISOString());
     this.log = deps.log ?? ((message) => console.warn(`[sessions] ${message}`));
     this.rewinds = new RewindNotes(join(deps.userData, 'sessions', 'rewinds'), { dispatch: deps.host.dispatch, now: this.now, log: this.log, track: (promise) => this.work.track(promise) });
+    this.spawnerProofs = new SpawnerProofs(join(deps.userData, 'sessions', 'launched-by'));
   }
 
   // D-16 at start: every `self` holder is stale (C3 owns no process yet) and is reset before anything else, then the
@@ -187,6 +190,7 @@ export class SessionService {
       stopWaitMs: this.deps.timing?.stopWaitMs ?? STOP_WAIT_MS,
       watches: new Set(),
       rewinds: this.rewinds, // P5 O3-D M4
+      spawnerProofs: this.spawnerProofs, // P5 O12 M11
     };
     await this.work.track(this.deps.intents.load());
     if (this.disposed) return;
@@ -1018,7 +1022,11 @@ export class SessionService {
   remove(appSessionId: AppSessionId, stopIfLive: boolean): Promise<DeleteOutcome> {
     return this.serial(appSessionId, async () => {
       const outcome = await deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive);
-      if (outcome.status === 'deleted') await this.rewinds.clear(appSessionId); // P5 O3-D M4: no conversation to repair
+      if (outcome.status === 'deleted') {
+        await this.rewinds.clear(appSessionId); // P5 O3-D M4: no conversation to repair
+        // P5 O12 M11: the spawner's proof goes with the record; one left behind names a session that is gone
+        await this.spawnerProofs.remove(appSessionId).catch((error: unknown) => this.log(`the spawner's proof of ${appSessionId} was not removed: ${error instanceof Error ? error.message : String(error)}`));
+      }
       return outcome;
     });
   }

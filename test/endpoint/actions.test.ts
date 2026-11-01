@@ -885,6 +885,23 @@ describe('the endpoint’s own actions, under its own ledger', () => {
     expect(await query(a2, lost.opId, lost.opCreated, 'endpoint')).toEqual({ state: 'not-received' });
   });
 
+  // P5 O12 M11 (with the architect): the endpoint's ledger opens with `orphanAtOpen`. Its actions are idempotent, so a claim
+  // the last process left unfinished is the RL4 `expired` (its outcome nobody can say), read back from nothing, and a
+  // new act under its id stays `in-progress`, running nothing
+  it('answers a claim the last process left unfinished `expired`, and a new act under its id `in-progress`, running nothing', async () => {
+    const f = await start();
+    const grant = (await open(f, a1, A)).device.action({ machine: f.ref, action: 'endpoint.grant', args: { grant: await grantFor(f, B) } });
+    await f.endpoint.stop();
+    started.splice(started.indexOf(f), 1);
+    const claim = { member: A, device: a1.device.id, fingerprint: await actionFingerprint(grant), target: null, name: 'endpoint.grant' };
+    expect(OpLedger.open(f.services.machine.stateDir, 'ops.jsonl').begin(grant.opId, grant.opCreated, claim, () => null)).toEqual({ kind: 'claimed' });
+    const g = await start({ services: f.services, host: f.host, records: f.records, chain: f.chain, key: f.key });
+    const a = await open(g, a1, A);
+    expect(await query(a, grant.opId, grant.opCreated, 'endpoint')).toEqual({ state: 'expired' });
+    expect(await run(a, a.device.reseal(grant))).toEqual({ state: 'in-progress' });
+    expect(g.endpoint.parts!.state.ledger!.grants[B]).toBeUndefined();
+  });
+
   it('answers every action and query `unavailable` while its ledger can’t be read', async () => {
     const services = fakeServices();
     fs.writeFileSync(join(services.machine.stateDir, 'ops.jsonl'), 'not json\n{}\n', { mode: 0o600 });
