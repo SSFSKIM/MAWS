@@ -14,7 +14,8 @@ import type { WireRegistry } from '../ipc/registry';
 import type { CommandName, CommandResult, HostState } from '../ipc/schema';
 import { HostPingSchema } from '../ipc/schema/common';
 import { createHostRuntime, type HostEmit } from './runtime';
-import { SOCKET_PROTOCOL } from './socket-protocol';
+import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL } from './socket-protocol';
+import { appIdentity } from './identity'; // P5 O16 M3b fix wave 2
 import { createHostSupervisor, REQUEST_TIMEOUT_MS, type HostOwner, type HostSpec, type HostSupervisor, type HostSupervisorOptions } from './host-supervisor';
 import type { DetachedTransportOptions, HostFiles } from './detached-transport';
 
@@ -656,5 +657,63 @@ describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
     await until(() => replaced.length === 1);
     expect(replaced).toEqual(['engine-host']);
     expect(supervisor.snapshot('engine-host').state).toBe('crashed');
+  });
+});
+
+// P5 O16 M3b fix wave 2 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): a completion (DRAIN_REPLIES) goes to the
+// host that raised its request and never waits for, wakes or launches another; on main's daemon shape, with its
+// engine-host link down, it goes by the machine link to `mawsd`'s front, for an app that reads the requests there.
+describe('a completion of an engine host’s request', () => {
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+  const answers = (seen: unknown[]) => createHostRuntime((on) => on('maws.pane.answer', async (input) => (seen.push(input), { outcome: 'delivered' as const })));
+
+  it('to a parked engine host: host_unavailable at once, nothing spawned, the host still parked', async () => {
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(supervisor.completionGone('engine-host', 'maws.pane.answer', ANSWER)).toBe(true);
+    expect(supervisor.completionGone('engine-host', 'engine.ping', undefined)).toBe(false); // any other name is a need as before
+    await sleep(60);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.parked('engine-host')).toBe(true);
+  });
+
+  it('during a recycle: held, and sent on the same host’s fresh link', async () => {
+    const seen: unknown[] = [];
+    await startFake({ runtime: answers(seen) });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    await recycled;
+    await expect(answered).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(seen).toEqual([ANSWER]);
+  });
+
+  it('main’s daemon shape, its engine-host link down: by the machine link, keeping its deadline; any other name waits for the engine host as before', async () => {
+    const machineSeen: unknown[] = [];
+    const at = siblingProfile('machine');
+    await startFake({ runtime: answers(machineSeen) }, at);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(machineSeen).toEqual([ANSWER]);
+    expect(supervisor.completionGone('engine-host', 'maws.pane.answer', ANSWER)).toBe(false); // it has a route
+    expect(spawn).not.toHaveBeenCalled();
+    await expect(ping(supervisor)).resolves.toMatchObject({ ok: true }); // a need: it woke the engine host
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('an app whose machine-link hello does not list machine.spine reads no requests there: no fallback', async () => {
+    const machineSeen: unknown[] = [];
+    const at = siblingProfile('machine');
+    await startFake({ runtime: answers(machineSeen) }, at);
+    const identity = appIdentity(profile.modulePath, {}, 'detached', [PTY_FRAMES_CAPABILITY]);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' }, identity }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(machineSeen).toEqual([]);
   });
 });

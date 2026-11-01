@@ -568,13 +568,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (recycling === 0 && hosts.snapshot('engine-host').state !== 'ready') engineRelay.dropApp(`the engine host is ${hosts.snapshot('engine-host').state} after its recycle`);
     });
   };
-  // A stop-all's close is deliberate (the host parks until the next attach or request). It is marked on the link the
-  // request is written to, so one sent just after an attach waits for that attach's recycle.
+  // A stop-all's close is deliberate (the host parks until the next attach or request). The supervisor marks the link
+  // the request is written to (P5 O16 M3b fix wave 2: at the write, so one held for a successor marks the successor's,
+  // and one written to a host that still owns a handover's drain leaves that link's close the successor's start), so one
+  // sent just after an attach waits for that attach's recycle.
   const stopAll = (request: { input: unknown; client?: string }): Promise<HostResponse> =>
-    recycled.then(() => {
-      hosts.expectExit('engine-host');
-      return hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) });
-    });
+    recycled.then(() => hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) }));
   // host.exitWhenIdle, forwarded and tracked: the link that answers it is marked armed (its exit once idle is
   // deliberate and parks the host) or disarmed. Sent after an attach's recycle, as a stop-all is.
   const exitWhenIdle = (request: { input: unknown; client?: string }): Promise<HostResponse> =>

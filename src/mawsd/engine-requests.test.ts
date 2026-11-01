@@ -9,7 +9,7 @@ import { engineRequests, EXIT_SETTLE_MS } from './engine-requests';
 function scene() {
   const steps: string[] = [];
   const listeners = new Set<(state: HostState) => void>();
-  const s = { asked: false, parked: false, steps, inFlight: [] as number[] };
+  const s = { asked: false, parked: false, steps, inFlight: [] as number[], gone: false };
   const forwarded: ((value: HostResponse) => void)[] = [];
   const hosts = {
     forward: vi.fn((owner: string, request: { name: string }) => {
@@ -18,6 +18,7 @@ function scene() {
     }),
     onState: (_owner: string, listener: (state: HostState) => void) => (listeners.add(listener), () => void listeners.delete(listener)),
     parked: () => s.parked,
+    completionGone: () => s.gone, // P5 O16 M3b fix wave 2: the supervisor's reading of a completion's raising host
   };
   const clocks = {
     engineNeeded: () => void steps.push('need'),
@@ -98,5 +99,22 @@ describe('a client’s request to the engine host and the park', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(t.s.steps).toEqual(['forward pty-host pty.list']);
     expect(t.s.inFlight).toEqual([]);
+  });
+});
+
+// P5 O16 M3b fix wave 2: the exception to the rule that every client request is a need: a completion whose raising engine
+// host is gone goes straight to the supervisor, which answers it host_unavailable at once (host-supervisor.ts)
+describe('a completion whose raising host is gone', () => {
+  it('is no need, counts nothing in flight and waits on no park: straight to the supervisor', async () => {
+    const t = scene();
+    t.s.gone = true;
+    t.s.asked = true; // even after the park's ask
+    const asked = t.guard.forward('engine-host', { name: 'maws.pane.answer', input: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.s.steps).toEqual(['forward engine-host maws.pane.answer']);
+    expect(t.s.inFlight).toEqual([]);
+    expect(t.logs).toEqual([]);
+    t.answer({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'gone' } } as HostResponse);
+    await expect(asked).resolves.toMatchObject({ ok: false });
   });
 });

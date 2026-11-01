@@ -6,6 +6,7 @@
 // park. A parked host, or one that does not hand over, is refused.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { DRAIN_REPLIES } from '@shared/host/host-supervisor'; // P5 O16 M3b fix wave 2
 import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
@@ -249,5 +250,151 @@ describe('the handover and the park', () => {
     expect(scene.spawn).toHaveBeenCalledTimes(2);
     expect(daemon.hosts.parked('engine-host')).toBe(false);
     expect(daemon.hosts.snapshot('engine-host').state).toBe('ready');
+  });
+});
+
+// P5 O16 M3b fix wave 2 (#1): `mawsd` closes main's engine-host.sock link the moment its engine host leaves ready, so the
+// app's completions of the old host's in-flight calls go by main's machine.sock link (host-supervisor's `viaMachine`),
+// whose front forwards them to the host that raised each request: the draining host while it drains, a successor for its
+// own; one whose raising host is gone is answered host_unavailable at once and is no need (nothing woken, held or
+// launched). The front admits these names from main's local link; the remote endpoint's offers do not gain them
+// (test/endpoint/drain-replies.test.ts).
+describe('the completions of the old host’s calls', () => {
+  const PANE = (requestId: string) => ({ appSessionId: 'app-1', requestId, pane: 'terminal', target: null, line: null });
+  const ANSWER = (requestId: string) => ({ appSessionId: 'app-1', requestId, result: { ok: false, error: 'closed' } });
+
+  async function mainOnMawsd(daemonExtra = {}) {
+    const daemon = await scene.start(daemonExtra);
+    const shown: string[] = [];
+    const main = scene.appHosts({ emit: (name, payload) => (name === 'maws.pane.show' && void shown.push((payload as { requestId: string }).requestId), true) }, { machine: true });
+    void main.start();
+    await until(() => main.snapshot('engine-host').state === 'ready' && main.snapshot('machine').state === 'ready' && main.streaming('engine-host') && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'main’s two links, past the attach’s recycle');
+    return { daemon, main, shown };
+  }
+
+  it('the app’s pane answer during a deferred drain reaches the old host before it detaches; the successor’s own request is answered by the successor; a late answer for the gone host is refused at once', { timeout: 30_000 }, async () => {
+    const drain = { inFlight: 1 };
+    scene.engineSpawn = {
+      answers: {
+        ...{ 'host.supervisorStatus': () => holder(0) },
+        'maws.pane.answer': () => {
+          drain.inFlight = 0; // the old host's show_pane settled
+          return { outcome: 'delivered' };
+        },
+        'host.handover': () => {
+          if (drain.inFlight > 0) return { state: 'deferred', inFlight: drain.inFlight };
+          const old = scene.lastEngine();
+          setImmediate(() => void old.supervisor.die());
+          return { state: 'detaching' };
+        },
+      },
+    };
+    const { daemon, main, shown } = await mainOnMawsd();
+    const old = scene.lastEngine();
+    await until(() => old.emitRaw('maws.pane.show', PANE('req-old')), 5_000, 'a ready link to the old host'); // written once its link is ready
+    await until(() => shown.includes('req-old'), 5_000, 'the old host’s pane request at the app');
+    const cli = await scene.app('machine', { capabilities: [] });
+    expect(await cli.request('daemon.restartEngineHost')).toMatchObject({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    await until(() => main.snapshot('engine-host').state !== 'ready', 5_000, 'main’s engine-host link closed by mawsd');
+
+    const answered = await main.dispatch('engine-host', 'maws.pane.answer', ANSWER('req-old'));
+    expect(answered).toEqual({ ok: true, value: { outcome: 'delivered' } }); // the old host's answer
+    expect(old.named('maws.pane.answer')).toEqual([ANSWER('req-old')]);
+    expect(old.supervisor.exits).toEqual([]); // delivered before the detach
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
+    const successor = scene.lastEngine();
+    await until(() => successor.emitRaw('maws.pane.show', PANE('req-new')), 5_000, 'a ready link to the successor');
+    await sleep(50); // through mawsd's supervisor, which records its raiser
+    expect(await cli.request('maws.pane.answer', ANSWER('req-new'))).toMatchObject({ ok: true, value: { outcome: 'delivered' } });
+    expect(successor.named('maws.pane.answer')).toEqual([ANSWER('req-new')]);
+    const late = await cli.request('maws.pane.answer', ANSWER('req-old'));
+    expect(late).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(successor.named('maws.pane.answer')).toEqual([ANSWER('req-new')]); // never the successor's
+    expect(old.named('maws.pane.answer')).toHaveLength(1);
+  });
+
+  it('the front admits each completion from the machine’s own client and forwards it to the engine host', { timeout: 20_000 }, async () => {
+    const UUID = '00000000-0000-4000-8000-000000000002';
+    const inputs: Record<string, unknown> = {
+      'maws.pane.answer': ANSWER('req-1'),
+      'maws.artifact.captured': { appSessionId: 'app-1', requestId: 'req-2', result: { ok: false, error: 'no display' } },
+      'maws.artifact.exported': { appSessionId: 'app-1', requestId: 'req-3', answer: { ok: false, error: 'closed' } },
+      'maws.artifact.datasetRefreshed': { requestId: UUID, outcome: { ok: true } },
+      'artifacts.datasetRefreshRequest': { requestId: UUID },
+    };
+    expect(Object.keys(inputs).sort()).toEqual([...DRAIN_REPLIES].sort());
+    scene.engineSpawn = { answers: { 'host.supervisorStatus': () => holder(0) } };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const cli = await scene.app('machine', { capabilities: [] });
+    for (const [name, input] of Object.entries(inputs)) {
+      expect(await cli.request(name, input), name).toMatchObject({ ok: true });
+      expect(scene.lastEngine().named(name), name).toEqual([input]);
+    }
+  });
+
+  it('to a parked engine host: answered host_unavailable at once, nothing launched and the park left as it was', async () => {
+    const daemon = await scene.start();
+    const cli = await scene.app('machine', { capabilities: [] });
+    expect(daemon.hosts.parked('engine-host')).toBe(true);
+    const asked = Date.now();
+    expect(await cli.request('maws.pane.answer', ANSWER('req-stale'))).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(await cli.request('maws.artifact.datasetRefreshed', { requestId: '00000000-0000-4000-8000-000000000001', outcome: { ok: true } })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(Date.now() - asked).toBeLessThan(1_000);
+    await sleep(200);
+    expect(scene.spawn).not.toHaveBeenCalled();
+    expect(daemon.hosts.parked('engine-host')).toBe(true);
+  });
+});
+
+// P5 O16 M3b fix wave 2 (#2): a deliberate stop reaches the host that still owns the drain, by main's machine.sock link
+// while its engine-host link is down; that link keeps its `replace`, so whether the stop or the drain ends the old host,
+// its close starts the successor: never a park with detached rows.
+describe('a deliberate stop during the drain', () => {
+  async function deferred(stopAll: () => unknown) {
+    scene.engineSpawn = { answers: { 'host.supervisorStatus': () => holder(0), 'host.handover': () => ({ state: 'deferred', inFlight: 1 }), 'host.stopAll': stopAll } };
+    const daemon = await scene.start();
+    const main = scene.appHosts({}, { machine: true });
+    void main.start();
+    await until(() => main.snapshot('engine-host').state === 'ready' && main.snapshot('machine').state === 'ready' && main.streaming('engine-host') && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'main’s two links, past the attach’s recycle');
+    const old = scene.lastEngine();
+    const cli = await scene.app('machine', { capabilities: [] });
+    expect(await cli.request('daemon.restartEngineHost')).toMatchObject({ ok: true, value: { state: 'deferred' } });
+    await until(() => main.snapshot('engine-host').state !== 'ready', 5_000, 'main’s engine-host link closed by mawsd');
+    return { daemon, main, old };
+  }
+  const exitsAfterAnswer = () => {
+    const old = scene.lastEngine();
+    setImmediate(() => void old.supervisor.die()); // a stop-all's exit, after its answer
+    return { stopped: 2, forced: 0 };
+  };
+
+  it('Settings’ stop-all (restartSupervisor {stopSessions: true}) reaches the old host; its close starts the successor', async () => {
+    const { daemon, main, old } = await deferred(exitsAfterAnswer);
+    expect(await main.restartSupervisor({ stopSessions: true })).toEqual({ ok: true, value: undefined });
+    expect(old.named('host.stopAll')).toEqual([{ graceMs: 5_000 }]);
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+    expect(scene.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('the quit’s stop-all reaches the old host; its close starts the successor', async () => {
+    const { daemon, main, old } = await deferred(exitsAfterAnswer);
+    await main.stopAllForQuit(4_000);
+    expect(old.named('host.stopAll')).toEqual([{ graceMs: 4_000 }]);
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+  });
+
+  it('a stop-all the old host never answers, its drain outlasting the request deadline: the close still starts the successor, no park', { timeout: 40_000 }, async () => {
+    const { daemon, main, old } = await deferred(() => new Promise(() => {}));
+    const stopped = main.restartSupervisor({ stopSessions: true });
+    await until(() => old.named('host.stopAll').length === 1, 5_000, 'the stop at the old host');
+    expect(await stopped).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    await old.supervisor.die(); // the drain settled past the deadline: its rows detached, it exits
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
+    expect(daemon.hosts.parked('engine-host')).toBe(false);
+    expect(scene.spawn).toHaveBeenCalledTimes(2);
   });
 });

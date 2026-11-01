@@ -17,6 +17,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
 import { remoteRow } from '../../../../test/support/builders'; // P5 O7 M2
+import { REATTACHING_STOP_REMOTE } from './submit/submit-state'; // P5 O16 M3b fix wave 2
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
@@ -1246,6 +1247,20 @@ describe('a lane B session on another machine', () => {
     mount([{ index: 0, id: R }]);
     expect(within(composerOf(0)).getByRole('button', { name: /^Model / }).title).toBe(reason);
     expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).toBe(reason);
+  });
+
+  // P5 O16 M3b fix wave 2: re-attaching after its machine's engine host was replaced, the session's Stop would be
+  // session.stop, which its machine's link does not carry: disabled, saying so, and nothing is asked of the machine
+  it('a re-attaching session there: Stop disabled with its reason, nothing sent', async () => {
+    act(() => {
+      useSessions.setState({ engine: new Map(useSessions.getState().engine).set(R, addressing.output('engine.sessions').lift([{ ...status('app-r', { process: 'initializing' }), holder: { pid: 4100, holderId: 'L-1', adopted: true } }], OTHER_MACHINE)[0]!) });
+    });
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(primary().dataset.submitState).toBe('end'));
+    expect(primary().textContent).toBe('Stop');
+    expect(primary().disabled).toBe(true);
+    expect(primary().title).toBe(REATTACHING_STOP_REMOTE);
+    expect(remote.invoked('session.stop')).toEqual([]);
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

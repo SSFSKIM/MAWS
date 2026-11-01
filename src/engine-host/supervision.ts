@@ -152,6 +152,9 @@ export class Supervision {
       }
     });
     on('host.stopAll', async ({ graceMs }) => {
+      // P5 O16 M3b fix wave 2: once the drain has settled its rows are detached for the successor, which alone can stop
+      // them; before, the stop-all takes every frozen row back (session.ts `stop`) and the exit is the stop-all's
+      if (this.drain?.settled) throw new HostCommandError({ code: 'host_unavailable', message: 'this engine host handed its sessions over; its successor stops them' });
       const exits = this.exit !== null && this.leaving === null;
       if (exits) this.leaving = 'stopAll'; // no other exit may close the client before the answer is written
       this.stopping = true;

@@ -210,6 +210,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     availability, // P2-A
     heldBy, // P2-A
     driven, // P5 O9 M5
+    remote: isRemoteLaneB(appSessionId), // P5 O16 M3b fix wave 2
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------

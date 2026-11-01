@@ -282,6 +282,7 @@ export class EngineSession {
   private reapView: ReapView | null = null;
   private descendants: number | null = 0;
   private reapIgnored = false;
+  private reaping = false; // P5 O16 M3b fix wave 2: an idle reap between its end_session and its verdict
   private mcpServerCommands: string[][] | null = null;
   private mcpRead: Promise<void> | null = null;
   private observerSaved = false;
@@ -650,17 +651,22 @@ export class EngineSession {
       if (this.processState === 'exiting') await this.exited; // an explicit stop took over through the ladder
       return this.processState === 'exited' ? 'exited' : null;
     };
-    this.reapRow('end_session');
-    endSession(client, { reason: 'stop' }).catch(() => {}); // the exit is the answer that matters
-    if (await this.exitWithin(LADDER_MS.endSession) || await taken()) return 'exited';
-    this.reapRow('term');
-    transport.kill('SIGTERM');
-    if (await this.exitWithin(REAP_TERM_MS) || await taken()) return 'exited';
-    this.reapRow('term_ignored');
-    this.reapIgnored = true;
-    this.tracker.termIgnored();
-    this.touch();
-    return 'ignored';
+    this.reaping = true;
+    try {
+      this.reapRow('end_session');
+      endSession(client, { reason: 'stop' }).catch(() => {}); // the exit is the answer that matters
+      if (await this.exitWithin(LADDER_MS.endSession) || await taken()) return 'exited';
+      this.reapRow('term');
+      transport.kill('SIGTERM');
+      if (await this.exitWithin(REAP_TERM_MS) || await taken()) return 'exited';
+      this.reapRow('term_ignored');
+      this.reapIgnored = true;
+      this.tracker.termIgnored();
+      this.touch();
+      return 'ignored';
+    } finally {
+      this.reaping = false;
+    }
   }
 
   private reapRow(phase: 'end_session' | 'term' | 'term_ignored'): void {
@@ -1206,9 +1212,11 @@ export class EngineSession {
     return this.leftHandover;
   }
 
-  // Fix wave 1: a stop or release whose ladder is under way: a handover freezes nothing that is ending.
+  // Fix wave 1: a stop or release whose ladder is under way: a handover freezes nothing that is ending. Fix wave 2: the
+  // termination itself, not the reason it keeps: an idle reap both of whose signals were ignored keeps `idle` for a later
+  // exit while its engine runs on, ready, so it is frozen and detached like any other row.
   get ending(): boolean {
-    return this.stopReason !== null;
+    return this.processState === 'exiting' || this.reaping;
   }
 
   // The row let go for the successor: the writer's in-flight writes awaited (bounded by EOF_WRITE_WAIT_MS), the

@@ -5,7 +5,10 @@
 // the engine host through `mawsd` (the front's forward, the endpoint's, the artifact endpoint's lookups, the render
 // seam's answers to the bridges) goes through here:
 // - it is a need (`DaemonClocks.engineNeeded`): the park clock starts again from it, and a discovery wake's park still
-//   to be asked is left to the clock, so the host woken for a read and then asked for more stays up;
+//   to be asked is left to the clock, so the host woken for a read and then asked for more stays up. The one exception
+//   (P5 O16 M3b fix wave 2, the handover's completion route): a completion (host-supervisor.ts DRAIN_REPLIES) whose
+//   raising engine host is gone is no need: it is answered `host_unavailable` at once, waits on no park and wakes,
+//   holds or launches no host, since no call is left for it to settle;
 // - while any is in flight no park is asked (`DaemonClocks.engineRequests`);
 // - one that arrives after the ask was sent waits for that host's exit (bounded by EXIT_SETTLE_MS), and then goes as any
 //   request to a parked host does: the supervisor holds it and starts the next host for it. A host still serving after
@@ -20,7 +23,7 @@ export const EXIT_SETTLE_MS = 5_000;
 type Forward = HostSupervisor['forward'];
 
 export interface EngineRequestsOptions {
-  hosts: Pick<HostSupervisor, 'forward' | 'onState' | 'parked'>;
+  hosts: Pick<HostSupervisor, 'forward' | 'onState' | 'parked' | 'completionGone'>;
   clocks: Pick<DaemonClocks, 'engineNeeded' | 'engineRequests' | 'parkAsked' | 'takeBackPark'>;
   log(line: string): void;
   exitSettleMs?: number;
@@ -49,6 +52,7 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
 
   const forward: Forward = async (owner: HostOwner, request) => {
     if (owner !== 'engine-host') return hosts.forward(owner, request);
+    if (hosts.completionGone(owner, request.name, request.input)) return hosts.forward(owner, request); // the exception above: answered at once
     inFlight += 1;
     clocks.engineRequests(inFlight);
     clocks.engineNeeded();

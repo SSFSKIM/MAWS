@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { humanTurn, status } from '../../../../../test/support/builders';
-import { isBusy, steerPriority, submitState, type SubmitInput } from './submit-state';
+import { isBusy, REATTACHING_STOP_REMOTE, steerPriority, submitState, type SubmitInput } from './submit-state';
 
 const APP = 'app-1';
 const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): QueueEntry => ({
@@ -160,6 +160,9 @@ describe('a session with a record and no ready process: its availability decides
     expect(row({ status: adopting, availability: 'starting', empty: true })).toEqual(['end', 'Stop', true, null, false]);
     expect(row({ status: adopting, availability: null, empty: true })).toEqual(['end', 'Stop', true, null, false]);
     expect(row({ status: { ...idle, process: 'initializing' }, availability: 'starting', empty: true })[0]).toBe('send'); // a plain start keeps its Starting…
+    // fix wave 2: a session on another machine has no session.stop on its link: the control says so, disabled
+    expect(row({ status: adopting, availability: 'starting', empty: true, remote: true })).toEqual(['end', 'Stop', false, REATTACHING_STOP_REMOTE, false]);
+    expect(row({ status: adopting, availability: null, empty: true, remote: true })).toEqual(['end', 'Stop', false, REATTACHING_STOP_REMOTE, false]);
   });
 
   it('foreign_held: disabled with the holder’s words', () => {
