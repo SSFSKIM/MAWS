@@ -29,7 +29,8 @@
 | `host.holder` | capability on the engine host's welcome and on the app's and `mawsd`'s hellos | O16 M2, M3 | `mawsd`'s detached transport |
 | `host.handover`, `daemon.restartEngineHost`, `daemon.status.sessionHosts`, `release.gate` | commands and status fields | O16 | `mawsd`'s CLI; O7's remote streams see `reconnect {trigger: 'host_restart'}` and the status's `holder` |
 | `gate.sock` protocol (OX10 as adopted, O16 Interfaces §E) | engine host to observer bridge | O16 M5 | O12 M4 (sminos), its fixture `spikes/protocol-probe/fixtures/p5/p5-o16-gate.jsonl` |
-| `session.spawn`, `files.upload` `part`, `pty.op`, `pty.opQuery`, `pty.listFor`, `pty.replay`, `machine.op.action`, `remote.*`, `launchedBy` | commands and fields | O7 M3, M4 | O12's observer reads `launchedBy` (P5 item 7) |
+| `session.spawn`, `files.upload` `part`, `pty.op`, `pty.opQuery`, `pty.listFor`, `pty.replay`, `machine.op.action`, `remote.*`, `launchedBy` | commands and fields | O7 M3, M4 | O12 M11 reads `launchedBy` (P5 item 7): the launch's environment and the endpoint's bridge; O7 M4 pins it written once, by `session.spawn`'s handler alone |
+| `LaunchSpec.launchedBy`, the launch environment's `MAWS_LAUNCHED_BY`, the proof file `launched-by/<appSessionId>.json` (O12 Interfaces §H) | launch spec field, engine env, spine file | O12 M11 (desk track), after O7 M4 | sminos's record hook (O12 M11) |
 | `rl2.executor.machine`, `rl2.call-session`, `rl2.feeds`, `rl2.executor.pty-host`, `rl2.streams`, `rl2.pong-clock`, `rl2.client-port` | RL2 capabilities | O7 | the endpoint (desk track's O10 code, edited by O7 with the desk track told) |
 | `connectors.reset` | main-owned event to the app's windows, off the wire manifest | O4 M2 | the renderer's connectors client rebuilds its leases on it |
 | router `before(names, hook)` seam | src/main/ipc/router.ts | O4 M2 | O4's window report and its delivery cancel |
@@ -107,6 +108,8 @@
 | `test/support/mawsd-scene.ts` (`ENGINE_COMMANDS` gains `maws.artifact.captured` and `.exported`, the stand-in registry those two events; StandIn.clients as O7 M2 wrote it), the new `e2e/support/unit-daemon.ts` | O5 landing 1, after O7 M2 | a sibling extending the scene's command or event lists adds to them; cross-build's unit-daemon scenes use the new support file |
 | `src/shared/host/host-supervisor.ts`'s `forward` with a `ClientRef` (O7 M2's hunk, applied verbatim by O5 M4 for the render client's end) | O7 M2 first (#410), O5 landing 1 takes master's text | the later lander keeps one copy; O16 carries it through its re-homing |
 | `src/shared/catalog/engine-view.ts` (the spec's shared view) | O4 M3, lands with O4 | a sibling reading the engine's catalog view imports it rather than restating it |
+| `src/engine-host/launch.ts` (`buildEnvironment`), `src/shared/engine/launch-spec.ts`, `src/services/sessions/launch-mapping.ts` and the start and resume flows (`setup.ts`, `resume.ts`) | O12 M11 (`MAWS_LAUNCHED_BY` and its proof file), O16 M3b and M3c (the launch's re-homing), O5 landing 2 (`CUA_BROWSER_BACKENDS` in the start and resume flows) | M11 lands after O7 M4; whichever of the three lands second merges the other; the variable reaches every launch whose session's record carries `launchedBy`, resume included |
+| `src/endpoint/targets.ts` (`laneB` returns the spine record's `launchedBy`), `src/endpoint/authorize.ts` (`Reads.record`'s bridge) | O7 (M4's fix waves), O12 M11 | M11 lands after O7 M4 and reconciles |
 
 ## Start order
 
@@ -127,3 +130,4 @@
 - 2026-10-31, the architect: O7 M4a1 drops its index migration 16 for `ADDED_COLUMNS` after the cross-build downgrade lost the whole index (run 41237182488); the mechanism is a wave 2 rule for every child.
 - 2026-10-31, the architect: rule 5 additions from O5 landing 1 (the park need on the front's forward), O7 M4a2 (RL2 1.2's call session and feeds, the checkout rule's bounds and feed, `rl2.events-budget`) and O16 M3a (adoption's wire, journal and launch seams, its module-local set by reference, its test support).
 - 2026-10-31, the architect: rule 5 additions from O7 M4a2's fix waves and M4b (the placement flag, the checkout feed's session record, `remote.upload`, main's machine dispatch with a session, the remote link's capabilities and feed subscriptions, lane B main's checkout, upload, history and idle names).
+- 2026-11-01, p5-desk-track-owner, on the architect's routing: O12 M11's names (`LaunchSpec.launchedBy`, `MAWS_LAUNCHED_BY`, the proof file) and its shared files (the launch's environment and flows beside O16's re-homing and O5's landing 2; `targets.ts` and `authorize.ts` after O7 M4); `launchedBy`'s consumer row names M11 and the write-once rule O7 M4 pins.
