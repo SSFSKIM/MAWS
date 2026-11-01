@@ -498,19 +498,30 @@ describe('the machine’s attention feed', () => {
     expect(of(b, 'att', from).filter((m) => m.t === 'ev')).toEqual([]);
   });
 
-  it('is refused to a web-cards device, and ends `behind` past its backlog', async () => {
+  it('is refused to a web-cards device, and holds one output for a device that reads nothing, which then gets the latest', async () => {
     const f = await startEndpoint(org, started, { subscriptions: { backlogBytes: 2048 } });
     const machine = machineAttention(f);
     shared(f, 'app-1', 'view');
-    machine.seed('app-1', [att('app-1', 'r0')]); // placed at the opening, so each change goes as it comes
+    machine.seed('app-1', [att('app-1', 'r0')]);
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(await feed(c, 'att', null, 'attention')).toMatchObject({ t: 'ended', reason: 'class' });
     const b = await openRemote(f, org.b1, org.B);
     const from = b.inbox.length;
     await b.channel.send({ t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit: 1 });
     await waitFor(b, (m) => m.sub === 'att' && m.t === 'snap', 'the snapshot', from);
-    for (let i = 0; i < 40; i++) machine.set('app-1', [att('app-1', `r${i}`)]);
-    expect(await waitFor(b, (m) => m.sub === 'att' && m.t === 'ended', 'the feed’s end', from)).toMatchObject({ reason: 'behind' });
+    // The snapshot spent the credit: 40 changes leave one output queued, never a backlog past the bound.
+    for (let i = 1; i <= 40; i++) machine.set('app-1', [att('app-1', `r${i}`)]);
+    await settle();
+    expect(of(b, 'att', from).filter((m) => m.t === 'ev' || m.t === 'ended')).toEqual([]);
+    await b.channel.send({ t: 'credit', sub: 'att', bytes: 1024 * 1024 });
+    await until(() => bodies(b, 'att', from).at(-1)?.items[0]?.id === 'att-r40', 'the latest items');
+    await settle();
+    // The output queued before the credit came, then the latest: not each change on the way.
+    expect(bodies(b, 'att', from)).toEqual([
+      { appSessionId: 'app-1', items: [att('app-1', 'r1')] },
+      { appSessionId: 'app-1', items: [att('app-1', 'r40')] },
+    ]);
+    expect(of(b, 'att', from).filter((m) => m.t === 'ended')).toEqual([]);
   });
 });
 
@@ -559,6 +570,30 @@ describe('the each-session calls', () => {
     expect(searched).toHaveLength(3);
     expect(await call(c, 'attention.list', null)).toMatchObject({ ok: false, error: { code: 'class' } });
     expect(engineReads(f)).toBe(engine);
+  });
+
+  // Fix wave 1: the placement a call read is not the one its answer is cut by once the session's record moved meanwhile.
+  it('cut by the session’s record as it stands when the answer goes, though `session.get` answered an older one', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    f.records.set({ lane: 'B', session: 'eng-moved', owners: ['@machine'], access: 'private' }, 'app-1'); // B holds nothing on it
+    f.spine.handle('session.search', () => ({ hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }));
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [{ appSessionId: 'app-1', snippet: 'one' }] } });
+    // `session.get` of app-1 held; its answer, when it comes, is the record from before the move.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const dispatch = f.spine.dispatch.bind(f.spine);
+    f.spine.dispatch = async (name, input, client) => {
+      const answer = await dispatch(name, input, client);
+      if (name === 'session.get') await held;
+      return answer;
+    };
+    const asked = call(b, 'session.search', { query: 'word' });
+    await until(() => f.host.calls.filter((c) => c.name === 'session.get').length >= 2, 'the held placement read');
+    f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-1')!, engineSessionId: 'eng-moved' }, cause: 'update', revision: 2 });
+    release();
+    expect(await asked).toMatchObject({ ok: true, output: { hits: [] } });
   });
 });
 

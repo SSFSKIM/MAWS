@@ -4,25 +4,30 @@
 // what it carries is cut per session to the ones the member holds `view` on, as their rights stand when it goes.
 //
 // Every opening is `subbed {mode: 'snapshot', epoch: 'attention:<this endpoint's boot>', seq: 0}` with its `snap`, the
-// machine's `attention.list` cut so; then each `attention.changed` (owner `machine`) of a session the member views goes
-// as `ev {body: {appSessionId, items}}` at the next `seq`, the session's whole list (replace). The cut follows the
-// member's rights: at every record change and every new head (`accessChanged`) the feed works out again which sessions
-// the member views, and a session that left the set goes as `{appSessionId, items: []}`, one that joined as its items
-// now, so a permission already waiting on a session shared a moment ago shows at once. A member who views nothing holds
-// an open, empty feed, which fills at the first share: it lives with its channel, never ending for being empty.
+// machine's `attention.list` cut so; then each change of what the member should hold of a session goes as `ev {body:
+// {appSessionId, items}}` at the next `seq`, the session's whole list (replace). The cut follows the member's rights: at
+// every record change and every new head (`accessChanged`) the feed works out again which sessions the member views, and
+// a session that left the set goes as `{appSessionId, items: []}`, one that joined as its items now, so a permission
+// already waiting on a session shared a moment ago shows at once. A member who views nothing holds an open, empty feed,
+// which fills at the first share: it lives with its channel, never ending for being empty.
 //
 // How. The feed keeps the machine's items as `attention.list` answered them and each `attention.changed` replaced them
 // since (the changes heard while that read is out are laid over its answer), each session's placement by its record
 // (`session.get`, then each `session.changed`; targets.ts' `recordedPlacement`, never the engine host, which a read would
-// wake), and what the device holds of each session. Whatever moves, `#settle` compares what the device should hold with
-// what it holds and sends the difference, deciding and sending in one synchronous step (M3's lesson: the defects lived
-// where two transitions met): the records are read as it decides, so no change of rights can fall between the decision
-// and the message, and a change of items heard while a session's placement or the member's ranks are read is sent, cut,
-// once they land. Before the snapshot goes nothing else does: it waits for the list, every listed session's placement
-// and the ranks, and is cut as things stand when it goes.
+// wake), what the device was given of each session, and the one output queued and not yet taken (`pending`).
 //
-// It ends with its channel, `removed` with the device (the channel's), `behind` once the device leaves more than its
-// backlog unread (as the `checkout` feed), and `unavailable` when the machine can't answer `attention.list`.
+// Output crosses no change of rights (fix wave 1). The device's credit can hold what is queued for as long as it likes, so
+// a decision made when a message was queued is not one about when it leaves. The feed queues one output at a time (the
+// snapshot, or one session's change) and works out the next only once that one was taken; and at every change of
+// rights it checks the queued output again against the rights now, before anything more of it can leave: while it can't
+// (the member's ranks or a session's placement being read) the subscription is held; one that no longer stands is taken
+// back (an `ev` unqueued, a snapshot replaced whole) and what the device should hold is worked out afresh. A snapshot of
+// which some pages already left can't be taken back: the feed ends `behind`, and the device opens it again. Since only
+// one output waits, a device that reads slowly gets each session's latest state, not every change on the way.
+//
+// It ends with its channel, `removed` with the device (the channel's), `behind` once what it queued passes plane B's
+// backlog bound (as the `checkout` feed) or a part-sent snapshot no longer stands, and `unavailable` when the machine
+// can't answer `attention.list` or a session's placement (`session.get`): the device opens it again on its backoff.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { SessionRanks } from './authorize';
@@ -35,17 +40,22 @@ export type AttentionFeedsContext = {
   /** The member's ranks on the machine's sessions as the head now gives them (`Authorizer.ranks`). */
   ranks(member: string): Promise<SessionRanks>;
   log(line: string): void;
-  /** The most a feed's unread stream may hold before it ends `behind`. */
+  /** The most a feed's queued stream may hold before it ends `behind`. */
   backlogBytes?: number;
 };
 
 type Items = readonly unknown[];
 
+/** What is queued on the subscription and not yet taken: the snapshot (each session's items in it), or one session's change. */
+type Pending = { kind: 'snapshot'; sessions: ReadonlyMap<string, Items> } | { kind: 'change'; appSessionId: string; items: Items | null };
+
 type Feed = {
   sub: Subscription;
   seq: number;
-  /** The snapshot went: what changes goes as `ev`s from here on. */
-  opened: boolean;
+  /** Its `subbed` was queued (once: a snapshot taken back is replaced under it). */
+  subbed: boolean;
+  /** The snapshot was queued (it is `pending`, or was taken): what changes goes as `ev`s after it. */
+  snapshotted: boolean;
   /** The machine's items by session (a session with none is absent); null until `attention.list` answers. */
   items: Map<string, Items> | null;
   /** The changes heard while `attention.list` is out, the latest per session, laid over its answer. */
@@ -54,14 +64,16 @@ type Feed = {
   placed: Map<string, Placement>;
   /** The placement reads out, by session, numbered: a `session.changed` heard meanwhile supersedes the read. */
   placing: Map<string, number>;
-  /** What the device holds of each session: the items last sent (a session it holds none of is absent). */
-  sent: Map<string, Items>;
+  /** What the device was given of each session, as taken (a session it holds none of is absent). */
+  given: Map<string, Items>;
+  pending: Pending | null;
   /** The member's ranks; null while they are read. */
   ranks: SessionRanks | null;
   /** Reads of the ranks begun: only the latest one's answer is taken. */
   rankReads: number;
 };
 
+const SNAPSHOT = 'attention';
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
 
@@ -76,8 +88,10 @@ export class AttentionFeeds {
   }
 
   open(sub: Subscription): void {
-    const feed: Feed = { sub, seq: 0, opened: false, items: null, early: new Map(), placed: new Map(), placing: new Map(), sent: new Map(), ranks: null, rankReads: 0 };
+    const feed: Feed = { sub, seq: 0, subbed: false, snapshotted: false, items: null, early: new Map(), placed: new Map(), placing: new Map(), given: new Map(), pending: null, ranks: null, rankReads: 0 };
     this.#feeds.set(sub, feed);
+    // The device took some of the stream, or credit came: the queued output may be taken, and the next one due.
+    sub.onRoom = () => this.#settle(feed);
     void this.#readRanks(feed);
     void this.#readItems(feed);
   }
@@ -130,21 +144,17 @@ export class AttentionFeeds {
       this.#ctx.log(`endpoint: an attention feed's snapshot could not be read: ${answer.ok ? 'not a list' : `${answer.error.code} (${answer.error.message})`}`);
       return void feed.sub.end('unavailable');
     }
-    const items = new Map<string, unknown[]>();
+    const items = new Map<string, Items>();
     for (const item of answer.value as unknown[]) {
       const id = isObject(item) ? item.appSessionId : undefined;
-      if (!isId(id)) continue;
-      const list = items.get(id);
-      if (list === undefined) items.set(id, [item]);
-      else list.push(item);
+      if (isId(id)) items.set(id, [...(items.get(id) ?? []), item]);
     }
-    const machine = new Map<string, Items>(items);
     for (const [id, list] of feed.early) {
-      if (list.length === 0) machine.delete(id);
-      else machine.set(id, list);
+      if (list.length === 0) items.delete(id);
+      else items.set(id, list);
     }
     feed.early.clear();
-    feed.items = machine;
+    feed.items = items;
     this.#settle(feed);
   }
 
@@ -164,15 +174,21 @@ export class AttentionFeeds {
     this.#settle(feed);
   }
 
-  /** The session's placement by its record, read for this feed's channel; settled again when it lands. */
+  /**
+   * The session's placement by its record, read for this feed's channel; settled again when it lands. A spine that
+   * can't answer ends the feed `unavailable` (fix wave 1): a session it can't place is not one nobody may rank, and the
+   * device's reopening reads it again.
+   */
   async #place(feed: Feed, id: string): Promise<void> {
     const n = ++this.#placeReads;
     feed.placing.set(id, n);
-    let placement: Placement = null;
+    let placement: Placement;
     try {
       placement = await placeRecorded(id, dispatchAs(this.#ctx.dispatch, feed.sub.channel.client));
     } catch (error) {
+      if (feed.placing.get(id) !== n || this.#feeds.get(feed.sub) !== feed) return;
       this.#ctx.log(`endpoint: an attention feed could not place a session: ${(error as Error).message}`);
+      return void feed.sub.end('unavailable');
     }
     if (feed.placing.get(id) !== n || this.#feeds.get(feed.sub) !== feed) return;
     feed.placing.delete(id);
@@ -181,60 +197,106 @@ export class AttentionFeeds {
   }
 
   /**
-   * What the device should hold against what it holds, the difference sent: the decision and the messages in one
-   * synchronous step, against the records as they stand. Anything it can't decide yet (a placement or the ranks being
-   * read) is decided when that lands.
+   * The feed against the rights now, in one synchronous step: the queued output is checked again (held while it can't
+   * be, taken back once it no longer stands), and once nothing waits, the next output is queued, so what leaves was
+   * allowed under the rights that stand when it is taken.
    */
   #settle(feed: Feed): void {
-    const { sub, items } = feed;
-    if (sub.ended || items === null) return;
-    const sessions = new Set([...items.keys(), ...feed.sent.keys()]);
-    let unplaced = false;
-    for (const id of sessions) {
-      if (feed.placed.has(id)) continue;
-      unplaced = true;
-      if (!feed.placing.has(id)) void this.#place(feed, id);
-    }
-    if (feed.ranks === null) return;
-    if (!feed.ranks.current()) return void this.#readRanks(feed);
-    const ranks = feed.ranks;
-    const views = (id: string) => feed.placed.has(id) && ranks.holds(feed.placed.get(id)!, 'view');
-    if (!feed.opened) {
-      if (unplaced) return;
-      feed.opened = true;
-      const snap: unknown[] = [];
-      for (const [id, list] of items) {
-        if (!views(id)) continue;
-        feed.sent.set(id, list);
-        snap.push(...list);
+    const { sub } = feed;
+    for (;;) {
+      if (sub.ended || feed.items === null) return;
+      if (feed.pending !== null && sub.backlog === 0) this.#taken(feed);
+      this.#placeMissing(feed);
+      if (feed.ranks !== null && !feed.ranks.current()) void this.#readRanks(feed);
+      if (feed.pending !== null) {
+        const verdict = this.#stands(feed, feed.pending);
+        if (verdict === 'unknown') return void sub.hold();
+        if (verdict === 'stands') return void sub.unhold();
+        if (!this.#takeBack(feed)) return;
       }
-      const at = { epoch: this.#epoch, seq: 0 };
-      sub.subbed('snapshot', at);
-      sub.snap(at, snap);
-      return;
+      if (feed.ranks === null) return;
+      sub.unhold();
+      const queued = this.#queueNext(feed);
+      if (!queued) return this.#prune(feed);
+      if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return void sub.end('behind');
+      if (sub.backlog > 0) return; // taken later: `onRoom` settles again
     }
-    for (const id of sessions) {
-      if (!feed.placed.has(id)) continue;
-      const now = views(id) ? (items.get(id) ?? null) : null;
-      const was = feed.sent.get(id) ?? null;
-      if (now === was) continue;
-      if (now === null) feed.sent.delete(id);
-      else feed.sent.set(id, now);
-      if (!this.#send(feed, { appSessionId: id, items: now ?? [] })) return;
-    }
-    // A session the device holds nothing of and the machine lists nothing for needs no placement kept.
-    for (const id of feed.placed.keys()) if (!items.has(id) && !feed.sent.has(id)) feed.placed.delete(id);
   }
 
-  /** One change at the next `seq`; false once the feed ended (`behind`). */
-  #send(feed: Feed, body: { appSessionId: string; items: Items }): boolean {
+  /** The queued output left: the device holds it. */
+  #taken(feed: Feed): void {
+    const pending = feed.pending!;
+    feed.pending = null;
+    if (pending.kind === 'snapshot') for (const [id, items] of pending.sessions) feed.given.set(id, items);
+    else if (pending.items === null) feed.given.delete(pending.appSessionId);
+    else feed.given.set(pending.appSessionId, pending.items);
+  }
+
+  /** Whether the member views the session now (false while its placement is unknown). */
+  #views(feed: Feed, id: string): boolean {
+    return feed.ranks !== null && feed.placed.has(id) && feed.ranks.holds(feed.placed.get(id)!, 'view');
+  }
+
+  /** Whether the queued output still stands under the rights now: `unknown` while the ranks or a placement are read. */
+  #stands(feed: Feed, pending: Pending): 'stands' | 'withdrawn' | 'unknown' {
+    if (pending.kind === 'change' && pending.items === null) return 'stands'; // emptying a session tells nothing
+    if (feed.ranks === null) return 'unknown';
+    const sessions = pending.kind === 'snapshot' ? [...pending.sessions.keys()] : [pending.appSessionId];
+    if (sessions.some((id) => !feed.placed.has(id))) return 'unknown';
+    return sessions.every((id) => this.#views(feed, id)) ? 'stands' : 'withdrawn';
+  }
+
+  /** The queued output no longer stands: taken back. False when it can't be (a part-sent snapshot): the feed ended. */
+  #takeBack(feed: Feed): boolean {
     const { sub } = feed;
-    if (sub.ended) return false;
-    if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) {
-      sub.end('behind');
-      return false;
+    if (feed.pending!.kind === 'snapshot') {
+      if (sub.midSnapshot) {
+        sub.end('behind');
+        return false;
+      }
+      sub.dropSnapshot(SNAPSHOT); // its `subbed`, already queued, stands: the snapshot queued next replaces it
+      feed.snapshotted = false;
+    } else {
+      sub.clear();
     }
-    sub.ev({ epoch: this.#epoch, seq: ++feed.seq }, body);
+    feed.pending = null;
     return true;
+  }
+
+  /** The next output, queued: the snapshot, then the first session whose due items differ from the device's. False: none. */
+  #queueNext(feed: Feed): boolean {
+    const { sub } = feed;
+    const items = feed.items!;
+    if (!feed.snapshotted) {
+      if ([...items.keys()].some((id) => !feed.placed.has(id))) return false;
+      const sessions = new Map([...items].filter(([id]) => this.#views(feed, id)));
+      const at = { epoch: this.#epoch, seq: 0 };
+      if (!feed.subbed) sub.subbed('snapshot', at);
+      feed.subbed = true;
+      feed.snapshotted = true;
+      feed.pending = { kind: 'snapshot', sessions };
+      sub.snap(at, [...sessions.values()].flat(), SNAPSHOT);
+      return true;
+    }
+    for (const id of new Set([...items.keys(), ...feed.given.keys()])) {
+      if (!feed.placed.has(id)) continue; // its placement is read: settled again when it lands
+      const due = this.#views(feed, id) ? (items.get(id) ?? null) : null;
+      if (due === (feed.given.get(id) ?? null)) continue;
+      feed.pending = { kind: 'change', appSessionId: id, items: due };
+      sub.ev({ epoch: this.#epoch, seq: ++feed.seq }, { appSessionId: id, items: due ?? [] });
+      return true;
+    }
+    return false;
+  }
+
+  /** Starts a placement read for every session the feed needs and hasn't placed. */
+  #placeMissing(feed: Feed): void {
+    const pending = feed.pending === null ? [] : feed.pending.kind === 'snapshot' ? [...feed.pending.sessions.keys()] : [feed.pending.appSessionId];
+    for (const id of new Set([...feed.items!.keys(), ...feed.given.keys(), ...pending])) if (!feed.placed.has(id) && !feed.placing.has(id)) void this.#place(feed, id);
+  }
+
+  /** A session the device holds nothing of, the machine lists nothing for and nothing queued names needs no placement kept. */
+  #prune(feed: Feed): void {
+    for (const id of feed.placed.keys()) if (!feed.items!.has(id) && !feed.given.has(id)) feed.placed.delete(id);
   }
 }

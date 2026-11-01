@@ -475,6 +475,7 @@ export class Endpoint implements EndpointModule {
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
+        this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
       }),

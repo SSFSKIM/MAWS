@@ -52,12 +52,15 @@ export type Mode = 'replay' | 'snapshot' | 'missing';
 /** Where a stream stands: lane A's `(epoch, seq)`, lane B's `(launchId, seq, idx)`. */
 export type Position = { epoch: string; seq: number; idx?: number };
 
-/** A plane: lane A's or lane B's half of every subscription on its lane. */
-export interface Plane {
+/**
+ * A plane: lane A's or lane B's half of every subscription on its lane (each names its session: `SessionSubscription`),
+ * or the feeds'.
+ */
+export interface Plane<S extends Subscription = Subscription> {
   /** An authorized subscription: answer it (`subbed`, or `end`) and stream to it. */
-  open(sub: Subscription): void;
+  open(sub: S): void;
   /** The subscription is over (unsubscribed, replaced, ended, its channel gone); `retain`: keep its cursor resumable. */
-  close(sub: Subscription, retain: boolean): void;
+  close(sub: S, retain: boolean): void;
   /** The cursors a dropped channel left resumable, for the access re-check (lane A's). */
   retained?(): Array<{ key: string; session: SessionRef; view: 'full' | 'cards'; who: Who }>;
   /** A retained cursor that no longer qualifies: dropped. */
@@ -83,7 +86,7 @@ export class Subscription implements StreamSource {
   readonly id: string;
   readonly channel: RemoteChannel;
   readonly who: Who;
-  /** Its session; null for the machine's `attention` feed (P5 O7 M6), which names none. */
+  /** Its session; null for the machine's `attention` feed (P5 O7 M6), which names none (`SessionSubscription` names one). */
   readonly session: SessionRef | null;
   readonly view: 'full' | 'cards';
   readonly cursor: Cursor | null;
@@ -187,6 +190,16 @@ export class Subscription implements StreamSource {
     if (!this.ended) this.channel.send(message);
   }
 
+  /** A snapshot is part sent: its first page went and its last hasn't, so it can't be cut (P5 O7 M6). */
+  get midSnapshot(): boolean {
+    return this.#started !== null;
+  }
+
+  /** A snapshot of `key` queued and not yet begun is dropped (P5 O7 M6: one that no longer stands). */
+  dropSnapshot(key: string): void {
+    this.#unqueue((out) => out.key === key && out.group !== this.#started);
+  }
+
   /** What is queued and unsent is dropped (the stream starts over), but for the rest of a snapshot already begun. */
   clear(): void {
     this.#unqueue((out) => out.group === undefined || out.group !== this.#started);
@@ -252,6 +265,12 @@ export class Subscription implements StreamSource {
   }
 }
 
+/** A subscription that names its session: a lane's stream, or a session's `checkout` feed. */
+export type SessionSubscription = Subscription & { readonly session: SessionRef };
+
+/** Whether `sub` names its session (every one but the machine's `attention` feed). */
+export const namesSession = (sub: Subscription): sub is SessionSubscription => sub.session !== null;
+
 /** A re-check answered `unavailable` is tried again after each of these; still unanswered after the last, it ends. */
 export const RECHECK_RETRY_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
 /** A stream message the channel's carrier hasn't taken within this ends the carrier (stream-window.ts). */
@@ -260,7 +279,7 @@ export const TRANSMIT_DEADLINE_MS = 30_000;
 export type SubscriptionsContext = {
   authorize(request: AuthorizeRequest, who: Who, now: number): Promise<Decision>;
   /** Lane A's and lane B's sessions, and the feeds (P5 O7 M4). */
-  planes: { A: Plane; B: Plane; feeds: Plane };
+  planes: { A: Plane<SessionSubscription>; B: Plane<SessionSubscription>; feeds: Plane };
   interest: Interest;
   records: RecordSource;
   now(): number;
@@ -311,7 +330,7 @@ export class Subscriptions {
     const sub = this.#channels.get(channel)?.get(m.sub);
     if (sub === undefined || sub.message !== m || sub.ended) return;
     sub.target = decision.target ?? null;
-    this.#plane(sub).open(sub);
+    this.#toPlane(sub, (plane, s) => plane.open(s));
     this.#report(channel);
   }
 
@@ -417,7 +436,7 @@ export class Subscriptions {
     this.#checks.delete(sub);
     const subs = this.#channels.get(sub.channel);
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
-    this.#plane(sub).close(sub, false);
+    this.#toPlane(sub, (plane, s) => plane.close(s, false));
     this.#report(sub.channel);
   }
 
@@ -427,7 +446,7 @@ export class Subscriptions {
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
     sub.close();
     // Opened by its plane once authorized: a session's with its target; the machine's feed with none.
-    if (sub.target !== null || sub.message.feed === 'attention') this.#plane(sub).close(sub, retain);
+    if (sub.target !== null || sub.message.feed === 'attention') this.#toPlane(sub, (plane, s) => plane.close(s, retain));
     this.#report(sub.channel);
   }
 
@@ -446,9 +465,10 @@ export class Subscriptions {
     this.#ctx.interest.report(viewerOf(channel), sessions);
   }
 
-  /** The plane that streams `sub`: its lane's, or the feeds'. */
-  #plane(sub: Subscription): Plane {
-    return sub.message.feed === undefined ? this.#ctx.planes[sub.message.session.lane] : this.#ctx.planes.feeds;
+  /** `sub` to the plane that streams it: its lane's (a session's stream names its session), or the feeds'. */
+  #toPlane(sub: Subscription, run: <S extends Subscription>(plane: Plane<S>, sub: S) => void): void {
+    if (sub.message.feed === undefined && namesSession(sub)) run(this.#ctx.planes[sub.session.lane], sub);
+    else run(this.#ctx.planes.feeds, sub);
   }
 }
 

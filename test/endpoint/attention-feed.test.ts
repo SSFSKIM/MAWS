@@ -49,7 +49,7 @@ const item = (appSessionId: string, requestId: string) => ({ id: `att-${requestI
  * The machine (`attention.list`, `session.get`), the member's ranks (the engine sessions it views, under a head numbered
  * `head`), and one attention feed on a channel stand-in.
  */
-function scene() {
+function scene(options: { backlogBytes?: number; getFails?: (id: string) => boolean } = {}) {
   const machine = new Map<string, unknown[]>();
   const records = new Map<string, { appId: string; engineSessionId: string | null }>();
   const holds = { list: null as Promise<void> | null, get: new Map<string, Promise<void>>(), ranks: null as Promise<void> | null };
@@ -66,6 +66,7 @@ function scene() {
         const id = (input as { appSessionId: string }).appSessionId;
         const record = records.get(id) ?? null;
         await holds.get.get(id);
+        if (options.getFails?.(id) === true) return { t: 'res', id: '0', ok: false, error: { code: 'timeout', message: 'slow' } };
         return ok(record);
       }
       throw new Error(`unexpected ${owner} ${name}`);
@@ -78,6 +79,7 @@ function scene() {
       return { current, holds: (placement) => current() && placement !== null && state.views.has(placement.target.session) };
     },
     log: () => {},
+    backlogBytes: options.backlogBytes,
   });
   const plane: Plane = { open: (s) => feeds.open(s), close: (s) => feeds.close(s), stop: () => feeds.stop(), accessChanged: () => feeds.accessChanged() };
   const subs = new Subscriptions({
@@ -107,14 +109,27 @@ function scene() {
       else machine.set(id, items);
       feeds.event('machine', { name: 'attention.changed', payload: { appSessionId: id, items } });
     },
-    open() {
-      const m: MachineFeedSubMessage = { t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit: 1 << 22 };
+    open(credit = 1 << 22) {
+      const m: MachineFeedSubMessage = { t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit };
       subs.receive(ch, m, (c, message) => subs.start(c, message, {}));
+    },
+    credit(bytes: number) {
+      subs.credit(ch, { t: 'credit', sub: 'att', bytes });
+    },
+    /** The member stops viewing the engine session `engine`: a record change (the table's re-check). */
+    revoke(engine: string) {
+      state.views.delete(engine);
+      subs.recheck({ lane: 'B', session: engine, appSessionId: '' });
     },
     snaps: () => ch.sent.filter((m) => m.t === 'snap').map((m) => JSON.parse(m.body as string) as unknown[]),
     bodies: () => ch.sent.filter((m) => m.t === 'ev').map((m) => m.body),
     ended: () => ch.sent.filter((m) => m.t === 'ended') as ChannelMessage[],
   };
+}
+
+/** The subscription's credit spent before the feed queues anything (a stand-in message on the stream), so what it queues waits. */
+function spend(s: ReturnType<typeof scene>): void {
+  s.subs.get(s.ch, 'att')!.ev({ epoch: 'spent', seq: 0 }, { spent: true });
 }
 
 describe('the attention feed’s transitions', () => {
@@ -188,6 +203,106 @@ describe('the attention feed’s transitions', () => {
     s.change('app-2', [item('app-2', 'r2'), item('app-2', 'r5')]);
     await settle();
     expect(s.bodies()).toEqual([{ appSessionId: 'app-2', items: [item('app-2', 'r2'), item('app-2', 'r5')] }]);
+  });
+
+  // Fix wave 1: a decision made when an output was queued is not one about when it leaves.
+  it('takes back a snapshot still queued when a share is withdrawn, and queues it again cut to the rights now', async () => {
+    const s = scene();
+    s.record('app-1');
+    s.record('app-2');
+    s.machine.set('app-1', [item('app-1', 'r1')]);
+    s.machine.set('app-2', [item('app-2', 'r2')]);
+    s.state.views = new Set(['eng-app-1', 'eng-app-2']);
+    s.open(1);
+    spend(s);
+    await settle();
+    expect(s.snaps()).toEqual([]); // queued, waiting for credit
+    s.revoke('eng-app-1');
+    s.credit(1 << 20);
+    await settle();
+    expect(s.snaps()).toEqual([[item('app-2', 'r2')]]);
+    expect(JSON.stringify(s.ch.sent)).not.toContain('att-r1');
+  });
+
+  it('takes back a change still queued when a share is withdrawn: the device gets the session emptied, never the item', async () => {
+    const s = scene();
+    s.record('app-1');
+    s.machine.set('app-1', [item('app-1', 'r1')]);
+    s.state.views.add('eng-app-1');
+    s.open(1); // the snapshot spends it
+    await settle();
+    expect(s.snaps()).toEqual([[item('app-1', 'r1')]]);
+    s.change('app-1', [item('app-1', 'r1'), item('app-1', 'private')]);
+    await settle();
+    expect(s.bodies()).toEqual([]);
+    s.revoke('eng-app-1');
+    s.credit(1 << 20);
+    await settle();
+    expect(s.bodies()).toEqual([{ appSessionId: 'app-1', items: [] }]);
+    expect(JSON.stringify(s.ch.sent)).not.toContain('att-private');
+  });
+
+  it('holds what is queued while the ranks are read again at a new head, and lets it go once they still allow it', async () => {
+    const s = scene();
+    s.record('app-1');
+    s.machine.set('app-1', [item('app-1', 'r1')]);
+    s.state.views.add('eng-app-1');
+    s.open(1);
+    await settle();
+    s.change('app-1', [item('app-1', 'r1'), item('app-1', 'r2')]);
+    const ranks = gate();
+    s.holds.ranks = ranks.wait;
+    s.state.head = 2;
+    s.subs.recheck();
+    s.credit(1 << 20);
+    await settle();
+    expect(s.bodies()).toEqual([]);
+    ranks.open();
+    await settle();
+    expect(s.bodies()).toEqual([{ appSessionId: 'app-1', items: [item('app-1', 'r1'), item('app-1', 'r2')] }]);
+  });
+
+  it('ends `behind` when a part-sent snapshot no longer stands', async () => {
+    const s = scene();
+    s.record('app-1');
+    const big = Array.from({ length: 6 }, (_, i) => ({ ...item('app-1', `r${i}`), pad: 'p'.repeat(100 * 1024) }));
+    s.machine.set('app-1', big);
+    s.state.views.add('eng-app-1');
+    s.open(1); // the first page goes, the rest wait for credit
+    await settle();
+    expect(s.ch.sent.filter((m) => m.t === 'snap').length).toBe(1);
+    s.revoke('eng-app-1');
+    await settle();
+    expect(s.ended()).toEqual([{ t: 'ended', sub: 'att', reason: 'behind' }]);
+  });
+
+  it('ends `behind` when its snapshot alone passes the backlog bound', async () => {
+    const s = scene({ backlogBytes: 2048 });
+    s.record('app-1');
+    s.machine.set('app-1', Array.from({ length: 60 }, (_, i) => item('app-1', `r${i}`)));
+    s.state.views.add('eng-app-1');
+    s.open(1);
+    spend(s);
+    await settle();
+    expect(s.snaps()).toEqual([]);
+    expect(s.ended()).toEqual([{ t: 'ended', sub: 'att', reason: 'behind' }]);
+  });
+
+  it('ends `unavailable` when the spine can’t place a session, rather than taking it for one nobody may rank', async () => {
+    let failing = true;
+    const s = scene({ getFails: () => failing });
+    s.record('app-1');
+    s.machine.set('app-1', [item('app-1', 'r1')]);
+    s.state.views.add('eng-app-1');
+    s.open();
+    await settle();
+    expect(s.snaps()).toEqual([]);
+    expect(s.ended()).toEqual([{ t: 'ended', sub: 'att', reason: 'unavailable' }]);
+    // The device's reopening, once the spine answers, places it.
+    failing = false;
+    s.open();
+    await settle();
+    expect(s.snaps()).toEqual([[item('app-1', 'r1')]]);
   });
 
   it('ends `unavailable` when the machine can’t answer its snapshot’s read', async () => {

@@ -25,7 +25,7 @@ import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { dispatchAs, type EndpointServices } from './services';
-import type { Plane, Subscription } from './subscriptions';
+import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
 import { withinBounds, type CheckoutBounds } from './targets';
 
 export type PlaneFeedsContext = {
@@ -42,7 +42,7 @@ export type PlaneFeedsContext = {
 export const HELD_REPOSITORIES = 64;
 
 type Open = {
-  sub: Subscription;
+  sub: SessionSubscription;
   seq: number;
   /** The session's checkout bounds; null while a read of them is out. */
   bounds: readonly string[] | null;
@@ -67,7 +67,7 @@ export class PlaneFeeds implements Plane {
   }
 
   open(sub: Subscription): void {
-    if (sub.message.feed === 'attention') return this.#attention.open(sub);
+    if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
     const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
@@ -96,7 +96,7 @@ export class PlaneFeeds implements Plane {
     const { name, payload } = message;
     if (!isObject(payload)) return;
     if (name === 'files.changed' || name === 'scm.remote.output') {
-      for (const open of this.#open.values()) if (open.sub.session!.id === payload.appSessionId) this.#send(open, name, payload);
+      for (const open of this.#open.values()) if (open.sub.session.id === payload.appSessionId) this.#send(open, name, payload);
     } else if (name === 'git.changed' && typeof payload.repoRoot === 'string') {
       const repoRoot = payload.repoRoot;
       for (const open of this.#open.values()) {
@@ -111,7 +111,7 @@ export class PlaneFeeds implements Plane {
     } else if (name === 'session.changed' && isObject(payload.record)) {
       const record = payload.record;
       for (const open of this.#open.values()) {
-        if (open.sub.session!.id !== record.appId) continue;
+        if (open.sub.session.id !== record.appId) continue;
         this.#send(open, name, payload);
         void this.#readBounds(open, record);
       }
@@ -142,7 +142,7 @@ export class PlaneFeeds implements Plane {
   }
 
   async #record(open: Open, dispatch: EndpointServices['dispatch']): Promise<Record<string, unknown> | null> {
-    const answer = await dispatch('machine', 'session.get', { appSessionId: open.sub.session!.id });
+    const answer = await dispatch('machine', 'session.get', { appSessionId: open.sub.session.id });
     return answer.ok && isObject(answer.value) ? answer.value : null;
   }
 

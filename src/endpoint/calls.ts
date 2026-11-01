@@ -18,7 +18,9 @@
 //     every session: its input is held to the registry's schema here (authorization's step 2 skips a row that carries its
 //     own grade), the machine's services answer it, and the answer keeps only the sessions the caller holds the
 //     registry's grade on (`view`), each placed by its record. The cut is made as the answer goes, in one synchronous
-//     step, against the records as they stand then: a caller below the floor learns nothing of another session.
+//     step, against the records as they stand then and each session's placement as its latest record gives it (a
+//     `session.changed` heard while the reads were out supersedes what `session.get` answered: fix wave 1): a caller
+//     below the floor learns nothing of another session. A session the spine can't place answers `unavailable`.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
@@ -32,14 +34,14 @@ import { OFFERS, type Offers } from './offers';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
-import type { Subscription } from './subscriptions';
-import { placeRecorded, type Placement } from './targets';
+import { namesSession, type SessionSubscription, type Subscription } from './subscriptions';
+import { placeRecorded, recordedPlacement, type Placement } from './targets';
 
 export type CallsContext = {
   dispatch: EndpointServices['dispatch'];
   /** The caller's subscription by its id, and the upstream it holds (lane A). */
   subscription(channel: RemoteChannel, sub: string): Subscription | null;
-  upstreamOf(sub: Subscription): { epoch: string; project: string; session: string } | null;
+  upstreamOf(sub: SessionSubscription): { epoch: string; project: string; session: string } | null;
   /** A frame down RL10 to sminos. */
   toSminos(frame: object): void;
   /** The machine's sessions as sminos reports them, each with the id it is listed under (null: not yet). */
@@ -122,7 +124,19 @@ const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(o
 };
 
 export class Calls {
+  /** Each `each-session` call in flight: the placements its sessions' records gave since its reads began (fix wave 1). */
+  readonly #heard = new Set<Map<string, Placement>>();
+
   constructor(private readonly ctx: CallsContext) {}
+
+  /** A machine event (`onEvent`): a session's record moved, which every `each-session` call in flight places it by. */
+  event(owner: string, message: { name: string; payload: unknown }): void {
+    if (owner !== 'machine' || message.name !== 'session.changed' || this.#heard.size === 0) return;
+    const record = isObject(message.payload) ? message.payload.record : undefined;
+    if (!isObject(record) || !isText(record.appId, 512)) return;
+    const placement = recordedPlacement(record.appId, record);
+    for (const heard of this.#heard) heard.set(record.appId, placement);
+  }
 
   /** An authorized call, answered by its executor. */
   execute(channel: RemoteChannel, m: CallMessage): void {
@@ -170,22 +184,24 @@ export class Calls {
     if (!response.ok) return { ok: false, code: response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code };
     const output = response.value ?? null;
     const sessions = [...new Set(filter.sessions(output))];
-    const placed = new Map<string, Placement>(
-      await Promise.all(
-        sessions.map(async (id): Promise<[string, Placement]> => {
-          try {
-            return [id, await placeRecorded(id, dispatch)];
-          } catch (error) {
-            this.ctx.log(`endpoint: a \`${m.name}\` answer could not place a session: ${(error as Error).message}`);
-            return [id, null];
-          }
-        }),
-      ),
-    );
-    const ranks = await this.ctx.ranks(member);
+    // A record heard from here on places its session over what `session.get` answers (which it is at least as new as).
+    const heard = new Map<string, Placement>();
+    this.#heard.add(heard);
+    let placed: Map<string, Placement>;
+    let ranks: SessionRanks;
+    try {
+      placed = new Map(await Promise.all(sessions.map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
+      ranks = await this.ctx.ranks(member);
+    } catch (error) {
+      this.#heard.delete(heard);
+      this.ctx.log(`endpoint: a \`${m.name}\` answer could not be cut: ${(error as Error).message}`);
+      return { ok: false, code: 'unavailable' };
+    }
     return () => {
+      this.#heard.delete(heard);
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
-      return { ok: true, output: filter.keep(output, (id) => id !== null && ranks.holds(placed.get(id) ?? null, grade)) };
+      const placement = (id: string): Placement => (heard.has(id) ? heard.get(id)! : (placed.get(id) ?? null));
+      return { ok: true, output: filter.keep(output, (id) => id !== null && ranks.holds(placement(id), grade)) };
     };
   }
 
@@ -205,7 +221,7 @@ export class Calls {
     for (const [name, check] of Object.entries(spec.fields)) if (!check(input[name])) return { ok: false, code: 'malformed' };
     for (const [name, check] of Object.entries(spec.optional ?? {})) if (input[name] !== undefined && !check(input[name])) return { ok: false, code: 'malformed' };
     const sub = this.ctx.subscription(channel, input.sub);
-    const up = sub === null || sub.ended ? null : this.ctx.upstreamOf(sub);
+    const up = sub === null || sub.ended || !namesSession(sub) ? null : this.ctx.upstreamOf(sub);
     if (up === null) return { ok: false, code: 'unavailable' };
     if (up.session !== input.session) return { ok: false, code: 'malformed' };
     const rest: Fields = { ...input };
