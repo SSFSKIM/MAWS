@@ -19,8 +19,9 @@
 //      hub), once the link is up again; the Source control tool commits;
 //      then (M3) the Terminal tool opens a shell on B in the session's checkout, where `pwd` prints it; a reload of A's
 //      window re-attaches the same shell (one pty on B, its label the tab's) and shows what it printed; a dev server
-//      started in that shell (`python3 -m http.server`) opens from the `localhost` link B's reply names in A's in-app
-//      browser, its tab marked "forwarded from B", its page the directory listing B's server sent, and stops at ⌃C.
+//      started in that shell (`python3 -m http.server`, dual-stack) opens from the `[::]` link B's reply names in A's
+//      in-app browser, its tab marked "forwarded from B", its page the directory listing B's server sent, and stops at
+//      ⌃C.
 //      A runs this launch with no harness confirmation, so the owner's terminal and forward ask nothing: a step-up
 //      would stop the act at a sheet nobody answers;
 //   2. directly: the map sends it to B's listener, so the link comes `up` over the direct carrier; the hover reads
@@ -96,11 +97,13 @@ const WORKTREE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b4';
 const WORKTREE_FILE = { name: 'worktree-notes.txt', content: 'Goes up to the worktree on B.\n' };
 const WORKTREE_TEXT = 'Read the file in the worktree.';
 const WORKTREE_REPLY = 'B read it in the worktree.';
-// M3: the dev server's link in B's reply, a markdown link to B's own loopback (its port chosen when the journal is
-// written, since the reply is recorded before B's server listens)
+// M3: the dev server's link in B's reply, as `python3 -m http.server` with no `--bind` prints it: dual-stack on `::`, so
+// `http://[::]:<port>/`, the common case a forward has to take (its port chosen when the journal is written, since the
+// reply is recorded before B's server listens)
 const LINK_ASK = 'Where does the dev server listen?';
 const LINK_TEXT = 'the dev server';
-const linkReply = (port: number) => `It serves B’s checkout at [${LINK_TEXT}](http://localhost:${port}/).`;
+const devServerUrl = (port: number) => `http://[::]:${port}/`;
+const linkReply = (port: number) => `It serves B’s checkout at [${LINK_TEXT}](<${devServerUrl(port)}>).`;
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
 // The repository's own settings, so the runner's global ones (a hooks path, signing, an identity) change nothing B's
@@ -250,15 +253,15 @@ async function pastePng(page: Page): Promise<void> {
   }, PNG);
 }
 
-// M3: a loopback port nothing listens on now, outside the ephemeral range other listeners take theirs from, for B's dev
-// server, whose link B's journal names before the server starts.
+// M3: a port nothing listens on now (on any address, as the dev server's dual-stack listener takes it), outside the
+// ephemeral range other listeners take theirs from, for B's dev server, whose link B's journal names before it starts.
 async function quietPort(): Promise<number> {
   for (;;) {
     const port = 20_000 + Math.floor(Math.random() * 10_000);
     const free = await new Promise<boolean>((done) => {
       const server = createServer();
       server.once('error', () => done(false));
-      server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
+      server.listen(port, () => server.close(() => done(true)));
     });
     if (free) return port;
   }
@@ -606,16 +609,20 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     await test.step('M3: a dev server in that shell opens from B’s localhost link in A’s browser, forwarded from B', async () => {
       const id = terminal;
-      await typeInTerminal(page, id, `python3 -m http.server ${devPort} --bind 127.0.0.1`);
+      await typeInTerminal(page, id, `python3 -m http.server ${devPort}`);
       await expect
-        .poll(async () => printedAnywhere(await terminalRows(page, id), `Serving HTTP on 127.0.0.1 port ${devPort}`), { timeout: 60_000, message: 'B’s dev server listens' })
+        .poll(async () => printedAnywhere(await terminalRows(page, id), `Serving HTTP on :: port ${devPort} (${devServerUrl(devPort)})`), {
+          timeout: 60_000,
+          message: 'B’s dev server listens dual-stack and prints the link B’s reply names',
+        })
         .toBe(true)
         .catch(async (error: unknown) => {
           throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await terminalSaid(page, id)}`);
         });
-      expect(await listening(devPort), 'on B’s loopback').toBe(true);
+      expect(await listening(devPort), 'B’s loopback reaches it').toBe(true);
 
-      // B names it in its reply, and the link opens in the in-app browser through a forward of B's port.
+      // B names it in its reply as the server printed it, and the link opens in the in-app browser through a forward of
+      // B's port (the endpoint connects to B's 127.0.0.1, which the dual-stack listener accepts).
       await composerOf(page).click();
       await page.keyboard.type(LINK_ASK);
       await page.keyboard.press('Enter');
