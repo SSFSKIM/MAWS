@@ -322,8 +322,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     void controls?.interrupt({ cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
+  // P5 O16 M3b fix wave 1: the re-attaching session's Stop ends the session (its ladder), as the slow notice says
+  const end = () =>
+    void client.invoke('session.stop', { appSessionId, reason: 'stop' }).then((result) => {
+      if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
+    });
   const onPrimary = () => {
     if (decision.primary === 'stop') return stop();
+    if (decision.primary === 'end') return end();
     if (decision.primary === 'resume')
       return void controls?.queue()?.setPaused({ paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does

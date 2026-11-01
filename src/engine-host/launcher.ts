@@ -270,6 +270,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnect: true, reconnectTrigger: 'host_restart', launchKind: 'adopted',
         appAttached: deps.appAttached,
+        rendersAnswered: deps.rendersAnswered, // P5 O16 M3b fix wave 1: #418's render gate, as a launch's (the merge dropped it here)
         unsettledPrompts: () => unsettledPrompts(dir, launchId),
         observedFacts: deps.observedFacts, artifacts: deps.artifacts, datasetRefresh: deps.datasetRefresh,
         holder: { pid: entry.pid, holderId: launchId, binary: entry.binary },

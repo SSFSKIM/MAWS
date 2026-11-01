@@ -103,6 +103,7 @@ export class IdleRelease {
   // O16 M5: whether the rule holds the session now, the reap's step reading it again: the release off, or interest held
   // (unless exit-when-idle ignores it). The keep mark and the row's state are the reap's own reads.
   held(appSessionId: AppSessionId): boolean {
+    if (this.closed) return true; // P5 O16 M3b fix wave 1: closed (a handover, the exit order): nothing is released
     const { idleMs, activeSince, ignoreInterest } = this.policy;
     return idleMs === null || activeSince === null || (!ignoreInterest && this.union().has(appSessionId));
   }

@@ -57,7 +57,7 @@ export interface GateChannel {
   arm(fence: number, leaseMs: number): void;
   disarm(fence: number): void;
   listen(listener: GateListener): void;
-  close(): void; // the row's process exited: its observer is closed and no hello matches it again
+  close(flush?: boolean): void; // the row's process exited: its observer is closed and no hello matches it again; P5 O16 M3b fix wave 1: `flush`, after what was written (a handover's disarm)
 }
 
 // The gate's socket path is holder/files.ts `gateSocketPath` (M2's, which every hosted launch's MAWS_HOLDER_SOCKET names).
@@ -104,12 +104,13 @@ class Row implements GateChannel {
     this.listener = listener;
   }
 
-  close(): void {
+  close(flush = false): void {
     if (this.closed) return;
     this.closed = true;
     this.dropped(this);
     this.stopSilence();
-    this.conn?.socket.destroy();
+    if (flush) this.conn?.socket.end(); // P5 O16 M3b fix wave 1: the disarm written before it reaches the observer
+    else this.conn?.socket.destroy();
     this.conn = null;
   }
 

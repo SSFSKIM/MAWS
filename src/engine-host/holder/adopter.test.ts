@@ -4,10 +4,11 @@
 // after the reservation is counted by adoptAll, and the bound counts an adoption still under way as failed without
 // killing it. The plan's environment was rebuilt (this build's capture now, cut to the spawn row's keys), so nothing
 // attests from it: a changed PATH and config home between the launch and the adoption reach no connector context.
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { openDocuments, type Documents } from '../documents'; // P5 O16 M3b fix wave 1
 import type { AppSessionId } from '@shared/graph/ids';
 import { autoResponder, scriptedTransport, type Responder, type ScriptedTransport } from '../conformance/scripted-transport';
 import { handshakeResponder, launchSpec } from '../conformance/session-harness';
@@ -31,7 +32,7 @@ async function until(check: () => boolean, what: string, ms = 5_000): Promise<vo
 }
 
 const ID = 'app-adopter' as AppSessionId;
-const spec = launchSpec({ appSessionId: ID, cwd: '/tmp/maws-session' });
+const SPEC = launchSpec({ appSessionId: ID, cwd: '/tmp/maws-session' });
 let userData: string;
 beforeEach(() => {
   userData = mkdtempSync(join(tmpdir(), 'maws-adopter-'));
@@ -39,7 +40,7 @@ beforeEach(() => {
 afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
 // The launch as the old manager made it, under the environment it captured then; its journal's spawn row names the keys
-function launched(): { launchId: string; entry: RosterEntry } {
+function launched(spec = SPEC): { launchId: string; entry: RosterEntry } {
   const plan = buildLaunch(spec, { PATH: '/opt/then/bin', HOME: '/Users/x', CLAUDE_CONFIG_DIR: '/Users/x/.claude-then' }, { relayUrl: RELAY_URL, bin: '/x/claude', engineVersion: '2.1.283', spawnerPid: 4100, holder: { gateSocket: '/x/gate.sock' } });
   const writer = new JournalWriter(journalDir(userData, ID), plan.launchId, { maxBytes: 1_000_000 });
   writer.row('meta', spawnMeta(plan, { appVersion: 'test', holder: { pid: 4100, holderId: plan.launchId, binary: '/x/maws-session-host' } }));
@@ -53,9 +54,9 @@ function launched(): { launchId: string; entry: RosterEntry } {
   return { launchId: plan.launchId, entry };
 }
 
-async function adopter(opts: { responder?: Responder; adoptMs?: number } = {}) {
+async function adopter(opts: { responder?: Responder; adoptMs?: number; spec?: typeof SPEC; deps?: Partial<LauncherDeps> } = {}) {
   const store = new MemorySessionStateStore();
-  await store.saveLaunchSpec(ID, spec);
+  await store.saveLaunchSpec(ID, opts.spec ?? SPEC);
   const table = new ProcessTable({ ps: async () => '', log: () => {} });
   const transports: ScriptedTransport[] = [];
   const logs: string[] = [];
@@ -78,6 +79,7 @@ async function adopter(opts: { responder?: Responder; adoptMs?: number } = {}) {
       },
       release: async () => {},
     },
+    ...opts.deps,
   };
   return { adopt: createAdopter(deps, opts.adoptMs), table, transports, logs };
 }
@@ -147,5 +149,41 @@ describe('the launcher’s adoption', () => {
     expect(a.table.get(ID)).toBeUndefined();
     expect(a.transports[0]!.calls).toEqual(['detach']);
     expect(a.transports[0]!.writes).toEqual([]);
+  });
+});
+
+// P5 O16 M3b fix wave 1: an adopted session's capture and export bridges ask the client that renders (the daemon's render
+// seam) as a launched one's do, app or no app (#418's `rendersAnswered`, which the adopter dropped)
+describe('an adopted session’s bridges', () => {
+  let documents: Documents;
+  let cwd: string;
+  beforeEach(() => {
+    documents = openDocuments(userData, () => {})!;
+    cwd = mkdtempSync(join(tmpdir(), 'maws-adopter-cwd-'));
+  });
+  afterEach(() => {
+    documents.close();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('with no app attached and a client that renders, artifact_screenshot sends its capture request', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>ADOPTED</h1>');
+    const spec = launchSpec({ appSessionId: ID, cwd });
+    const { entry } = launched(spec);
+    const captures: unknown[] = [];
+    const a = await adopter({ spec, deps: { appAttached: () => false, rendersAnswered: () => true, artifacts: () => documents.store, wire: (session) => void session.on('artifactCapture', (request) => captures.push(request)) } });
+    const adopting = a.adopt(entry);
+    await until(() => a.transports.length === 1, 'the attach');
+    caughtUp(a.transports[0]!);
+    await adopting;
+    const t = a.transports[0]!;
+    const tool = (id: string, rpcId: number, name: string, args: unknown) => t.push({ type: 'control_request', request_id: id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: rpcId, method: 'tools/call', params: { name, arguments: args, _meta: { 'claudecode/toolUseId': `toolu_${rpcId}` } } } } });
+    tool('e-create', 1, 'artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' });
+    await until(() => t.writes.some((w) => w.type === 'control_response' && JSON.stringify(w).includes('e-create')), 'the create');
+    tool('e-shot', 2, 'artifact_screenshot', { id: 'dash' });
+    await until(() => captures.length === 1, 'the capture request, sent with no app');
+    expect(captures[0]).toMatchObject({ requestId: 'e-shot' });
+    t.exit(0);
+    await a.table.get(ID)!.exited;
   });
 });

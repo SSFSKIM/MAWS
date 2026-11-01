@@ -321,6 +321,7 @@ describe('one command of each grade class, refused below its grade (acceptance 8
       'host.status': { kind: 'call', executor: 'main', target: 'machine' },
       'session.mcpAuthenticate': { kind: 'act', executor: 'engine-host', target: 'appSessionId' },
       'session.ui.press': { kind: 'act', executor: 'engine-host', target: 'appSessionId' },
+      'daemon.restartEngineHost': { kind: 'act', executor: 'machine', target: 'machine' }, // P5 O16 M3b fix wave 1: even offered, refused
     },
   };
   const ptySpawn = (f: Fixture, remote: Remote) => remote.device.action({ machine: f.ref, action: 'pty.spawn', args: { appSessionId: 'app-own', label: 't1', cwd: CHECKOUT, cols: 80, rows: 24 } });
@@ -371,6 +372,8 @@ describe('one command of each grade class, refused below its grade (acceptance 8
     expect(await call(a, 'host.status')).toBe('grade');
     expect(await call(a, 'host.status', {})).toBe('grade');
     expect(await send(a, await a.device.stepUp(laneB(f, a, 'session.mcpAuthenticate', 'app-own', { serverName: 's', redirectUri: null })))).toBe('grade');
+    // P5 O16 M3b fix wave 1: the machine's own engine-host restart is `internal`: an owner's stepped-up act never reaches it
+    expect(await send(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'daemon.restartEngineHost', args: {} })))).toBe('grade');
   });
 
   it('`no-rule` for a by-effect command nobody has read for remote use (`session.ui.press`)', async () => {

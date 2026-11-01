@@ -216,6 +216,12 @@ export const STOP_ALL_GRACE_MS = 5_000;
 // P5 O16 M3b: how long a handover waits for the requests sent on the old host's link to be answered before it asks; one
 // still unanswered after it is answered by the old host if it can before its exit, else fails `host_unavailable`
 export const HANDOVER_SENT_WAIT_MS = 5_000;
+// P5 O16 M3b fix wave 1: the replies that settle a MAWS tool call the handing-over host holds in flight, which its drain
+// waits for (show_pane's, the capture's, the export's, the dataset refresh's); while it drains they go to its old link.
+// Keyed by name, not by the request's correlation: until the old host's link closes no successor exists to have raised
+// such a request, so each one names a call the draining host made (an answer the call no longer waits for is
+// `not_pending` there, as anywhere); after the close they are held for the successor like the rest.
+export const DRAIN_REPLIES: ReadonlySet<string> = new Set(['maws.pane.answer', 'maws.artifact.captured', 'maws.artifact.exported', 'maws.artifact.datasetRefreshed']);
 const HANDOVER_SENT_POLL_MS = 10;
 
 interface Pending {
@@ -242,6 +248,9 @@ interface Host {
   state: HostState;
   utility: UtilityLink | null; // a utility host's child and channel
   port: MainPort | null;
+  // P5 O16 M3b fix wave 1: a handing-over host's old link, from the handover's ask until it closes: the drain's own
+  // replies still reach it (DRAIN_REPLIES); every other request is held for the successor
+  draining: MainPort | null;
   pending: Map<string, Pending>;
   exits: number[]; // times of unexpected exits inside the crash window
   restartTimer: ReturnType<typeof setTimeout> | null;
@@ -299,6 +308,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       state: { state: 'starting', pid: null, restarts: 0, revision: 0 },
       utility: null,
       port: null,
+      draining: null,
       pending: new Map(),
       exits: [],
       restartTimer: null,
@@ -484,6 +494,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     host.utility = null;
     host.port?.close();
     host.port = null;
+    host.draining = null; // P5 O16 M3b fix wave 1
     failSent(host, reason);
   }
 
@@ -525,12 +536,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     }
   }
 
-  function send(host: Host, pending: Pending): void {
+  function send(host: Host, pending: Pending, port: MainPort = host.port!): void {
     pending.sent = true;
     // P5 O2 M3: a forwarded `client` never reaches a protocol-2 link, whose strict `req` refuses it (P5 Decision Log 42)
     const forwarded = host.peer?.major !== SOCKET_PROTOCOL_V2 ? pending.forwardedClient : null;
     const request = forwarded ? { ...pending.request, client: forwarded } : pending.request;
-    host.port!.postMessage(request);
+    port.postMessage(request);
     const asker = pending.client ?? (forwarded ? pending.forwardedRef : null);
     if (asker) host.gone?.carry(asker); // P5 O1 M5: after the request, so a gone client's line follows it
   }
@@ -612,6 +623,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (stopped) return link.close();
         park(host, false); // P5 O2 M3: an adoption, or a launch, reached it
         host.port = link;
+        host.draining = null; // P5 O16 M3b fix wave 1: the successor's link (the old one closed before it)
         host.peer = welcome.peer; // P5 O1 M6
         host.welcome = welcome; // P5 O2 M5
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
@@ -640,6 +652,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         disconnected();
       },
       lost(loss) {
+        host.draining = null; // P5 O16 M3b fix wave 1: the old link closed: what the drain answers now waits for the successor
         if (stopped) return;
         if (loss === 'replaced') {
           crashed('was taken over by another client of its supervisor; not reconnecting');
@@ -863,6 +876,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       const pending: Pending = { name, resolve, raw: forwarded?.raw ?? null, timer, request: message, sent: false, client: asker, ...forwardedAs(forwarded?.client ?? null) };
       host.pending.set(id, pending);
       if (host.port) send(host, pending);
+      else if (host.draining && DRAIN_REPLIES.has(name)) send(host, pending, host.draining); // P5 O16 M3b fix wave 1
       else if (host.parked) launch(host); // P5 O2 M3: a request wakes a parked host
     });
   }
@@ -1051,11 +1065,13 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       if (!host.peer?.capabilities.includes(HOLDER_CAPABILITY)) return { ok: false, error: ipcError('host_unavailable', `${owner} (build ${host.peer?.build ?? 'unknown'}) does not hand its sessions over`) };
       host.readyAsked = false; // a sayReady belonged to the connection that ends here
       unlink(host);
+      host.draining = host.port; // fix wave 1: the drain's replies still go to it
       host.port = null;
       transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
       const answer: HandoverAnswer = await transport.handover(graceMs, () => sentAnswered(host, HANDOVER_SENT_WAIT_MS));
       if (answer.state === 'failed') {
         // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
+        host.draining = null;
         transport.recycle(() => failSent(host, 'was recycled'));
         return { ok: false, error: ipcError('internal', `${owner} did not hand over: ${answer.why}`) };
       }

@@ -73,8 +73,9 @@ export class OutboundWriter {
 
   // P5 O16 M3b (the handover's freeze): from here a frame `allow` refuses is never written: its write rejects with
   // TransportClosed at once, with nothing journaled, and what is in flight goes on.
-  restrict(allow: (frame: StdinFrame) => boolean, why: string): void {
-    this.only = { allow, why };
+  // `null` lifts the restriction (P5 O16 M3b fix wave 1: a row taken back from the handover).
+  restrict(allow: ((frame: StdinFrame) => boolean) | null, why = ''): void {
+    this.only = allow === null ? null : { allow, why };
   }
 
   whenIdle(): Promise<void> {

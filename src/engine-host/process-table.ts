@@ -384,11 +384,11 @@ export class ProcessTable {
     this.emitBudget(false);
   }
 
-  private detachReap(session: EngineSession): void {
+  private detachReap(session: EngineSession, flush = false): void {
     const held = this.reaps.get(session);
     if (!held) return;
     held.reap.dispose();
-    held.channel.close();
+    held.channel.close(flush);
   }
 
   // The work under the session's engine now (the reap's step): a fresh synchronous read of the tree, kept in the status.
@@ -631,11 +631,18 @@ export class ProcessTable {
   // stops, and every live row under a session host is frozen: it consumes nothing more of its transport, so what the
   // engine says from here on stays in the host's ring for the successor. Answers the frozen rows, for the drain. A live
   // row with no session host (a direct launch, or one not yet spawned) is left to the exit order's ladder.
+  // Fix wave 1: a row whose stop or release is under way is not frozen (it is ending; the exit order awaits it), and each
+  // frozen row's reap is cancelled and its gate channel closed, so no fence armed here can answer the engine's `turn`
+  // with `stop` once the successor carries the session (its observer says hello to the successor's gate).
   freezeForHandover(): EngineSession[] {
     this.handingOver = true;
     this.idle.close();
-    const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted);
-    for (const session of hosted) session.freeze();
+    const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted && !session.ending);
+    for (const session of hosted) {
+      session.freeze();
+      this.reapOf(session)?.cancel('the row is handed over');
+      this.detachReap(session, true); // its disarm delivered before the channel closes
+    }
     return hosted;
   }
 
@@ -643,12 +650,15 @@ export class ProcessTable {
   // at 3 s); `stopped` counts the exits before SIGKILL, `forced` the SIGKILLs. Idempotent: a process already exited
   // counts in neither, one already in its ladder is awaited on that ladder.
   // P5 O16 M3b: `detach` (a detached host's exit order for every reason but a stop-all) detaches each live row under a
-  // session host instead, leaving it and its engine running for the successor to adopt; it counts in neither.
+  // session host instead, leaving it and its engine running for the successor to adopt; it counts in neither. Fix wave 1:
+  // `stop` stops every row, one frozen for a handover included (its stop takes it back from the handover: Interfaces §D,
+  // a stop-all stays deliberate).
   async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
     this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
-    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted) : [];
+    // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped
+    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending) : [];
     const stopping = live.filter((session) => !detaching.includes(session));
     const [results] = await Promise.all([
       Promise.all(stopping.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) }))),

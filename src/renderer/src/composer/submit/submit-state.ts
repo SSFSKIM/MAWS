@@ -13,7 +13,7 @@ import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-
 import type { Availability } from '@shared/ipc/schema/session'; // P2-A
 import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
-export type SubmitState = 'send' | 'stop' | 'resume';
+export type SubmitState = 'send' | 'stop' | 'resume' | 'end' /* P5 O16 M3b fix wave 1: session.stop, ending the session */;
 
 // P5 O9 M5: the controls port's `Capability`, spelled here so this module stays free of the port's imports (it is in the
 // node project's program, through side/copy.ts)
@@ -48,6 +48,8 @@ export const STARTING = 'Session is starting…';
 // handover found it in may take)
 export const REATTACHING = 'Re-attaching to the engine after the update…';
 export const reattaching = (status: EngineSessionStatus | null): boolean => status?.process === 'initializing' && status.holder?.adopted === true;
+// Fix wave 1: what the re-attaching state's Stop does (an empty editor: no turn to interrupt, the engine not answering)
+export const ENDS_REATTACHING = 'Ends the session; its engine has not answered since the update';
 export const MESSAGE_HELD = 'Your first message is with the setup above';
 export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
@@ -106,12 +108,14 @@ export function submitState(i: SubmitInput): SubmitDecision {
     const label = mode === 'bash' ? 'Run' : mode === 'memory' ? 'Save to memory' : 'Send';
     if (i.availability === 'archived') return decide('send', label, false, ARCHIVED);
     if (i.availability === 'foreign_held') return decide('send', label, false, `Held by ${i.heldBy ?? 'another process'}`);
+    if (i.availability === 'starting' && reattaching(status) && empty) return decide('end', 'Stop', true, null, ENDS_REATTACHING); // fix wave 1
     if (i.availability === 'starting') return decide('send', reattaching(status) ? 'Re-attaching…' : 'Starting…', !empty, null, SENDS_WHEN_STARTED);
     return decide('send', label, !empty, null, STARTS);
   }
   // P2-A end
   if (status === null || status.process !== 'ready') {
     const starting = status !== null && (status.process === 'starting' || status.process === 'initializing');
+    if (reattaching(status) && empty) return decide('end', 'Stop', true, null, ENDS_REATTACHING); // fix wave 1
     return decide('send', 'Send', false, reattaching(status) ? REATTACHING : starting ? STARTING : ENDED);
   }
   const busy = isBusy(status, queue.entries);

@@ -191,6 +191,44 @@ describe('the handover and the park', () => {
     expect(old.named('host.exitWhenIdle')).toEqual([]);
   });
 
+  // fix wave 1: the drain waits for the old host's in-flight tools, whose completions (the render seam's, an app's pane
+  // answer) arrive through the supervisor after the handover began; they reach the draining host before it detaches,
+  // while any other request stays held for the successor
+  it('a capture’s completion that arrives during the drain is delivered to the draining host before it detaches; other work waits for the successor', async () => {
+    const drain = { inFlight: 1 };
+    scene.engineSpawn = {
+      answers: {
+        ...status,
+        'engine.ping': () => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` }),
+        'maws.artifact.captured': () => {
+          drain.inFlight = 0; // the bridge's call settled: the drain can end
+          return { outcome: 'delivered' };
+        },
+        'host.handover': () => {
+          if (drain.inFlight > 0) return { state: 'deferred', inFlight: drain.inFlight };
+          const old = scene.lastEngine();
+          setImmediate(() => void old.supervisor.die());
+          return { state: 'detaching' };
+        },
+      },
+    };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const old = scene.lastEngine();
+    const cli = await scene.app('machine', { capabilities: [] });
+    expect(await cli.request('daemon.restartEngineHost')).toMatchObject({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    const ping = cli.request('engine.ping', undefined, 20_000); // new work: held for the successor
+    const captured = await daemon.hosts.forward('engine-host', { name: 'maws.artifact.captured', input: { appSessionId: 'app-1', requestId: 'r-1', result: { ok: false, error: 'no display' } } });
+    expect(captured).toMatchObject({ ok: true, value: { outcome: 'delivered' } }); // the old host's answer, through its draining link
+    expect(old.named('maws.artifact.captured')).toHaveLength(1);
+    expect(old.supervisor.exits).toEqual([]);
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready'); // re-asked: detaching, then the successor
+    expect(await ping).toMatchObject({ ok: true, value: { hostVersion: `pid ${scene.lastEngine().supervisor.pid}` } });
+    expect(old.named('engine.ping')).toEqual([]);
+    expect(scene.lastEngine().named('maws.artifact.captured')).toEqual([]);
+  });
+
   it('a park asked of an idle host that exits under the handover’s ask: its successor follows, and the restart is answered', async () => {
     scene.engineSpawn = {
       answers: { ...status, 'host.handover': () => {

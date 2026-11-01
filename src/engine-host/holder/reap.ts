@@ -175,7 +175,7 @@ export class Reap {
   }
 
   private turn(fence: number): TurnAnswer {
-    if (fence !== this.fence) return 'proceed';
+    if (this.disposed || fence !== this.fence) return 'proceed'; // P5 O16 M3b fix wave 1: a disposed reap fences nothing
     if (this.current === 'signalled') return 'stop';
     if (this.current === 'arming' || this.current === 'armed') this.end(`${this.reason} reap of ${this.label} cancelled: a turn started under fence ${fence}`, true);
     return 'proceed';

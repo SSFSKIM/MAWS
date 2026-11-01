@@ -1,9 +1,11 @@
 // The handover's drain (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3 and Interfaces §D; D9, D34, D41): the
-// rows the table froze in one synchronous step, each detached at the first moment it holds no MAWS-owned call in
-// flight (`inFlightThroughDelivery`, every tool's but `ask`), checked at each retirement. The drain has settled once
-// every row has drained; each row's detach (the writer's in-flight writes, the final ack, the `host_detach` row, the
-// connection closed without `release`) is then under way, and the exit order's shutdown awaits it. Nothing is ever
-// forced: a call that runs on keeps the drain open, and `host.handover` answers `deferred` meanwhile.
+// rows the table froze in one synchronous step, each drained at the first moment it holds no MAWS-owned call in flight
+// (`inFlightThroughDelivery`, every tool's but `ask`), checked at each retirement, or once a deliberate stop took it
+// back. The drain settles once every row has; then every row is detached at once (the writer's in-flight writes, the
+// final ack, the `host_detach` row, the connection closed without `release`; a row taken back is not), and the exit
+// order's shutdown awaits it. Fix wave 1: no row detaches before the drain settles, so a stop-all or quit that comes
+// during a deferral can still take every row back and stop it. Nothing is ever forced: a call that runs on keeps the
+// drain open, and `host.handover` answers `deferred` meanwhile.
 
 // What the drain needs of a frozen row (EngineSession's).
 export interface DrainingRow {
@@ -26,7 +28,6 @@ export class HandoverDrain {
     for (const row of rows) {
       void row.drained().then(() => {
         this.draining -= 1;
-        row.detach('handover').catch((error: unknown) => opts.log(`a row's detach failed: ${error instanceof Error ? error.message : String(error)}`));
         if (this.draining === 0) this.settle();
       });
     }
@@ -57,6 +58,7 @@ export class HandoverDrain {
   }
 
   private settle(): void {
+    for (const row of this.rows) row.detach('handover').catch((error: unknown) => this.opts.log(`a row's detach failed: ${error instanceof Error ? error.message : String(error)}`));
     for (const waiter of [...this.waiters]) waiter();
     this.opts.settled();
   }

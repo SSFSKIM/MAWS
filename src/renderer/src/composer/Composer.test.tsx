@@ -1259,6 +1259,21 @@ describe('a lane B session on another machine', () => {
   });
 });
 
+// P5 O16 M3b fix wave 1: a session a successor engine host adopted, whose engine has not answered its re-initialize: the
+// composer's control reads Stop with the editor empty, and its click ends the session (session.stop), not an interrupt
+describe('a re-attaching session', () => {
+  it('offers Stop, which ends the session through session.stop', async () => {
+    live(A, { status: { process: 'initializing', holder: { pid: 4100, holderId: 'L-1', adopted: true } } });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(primary().dataset.submitState).toBe('end'));
+    expect(primary().textContent).toBe('Stop');
+    expect(primary().disabled).toBe(false);
+    await userEvent.setup().click(primary());
+    await waitFor(() => expect(invoked('session.stop')).toEqual([{ appSessionId: A_ID, reason: 'stop' }]));
+    expect(invoked('session.interrupt')).toEqual([]);
+  });
+});
+
 describe('an oversized draft on a session the seam refuses by state', () => {
   it.each(['exited', 'starting'] as const)('Enter on a session %s with no record keeps the draft, with no warning and nothing dispatched', async (process) => {
     useSessions.setState({ engine: new Map(useSessions.getState().engine).set(A, { ...pageStatus(A), process }) });

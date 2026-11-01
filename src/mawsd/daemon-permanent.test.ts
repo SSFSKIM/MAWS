@@ -7,7 +7,7 @@
 // P5 O5 M4: the stand-in engine host is one of O3-D's build (its welcome lists no `host.render`), which mawsd tells only
 // the attachment; a render-reading host's `render: true` and its tell at each streaming are daemon-render.test.ts's.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, HOLDER_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResync } from '@shared/host/host-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -64,7 +64,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     await scene.start({ endpoint: seam.endpoint, permanentClient: true });
     expect(await seam.services().dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: true }); // wakes it, no app
     const engine = scene.lastEngine();
-    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY]);
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY]); // P5 O16 M3b: host.holder whatever the option
     // ready by its own resync with the spine cold (nothing to pull): events flow with no app, and are available
     await until(() => engine.send({ n: 1 }), 3_000, 'the link’s ready line');
     await until(() => seam.events.length === 1, 3_000, 'the event through the seam');
@@ -338,7 +338,9 @@ describe('O2’s recycle per attachment stays', () => {
     const app = await scene.app();
     const engine = scene.lastEngine();
     await until(() => engine.supervisor.peer() !== null);
-    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY]);
+    // P5 O16 M3b: host.holder is listed whatever the option (mawsd adopts through its successor either way); the
+    // attachment capability, the option's own, is not
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, HOLDER_CAPABILITY]);
     const linksAtWelcome = engine.supervisor.connections.length;
     await until(() => engine.supervisor.connections.length > linksAtWelcome, 3_000, 'the recycle at attach');
     app.ready();

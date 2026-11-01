@@ -121,11 +121,22 @@ describe('the handover of a hosted session', () => {
     expect(run.session.lifecycle).not.toBe('exited');
   });
 
-  it('a stop asked of a frozen row runs no ladder: the row is the successor’s', async () => {
+  // fix wave 1: a release is not the owner's act: it waits for the successor; a deliberate stop takes the row back from
+  // the handover and runs the ladder (process-table.test.ts runs it to the exit)
+  it('a release asked of a frozen row runs no ladder; a deliberate stop takes it back and runs it', async () => {
     const run = await hostedSession();
     run.session.freeze();
-    await run.session.stop('stop');
+    await run.session.stop('idle');
+    expect(run.transport.requestsOf('end_session')).toEqual([]);
     expect(run.transport.calls.some((c) => c.startsWith('kill:') || c === 'endInput')).toBe(false);
     expect(run.logs.some((line) => line.includes('left to the successor'))).toBe(true);
+    const stopped = run.session.stop('stop');
+    await until(() => run.transport.requestsOf('end_session').length === 1, 'the ladder’s end_session');
+    expect(run.logs.some((line) => line.includes('taken back from the handover'))).toBe(true);
+    run.transport.exit(0);
+    await stopped;
+    expect(run.session.status().exit).toMatchObject({ reason: 'stop' });
+    await run.session.detach('handover'); // taken back: never detached
+    expect(run.transport.calls).not.toContain('detach:ack');
   });
 });

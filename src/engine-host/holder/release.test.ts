@@ -52,7 +52,7 @@ const until = async (check: () => boolean, what: string, ms = 3_000) => {
 };
 const proc = (pid: number, ppid: number, command: string, stat = 'S') => `${pid} ${ppid} 1024 ${stat} ${command}`;
 
-async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySessionStateStore; psSync?: () => string; ps?: () => Promise<string> } = {}) {
+async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySessionStateStore; psSync?: () => string; ps?: () => Promise<string>; hosted?: boolean } = {}) {
   const logs: string[] = [];
   const table = new ProcessTable({ ps: opts.ps ?? (async () => tree.join('\n')), psSync: opts.psSync, sampleMs: 60_000, gate, log: (line) => void logs.push(line) });
   tables.push(table);
@@ -60,7 +60,7 @@ async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySes
   const s = Object.fromEntries(names.map((name, i) => {
     const x = scriptedSession({
       spec: { appSessionId: name as AppSessionId, sessionId: `${PINNED.slice(0, -1)}${i}` as never },
-      transport: { pid: ENGINE + i },
+      transport: { pid: ENGINE + i, ...(opts.hosted && { holder: { pid: 4100 + i, holderId: `L-${name}`, fence: 1 } }) }, // P5 O16 M3b fix wave 1: under a session host
       responder: handshakeResponder({ end_session: () => null, mcp_status: () => ({ response: { mcpServers: servers } }) }),
       session: opts.store ? { store: opts.store } : {},
     });
@@ -84,6 +84,22 @@ async function observe(x: Row, opts: { childPid?: number; beat?: boolean } = {})
 }
 
 describe('the idle release through the gate', () => {
+  // P5 O16 M3b fix wave 1: the handover's freeze cancels the row's reap and retires its gate channel, so no fence armed
+  // by the old host can stop a turn the engine runs under the successor, and the closed idle release holds every row
+  it('a freeze for the handover disarms an armed reap and closes its channel; nothing is signalled and the release holds', async () => {
+    const { table, s } = await rows(['a'], { hosted: true });
+    const o = await observe(s.a!);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    expect(await o.next('arm', IDLE_MS + 1_000)).toEqual({ t: 'arm', fence: 1, leaseMs: 10_000 });
+    expect(table.freezeForHandover()).toEqual([s.a!.session]);
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    await o.closed; // the row's channel retired: its observer says hello to the successor's gate
+    expect(s.a!.session.status().reap?.state).toBe('idle');
+    await sleep(IDLE_MS * 2);
+    expect(releasing(s.a!)).toBe(false);
+    expect(table.gateCounts().armed).toBe(0);
+  });
+
   it('a row whose observer is healthy is armed first and released only after armed', async () => {
     const { table, s } = await rows(['a']);
     const o = await observe(s.a!);

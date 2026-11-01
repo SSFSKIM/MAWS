@@ -782,7 +782,8 @@ describe('host.supervisorStatus: the gate (O16 M5)', () => {
 
 // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11, D33, D34): the handover, armed by
 // host.handover or by a refused link's `exit idle` from a client that adopts, freezes the hosted rows once, detaches
-// each as it drains, and runs the exit order once every row has drained, after its answer is written.
+// them once every row has drained (fix wave 1: all at once, at the settle), and runs the exit order after its answer
+// is written.
 describe('the handover', () => {
   it('exit idle on a welcomed link keeps E10’s meaning whatever the hello listed; on a refused link from a client that adopts it hands over', async () => {
     const welcomed = harness();
@@ -834,7 +835,7 @@ describe('the handover', () => {
     h.draining.push(busy, idle);
     const answer = h.call('host.handover', { graceMs: 5_000 });
     await vi.advanceTimersByTimeAsync(0);
-    expect(idle.detached).toEqual(['handover']); // a row with nothing in flight goes at once
+    expect(idle.detached).toEqual([]); // fix wave 1: drained, it waits for the drain's settle, so a stop-all can still take it back
     expect(h.supervision.quiet()).toBe(false);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(await answer).toEqual({ state: 'deferred', inFlight: 2 });
@@ -848,6 +849,7 @@ describe('the handover', () => {
     busy.retire();
     await vi.advanceTimersByTimeAsync(0);
     expect(busy.detached).toEqual(['handover']);
+    expect(idle.detached).toEqual(['handover']); // both at the settle
     expect(h.exits).toEqual(['handover']);
   });
 

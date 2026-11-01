@@ -413,6 +413,32 @@ describe('an adopted session, fix wave 1', () => {
     await a.session.exited;
   });
 
+  // P5 O16 M3b fix wave 1: a second handover freezes an adopted row whose handshake still waits (here on its gateway
+  // read): no continuation of the handshake runs after the freeze; the row never becomes ready, the request its gate
+  // held is never dispatched, and nothing is journaled after the detach
+  it('a freeze during the adopted handshake ends it: never ready, its held request never dispatched, nothing after the detach', async () => {
+    const plan = planOf();
+    predecessor(plan, () => {});
+    const a = adopter(plan, {}, undefined, { responder: { get_status: () => null } });
+    const shows: unknown[] = [];
+    a.session.on('paneShow', (request) => void shows.push(request));
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.transport.requestsOf('get_status').length === 1, 'the gateway read, after the re-initialize');
+    a.transport.push(call('e-held', 1, 'show_pane', { pane: 'terminal' }, 'toolu_held'), 1);
+    await until(() => a.transport.journaledSeqs.includes(1), 'the held call journaled');
+    a.session.freeze();
+    await a.session.drained();
+    await a.session.detach('handover');
+    const rowsAtDetach = a.rows().length;
+    await sleep(8_500); // the gateway read's deadline (read class, 8 s) passes
+    expect(a.session.lifecycle).toBe('initializing');
+    expect(shows).toEqual([]);
+    expect(responses(a.transport).map((r) => r.response.request_id)).not.toContain('e-held');
+    expect(a.rows().length).toBe(rowsAtDetach);
+    expect(a.outcome.settled).toBeNull();
+  }, 20_000);
+
   describe('D58: the re-initialize after the handover', () => {
     it('an error answer ends the session through the ladder, naming its cause', async () => {
       const plan = planOf();

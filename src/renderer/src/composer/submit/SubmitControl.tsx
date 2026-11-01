@@ -16,6 +16,7 @@ const PRIMARY =
 const TONE: Record<SubmitDecision['primary'], string> = {
   send: 'bg-accent text-bg hover:opacity-90',
   stop: 'bg-fg text-bg hover:opacity-90',
+  end: 'bg-fg text-bg hover:opacity-90', // P5 O16 M3b fix wave 1
   resume: 'bg-accent text-bg hover:opacity-90',
 };
 
@@ -24,6 +25,8 @@ function tooltip(d: SubmitDecision, multiline: boolean): string {
   switch (d.primary) {
     case 'stop':
       return 'Stop the running turn (⌘.)';
+    case 'end':
+      return d.detail ?? d.label; // P5 O16 M3b fix wave 1
     case 'resume':
       return 'Resume the paused queue';
     default:

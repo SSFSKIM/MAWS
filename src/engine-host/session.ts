@@ -308,6 +308,7 @@ export class EngineSession {
   private readonly drainWaiters: (() => void)[] = [];
   private exitedWhileFrozen = false;
   private detaching: Promise<void> | null = null;
+  private leftHandover = false; // fix wave 1: taken back from the handover by a deliberate stop; never detached
   readonly adoption: Promise<void>;
   private settleAdoption: (error: AdoptionFailed | null) => void = () => {};
   // P5 O16 M3 end
@@ -602,10 +603,14 @@ export class EngineSession {
   stop(reason: 'budget', opts: { graceMs?: number; release: BudgetRelease }): Promise<StopResult>;
   stop(reason: 'stop' | 'archive' | 'quit' | 'budget' | 'idle' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
-    // P5 O16 M3b: a frozen row is the successor's: nothing here reads its exit, so no ladder runs (the stop goes to it)
+    // P5 O16 M3b fix wave 1: a deliberate stop (a user's, an archive, a stop-all or quit) of a row frozen for the handover
+    // takes it back from the handover and runs the ladder, so its engine ends as asked; a release (idle, budget) waits
+    // for the successor. A row already detached is the successor's: nothing here can reach its process.
     if (this.frozen) {
-      this.log(`stop (${reason}) asked during the handover: left to the successor`);
-      return Promise.resolve(this.stopResult());
+      if (reason === 'idle' || reason === 'budget' || !this.thaw(`stop (${reason})`)) {
+        this.log(`stop (${reason}) asked during the handover: left to the successor`);
+        return Promise.resolve(this.stopResult());
+      }
     }
     if (reason === 'budget' || reason === 'idle') {
       if (this.stopReason === null) {
@@ -1044,7 +1049,7 @@ export class EngineSession {
       if (this.reinitializeWait !== null) clearTimeout(this.reinitializeWait);
       this.reinitializeWait = null;
     }
-    if (this.processState !== 'initializing') return;
+    if (this.processState !== 'initializing' || this.frozen) return; // fix wave 1: a freeze ends the handshake here
     this.handshakeDone = true;
     this.record('meta', { event: 'initialize', current_permission_mode: init.current_permission_mode, session_state: init.session_state ?? null, hooks_applied: init.hooks_applied ?? null, workspace_trust_recorded: init.workspace_trust_recorded ?? null });
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', ...this.attempt, trigger: this.reconnectTrigger, reason: null });
@@ -1055,6 +1060,7 @@ export class EngineSession {
     if (Array.isArray(init.models)) this.emit('models', init.models);
     // C10 end
     await this.surface.attach(client, init.capabilities); // R2: as the desktop surface, when the engine speaks ui_surface_v1
+    if (this.frozen) return; // P5 O16 M3b fix wave 1
 
     // Visibility only: null preserves the engine's thinking budget (2.1.309 probe). Queue it before the gateway read,
     // but never hold readiness or a prompt for its acknowledgement.
@@ -1062,6 +1068,7 @@ export class EngineSession {
       onWritten: (requestId) => { this.thinkingDisplayRequestId = requestId; },
     }).catch((error: unknown) => this.log(`Reasoning summaries could not be enabled: ${messageOf(error)}`));
     await this.verifyGateway();
+    if (this.frozen) return; // P5 O16 M3b fix wave 1: frozen meanwhile (a second handover): the successor's handshake
     if (!adopted) await this.fallBackFromAuto(client, init); // W3
     if (!adopted && (this.spec.resume !== null || this.inheritedGrants /* C10 */) && this.grants.allow.length > 0 && this.processState === 'initializing') {
       try {
@@ -1070,7 +1077,7 @@ export class EngineSession {
         this.notice('grants:reapply_failed', `Session grants could not be re-applied after the resume: ${messageOf(error)}`);
       }
     }
-    if (this.processState !== 'initializing') return;
+    if (this.processState !== 'initializing' || this.frozen) return; // fix wave 1: a freeze ends the handshake here
     if (!adopted) {
       try {
         await this.queue.recover();
@@ -1079,8 +1086,9 @@ export class EngineSession {
         this.initializeFailed(new Error(`the session's queue could not be recovered: ${messageOf(error)}`));
         return;
       }
-      if (this.processState !== 'initializing') return;
+      if (this.processState !== 'initializing' || this.frozen) return; // fix wave 1: a freeze ends the handshake here
     }
+    if (this.frozen) return; // P5 O16 M3b fix wave 1: never ready, nothing held dispatched, once frozen
     this.setProcess('ready');
     void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
     if (adopted) {
@@ -1145,9 +1153,12 @@ export class EngineSession {
   // yet processed is dropped, the first-output and re-initialize clocks stop, and the writer writes nothing but answers
   // (a call's result, a hook's or a human's answer already on its way), so the engine's requests in flight still settle.
   freeze(): void {
-    if (this.frozen || this.processState === 'exited') return;
+    if (this.frozen || this.leftHandover || this.processState === 'exited') return;
     this.frozen = true;
     this.held.length = 0;
+    // fix wave 1: the adopted handshake's gate is dropped with it: a held request was journaled, so the successor's fold
+    // finds it outstanding and disposes of it by its table; nothing here dispatches it
+    if (this.handshakeHeld !== null) this.handshakeHeld = [];
     this.heard();
     if (this.reinitializeWait !== null) clearTimeout(this.reinitializeWait);
     this.reinitializeWait = null;
@@ -1174,11 +1185,38 @@ export class EngineSession {
     if (this.frozen && this.isDrained()) for (const resolve of this.drainWaiters.splice(0)) resolve();
   }
 
+  // Fix wave 1: a row frozen and not yet detached, taken back from the handover for a deliberate stop. It leaves the drain
+  // (its waiters resolve: it holds nothing for the successor), the writer writes again, what the engine said while it
+  // was frozen is not read back (the row is ending), and an exit it already made is handled now. False when it cannot
+  // be taken back: not frozen, or its detach has begun.
+  private thaw(why: string): boolean {
+    if (!this.frozen || this.detaching !== null) return false;
+    this.frozen = false;
+    this.leftHandover = true;
+    this.writer?.restrict(null);
+    this.log(`taken back from the handover: ${why}`);
+    for (const resolve of this.drainWaiters.splice(0)) resolve();
+    const transport = this.transport;
+    if (this.exitedWhileFrozen && transport) void transport.exited.then((exit) => this.handleExit(exit));
+    return true;
+  }
+
+  // Fix wave 1: whether the row left the handover for a stop (the drain does not detach it; the exit order stops it).
+  get takenBack(): boolean {
+    return this.leftHandover;
+  }
+
+  // Fix wave 1: a stop or release whose ladder is under way: a handover freezes nothing that is ending.
+  get ending(): boolean {
+    return this.stopReason !== null;
+  }
+
   // The row let go for the successor: the writer's in-flight writes awaited (bounded by EOF_WRITE_WAIT_MS), the
   // `host_detach` row, the journal and the map closed, then the final ack and the connection ended without `release`, so
   // the session host and its engine run on. A row frozen before its adoption connected writes no row (the journal is
   // still the old manager's). The process has not exited: no exit row, no `exited`.
   detach(reason: 'handover' | 'exit'): Promise<void> {
+    if (this.leftHandover) return Promise.resolve(); // fix wave 1: taken back for a stop; the exit order stops it
     this.freeze();
     if (!this.frozen) return Promise.resolve(); // exited already
     this.detaching ??= this.detachNow(reason);
@@ -1402,7 +1440,11 @@ export class EngineSession {
   // Ready: the turn ends the replay saw, then the head as after any sequence.
   private async releaseAfterAdoption(): Promise<void> {
     this.releaseDeferred = false;
-    for (const event of this.deferredTurnEnds.splice(0)) await this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
+    for (const event of this.deferredTurnEnds.splice(0)) {
+      if (this.frozen) return; // P5 O16 M3b fix wave 1
+      await this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
+    }
+    if (this.frozen) return;
     await this.queue.onSequenceEnded().catch((error: unknown) => this.log(`queue release after adoption failed: ${messageOf(error)}`));
   }
 
@@ -1837,10 +1879,10 @@ export class EngineSession {
     try {
       status = await getStatus(client, {});
     } catch (error) {
-      this.log(`get_status failed: ${messageOf(error)}`);
+      if (!this.frozen) this.log(`get_status failed: ${messageOf(error)}`);
       return;
     }
-    if (this.processState === 'exited') return;
+    if (this.processState === 'exited' || this.frozen) return; // P5 O16 M3b fix wave 1: nothing recorded once frozen
     const rows = (title: string) => status.sections.find((s) => s.title === title)?.rows ?? [];
     const baseUrl = rows('Session').find((r) => r.label === 'Anthropic base URL')?.value ?? null;
     const server = rows('Environment').find((r) => r.label === 'Auto mode server')?.value;
@@ -1923,6 +1965,7 @@ export class EngineSession {
   // P5 O16 M3a fix wave 1 (D58): an adopted engine's failed re-initialize ends it the same way, its cause named.
   private initializeFailed(error: unknown): void {
     if (this.processState !== 'initializing') return; // exited before the response (handled at the exit) or stopped
+    if (this.frozen) return; // P5 O16 M3b fix wave 1: frozen (the transport detached or the answer left unread): the successor's
     const code = error instanceof ControlError ? error.code : null;
     if (this.opts.adopted) this.reinitializeFailed(messageOf(error), code);
     else this.writeInitFailed(messageOf(error), code);

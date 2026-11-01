@@ -12,6 +12,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'; // P5 O2 branch revie
 import { tmpdir } from 'node:os'; // P5 O2 branch review
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { EngineSession } from './session';
+import { HandoverDrain } from './handover'; // P5 O16 M3b fix wave 1
 import type { LiveRow } from './live-ledger'; // E10
 // C12 start
 import { readFileSync } from 'node:fs';
@@ -20,6 +21,13 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 // C12 end
 
 const flush = () => new Promise((r) => setImmediate(r));
+async function until(check: () => boolean, what: string, ms = 5_000): Promise<void> { // P5 O16 M3b fix wave 1
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -187,6 +195,44 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(hosted.transport.calls).toEqual(['detach:ack']);
     expect(hosted.session.lifecycle).toBe('ready');
     expect(direct.session.lifecycle).toBe('exited');
+  });
+
+  // P5 O16 M3b fix wave 1 (Interfaces §D: a stop-all and a quit stay deliberate): a stop after the freeze takes the row
+  // back from the handover and runs the real ladder; nothing is left to a successor
+  it('a stop-all after the freeze stops every frozen row through the ladder: the engine exits, nothing detached', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const hosted = scriptedSession({ spec: { appSessionId: 'app-hosted' as AppSessionId }, transport: { holder: { pid: 4100, holderId: 'L1', fence: 1 } }, responder: handshakeResponder({ end_session: () => null }) });
+    table.reserve('app-hosted' as AppSessionId, () => hosted.session);
+    await hosted.session.start();
+    const drain = new HandoverDrain(table.freezeForHandover(), { log: () => {}, settled: () => {} });
+    const shutdown = table.shutdown({ graceMs: 5_000, mode: 'stop' });
+    await until(() => hosted.transport.requestsOf('end_session').length === 1, 'the ladder’s end_session');
+    hosted.transport.exit(0);
+    expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
+    expect(hosted.session.lifecycle).toBe('exited');
+    expect(hosted.session.status().exit).toMatchObject({ reason: 'quit' });
+    expect(hosted.transport.calls).not.toContain('detach:ack');
+    expect(hosted.journal.rows.some((row) => (row.frame as { event?: string }).event === 'host_detach')).toBe(false);
+    expect(drain.settled).toBe(true); // the row left the drain; nothing waits for a successor
+  });
+
+  it('a user’s stop of a frozen row during the drain stops it through the ladder and takes it out of the handover; the rest still detach', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const rows = ['app-a', 'app-b'].map((id, i) => scriptedSession({ spec: { appSessionId: id as AppSessionId }, transport: { holder: { pid: 4100 + i, holderId: `L${i}`, fence: 1 } }, responder: handshakeResponder({ end_session: () => null }) }));
+    for (const row of rows) table.reserve(row.session.status().appSessionId, () => row.session);
+    for (const row of rows) await row.session.start();
+    const [a, b] = rows as [typeof rows[0], typeof rows[0]];
+    let settled = false;
+    new HandoverDrain(table.freezeForHandover(), { log: () => {}, settled: () => void (settled = true) });
+    const stopped = a.session.stop('stop');
+    await until(() => a.transport.requestsOf('end_session').length === 1, 'the ladder’s end_session');
+    a.transport.exit(0);
+    await stopped;
+    expect(a.session.status().exit).toMatchObject({ reason: 'stop' });
+    await until(() => settled, 'the drain');
+    await until(() => b.transport.calls.includes('detach:ack'), 'the other row’s detach');
+    expect(a.transport.calls).not.toContain('detach:ack');
+    expect(b.session.lifecycle).toBe('ready');
   });
 
   // P5 O16 M3 (D10): a row held for an adoption from before the first client is answered: live, holding the host as a
