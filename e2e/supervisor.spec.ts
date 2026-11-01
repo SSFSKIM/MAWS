@@ -857,7 +857,9 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
   });
 });
 
-// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
+// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`); and the
+// turn's start, which the engine says just before its call (toolCallJournal)
+const isTurnStarted = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'started';
 const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
 const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
 const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating the engine host (1 call running).'; // ENGINE_HOST_UPDATE.waiting(1, 'artifact_list')
@@ -899,8 +901,9 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     await startTurn(first.page, s, a, toolCallJournal(s.root, 'tool-call', 'artifact_list'), 'turn 1');
     await expect.poll(() => s.journal(a).some(isToolCall), { timeout: 30_000, message: 'A’s engine called the tool, held' }).toBe(true);
     const b = await s.record(first.page);
-    await startTurn(first.page, s, b, turnsJournal(s.root, 'b', 2), 'turn 1');
-    await expect.poll(async () => (await statusOf(first.page, b)).turn === null, { timeout: 30_000, message: 'B’s first turn ends' }).toBe(true);
+    await s.launchSession(first.page, b, turnsJournal(s.root, 'b', 2), { cwd: s.repo }); // unpaced: its turn may end before a poll sees it open
+    value(await invoke(first.page, 'session.send', { appSessionId: b, content: 'turn 1' }));
+    await expect.poll(async () => (await eventsOf(first.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s first turn ends' }).toBe(1);
     const engines = { a: (await statusOf(first.page, a)).pid, b: (await statusOf(first.page, b)).pid };
     await s.quit(first);
     expect(first.quitLines()).toContain(keptQuitLine());
@@ -975,13 +978,14 @@ test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the fr
     writeFileSync(hold, '');
     s.useStub({ gate });
     const fixture = toolCallJournal(s.root, 'tool-call', 'artifact_list');
-    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: async () => {} });
+    const reachedGate = async (_page: Page, at: AppSessionId) => void (await expect.poll(() => s.journal(at).some(isTurnStarted), { timeout: 30_000, message: 'the engine started the turn and stands at its call (the gate)' }).toBe(true));
+    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: reachedGate });
     expect(s.journal(id).some(isToolCall), 'no call yet: the host is quiet').toBe(false);
 
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
     await expect.poll(() => s.log().includes('e2e: the handover waits for a call to start before its freeze'), { timeout: 60_000, message: 'host.log: the update asked at the quiet report' }).toBe(true);
     writeFileSync(gate, ''); // the call starts between the quiet report and the freeze
-    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: 'host.log: frozen with the call in flight' }).toBe(true);
+    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: `host.log: frozen with the call in flight; the journal's tail: ${JSON.stringify(s.journal(id).slice(-4).map((r) => [r.direction, r.frame.type, r.frame.subtype ?? r.frame.state ?? null]))}; the stub: ${s.stderrOf(id).slice(-5).join(' | ')}` }).toBe(true);
     const frozenAt = Date.now();
     const daemon = s.daemonLock()!.pid; // the update's mawsd, holding the app's hello
     await expect.poll(() => s.log().includes('the handover defers: 1 calls in flight'), { timeout: 30_000, message: 'host.log: the handover defers' }).toBe(true);
