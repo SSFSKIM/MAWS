@@ -51,6 +51,7 @@ const registry = vi.hoisted(() => {
     terminals: {
       list: () => infos,
       host: () => host,
+      hosts: () => new Map(host ? [['TestMachineRef00000000', host]] : []), // P5 O7 M3: each machine's, this one's here
       subscribe: (cb: (infos: TerminalInfo[], host: HostState | null) => void) => {
         listeners.add(cb);
         return () => listeners.delete(cb);
