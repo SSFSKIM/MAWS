@@ -27,6 +27,9 @@ export interface OverviewInput {
   rows: NeedsYouRow[];
   local: MachineRef; // P5 O6 M5: the sessions of no project group by machine, this one's first, each named as its row is
   machineName(machine: MachineRef): string;
+  // P5 O7 M6 (M6c fix wave 1): other machines' listed sessions; one with no record is carded in Needs you from its
+  // listing and its item (as the toolbar counts it), and in no other group, which needs a record's directory and digest.
+  listed?: ReadonlyMap<AppSessionId, unknown>;
 }
 
 export interface CardGroup {
@@ -45,9 +48,10 @@ function eligible(record: SessionRecord, digest: SessionDigest | undefined, wait
 const latestTurn = (record: SessionRecord, digest: SessionDigest | undefined) =>
   time(digest?.turnStartedAt ?? digest?.lastTurnEndedAt ?? record.updatedAt);
 
-export function overviewGroups({ records, digests, projects, rows, local, machineName }: OverviewInput): CardGroup[] {
+export function overviewGroups({ records, digests, projects, rows, local, machineName, listed }: OverviewInput): CardGroup[] {
   const waiting = new Set(rows.map((row) => row.appSessionId));
-  const groups: CardGroup[] = [{ id: 'needs-you', title: 'Needs you', sessions: rows.map((row) => row.appSessionId).filter((id) => records.has(id)) }];
+  const carded = (id: AppSessionId) => records.has(id) || (listed?.has(id) ?? false);
+  const groups: CardGroup[] = [{ id: 'needs-you', title: 'Needs you', sessions: rows.map((row) => row.appSessionId).filter(carded) }];
   const ordered = orderProjects(projects);
   const byProject = new Map<ProjectId | OrgKey, SessionRecord[]>();
   const known = new Set(ordered.map((p) => p.id));

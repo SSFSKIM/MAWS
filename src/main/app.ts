@@ -822,7 +822,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(view, { actions: notificationActions({ dispatch: hosts.dispatch, view }), settings: () => settings.state().settings, port: clientPort }); // P5 O3-C (readers R1, R2)
+  startAttention(view, {
+    actions: notificationActions({ dispatch: hosts.dispatch, view }),
+    settings: () => settings.state().settings,
+    port: clientPort,
+    // P5 O7 M6: other machines' items, from remote lane B's attention feeds, titled by their listed rows
+    remote: remoteLaneB.attention,
+    remoteTitle: (machine, app) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === app)?.title ?? null,
+  }); // P5 O3-C (readers R1, R2)
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(view, { // P5 O3-C (reader R3)
     // C12 start

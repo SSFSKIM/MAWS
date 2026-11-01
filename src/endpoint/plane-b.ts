@@ -19,7 +19,7 @@
 // request, context, requestDigest}]}`; it never carries an event, the queue, the catalog or the status.
 import { SessionStreams, type StreamHandle, type StreamSink } from '@shared/host/stream-catchup';
 import type { EndpointServices } from './services';
-import type { Plane, Subscription } from './subscriptions';
+import type { Plane, SessionSubscription } from './subscriptions';
 
 export { BACKLOG_BYTES, PAGE_EVENTS } from '@shared/host/stream-catchup';
 
@@ -30,9 +30,9 @@ export type PlaneBContext = {
 };
 
 /** Lane B's plane: each subscription a stream of `@shared/host/stream-catchup`, from the launch's start. */
-export class PlaneB implements Plane {
+export class PlaneB implements Plane<SessionSubscription> {
   readonly #streams: SessionStreams;
-  readonly #handles = new Map<Subscription, StreamHandle>();
+  readonly #handles = new Map<SessionSubscription, StreamHandle>();
 
   constructor(ctx: PlaneBContext) {
     this.#streams = new SessionStreams({
@@ -43,14 +43,14 @@ export class PlaneB implements Plane {
     });
   }
 
-  open(sub: Subscription): void {
+  open(sub: SessionSubscription): void {
     const handle = this.#streams.openStream({ app: sub.session.id, cursor: sub.cursor === null ? null : { epoch: sub.cursor.epoch, seq: sub.cursor.seq, ...(sub.cursor.idx === undefined ? {} : { idx: sub.cursor.idx }) }, view: sub.view, from: 'start' }, sinkOf(sub));
     this.#handles.set(sub, handle);
     // Room to send more (credit came, the device took its stream, a hold ended): the journal reads on.
     sub.onRoom = () => this.#streams.room(handle);
   }
 
-  close(sub: Subscription): void {
+  close(sub: SessionSubscription): void {
     const handle = this.#handles.get(sub);
     if (handle === undefined) return;
     this.#handles.delete(sub);
@@ -79,7 +79,7 @@ export class PlaneB implements Plane {
 }
 
 /** A subscription as the stream's reader: its messages, with `paused` and `resumed` as its control messages. */
-function sinkOf(sub: Subscription): StreamSink {
+function sinkOf(sub: SessionSubscription): StreamSink {
   return {
     get ended() {
       return sub.ended;

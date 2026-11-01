@@ -107,11 +107,11 @@ function HostRow({ label, state }: { label: string; state: HostState | null }) {
 
 // C5: the shell's data at a glance, how M1's acceptance is read before any shell surface exists.
 function ShellDataRow() {
-  const { loaded, records, recordsVersion } = useSessions(useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion })));
-  const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version })));
+  const { loaded, records, recordsVersion, listed } = useSessions(useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, listed: s.listed })));
+  const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version, greyed: a.greyed })));
   const hydrated = useLayout((l) => l.hydrated);
   const sessions = loaded ? [...records.values()].filter((r) => !r.archived).length : '…';
-  const needsYou = attention.loaded ? selectCountNeedsYou(attention, { records, recordsVersion }) : '…';
+  const needsYou = attention.loaded ? selectCountNeedsYou(attention, { records, recordsVersion, listed }) : '…';
   return (
     <output aria-label="shell data" className="font-mono">
       {`sessions · ${sessions} · needs you · ${needsYou} · layout · ${hydrated ? 'hydrated' : 'pending'}`}

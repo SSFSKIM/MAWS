@@ -289,8 +289,15 @@ export const SESSION_CHANGE_CAUSES = ['discovered', 'facts', 'holder', 'update',
 export type SessionChangeCause = (typeof SESSION_CHANGE_CAUSES)[number];
 
 const appSession = z.strictObject({ appSessionId: AppSessionIdSchema });
+/** The most hits `session.search` answers (title matches first). */
+export const SESSION_SEARCH_LIMIT = 50;
+/**
+ * P5 O7 M6: the most sessions `session.search`'s `sessions` may name. The endpoint names the sessions a remote member
+ * views, so the limit is spent on them rather than on sessions the answer's cut would drop.
+ */
+export const SESSION_SEARCH_SESSIONS_MAX = 10_000;
 const c4Commands = {
-  'session.search': { input: z.strictObject({ query: z.string().max(1000) }), output: z.strictObject({ hits: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, snippet: z.string().nullable() })), indexing: z.boolean(), incomplete: z.boolean() }), owner: 'machine' },
+  'session.search': { input: z.strictObject({ query: z.string().max(1000), sessions: z.array(AppSessionIdSchema).max(SESSION_SEARCH_SESSIONS_MAX).optional() }), output: z.strictObject({ hits: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, snippet: z.string().nullable() })), indexing: z.boolean(), incomplete: z.boolean() }), owner: 'machine' },
   'session.list': {
     input: z.strictObject({ includeArchived: z.boolean().optional() }),
     output: z.strictObject({ sessions: z.array(SessionRecordSchema), revision: z.number().int() }),

@@ -4,22 +4,29 @@
 // click opens the session, a ⌘-click opens it in the split. A foreign-live card shows its holder and holds no control
 // but itself (D-12); P5 O9 M6: unless MAWS drives it through its bridge (it has a controls port), when its request is
 // answered from the card as any session's.
+// P5 O7 M6 (M6c fix wave 1): another machine's session with no record (no tab was opened) waiting in Needs you is carded
+// from what the page has, its listing and its item: the glyph, the title, its machine in the project's place, what it
+// waits for and the item's summary; no branch, digest or footer. A click opens it through its lane's opener (M2's pane).
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSlot } from '../app/slots';
 import { GlyphMark } from '../attention/GlyphMark';
 import { waitingItem } from '../attention/derive';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, listedGlyph } from '../attention/glyph'; // P5 O7 M6: listedGlyph
 import { ipc } from '../ipc/client';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M6
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions'; // P5 O7 M6: ListedSession
 import { cardActivity, cardFooter } from './derive';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
-import { displayTitle } from '../sessions/title';
+import { displayTitle, listedTitle } from '../sessions/title';
+import { previewLine } from '@shared/owner/preview'; // P5 O7 M6
+import { isActionable } from '@shared/attention/kinds'; // P5 O7 M6
+import { useMachineMark } from '../app/machine-mark'; // P5 O7 M6
+import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 
 type PaneIndex = 0 | 1;
 
@@ -42,7 +49,8 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M6: none for a session held elsewhere with no live bridge
-  if (!record) return null;
+  const listed = useSessions((s) => (record === undefined ? s.listed.get(appSessionId) : undefined)); // P5 O7 M6
+  if (!record) return listed ? <ListedCard listed={listed} showProject={showProject} stop={stop} onFocus={onFocus} onKeyDown={onKeyDown} /> : null;
 
   const waiting = waitingItem(pending);
   const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
@@ -88,6 +96,47 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
               <span>{part}</span>
             </span>
           ))}
+        </p>
+      )}
+    </article>
+  );
+}
+
+// P5 O7 M6: a listed session's card (the comment at the top).
+function ListedCard({ listed, showProject, stop, onFocus, onKeyDown }: Omit<SessionCardProps, 'appSessionId' | 'paneIndex'> & { listed: ListedSession }) {
+  const appSessionId = listed.appId;
+  const pending = useAttention((s) => selectPendingOf(s, appSessionId));
+  const machine = useMachineMark(appSessionId);
+  const glyph = listedGlyph(listed.state, pending);
+  const waiting = waitingItem(pending);
+  const activity = waiting !== null && isActionable(waiting.oldest) && waiting.oldest.kind === 'permission' ? 'Waiting for approval' : glyph.label;
+  const summary = waiting === null || waiting.oldest.summary === '' ? null : (previewLine(waiting.oldest.summary, 200) ?? waiting.oldest.summary);
+  const title = listedTitle(listed);
+  return (
+    <article
+      aria-label={title}
+      tabIndex={stop ? 0 : -1}
+      data-card={appSessionId}
+      data-listed-card
+      onFocus={(event) => event.target === event.currentTarget && onFocus()}
+      onKeyDown={onKeyDown}
+      onClick={(event) => {
+        if (onControl(event)) return;
+        if (event.metaKey || !openListed(appSessionId)) useLayout.getState().openSession(appSessionId, { split: event.metaKey });
+      }}
+      className="flex min-w-0 cursor-default flex-col gap-1.5 rounded-md border border-border bg-bg-raised p-3 outline-accent hover:border-border-strong focus-visible:outline-2"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <GlyphMark glyph={glyph} className="shrink-0" />
+        <span className="truncate font-medium text-fg">{title}</span>
+        {showProject && <span className="shrink-0 text-ui-sm text-fg-muted">{machine.name}</span>}
+      </div>
+      <p data-testid="card-activity" className="m-0 truncate text-ui-sm text-fg">
+        {activity}
+      </p>
+      {summary && (
+        <p data-testid="card-summary" className="m-0 truncate text-ui-sm text-fg-muted">
+          {summary}
         </p>
       )}
     </article>

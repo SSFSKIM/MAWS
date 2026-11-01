@@ -15,16 +15,26 @@
 import { base64urlEncode, SUB_CREDIT_MAX, type Cursor, type DeviceMessage, type EndpointMessage, type SessionRef } from '../../../../apps/org-protocol/src/index.ts';
 import { MAX_SUBS, type RemoteTiming } from './timing';
 
-export interface SubscribeRequest {
+/**
+ * A session's stream, or one of the machine's feeds (P5 O7 M4 and M6, §R), each sent only to a peer that listed
+ * `rl2.feeds` (an older endpoint would read a `checkout` feed as the session's own stream, and close the channel on an
+ * `attention` one); for any other the subscription ends `not-offered`, never sent. Every opening of a feed is a snapshot,
+ * so a feed resubscribes with no cursor and its `view` is not sent.
+ */
+export type SubscribeRequest = SessionSubscribeRequest | MachineFeedRequest;
+export interface SessionSubscribeRequest {
   session: SessionRef;
   view?: 'full' | 'cards';
   cursor?: Cursor | null;
-  /**
-   * P5 O7 M4 (§R): the session's `checkout` feed rather than its stream, sent only to a peer that listed `rl2.feeds`
-   * (an older endpoint would read it as the session's own stream); for any other the subscription ends `not-offered`,
-   * never sent. Every opening is a snapshot, so a feed resubscribes with no cursor and its `view` is not sent.
-   */
+  /** P5 O7 M4: the session's `checkout` feed rather than its stream. */
   feed?: 'checkout';
+}
+/** P5 O7 M6: the machine's `attention` feed, which names no session. */
+export interface MachineFeedRequest {
+  feed: 'attention';
+  session?: undefined;
+  view?: undefined;
+  cursor?: undefined;
 }
 export interface SubscriptionSink {
   /** A snapshot or missing starts the stream over from `at`. */
@@ -195,15 +205,16 @@ export class SubTable {
   }
 
   #sub(entry: Entry): void {
-    const { session, view, feed } = entry.request;
+    const { request } = entry;
     const credit = this.#deps.timing.SUB_INITIAL_CREDIT;
-    if (feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session, ...(view === undefined ? {} : { view }), cursor: entry.cursor, credit });
+    if (request.feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), cursor: entry.cursor, credit });
     // What the peer could not read never goes: the feed ends here, as the endpoint would end a name it does not offer.
     if (this.#deps.peerCapabilities()?.includes('rl2.feeds') !== true) {
       this.#remove(entry);
       return void queueMicrotask(() => entry.sink.ended('not-offered'));
     }
-    this.#deps.send({ t: 'sub', sub: entry.id, session, feed, cursor: null, credit });
+    if (request.feed === 'attention') return void this.#deps.send({ t: 'sub', sub: entry.id, feed: 'attention', cursor: null, credit });
+    this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, feed: request.feed, cursor: null, credit });
   }
 
   #page(entry: Entry, at: Cursor, page: number, last: boolean, body: unknown): void {

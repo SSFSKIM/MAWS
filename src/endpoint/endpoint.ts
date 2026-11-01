@@ -32,7 +32,9 @@
 // plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
 // authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
 // device's lane B subscriptions are interest (OX5). P5 O7 M4: a `sub` may name a session's `checkout` feed, streamed by
-// the feeds' plane from the spine's events, within the same checkout bounds the `checkout` target rule reads.
+// the feeds' plane from the spine's events, within the same checkout bounds the `checkout` target rule reads. P5 O7 M6:
+// or the machine's `attention` feed, cut to the sessions the member views as its rights stand (`Authorizer.ranks`, read
+// again at every record change and new head), as `attention.list` and `session.search` are cut when called.
 //
 // P5 O7 M3: a device's streams (streams.ts) open under its acts: a terminal's bytes, read from the pty host's ring and its
 // `onFrame` output, and a forwarded port's connections, each naming a forward the endpoint keeps per device for the resume
@@ -145,7 +147,7 @@ export class Endpoint implements EndpointModule {
   readonly forwards: Forwards;
   readonly planeA: PlaneA;
   readonly planeB: PlaneB;
-  /** The feeds (P5 O7 M4): a session's `checkout` feed. */
+  /** The feeds (P5 O7 M4): a session's `checkout` feed; the machine's `attention` feed (M6). */
   readonly planeFeeds: PlaneFeeds;
   /** Lane B sessions' checkout bounds, which the `checkout` rule and the `checkout` feed both read. */
   readonly checkoutBounds = new CheckoutBounds();
@@ -397,7 +399,7 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
-    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), log, backlogBytes: seams.backlogBytes });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
@@ -431,6 +433,7 @@ export class Endpoint implements EndpointModule {
         return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
       },
       recordFor: (report) => this.listings.recordFor(report),
+      ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       offers: authorization.offers,
       log,
     });
@@ -472,6 +475,7 @@ export class Endpoint implements EndpointModule {
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
+        this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
       }),

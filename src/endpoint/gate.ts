@@ -5,9 +5,8 @@
 // M7's: its authorization needs the binding the executing side stored (`authorize`'s `query` kind).
 //
 // P5 O7 M4: a call's own `session` (RL2's `call.session`) goes to authorization with it, for the `checkout` rule. A `sub`
-// reaches the gate only as a session's (its stream, or its `checkout` feed): the subscription table answers one that
-// names no session (subscriptions.ts).
-import type { ActMessage, CallMessage, SessionSubMessage } from 'org-protocol';
+// reaches the gate as a session's (its stream, or its `checkout` feed) or, from M6, as the machine's `attention` feed.
+import type { ActMessage, CallMessage, SubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { ChannelRoutes, RemoteChannel } from './channels';
 import type { SessionTarget } from './sources';
@@ -18,9 +17,9 @@ export type Granted = { target?: SessionTarget };
 export type Executors = {
   call(channel: RemoteChannel, message: CallMessage, decision: Granted): void;
   act(channel: RemoteChannel, message: ActMessage, decision: Granted): void;
-  sub(channel: RemoteChannel, message: SessionSubMessage, decision: Granted): void;
+  sub(channel: RemoteChannel, message: SubMessage, decision: Granted): void;
   /** A refused `sub`, answered by its executor (M8 registers a subscription before it is decided); else `ended` here. */
-  subRefused?(channel: RemoteChannel, message: SessionSubMessage, reason: string): void;
+  subRefused?(channel: RemoteChannel, message: SubMessage, reason: string): void;
 };
 
 const UNAVAILABLE: Executors = {
@@ -46,7 +45,7 @@ export class Gate {
   }
 
   /** The routes the channel table runs; `sub` behind the subscription table, which hands on a session's. */
-  routes(): Pick<ChannelRoutes, 'call' | 'act'> & { sub(channel: RemoteChannel, m: SessionSubMessage): void } {
+  routes(): Pick<ChannelRoutes, 'call' | 'act'> & { sub(channel: RemoteChannel, m: SubMessage): void } {
     return {
       call: (channel, m) =>
         this.#decide(channel, { kind: 'call', name: m.name, input: m.input, ...(m.session === undefined ? {} : { session: m.session }) }, {

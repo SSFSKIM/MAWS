@@ -16,9 +16,10 @@ import type { GradeSpec } from '@shared/ipc/grades';
  * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), none: the machine itself, or
  * `checkout` (P5 O7 M4: a path-class read of a lane B session's checkout: the call's own `session` names the session,
  * placed as an `appSessionId`, and the input's `directory` or `repoRoot` must lie in that session's roots or their
- * repositories: targets.ts).
+ * repositories: targets.ts), or `each-session` (P5 O7 M6: a machine-wide read whose answer is per session, admitted at the
+ * row's own grade, `list`, and cut by `calls.ts` to the sessions the caller holds the registry's declared grade on).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -39,7 +40,7 @@ export type OfferRow = {
 
 /**
  * The table, the lanes a `sub` may name (M8: `full` or `cards` on either), and the feeds it may name (P5 O7 M4, §R: a
- * session's `checkout` feed; M6 adds the machine's `attention`).
+ * session's `checkout` feed; M6: the machine's `attention`).
  */
 export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[]; feeds: readonly Feed[] };
 
@@ -49,6 +50,8 @@ const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'mac
 /** A read of a lane B session's checkout by a path (`git.*`): the call names its session, the input a directory in it. */
 const checkout: OfferRow = { kind: 'call', executor: 'machine', target: 'checkout' };
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
+/** A machine-wide read answered per session (P5 O7 M6): admitted at `list`, its answer cut per session (calls.ts). */
+const eachSession: OfferRow = { kind: 'call', executor: 'machine', target: 'each-session', grade: 'list' };
 /** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
 const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
 /** `forward.open`'s args: exactly a port. */
@@ -179,7 +182,11 @@ export const OFFERS: Offers = {
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
     'daemon.status': { kind: 'call', executor: 'machine', target: 'machine' },
     'machine.identity': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M6: the machine's attention items and conversation search, each answering for every session. `list` admits any
+    // member (as `endpoint.listings`); the answer keeps only the sessions the caller holds the registry's grade (`view`) on.
+    'attention.list': eachSession,
+    'session.search': eachSession,
   },
   subscriptions: ['A', 'B'],
-  feeds: ['checkout'],
+  feeds: ['checkout', 'attention'],
 };

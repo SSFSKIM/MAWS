@@ -4,14 +4,26 @@
 // `seq` after a `subbed` snapshot with nothing to snap. It is authorized as a subscription of the session (`view`), lives
 // with its channel, and a watch the channel's requests installed on the machine ends with the channel's ref, so the
 // files service holds nothing for a device that is gone.
+//
+// P5 O7 M6 (§R, "The feed", "The each-session rule"): the machine's `attention` feed, admitted at `list` for any member,
+// opens as a snapshot of `attention.list` cut to the sessions the member views and follows that set across every record
+// change: a session that leaves it is emptied, one that joins shows its items at once, and nothing of a session the
+// member can't view goes, however a change of rights and a change of items interleave. `attention.list` and
+// `session.search` are answered the same cut.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { gradeOf } from '@shared/ipc/grades';
+import { OFFERS } from '../../src/endpoint/offers';
 import type { AllowlistRecord } from '../../src/services/files/allowlist';
 import { registerFilesHandlers } from '../../src/services/files/register';
-import { evs, makeOrg, of, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { Index } from '../../src/services/index/index';
+import { registerIndexHandlers } from '../../src/services/index/register';
+import { summary } from '../support/index-fixture';
+import { iso } from './org-fixtures';
+import { evs, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -201,14 +213,13 @@ describe('a session’s checkout feed', () => {
     expect(f.interest.filter(([kind, , sessions]) => kind === 'report' && (sessions ?? []).includes('app-1'))).toEqual([]);
   });
 
-  it('is refused to a caller who can’t view the session, for a lane A session, and as an attention feed (not offered until M6)', async () => {
+  it('is refused to a caller who can’t view the session, and for a lane A session', async () => {
     const repo = scratch();
     const f = await startEndpoint(org, started);
     session(f, 'app-1', repo);
     const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
     expect(await feed(b, 'f1', { lane: 'B', id: 'app-1' })).toMatchObject({ t: 'ended', reason: 'grade' });
     expect(await feed(a, 'f2', { lane: 'A', id: 'la-1' })).toMatchObject({ t: 'ended', reason: 'no-target' });
-    expect(await feed(a, 'f3', null, 'attention')).toMatchObject({ t: 'ended', reason: 'not-offered' });
     // B's events reach no one who was refused.
     f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(repo, 'x'), kind: 'created' });
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -236,6 +247,455 @@ describe('a session’s checkout feed', () => {
     f.records.set({ lane: 'B', session: 'eng-app-1', owners: [org.B], access: 'private' }, 'app-1');
     await waitFor(a, (m) => m.sub === 'f1' && m.t === 'ended', 'the feed’s end');
     expect(of(a, 'f1').at(-1)).toMatchObject({ t: 'ended', reason: 'removed' });
+  });
+});
+
+// ---- P5 O7 M6: attention and search ----------------------------------------------------------------------------------
+
+type Item = Record<string, unknown>;
+
+const AT = iso(Date.UTC(2026, 10, 1));
+
+/** An attention item of `appSessionId`, a request waiting. */
+function att(appSessionId: string, requestId: string): Item {
+  const at = AT;
+  return { id: `att-${requestId}`, appSessionId, sessionId: `eng-${appSessionId}`, kind: 'permission', request: { requestId, toolUseId: `tu-${requestId}`, taskId: null, agentId: null }, summary: 'permission', createdAt: at, state: 'pending', stateChangedAt: at, expiresAt: null };
+}
+
+/**
+ * The machine's attention service, as the spine answers `attention.list` and emits `attention.changed` (owner `machine`).
+ * `hold` keeps the next `attention.list` answer (computed when asked) until its release, as a read in flight.
+ */
+function machineAttention(f: Fixture) {
+  const items = new Map<string, Item[]>();
+  let held: Promise<void> | null = null;
+  f.spine.handle('attention.list', async () => {
+    const answer = [...items.values()].flat();
+    if (held !== null) await held;
+    return answer;
+  });
+  return {
+    /** The session's items now, with no event (as before the endpoint heard of them). */
+    seed(appSessionId: string, list: Item[]): void {
+      items.set(appSessionId, list);
+    },
+    /** The session's items change: `attention.changed`. */
+    set(appSessionId: string, list: Item[]): void {
+      if (list.length === 0) items.delete(appSessionId);
+      else items.set(appSessionId, list);
+      f.host.emitMachine('attention.changed', { appSessionId, items: list, silent: [] });
+    },
+    hold(): () => void {
+      let release: () => void = () => {};
+      held = new Promise<void>((resolve) => (release = resolve));
+      return () => {
+        held = null;
+        release();
+      };
+    },
+  };
+}
+
+/** A lane B session in the machine's index and its record: the machine's owners own it, and `B` holds `share` (none: `listed`, so `list`). */
+function shared(f: Fixture, appSessionId: string, share: 'view' | 'converse' | null, member: string = org.B): void {
+  if (!f.spine.records.has(appSessionId)) f.spine.set(appSessionId, `eng-${appSessionId}`, { appId: appSessionId });
+  f.records.set({ lane: 'B', session: `eng-${appSessionId}`, owners: ['@machine'], ...(share === null ? {} : { shares: [{ member, grade: share }] }) }, appSessionId);
+}
+
+/** The feed opened, and the snapshot this opening sent (its pages may follow its `subbed`). */
+async function attentionFeed(r: Remote, sub: string): Promise<{ subbed: Msg; snap: Item[] }> {
+  const from = r.inbox.length;
+  const subbed = await feed(r, sub, null, 'attention');
+  if (subbed.t !== 'subbed') return { subbed, snap: [] };
+  const snap = await snapshot(r, sub, from);
+  return { subbed, snap: snap.body as unknown as Item[] };
+}
+
+const bodies = (r: Remote, sub: string, from = 0) => evs(r, sub, from).map((e) => e.body as { appSessionId: string; items: Item[] });
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+const engineReads = (f: Fixture) => f.host.calls.filter((c) => c.owner === 'engine-host').length;
+
+describe('the machine’s attention feed', () => {
+  it('opens as a snapshot of the items of the sessions the member views, then carries each change of such a session at the next seq, and nothing of another', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null); // listed: B holds `list`, below `view`
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    machine.seed('app-2', [att('app-2', 'r2')]);
+    const engine = engineReads(f);
+    const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+
+    const opened = await attentionFeed(b, 'att');
+    expect(opened.subbed).toMatchObject({ t: 'subbed', mode: 'snapshot', seq: 0 });
+    expect(opened.subbed.epoch).toMatch(/^attention:/);
+    expect(opened.snap).toEqual([att('app-1', 'r1')]);
+    expect(of(b, 'att').filter((m) => m.t === 'snap').every((m) => m.epoch === opened.subbed.epoch && m.seq === 0)).toBe(true);
+    // The owner views both.
+    expect((await attentionFeed(a, 'att')).snap).toEqual([att('app-1', 'r1'), att('app-2', 'r2')]);
+
+    machine.set('app-2', [att('app-2', 'r2'), att('app-2', 'r3')]);
+    machine.set('app-1', []);
+    machine.set('app-1', [att('app-1', 'r4')]);
+    await until(() => evs(b, 'att').length >= 2 && evs(a, 'att').length >= 3, 'the changes');
+    await settle();
+    expect(evs(b, 'att').map((e) => [e.epoch, e.seq])).toEqual([1, 2].map((seq) => [opened.subbed.epoch, seq]));
+    expect(bodies(b, 'att')).toEqual([
+      { appSessionId: 'app-1', items: [] },
+      { appSessionId: 'app-1', items: [att('app-1', 'r4')] },
+    ]);
+    expect(bodies(a, 'att').map((body) => body.appSessionId)).toEqual(['app-2', 'app-1', 'app-1']);
+    // Neither the feed nor its rule reads the engine host (which would wake a parked one), nor reports interest.
+    expect(engineReads(f)).toBe(engine);
+    expect(f.interest.filter(([kind, , sessions]) => kind === 'report' && (sessions ?? []).length > 0)).toEqual([]);
+  });
+
+  it('answers a resubscribe, and a new channel, with the snapshot again, as things stand then', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    const b = await openRemote(f, org.b1, org.B);
+    const first = await attentionFeed(b, 'att');
+    machine.set('app-1', [att('app-1', 'r1'), att('app-1', 'r2')]);
+    await until(() => evs(b, 'att').length === 1, 'the change');
+
+    const from = b.inbox.length;
+    const again = await attentionFeed(b, 'att');
+    expect(again.subbed).toMatchObject({ t: 'subbed', mode: 'snapshot', seq: 0, epoch: first.subbed.epoch });
+    expect(snapshots(b, 'att')).toHaveLength(2);
+    expect(again.snap).toEqual([att('app-1', 'r1'), att('app-1', 'r2')]);
+    expect(of(b, 'att', from).filter((m) => m.t === 'ended')).toEqual([]);
+
+    b.channel.close('closed');
+    const b2 = await openRemote(f, org.b1, org.B);
+    expect((await attentionFeed(b2, 'att')).snap).toEqual([att('app-1', 'r1'), att('app-1', 'r2')]);
+  });
+
+  it('empties a session whose share is withdrawn, and keeps the feed and the other session', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-3', 'converse');
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    machine.seed('app-3', [att('app-3', 'r3')]);
+    const b = await openRemote(f, org.b1, org.B);
+    expect((await attentionFeed(b, 'att')).snap).toEqual([att('app-1', 'r1'), att('app-3', 'r3')]);
+
+    shared(f, 'app-1', null);
+    await until(() => evs(b, 'att').length === 1, 'the withdrawn session emptied');
+    expect(bodies(b, 'att')).toEqual([{ appSessionId: 'app-1', items: [] }]);
+    machine.set('app-1', [att('app-1', 'r1'), att('app-1', 'r5')]);
+    machine.set('app-3', [att('app-3', 'r3'), att('app-3', 'r6')]);
+    await until(() => evs(b, 'att').length === 2, 'the other session’s change');
+    await settle();
+    expect(bodies(b, 'att')[1]).toEqual({ appSessionId: 'app-3', items: [att('app-3', 'r3'), att('app-3', 'r6')] });
+    expect(evs(b, 'att')).toHaveLength(2);
+    expect(of(b, 'att').filter((m) => m.t === 'ended')).toEqual([]);
+  });
+
+  it('shows a session’s waiting permission at once when it is shared, with no reconnect', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    const b = await openRemote(f, org.b1, org.B);
+    expect((await attentionFeed(b, 'att')).snap).toEqual([att('app-1', 'r1')]);
+    // A permission raised on a session B can't view yet: not delivered.
+    machine.set('app-2', [att('app-2', 'r2')]);
+    await settle();
+    expect(evs(b, 'att')).toEqual([]);
+
+    shared(f, 'app-2', 'view');
+    await until(() => evs(b, 'att').length === 1, 'the shared session’s items');
+    expect(bodies(b, 'att')).toEqual([{ appSessionId: 'app-2', items: [att('app-2', 'r2')] }]);
+    expect(snapshots(b, 'att')).toHaveLength(1);
+  });
+
+  it('is an open, empty feed for a member who views nothing, which fills at the first share', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', null);
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    const b = await openRemote(f, org.b1, org.B);
+    const opened = await attentionFeed(b, 'att');
+    expect(opened.subbed).toMatchObject({ t: 'subbed', mode: 'snapshot' });
+    expect(opened.snap).toEqual([]);
+    machine.set('app-1', [att('app-1', 'r1'), att('app-1', 'r2')]);
+    await settle();
+    expect(of(b, 'att').filter((m) => m.t === 'ev' || m.t === 'ended')).toEqual([]);
+
+    shared(f, 'app-1', 'view');
+    await until(() => evs(b, 'att').length === 1, 'the first share’s items');
+    expect(bodies(b, 'att')).toEqual([{ appSessionId: 'app-1', items: [att('app-1', 'r1'), att('app-1', 'r2')] }]);
+  });
+
+  it('loses no item and leaks none when record changes and attention changes interleave', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    const b = await openRemote(f, org.b1, org.B);
+    await attentionFeed(b, 'att');
+
+    machine.set('app-1', [att('app-1', 'r1'), att('app-1', 'r2')]);
+    shared(f, 'app-1', null);
+    machine.set('app-1', [att('app-1', 'r1'), att('app-1', 'r2'), att('app-1', 'r3')]); // B can't view it now
+    shared(f, 'app-1', 'view');
+    machine.set('app-1', [att('app-1', 'r3')]);
+    await until(() => evs(b, 'att').length >= 4, 'the interleaved changes');
+    await settle();
+    expect(bodies(b, 'att')).toEqual([
+      { appSessionId: 'app-1', items: [att('app-1', 'r1'), att('app-1', 'r2')] },
+      { appSessionId: 'app-1', items: [] },
+      { appSessionId: 'app-1', items: [att('app-1', 'r1'), att('app-1', 'r2'), att('app-1', 'r3')] },
+      { appSessionId: 'app-1', items: [att('app-1', 'r3')] },
+    ]);
+  });
+
+  it('delivers nothing of a session first heard while its placement is read, once the share is withdrawn before the read lands', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-4', 'view');
+    const b = await openRemote(f, org.b1, org.B);
+    await attentionFeed(b, 'att');
+    // The spine's `session.get` of app-4 held.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const dispatch = f.spine.dispatch.bind(f.spine);
+    f.spine.dispatch = async (name, input, client) => {
+      if (name === 'session.get' && (input as { appSessionId?: string }).appSessionId === 'app-4') await held;
+      return dispatch(name, input, client);
+    };
+    machine.set('app-4', [att('app-4', 'r4')]);
+    await until(() => f.host.calls.some((c) => c.name === 'session.get' && (c.input as { appSessionId: string }).appSessionId === 'app-4'), 'app-4 placed');
+    shared(f, 'app-4', null);
+    release();
+    await settle();
+    expect(evs(b, 'att')).toEqual([]);
+    shared(f, 'app-4', 'view');
+    await until(() => evs(b, 'att').length === 1, 'app-4 shared again');
+    expect(bodies(b, 'att')).toEqual([{ appSessionId: 'app-4', items: [att('app-4', 'r4')] }]);
+  });
+
+  it('cuts its snapshot to the rights that stand when it goes, not those when its read began', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    machine.seed('app-2', [att('app-2', 'r2')]);
+    const b = await openRemote(f, org.b1, org.B);
+    const release = machine.hold();
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit: 4 * 1024 * 1024 });
+    await until(() => f.host.calls.some((c) => c.name === 'attention.list'), 'the snapshot’s read');
+    shared(f, 'app-1', null); // withdrawn while the read is out
+    shared(f, 'app-2', 'view'); // granted while the read is out
+    release();
+    const snap = await until(() => snapshots(b, 'att').at(-1), 'the snapshot');
+    expect(snap).toEqual([att('app-2', 'r2')]);
+    await settle();
+    expect(of(b, 'att', from).filter((m) => m.t === 'ev')).toEqual([]);
+  });
+
+  it('is refused to a web-cards device, and holds one output for a device that reads nothing, which then gets the latest', async () => {
+    const f = await startEndpoint(org, started, { subscriptions: { backlogBytes: 2048 } });
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    machine.seed('app-1', [att('app-1', 'r0')]);
+    const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
+    expect(await feed(c, 'att', null, 'attention')).toMatchObject({ t: 'ended', reason: 'class' });
+    const b = await openRemote(f, org.b1, org.B);
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit: 1 });
+    await waitFor(b, (m) => m.sub === 'att' && m.t === 'snap', 'the snapshot', from);
+    // The snapshot spent the credit: 40 changes leave one output queued, never a backlog past the bound.
+    for (let i = 1; i <= 40; i++) machine.set('app-1', [att('app-1', `r${i}`)]);
+    await settle();
+    expect(of(b, 'att', from).filter((m) => m.t === 'ev' || m.t === 'ended')).toEqual([]);
+    await b.channel.send({ t: 'credit', sub: 'att', bytes: 1024 * 1024 });
+    await until(() => bodies(b, 'att', from).at(-1)?.items[0]?.id === 'att-r40', 'the latest items');
+    await settle();
+    // The output queued before the credit came, then the latest: not each change on the way.
+    expect(bodies(b, 'att', from)).toEqual([
+      { appSessionId: 'app-1', items: [att('app-1', 'r1')] },
+      { appSessionId: 'app-1', items: [att('app-1', 'r40')] },
+    ]);
+    expect(of(b, 'att', from).filter((m) => m.t === 'ended')).toEqual([]);
+  });
+});
+
+describe('the each-session calls', () => {
+  it('are offered as machine calls under the `each-session` rule, admitted at `list`', () => {
+    for (const name of ['attention.list', 'session.search']) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'call', executor: 'machine', target: 'each-session', grade: 'list' }]);
+    expect(gradeOf('attention.list')).toBe('view');
+    expect(gradeOf('session.search')).toBe('view');
+  });
+
+  it('answer `attention.list` and `session.search` cut to the sessions the caller views, and hold their input to the registry’s schema', async () => {
+    const f = await startEndpoint(org, started);
+    const machine = machineAttention(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    f.spine.set('app-5', null, { appId: 'app-5' }); // no engine session recorded: nobody's to rank
+    machine.seed('app-1', [att('app-1', 'r1')]);
+    machine.seed('app-2', [att('app-2', 'r2')]);
+    machine.seed('app-5', [att('app-5', 'r5')]);
+    machine.seed('app-9', [att('app-9', 'r9')]); // no record at all
+    const hits = [
+      { appSessionId: 'app-1', snippet: 'one' },
+      { appSessionId: 'app-2', snippet: 'two' },
+      { appSessionId: 'app-9', snippet: 'nine' },
+    ];
+    const searched: unknown[] = [];
+    f.spine.handle('session.search', (input) => (searched.push(input), { hits, indexing: false, incomplete: true }));
+    const engine = engineReads(f);
+    const [a, b, c] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B), await openRemote(f, org.c1, org.C, { passkey: org.passkey })];
+
+    expect(await call(b, 'attention.list', null)).toMatchObject({ ok: true, output: [att('app-1', 'r1')] });
+    expect(await call(a, 'attention.list', null)).toMatchObject({ ok: true, output: [att('app-1', 'r1'), att('app-2', 'r2')] });
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [hits[0]], indexing: false, incomplete: true } });
+    expect(await call(a, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [hits[0], hits[1]], indexing: false, incomplete: true } });
+    // Each search names the sessions its caller views (milestone fix), never one the caller can't.
+    expect(searched).toEqual([
+      { query: 'word', sessions: ['app-1'] },
+      { query: 'word', sessions: ['app-1', 'app-2'] },
+    ]);
+
+    // A share withdrawn: the next answer leaves the session out.
+    shared(f, 'app-1', null);
+    expect(await call(b, 'attention.list', null)).toMatchObject({ ok: true, output: [] });
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [] } });
+
+    // The registry's schema, though the row carries its own grade; a web-cards device is refused by its class.
+    expect(await call(b, 'session.search', { query: 5 })).toMatchObject({ ok: false, error: { code: 'malformed' } });
+    expect(await call(b, 'session.search', { query: 'word', extra: 1 })).toMatchObject({ ok: false, error: { code: 'malformed' } });
+    expect(await call(b, 'attention.list', { appSessionId: 'app-1' })).toMatchObject({ ok: false, error: { code: 'malformed' } });
+    expect(searched).toHaveLength(3);
+    expect(await call(c, 'attention.list', null)).toMatchObject({ ok: false, error: { code: 'class' } });
+    expect(engineReads(f)).toBe(engine);
+  });
+
+  // Milestone fix: the store answers at most 50 hits, title matches first; a caller's search names the sessions it views,
+  // so 50 title matches of sessions it can't see don't spend the limit before its own transcript's match.
+  it('session.search: finds the caller’s transcript match behind 50 title matches of sessions it can’t view', async () => {
+    const f = await startEndpoint(org, started);
+    const dir = scratch();
+    const index = new Index(join(dir, 'index.sqlite'));
+    try {
+      registerIndexHandlers(index, f.spine.bus as never);
+      const record = (over: Parameters<typeof summary>[0], access: 'view' | 'private') => {
+        const r = index.sessions.upsertFromSummary(summary(over)).record;
+        f.spine.set(r.appId, r.engineSessionId, { appId: r.appId });
+        f.records.set({ lane: 'B', session: r.engineSessionId!, owners: ['@machine'], ...(access === 'view' ? { shares: [{ member: org.B, grade: 'view' as const }] } : { access: 'private' as const }) }, r.appId);
+        return r;
+      };
+      const mine = record({ customTitle: 'Shared notes' }, 'view');
+      index.sessionSearch.replace(mine.appId, mine.engineSessionId!, 100, 1000, 'a needle inside the shared conversation');
+      for (let n = 0; n < 50; n++) record({ customTitle: `needle private ${n}` }, 'private');
+      const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+      const answer = await call(b, 'session.search', { query: 'needle' });
+      expect(answer).toMatchObject({ ok: true, output: { hits: [{ appSessionId: mine.appId }], incomplete: false } });
+      expect((answer.output as { hits: Array<{ snippet: string }> }).hits[0].snippet).toContain('needle inside the shared conversation');
+      // The owner views all 51: the store's limit stands, title matches first.
+      const owner = await call(a, 'session.search', { query: 'needle' });
+      expect((owner.output as { hits: unknown[] }).hits).toHaveLength(50);
+    } finally {
+      index.close();
+    }
+  });
+
+  it('session.search: says `incomplete` when the cut took hits from a full page', async () => {
+    const f = await startEndpoint(org, started);
+    const ids = Array.from({ length: 50 }, (_, n) => `app-s${n}`);
+    for (const id of ids) shared(f, id, 'view');
+    const asked: unknown[] = [];
+    f.spine.handle('session.search', (input) => (asked.push(input), { hits: ids.map((appSessionId) => ({ appSessionId, snippet: null })), indexing: false, incomplete: false }));
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { incomplete: false } });
+    expect(asked[0]).toEqual({ query: 'word', sessions: ids });
+    // One session moves to an engine session B can't view while the call is out: the cut takes its hit from a full page.
+    f.records.set({ lane: 'B', session: 'eng-gone', owners: ['@machine'], access: 'private' }, 'app-s7');
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const dispatch = f.spine.dispatch.bind(f.spine);
+    f.spine.dispatch = async (name, input, client) => {
+      if (name === 'session.get') await held;
+      return dispatch(name, input, client);
+    };
+    const reads = f.host.calls.filter((c) => c.name === 'session.get').length;
+    const answer = call(b, 'session.search', { query: 'word' });
+    await until(() => f.host.calls.filter((c) => c.name === 'session.get').length > reads, 'the placement reads');
+    f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-s7')!, engineSessionId: 'eng-gone' }, cause: 'update', revision: 2 });
+    release();
+    const output = (await answer).output as { hits: Array<{ appSessionId: string }>; incomplete: boolean };
+    expect(output.hits).toHaveLength(49);
+    expect(output.incomplete).toBe(true);
+  });
+
+  // Fix wave 2: the index's live read can be ahead of the record changes it published (they wait for its coalescing
+  // tick), so no placement the call saw may widen the caller's rights: each must allow the session.
+  for (const [command, input, kept, cut] of [
+    ['attention.list', null, [att('app-1', 'r1')], []],
+    ['session.search', { query: 'word' }, { hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }, { hits: [], indexing: false, incomplete: false }],
+  ] as const) {
+    for (const [moved, last] of [
+      ['to a viewed engine session, heard, then to a private one whose notification waits', 'private'],
+      ['twice, between engine sessions the caller views', 'view'],
+    ] as const) {
+      it(`${command}: a session that moved ${moved} while the call was out ${last === 'private' ? 'is left out' : 'stays in'}`, async () => {
+        const f = await startEndpoint(org, started);
+        const machine = machineAttention(f);
+        shared(f, 'app-1', 'view');
+        machine.seed('app-1', [att('app-1', 'r1')]);
+        f.spine.handle('session.search', () => ({ hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }));
+        f.records.set({ lane: 'B', session: 'eng-2', owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, 'app-1');
+        f.records.set({ lane: 'B', session: 'eng-3', owners: ['@machine'], ...(last === 'private' ? { access: 'private' as const } : { shares: [{ member: org.B, grade: 'view' as const }] }) }, 'app-1');
+        const b = await openRemote(f, org.b1, org.B);
+        // `session.get` of app-1 held; answered from the index as it stands at the release.
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const dispatch = f.spine.dispatch.bind(f.spine);
+        f.spine.dispatch = async (name, inputOf, client) => {
+          if (name === 'session.get') await held;
+          return dispatch(name, inputOf, client);
+        };
+        const reads = f.host.calls.filter((c) => c.name === 'session.get').length;
+        const asked = call(b, command, input);
+        await until(() => f.host.calls.filter((c) => c.name === 'session.get').length > reads, 'the held placement read');
+        f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-1')!, engineSessionId: 'eng-2' }, cause: 'update', revision: 2 });
+        f.spine.set('app-1', 'eng-3', { appId: 'app-1' }); // the second move: in the index, its notification not yet out
+        release();
+        expect(await asked).toMatchObject({ ok: true, output: last === 'private' ? cut : kept });
+      });
+    }
+  }
+
+  // Fix wave 1: the placement a call read is not the one its answer is cut by once the session's record moved meanwhile.
+  it('cut by the session’s record as it stands when the answer goes, though `session.get` answered an older one', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    f.records.set({ lane: 'B', session: 'eng-moved', owners: ['@machine'], access: 'private' }, 'app-1'); // B holds nothing on it
+    f.spine.handle('session.search', () => ({ hits: [{ appSessionId: 'app-1', snippet: 'one' }], indexing: false, incomplete: false }));
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [{ appSessionId: 'app-1', snippet: 'one' }] } });
+    // `session.get` of app-1 held; its answer, when it comes, is the record from before the move.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const dispatch = f.spine.dispatch.bind(f.spine);
+    f.spine.dispatch = async (name, input, client) => {
+      const answer = await dispatch(name, input, client);
+      if (name === 'session.get') await held;
+      return answer;
+    };
+    const asked = call(b, 'session.search', { query: 'word' });
+    await until(() => f.host.calls.filter((c) => c.name === 'session.get').length >= 2, 'the held placement read');
+    f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-1')!, engineSessionId: 'eng-moved' }, cause: 'update', revision: 2 });
+    release();
+    expect(await asked).toMatchObject({ ok: true, output: { hits: [] } });
   });
 });
 

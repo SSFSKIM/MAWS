@@ -32,7 +32,7 @@ vi.mock('electron', () => ({
   },
 }));
 vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
-vi.mock('../ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('../ipc/events', () => ({ emit: vi.fn(), emitFrom: vi.fn() }));
 vi.mock('../windows', () => ({ appWindows: vi.fn(() => []), isAppWindow: vi.fn(() => true) }));
 
 // The silence of restored items end to end in process (P5 O3-C): the attention service marks them, the spine's view
@@ -169,4 +169,17 @@ describe('attention startup', () => {
     } finally { stop(); service.stop(); }
   });
 
+  // P5 O7 M6 fix wave 1: a page's announcement (subscribe, then `attention.pendingNavigate`) is told every other machine's
+  // attention again, which a reloaded page or a new window would otherwise lack until that machine's next snapshot
+  it('tells a page that announces itself every machine’s attention again', () => {
+    vi.mocked(registerMainHandler).mockClear();
+    const remote = { machines: () => [], machine: () => null, onChange: () => () => {}, sayAgain: vi.fn() };
+    const stop = startAttention(fakeSpineView(), { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }), remote });
+    try {
+      const pending = vi.mocked(registerMainHandler).mock.calls.find(([name]) => name === 'attention.pendingNavigate')![1] as () => { navigate: unknown };
+      expect(remote.sayAgain).not.toHaveBeenCalled();
+      expect(pending()).toEqual({ navigate: null });
+      expect(remote.sayAgain).toHaveBeenCalledOnce();
+    } finally { stop(); }
+  });
 });

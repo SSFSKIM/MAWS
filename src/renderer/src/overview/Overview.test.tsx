@@ -12,6 +12,14 @@ import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../tes
 import { Overview } from './Overview';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
+import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
+import { addressOf } from '@shared/machine/address';
+import { item, remoteRow } from '../../../../test/support/builders';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
+import { Toolbar } from '../app/Toolbar';
+import { registerRemoteOpener } from '../sessions/remote-openers';
+import { useAttention } from '../stores/attention';
+import { useMachines } from '../stores/machines';
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -175,6 +183,57 @@ describe('overview board', () => {
 
 // C12 start: the released mark on a card (C12 execution document, Interfaces "Surfaces of the budget"): the card stays on
 // the board in its idle presentation with one muted word.
+// P5 O7 M6 (M6c fix wave 1): "Overview and attention span machines": a session on another machine with no tab open,
+// counted in the toolbar, has its card in the Needs-you group from its listing and its item, and opens through its lane's
+// opener; a greyed machine's is counted nowhere and has none.
+describe('another machine’s waiting session', () => {
+  const b1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+  const waiting = item(b1, 'permission', '2026-09-28T01:00:00Z', { summary: 'Bash: pnpm deploy --prod', id: addressOf(OTHER_MACHINE, 'att-b1') as never });
+  const waitingCount = () => Number(/Overview, (\d+) waiting/.exec(screen.getByRole('button', { name: /^Overview/ }).getAttribute('aria-label') ?? '')?.[1] ?? 0);
+  beforeEach(() => {
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-01T00:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-01T00:00:00Z', generation: 1 },
+    ]);
+    useSessions.setState({ listed: new Map([[b1, { ...remoteRow(OTHER_MACHINE, 'b1', { title: 'Studio build' }), appId: b1 }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => {
+    act(() => useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }));
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  });
+
+  it('is counted in the toolbar, carded in Needs you from its listing, and opened through its lane’s opener with no tab before', async () => {
+    const opened: AppSessionId[] = [];
+    offs.push(registerRemoteOpener('B', (listed) => opened.push(listed.appId)));
+    render(<><Toolbar /><Overview paneIndex={0} /></>);
+    const before = waitingCount();
+    act(() => useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waiting], greyed: false }));
+    expect(waitingCount()).toBe(before + 1);
+    expect(screen.getByRole('heading', { name: 'Needs you · 4' })).toBeTruthy();
+    expect(cardTitles(group('Needs you'))[0]).toBe('Studio build'); // the oldest wait
+    const remote = card('Studio build');
+    expect(remote.dataset.card).toBe(b1);
+    expect(within(remote).getByTestId('card-activity').textContent).toBe('Waiting for approval');
+    expect(within(remote).getByTestId('card-summary').textContent).toBe('Bash: pnpm deploy --prod');
+    expect(within(remote).getByText('Studio')).toBeTruthy(); // its machine, in the project's place
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+    await userEvent.setup().click(within(remote).getByText('Studio build'));
+    expect(opened).toEqual([b1]);
+    remote.focus();
+    fireEvent.keyDown(remote, { key: 'Enter' });
+    expect(opened).toEqual([b1, b1]);
+  });
+
+  it('a greyed machine’s session is neither counted nor carded', () => {
+    render(<><Toolbar /><Overview paneIndex={0} /></>);
+    const before = waitingCount();
+    act(() => useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waiting], greyed: true }));
+    expect(waitingCount()).toBe(before);
+    expect(screen.getByRole('heading', { name: 'Needs you · 3' })).toBeTruthy();
+    expect(screen.queryByRole('article', { name: 'Studio build' })).toBeNull();
+  });
+});
+
 describe('a released session’s card', () => {
   const AT_RELEASE = new Date(2026, 8, 29, 14, 2).toISOString();
   it('stays on the board, idle, with the muted word released', () => {
