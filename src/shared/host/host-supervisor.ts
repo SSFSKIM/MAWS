@@ -802,7 +802,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
         // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
         if (closed !== null && handedOver.delete(closed)) {
-          console.error(`[hosts] ${host.owner} pid ${closed} left after handing its sessions over; starting its successor`);
+          console.log(`[hosts] ${host.owner} pid ${closed} left after handing its sessions over; starting its successor`);
           failSent(host, 'handed its sessions over');
           return launch(host);
         }
@@ -869,11 +869,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     if (status.holder?.handover === 'draining' && !host.relayed && host.transport) return takeBack(host, status.pid, { inFlight: inFlight ?? 0, ...(tool !== undefined && { tool }) });
     if (!host.updatePending) return;
     if (inFlight !== undefined && inFlight > 0) {
-      if (host.handover === null) console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, hands over once its ${inFlight} calls in flight${tool ? ` (${tool})` : ''} finish; serving it meanwhile`);
+      if (host.handover === null) console.log(`[hosts] ${host.owner} pid ${status.pid}, of another build, hands over once its ${inFlight} calls in flight${tool ? ` (${tool})` : ''} finish; serving it meanwhile`);
       return setHandover(host, { state: 'waiting', inFlight, ...(tool !== undefined && { tool }) });
     }
     host.updatePending = false;
-    console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, is quiet; asking it to hand its sessions over`);
+    console.log(`[hosts] ${host.owner} pid ${status.pid}, of another build, is quiet; asking it to hand its sessions over`);
     void api.handover(host.owner, HANDOVER_GRACE_MS).then((answer) => {
       if (!answer.ok) console.error(`[hosts] ${host.owner} pid ${status.pid} did not hand over: ${answer.error.message}`);
     });
@@ -884,7 +884,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   function takeBack(host: Host, pid: number, armed: { inFlight: number; tool?: string }): void {
     const first = host.drainMet !== pid;
     host.drainMet = pid;
-    if (first) console.error(`[hosts] ${host.owner} pid ${pid} is already handing its sessions over; taking it back into the handover`);
+    if (first) console.log(`[hosts] ${host.owner} pid ${pid} is already handing its sessions over; taking it back into the handover`);
     void drain(host, host.transport!, 0, armed).then((answer) => {
       if (!answer.ok && first) console.error(`[hosts] ${host.owner} pid ${pid} did not hand over: ${answer.error.message}; asked again each time it is met`);
     });
