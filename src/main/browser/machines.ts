@@ -2,66 +2,86 @@
 // "Forwarding"; its Decision Log on the in-app browser for a remote session). The in-app browser is this Mac's own
 // surface: a remote session's panel holds local tabs, as the forward's listener is local. The router answers the Browser
 // tool's commands for such a session here (src/main/ipc/router.ts, `BROWSER_TOOL_HERE_FOR_ANY_MACHINE`), with the bare id
-// its address lowered to and the machine as `ctx.target`; the tab store keeps the bare id.
+// its address lowered to and the machine as `ctx.target`.
 //
-// What this keeps is the other half of the address: each session of another machine that has tabs here, by its bare id,
-// with its machine. Noted at each such command, kept in tabs.json (`machines`) so a relaunch keeps the session's tabs (the
-// spine knows no other machine's session), and read where the address is said again:
-// - every browser event naming such a session goes to the windows from its machine (`emitFrom`), so the renderer's
-//   per-address stores take it under the session's address;
-// - `browser.tabs.list` for this machine (the boot's list of every session) leaves them out, since its answer is lifted
-//   with this machine; each is listed when its own surface mounts, for its machine.
+// A session is its full address: a bare id is its machine's to mint, and two machines may name the same one. So the
+// browser keys its sessions (the tab store's `appSessionId`, its selection, tabs.json) by a session key: this machine's
+// session by its bare id, as always (its tabs, the spine's record removal and the agent's reach unchanged), another
+// machine's by its address (`addressOf(machine, bare)`), registered here with its machine and bare id. Each key's machine
+// is fixed by the key itself: no command moves a session to another machine.
+//
+// Where the key leaves main it becomes the bare id again, said for its machine:
+// - every browser event naming such a session goes to the windows from its machine (`emitFrom`), its `appSessionId` and
+//   its `tabs[].appSessionId` bare, so the renderer lifts them to the session's address; comment mode's pick likewise
+//   (comment/mode.ts, `away`);
+// - the handlers' answers (`browser.tabs.list`, `.open`) carry the bare id, lifted with the invoke's machine
+//   (register.ts); a list of every session is the invoke machine's sessions only.
+// tabs.json keeps the keys, and `machines` each remote key's machine, so a relaunch keeps the session's tabs (the spine
+// knows no other machine's session).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { addressOf, bareOf, isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { BrowserEmit } from './tabs';
 
 export type EmitFrom = <N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>) => unknown;
+/** A remote session key's machine and the bare id its machine names it by. */
+export type AwaySession = { machine: MachineRef; bare: AppSessionId };
 
 export class SessionMachines {
-  readonly #machines = new Map<string, MachineRef>();
+  readonly #away = new Map<string, AwaySession>();
 
   constructor(
     readonly local: MachineRef,
     restored: Readonly<Record<string, MachineRef>> = {},
-    private readonly changed: () => void = () => {},
   ) {
-    for (const [appSessionId, machine] of Object.entries(restored)) if (machine !== local) this.#machines.set(appSessionId, machine);
+    for (const [key, machine] of Object.entries(restored)) {
+      if (machine !== local && isAddress(key) && machineOf(key) === machine) this.#away.set(key, { machine, bare: bareOf(key as AppSessionId) });
+    }
   }
 
-  /** A command of the Browser tool named the session for `machine` (the router's `ctx.target`). */
-  note(appSessionId: AppSessionId, machine: MachineRef): void {
-    if (this.#machines.get(appSessionId) === (machine === this.local ? undefined : machine)) return;
-    if (machine === this.local) this.#machines.delete(appSessionId);
-    else this.#machines.set(appSessionId, machine);
-    this.changed();
+  /** The session key of `bare` on `machine` (the router's `ctx.target`): the bare id for this machine's. */
+  keyOf(bare: AppSessionId, machine: MachineRef): AppSessionId {
+    if (machine === this.local) return bare;
+    const key = addressOf(machine, bare);
+    if (!this.#away.has(key)) this.#away.set(key, { machine, bare });
+    return key;
   }
 
-  of(appSessionId: string): MachineRef {
-    return this.#machines.get(appSessionId) ?? this.local;
+  /** The machine and bare id of another machine's session key; null for this machine's. */
+  away(key: string): AwaySession | null {
+    return this.#away.get(key) ?? null;
   }
 
-  /** The session's machine when it is another machine's, else null. */
-  elsewhere(appSessionId: string): MachineRef | null {
-    return this.#machines.get(appSessionId) ?? null;
+  machineOf(key: string): MachineRef {
+    return this.#away.get(key)?.machine ?? this.local;
   }
 
-  /** What tabs.json keeps: the sessions of another machine among those with tabs kept; nothing when there are none. */
-  kept(sessions: Iterable<string>): { machines?: Record<AppSessionId, MachineRef> } {
+  /** The id the key is said by on its machine. */
+  bareOf(key: string): AppSessionId {
+    return this.#away.get(key)?.bare ?? (key as AppSessionId);
+  }
+
+  /** What tabs.json keeps: the remote keys among those with tabs kept, with their machines; nothing when there are none. */
+  kept(keys: Iterable<string>): { machines?: Record<AppSessionId, MachineRef> } {
     const machines: Record<AppSessionId, MachineRef> = {};
-    for (const appSessionId of sessions) {
-      const machine = this.#machines.get(appSessionId);
-      if (machine !== undefined) machines[appSessionId as AppSessionId] = machine;
+    for (const key of keys) {
+      const away = this.#away.get(key);
+      if (away !== undefined) machines[key as AppSessionId] = away.machine;
     }
     return Object.keys(machines).length === 0 ? {} : { machines };
   }
 
-  /** `emit`, but an event naming a session of another machine goes from that machine. */
+  /** `emit`, but an event naming another machine's session goes from that machine, with the session's bare id. */
   stamped(emit: BrowserEmit, emitFrom: EmitFrom): BrowserEmit {
     return (name, payload) => {
-      const appSessionId = (payload as { appSessionId?: unknown }).appSessionId;
-      const machine = typeof appSessionId === 'string' ? this.elsewhere(appSessionId) : null;
-      return machine === null ? emit(name, payload) : emitFrom(machine, name, payload);
+      const key = (payload as { appSessionId?: unknown }).appSessionId;
+      const away = typeof key === 'string' ? this.#away.get(key) : undefined;
+      if (away === undefined) return emit(name, payload);
+      const { tabs } = payload as { tabs?: unknown };
+      const bare = (value: object) => ({ ...value, appSessionId: away.bare });
+      const said = { ...bare(payload as object), ...(Array.isArray(tabs) && { tabs: tabs.map((tab: { appSessionId?: unknown }) => (tab.appSessionId === key ? bare(tab) : tab)) }) };
+      return emitFrom(away.machine, name, said as typeof payload);
     };
   }
 }

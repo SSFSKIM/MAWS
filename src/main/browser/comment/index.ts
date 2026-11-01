@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { ipcMain, type IpcMainEvent, type WebContents } from 'electron';
 import { COMMENT_CHANNEL } from '@shared/browser/comment-protocol';
 import type { BrowserControl } from '@shared/browser/tab';
-import type { MachineRef } from '@shared/machine/ref';
 import type { registerMainHandler } from '../../ipc/router';
 import { registerContextMenuExtras } from '../context-menu';
+import type { AwaySession } from '../machines';
 import type { BrowserEmit, TabStore } from '../tabs';
 import { withIgnoredAcks } from './ack-filter';
 import { captureCrop, sweepCrops } from './crop';
@@ -25,7 +25,7 @@ export interface CommentModeStartDeps {
   register: typeof registerMainHandler;
   userData: string;
   env: NodeJS.ProcessEnv;
-  elsewhere?(appSessionId: string): MachineRef | null; // P5 O7 M3: a session on another machine's (../machines.ts)
+  away?(key: string): AwaySession | null; // P5 O7 M3: another machine's session key's machine and bare id (../machines.ts)
 }
 
 export interface CommentModeService {
@@ -52,14 +52,14 @@ declare global {
   var __maws_browser_comment: CommentModeSeam | undefined;
 }
 
-export function startCommentMode({ store, emit, register, userData, env, elsewhere }: CommentModeStartDeps): CommentModeService {
+export function startCommentMode({ store, emit, register, userData, env, away }: CommentModeStartDeps): CommentModeService {
   const dir = join(userData, 'browser', 'crops'); // E4a's layout reserves it (its Design §9)
   const mode = new CommentMode({
     store,
     emit,
     capture: (entry, rect) => (entry.view ? captureCrop(entry.view, rect, { dir, tabId: entry.tab.tabId }) : Promise.resolve({ crop: 'failed' })),
     discard: (path) => void unlink(path).catch(() => {}),
-    ...(elsewhere && { elsewhere }),
+    ...(away && { away }),
   });
   register('browser.comment.set', ({ tabId, on }) => mode.set(tabId, on));
   const ignoredAcks = new Set<string>(); // filled only by the e2e seam's `ignoreAcks`

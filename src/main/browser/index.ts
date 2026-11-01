@@ -102,8 +102,9 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   const profiles = listProfiles ?? (() => readProfiles(profilesFile));
 
   const { file, broken } = readTabsFile(tabsFile);
-  // P5 O7 M3: every browser event naming a session of another machine is said from it (machines.ts)
-  const machines = remote ? new SessionMachines(remote.local, file.machines, () => writer.markDirty()) : null;
+  // P5 O7 M3: another machine's session keyed by its address, and every browser event naming one said from its machine
+  // with its bare id (machines.ts)
+  const machines = remote ? new SessionMachines(remote.local, file.machines) : null;
   const emit: BrowserEmit = machines && remote ? machines.stamped(emitHere, remote.emitFrom) : emitHere;
   const restored = knownSessionsOnly(file, view);
   // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
@@ -277,7 +278,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   if (inspector) inspector.extensions = extensionUi.seam; // cua #90: the open extension popup
   // E4d start: comment mode (E4d execution document, Interfaces "Main"; Decision Log 26(b)): the toggle's command, the
   // preload's report gate, the crop, the context menu's Comment and the e2e seam, over this store
-  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { elsewhere: (appSessionId: string) => machines.elsewhere(appSessionId) }) });
+  const commentMode = startCommentMode({ store, emit, register, userData, env, ...(machines && { away: (key: string) => machines.away(key) }) });
   // E4d end
   // E4c start: the agent's presence (the dialogs' wrap, parking, the e2e seam's `agent`), re-homed from E4c's browser
   // tools when they left (the in-app browser spec of 2026-10-08, M4)
