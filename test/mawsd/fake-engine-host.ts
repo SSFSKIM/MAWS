@@ -26,6 +26,9 @@ export type HostSession = {
 
 type Raw = (message: { name: string; payload: unknown }) => void;
 
+/** The reads a session's stream makes, which a successor answers once its adoption settled (P5 O16 M4). */
+const STREAM_READS: ReadonlySet<string> = new Set(['session.status', 'session.events', 'session.queue.list', 'session.pendingItems', 'session.catalog', 'session.pendingRequest']);
+
 export class FakeEngineHost {
   readonly sessions = new Map<string, HostSession>();
   readonly calls: Array<{ name: string; input: unknown }> = [];
@@ -34,10 +37,15 @@ export class FakeEngineHost {
   #launches = 0;
   readonly #raw = new Set<Raw>();
   readonly #streaming = new Set<() => void>();
+  readonly #adopting = new Map<string, Promise<void>>();
 
   /** The supervisor's slice the front takes. */
   readonly hosts: Pick<HostSupervisor, 'forward' | 'onRaw' | 'onStreaming' | 'parked'> = {
-    forward: async (_owner, request) => this.answer(request.name, request.input),
+    forward: async (_owner, request) => {
+      const held = this.#adopting.get((request.input as { appSessionId?: string } | null)?.appSessionId ?? '');
+      if (held !== undefined && STREAM_READS.has(request.name)) await held;
+      return this.answer(request.name, request.input);
+    },
     onRaw: (_owner, listener) => (this.#raw.add(listener), () => void this.#raw.delete(listener)),
     onStreaming: (_owner, listener) => (this.#streaming.add(listener), () => void this.#streaming.delete(listener)),
     parked: () => this.parkedNow,
@@ -76,6 +84,30 @@ export class FakeEngineHost {
     s.journal = true;
     this.emit('session.status', { appSessionId, status: this.status(s) });
     return s;
+  }
+
+  /**
+   * The session held for adoption, as a successor engine host holds it from its start (P5 O16 M4; the engine host's
+   * ProcessTable.adoptionSettled): unknown to every other command, and its stream's reads answered once the adoption
+   * reserves its row (`adopted`: the same launch, its status published) or gives up (`failed`: `unknown session`).
+   */
+  adopting(appSessionId: string): { adopted(): void; failed(): void } {
+    const s = this.session(appSessionId);
+    this.sessions.delete(appSessionId);
+    let settle: () => void = () => {};
+    this.#adopting.set(appSessionId, new Promise<void>((resolve) => (settle = resolve)));
+    const end = () => {
+      this.#adopting.delete(appSessionId);
+      settle();
+    };
+    return {
+      adopted: () => {
+        this.sessions.set(appSessionId, s);
+        end();
+        this.emit('session.status', { appSessionId, status: this.status(s) });
+      },
+      failed: end,
+    };
   }
 
   /** Writes one journal row of `count` events and returns them; emitted live now unless `live: false`, cut into batches at `cut`. */

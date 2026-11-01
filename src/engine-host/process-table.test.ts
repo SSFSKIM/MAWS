@@ -256,6 +256,79 @@ describe('process table: change notification, shutdown and reservations', () => 
     await s.session.exited;
   });
 
+  // P5 O16 M4 ("Stream redelivery"): a read of a session held for adoption waits for its row, or for its adoption's end
+  describe('a read of a session held for adoption (adoptionSettled)', () => {
+    const S = 'app-s' as AppSessionId;
+    const settledBy = async (wait: Promise<void> | null) => {
+      let settled = false;
+      void wait?.then(() => void (settled = true));
+      for (let i = 0; i < 5; i++) await Promise.resolve(); // microtasks only: some cases fake the timers
+      return settled;
+    };
+
+    it('has nothing to wait for when the session is not held', () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+    });
+
+    it('waits until the hold becomes the row', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      expect(await settledBy(wait)).toBe(false);
+      const s = scriptedSession();
+      let rowAtWake: unknown = null;
+      void wait!.then(() => void (rowAtWake = table.get(S)));
+      table.reserve(S, () => s.session, { adoption: true });
+      await settledBy(wait);
+      expect(rowAtWake).toBe(s.session); // woken with the row there
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+      s.transport.exit(0);
+      await s.session.exited;
+    });
+
+    it('wakes the reads of an adoption that gave up at once, and has none wait for it after, its hold kept', async () => {
+      vi.useFakeTimers();
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.adoptionFailed(S);
+      expect(await settledBy(wait)).toBe(true); // woken, not run out: no timer advanced
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+      expect(table.isAdopting(S)).toBe(true); // a launch of its id is still refused until every adoption ended
+      table.adoptionEnded(S);
+      expect(table.isAdopting(S)).toBe(false);
+    });
+
+    it('wakes them when the adoptions end', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.adoptionEnded(S);
+      expect(await settledBy(wait)).toBe(true);
+    });
+
+    it('answers a read past its bound', async () => {
+      vi.useFakeTimers();
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(await settledBy(wait)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await settledBy(wait)).toBe(true);
+    });
+
+    it('has none wait once a handover froze the host, and wakes those waiting', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.freezeForHandover();
+      expect(await settledBy(wait)).toBe(true);
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+    });
+  });
+
   it('release frees an exited row only: a live one stays reserved, an exited one leaves the table (archive, whole-branch review)', async () => {
     const table = new ProcessTable({ ps: async () => '' });
     const s = scriptedSession();

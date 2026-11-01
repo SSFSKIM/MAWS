@@ -358,7 +358,7 @@ async function run({ directory, tag, nextPack, seconds, stubPort, profile }) {
     say(`live: ${counts.events} events (${live.redelivered} delivered again and kept once), history ${history.length}; permission.requested ${permission} x${counts.permissions}; the original turn ended x${counts.results}; completion x${counts.notified}; prompt x${counts.prompts}; reconnect host_restart x${counts.hostRestarts}; KillMode ${killModes.join(',')}`);
     if (failures.length > 0) throw new Error(failures.join('; '));
     say(
-      `PASS holder: live stream and history agree: the original turn's success once, permission ${permission} once, the shell's own completion once; shell pid ${shell.pid} alive across 2 restarts, reconnect host_restart x1, KillMode=process at all ${killModes.length} reads, mawsd pid changed (${m0.mawsd} → ${m1.mawsd} → ${m2.mawsd}), engine host pid changed (${m1.engineHost} → ${m2.engineHost}), session pid unchanged (${s0.pid}, session host ${s0.holder.pid}, launch ${s0.launchId})`,
+      `PASS holder: live stream and history satisfy the acceptance checks: the original turn's success once, permission ${permission} once, the shell's own completion once; shell pid ${shell.pid} alive across 2 restarts, reconnect host_restart x1, KillMode=process at all ${killModes.length} reads, mawsd pid changed (${m0.mawsd} → ${m1.mawsd} → ${m2.mawsd}), engine host pid changed (${m1.engineHost} → ${m2.engineHost}), session pid unchanged (${s0.pid}, session host ${s0.holder.pid}, launch ${s0.launchId})`,
     );
     await link.request('session.stop', { appSessionId: app, reason: 'stop' }).catch(() => {});
     link.close();

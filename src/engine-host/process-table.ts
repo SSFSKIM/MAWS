@@ -133,6 +133,8 @@ export class ProcessTable {
   private readonly holdListeners = new Set<() => void>(); // P5 Decision Log 124
   private launches = 0; // P5 Decision Log 124: launches from their entry until they have reserved their row or refused
   private readonly adopting = new Set<AppSessionId>(); // P5 O16 M3: rows held for an adoption under way
+  private readonly adoptionReads = new Map<AppSessionId, Set<() => void>>(); // P5 O16 M4: the reads waiting on each hold
+  private readonly adoptionsFailed = new Set<AppSessionId>(); // P5 O16 M4: held still, their adoption given up
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -182,6 +184,7 @@ export class ProcessTable {
     const session = create();
     this.rows.set(appSessionId, session);
     this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
+    this.wakeAdoptionReads(appSessionId); // P5 O16 M4: its reads read the row
     this.attachReap(session); // O16 M5
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
@@ -314,6 +317,8 @@ export class ProcessTable {
   }
 
   adoptionEnded(appSessionId: AppSessionId): void {
+    this.adoptionsFailed.delete(appSessionId);
+    this.wakeAdoptionReads(appSessionId);
     if (!this.adopting.delete(appSessionId)) return;
     this.rowsChanged();
     this.holdChanged();
@@ -321,6 +326,43 @@ export class ProcessTable {
 
   isAdopting(appSessionId: AppSessionId): boolean {
     return this.adopting.has(appSessionId);
+  }
+
+  // P5 O16 M4 (the VM run's stream redelivery and the kept stream's stall): a successor serves before its adoptions
+  // reserve their rows, and a read of a held session would answer `unknown session` for a launch that is live, which a
+  // stream reader takes for a session not running (its cursor then lost, or its catch-up failed). A read of a session
+  // held for adoption waits until the hold becomes its row (`reserve`, which comes after the adopter's spec, environment
+  // and host attach, never after the re-initialize) or its adoption ends, at most `ms`. Null when there is nothing to
+  // wait for: no hold (every session not being adopted answers as before), an adoption already given up
+  // (`adoptionFailed`: the read answers `unknown session` at once), or admission closed (a handover's freeze or the exit
+  // order: no reservation can come).
+  adoptionSettled(appSessionId: AppSessionId, ms: number): Promise<void> | null {
+    if (!this.adopting.has(appSessionId) || this.adoptionsFailed.has(appSessionId) || this.handingOver || this.shuttingDown) return null;
+    return new Promise<void>((resolve) => {
+      let waiters = this.adoptionReads.get(appSessionId);
+      if (waiters === undefined) this.adoptionReads.set(appSessionId, (waiters = new Set()));
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        if (waiters.size === 0 && this.adoptionReads.get(appSessionId) === waiters) this.adoptionReads.delete(appSessionId);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+    });
+  }
+
+  // P5 O16 M4: the adoption gave up before its row was reserved. Its hold stays until every adoption has ended (a launch
+  // of the id is refused meanwhile, as before); its reads answer now, and from here on at once.
+  adoptionFailed(appSessionId: AppSessionId): void {
+    if (!this.adopting.has(appSessionId)) return;
+    this.adoptionsFailed.add(appSessionId);
+    this.wakeAdoptionReads(appSessionId);
+  }
+
+  private wakeAdoptionReads(appSessionId?: AppSessionId): void {
+    const ids = appSessionId === undefined ? [...this.adoptionReads.keys()] : [appSessionId];
+    for (const id of ids) for (const done of [...(this.adoptionReads.get(id) ?? [])]) done();
   }
 
   get adoptingCount(): number {
@@ -649,6 +691,7 @@ export class ProcessTable {
   // with `stop` once the successor carries the session (its observer says hello to the successor's gate).
   freezeForHandover(): EngineSession[] {
     this.handingOver = true;
+    this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
     this.idle.close();
     const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted && !session.ending);
     for (const session of hosted) {
@@ -668,6 +711,7 @@ export class ProcessTable {
   // a stop-all stays deliberate).
   async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
+    this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
     this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
     // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped

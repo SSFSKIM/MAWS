@@ -204,6 +204,15 @@ export interface EngineIpc {
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
 
+// P5 O16 M4 ("Stream redelivery"): the longest a stream's read of a session held for adoption waits for its row
+// (ProcessTable.adoptionSettled). A hold becomes the row after the adopter's spec and environment reads and the session
+// host's attach (launcher.ts `createAdopter`), well under a second, never after the re-initialize. The bound stays half
+// of the forwarded request's deadline (REQUEST_TIMEOUT_MS, 10 s, @shared/host/host-supervisor) so a stream's opening, a
+// status read then its parts and first page, still answers within it, with 5 s to spare. Past the bound the read answers
+// as it did before the wait (`unknown session`), which is safe: it is the answer every reader already handles, and
+// holding the read longer would only turn it into the caller's own timeout, which says less.
+export const ADOPTION_READ_WAIT_MS = 5_000;
+
 // A bounded handler: the host's own deadline reaches the renderer as `timeout`, never as the router's; so does a
 // `#` append refused because its budget ran out before the write (M5 review).
 export async function bounded<T>(run: () => Promise<T>): Promise<T> {
@@ -330,6 +339,12 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
   const sessionOf = (id: string): EngineSession => table.get(id as AppSessionId) ?? throwing(unknownSession(id));
   const streamOf = (id: string): SessionStream => streams.get(id as AppSessionId) ?? throwing(unknownSession(id));
+  // P5 O16 M4: a stream's reads of a session held for adoption are answered once its row is reserved or its adoption
+  // ended (ADOPTION_READ_WAIT_MS above); any other session's as before, with nothing to wait for
+  const adopted = async (id: string): Promise<void> => {
+    const settling = table.adoptionSettled(id as AppSessionId, ADOPTION_READ_WAIT_MS);
+    if (settling !== null) await settling;
+  };
   const ready = (id: string): { session: EngineSession; client: ControlClient } => {
     const session = sessionOf(id);
     if (session.lifecycle !== 'ready' || !session.control) throw new Error(`session ${id} is not ready (${session.lifecycle})`);
@@ -385,8 +400,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
-  handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
+  handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
   handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
+    await adopted(appSessionId); // P5 O16 M4
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
@@ -438,9 +454,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     }
     return result;
   });
-  handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
-  handle('session.catalog', async ({ appSessionId }) => sessionOf(appSessionId).catalog());
-  on('session.pendingItems', async ({ appSessionId }) => ({ items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
+  handle('session.pendingRequest', async ({ appSessionId, requestId }) => (await adopted(appSessionId), { event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
+  handle('session.catalog', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).catalog()));
+  on('session.pendingItems', async ({ appSessionId }) => (await adopted(appSessionId), { items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
   // P5 O10: every row's count of items waiting on an answer, for the endpoint's lane B counts (pending-counts.ts)
   on('engine.pendingItems', async () => pendingCounts(table.list()));
 
@@ -452,6 +468,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.steer', async ({ appSessionId, content, priority }) => sessionOf(appSessionId).steer(content, { priority: priority ?? 'now' }));
   handle('session.queue.list', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it may read a state file named after it
+    await adopted(appSessionId); // P5 O16 M4: the adopted row's recovered queue, not the store's
     const session = table.get(appSessionId as AppSessionId);
     if (session?.queue.recovered) return session.queue.state;
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with

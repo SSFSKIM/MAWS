@@ -15,9 +15,10 @@ import { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import type { BinaryCheck } from './binary-info';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
-import { handshakeResponder, INIT_RESPONSE } from './conformance/session-harness';
+import { handshakeResponder, INIT_RESPONSE, scriptedSession } from './conformance/session-harness';
 import { REQUEST_TIMEOUT_MS } from './controls';
-import { bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { ADOPTION_READ_WAIT_MS, bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { REQUEST_TIMEOUT_MS as FORWARD_TIMEOUT_MS } from '@shared/host/host-supervisor'; // P5 O16 M4: a forwarded request's deadline
 import { MemoryAppendBudgetSpent } from './memory-append';
 import { RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
@@ -1347,5 +1348,59 @@ describe('session.setKeep (P5 O2 M2)', () => {
     expect(store.keeps.get('app-off' as AppSessionId)).toBe(true);
     await expect(host.call('session.setKeep', { appSessionId: 'app-never' as AppSessionId, keep: true })).rejects.toThrow('unknown session app-never');
     expect(store.keeps.has('app-never' as AppSessionId)).toBe(false);
+  });
+});
+
+// P5 O16 M4 ("Stream redelivery"): a successor engine host serves before its adoptions reserve their rows; a stream's
+// reads of a session it holds for adoption wait for the row rather than answer `unknown session` for a live launch
+describe('a stream’s reads of a session held for adoption (P5 O16 M4)', () => {
+  const READS = ['session.status', 'session.events', 'session.queue.list', 'session.pendingItems', 'session.catalog', 'session.pendingRequest'] as const;
+  const inputOf = (name: (typeof READS)[number], appSessionId: AppSessionId) =>
+    (name === 'session.events' ? { appSessionId, afterSeq: null, limit: 10 } : name === 'session.pendingRequest' ? { appSessionId, requestId: 'req-1' } : { appSessionId }) as never;
+  const settles = (promise: Promise<unknown>) => {
+    const state = { settled: false };
+    promise.then(() => void (state.settled = true), () => void (state.settled = true));
+    return state;
+  };
+
+  it('answers the status of the row the adoption reserved, after waiting for it', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const host = engineHost({ table });
+    const id = 'app-adopting' as AppSessionId;
+    table.holdForAdoption([id]);
+    const status = host.call('session.status', { appSessionId: id });
+    const state = settles(status);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(state.settled).toBe(false);
+    const s = scriptedSession({ spec: { appSessionId: id } });
+    table.reserve(id, () => s.session, { adoption: true });
+    expect(await status).toMatchObject({ appSessionId: id, launchId: s.session.status().launchId });
+    s.transport.exit(0);
+    await s.session.exited;
+  });
+
+  it('answers each read of an adoption that gave up `unknown session` as soon as it gives up, not at the wait’s bound', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const host = engineHost({ table });
+    const id = 'app-failing' as AppSessionId;
+    table.holdForAdoption([id]);
+    const reads = READS.map((name) => host.call(name, inputOf(name, id)));
+    const states = reads.map(settles);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(states.map((s) => s.settled)).toEqual(READS.map(() => false)); // every stream read waits
+    const gaveUp = Date.now();
+    table.adoptionFailed(id);
+    for (const read of reads) await expect(read).rejects.toThrow(`unknown session ${id}`);
+    expect(Date.now() - gaveUp).toBeLessThan(ADOPTION_READ_WAIT_MS / 5);
+    await expect(host.call('session.status', { appSessionId: id })).rejects.toThrow(`unknown session ${id}`); // and at once after
+  });
+
+  it('answers a session not held for adoption as before, with no wait', async () => {
+    const host = engineHost();
+    await expect(host.call('session.status', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow('unknown session app-none');
+  });
+
+  it('bounds the wait below the forwarded request’s deadline', () => {
+    expect(ADOPTION_READ_WAIT_MS).toBeLessThanOrEqual(FORWARD_TIMEOUT_MS / 2);
   });
 });

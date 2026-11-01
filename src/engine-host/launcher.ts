@@ -219,7 +219,14 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
 export const ADOPT_MS = 60_000;
 
 export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId> {
-  return async (entry) => {
+  // P5 O16 M4: an adoption that gives up wakes the reads waiting on its hold (ProcessTable.adoptionSettled), which then
+  // answer `unknown session` at once rather than run out their wait; one past its reservation has no hold to wake
+  return (entry) =>
+    adoptOne(entry).catch((error: unknown) => {
+      if (entry.appSessionId !== null) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
+      throw error;
+    });
+  async function adoptOne(entry: RosterEntry): Promise<AppSessionId> {
     const deadline = Date.now() + adoptMs;
     const left = () => {
       const ms = deadline - Date.now();
@@ -305,7 +312,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
     }
     deps.log(`${appSessionId}: adopted the session host of launch ${launchId}`);
     return appSessionId;
-  };
+  }
 }
 
 // P2-F wave S (S-budget; the owner's D7, Q12 as ruled 2026-10-11): a side thread takes its parent's numeric
