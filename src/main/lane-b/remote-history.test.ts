@@ -180,10 +180,10 @@ describe('readEventsInPages within a byte budget', () => {
     expect(asked.map((a) => a.maxBytes)).toEqual([4096, undefined]);
   });
 
-  // Fix wave 1 (finding 1): the budget goes only to the channel whose peer lists it, page by page.
+  // Fix waves 1 and 2 (finding 1): the budget goes only to a peer that lists it, at every transmission.
   describe('across a channel to a peer without the budget', () => {
     const rows = [...Array.from({ length: 6 }, (_, i) => [event(i + 1, 0, 'r'.repeat(900))]), [event(7, 0, 'y'.repeat(6000))], [event(8)]];
-    /** Budgeted pages from the engine host while the budget is sent; M2's machine (too-large past 4000 bytes) without it. */
+    /** Budgeted pages from the engine host while the peer takes the budget; M2's machine (too-large past 4000 bytes) without. */
     function downgrading(after: 'peer' | 'malformed') {
       const within = budgeted({ rows });
       const whole = machine(rows);
@@ -196,22 +196,60 @@ describe('readEventsInPages within a byte budget', () => {
           if (after === 'peer') link.peers = ['rl2.executor.machine']; // the next channel's peer lacks the budget
           return within.answer(input);
         }
-        return { ok: false, error: { code: 'malformed' } }; // a budgeted call carried to a peer that doesn't read the field
+        return { ok: false, error: { code: 'malformed' } }; // a peer that doesn't read the field (an older build)
       });
       return { link, asked };
     }
 
     for (const after of ['peer', 'malformed'] as const) {
-      it(`starts again on M2’s path when ${after === 'peer' ? 'the next channel’s peer no longer lists it' : 'a budgeted page is refused `malformed`'}, its gaps said once`, async () => {
+      it(`starts again on M2’s path when ${after === 'peer' ? 'the next page’s peer doesn’t list it' : 'a budgeted page is refused `malformed`'}, its gaps said once`, async () => {
         const { link, asked } = downgrading(after);
         const said = { gaps: [] as unknown[], tooLarge: [] as string[] };
         const answer = await readEventsInPages(link, { appSessionId: APP, afterSeq: null, limit: null }, { launch: () => 'L1', gap: (launchId, at) => void said.gaps.push({ launchId, at }), tooLarge: (window) => void said.tooLarge.push(window), log: () => {}, budget: true, pageBytes: 4096, pageEvents: 8 });
         expect(answer).toEqual({ ok: true, value: { events: [...rows.slice(0, 6), rows[7]].flat(), lastSeq: 8, complete: true } });
         expect(said.gaps).toEqual([{ launchId: 'L1', at: { seq: 7 } }]);
-        const sent = asked.map((a) => a.maxBytes !== undefined);
-        expect(sent.slice(after === 'peer' ? 1 : 2).every((budget) => !budget)).toBe(true);
+        const budgetedAt = asked.flatMap((a, i) => (a.maxBytes !== undefined ? [i] : []));
+        expect(budgetedAt).toEqual(after === 'peer' ? [0] : [0, 1]);
       });
     }
+
+    it('reads a page the link sent to a peer without the budget as the downgrade it is, with no refusal round trip', async () => {
+      const rows8 = rows;
+      const within = budgeted({ rows: rows8 });
+      const whole = machine(rows8);
+      const link = within.link;
+      const asked: Array<Record<string, unknown>> = [];
+      link.answers.set('session.events', (input) => (asked.push(input), input.maxBytes === undefined ? whole.link.answers.get('session.events')!(input) : within.answer(input)));
+      // The pre-check sees a peer with the budget; the channel changes before the second page goes, and the link, which
+      // judges the field per transmission, sends that page's input for a peer without it.
+      const transmissions: Array<Record<string, unknown>> = [];
+      const call = link.call.bind(link);
+      link.call = async (name, input, options) => {
+        const lacking = (options as { lacking?: { capability: string; input: unknown } } | undefined)?.lacking;
+        const fell = lacking !== undefined && transmissions.length > 0;
+        const sent = (fell ? lacking!.input : input) as Record<string, unknown>;
+        transmissions.push(sent);
+        const result = await call(name, sent, options);
+        return fell ? { ...result, fellBack: true } : result;
+      };
+      const answer = await readEventsInPages(link, { appSessionId: APP, afterSeq: null, limit: null }, { launch: () => 'L1', gap: () => {}, tooLarge: () => {}, log: () => {}, budget: true, pageBytes: 4096, pageEvents: 8 });
+      expect(answer).toEqual({ ok: true, value: { events: [...rows8.slice(0, 6), rows8[7]].flat(), lastSeq: 8, complete: true } });
+      expect(transmissions.filter((t) => t.maxBytes !== undefined)).toHaveLength(1);
+      expect(asked.filter((a) => a.maxBytes !== undefined)).toHaveLength(1);
+    });
+  });
+
+  // Fix wave 2 (finding 4): M2's pager steps over a live row by its seq; a transcript read from disk has none, and
+  // answers its first items whatever the cursor, so an item alone past the channel ends the read with M2's bar.
+  it('ends M2’s read of a transcript whose first item alone is too large for the channel with the bar, no gap and a bounded number of reads', async () => {
+    const link = new FakeLink();
+    const asked: unknown[] = [];
+    link.answers.set('session.events', (input) => (asked.push(input), { ok: false, error: { code: 'too-large' } }));
+    const said = { gaps: [] as unknown[], tooLarge: [] as string[] };
+    const answer = await readEventsInPages(link, { appSessionId: APP, afterSeq: null, limit: null }, { launch: () => 'L1', gap: (launchId, at) => void said.gaps.push({ launchId, at }), tooLarge: (window) => void said.tooLarge.push(window), log: () => {}, pageEvents: 8 });
+    expect(answer).toEqual({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } });
+    expect(said).toEqual({ gaps: [], tooLarge: ['newest'] });
+    expect(asked.length).toBeLessThan(20);
   });
 
   it('never sends the budget to a machine whose endpoint did not list it, keeping the bar for a window it can’t page', async () => {

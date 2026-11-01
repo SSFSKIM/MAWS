@@ -531,6 +531,24 @@ describe('the checkout and the spawn (M4)', () => {
     expect(streams()).toHaveLength(3);
   });
 
+  // Fix wave 2 (finding 3): the first try is a try out too.
+  it('takes a start record that comes while the opening’s first try is out once it ends, and only once', async () => {
+    const l = lab();
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await vi.advanceTimersByTimeAsync(0);
+    const streams = () => l.link.subs.filter((s) => s.request.feed === undefined);
+    const stream = () => l.link.open().find((s) => s.request.feed === undefined)!;
+    const feed = l.link.open().find((s) => s.request.feed === 'checkout')!;
+    feed.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 }); // the feed opens first: the stream is still opening
+    feed.sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: running, cause: 'live', revision: 2 } });
+    expect(streams()).toHaveLength(1);
+    stream().sink.ended('unavailable');
+    expect(streams()).toHaveLength(2);
+    stream().sink.ended('unavailable');
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    expect(streams()).toHaveLength(2);
+  });
+
   it('falls back to the idle backoff when the next channel’s peer offers no feed, and stays put on `removed` or `grade`', async () => {
     const { l, streams, stream, feed } = await idleFollowed();
     stream()!.sink.ended('unavailable');

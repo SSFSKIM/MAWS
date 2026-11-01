@@ -83,15 +83,18 @@ export interface RemoteLink extends MachineLink {
   /**
    * `session` (P5 O7 M4): the session a path-class read is made from, sent as `call.session` only to a peer that listed
    * `rl2.call-session` (checked at each send, so a call carried to the next channel follows that channel's peer).
+   * `lacking` (fix wave 2): the input sent instead to a peer that doesn't list `capability`, judged at each send the
+   * same way (an input field only some peers read, as `session.events`' `maxBytes`); an answer to it says `fellBack`.
    */
-  call(name: string, input: unknown, options?: { timeoutMs?: number; session?: SessionRef }): Promise<CallResult>;
+  call(name: string, input: unknown, options?: CallOptions): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
   /** `person`: a person acted on this machine (also lifts `refused`). */
   probe(reason: ProbeReason): void;
 }
 
-export type CallResult = { ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } };
+export type CallResult = ({ ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } }) & { fellBack?: true };
+export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown } };
 
 export interface RemoteLinkDeps {
   machine: { ref: MachineRef; name: string };
@@ -115,7 +118,7 @@ type Internal = 'connecting' | 'up' | 'reconnecting' | 'down' | 'refused' | 'clo
 type Trust = { generation: number; keys: string[]; identity: string };
 type Current = { channel: Channel; carrier: Carrier; serial: number; trust: Trust };
 type Attempt = { channel: Channel; carrier: Carrier; trust: Trust } | { failed: string };
-type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; lacking: CallOptions['lacking']; fellBack: boolean; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
 
 const REPORTED: Record<Internal, LinkState> = { connecting: 'connecting', up: 'up', reconnecting: 'up', down: 'down', refused: 'down', closed: 'down' };
 
@@ -666,7 +669,9 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   function sendCall(pending: PendingCall): void {
     if (current === null) return;
     const session = pending.session !== undefined && peerLists({ peerCapabilities }, 'rl2.call-session') ? { session: pending.session } : {};
-    if (send({ t: 'call', id: pending.id, name: pending.name, input: pending.input ?? null, ...session })) pending.sentOn = current.serial;
+    const fellBack = pending.lacking !== undefined && peerCapabilities()?.includes(pending.lacking.capability) !== true;
+    const input = fellBack ? pending.lacking!.input : pending.input;
+    if (send({ t: 'call', id: pending.id, name: pending.name, input: input ?? null, ...session })) [pending.sentOn, pending.fellBack] = [current.serial, fellBack];
   }
 
   function answered(message: Extract<EndpointMessage, { t: 'result' }>): void {
@@ -674,7 +679,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     if (pending === undefined) return;
     calls.delete(message.id);
     clearTimeout(pending.timer);
-    pending.resolve(message.ok ? { ok: true, output: message.output } : { ok: false, error: message.error });
+    const fellBack = pending.fellBack ? { fellBack: true as const } : {};
+    pending.resolve(message.ok ? { ok: true, output: message.output, ...fellBack } : { ok: false, error: message.error, ...fellBack });
   }
 
   function failCalls(code: string): void {
@@ -727,6 +733,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           name: callName,
           input,
           session: options.session,
+          lacking: options.lacking,
+          fellBack: false,
           sentOn: null,
           resolve,
           timer: setTimeout(() => {

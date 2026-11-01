@@ -14,15 +14,17 @@
 //   machine may have let them go (`src/main/sessions/watch-replay.ts`'s two rules).
 // - A reopening. Every opening of a feed is a snapshot of nothing, so a `subbed` after the first is a new channel (the old
 //   one's ref, and every watch it held, ended), and a feed the endpoint ended `behind` or `unavailable` (its channel
-//   still up) is opened again: either way what changed meanwhile went untold. The machine counts a hold per channel
-//   client and directory, not per page, so the session's watches are given back by directory, every page's together
-//   (fix wave 1): each git directory released as many times as all pages hold it, then made again as many times, its
-//   status told once per repository as `git.changed` (`initial`); each files directory released as many times as held,
-//   forgotten, and `files.changed {kind: 'invalidated'}` told once, on which the renderer's files store lists and
-//   watches again. Releasing the whole count before making any is right either way: on a new channel every release is a
-//   no-op (its ref holds nothing; an unwatch of nothing does nothing), on the same one it brings the count to none. The
-//   session's watch, unwatch, release and replay calls go one at a time, so a page's watch made meanwhile is counted
-//   after the replay rather than inside it. `removed`, `grade` and `closed` leave the feed closed until the stream opens
+//   still up) is opened again: either way what changed meanwhile went untold. The machine counts a hold by the key its
+//   service keeps, so the watches are given back by that key (fix waves 1 and 2): a git hold is the channel client's and
+//   the directory's, with neither page nor session in it, so each git directory the session watches is released as many
+//   times as every page of every session on the machine holds it, then made again as many times (each under its own
+//   session, `call.session`), its status told once per repository as `git.changed` (`initial`); a files hold names its
+//   session, so each of the session's files directories is released as many times as its pages hold it, forgotten, and
+//   `files.changed {kind: 'invalidated'}` told once, on which the renderer's files store lists and watches again.
+//   Releasing the whole count before making any is right either way: on a new channel every release is a no-op (its ref
+//   holds nothing; an unwatch of nothing does nothing), on the same one it brings the count to none; so feeds that open
+//   one after another on a new channel each leave the count whole. Every watch, unwatch, release and replay on one
+//   machine goes one at a time, so a page's watch made meanwhile is counted after the replay rather than inside it. `removed`, `grade` and `closed` leave the feed closed until the stream opens
 //   again; any other end (`not-offered` from a next channel's peer without feeds, an unknown reason) does too, and says
 //   the session is no longer followed (`unfollowed`), so a stream that waited on the record falls back to its backoff.
 // - The record (O5's landing audit). The feed carries the session's `session.changed` too, handed to the session
@@ -92,12 +94,11 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
   const timing: RemoteCheckoutTiming = { ...REMOTE_CHECKOUT_TIMING, ...deps.timing };
   const feeds = new Map<string, Feed>();
   const pages = new Map<ClientId, Page>();
-  /** Each session's watch calls, one at a time (machine and session). */
-  const queues = new Map<string, Promise<unknown>>();
+  /** Each machine's watch calls, one at a time: its holds are the channel's, across sessions. */
+  const queues = new Map<MachineRef, Promise<unknown>>();
   let stopped = false;
 
-  function serial<T>(machine: MachineRef, app: string, run: () => Promise<T>): Promise<T> {
-    const key = feedKey(machine, app);
+  function serial<T>(key: MachineRef, run: () => Promise<T>): Promise<T> {
     const next = (queues.get(key) ?? Promise.resolve()).then(run, run);
     const settled = next.then(
       () => {},
@@ -131,7 +132,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
     pages.delete(id);
     for (const watch of page.watches.values()) {
       const link = deps.remote(watch.machine);
-      if (link !== null) void serial(watch.machine, watch.app, () => release(link, watch, watch.count));
+      if (link !== null) void serial(watch.machine, () => release(link, watch, watch.count));
     }
     page.watches.clear();
   }
@@ -148,7 +149,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
   function dispatch(link: RemoteLink, name: CommandName, input: Record<string, unknown>, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const app = sessionOf(name, input, ctx);
     if (app === undefined) return dispatchOverLink(link, name, input, ctx.session);
-    return serial(link.machine, app, () => watchOrUnwatch(link, name, input, ctx, app));
+    return serial(link.machine, () => watchOrUnwatch(link, name, input, ctx, app));
   }
 
   async function watchOrUnwatch(link: RemoteLink, name: CommandName, input: Record<string, unknown>, ctx: MainContext, app: string): Promise<CommandResult<CommandName>> {
@@ -176,41 +177,37 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
   }
 
   /**
-   * The session's watches given back to the machine by directory, every page's together: git's released and made again
-   * and its status told, files' released and invalidated.
+   * The session's watches given back to the machine by the key it holds them under: a git directory with every
+   * session's holds on it (released, then made again, its status told), a files directory with the session's own
+   * (released and invalidated).
    */
   async function replay(link: RemoteLink, app: string): Promise<void> {
     const machine = link.machine;
-    const groups = new Map<string, { kind: 'git' | 'files'; target: string; input: Record<string, unknown>; count: number; held: Array<{ page: Page; key: string }> }>();
-    for (const page of pages.values()) {
-      for (const [key, watch] of page.watches) {
-        if (watch.machine !== machine || watch.app !== app) continue;
-        const id = `${watch.kind}\n${watch.target}`;
-        const group = groups.get(id) ?? { kind: watch.kind, target: watch.target, input: watch.input, count: 0, held: [] };
-        group.count += watch.count;
-        group.held.push({ page, key });
-        groups.set(id, group);
-      }
-    }
+    const all = [...pages.values()].flatMap((page) => [...page.watches].map(([key, watch]) => ({ page, key, watch }))).filter(({ watch }) => watch.machine === machine);
+    const mine = all.filter(({ watch }) => watch.app === app);
     const told = new Set<string>();
-    for (const group of groups.values()) {
-      await release(link, { ...group, machine, app }, group.count);
-      if (group.kind === 'files') {
-        // The renderer's files store lists and watches again on the invalidation: that watch is what this opening counts.
-        for (const { page, key } of group.held) page.watches.delete(key);
-        deps.emit(machine, 'files.changed', { appSessionId: app as AppSessionId, path: group.target, kind: 'invalidated' });
-        continue;
-      }
+    for (const target of new Set(mine.filter(({ watch }) => watch.kind === 'git').map(({ watch }) => watch.target))) {
+      const held = all.filter(({ watch }) => watch.kind === 'git' && watch.target === target).map(({ watch }) => watch);
+      for (const watch of held) await release(link, watch, watch.count);
       let status: GitStatus | null = null;
-      for (let i = 0; i < group.count; i++) {
-        const result = await dispatchOverLink(link, 'git.watch', group.input, app as AppSessionId);
-        if (result.ok) status = result.value as GitStatus;
-        else deps.log(`lane B: git.watch of ${link.name}/${app} ${group.target} again failed: ${result.error.message}`);
+      for (const watch of held) {
+        for (let i = 0; i < watch.count; i++) {
+          const result = await dispatchOverLink(link, 'git.watch', watch.input, watch.app as AppSessionId);
+          if (result.ok) status = result.value as GitStatus;
+          else deps.log(`lane B: git.watch of ${link.name}/${watch.app} ${target} again failed: ${result.error.message}`);
+        }
       }
       if (status !== null && !told.has(status.repoRoot)) {
         told.add(status.repoRoot);
         deps.emit(machine, 'git.changed', { repoRoot: status.repoRoot, status, reason: 'initial' });
       }
+    }
+    for (const target of new Set(mine.filter(({ watch }) => watch.kind === 'files').map(({ watch }) => watch.target))) {
+      const held = mine.filter(({ watch }) => watch.kind === 'files' && watch.target === target);
+      for (const { watch } of held) await release(link, watch, watch.count);
+      // The renderer's files store lists and watches again on the invalidation: that watch is what this opening counts.
+      for (const { page, key } of held) page.watches.delete(key);
+      deps.emit(machine, 'files.changed', { appSessionId: app as AppSessionId, path: target, kind: 'invalidated' });
     }
   }
 
@@ -230,7 +227,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
           deps.following?.(link.machine, app);
           if (!feed.opened) return void (feed.opened = true);
           // A new channel, or the feed opened again after the endpoint ended it: what changed meanwhile went untold.
-          serial(link.machine, app, () => replay(link, app)).catch((error: unknown) => deps.log(`lane B: the checkout of ${link.name}/${app} could not be given back: ${(error as Error).message}`));
+          serial(link.machine, () => replay(link, app)).catch((error: unknown) => deps.log(`lane B: the checkout of ${link.name}/${app} could not be given back: ${(error as Error).message}`));
         },
         snapshot: () => {},
         event: (_at, body) => {

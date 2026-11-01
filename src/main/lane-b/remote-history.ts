@@ -12,6 +12,10 @@
 //   at: {seq}}`, what the stream itself says for an event too large to carry (`{omitted: 'too-large'}`); the renderer,
 //   reading this answer, places a gap told meanwhile at that point of the launch. Without a launch to name, the answer
 //   says `historyUnavailable` instead (a bar at its start).
+// - A transcript read from disk has no seq to step over (its read takes no cursor, so every page asks its first items
+//   again): a one-row page refused there is refused at every cursor. So no more than LEFT_OUT_IN_A_ROW rows are left out
+//   with no page crossing between them; past that the read ends with the bar below (`newest`), and the gaps it found are
+//   said only once a page crosses (fix wave 2: M2's pager stepped on forever there).
 // - A window the inputs can't page is answered as history unavailable (no events, `complete`, `historyUnavailable`):
 //   an older page (`before`), a subagent's slice (`agentId`), a seek, and a transcript the engine host reads from disk
 //   (a session with no stream there: its events carry no `seq`, and its `limit` selects the transcript's first events,
@@ -30,13 +34,14 @@
 // - A live launch's events are read on from `afterSeq` in budgeted pages while the launch says more follows, and
 //   assembled into the one answer the renderer asked for; a row alone past the budget is left out with its place told as
 //   `remote.gap {launchId, at: {seq}}`, as above.
-// - The budget is judged per page (fix wave 1): a page goes budgeted only while the current channel's peer lists
-//   `rl2.events-budget` (with no channel current, the link carries it to the next one). A read that meets a peer without
-//   it starts again on the path above from the renderer's input, whatever it had read: a page's peer no longer listing
-//   it, a budgeted page refused `malformed` (a call the link carried to a channel whose endpoint doesn't read the field),
-//   or `invalid_input` (an older engine host behind a current endpoint, which `mawsd` may serve across a swap). The
-//   gaps a budgeted read found are said only once it answers, so a read started again says each once. A subagent's slice
-//   ignores the budget, so it keeps that path too.
+// - The budget never goes to a peer that doesn't list `rl2.events-budget` (fix waves 1 and 2). Each page is a call whose
+//   input for a peer lacking the capability is the same page without `maxBytes` (the link's `lacking`, judged at every
+//   transmission, the first send and a resend on the next channel alike), and the pager doesn't ask a page budgeted of
+//   a current peer known not to list it. A read that meets such a peer starts again on the path above from the
+//   renderer's input, whatever it had read: a page the link sent without the budget (`fellBack`), a page's peer not
+//   listing it, a budgeted page refused `malformed`, or `invalid_input` (an older engine host behind a current endpoint,
+//   which `mawsd` may serve across a swap). The gaps a budgeted read found are said only once it answers, so a read
+//   started again says each once. A subagent's slice ignores the budget, so it keeps that path too.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { SessionEvent } from '@shared/graph/events';
@@ -44,6 +49,8 @@ import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
 
+/** One-row pages refused with no page crossing between them, at most, before a read ends with the bar (a disk item). */
+export const LEFT_OUT_IN_A_ROW = 3;
 /** Events asked for per page at most: the stream's own page (PAGE_EVENTS). */
 export const HISTORY_PAGE_EVENTS = 500;
 /**
@@ -100,7 +107,11 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
       deps.log(`${said}: the channel's peer no longer takes the byte budget; read again without it`);
       return DOWNGRADED;
     }
-    const result = await dispatchOverLink(link, 'session.events', { ...fields, maxBytes });
+    const result = await dispatchOverLink(link, 'session.events', { ...fields, maxBytes }, undefined, { capability: 'rl2.events-budget', input: fields });
+    if (result.fellBack === true) {
+      deps.log(`${said}: a page went to a peer that doesn't take the byte budget; read again without it`);
+      return DOWNGRADED;
+    }
     if (!result.ok && (result.error.code === 'invalid_input' || refusalOf(result) === 'malformed')) {
       deps.log(`${said}: the byte budget was refused (${result.error.code === 'invalid_input' ? 'an older engine host' : 'a peer that does not read it'}); read again without it`);
       return DOWNGRADED;
@@ -181,6 +192,7 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
   let lastSeq = cursor ?? 0;
   let size = Math.min(most, total ?? most);
   let lost = false;
+  let leftOut: Array<[string, { seq: number }] | null> = []; // since the last page that crossed; null: no launch to name
   for (;;) {
     const read = await dispatchOverLink(link, 'session.events', { appSessionId: app, afterSeq: cursor, limit: size });
     if (tooLarge(read)) {
@@ -188,17 +200,26 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
         size = Math.floor(size / 2);
         continue;
       }
-      // One row the channel can't carry: left out, its place told, and the read goes on after it.
+      if (leftOut.length >= LEFT_OUT_IN_A_ROW) {
+        deps.log(`${said}: ${leftOut.length + 1} rows in a row alone too large for the channel (a transcript read from disk), answered as history unavailable`);
+        deps.tooLarge('newest');
+        return unavailable();
+      }
+      // One row the channel can't carry: left out, its place told once a page crosses, and the read goes on after it.
       const seq = (cursor ?? 0) + 1;
       const launch = deps.launch();
       deps.log(`${said}: row ${seq} alone is too large for the channel; left out${launch === null ? '' : ', a gap at its place'}`);
-      if (launch === null) lost = true;
-      else deps.gap(launch, { seq });
+      leftOut.push(launch === null ? null : [launch, { seq }]);
       cursor = lastSeq = seq;
       continue;
     }
     if (!read.ok) return read;
     const page = read.value as Events;
+    for (const gap of leftOut) {
+      if (gap === null) lost = true;
+      else deps.gap(...gap);
+    }
+    leftOut = [];
     if (fromDisk(page)) {
       deps.log(`${said}: a transcript read from disk too large for the channel, answered as history unavailable`);
       deps.tooLarge('newest');

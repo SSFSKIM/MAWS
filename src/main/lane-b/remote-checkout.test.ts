@@ -221,6 +221,31 @@ describe('the watches across a reopening', () => {
     expect(held()).toBe(1); // page 1's watch still follows the repository
   });
 
+  // Fix wave 2 (finding 2): the hold has no session in it either, so two sessions on one directory share it.
+  it('keeps two sessions’ holds on one directory across a new channel whose feeds open one after the other, and one session’s page ending leaves the other’s', async () => {
+    const l = lab();
+    const holds = new Map<string, number>();
+    const held = () => holds.get(REPO) ?? 0;
+    l.link.answers.set('git.watch', (input) => (holds.set(String(input.directory), held() + 1), { ok: true, output: status() }));
+    l.link.answers.set('git.unwatch', (input) => (holds.set(String(input.directory), Math.max(0, held() - 1)), { ok: true, output: null }));
+    const other = endableClientRef('page-2');
+    for (const [app, client] of [[APP, l.page], ['app-2', other]] as const) {
+      l.checkout.open(l.link, app);
+      l.link.open().at(-1)!.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 });
+      await l.cmd('git.watch', { directory: REPO }, { ...l.ctx, client, session: app as AppSessionId });
+    }
+    expect(held()).toBe(2);
+    holds.clear(); // a new channel: the old ref ended
+    for (const feed of l.link.open()) {
+      feed.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 }); // its feeds open one at a time
+      await vi.advanceTimersByTimeAsync(0);
+      expect(held()).toBe(2);
+    }
+    other.end();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held()).toBe(1);
+  });
+
   it('counts a watch made while a reopening gives the watches back after it', async () => {
     const l = lab();
     l.checkout.open(l.link, APP);

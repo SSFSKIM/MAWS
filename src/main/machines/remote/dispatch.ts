@@ -18,8 +18,7 @@ import { gradeOf } from '@shared/ipc/grades';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
 import { LINK_REGISTRY, onLink } from '../link-surface';
-import type { SessionRef } from '../../../../apps/org-protocol/src/index.ts';
-import type { CallResult } from './link';
+import type { CallOptions, CallResult } from './link';
 
 const codec = codecOf(LINK_REGISTRY);
 const isIpcCode = (code: string): code is IpcErrorCode => (IPC_ERROR_CODES as readonly string[]).includes(code);
@@ -43,16 +42,21 @@ function voidAsUndefined(name: CommandName, output: unknown): unknown {
   return !schema.safeParse(null).success && schema.safeParse(undefined).success ? undefined : output;
 }
 
-type Caller = { readonly name: string; call(name: string, input: unknown, options?: { session?: SessionRef }): Promise<CallResult> };
+type Caller = { readonly name: string; call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> };
 
-export async function dispatchOverLink(link: Caller, name: CommandName, input: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
+/** A result, and whether the link sent the input for a peer lacking a capability (`lacking`, fix wave 2). */
+export type LinkResult = CommandResult<CommandName> & { fellBack?: true };
+
+export async function dispatchOverLink(link: Caller, name: CommandName, input: unknown, session?: AppSessionId, lacking?: CallOptions['lacking']): Promise<LinkResult> {
   if (!onLink(name)) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${link.name} cannot answer it: ${name} does not cross a machine link`) };
   const grade = gradeOf(name);
   if (grade !== 'list' && grade !== 'view') return { ok: false, error: ipcError('internal', `${name}: refused act-required by machine ${link.name}`, { refusal: 'act-required' }) };
   // A remote session's checkout is lane B's: lane A's roots are sminos's, which no `checkout` row reads.
-  const result = await (session === undefined ? link.call(name, input) : link.call(name, input, { session: { lane: 'B', id: session } }));
-  if (!result.ok) return refusalError(name, link.name, result.error);
+  const options: CallOptions = { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }) };
+  const result = await (Object.keys(options).length === 0 ? link.call(name, input) : link.call(name, input, options));
+  const fellBack = result.fellBack === true ? { fellBack: true as const } : {};
+  if (!result.ok) return { ...refusalError(name, link.name, result.error), ...fellBack };
   const output = codec.readCommandOutput(name, voidAsUndefined(name, result.output));
-  if (!output.ok) return { ok: false, error: ipcError('internal', output.error.message, output.error.issues) };
-  return { ok: true, value: output.value } as CommandResult<CommandName>;
+  if (!output.ok) return { ok: false, error: ipcError('internal', output.error.message, output.error.issues), ...fellBack };
+  return { ok: true, value: output.value, ...fellBack } as LinkResult;
 }

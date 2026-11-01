@@ -547,10 +547,10 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(gapsOf(l.a, 'app-1').filter((g) => (g.at as { idx?: number } | undefined)?.idx === undefined)).toEqual([{ appSessionId: 'app-1', launchId: s.launchId, at: { seq: huge[0].seq } }]);
     // the device's reads (a channel's client), not the machine's in-process stream catch-up
     const asked = l.host.calls.slice(opening).filter((c) => c.name === 'session.events' && c.client !== undefined).map((c) => (c.input as { maxBytes?: number }).maxBytes !== undefined);
-    // the lost page, and at most its resend by the link; every page after is M2's
-    const last = asked.lastIndexOf(true);
-    expect(last).toBeLessThanOrEqual(1);
-    expect(asked.slice(last + 1).length).toBeGreaterThan(1);
+    // only the lost page carried the budget, to the peer that listed it; its resend and every page after are M2's
+    expect(asked.indexOf(true)).toBe(0);
+    expect(asked.filter(Boolean)).toHaveLength(1);
+    expect(asked.length).toBeGreaterThan(2);
   });
 
   it('still tries an idle stream on the backoff for an endpoint without feeds, which carries no record', async () => {
@@ -895,6 +895,37 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     writeFileSync(repo.path('four.ts'), 'export {};\n');
     await until(() => gitChanges(l.a).some((c) => c.repoRoot === repo.root && untracked('four.ts')(c)), 'a git change after one page closed', 10_000);
+  });
+
+  // Fix wave 2 (finding 2): the git hold is the channel's and the directory's, whichever session asked for it.
+  it('keeps two sessions’ git holds on one repository across a drop, so one session’s panel closing leaves the other’s changes coming', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    for (const app of ['app-1', 'app-2']) {
+      l.host.add(app);
+      l.place(app, undefined, { directory: repo.root });
+    }
+    checkoutServices(l, repo);
+    l.a.tabs('app-1', 'app-2');
+    await until(() => ['app-1', 'app-2'].every((app) => sessionOf(l.a, app)?.stream === 'live'), 'both sessions live', 10_000);
+    const panels = ['app-1', 'app-2'].map((app) => ({ client: endableClientRef(`panel-${app}`), session: app as AppSessionId }));
+    for (const panel of panels) await l.a.cmd('git.watch', { directory: repo.root }, panel);
+    const untracked = (name: string) => (c: { status: GitStatus }) => c.status.files.some((x) => x.path === name && x.untracked);
+
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const said = l.a.emitted.length;
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    // each session's feed opens on the new channel and gives the repository's holds back
+    await until(() => l.a.emitted.slice(said).filter((e) => e.name === 'git.changed' && (e.payload as { reason: string }).reason === 'initial').length >= 2, 'both feeds’ replays', 15_000);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    panels[1].client.end();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    writeFileSync(repo.path('after.ts'), 'export {};\n');
+    await until(() => gitChanges(l.a).some((c) => c.repoRoot === repo.root && untracked('after.ts')(c)), 'a git change after one session’s panel closed', 10_000);
   });
 
   it('spawns as a member who owns nothing there once a grant gives them `spawn`, stepped up; the new session streams, takes a PDF’s upload, then one message naming its path', async () => {

@@ -29,8 +29,8 @@
 //   session (`recordChanged`), or when the feed opens again (`kick`: what changed meanwhile went untold). Without such a
 //   feed (a peer without `rl2.feeds`) it is tried on a backoff from 1 s doubling to `idleProbeMaxMs`, well past the
 //   machine's park window, so the host parks between tries. `kick` subscribes at once (a resume this app asked for, the
-//   feed's opening). A record that says the session runs while a try is still out is kept for that try, and taken once
-//   it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
+//   feed's opening). A record that says the session runs while a try is still out, unanswered (the opening's first try
+//   too: fix wave 2), is kept for that try, and taken once it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
 //   channel's peer without feeds) puts a waiting stream on the backoff (fix wave 1). `removed` and `closed` end it for
 //   good; any other end ends the stream with its reason.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
@@ -112,6 +112,8 @@ export class RemoteSession {
   #timer: ReturnType<typeof setTimeout> | null = null;
   /** A record said the session runs while the try out was not yet answered: one more try once it ends. */
   #started = false;
+  /** The subscription out has had its `subbed`. */
+  #answered = false;
   #backoffMs: number;
   #batch: SessionEvent[] = [];
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -175,10 +177,9 @@ export class RemoteSession {
     const before = this.state.record;
     this.state.record = record;
     this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
-    if (this.state.stream !== 'idle') return;
     if (record.holder.kind !== 'self' && record.engineSessionId === before?.engineSessionId) return;
-    if (this.#sub === null) this.kick();
-    else this.#started = true;
+    if (this.#sub !== null && !this.#answered) this.#started = true; // a try out, unanswered: kept for its end
+    else if (this.state.stream === 'idle') this.kick();
   }
 
   /** The record no longer follows (the feed ended for good, not as a stop): a stream waiting on it tries on the backoff. */
@@ -290,6 +291,7 @@ export class RemoteSession {
   #subscribe(): void {
     const token = {};
     this.#token = token;
+    this.#answered = false;
     const mine = () => this.#token === token && this.#running;
     let first = true; // this subscription's first `subbed`
     const carried = this.#cursor !== null;
@@ -300,6 +302,7 @@ export class RemoteSession {
         const gap = first ? mode === 'missing' && carried : mode !== 'replay';
         first = false;
         this.#started = false;
+        this.#answered = true;
         this.#backoffMs = this.#deps.timing.idleRetryMs[0];
         this.state.launch = at.epoch;
         this.#tellPendingGap();
