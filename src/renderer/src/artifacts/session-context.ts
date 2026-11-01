@@ -2,7 +2,7 @@
 // P3-H and Decision Log 24, 83 and 85; reused by Send to, Decision Log 87). The connector sheet's Start uses it today;
 // it is the one place that reads an artifact's durable session context in the window.
 //
-// The context, in order (main's route E eligibility, src/main/connectors/eligibility.ts, reads the same facts):
+// The context, in order (main's route E eligibility, src/services/connectors/eligibility.ts, reads the same facts):
 // - the artifact's own session (its creating session, or for an import its `created` link; a session that only viewed
 //   or edited it is no context) while the window's index knows it in the artifact's project: resumed;
 // - else the artifact's Space's linked directory, else the directory of the project the artifact itself names: a new

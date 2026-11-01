@@ -135,11 +135,6 @@ function libraryFiles(dialog: () => Promise<string>) {
     port: {
       save: async () => ({ path: await dialog() }),
       confirm: async () => ({ confirmed: false }),
-      openExternal: async () => ({ opened: true }),
-      reveal: async () => ({ revealed: true }),
-    },
-    readFile: async () => {
-      throw new Error('not read here');
     },
     env: {},
   });

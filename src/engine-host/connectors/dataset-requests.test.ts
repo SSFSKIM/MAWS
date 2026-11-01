@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
-import { DatasetRefreshRequests, type DatasetRefreshAsk, type DatasetRefreshSettlement } from './dataset-requests';
+import { createHostRuntime } from '@shared/host/runtime';
+import { DatasetRefreshRequests, hostDatasetRefresh, type DatasetRefreshAsk, type DatasetRefreshSettlement } from './dataset-requests';
 
 const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const ASK: DatasetRefreshAsk = { artifactId: ARTIFACT, datasetId: 'live', baseRevision: 4, appSessionId: 'app-1' as AppSessionId, opId: 'app-1/toolu_1', server: 'fixture', tool: 'rows', args: { series: 'revenue', limit: 2 } };
@@ -199,5 +200,49 @@ describe('the dataset refresh requests', () => {
       requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'toolError' });
       expect(await asked).toEqual({ kind: 'refused', outcome: { ok: false, state: 'failed', reason: 'toolError' }, refusal: 'the publication was not committed: disk full' });
     });
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 3, Interfaces §D, D10): the registry as the
+// host's entry composes it, over the runtime's connectors presence. A served `mawsd` that listed `host.connectors` runs
+// the refresh with no app attached; one that listed `host.attachment` alone (a pre-O4 daemon, its engine host kept across
+// the update) keeps O3-D's rule, the app's attachment.
+describe('the host’s registry over the connectors’ presence (P5 O4 M2)', () => {
+  const PING = { pid: 42, uptimeMs: 10, hostVersion: 'test' };
+  afterEach(() => vi.restoreAllMocks());
+  function served(capabilities: string[]) {
+    const events: { name: string; payload: unknown }[] = [];
+    let requests!: DatasetRefreshRequests;
+    const runtime = createHostRuntime((on, emit, client) => {
+      on('engine.ping', async () => PING); // the engine host's: its emits are checked against HOST_EVENTS
+      requests = hostDatasetRefresh(emit, client.connectorsPresence);
+    });
+    const port = { start: () => {}, on: () => {}, postMessage: (message: unknown) => void events.push(message as { name: string; payload: unknown }) };
+    runtime.serve(port, { capabilities });
+    runtime.setReady();
+    return { runtime, requests, events };
+  }
+
+  it('a client listing host.connectors: announced with no app attached, ended only at the connection’s end', async () => {
+    const host = served(['socket.ptyFrames', 'host.attachment', 'host.connectors']);
+    expect(host.runtime.presence.attached()).toBe(false); // no app
+    const asked = host.requests.ask(ASK, new AbortController().signal);
+    expect(host.events).toEqual([{ t: 'evt', name: 'maws.artifact.datasetRefresh', payload: { requestId: expect.any(String) } }]);
+    host.runtime.setAttachment(true);
+    host.runtime.setAttachment(false); // an app came and went: the request stands
+    expect(await settled(asked)).toBe(false);
+    host.runtime.detach();
+    expect(await asked).toEqual({ kind: 'noClient' });
+  });
+
+  it('a client listing host.attachment alone: noClient with no app, as at O3-D; announced once the app is attached', async () => {
+    const host = served(['socket.ptyFrames', 'host.attachment']);
+    expect(await host.requests.ask(ASK, new AbortController().signal)).toEqual({ kind: 'noClient' });
+    expect(host.events).toEqual([]);
+    host.runtime.setAttachment(true);
+    const asked = host.requests.ask(ASK, new AbortController().signal);
+    expect(host.events).toHaveLength(1);
+    host.runtime.setAttachment(false); // the app's departure ends it
+    expect(await asked).toEqual({ kind: 'noClient' });
   });
 });

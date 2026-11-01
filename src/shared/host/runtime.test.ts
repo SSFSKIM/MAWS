@@ -631,6 +631,109 @@ describe('host runtime: the app’s presence (P5 O3-D M3)', () => {
   });
 });
 
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §D, D10): the connectors' presence. A client
+// whose hello listed `host.connectors` (a post-O4 `mawsd`) owns connector operations and dataset refreshes for as long
+// as it is the ready client, app or no app; any other client keys them on the app's presence, as at O3-D.
+describe('host runtime: the connectors’ presence (P5 O4 M2)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  const PRE_O4_DAEMON = { capabilities: ['socket.ptyFrames', 'host.attachment'] };
+  const POST_O4_DAEMON = { capabilities: ['socket.ptyFrames', 'host.attachment', 'host.connectors'] };
+
+  function host() {
+    let gone = 0;
+    let appGone = 0;
+    let hooks!: { connectorsPresence: { attached(): boolean } };
+    const runtime = createHostRuntime((on, _emit, client) => {
+      on('engine.ping', async () => PING);
+      hooks = client; // registration precedes serve: the presence handed here is read at call time
+      client.connectorsPresence.onGone(() => void gone++);
+      client.presence.onGone(() => void appGone++);
+    });
+    return { runtime, registered: () => hooks.connectorsPresence, gone: () => gone, appGone: () => appGone };
+  }
+
+  it('a client listing host.connectors: attached while it is the ready client, whatever the app’s attachment says', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    expect(h.runtime.connectorsPresence).toBe(h.registered()); // one object, made with the runtime
+    expect(h.runtime.connectorsPresence.attached()).toBe(false);
+    h.runtime.serve(fakePort().port, POST_O4_DAEMON);
+    expect(h.runtime.connectorsPresence.attached()).toBe(false); // served, not yet ready
+    h.runtime.setReady();
+    expect(h.runtime.connectorsPresence.attached()).toBe(true);
+    expect(h.runtime.presence.attached()).toBe(false); // no app
+    h.runtime.setAttachment(true);
+    h.runtime.setAttachment(false); // the app departs: the app's presence falls, the connectors' holds
+    expect(h.appGone()).toBe(1);
+    expect(h.runtime.connectorsPresence.attached()).toBe(true);
+    expect(h.gone()).toBe(0);
+    h.runtime.detach(); // the connection's end
+    expect(h.runtime.connectorsPresence.attached()).toBe(false);
+    expect(h.gone()).toBe(1);
+  });
+
+  it('a client listing host.attachment alone (a pre-O4 mawsd): the connectors’ presence is the app’s', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port, PRE_O4_DAEMON);
+    h.runtime.setReady();
+    expect(h.runtime.connectorsPresence.attached()).toBe(false);
+    h.runtime.setAttachment(true);
+    expect(h.runtime.connectorsPresence.attached()).toBe(true);
+    h.runtime.setAttachment(false);
+    expect(h.runtime.connectorsPresence.attached()).toBe(false);
+    expect(h.gone()).toBe(1);
+    expect(h.appGone()).toBe(1);
+    h.runtime.detach(); // already fallen: nothing more
+    expect(h.gone()).toBe(1);
+  });
+
+  it('a client listing neither (main’s direct link, a utility port): the connection, as E10 had it', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port);
+    h.runtime.setReady();
+    expect(h.runtime.connectorsPresence.attached()).toBe(true);
+    h.runtime.detach();
+    expect(h.runtime.connectorsPresence.attached()).toBe(false);
+    expect(h.gone()).toBe(1);
+  });
+
+  it('a replacement fires the outgoing client’s hooks under the rule it was served by, then reads the new one’s', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    // a post-O4 mawsd with no app, replaced by a pre-O4 one: the outgoing connection owned the connectors
+    h.runtime.serve(fakePort().port, POST_O4_DAEMON);
+    h.runtime.setReady();
+    h.runtime.serve(fakePort().port, PRE_O4_DAEMON);
+    expect(h.gone()).toBe(1);
+    h.runtime.setReady();
+    expect(h.runtime.connectorsPresence.attached()).toBe(false); // the new one's rule: no app attached
+    // a pre-O4 mawsd with no app, replaced by a post-O4 one: nothing owned the connectors, nothing fell
+    h.runtime.serve(fakePort().port, POST_O4_DAEMON);
+    expect(h.gone()).toBe(1);
+    h.runtime.setReady();
+    expect(h.runtime.connectorsPresence.attached()).toBe(true);
+  });
+
+  it('a client listing host.connectors whose write fails is gone for the connectors too', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    let emit!: HostEmit;
+    let failed = 0;
+    const runtime = createHostRuntime((on, e, client) => {
+      on('engine.ping', async () => PING);
+      emit = e;
+      client.connectorsPresence.onGone(() => void failed++);
+    });
+    runtime.serve({ ...fakePort().port, postMessage: () => false }, POST_O4_DAEMON);
+    runtime.setReady();
+    expect(emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never)).toBe(false);
+    expect(failed).toBe(1);
+    expect(runtime.connectorsPresence.attached()).toBe(false);
+  });
+});
+
 // P3-A M4 start: a document's port on the parent port (docs/doperpowers/plans/2026-10-12-p3-a-store.md, Decision Log 13).
 // Main posts `{t: 'doc', channel, artifactId, actor}` with one end of the document's channel; the runtime hands it to
 // the handler the register installed, and closes what it cannot hand anywhere.

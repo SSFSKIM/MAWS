@@ -4,6 +4,7 @@
 // test-source seam (Sources, 3a).
 import { readFileSync } from 'node:fs';
 import * as z from 'zod';
+import { DIRECTORY_MARKETPLACE } from '@shared/catalog/engine-view'; // P5 O4 M3: the engine's built-in marketplace over Anthropic's directory (fact 2), neutral ground the machine's reads share
 import type { Ownership } from '@shared/ipc/schema/catalog';
 
 // M1 fixed this seam's name: when this environment variable names a JSON file, each descriptor in it,
@@ -40,8 +41,6 @@ export const SEEDS: readonly Seed[] = [
 
 export const OFFICIAL = 'claude-plugins-official';
 export const COMMUNITY = 'claude-community';
-// The engine's built-in marketplace over Anthropic's directory (fact 2): always the engine's, never a listed row.
-export const DIRECTORY_MARKETPLACE = 'anthropic-plugin-directory';
 
 const seedByName = new Map(SEEDS.map((s, order) => [s.marketplaceName, { seed: s, order }]));
 export const seedOf = (marketplaceName: string): Seed | null => seedByName.get(marketplaceName)?.seed ?? null;

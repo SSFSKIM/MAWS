@@ -21,7 +21,7 @@ import type { HostPing, Owner } from '../ipc/schema';
 import { readTolerant, tolerantLog } from '../ipc/tolerant';
 import { codecOf } from '../ipc/validate';
 import { remoteClients, type RemoteClients } from './client-refs';
-import { ATTACHMENT_CAPABILITY } from './socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY } from './socket-protocol';
 
 export type HostOn<R extends WireRegistry = typeof REGISTRY> = <N extends NameOf<R>>(
   name: N,
@@ -33,7 +33,8 @@ export type HostEmit<R extends WireRegistry = typeof REGISTRY> = <N extends Even
 // E4c: and the client's going (the browser bridge settles its pending requests on it)
 // P3-A M4: and the document ports main posts on the parent port (`onDocPort`)
 // P5 O3-D M3: and the app's presence with the signal that sets it (`presence`, `setAttachment`; AppPresence below)
-export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */ | 'presence' | 'setAttachment' /* P5 O3-D M3 */>;
+// P5 O4 M2: and the connectors' presence (`connectorsPresence`, below)
+export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */ | 'presence' | 'setAttachment' /* P5 O3-D M3 */ | 'connectorsPresence' /* P5 O4 M2 */>;
 // Registration is synchronous; an optional returned startup promise holds request admission, not the handshake.
 export type HostRegister<R extends WireRegistry = typeof REGISTRY> = (on: HostOn<R>, emit: HostEmit<R>, client: HostClientHooks) => void | Promise<void>;
 
@@ -122,34 +123,30 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
   // E10 keyed every app-bound gate. Presence's gone hooks fire at each fall from attached, whatever caused it.
   let declaring = false; // the served client listed ATTACHMENT_CAPABILITY in its hello
   let signalled = false; // its last `host.attachment`; false at its connect and at its connection's end
-  const presenceHooks = new Set<() => void>();
   const attached = () => port !== null && ready && (!declaring || signalled);
-  const presenceFell = (before: boolean) => {
-    if (!before || attached()) return;
-    for (const hook of [...presenceHooks]) {
-      try {
-        hook();
-      } catch (error) {
-        console.error('[host] an app-gone hook failed', error);
-      }
-    }
-  };
-  const presence: AppPresence = {
-    attached,
-    onGone(hook) {
-      presenceHooks.add(hook);
-      return () => void presenceHooks.delete(hook);
-    },
-  };
+  const { presence, fell: presenceFell } = presenceOf(attached, 'an app-gone hook');
   const setAttachment = (value: boolean): AttachmentSignal => {
     if (!port || !declaring) return 'refused';
     if (signalled === value) return 'unchanged';
-    const before = attached();
+    const before = presences();
     signalled = value;
-    presenceFell(before);
+    presencesFell(before);
     return 'changed';
   };
   // P5 O3-D M3 end
+  // P5 O4 M2 start (Interfaces §D, D10): the connectors' presence. A client whose hello listed `host.connectors` (a
+  // post-O4 `mawsd`) owns connector operations and dataset refreshes while it is the ready client, app or no app; any
+  // other's are the app's (the presence above). Read at call time, so the object registration holds follows each serve.
+  let declaringConnectors = false; // the served client listed CONNECTORS_CAPABILITY in its hello
+  const connectorsAttached = () => (declaringConnectors ? port !== null && ready : attached());
+  const { presence: connectorsPresence, fell: connectorsFell } = presenceOf(connectorsAttached, 'a connectors-gone hook');
+  // Both presences read before a change and told after it: a hook fires at its own presence's fall, whatever caused it
+  const presences = () => ({ app: attached(), connectors: connectorsAttached() });
+  const presencesFell = (before: { app: boolean; connectors: boolean }) => {
+    presenceFell(before.app);
+    connectorsFell(before.connectors);
+  };
+  // P5 O4 M2 end
   // Which host this is. `runHost`'s signature does not name it, so the first registration fixes it and every later
   // one must match: a handler registered in the wrong host fails at load instead of sitting unreachable, since main
   // routes each command to its registry owner.
@@ -189,7 +186,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     if (port.postMessage({ t: 'evt', name, payload: checked.value }) !== false) return true;
     // E10: a port that wrote nothing is closing, closed or stalled, and never writes again: the client is gone (the
     // caller's detach follows at the close), so hasClient() after a false tells a gone client from a refused payload
-    const wasAttached = attached(); // P5 O3-D M3
+    const wasAttached = presences(); // P5 O3-D M3; P5 O4 M2: both
     ready = false;
     signalled = false; // P5 O3-D M3: a connection's end counts as {attached: false}
     port = null; // definitively gone: queued startup requests from this source must never reach a handler
@@ -197,7 +194,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     console.info(`[host] the client stopped taking events (at ${name}); dropping until a client is ready`); // E11: a client leaving, as a keep-quit does
     dropped += 1;
     clientGone(); // E4c
-    presenceFell(wasAttached); // P5 O3-D M3
+    presencesFell(wasAttached); // P5 O3-D M3
     return false;
   };
 
@@ -222,7 +219,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     }
   };
   // P3-A M4 end
-  const startup = register(on as HostOn<R>, emit as HostEmit<R>, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */, presence, setAttachment /* P5 O3-D M3 */ });
+  const startup = register(on as HostOn<R>, emit as HostEmit<R>, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */, presence, setAttachment /* P5 O3-D M3 */, connectorsPresence /* P5 O4 M2 */ });
   // One shared admission hold. The register owns its bound and logging; even rejection must not wedge the host.
   // Clearing it restores synchronous handler admission instead of awaiting a fulfilled promise on every request.
   let admission: Promise<void> | null = null;
@@ -254,15 +251,16 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
   return {
     serve(p, peer) {
       const replaced = ready; // E4c: a ready client this one replaces is gone
-      const wasAttached = attached(); // P5 O3-D M3
+      const wasAttached = presences(); // P5 O3-D M3; P5 O4 M2: read under the outgoing client's capabilities
       port = p;
       ready = false; // E10
       declaring = peer?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false; // P5 O3-D M3
+      declaringConnectors = peer?.capabilities.includes(CONNECTORS_CAPABILITY) ?? false; // P5 O4 M2
       signalled = false;
       endClients(); // P5 O1 M5: the replaced connection's clients end with it
       const served = (clients = remoteClients(++connections));
       if (replaced) clientGone(); // E4c
-      presenceFell(wasAttached); // P5 O3-D M3
+      presencesFell(wasAttached); // P5 O3-D M3
       p.on('message', ({ data }) => {
         // E10: the client's ready line; one from a port this runtime no longer serves is stale and ignored
         const ready = readTolerant(HostReadySchema, data); // P5 O1 M6: this and the envelope below read tolerantly
@@ -293,13 +291,13 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     // E10 start
     detach() {
       const wasReady = ready; // E4c
-      const wasAttached = attached(); // P5 O3-D M3
+      const wasAttached = presences(); // P5 O3-D M3; P5 O4 M2: both
       port = null;
       ready = false;
       signalled = false; // P5 O3-D M3: a connection's end counts as {attached: false}
       endClients(); // P5 O1 M5
       if (wasReady) clientGone(); // E4c
-      presenceFell(wasAttached); // P5 O3-D M3
+      presencesFell(wasAttached); // P5 O3-D M3
     },
     setReady,
     hasClient,
@@ -310,6 +308,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     docPort, // P3-A M4
     presence, // P5 O3-D M3
     setAttachment, // P5 O3-D M3
+    connectorsPresence, // P5 O4 M2
   };
 
   async function answer({ id, name, input }: HostRequest, ctx: HandlerContext, source: HostPort): Promise<HostMessage | undefined> {
@@ -424,3 +423,38 @@ export interface HostRuntime {
   setAttachment(attached: boolean): AttachmentSignal; // the served client's signal (host.attachment's handler)
 }
 // P5 O3-D M3 end
+
+// P5 O4 M2 start (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §D, D10): whose connector operations
+// and dataset refreshes they are. A client whose hello listed `host.connectors` (a post-O4 `mawsd`, whose broker runs
+// them with or without an app) holds them while it is the served, ready client, and they end at its connection's end;
+// for any other client they are the app's, as at O3-D (`presence`): a pre-O4 `mawsd`'s app attachment, main's direct
+// link's or a utility port's connection. The pane, capture and export bridges stay on `presence` (O3X5).
+export interface HostRuntime {
+  connectorsPresence: AppPresence;
+}
+// P5 O4 M2 end
+
+// A presence over its `attached` reading, and its runtime's side: `fell(before)` runs the gone hooks once when it was
+// attached before a change and is not after it (each hook's failure logged as `what`).
+function presenceOf(attached: () => boolean, what: string): { presence: AppPresence; fell(before: boolean): void } {
+  const hooks = new Set<() => void>();
+  return {
+    presence: {
+      attached,
+      onGone(hook) {
+        hooks.add(hook);
+        return () => void hooks.delete(hook);
+      },
+    },
+    fell(before) {
+      if (!before || attached()) return;
+      for (const hook of [...hooks]) {
+        try {
+          hook();
+        } catch (error) {
+          console.error(`[host] ${what} failed`, error);
+        }
+      }
+    },
+  };
+}

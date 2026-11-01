@@ -1,6 +1,8 @@
 // The spine's commands that run past a host request's 10 s (the panel's sweep#3): each keeps a budget that covers its
 // own named waits, so main's `machine` binding does not answer `timeout` while mawsd goes on to finish it.
 import { EventEmitter } from 'node:events';
+import { join, relative } from 'node:path';
+import { buildSync } from 'esbuild';
 import { describe, expect, it, vi } from 'vitest';
 import { createHostSupervisor, REQUEST_TIMEOUT_MS, type UtilityLink } from '@shared/host/host-supervisor';
 import type { HostMessage } from '@shared/ipc/host-protocol';
@@ -16,6 +18,14 @@ import { EXIT_WAIT_MS, WATCHDOG_MS } from './sessions/context';
 import { CLEAR_WAIT_MS, PAUSE_WAIT_MS } from './sessions/pause-take-over';
 import { PAUSED_READY_MS } from './sessions/resume';
 import { STOP_TIMEOUT_MS, TAKE_OVER_WAIT_MS } from './sessions/take-over';
+import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
+import { DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS } from './connectors/direct-route';
+import { CONNECT_CALLBACK_TIMEOUT_MS } from './connectors/oauth-flow';
+import { OAUTH_REQUEST_TIMEOUT_MS } from './connectors/oauth-http';
+import { OAUTH_HOST_CLOSE_TIMEOUT_MS } from './connectors/oauth-provider';
+import { OWNER_QUERY_DEADLINE_MS } from './connectors/owner';
+import { DELIVERY_STATUS_DEADLINE_MS } from './delivery';
+import { GONE_WAIT_MS, GWS_LOGIN_DEADLINE_MS, GWS_STATUS_TIMEOUT_MS, GWS_UPLOAD_TIMEOUT_MS, KILL_GRACE_MS } from './delivery/gws';
 
 describe('the spine’s command budgets', () => {
   it('a take-over covers `claude stop` and the registry’s wait after it, and a pane’s pause and resume', () => {
@@ -120,5 +130,59 @@ describe('the checkouts’ command budgets (P5 O3-E)', () => {
       vi.useRealTimers();
       void hosts.stop();
     }
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §H): the connectors' and delivery's commands
+// whose chains run past the default, pinned term by term against the waits they name
+const HOST = REQUEST_TIMEOUT_MS;
+const GWS_RUN = (timeoutMs: number) => timeoutMs + KILL_GRACE_MS + GONE_WAIT_MS;
+const CREDENTIAL = OAUTH_REQUEST_TIMEOUT_MS + OAUTH_HOST_CLOSE_TIMEOUT_MS;
+const DIRECT = DIRECT_RESOLVE_DEADLINE_MS + CREDENTIAL + DIRECT_OPERATION_DEADLINE_MS;
+const CALL = HOST + Math.max(5 * HOST + CONNECTOR_OPERATION_DEADLINE_MS + HOST, DIRECT);
+const NOTION_FIND = 3 * HOST + DIRECT_RESOLVE_DEADLINE_MS;
+const O4_EXPECTED: Record<string, number> = {
+  'connectors.call': CALL + MARGIN,
+  'connectors.refresh': CALL + MARGIN,
+  'connectors.servers': OWNER_QUERY_DEADLINE_MS + MARGIN,
+  'delivery.status': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS), DELIVERY_STATUS_DEADLINE_MS) + MARGIN,
+  'delivery.connect': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_LOGIN_DEADLINE_MS), NOTION_FIND + 3 * OAUTH_REQUEST_TIMEOUT_MS + CONNECT_CALLBACK_TIMEOUT_MS + OAUTH_REQUEST_TIMEOUT_MS) + MARGIN,
+  'delivery.deliver': HOST + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN,
+};
+
+describe('the connectors’ and delivery’s command budgets (P5 O4)', () => {
+  it('names the six whose chains pass the default, each the sum of its chain', () => {
+    for (const [name, budget] of Object.entries(O4_EXPECTED)) expect(COMMAND_BUDGETS_MS[name as CommandName], name).toBe(budget);
+    const named = Object.keys(COMMAND_BUDGETS_MS).filter((name) => /^(connectors|delivery)\./.test(name));
+    expect(named.sort()).toEqual(Object.keys(O4_EXPECTED).sort());
+  });
+
+  it('answers within the default for what acknowledges at once or reads in one step', () => {
+    for (const name of ['connectors.open', 'connectors.connect', 'connectors.signIn', 'delivery.cancel', 'delivery.receipts', 'artifacts.grantConnectorTool'] as const) {
+      expect(COMMAND_BUDGETS_MS[name], name).toBeUndefined();
+    }
+  });
+});
+
+// P5 O4 M3 (Interfaces §H): one cwd's engine view is three rounds of host reads; the library's reads are one host read
+// and a file or the client's answer
+describe('the catalog’s and the library’s command budgets (P5 O4 M3)', () => {
+  it('names catalog.engine alone, its three rounds of host reads', () => {
+    expect(COMMAND_BUDGETS_MS['catalog.engine']).toBe(3 * HOST + MARGIN);
+    expect(Object.keys(COMMAND_BUDGETS_MS).filter((name) => /^(catalog|library)\./.test(name))).toEqual(['catalog.engine']);
+  });
+});
+
+// P5 O4 M2 (acceptance 9): the table loads with main's import of the services entry and in every chunk that names it,
+// so of the connectors and delivery it reads their deadlines alone, never their services (the custody's backup
+// exclusion among them, whose JXA text the bundle guard reads as a dynamic import)
+describe('what the budgets load of the connectors and delivery', () => {
+  it('is their deadline modules alone', () => {
+    const root = join(__dirname, '..', '..');
+    const { metafile } = buildSync({ entryPoints: [join(__dirname, 'command-budgets.ts')], bundle: true, write: false, metafile: true, platform: 'node', format: 'esm', packages: 'external', tsconfig: join(root, 'tsconfig.node.json'), logLevel: 'silent' });
+    const loaded = Object.keys(metafile.inputs).map((path) => relative(root, join(root, path)));
+    expect(loaded.filter((path) => /^src\/services\/(connectors|delivery)\//.test(path)).sort()).toEqual(['src/services/connectors/deadlines.ts', 'src/services/delivery/deadlines.ts']);
+    expect(loaded.filter((path) => path.includes('backup-exclusion'))).toEqual([]);
+    expect(loaded.filter((path) => /^src\/services\/(catalog|library)\//.test(path))).toEqual([]); // P5 O4 M3
   });
 });

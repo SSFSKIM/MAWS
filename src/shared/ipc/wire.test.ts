@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -191,8 +191,9 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     }
     expect(ownerOf('host.attachment')).toBe('engine-host');
     expect(manifest.entries).toHaveProperty(['commands.host.attachment']);
-    // the client's commands stay main's, out of the manifest (the checkouts' moved at O3-E, below)
-    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'settings.get', 'library.content']) {
+    // the client's commands stay main's, out of the manifest (the checkouts' moved at O3-E, below; P5 O4 M3: the
+    // library's reads of a stored file moved, its export formats and Save as stay)
+    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'settings.get', 'library.exportFormats', 'library.saveAs', 'catalog.home']) {
       expect(ownerOf(name), name).toBe('main');
       expect(manifest.entries, name).not.toHaveProperty([`commands.${name}`]);
     }
@@ -212,24 +213,46 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     expect(MACHINE_ARTIFACTS_CAPABILITY).toBe('machine.artifacts'); // P5 O5 M2
     expect(RENDER_CLIENT_CAPABILITY).toBe('render.client'); // P5 O5 M3
     expect([MACHINE_RENDER_CAPABILITY, HOST_RENDER_CAPABILITY]).toEqual(['machine.render', 'host.render']); // P5 O5 M4
-    expect(manifest.capabilities).toEqual(['host.attachment', 'host.render', 'machine.artifacts', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect(manifest.capabilities).toEqual(expect.arrayContaining(['host.attachment', 'host.render', 'machine.artifacts', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']));
     expect([...WIRE_CAPABILITIES].sort()).toEqual(manifest.capabilities);
     // D4: the engine host lists host.attachment from M3, when it serves the command, and mawsd's hello to it from M3
     // (under its permanent-client option, which drops the name otherwise); main's hellos list machine.spine from M5b,
     // when main stops composing the spine on the daemon shape; P5 O5 M2: mawsd's welcome lists machine.artifacts, the
     // artifact endpoint on artifacts.sock; P5 O5 M3: the render host's hello lists render.client; P5 O5 M4: the engine
     // host's welcome lists host.render (it reads host.attachment's render), mawsd's machine.render (its render seam)
+    // (O4's additions, and every peer's whole list, pinned below)
+    expect(PEER_CAPABILITIES.engineHost).toEqual(expect.arrayContaining([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY]));
+    expect(PEER_CAPABILITIES.app).toEqual(expect.arrayContaining([PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY]));
+    expect(PEER_CAPABILITIES.daemonToEngineHost).toEqual(expect.arrayContaining([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY]));
+    expect(PEER_CAPABILITIES.daemon).toEqual([PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY]);
+    expect(PEER_CAPABILITIES.renderClient).toEqual([RENDER_CLIENT_CAPABILITY]);
+    for (const list of Object.values(PEER_CAPABILITIES)) for (const name of list) expect(WIRE_CAPABILITIES).toContain(name);
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one capability per
+// direction for the connectors' new owner. The engine host's welcome and mawsd's hello to it list `host.connectors`
+// (mawsd's beside `host.attachment`, under the same option); main's hellos list `machine.connectors`, which a post-O4
+// mawsd requires of an app's hello. The CLI, the link, the render host and the pty host list neither.
+describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+
+  it('names both, and lists them in the manifest’s union', () => {
+    expect([CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]).toEqual(['host.connectors', 'machine.connectors']);
+    expect(manifest.capabilities).toEqual(['host.attachment', 'host.connectors', 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+  });
+
+  it('has each peer list only what it implements', () => {
     expect(PEER_CAPABILITIES).toEqual({
-      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY],
+      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY],
       ptyHost: [PTY_FRAMES_CAPABILITY],
-      app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY],
-      daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY],
+      app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY],
+      daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY],
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
       daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY],
       link: [PTY_FRAMES_CAPABILITY],
       renderClient: [RENDER_CLIENT_CAPABILITY],
     });
-    for (const list of Object.values(PEER_CAPABILITIES)) for (const name of list) expect(WIRE_CAPABILITIES).toContain(name);
   });
 });
 
@@ -259,6 +282,26 @@ describe('the checkouts on the wire (P5 O3-E M2)', () => {
       expect(REGISTRY.machineEvents, name).toContain(name);
       expect(manifest.entries, name).toHaveProperty([`events.${name}`]);
     }
+  });
+});
+
+// P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D16, D19): the library's reads of a stored
+// file retagged `machine`, the catalog's machine half's two commands and its event, all additive under M2's minor
+describe('the library’s reads and the catalog’s machine half on the wire (P5 O4 M3)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+  const ownerOf = (name: string) => REGISTRY.commands[name as keyof typeof REGISTRY.commands]?.owner;
+
+  it('owns by machine the four retagged reads and the two new catalog commands, each in the manifest and bridged', () => {
+    for (const name of ['library.content', 'library.read', 'library.openExternally', 'library.reveal', 'catalog.engine', 'catalog.engineRefresh']) {
+      expect(ownerOf(name), name).toBe('machine');
+      expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+      expect(REGISTRY.mainOnly.has(name as never), name).toBe(false);
+    }
+  });
+
+  it('lists catalog.engineChanged among the machine host’s events', () => {
+    expect(REGISTRY.machineEvents).toContain('catalog.engineChanged');
+    expect(manifest.entries).toHaveProperty(['events.catalog.engineChanged']);
   });
 });
 

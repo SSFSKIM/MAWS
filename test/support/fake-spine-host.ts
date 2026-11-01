@@ -14,7 +14,7 @@ import type { SessionEvent } from '../../src/shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '../../src/shared/graph/ids';
 import type { HostDispatch, HostResync } from '../../src/shared/host/host-supervisor';
 import { ipcError } from '../../src/shared/ipc/errors';
-import type { CommandName, CommandResult, EventName, EventPayload, HostState } from '../../src/shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult, EventName, EventPayload, HostState } from '../../src/shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '../../src/shared/ipc/validate';
 import type { SpineHosts } from '../../src/services/spine-root';
 import { item } from './builders';
@@ -53,6 +53,11 @@ export class FakeSpineHost implements SpineHosts {
     'session.replay.launch': (input) => this.replays.launch(input),
     'session.replay.control': (input) => this.replays.control(input),
   };
+
+  // A test's own answer to a command beyond the connect's (P5 O4 M2: delivery's `artifacts.get`)
+  answer<N extends CommandName>(name: N, answer: (input: CommandInput<N>) => CommandOutput<N>): void {
+    this.answers[name] = answer as Answer;
+  }
 
   readonly dispatch: HostDispatch = async (owner, command, input) => {
     const name = command as CommandName;

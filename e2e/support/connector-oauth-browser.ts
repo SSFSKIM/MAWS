@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export const CALLBACK_PATH = '/callback'; // MAWS's loopback callback (src/main/connectors/oauth-flow.ts OAUTH_CALLBACK_PATH)
+export const CALLBACK_PATH = '/callback'; // MAWS's loopback callback (src/services/connectors/oauth-flow.ts OAUTH_CALLBACK_PATH)
 const PREFIX = 'openExternal ';
 const BODY_LIMIT = 512; // bytes of the callback's reply kept; the rest is cancelled unread
 

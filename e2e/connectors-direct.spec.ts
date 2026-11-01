@@ -31,6 +31,8 @@
 //          instance is held with a call pending (the fixture answers nothing), still up past the idle bound, and killing
 //          that scratch main ends every member (wrapper, EOF-ignoring grandchild, server) within 5 s while the detached
 //          host stays up: only the host's client-gone cleanup can, as the pending call's lease forbids the idle close.
+//          P5 O4 M2 (D10): the host's connector client is the connectors' process, main on the embedded shape and the
+//          profile's `mawsd` on the daemon shape (it lists `host.connectors`), so it is that process which is killed.
 // P3-HD M2's transport scenes drive MAWS's own connections (src/engine-host/connectors/direct-client.ts) against the
 // same fixture server, with no engine and no artifact grant (the host's operations and main's disconnect are the
 // host scenes'):
@@ -58,6 +60,7 @@ import { alive, DIRECT_HOST, until, wrappedLaunch, wrapperPids, writeWrapper } f
 // P3-HD M4 start
 import { invoke as appInvoke, value as appValue, TOOL_NAME, wait, WATCH_MS, withScene } from './support/connector-scene';
 import { holdFileOf, newMembers, wrappedServer } from './support/connector-direct-scene';
+import { connectorsPid } from './support/connector-direct-oauth'; // P5 O4 M2
 import { ps } from './support/processes';
 // P3-HD M4 end
 // P3-HD M4b start
@@ -651,18 +654,24 @@ test('disconnect: the page reads through MAWS’s own instance after the engine 
       const supervisor = await scene.supervisor(run.page);
       scene.note('direct instance', { members, supervisor });
 
-      // that scratch main is killed: the detached host sees its client go and ends the whole instance, call pending. The
-      // bound counts from just before the kill, so the wait for main's own exit is inside it.
+      // the host's connector client is killed: the detached host sees its client go and ends the whole instance, call
+      // pending. The bound counts from just before the kill, so the wait for the process's own exit is inside it. P5 O4
+      // M2 (D10): that client is the connectors' process, main on the embedded shape, the profile's `mawsd` on the daemon
+      // shape, where killing main would only end its pages' leases in `mawsd` (an idle close, not the client-gone one)
+      const client = await connectorsPid(run);
+      const machineClient = client !== run.child.pid;
       const killedAt = Date.now();
-      await scene.killApp(run);
+      if (machineClient) process.kill(client, 'SIGKILL');
+      else await scene.killApp(run);
       await expect
-        .poll(() => members.filter(alive), { timeout: 5_000, intervals: [100], message: 'wrapper, grandchild and server are gone within 5 s of main’s death' })
+        .poll(() => members.filter(alive), { timeout: 5_000, intervals: [100], message: `wrapper, grandchild and server are gone within 5 s of ${machineClient ? 'mawsd’s' : 'main’s'} death` })
         .toEqual([]);
       const elapsedMs = Date.now() - killedAt;
       const supervisorSurvived = scene.pidAlive(supervisor);
-      await evidence(info, 'direct-main-loss', { elapsedMs, members: members.length, heldSubmissions: scene.toolCalls().filter((entry) => entry.pid === heldServer).length, supervisorSurvived });
-      expect(elapsedMs, 'from main’s kill until every member is gone').toBeLessThan(5_000);
-      expect(supervisorSurvived, 'the detached host outlived main, so it was its own client-gone cleanup that ended the instance').toBe(true);
+      if (machineClient) await scene.killApp(run); // the app would start its daemon again; the scene ends here
+      await evidence(info, 'direct-main-loss', { elapsedMs, members: members.length, heldSubmissions: scene.toolCalls().filter((entry) => entry.pid === heldServer).length, supervisorSurvived, client: machineClient ? 'mawsd' : 'main' });
+      expect(elapsedMs, 'from the connector client’s kill until every member is gone').toBeLessThan(5_000);
+      expect(supervisorSurvived, 'the detached host outlived its client, so it was its own client-gone cleanup that ended the instance').toBe(true);
       await info.attach('direct-members.json', { body: JSON.stringify({ engineMembers, first, firstServer, second, heldServer }, null, 2), contentType: 'application/json' });
     },
     { server: wrappedServer },

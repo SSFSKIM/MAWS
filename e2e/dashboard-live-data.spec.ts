@@ -31,12 +31,25 @@
 //  13. relaunched: the grant held, the schedule on, the dashboard on screen in the active tab, no eligible engine; ten real
 //      minutes with no call, no new session and no new launch
 // E3c adds a separate direct scene: a verified source remains in the host after the owner stops its engine.
-// Step 13 above is unchanged: after relaunch neither route exists, and every request remains absent.
-import { mkdirSync } from 'node:fs';
+// Step 13 above is unchanged: after relaunch neither route exists, and every request remains absent. P5 O4 M2 (D10): on
+// the daemon shape that verified source is the machine's and outlives an app's quit, so step 12 ends the machine after
+// the quit, as the quit ended main's connectors before O4.
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 3, D12, D17) adds the app-less refresh, on the
+// daemon shape, its spine's quiet period shortened (MAWS_SPINE_QUIET_MS) so a release follows the quit within seconds:
+//   app quit: the agent's refresh announced while the spine is loaded, its call slow, the app quits before the server
+//          answers: the refresh completes through the session's engine with no app (the connectors part busy, the
+//          release waits for it), its publication lands, and the relaunched app draws it; then, the app quit again and the
+//          spine released, the agent's next refresh is announced to a cold spine, wakes it, and is answered within the
+//          operation's deadline, its rows published.
+import { mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test, expect, type Locator } from '@playwright/test';
+import { daemonPaths } from '@shared/daemon/files';
+import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, SERVER, TOOL, TOOL_NAME, value, wait, withScene, type ConnectorScene, type Run } from './support/connector-scene';
-import { durable, ok, openInMain, openInPanel, refusalOf } from './support/dashboards';
+import { durable, ok, openInMain, openInPanel, refusalOf, toggleDatasets } from './support/dashboards';
 import {
   agentDataset,
   agentOf,
@@ -377,8 +390,7 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await drawsRows(previewed, FIRST, 'the retained version');
         await expect(labelOf(previewed)).toHaveText(`${HEAD} · updated ${utcTime(firstAt)} by You`);
         // the header's Datasets inspects the version shown: its rows, and no live controls
-        await page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'More actions' }).click();
-        await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
+        await toggleDatasets(page.locator('[data-region="main"] [data-editor-header]')); // inline, or folded under More actions when narrow (UX2-L)
         const sheet = page.getByRole('dialog', { name: new RegExp(`^(Source of ${TITLE}|Datasets)$`) });
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(FIRST.length + 1));
         await expect(liveBlock(sheet)).toHaveCount(0);
@@ -452,6 +464,9 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         if (daemon) await stopEngine(scene, run, engine);
         await scene.quit(run);
         await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: daemon ? 'the engine stopped before the quit' : 'the engine stopped with the app' }).toBe(false);
+        // P5 O4 M2 (D10): on the daemon shape the connectors' state is the machine's and outlives the quit (the host's
+        // verified source would serve the dashboard through route D after the relaunch), so the machine ends here too
+        if (daemon) await scene.endMachine();
       });
 
       await test.step('13. relaunched with the grant held, the schedule on and the dashboard on screen: ten real minutes with no route call nothing and acquire nothing', async () => {
@@ -573,4 +588,104 @@ test('route D: with no engine holding the server, the same dashboard refreshes o
     scene.note('direct dataset refreshes', { sources, baseline, scheduled, updated: read.updated });
     await shot(run, 'direct-agent');
   }, { liveData: true });
+});
+
+// ---- P5 O4 M2: the agent's refresh with no app (acceptance 3) ---------------------------------------------------------
+
+const QUIET_MS = 5_000; // the spine's quiet period in this scene (MAWS_SPINE_QUIET_MS): a release within seconds of a quit
+const SLOW_MS = 20_000; // the fixture's answer delay while the app quits under the agent's refresh
+
+test('app quit: the agent’s refresh completes with no app and the relaunched app draws it; announced to a cold spine, the next wakes it and is answered', async () => {
+  test.setTimeout(12 * 60_000);
+  await withScene(
+    'live-data-quit',
+    test.info(),
+    async (scene: ConnectorScene) => {
+      const log = () => readFileSync(join(scene.userData, 'mawsd', 'mawsd.log'), 'utf8');
+      const count = (text: string, line: string) => text.split('\n').filter((l) => l.includes(line)).length;
+      scene.fixtureReply({ reply: 'rows', rows: rows(...FIRST) });
+      let run = await scene.launch();
+      let page = run.page;
+      test.skip(value(await invoke(page, 'host.status', undefined)).transport !== 'daemon', 'the daemon shape’s case: an embedded app’s quit ends its broker with it');
+      const agent = agentOf(scene);
+      const id = await createBoard(scene, page, agent);
+      let views = liveViews(await openInMain(page, id));
+      const sheet = await openSheet(views);
+      const engine = await startFromSheet(scene, page, liveBlock(sheet));
+      await liveBlock(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+      await closeSheet(sheet);
+      await drawsRows(views, FIRST, 'the first fetch');
+      const server = scene.toolCalls().at(-1)!.pid;
+      // the dashboard closed: no page of the owner's refreshes it, so what moves its dataset from here is the agent's
+      await page.getByRole('button', { name: `Close ${BOARD}`, exact: true }).click();
+      await expect(mainTab(page, id)).toHaveCount(0);
+      let releasedBefore = 0;
+
+      await test.step('the app quits while the agent’s refresh is in flight: it completes through the session’s engine with no app', async () => {
+        scene.fixtureReply({ reply: 'rows', rows: rows(...AGENTS), delayMs: SLOW_MS });
+        await readDataset(agent, engine.appSessionId, id); // the session's last read: `baseRevision: 'last'` is this revision
+        const before = Date.now();
+        const asked = agent.call<{ status: string; id: string; rows: number }>(engine.appSessionId, 'artifact_dataset', { artifact: id, id: DATASET, refresh: true, baseRevision: 'last' }, { timeoutMs: 200_000 });
+        const call = await nextCall(scene, before, 30_000); // announced, and the machine's broker called through the session's engine
+        expect(call.pid, 'through the started session’s server').toBe(server);
+        const logFrom = log().length;
+        await scene.quit(run);
+        const quitAt = Date.now();
+        expect(quitAt, 'the app had quit before the server answered').toBeLessThan(Date.parse(call.at) + SLOW_MS);
+        const answer = await asked;
+        expect(answer.isError, answer.text).toBe(false);
+        expect(answer.result).toMatchObject({ status: 'dataset', id: DATASET, rows: AGENTS.length });
+        const read = await readDataset(agent, AUTHOR, id); // the engine host's answer: no app runs
+        expect(read.rows, 'the dataset moved with no app').toBe(AGENTS.length);
+        expect(read.updated, 'published as the session').toEqual({ at: expect.any(String), by: 'another session', appSessionId: engine.appSessionId });
+        expect(scene.toolCallsBetween(before, Date.now()), 'one call, the agent’s').toHaveLength(1);
+        const said = log().slice(logFrom);
+        scene.note('the quit under the refresh', { quitAt, answered: Date.now(), daemon: said.split('\n').filter((line) => line.includes('[spine]')) });
+      });
+
+      await test.step('relaunched: the dashboard draws the rows the agent’s refresh published while no app ran', async () => {
+        scene.fixtureReply({ reply: 'isError' }); // a refresh of the page's own keeps the rows it draws, so what it draws is the agent's
+        run = await scene.launch();
+        page = run.page;
+        const tab = await openInMain(page, id);
+        views = liveViews(tab);
+        await drawsRows(views, AGENTS, 'the agent’s publication after the relaunch');
+        const read = await readDataset(agent, AUTHOR, id);
+        expect(read.updated, 'still the session’s publication').toEqual({ at: expect.any(String), by: 'another session', appSessionId: engine.appSessionId });
+        await page.getByRole('button', { name: `Close ${BOARD}`, exact: true }).click();
+        await expect(mainTab(page, id)).toHaveCount(0);
+        releasedBefore = count(log(), '[spine] released');
+        await scene.quit(run);
+        await readDataset(agent, engine.appSessionId, id); // the session's last read, for the next step's `baseRevision: 'last'`
+      });
+
+      await test.step('the spine released after the quiet: the agent’s next refresh wakes it and is answered within the deadline', async () => {
+        await expect.poll(() => count(log(), '[spine] released'), { timeout: QUIET_MS + 60_000, message: 'the spine released after the quit and the quiet' }).toBeGreaterThan(releasedBefore);
+        const reached = await reachMachine(daemonPaths(scene.userData), { build: 'e2e-live-data-quit' });
+        if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+        let spine: string | undefined;
+        try {
+          spine = ((await reached.link.request('daemon.status', undefined)) as { ok: boolean; value?: { spine?: { state: string } } }).value?.spine?.state;
+        } finally {
+          reached.link.close();
+        }
+        expect(spine, 'the spine is cold').toBe('cold');
+        const loadsBefore = count(log(), '[spine] loading (');
+        scene.fixtureReply({ reply: 'rows', rows: rows(...TRIALS) });
+        const from = Date.now();
+        const answer = await agent.call<{ status: string; rows: number }>(engine.appSessionId, 'artifact_dataset', { artifact: id, id: DATASET, refresh: true, baseRevision: 'last' }, { timeoutMs: 200_000 });
+        const elapsed = Date.now() - from;
+        expect(answer.isError, answer.text).toBe(false);
+        expect(answer.result).toMatchObject({ status: 'dataset', rows: TRIALS.length });
+        expect(elapsed, 'answered within the operation’s deadline').toBeLessThan(CONNECTOR_OPERATION_DEADLINE_MS);
+        expect(count(log(), '[spine] loading ('), 'the announcement loaded the cold spine').toBeGreaterThan(loadsBefore);
+        expect(scene.toolCallsBetween(from, Date.now()).map((call) => call.pid), 'through the session’s server').toEqual([server]);
+        const read = await readDataset(agent, AUTHOR, id);
+        expect(read.rows).toBe(TRIALS.length);
+        expect(read.updated).toEqual({ at: expect.any(String), by: 'another session', appSessionId: engine.appSessionId });
+        scene.note('cold refresh', { elapsed, daemon: log().split('\n').filter((line) => line.includes('[spine]')).slice(-8) });
+      });
+    },
+    { liveData: true, env: () => ({ MAWS_SPINE_QUIET_MS: String(QUIET_MS) }) },
+  );
 });
