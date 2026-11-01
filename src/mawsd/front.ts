@@ -49,9 +49,12 @@
 // `held: true` from the connection the route selects for the session (`browser.selected`, M5's route; until then a
 // stand-in that selects none), answered once the fence is had or refused with its reason (`host_unavailable`), so the
 // engine makes no tab; `held: false` from the selected connection or one holding the session, answered at once. A
-// connection's end removes its holds. `host.browserWork` is `mawsd`'s own signal to the engine host, refused from a
-// forwarded caller as `host.attachment` is, and the engine host's `host.browserIdle` is `mawsd`'s to answer (M5): no
-// client hears it.
+// connection's end removes its holds. A grant is the selection period's it was asked in: if the route retires that
+// period while the engine host has not yet acknowledged (a handover, or the same connection selected again after a
+// drop), it is refused `forbidden_sender`, no tab is made, and the hold it made goes unless another of the connection's
+// reports for the session stands (its `grants`): a refused report leaves nothing for the engine to report zero for.
+// `host.browserWork` is `mawsd`'s own signal to the engine host, refused from a forwarded caller as `host.attachment`
+// is, and the engine host's `host.browserIdle` is `mawsd`'s to answer (M5): no client hears it.
 //
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
@@ -121,10 +124,15 @@ export interface FrontRender {
 }
 
 // P5 O17 M3: browser work as the front reaches it: the holds (browser-work.ts) and the engine connection the route selects
-// for a session (M5's browser-route.ts), compared by identity with the asking connection
+// for a session (M5's browser-route.ts), compared by identity with the asking connection, under its selection period
+// (the route's epoch): the same connection selected again after a drop is another period
+export interface FrontSelection {
+  engine: EngineConnection;
+  period: string;
+}
 export interface FrontBrowser {
   work: Pick<BrowserWork, 'acquire' | 'release' | 'holding' | 'engineGone'>;
-  selected(appSessionId: AppSessionId): EngineConnection | null;
+  selected(appSessionId: AppSessionId): FrontSelection | null;
 }
 
 // A front that takes no browser work: no connection is selected and none holds, so every report is refused
@@ -235,20 +243,27 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     'artifacts.export': (input) => render.exportForLibrary(input as CommandInput<'artifacts.export'>), // P5 O5 M4
     // P5 O17 M3: a tab engine's browser work, bound to its connection (above)
     'browserEngine.work': async (input, _context, from) => {
+      const client = from!;
       const { held } = input as CommandInput<'browserEngine.work'>;
       const appSessionId = (input as CommandInput<'browserEngine.work'>).appSessionId as AppSessionId;
-      const selected = browser.selected(appSessionId) === from;
+      const selection = browser.selected(appSessionId);
       if (held) {
-        if (!selected) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId} from a connection not selected for that session`));
+        if (selection?.engine !== client) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId} from a connection not selected for that session`));
+        client.grants.set(appSessionId, (client.grants.get(appSessionId) ?? 0) + 1);
         try {
-          await browser.work.acquire(from!, appSessionId);
+          await browser.work.acquire(client, appSessionId);
         } catch (error) {
+          client.ungrant(appSessionId); // a failed acquire undid the hold it made itself
           throw new HostCommandError(ipcError('host_unavailable', messageOf(error)));
         }
-        return;
+        const now = browser.selected(appSessionId);
+        if (now?.engine === client && now.period === selection.period) return;
+        if (client.ungrant(appSessionId) === 0) browser.work.release(client, appSessionId); // the hold was this report's alone
+        throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId}: the session's tab engine changed before the engine host took the hold`));
       }
-      if (!selected && !browser.work.holding(from!, appSessionId)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: false} for ${appSessionId} from a connection that neither holds nor is selected for that session`));
-      browser.work.release(from!, appSessionId);
+      if (selection?.engine !== client && !browser.work.holding(client, appSessionId)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: false} for ${appSessionId} from a connection that neither holds nor is selected for that session`));
+      client.grants.delete(appSessionId);
+      browser.work.release(client, appSessionId);
     },
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
     'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
@@ -423,6 +438,8 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     browserSocket: string | null = null;
     readonly renders: boolean; // P5 O5 M4: its hello listed render.client
     readyAt = 0; // P5 O5 M4: the order render clients said ready in (postRender's newest)
+    // P5 O17: its browserEngine.work {held: true} reports per session, in flight or granted, until its held: false
+    readonly grants = new Map<AppSessionId, number>();
 
     constructor(readonly facts: ClientFacts) {
       this.follower = streams.follower((name, payload) => this.send(name, payload));
@@ -489,9 +506,18 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       this.follower.end();
       clientPort.gone(this);
       browser.work.engineGone(this); // P5 O17 M3: its browser work, if it reported any
+      this.grants.clear();
       if (this.browserSocket !== null) options.browserChanged?.(); // P5 O5 M5: the app that told it is gone
       if (wasReady && this.renders) return void render.clientGone(); // P5 O5 M4
       if (wasReady) options.readiness?.();
+    }
+
+    // P5 O17: one held: true report of the session's settled without a grant; the reports still standing
+    ungrant(appSessionId: AppSessionId): number {
+      const left = (this.grants.get(appSessionId) ?? 0) - 1;
+      if (left > 0) this.grants.set(appSessionId, left);
+      else this.grants.delete(appSessionId);
+      return Math.max(left, 0);
     }
 
     isReady(): boolean {

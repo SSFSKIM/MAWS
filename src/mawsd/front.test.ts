@@ -419,8 +419,8 @@ describe('the services front', () => {
 });
 
 // P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): a tab engine's browser work, bound to
-// its connection; the route's selection is a stand-in here (M5's). The holds are browser-work.ts's own, over a stand-in
-// link to the engine host that acknowledges at once.
+// its connection; the route's selection, a connection under a selection period, is a stand-in here (M5's: the route's
+// epoch). The holds are browser-work.ts's own, over a stand-in link to the engine host that acknowledges at once.
 describe('browser work through the front', () => {
   const S = 's1' as never;
 
@@ -430,7 +430,7 @@ describe('browser work through the front', () => {
     const snapshots: unknown[][] = [];
     const acks: (() => void)[] = [];
     void work.linkUp((held) => (snapshots.push(held), heldBack ? new Promise<void>((resolve) => void acks.push(resolve)) : Promise.resolve()), capable);
-    let selected: EngineConnection | null = null;
+    let selected: { engine: EngineConnection; period: string } | null = null;
     const served = front({ browser: { work, selected: () => selected } });
     // a render host's connection: its runtime is the engine connection the route selects
     const engine = () => {
@@ -440,7 +440,8 @@ describe('browser work through the front', () => {
       end.ready();
       return { end, runtime };
     };
-    return { work, snapshots, acks, served, engine, select: (connection: EngineConnection | null) => void (selected = connection) };
+    const select = (connection: EngineConnection | null, period = 'p1') => void (selected = connection === null ? null : { engine: connection, period });
+    return { work, snapshots, acks, served, engine, select };
   }
 
   it('takes held: true from the selected connection alone, answered only once the snapshot naming the session is acknowledged', async () => {
@@ -485,6 +486,65 @@ describe('browser work through the front', () => {
     };
     expect(await create('http://127.0.0.1:5173/')).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'the engine host on mini predates browser work holds; it is replaced when idle' } });
     expect(tabs).toEqual([]);
+  });
+
+  // The cross-milestone review's finding: a grant is the selection period's it was asked in. A handover while the engine
+  // host has not yet acknowledged retires that period: the grant is refused, no tab is made, and the hold the grant made
+  // goes with it; the same connection selected again under a new period is granted only under that period.
+  const pendingGrant = async (fixture: ReturnType<typeof withWork>, id: string) => {
+    const { snapshots, engine, select, acks } = fixture;
+    acks[0]!(); // the link's first snapshot, {}
+    const chosen = engine();
+    select(chosen.runtime, 'p1');
+    chosen.end.send({ t: 'req', id, name: 'browserEngine.work', input: { appSessionId: S, held: true } });
+    await vi.waitFor(() => expect(snapshots).toEqual([[], [S]]));
+    return chosen;
+  };
+  const answerOf = async (chosen: ReturnType<ReturnType<typeof withWork>['engine']>, id: string) => {
+    await vi.waitFor(() => expect(chosen.end.posted.find((m) => m.id === id)).toBeDefined());
+    return chosen.end.posted.find((m) => m.id === id);
+  };
+
+  it('refuses a pending held: true whose connection was deselected before the acknowledgement, and lets its hold go', async () => {
+    const fixture = withWork(true, true);
+    const { work, snapshots, acks, select } = fixture;
+    const chosen = await pendingGrant(fixture, 'w1');
+    select(null); // the handover: the session's period retired, no connection selected
+    acks[1]!();
+    expect(await answerOf(chosen, 'w1')).toMatchObject({ t: 'res', ok: false, error: { code: 'forbidden_sender' } });
+    expect(work.held()).toEqual([]);
+    await vi.waitFor(() => expect(snapshots.at(-1)).toEqual([]));
+  });
+
+  it('refuses a pending held: true whose connection was selected again under a new period; a fresh one is granted under it', async () => {
+    const fixture = withWork(true, true);
+    const { work, snapshots, acks, select } = fixture;
+    const chosen = await pendingGrant(fixture, 'w1');
+    select(chosen.runtime, 'p2'); // dropped and prepared again: the same connection, a new period
+    acks[1]!();
+    expect(await answerOf(chosen, 'w1')).toMatchObject({ t: 'res', ok: false, error: { code: 'forbidden_sender' } });
+    expect(work.held()).toEqual([]);
+    await vi.waitFor(() => expect(snapshots.at(-1)).toEqual([]));
+    acks[2]!();
+    chosen.end.send({ t: 'req', id: 'w2', name: 'browserEngine.work', input: { appSessionId: S, held: true } });
+    await vi.waitFor(() => expect(snapshots.at(-1)).toEqual([S]));
+    acks[3]!();
+    expect(await answerOf(chosen, 'w2')).toMatchObject({ t: 'res', ok: true });
+    expect(work.held()).toEqual([S]);
+  });
+
+  it('a refused grant leaves the hold of the new period’s grant on the same connection, asked before the acknowledgement', async () => {
+    const fixture = withWork(true, true);
+    const { work, snapshots, acks, select } = fixture;
+    const chosen = await pendingGrant(fixture, 'w1');
+    select(chosen.runtime, 'p2');
+    chosen.end.send({ t: 'req', id: 'w2', name: 'browserEngine.work', input: { appSessionId: S, held: true } }); // waits on the same snapshot
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    acks[1]!();
+    expect(await answerOf(chosen, 'w1')).toMatchObject({ t: 'res', ok: false, error: { code: 'forbidden_sender' } });
+    expect(await answerOf(chosen, 'w2')).toMatchObject({ t: 'res', ok: true });
+    expect(work.held()).toEqual([S]);
+    expect(snapshots).toEqual([[], [S]]);
   });
 
   it('removes a connection’s holds when it ends', async () => {
