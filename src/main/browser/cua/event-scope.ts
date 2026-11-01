@@ -10,22 +10,25 @@
 // - What a specialised producer emits follows the lease's own request for it, never its domain's enable: a screencast's
 //   frames its `Page.startScreencast` (so `Page.enable` alone never subscribes frames), Fetch interception its
 //   `Fetch.enable` (auth challenges only with `handleAuthRequests`), target attach events its auto-attach or an explicit
-//   attach, the file chooser and lifecycle events their switches, a binding's calls its `Runtime.addBinding`, tracing its
-//   `Tracing.start` until the completion is told.
-// - A command is scoped before it is sent, since an enable can emit before it answers, and settles at its answer: kept,
-//   or rolled back if it failed. A disable or stop takes effect at once, so nothing after it is forwarded, and is undone
-//   if it fails. Commands on one CDP session answer in the order they were sent, so each answer settles that method's
-//   oldest unanswered command.
-// - A child's detach discards its scope; the lease's end discards every scope.
+//   attach of a target until that target's child detaches, the file chooser and lifecycle events their switches, a
+//   binding's calls its `Runtime.addBinding`, tracing its `Tracing.start` until that trace's completion is told.
+// - A command is scoped as it is sent, since an enable can emit before it answers, and settled by its own answer through
+//   what `willSend` returns: kept, or rolled back if it failed. Send order decides, whatever order the answers come in
+//   (neither the RPC dispatcher nor TabDebugger.send orders completions): a switch reads the most recently sent command
+//   that set it and has not failed, answered or not. So a disable or stop takes effect at once and an earlier enable
+//   answered after it never undoes it. A child's detach and a trace's completion are newer than every command sent
+//   before them: an attach or a start still unanswered then never brings its subscription back.
+// - A child's detach discards its scope and ends the explicit attach of its target; the lease's end discards every
+//   scope.
 //
 // The scope gates the outgoing notification only: the connection's own bookkeeping (target tracking, `debugger.detached`)
 // reads every event.
 
 export interface CuaEventScope {
-  willSend(childSession: string | null, method: string, params: unknown): () => void; // scope provisionally; returns the rollback
-  answered(childSession: string | null, method: string, ok: boolean): void; // settle or roll back
+  // scope provisionally as the command is sent; returns its settlement, called with its answer: kept, or rolled back
+  willSend(childSession: string | null, method: string, params: unknown): (ok: boolean) => void;
   admits(childSession: string | null, event: string): boolean; // read before each outgoing notification
-  detached(childSession: string): void;
+  detached(childSession: string, targetId: string | null): void; // the child and its target, from Target.detachedFromTarget
   released(): void; // the lease ended
 }
 
@@ -33,16 +36,17 @@ export interface CuaEventScope {
 type Change = [flag: string, on: boolean];
 
 interface Command {
-  method: string;
+  seq: number; // its place in send order, the scope's whole
   changes: Change[];
 }
 
 interface SessionScope {
-  settled: Map<string, boolean>;
-  pending: Command[]; // sent, unanswered, in the order sent
+  settled: Map<string, { seq: number; on: boolean }>; // per switch, the newest answered command or terminal event
+  pending: Command[]; // sent and unanswered, in send order
 }
 
 const BINDING = 'binding:';
+const ATTACHED = 'attached:'; // an explicit attach, by its target
 const ATTACH_EVENTS = new Set(['Target.attachedToTarget', 'Target.detachedFromTarget']);
 
 const on = (params: unknown, key: string) => (params as Record<string, unknown> | null)?.[key] === true;
@@ -63,8 +67,10 @@ function changesOf(method: string, params: unknown): Change[] {
       return [['lifecycle', on(params, 'enabled')]];
     case 'Target.setAutoAttach':
       return [['autoAttach', on(params, 'autoAttach')]];
-    case 'Target.attachToTarget':
-      return [['attached', true]]; // its session's events stay told until the lease ends or the child detaches
+    case 'Target.attachToTarget': {
+      const targetId = (params as Record<string, unknown> | null)?.targetId;
+      return typeof targetId === 'string' ? [[`${ATTACHED}${targetId}`, true]] : []; // until that target's child detaches
+    }
     case 'Fetch.enable':
       return [['fetch', true], ['fetchAuth', on(params, 'handleAuthRequests')]];
     case 'Fetch.disable':
@@ -75,7 +81,7 @@ function changesOf(method: string, params: unknown): Change[] {
       return name === null ? [] : [[`${BINDING}${name}`, method === 'Runtime.addBinding']];
     }
     case 'Tracing.start':
-      return [['tracing', true]]; // until its completion is told, past Tracing.end
+      return [['tracing', true]]; // until that trace's completion is told, past Tracing.end
     case 'DOM.getDocument':
     case 'DOM.getFlattenedDocument':
       return [['domain:DOM', true]];
@@ -87,6 +93,7 @@ function changesOf(method: string, params: unknown): Change[] {
 
 export function createEventScope(): CuaEventScope {
   const sessions = new Map<string | null, SessionScope>();
+  let sent = 0; // the send order, shared by every session's commands and terminal events
 
   const sessionOf = (child: string | null): SessionScope => {
     let scope = sessions.get(child);
@@ -94,17 +101,23 @@ export function createEventScope(): CuaEventScope {
     return scope;
   };
 
-  // The switch as the session reads it now: settled, then every unanswered command over it in the order sent.
+  // The switch as the session reads it now: the most recently sent command or terminal event that set it, answered or not.
   const isOn = (scope: SessionScope, flag: string): boolean => {
-    let value = scope.settled.get(flag) ?? false;
-    for (const command of scope.pending) for (const [f, v] of command.changes) if (f === flag) value = v;
-    return value;
+    let newest = scope.settled.get(flag) ?? { seq: -1, on: false };
+    for (const command of scope.pending) {
+      for (const [f, on] of command.changes) if (f === flag && command.seq > newest.seq) newest = { seq: command.seq, on };
+    }
+    return newest.on;
   };
 
-  const anyBinding = (scope: SessionScope): boolean => {
+  // Every switch with a prefix the session has heard of, read as above.
+  const anyOn = (scope: SessionScope, prefix: string): boolean => {
     const flags = new Set([...scope.settled.keys(), ...scope.pending.flatMap((command) => command.changes.map(([flag]) => flag))]);
-    return [...flags].some((flag) => flag.startsWith(BINDING) && isOn(scope, flag));
+    return [...flags].some((flag) => flag.startsWith(prefix) && isOn(scope, flag));
   };
+
+  // A terminal event: the switch is off from now on, newer than every command sent before it.
+  const end = (scope: SessionScope, flag: string) => void scope.settled.set(flag, { seq: ++sent, on: false });
 
   // The switch an event reads.
   const admitted = (scope: SessionScope, event: string): boolean => {
@@ -121,13 +134,13 @@ export function createEventScope(): CuaEventScope {
       case 'Fetch.authRequired':
         return isOn(scope, 'fetchAuth');
       case 'Runtime.bindingCalled':
-        return anyBinding(scope);
+        return anyOn(scope, BINDING);
     }
-    if (ATTACH_EVENTS.has(event)) return isOn(scope, 'autoAttach') || isOn(scope, 'attached');
+    if (ATTACH_EVENTS.has(event)) return isOn(scope, 'autoAttach') || anyOn(scope, ATTACHED);
     const domain = event.split('.', 1)[0]!;
     if (domain === 'Tracing') {
       const tracing = isOn(scope, 'tracing');
-      if (tracing && event === 'Tracing.tracingComplete') scope.settled.set('tracing', false); // the trace is over: told once
+      if (tracing && event === 'Tracing.tracingComplete') end(scope, 'tracing'); // the trace is over, its start answered or not
       return tracing;
     }
     if (domain === 'Fetch') return false; // interception's events are the two above
@@ -139,26 +152,26 @@ export function createEventScope(): CuaEventScope {
       const changes = changesOf(method, params);
       if (changes.length === 0) return () => {};
       const scope = sessionOf(child);
-      const command: Command = { method, changes };
+      const command: Command = { seq: ++sent, changes };
       scope.pending.push(command);
-      return () => {
+      return (ok) => {
         const at = scope.pending.indexOf(command);
-        if (at >= 0) scope.pending.splice(at, 1);
+        if (at < 0) return; // settled already, or its session discarded
+        scope.pending.splice(at, 1);
+        if (!ok) return;
+        for (const [flag, on] of changes) {
+          // an answer settles only what nothing sent later has set since
+          if (command.seq > (scope.settled.get(flag)?.seq ?? -1)) scope.settled.set(flag, { seq: command.seq, on });
+        }
       };
-    },
-    answered(child, method, ok) {
-      const scope = sessions.get(child);
-      const at = scope?.pending.findIndex((command) => command.method === method) ?? -1;
-      if (!scope || at < 0) return;
-      const [command] = scope.pending.splice(at, 1);
-      if (ok) for (const [flag, value] of command!.changes) scope.settled.set(flag, value);
     },
     admits(child, event) {
       const scope = sessions.get(child);
       return scope !== undefined && admitted(scope, event);
     },
-    detached(child) {
+    detached(child, targetId) {
       sessions.delete(child);
+      if (targetId !== null) for (const scope of sessions.values()) end(scope, `${ATTACHED}${targetId}`);
     },
     released() {
       sessions.clear();

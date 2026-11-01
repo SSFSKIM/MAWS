@@ -16,61 +16,61 @@ describe('the scope', () => {
   it('a domain enable admits that domain\'s events on that session alone; its disable ends them at once', () => {
     const scope = createEventScope();
     expect(scope.admits(null, 'Network.requestWillBeSent')).toBe(false);
-    scope.willSend(null, 'Network.enable', {});
+    const enable = scope.willSend(null, 'Network.enable', {});
     expect(scope.admits(null, 'Network.requestWillBeSent')).toBe(true); // before the answer: an enable can emit first
-    scope.answered(null, 'Network.enable', true);
+    enable(true);
     expect(scope.admits(null, 'Network.requestWillBeSent')).toBe(true);
     expect(scope.admits(null, 'Runtime.consoleAPICalled')).toBe(false);
     expect(scope.admits('C1', 'Network.requestWillBeSent')).toBe(false); // a child session is a scope of its own
-    scope.willSend(null, 'Network.disable', {});
+    const disable = scope.willSend(null, 'Network.disable', {});
     expect(scope.admits(null, 'Network.requestWillBeSent')).toBe(false); // before its answer
-    scope.answered(null, 'Network.disable', true);
+    disable(true);
     expect(scope.admits(null, 'Network.requestWillBeSent')).toBe(false);
   });
 
-  it('a failed enable is rolled back, a failed disable restores the enable, and the rollback willSend returns undoes that one command', () => {
+  it('a failed enable is rolled back, a failed disable restores the enable, and a settled send settles nothing again', () => {
     const scope = createEventScope();
-    scope.willSend(null, 'Runtime.enable', {});
-    scope.answered(null, 'Runtime.enable', false);
+    scope.willSend(null, 'Runtime.enable', {})(false);
     expect(scope.admits(null, 'Runtime.executionContextCreated')).toBe(false);
-    scope.willSend(null, 'Runtime.enable', {});
-    scope.answered(null, 'Runtime.enable', true);
-    scope.willSend(null, 'Runtime.disable', {});
+    scope.willSend(null, 'Runtime.enable', {})(true);
+    const disable = scope.willSend(null, 'Runtime.disable', {});
     expect(scope.admits(null, 'Runtime.executionContextCreated')).toBe(false);
-    scope.answered(null, 'Runtime.disable', false);
+    disable(false);
     expect(scope.admits(null, 'Runtime.executionContextCreated')).toBe(true);
-    const rollback = scope.willSend(null, 'Log.enable', {});
-    expect(scope.admits(null, 'Log.entryAdded')).toBe(true);
-    rollback();
-    expect(scope.admits(null, 'Log.entryAdded')).toBe(false);
-    scope.answered(null, 'Log.enable', true); // the rolled-back command settles nothing
-    expect(scope.admits(null, 'Log.entryAdded')).toBe(false);
+    disable(true); // a second answer to the same send changes nothing
+    expect(scope.admits(null, 'Runtime.executionContextCreated')).toBe(true);
   });
 
-  it('commands settle in the order they were sent: an enable then a disable leave it off, whichever is pending', () => {
+  it('send order wins whatever order the answers come in: a later disable answered first is not undone by the earlier enable', () => {
     const scope = createEventScope();
-    scope.willSend(null, 'Page.enable', {});
-    scope.willSend(null, 'Page.disable', {});
+    const enable = scope.willSend(null, 'Page.enable', {});
+    const disable = scope.willSend(null, 'Page.disable', {});
     expect(scope.admits(null, 'Page.frameNavigated')).toBe(false);
-    scope.answered(null, 'Page.enable', true);
-    expect(scope.admits(null, 'Page.frameNavigated')).toBe(false); // the disable still pending is the later word
-    scope.answered(null, 'Page.disable', true);
+    disable(true); // the disable answers while the enable is still deferred
     expect(scope.admits(null, 'Page.frameNavigated')).toBe(false);
+    enable(true);
+    expect(scope.admits(null, 'Page.frameNavigated')).toBe(false);
+    // the same method sent twice with opposite values, the later failing and the earlier answering last
+    const on = scope.willSend(null, 'Target.setAutoAttach', { autoAttach: true });
+    const off = scope.willSend(null, 'Target.setAutoAttach', { autoAttach: false });
+    off(false);
+    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true);
+    on(true);
+    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true);
   });
 
   it('Page.enable alone never admits frames, the file chooser or lifecycle events: each follows its own command', () => {
     const scope = createEventScope();
-    scope.willSend(null, 'Page.enable', {});
-    scope.answered(null, 'Page.enable', true);
+    scope.willSend(null, 'Page.enable', {})(true);
     expect(scope.admits(null, 'Page.frameNavigated')).toBe(true);
     for (const event of ['Page.screencastFrame', 'Page.screencastVisibilityChanged', 'Page.fileChooserOpened', 'Page.lifecycleEvent']) expect(scope.admits(null, event)).toBe(false);
-    scope.willSend(null, 'Page.startScreencast', { format: 'jpeg' });
+    const start = scope.willSend(null, 'Page.startScreencast', { format: 'jpeg' });
     expect(scope.admits(null, 'Page.screencastFrame')).toBe(true);
     expect(scope.admits(null, 'Page.screencastVisibilityChanged')).toBe(true);
-    scope.answered(null, 'Page.startScreencast', true);
-    scope.willSend(null, 'Page.stopScreencast', {});
+    start(true);
+    const stop = scope.willSend(null, 'Page.stopScreencast', {});
     expect(scope.admits(null, 'Page.screencastFrame')).toBe(false); // the stop takes effect before later frames
-    scope.answered(null, 'Page.stopScreencast', true);
+    stop(true);
     scope.willSend(null, 'Page.setInterceptFileChooserDialog', { enabled: true });
     expect(scope.admits(null, 'Page.fileChooserOpened')).toBe(true);
     scope.willSend(null, 'Page.setInterceptFileChooserDialog', { enabled: false });
@@ -97,7 +97,7 @@ describe('the scope', () => {
     expect(scope.admits(null, 'Fetch.authRequired')).toBe(false);
   });
 
-  it('target attach events follow auto-attach, or an explicit attach, on the session that asked', () => {
+  it('target attach events follow auto-attach on the session that asked; a failed explicit attach admits nothing', () => {
     const scope = createEventScope();
     expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
     scope.willSend(null, 'Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: false });
@@ -106,9 +106,25 @@ describe('the scope', () => {
     expect(scope.admits('C1', 'Target.attachedToTarget')).toBe(false); // a child's own auto-attach is the child's
     scope.willSend(null, 'Target.setAutoAttach', { autoAttach: false });
     expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
-    scope.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true });
+    const attach = scope.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true });
     expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true);
-    scope.answered(null, 'Target.attachToTarget', false);
+    attach(false);
+    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
+  });
+
+  it('an explicit attach ends with its own child\'s detach, keeping any other live explicit attach', () => {
+    const scope = createEventScope();
+    scope.willSend(null, 'Target.attachToTarget', { targetId: 'T1', flatten: true })(true);
+    scope.willSend(null, 'Target.attachToTarget', { targetId: 'T2', flatten: true })(true);
+    scope.detached('C1', 'T1');
+    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(true); // T2's attach is still live
+    scope.detached('C2', 'T2');
+    expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false); // another consumer's attaches are not the lease's
+    expect(scope.admits(null, 'Target.detachedFromTarget')).toBe(false);
+    // a detach while the attach's answer is still out ends it too: the late answer does not bring it back
+    const late = scope.willSend(null, 'Target.attachToTarget', { targetId: 'T3', flatten: true });
+    scope.detached('C3', 'T3');
+    late(true);
     expect(scope.admits(null, 'Target.attachedToTarget')).toBe(false);
   });
 
@@ -128,13 +144,24 @@ describe('the scope', () => {
   it('tracing is the lease\'s from its start until its completion is told, past its end', () => {
     const scope = createEventScope();
     expect(scope.admits(null, 'Tracing.dataCollected')).toBe(false);
-    scope.willSend(null, 'Tracing.start', {});
-    scope.answered(null, 'Tracing.start', true);
-    scope.willSend(null, 'Tracing.end', {});
-    scope.answered(null, 'Tracing.end', true);
+    scope.willSend(null, 'Tracing.start', {})(true);
+    scope.willSend(null, 'Tracing.end', {})(true);
     expect(scope.admits(null, 'Tracing.dataCollected')).toBe(true);
     expect(scope.admits(null, 'Tracing.tracingComplete')).toBe(true);
     expect(scope.admits(null, 'Tracing.dataCollected')).toBe(false);
+  });
+
+  it('a completion told before its start\'s answer ends that trace: the start\'s late answer does not bring it back', () => {
+    const scope = createEventScope();
+    const start = scope.willSend(null, 'Tracing.start', {});
+    expect(scope.admits(null, 'Tracing.dataCollected')).toBe(true);
+    expect(scope.admits(null, 'Tracing.tracingComplete')).toBe(true);
+    expect(scope.admits(null, 'Tracing.dataCollected')).toBe(false);
+    start(true);
+    expect(scope.admits(null, 'Tracing.dataCollected')).toBe(false);
+    // the next start is a new trace
+    scope.willSend(null, 'Tracing.start', {})(true);
+    expect(scope.admits(null, 'Tracing.dataCollected')).toBe(true);
   });
 
   it('DOM.getDocument turns DOM\'s events on, as Chromium does', () => {
@@ -147,12 +174,12 @@ describe('the scope', () => {
   it('a child\'s detach discards its scope, the lease\'s end discards every scope, and an answer for a discarded one settles nothing', () => {
     const scope = createEventScope();
     scope.willSend(null, 'Runtime.enable', {});
-    scope.willSend('C1', 'Runtime.enable', {});
+    const child = scope.willSend('C1', 'Runtime.enable', {});
     scope.willSend('C2', 'Runtime.enable', {});
-    scope.detached('C1');
+    scope.detached('C1', 'T1');
     expect(scope.admits('C1', 'Runtime.executionContextCreated')).toBe(false);
     expect(scope.admits('C2', 'Runtime.executionContextCreated')).toBe(true);
-    scope.answered('C1', 'Runtime.enable', true);
+    child(true);
     expect(scope.admits('C1', 'Runtime.executionContextCreated')).toBe(false);
     scope.released();
     expect(scope.admits(null, 'Runtime.executionContextCreated')).toBe(false);
@@ -269,6 +296,20 @@ describe('through the primitive server', () => {
     t.cdp.event('Network.requestWillBeSent', { requestId: '3' });
     await settle();
     expect(t.told()).toEqual([['Network.requestWillBeSent', null]]);
+  });
+
+  it('a deferred enable answered after a later disable leaves the lease told nothing, as sent', async () => {
+    const t = await uidStand();
+    await t.attach();
+    const answerEnable = t.cdp.defer('Page.enable');
+    const enabling = t.send('Page.enable');
+    await t.send('Page.disable');
+    answerEnable();
+    await enabling;
+    t.cdp.event('Page.frameNavigated', { frame: { id: t.cdp.frameId } });
+    await settle();
+    expect(t.cdp.timeline).toEqual(['send Page.enable', 'send Page.disable', 'reply Page.disable', 'reply Page.enable']);
+    expect(t.told()).toEqual([]);
   });
 
   it('a detach ends the lease\'s scope: after a re-attach nothing is forwarded until the new lease asks again', async () => {

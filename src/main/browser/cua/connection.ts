@@ -408,15 +408,14 @@ export class CuaConnection {
     });
   }
 
-  // P5 O17 M2: the command as the lease's scope sees it, scoped before it goes (an enable can emit before it answers) and
-  // settled at its answer.
+  // P5 O17 M2: the command as the lease's scope sees it, scoped as it goes (an enable can emit before it answers) and
+  // settled by its own answer.
   private scoped(leased: Leased, session: string, method: string, params: Record<string, unknown>, send: () => Promise<unknown>): Promise<unknown> {
-    const child = session || null;
-    leased.scope.willSend(child, method, params);
+    const settle = leased.scope.willSend(session || null, method, params);
     const reply = send();
     reply.then(
-      () => leased.scope.answered(child, method, true),
-      () => leased.scope.answered(child, method, false),
+      () => settle(true),
+      () => settle(false),
     );
     return reply;
   }
@@ -567,7 +566,7 @@ export class CuaConnection {
 
   private forward(leased: Leased, params: unknown, sessionId: string, method: string): void {
     if (this.leases.get(leased.entry.tab.tabId) !== leased) return;
-    const p = (params ?? {}) as { sessionId?: unknown; targetInfo?: { targetId?: unknown; type?: unknown; title?: unknown; url?: unknown } };
+    const p = (params ?? {}) as { sessionId?: unknown; targetId?: unknown; targetInfo?: { targetId?: unknown; type?: unknown; title?: unknown; url?: unknown } };
     if (sessionId === '' && method === 'Target.attachedToTarget' && typeof p.sessionId === 'string' && typeof p.targetInfo?.targetId === 'string') {
       const info = p.targetInfo;
       leased.children.set(p.sessionId, { targetId: info.targetId as string, type: String(info.type ?? 'other'), title: String(info.title ?? ''), url: String(info.url ?? '') });
@@ -587,7 +586,7 @@ export class CuaConnection {
     if (sessionId === '' && method === 'Target.detachedFromTarget' && typeof p.sessionId === 'string') {
       const gone = leased.children.get(p.sessionId);
       leased.children.delete(p.sessionId);
-      leased.scope.detached(p.sessionId);
+      leased.scope.detached(p.sessionId, typeof p.targetId === 'string' ? p.targetId : (gone?.targetId ?? null));
       if (gone && leased.byTarget.delete(gone.targetId)) this.notify('debugger.detached', { debuggee: { targetId: gone.targetId }, reason: 'target_closed' });
     }
   }
