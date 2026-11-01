@@ -24,6 +24,8 @@ import { addressOf } from '@shared/machine/address';
 import { OTHER_MACHINE } from '../../../../../../test/support/machine';
 import { instanceOf } from '../../../panel/host';
 import { resetForwards } from '../forward';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { useMachines } from '../../../stores/machines';
 import { COMMENT_COPY } from './copy';
 
 const URL = 'http://127.0.0.1:4000/comment.html';
@@ -159,6 +161,15 @@ describe('openForwardedLink', () => {
     expect(tab).toBeDefined();
     expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 5173 }]);
     expect(instanceOf(tab!.id)?.state).toBeDefined();
+  });
+
+  it('takes a loopback link of another machine’s session that cannot be forwarded and opens it nowhere, saying why', () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    for (const url of ['http://[::1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) expect(openForwardedLink(R, url), url).toBe(true);
+    expect(browserTabs(R)).toEqual([]);
+    expect(main.calls.map(({ name }) => name)).toEqual([]); // no forward, and nothing sent to main to open
+    expect(toasts()).toEqual(Array(3).fill('This link points at mini’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1 or 0.0.0.0)'));
+    useMachines.setState({ machines: new Map() });
   });
 
   it('leaves a local session’s localhost and another machine’s non-loopback link', () => {

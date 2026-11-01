@@ -2,7 +2,9 @@
 // loopback link out of another machine's session names that machine's own loopback (a dev server there), so it opens in
 // the in-app browser through a port forwarded over the machine's link, never on this Mac's localhost:
 //
-// - the rule (`forwardOf`): a link the shared loopback rule forwards, out of a session on another machine;
+// - the rule (`forwardOf`): a link the shared loopback rule forwards, out of a session on another machine; and a loopback
+//   link of such a session that is no forward (another scheme, [::1], the rest of 127/8: `loopbackElsewhere`), which names
+//   that machine's loopback all the same, so it opens nowhere;
 // - the open (`openForward`, the Browser tool's): `remote.forward.open` on this app, then the page on the local
 //   listener's port, in the session's browser, reusing a tab already at that URL;
 // - the forwards this page opened, by local port, so a tab at `127.0.0.1:<localPort>` is marked "forwarded from
@@ -17,7 +19,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { isAddress, machineOf } from '@shared/machine/address';
-import { forwardedUrl, loopbackPort } from '@shared/machine/loopback-link';
+import { forwardedUrl, isLoopbackLink, loopbackPort } from '@shared/machine/loopback-link';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { BROWSER_COPY } from './copy';
@@ -64,8 +66,14 @@ export function resetForwards(): void {
 /** The forward a link out of a session opens through: a loopback link of a session on another machine; else null. */
 export function forwardOf(appSessionId: AppSessionId, url: string, local: MachineRef = ipc.localMachine): ForwardTarget | null {
   if (!isAddress(appSessionId) || machineOf(appSessionId) === local) return null;
-  const port = loopbackPort(url); // the shared rule's one call here
+  const port = loopbackPort(url); // the shared rule's forwardable test
   return port === null ? null : { machine: machineOf(appSessionId), port };
+}
+
+/** The machine whose loopback a link out of its session names when that link cannot be forwarded; else null. */
+export function loopbackElsewhere(appSessionId: AppSessionId, url: string, local: MachineRef = ipc.localMachine): MachineRef | null {
+  if (!isAddress(appSessionId) || machineOf(appSessionId) === local || loopbackPort(url) !== null) return null;
+  return isLoopbackLink(url) ? machineOf(appSessionId) : null; // the shared rule's never-open-here test
 }
 
 /** The forward a page is served through, when its URL is on the local listener of a forward this page opened. */

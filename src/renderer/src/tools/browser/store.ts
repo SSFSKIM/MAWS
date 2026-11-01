@@ -42,7 +42,8 @@ export type CommentNoticeKind =
   | /* P2-E2: a card's missing crop, the card leaving the page uncovered */ 'commentCropTooLarge'
   | 'commentCropFailed'
   | /* P4 W2-C: a page opener's refused URL and where its page opened (`name`), while a browser is on screen */ 'commentCannotOpen'
-  | 'commentOpenedElsewhere';
+  | 'commentOpenedElsewhere'
+  | /* P5 O7 M3: a loopback link of another machine's session that cannot be forwarded (`name`: the machine) */ 'forwardRefused';
 // E4d end
 export interface ChromeNotice {
   id: number;

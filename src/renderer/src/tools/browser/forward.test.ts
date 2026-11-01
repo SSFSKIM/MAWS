@@ -8,7 +8,7 @@ import { addressOf } from '@shared/machine/address';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
 import { browserTab, T1 } from '../../test-support/browser';
-import { forwardErrorWords, forwardMarkOf, forwardOf, forwards, openForward, resetForwards, retryForward } from './forward';
+import { forwardErrorWords, forwardMarkOf, forwardOf, forwards, loopbackElsewhere, openForward, resetForwards, retryForward } from './forward';
 import { browser, resetBrowser } from './store';
 
 const LOCAL = at('session-l' as AppSessionId);
@@ -29,6 +29,21 @@ describe('forwardOf', () => {
     expect(forwardOf(R, 'http://localhost:5173/app')).toEqual(FORWARD);
     expect(forwardOf(R, 'http://127.0.0.1:8000/')).toEqual({ machine: OTHER_MACHINE, port: 8000 });
     expect(forwardOf(R, 'https://0.0.0.0:8443/x?y#z')).toEqual({ machine: OTHER_MACHINE, port: 8443 });
+  });
+
+  it('forwards a loopback link with no port written at its scheme’s default', () => {
+    expect(forwardOf(R, 'http://localhost/')).toEqual({ machine: OTHER_MACHINE, port: 80 });
+  });
+
+  // M3b fix wave 1's split: a loopback link that is no forward is the machine's all the same, and opens nowhere
+  it('names the machine of a loopback link that cannot be forwarded, and of no other', () => {
+    for (const url of ['http://[::1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) {
+      expect(forwardOf(R, url), url).toBeNull();
+      expect(loopbackElsewhere(R, url), url).toBe(OTHER_MACHINE);
+    }
+    expect(loopbackElsewhere(R, 'http://localhost:5173/'), 'a forward').toBeNull();
+    expect(loopbackElsewhere(R, 'https://example.com/')).toBeNull();
+    expect(loopbackElsewhere(LOCAL, 'http://[::1]:3000/'), 'this Mac’s own').toBeNull();
   });
 
   it('leaves every other link, and every link of this machine’s sessions', () => {
