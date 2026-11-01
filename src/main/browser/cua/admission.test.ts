@@ -43,7 +43,14 @@ const NEXT_ENGINE = 5100; // an engine that replaced the session's
 const MACHINE_FD = 901; // the app's machine.sock connection: its peer is the daemon actually attached
 const uid = process.getuid!();
 
-function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: number; start: number }>; fds: Map<number, { pid: number; uid: number } | 'closed'> } {
+// `onPeer` runs at each read of a socket's peer (other than the machine link's), before it answers: the seam a case uses
+// to change the process tree at a chosen read
+function fakeAddon(): PeerAddon & {
+  peerPid: number;
+  table: Map<number, { ppid: number; start: number }>;
+  fds: Map<number, { pid: number; uid: number } | 'closed'>;
+  onPeer: (() => void) | null;
+} {
   const table = new Map([
     [ENGINE, { ppid: 1, start: 10 }],
     [CHILD, { ppid: ENGINE, start: 20 }],
@@ -57,10 +64,12 @@ function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: 
     table,
     fds: new Map<number, { pid: number; uid: number } | 'closed'>(), // a descriptor's own peer; any other's is `peerPid`
     peerPid: CHILD,
+    onPeer: null as (() => void) | null,
     version: PEER_AUTH_VERSION,
     peer: (fd: number) => {
       const own = addon.fds.get(fd);
       if (own === 'closed') throw new Error('EBADF');
+      if (!own) addon.onPeer?.();
       return own ?? { pid: addon.peerPid, uid };
     },
     process: (pid: number) => table.get(pid) ?? null,
@@ -357,6 +366,30 @@ describe('a change of the session\'s engine', () => {
     expect(own.socketState()).toMatchObject({ open: false, endedByMaws: true });
     expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, leased: [] });
     expect(await relayed.request('tabs.query', {})).toHaveLength(1);
+  });
+
+  // the root that let the peer in is the check's own: an engine that exits as the check ends leaves its child under
+  // launchd, and a second walk would find no engine to tie the connection to
+  it('ties the connection to the engine that admitted it even when that engine exits as the check ends', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const tab = h.personTab();
+    let reads = 0;
+    addon.onPeer = () => {
+      if (++reads !== 2) return; // the check's last read: the walk has found ENGINE
+      addon.table.delete(ENGINE);
+      addon.table.set(CHILD, { ppid: 1, start: 20 }); // reparented to launchd
+    };
+    const own = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(own);
+    addon.onPeer = null;
+    await own.request('debugger.attach', { tabId: await h.idOf(own, tab) });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, leased: [tab.tab.tabId] });
+    h.backend.engineProcess(A, NEXT_ENGINE);
+    await until(() => !own.socketState().open);
+    expect(own.socketState()).toMatchObject({ open: false, endedByMaws: true });
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 0, leased: [] });
   });
 });
 

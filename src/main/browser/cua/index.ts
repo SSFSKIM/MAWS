@@ -45,7 +45,7 @@ import { CuaConnection } from './connection';
 import { HeldDialogs } from './dialogs';
 import { agentDownloads, type AgentDownloads } from './downloads';
 import { AgentPresence, type PresenceDeps } from './presence';
-import { authorizePeer, descends, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
+import { judgePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
 
 export interface CuaBackendDeps {
   store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update' | 'setControl' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
@@ -157,18 +157,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   let confirming: ProcessRoot | null = null; // P5 O5 M5: the daemon read from the link, until its confirmation
   let relayAsk = 0; // each relay() call, the link's generation; a confirmation applies only to the latest
   const relayedBy = new Map<CuaConnection, ProcessRoot>(); // P5 O5 M5: each connection admitted as a relay, by whose
-  const engineBy = new Map<CuaConnection, ProcessRoot>(); // each connection admitted under its session's engine, by which
-  // The session's engine the accepted socket's peer descends from, if it does (else it came in under a trusted root)
-  const engineOf = (appSessionId: AppSessionId, socket: Socket): ProcessRoot | null => {
-    const engine = engineRoots.get(appSessionId);
-    const fd = socketFd(socket);
-    if (!engine || addon === null || fd === null) return null;
-    try {
-      return descends(addon.peer(fd).pid, [engine], addon.process) ? engine : null;
-    } catch {
-      return null;
-    }
-  };
+  // each connection admitted as a descendant of its session's engine, by which: the root the check matched, never looked
+  // up again (only a trusted root's descendant is tied to none)
+  const engineBy = new Map<CuaConnection, ProcessRoot>();
   // The daemon the machine link is connected to: its socket's peer, this user's, as a live instance
   const connectedDaemon = (fd: number): ProcessRoot | null => {
     if (addon === null) return null;
@@ -200,22 +191,22 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
     const relay = generation === relayAsk ? relayRoot : null;
-    const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay });
-    if (refusal) {
+    const verdict = judgePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay });
+    if ('reason' in verdict) {
       listening.refused += 1;
-      log(refusalLine(appSessionId, refusal));
+      log(refusalLine(appSessionId, verdict));
       socket.destroy(); // last: the peer can see the close from here on
       return;
     }
-    const viaRelay = relay !== null && fromRelay(socket); // let in as the daemon (authorizePeer checked its start)
-    const engine = viaRelay ? null : engineOf(appSessionId, socket);
+    const viaRelay = verdict.via === 'relay'; // let in as the daemon's exact instance
+    const engine = verdict.via === 'root' && !trustedRoots.has(verdict.root) ? verdict.root : null;
     const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => {
       listening.connections.delete(closed);
       relayedBy.delete(closed);
       engineBy.delete(closed);
     });
     listening.connections.add(connection);
-    if (viaRelay) relayedBy.set(connection, relay);
+    if (viaRelay && relay) relayedBy.set(connection, relay);
     if (engine) engineBy.set(connection, engine);
     connection.greet();
     socket.resume();

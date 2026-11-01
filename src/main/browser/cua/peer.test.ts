@@ -8,6 +8,7 @@ import {
   ANCESTRY_LIMIT,
   authorizePeer,
   descends,
+  judgePeer,
   loadPeerAddon,
   PEER_AUTH_VERSION,
   peerAddonPath,
@@ -273,5 +274,15 @@ describe('the relay peer (doubles)', () => {
     expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
     expect(authorizePeer(7, [engineA], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
     expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT + 1, uid, relay: reborn })).toBeNull(); // accepted after it started
+  });
+
+  // the admission carries what let the peer in, so a caller never walks the tree again for it
+  it('names what admitted the peer: the relay, or the nearest root it descends from (the object passed)', () => {
+    const daemonAsRoot: ProcessRoot = { pid: 20, start: 220 };
+    expect(judgePeer(7, [], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay })).toEqual({ via: 'relay' });
+    const admitted = judgePeer(7, [daemonAsRoot, engineA], { addon: fakeAddon(table, [41]), now: ACCEPT, uid });
+    expect(admitted).toEqual({ via: 'root', root: engineA });
+    expect('root' in admitted && admitted.root).toBe(engineA);
+    expect(judgePeer(7, [engineB], { addon: fakeAddon(table, [41]), now: ACCEPT, uid })).toEqual({ reason: 'not_descendant', pid: 41 });
   });
 });
