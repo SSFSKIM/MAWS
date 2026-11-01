@@ -472,25 +472,40 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       return { held: contents !== undefined, offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
     }, contentsId);
   };
-  // a page's own reading, in the render host's main (never through cua's lease, which a person's input may hold): the tab
-  // at `path` in the inventory, its view by the engine's own id, and its document the one committed at that URL; anything
-  // else throws, saying what was missing (a poll retries it; a one-shot call fails loudly, never reads null)
-  const inPage = async <T,>(path: string, expression: string): Promise<T> => {
+  // One reading of the page at `path`, in the render host's main (never through cua's lease, which a person's input may
+  // hold): the tab at `path` in the inventory, its view by the engine's own id, and its document the one committed at that
+  // URL; else what was missing
+  const readPage = async (path: string, expression: string): Promise<{ value: unknown } | { missing: string }> => {
     const tabId = tabIdOf(path);
-    if (tabId === null) throw new Error(`no tab at ${path} in the inventory`);
+    if (tabId === null) return { missing: 'no tab at this URL in the inventory' };
     const contentsId = await contentsIdOf(tabId);
-    if (contentsId === null) throw new Error(`the engine holds no view for ${path} (${tabId})`);
-    const read = await app.evaluate(async ({ webContents }, [id, url, code]) => {
+    if (contentsId === null) return { missing: `the engine holds no view for ${tabId}` };
+    return app.evaluate(async ({ webContents }, [id, url, code]) => {
       const contents = webContents.fromId(id as number);
       if (!contents) return { missing: 'no webContents' };
       if (contents.getURL() !== url) return { missing: `the committed document is ${JSON.stringify(contents.getURL())}` };
       return { value: (await contents.executeJavaScript(code as string, true)) as unknown };
     }, [contentsId, pages.url(path), expression] as const);
+  };
+  // The page at `path` committed and loaded (`document.readyState` complete), waited for up to 15 s, else a failure
+  // saying what was last seen. Its own loop: Playwright's expect.poll does not retry a callback that throws
+  const committed = async (path: string): Promise<void> => {
+    let seen = 'nothing read yet';
+    for (const deadline = Date.now() + 15_000; Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 100))) {
+      const read = await readPage(path, 'document.readyState').catch((error: unknown) => ({ missing: error instanceof Error ? error.message : String(error) }));
+      if ('value' in read && read.value === 'complete') return;
+      seen = 'value' in read ? `document.readyState ${JSON.stringify(read.value)}` : read.missing;
+    }
+    throw new Error(`${path} did not commit and load within 15 s: ${seen}`);
+  };
+  // The page's own reading, always of its committed, loaded document: no caller can read a page before it commits, and
+  // anything missing after that fails loudly with what it was, never as null
+  const inPage = async <T,>(path: string, expression: string): Promise<T> => {
+    await committed(path);
+    const read = await readPage(path, expression);
     if ('missing' in read) throw new Error(`${path}: ${read.missing}`);
     return read.value as T;
   };
-  // the tab's document committed and loaded, before a one-shot action in it
-  const committed = (path: string) => expect.poll(() => inPage<string>(path, 'document.readyState').catch(() => null), { timeout: 15_000, message: `${path} committed and loaded` }).toBe('complete');
   const lines: string[] = [];
   try {
     await test.step('prepare: the session’s socket listens and admits mawsd’s relay; cua’s creation sequence makes an offscreen tab behind the fence', async () => {
