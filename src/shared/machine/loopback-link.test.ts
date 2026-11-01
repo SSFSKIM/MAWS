@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { forwardedUrl, isLoopbackLink, loopbackPort } from './loopback-link';
 
 describe('loopback links (P5 O7 M3, "Forwarding")', () => {
-  it('names the machine port of an http(s) link to localhost, 127.0.0.1 or 0.0.0.0, written or the scheme’s default', () => {
+  it('names the machine port of an http(s) link to localhost, 127.0.0.1, 0.0.0.0, [::] or [::1], written or the scheme’s default', () => {
     expect(loopbackPort('http://localhost:5173/')).toBe(5173);
     expect(loopbackPort('http://127.0.0.1:8000/a/b?c=1#d')).toBe(8000);
     expect(loopbackPort('https://0.0.0.0:3000')).toBe(3000);
@@ -14,10 +14,17 @@ describe('loopback links (P5 O7 M3, "Forwarding")', () => {
     expect(loopbackPort('http://localhost/')).toBe(80);
     expect(loopbackPort('https://0.0.0.0/x')).toBe(443);
     expect(loopbackPort('http://127.1:9000/')).toBe(9000); // 127.0.0.1 in a short form
+    // IPv6 loopback, written and implied ports (python's http.server prints http://[::]:8000/)
+    expect(loopbackPort('http://[::]:8000/')).toBe(8000);
+    expect(loopbackPort('http://[::1]:3000/app')).toBe(3000);
+    expect(loopbackPort('http://[::]/')).toBe(80);
+    expect(loopbackPort('https://[::1]/')).toBe(443);
+    expect(loopbackPort('http://[0:0:0:0:0:0:0:1]:5173/')).toBe(5173); // [::1] uncompressed
+    expect(loopbackPort('http://[::1]:80/')).toBe(80);
   });
 
   it('forwards no other link', () => {
-    for (const url of ['http://example.com:8080/', 'http://192.168.1.4:8080/', 'ftp://localhost:21/', 'ws://localhost:3000/', 'mailto:a@localhost', 'not a url', 'http://[::1]:8080/', 'http://127.0.0.2:8080/', 'http://app.localhost:3000/', 'http://[::ffff:127.0.0.1]:8080/', 'http://[::ffff:7f00:1]:8080/', 'http://[::ffff:0.0.0.0]:8080/', 'file:///etc/hosts']) {
+    for (const url of ['http://example.com:8080/', 'http://192.168.1.4:8080/', 'ftp://localhost:21/', 'ws://localhost:3000/', 'mailto:a@localhost', 'not a url', 'ws://[::1]:8080/', 'http://[::2]:8080/', 'http://127.0.0.2:8080/', 'http://app.localhost:3000/', 'http://[::ffff:127.0.0.1]:8080/', 'http://[::ffff:7f00:1]:8080/', 'http://[::ffff:0.0.0.0]:8080/', 'file:///etc/hosts']) {
       expect(loopbackPort(url), url).toBeNull();
     }
   });
@@ -64,5 +71,8 @@ describe('loopback links (P5 O7 M3, "Forwarding")', () => {
     expect(forwardedUrl('http://0.0.0.0:8000', 49153)).toBe('http://127.0.0.1:49153/');
     expect(forwardedUrl('http://localhost/x', 49154)).toBe('http://127.0.0.1:49154/x');
     expect(forwardedUrl('https://127.0.0.1:443/', 49155)).toBe('https://127.0.0.1:49155/');
+    // a bracketed IPv6 host replaced whole
+    expect(forwardedUrl('http://[::]:8000/dir/?q=1#top', 49156)).toBe('http://127.0.0.1:49156/dir/?q=1#top');
+    expect(forwardedUrl('http://[::1]/', 49157)).toBe('http://127.0.0.1:49157/');
   });
 });

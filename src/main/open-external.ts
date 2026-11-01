@@ -14,7 +14,7 @@ import { registerMainHandler } from './ipc/router';
 import { boundLocalMachine } from './machine/local';
 
 /** The words for a loopback link of another machine's session, refused here. */
-export const FORWARDED_ELSEWHERE = 'This link points at its session’s machine, not this Mac: it opens only in the in-app browser, forwarded, and only when it is http(s) to localhost, 127.0.0.1 or 0.0.0.0';
+export const FORWARDED_ELSEWHERE = 'This link points at its session’s machine, not this Mac: it opens only in the in-app browser, forwarded, and only when it is http(s) to localhost, 127.0.0.1, 0.0.0.0, [::] or [::1]';
 
 /** Whether `url` is a loopback link of a session on another machine (`target`): never opened on this Mac. */
 export function forwardedElsewhere(url: string, target: MachineRef | undefined): boolean {

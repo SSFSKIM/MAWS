@@ -29,21 +29,26 @@ describe('forwardOf', () => {
     expect(forwardOf(R, 'http://localhost:5173/app')).toEqual(FORWARD);
     expect(forwardOf(R, 'http://127.0.0.1:8000/')).toEqual({ machine: OTHER_MACHINE, port: 8000 });
     expect(forwardOf(R, 'https://0.0.0.0:8443/x?y#z')).toEqual({ machine: OTHER_MACHINE, port: 8443 });
+    // IPv6 loopback: python's http.server prints http://[::]:8000/
+    expect(forwardOf(R, 'http://[::]:8000/')).toEqual({ machine: OTHER_MACHINE, port: 8000 });
+    expect(forwardOf(R, 'http://[::1]:3000/')).toEqual({ machine: OTHER_MACHINE, port: 3000 });
   });
 
   it('forwards a loopback link with no port written at its scheme’s default', () => {
     expect(forwardOf(R, 'http://localhost/')).toEqual({ machine: OTHER_MACHINE, port: 80 });
+    expect(forwardOf(R, 'https://[::1]/')).toEqual({ machine: OTHER_MACHINE, port: 443 });
   });
 
   // M3b fix wave 1's split: a loopback link that is no forward is the machine's all the same, and opens nowhere
   it('names the machine of a loopback link that cannot be forwarded, and of no other', () => {
-    for (const url of ['http://[::1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) {
+    for (const url of ['http://[::ffff:127.0.0.1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) {
       expect(forwardOf(R, url), url).toBeNull();
       expect(loopbackElsewhere(R, url), url).toBe(OTHER_MACHINE);
     }
     expect(loopbackElsewhere(R, 'http://localhost:5173/'), 'a forward').toBeNull();
     expect(loopbackElsewhere(R, 'https://example.com/')).toBeNull();
-    expect(loopbackElsewhere(LOCAL, 'http://[::1]:3000/'), 'this Mac’s own').toBeNull();
+    expect(loopbackElsewhere(R, 'http://[::1]:3000/'), 'a forward').toBeNull();
+    expect(loopbackElsewhere(LOCAL, 'http://127.0.0.2:3000/'), 'this Mac’s own').toBeNull();
   });
 
   it('leaves every other link, and every link of this machine’s sessions', () => {

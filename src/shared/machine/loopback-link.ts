@@ -7,12 +7,13 @@
 //   to it), `0.0.0.0`, `[::1]`, `[::]`, and an IPv4-mapped address of either (`[::ffff:127.x.x.x]`, `[::ffff:0.0.0.0]`,
 //   which reach this Mac's IPv4 loopback just the same), with a port written or not.
 // - `loopbackPort`: the subset that opens in the in-app browser as a forward (`remote.forward.open`): http or https on
-//   `localhost`, `127.0.0.1` or `0.0.0.0` (the endpoint connects the machine's 127.0.0.1), the port the link writes or its
-//   scheme's default (80, 443), written or implied.
+//   `localhost`, `127.0.0.1`, `0.0.0.0`, `[::]` or `[::1]` (the endpoint connects the machine's 127.0.0.1, then its ::1
+//   when that is refused, so a server bound to either loopback, or to every address, is reached; python's
+//   `http.server` prints `http://[::]:8000/`), the port the link writes or its scheme's default (80, 443).
 //
-// A link of a remote session that is loopback but not forwardable (`[::1]`, `127.0.0.2`, `ws:`, `*.localhost`, …) is
-// refused: opened neither forwarded nor on this Mac.
-const FORWARDABLE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+// A link of a remote session that is loopback but not forwardable (`127.0.0.2`, `ws:`, `*.localhost`, an IPv4-mapped
+// address, …) is refused: opened neither forwarded nor on this Mac.
+const FORWARDABLE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '[::]', '[::1]']);
 const DEFAULT_PORTS: Readonly<Record<string, number>> = { 'http:': 80, 'https:': 443 };
 
 function parse(url: string): URL | null {
@@ -55,7 +56,7 @@ export function loopbackPort(url: string): number | null {
   return parsed.port === '' ? DEFAULT_PORTS[parsed.protocol] : Number(parsed.port);
 }
 
-/** The link's page on this Mac's forwarding listener: its scheme, path, query and fragment at `127.0.0.1:<localPort>`. */
+/** The link's page on this Mac's forwarding listener: its scheme, path, query and fragment at `127.0.0.1:<localPort>` (a bracketed IPv6 host replaced whole). */
 export function forwardedUrl(url: string, localPort: number): string {
   const parsed = new URL(url);
   parsed.hostname = '127.0.0.1';

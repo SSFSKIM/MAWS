@@ -131,7 +131,7 @@ export const BROWSER_COPY = {
     notAllowed: (machine: string) => `This Mac isn’t allowed to open ports on ${machine}`,
     notOffered: (machine: string) => `${machine} runs a version of MAWS that can’t forward ports`,
     cancelled: 'Opening the port was cancelled',
-    refused: (machine: string) => `This link points at ${machine}’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1 or 0.0.0.0)`,
+    refused: (machine: string) => `This link points at ${machine}’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1, 0.0.0.0, [::] or [::1])`,
     tryAgain: 'Try again',
     dismiss: 'Dismiss',
   },

@@ -3,7 +3,7 @@
 // the in-app browser through a port forwarded over the machine's link, never on this Mac's localhost:
 //
 // - the rule (`forwardOf`): a link the shared loopback rule forwards, out of a session on another machine; and a loopback
-//   link of such a session that is no forward (another scheme, [::1], the rest of 127/8: `loopbackElsewhere`), which names
+//   link of such a session that is no forward (another scheme, the rest of 127/8, an IPv4-mapped host: `loopbackElsewhere`), which names
 //   that machine's loopback all the same, so it opens nowhere;
 // - the open (`openForward`, the Browser tool's): `remote.forward.open` on this app, then the page on the local
 //   listener's port, in the session's browser, reusing a tab already at that URL;
