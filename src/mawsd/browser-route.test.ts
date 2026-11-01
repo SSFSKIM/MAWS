@@ -122,6 +122,35 @@ describe('the route’s state and epoch (§B)', () => {
     expect(t.starts).toHaveLength(1);
   });
 
+  it('a retry in the same epoch owns the start: the aborted first demand’s failure leaves the retry’s start to finish headless', async () => {
+    const t = stand();
+    t.live();
+    const { epoch } = t.route.reading(S);
+    const first = t.route.ensureBrowser(t.demand());
+    const retry = t.route.ensureBrowser(t.demand()); // the broker aborted the first and began again in the same epoch
+    t.starts[0]!.answer.reject(new Error('aborted'));
+    await expect(first).rejects.toThrow('aborted');
+    expect(t.route.reading(S), 'the retry is still under way').toEqual({ state: 'starting', epoch });
+    t.served.set(S, ENGINE);
+    t.starts[1]!.answer.resolve({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
+    await retry;
+    expect(t.route.reading(S)).toEqual({ state: 'headless', epoch });
+  });
+
+  it('a superseded demand’s late success decides nothing: the retry’s failure returns the route to cold', async () => {
+    const t = stand();
+    t.live();
+    const { epoch } = t.route.reading(S);
+    const first = t.route.ensureBrowser(t.demand());
+    const retry = t.route.ensureBrowser(t.demand());
+    t.starts[0]!.answer.resolve({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
+    await first;
+    expect(t.route.reading(S).state).toBe('starting');
+    t.starts[1]!.answer.reject(new Error('the browser on mini did not start within 4000 ms'));
+    await expect(retry).rejects.toThrow('did not start');
+    expect(t.route.reading(S)).toEqual({ state: 'cold', epoch });
+  });
+
   it('a start answering after the epoch moved leaves the route where it moved: never headless, the target its own epoch', async () => {
     const t = stand();
     t.live();
@@ -333,5 +362,22 @@ describe('the inventory cache (§G, read by M6)', () => {
     t.inputs.headless = null;
     t.route.inputsChanged();
     expect(seen).toHaveLength(count);
+  });
+
+  it('keeps its watchers across the entry’s replacement: an adopted engine’s exit, then its resume', async () => {
+    const t = stand();
+    t.live();
+    const seen: { epoch: string; tabs: unknown[] }[] = [];
+    t.route.watchInventory(S, (inventory) => void seen.push(inventory));
+    await t.promote();
+    t.route.state(ENGINE, { appSessionId: S, inventory: INVENTORY });
+    t.route.statusSeen(S, { process: 'exited', pid: null });
+    t.route.removed(S); // daemon.ts: an exited engine no launch of this daemon was told of
+    const told = seen.length;
+    t.live(S, 5_678); // resumed: a new entry for the same session
+    expect(seen.slice(told), 'the new period’s epoch told').toEqual([{ epoch: t.route.reading(S).epoch, tabs: [], selected: null, state: 'ready' }]);
+    await t.promote();
+    t.route.state(ENGINE, { appSessionId: S, inventory: INVENTORY });
+    expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, ...INVENTORY });
   });
 });

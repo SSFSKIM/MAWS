@@ -13,7 +13,8 @@
 // host's `host.browserIdle` (D20). A reused pid running another engine (the same pid, another start, as the peer check
 // reads it) is an exit too (§B, amended at M5's review). It is minted before anything of the old route is torn down, so every waiter and reply
 // bound to the old one is refused from that instant; `cold` → `starting` → `headless` keep it, and a start that fails
-// returns to `cold` in the same epoch. Nothing migrates: the old route's drop (`dropBrowser`) closes its tabs.
+// returns to `cold` in the same epoch. Only the latest demand's start moves `starting` on: a retry in the same epoch
+// supersedes an aborted one, whose late answer decides nothing. Nothing migrates: the old route's drop (`dropBrowser`) closes its tabs.
 //
 // The inventory cache (§G): what the selected engine connection last pushed (`browserEngine.state`), stamped with the
 // epoch, reset at each; its watchers hear the current reading at once and each change (M6's feed reads it, never loading
@@ -65,14 +66,19 @@ interface Entry {
   pid: number | null; // the engine's, kept across a reading with none
   reason: string | null; // `none`'s reason as published: a reason that changes with the state unchanged is told, no epoch minted
   inventory: EngineInventory | null; // the selected engine's last push in this epoch
-  watchers: Set<(inventory: BrowserInventory) => void>;
+  attempt: number; // the latest demand's start: only its completion moves `starting` on (an older one was aborted or superseded)
 }
+
+type Watcher = (inventory: BrowserInventory) => void;
 
 const HEADLESS_STATES: ReadonlySet<BrowserRouteState> = new Set(['starting', 'headless']);
 
 export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
   const { machine, log } = options;
   const entries = new Map<AppSessionId, Entry>();
+  // The inventory's watchers, per session for as long as they watch: an entry is replaced (an adopted engine's exit, then
+  // its resume) under watchers that stay
+  const watchers = new Map<AppSessionId, Set<Watcher>>();
   const ends = new Set<(appSessionId: AppSessionId, reason: PeriodEnd) => void>();
   const prefix = randomBytes(4).toString('hex'); // a restarted mawsd never repeats an epoch a viewer still holds
   let minted = 0;
@@ -85,7 +91,8 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       const app = options.app();
       const headless = options.headless();
       const state = base(app, headless);
-      entries.set(appSessionId, (found = { state, epoch: mint(), live: false, pid: null, reason: state === 'none' ? headless : null, inventory: null, watchers: new Set() }));
+      entries.set(appSessionId, (found = { state, epoch: mint(), live: false, pid: null, reason: state === 'none' ? headless : null, inventory: null, attempt: 0 }));
+      told(appSessionId, found); // a replaced entry's watchers hear its new epoch
     }
     return found;
   };
@@ -97,11 +104,12 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
     if (HEADLESS_STATES.has(current.state) && current.inventory) return { epoch: current.epoch, ...current.inventory };
     return { epoch: current.epoch, tabs: [], selected: null, state: 'ready' };
   };
-  const told = (current: Entry) => {
-    if (current.watchers.size === 0) return;
+  function told(appSessionId: AppSessionId, current: Entry): void {
+    const watching = watchers.get(appSessionId);
+    if (!watching || watching.size === 0) return;
     const inventory = inventoryOf(current);
-    for (const watcher of [...current.watchers]) watcher(inventory);
-  };
+    for (const watcher of [...watching]) watcher(inventory);
+  }
   const ended = (appSessionId: AppSessionId, reason: PeriodEnd) => {
     for (const listener of [...ends]) listener(appSessionId, reason);
   };
@@ -121,7 +129,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
     ended(appSessionId, reason);
     if (HEADLESS_STATES.has(from)) drop(appSessionId);
     options.routeChanged(appSessionId);
-    told(current);
+    told(appSessionId, current);
   };
   // A session-level event's move: minted, then torn down, at once
   const moveNow = (appSessionId: AppSessionId, current: Entry, to: BrowserRouteState, reason: PeriodEnd, why: string) => {
@@ -151,7 +159,8 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       if (current.epoch !== epoch) return Promise.reject(new Error(`the browser route of ${appSessionId} moved on from epoch ${epoch}`));
       if (current.state === 'cold') current.state = 'starting';
       else if (!HEADLESS_STATES.has(current.state)) return Promise.reject(new Error(`the browser route of ${appSessionId} is ${current.state}`));
-      const ours = () => entries.get(appSessionId) === current && current.epoch === epoch && current.state === 'starting';
+      const attempt = ++current.attempt;
+      const ours = () => entries.get(appSessionId) === current && current.epoch === epoch && current.state === 'starting' && current.attempt === attempt;
       return options.ensureBrowser(demand).then(
         (target) => {
           // §B's linearization point: headless only for the current epoch while still starting
@@ -176,7 +185,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
           // still `none`, for another reason: the same period, its watchers told
           if (to === 'none' && current.reason !== headless) {
             current.reason = headless;
-            told(current);
+            told(appSessionId, current);
           }
           continue;
         }
@@ -216,7 +225,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       log(`[browser] ${appSessionId}: the render host serving it ended → ${current.state}`);
       ended(appSessionId, 'engine_changed');
       options.routeChanged(appSessionId);
-      told(current);
+      told(appSessionId, current);
     },
     browserIdle(appSessionId, held) {
       const current = entries.get(appSessionId);
@@ -227,15 +236,20 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       if (selection(appSessionId)?.engine !== engine) return false;
       const current = entries.get(appSessionId)!;
       current.inventory = inventory;
-      told(current);
+      told(appSessionId, current);
       return true;
     },
     inventory: (appSessionId) => inventoryOf(entry(appSessionId)),
     watchInventory(appSessionId, changed) {
       const current = entry(appSessionId);
-      current.watchers.add(changed);
+      let watching = watchers.get(appSessionId);
+      if (!watching) watchers.set(appSessionId, (watching = new Set()));
+      watching.add(changed);
       changed(inventoryOf(current));
-      return () => void current.watchers.delete(changed);
+      return () => {
+        watching.delete(changed);
+        if (watching.size === 0 && watchers.get(appSessionId) === watching) watchers.delete(appSessionId);
+      };
     },
     periodEnds(listener) {
       ends.add(listener);
