@@ -1254,6 +1254,73 @@ describe('the detached transport: the handover', () => {
     expect(errors.mock.calls.flat().join(' ')).not.toContain('unexpectedly');
   });
 
+  // fix wave 3c: a completion is its raising process's (D60), whichever link to that process is current. A host that
+  // announced a pane request, asked to hand over (deferred), whose socket then drops while it lives on: `status.hold`
+  // keeps the next status answer (the reconnect's welcome ask) until released.
+  const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+  async function paneDrainingFake() {
+    const drain = { inFlight: 1, armed: false };
+    const asked: unknown[] = [];
+    const answered: unknown[] = [];
+    const status = { hold: false, held: false, release: () => {} };
+    const fake: FakeSupervisor = await startFake({
+      register: (on) => {
+        on('host.supervisorStatus', async () => {
+          if (drain.armed && status.hold) {
+            status.hold = false;
+            await new Promise<void>((resolve) => ((status.held = true), (status.release = resolve)));
+          }
+          return (drain.armed ? drainingStatus(fake.pid, drain.inFlight) : supervisorStatus(fake.pid)) as never;
+        });
+        on('host.handover', async () => {
+          drain.armed = true;
+          asked.push(null);
+          return drain.inFlight > 0 ? { state: 'deferred' as const, inFlight: drain.inFlight } : { state: 'detaching' as const };
+        });
+        on('maws.pane.answer', async (input) => (answered.push(input), { outcome: 'delivered' as const }));
+      },
+    });
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {}); // the runtime's note of the tries before its ready line
+    await until(() => fake.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore()); // announced once the link said ready
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    return { fake, asked, answered, status };
+  }
+
+  it('a completion held while its raiser reconnects mid-drain goes out on the link that meets it draining, once; held work stays for the successor', { timeout: 15_000 }, async () => {
+    const { fake: old, asked, answered, status } = await paneDrainingFake();
+    status.hold = true; // the reconnect's welcome status waits
+    old.dropClient(); // the host lives on, draining
+    await until(() => status.held, 5_000); // past the exit's settle: reconnected, its status asked
+    const completion = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER); // held for its raiser, reconnecting
+    const work = ping(); // new work: held for the successor
+    await sleep(50);
+    expect(answered).toEqual([]);
+    status.release();
+    await until(() => asked.length >= 2); // met draining at the welcome: taken back into the handover
+    await vi.waitFor(() => expect(answered, 'the completion went out on the link met draining').toHaveLength(1), { timeout: 2_000, interval: 5 });
+    await expect(completion).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    await sleep(100);
+    expect(answered).toEqual([ANSWER]);
+    expect([state().state, supervisor.handoverState('engine-host')?.state]).toEqual(['restarting', 'draining']);
+    expect(spawn).not.toHaveBeenCalled(); // the ping waits for the successor
+    await old.die(); // its drain settled: it exits
+    expect(await work).toMatchObject({ ok: true, value: { pid: candidates[0]!.pid } });
+  });
+
+  it('a completion dispatched while a drain’s closed socket awaits the exit’s settle is held for its raiser, never written to that socket, and reaches it once reconnected', { timeout: 15_000 }, async () => {
+    const { fake: old, answered } = await paneDrainingFake();
+    old.dropClient(); // the host lives on, draining
+    await sleep(50); // inside the settle (exitWaitMs): the process not yet judged
+    const completion = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    await vi.waitFor(() => expect(answered, 'the completion reached its raiser once reconnected').toHaveLength(1), { timeout: 5_000, interval: 5 }); // reconnected, met draining, sent on the fresh link
+    await expect(completion).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(answered).toEqual([ANSWER]);
+    expect([state().restarts, supervisor.facts('engine-host').lastExit], 'no crash: the host lives').toEqual([0, null]);
+  });
+
   it('a host that said its rows detached, then exited, handed over as planned: no crash count, no backoff, no toast', async () => {
     const { fake: old, inFlight } = await handingOverFake({}, { count: 1 });
     await supervisor.start();

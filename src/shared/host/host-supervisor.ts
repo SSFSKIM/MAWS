@@ -609,13 +609,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     if (asker) host.gone?.carry(asker); // P5 O1 M5: after the request, so a gone client's line follows it
   }
 
-  // P5 O16 M3b fix wave 3: a held completion goes to its raising process alone (`pid`: the fresh link's, null when unknown)
-  function sendHeld(host: Host, pid: number | null = null): void {
-    for (const [id, pending] of host.pending) {
-      if (pending.sent) continue;
-      if (pending.issuer !== null && pending.issuer !== pid) failCompletion(host, id, pending);
-      else send(host, pending);
-    }
+  // What was held for whichever host serves next. P5 O16 M3b fix wave 3, 3c: a held completion is its raising process's
+  // alone, sent when a link to that process opens (`opened`), failed once it is gone; never sent here
+  function sendHeld(host: Host): void {
+    for (const pending of host.pending.values()) if (!pending.sent && pending.issuer === null) send(host, pending);
   }
 
   // Held work that needs a host: a held completion needs only its own process, never another (fix wave 3)
@@ -633,9 +630,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     for (const [id, pending] of host.pending) if (!pending.sent && pending.issuer !== null && pids.includes(pending.issuer)) failCompletion(host, id, pending);
   }
 
+  // A link to `pid` opened (fix wave 3c: whether it serves or meets the host draining): every other process reconnecting
+  // is gone, and the completions held for `pid` go out on it, so a completion follows its process, not a socket (D60)
   function opened(host: Host, link: MainPort, pid: number): void {
     host.closedPid = null;
     processGone(host, host.routes.opened(link, pid));
+    for (const pending of host.pending.values()) if (!pending.sent && pending.issuer === pid) send(host, pending, link);
   }
   // P5 O16 M3b fix wave 3 end
 
@@ -715,11 +715,13 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         host.port = link;
         host.draining = null; // P5 O16 M3b fix wave 1: the successor's link (the old one closed before it)
         [host.drainStopped, host.drainHears] = [null, false]; // M3c fix wave 3
-        opened(host, link, welcome.pid); // fix wave 3: a process still reconnecting is gone, its completions failed
         host.peer = welcome.peer; // P5 O1 M6
         host.welcome = welcome; // P5 O2 M5
         host.gone?.close(); // P5 O1 M5: a link's relay never outlives it
         host.gone = clientGoneRelay((message) => link.postMessage(message));
+        // fix wave 3: a process still reconnecting is gone, its completions failed; 3c: what `pid` raised goes out on the
+        // link, so after the peer and the gone relay, which `send` reads
+        opened(host, link, welcome.pid);
         // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
         host.relay?.connect(link);
         link.onDoc((channel, frame) => host.relay?.deliver(channel, frame));
@@ -739,7 +741,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           return takeBack(host, welcome.pid, facts.draining);
         }
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
-        sendHeld(host, welcome.pid);
+        sendHeld(host);
         host.settleFirstLaunch();
         if (external(host)) readyIfAsked(host); // P5 O2 M3
         else sayReady(host, link);
@@ -747,6 +749,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       disconnected() {
         if (stopped) return;
         if (host.quitting) return detach(host, 'stopped for the quit'); // the state keeps its pid for the quit's kill rung
+        // P5 O16 M3c fix wave 3c: a drain's link closed; until the transport judges the exit (`lost`), its process is
+        // reconnecting, so a completion it raised is held for it from now, never written to the closed link
+        if (host.draining) host.routes.closed(host.draining);
         disconnected();
       },
       lost(loss) {

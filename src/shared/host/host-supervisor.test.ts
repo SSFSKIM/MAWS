@@ -305,6 +305,40 @@ describe('an on-demand host', () => {
     expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  // P5 O16 M3c fix wave 3c: an adoption's connect lasts until the host's welcome status is answered (the transport asks
+  // it before reporting the link), so the host still reads parked meanwhile. A wake, a request or another adoption then
+  // joins that connect: a second connection would be another client to the host, which refuses the first `replaced`
+  // and, read as a takeover, ends a relay (`mawsd`'s onReplaced)
+  it('a wake, a request or an adoption while an adoption’s welcome status is still asked joins it: one connection, no takeover', async () => {
+    const status = { asks: 0, release: () => {} };
+    const fake = await startFake({
+      register: (on) =>
+        on('host.supervisorStatus', async () => {
+          if (++status.asks === 1) await new Promise<void>((resolve) => (status.release = resolve));
+          return { mode: 'detached', pid: fake.pid } as never; // not draining
+        }),
+    });
+    const replaced: HostOwner[] = [];
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } }, { onReplaced: (owner) => void replaced.push(owner) });
+    await supervisor.start();
+    const adopted = supervisor.adopt('engine-host');
+    await until(() => status.asks === 1);
+    const again = supervisor.adopt('engine-host'); // still parked: the transport's adoption joins
+    supervisor.wake('engine-host');
+    const pinged = ping(supervisor);
+    await sleep(100);
+    expect(fake.connections, 'no second connection while the first is admitted').toHaveLength(1);
+    status.release();
+    await expect(adopted).resolves.toBe(true);
+    await expect(again).resolves.toBe(true);
+    await expect(pinged).resolves.toMatchObject({ ok: true });
+    await sleep(100);
+    expect(fake.connections).toHaveLength(1);
+    expect(replaced).toEqual([]);
+    expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 // The panel's sweep#3: a command the daemon runs for main keeps its own completion budget across the host binding.

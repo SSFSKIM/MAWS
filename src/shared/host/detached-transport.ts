@@ -218,7 +218,7 @@ export interface ServedFacts {
 
 export interface DetachedEvents {
   connected(link: HostLink, welcome: Welcomed, facts?: ServedFacts): void;
-  disconnected(): void;
+  disconnected(): void; // the served connection closed where `lost` (its verdict) may follow later (fix wave 3c: a drain's too)
   lost(loss: DetachedLoss): void;
   exited(exit: ExitInfo): void;
   failed(reason: DetachedFailure, message: string): void;
@@ -332,6 +332,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let waitingFor: string | null = null;
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
   let adopting: ((served: boolean) => void) | null = null; // P5 O2 M3: the adoption under way, answered once
+  // P5 O16 M3c fix wave 3c: a welcomed link not reported yet (its status asked, `serve`), and what joined its admission
+  let admitting: ((served: boolean) => void)[] | null = null;
   let handoverAsks = 0; // P5 O16 M3b: the ids of `host.handover` requests, apart from any the host supervisor sends
 
   function after(ms: number, run: () => void): void {
@@ -359,8 +361,11 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
 
   // `replaceRefused`: the owner asked to restart an incompatible supervisor (replaceIncompatible), for this attempt only.
   // P5 O2 M3: `adopt`: one connect to a live lock holder's socket, nothing started; answered once at the attempt's end.
+  // Fix wave 3c: while a welcomed link is still admitted (`admitting`), a launch or an adoption joins that connect, never
+  // opening a second connection, which the host would read as another client replacing this one.
   function launch(replaceRefused = false, adopt: ((served: boolean) => void) | null = null): void {
     if (stopped || quitting) return adopt?.(false);
+    if (admitting) return void (adopt && admitting.push(adopt));
     cancelAttempt();
     adopting = adopt;
     const gen = generation;
@@ -742,6 +747,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   // Fix wave 3b: a host that hands over, reached directly (not through a relay, whose host is the relay's), is asked its
   // status on the fresh link before the link is reported, so a drain armed already reaches the host supervisor with the
   // link (`draining`); no answer within helloTimeoutMs, or an error, reads as none. `then`: whether the link was reported.
+  // Fix wave 3c: until then the connect is not over: a launch or an adoption meanwhile joins it (`admitting`).
   function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean, updatePending: boolean, then: (servedIt: boolean) => void): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
@@ -768,8 +774,14 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       for (const listener of listeners) listener(data);
     });
     let reported = false;
+    const joined = [then];
+    admitting = joined;
+    const admitted = (servedIt: boolean) => {
+      if (admitting === joined) admitting = null;
+      for (const answer of joined) answer(servedIt);
+    };
     port.onClose(() => {
-      if (!reported) then(false); // closed while its status was asked: never reported, the close is read as any other
+      if (!reported) admitted(false); // closed while its status was asked: never reported, the close is read as any other
       closed(connection);
     });
     const { peer } = welcome;
@@ -791,7 +803,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         draining ? { updatePending: false, draining } : { updatePending },
       );
       for (const data of held) for (const listener of listeners) listener(data);
-      then(true);
+      admitted(true);
     };
     if (options.relayed || !peer.capabilities.includes(HOLDER_CAPABILITY)) {
       report();
@@ -858,8 +870,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     // P5 O16 M3b (D40): a host asked to hand over: its successor is spawned once it is gone, never parked. Fix wave 3:
     // whether it handed over or crashed mid-drain is the host supervisor's to read (above). Fix wave 3b: it is looked at
     // until gone within `exitWaitMs`, as an idle exit is (#413); one that outlives that lost only its socket, so it is
-    // reconnected to (quiet), met draining at the welcome and taken back into the handover
+    // reconnected to (quiet), met draining at the welcome and taken back into the handover. Fix wave 3c: the close is
+    // told at once (`disconnected`), as any other close is, so nothing more is routed to that link meanwhile
     if (connection.exitAsked === 'replace') {
+      events.disconnected();
       const idleAsked = idleArmed !== null && idleArmed.pid === connection.proc.pid && idleArmed.procStart === connection.proc.procStart;
       const settleBy = Date.now() + timing.exitWaitMs;
       const settled = () => {
@@ -1054,7 +1068,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return true;
     },
     adopt() {
-      if (served) return Promise.resolve(true);
+      if (served && !admitting) return Promise.resolve(true);
       return new Promise((resolve) => launch(false, resolve));
     },
     // P5 O2 M3 end
