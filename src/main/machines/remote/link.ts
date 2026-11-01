@@ -55,11 +55,13 @@ import { peerLists } from './capabilities';
 import { CARRIER_CLOSED, dialDirect as dialDirectCarrier, isTailnetAddress, openRelaySocket, raceDirect, RelayUpgradeError, type RelaySocket } from './carriers';
 import { dispatchOverLink } from './dispatch';
 import type { EndpointRecords } from './endpoint-records';
+import { StreamTable, type RemoteStream, type StreamRequest, type StreamSink } from './streams';
 import { SubTable, type Subscription, type SubscribeRequest, type SubscriptionSink } from './subs';
 import { timingOf, TokenBucket, type RemoteTiming } from './timing';
 
 export type { ActHandle, ActOutcome, ActProgress, ActRequest } from './acts';
 export type { Subscription, SubscribeRequest, SubscriptionSink } from './subs';
+export type { RemoteStream, StreamOpened, StreamRequest, StreamSink } from './streams';
 export type { RelaySocket } from './carriers';
 
 export type Carrier = 'direct' | 'relay';
@@ -92,6 +94,11 @@ export interface RemoteLink extends MachineLink {
   /** P5 O7 M4: the machine's ledger asked again about an op settled `unknown` (ActTable.requery): query only, never the act. */
   requery(op: { opId: string; opCreated: string; executor: Executor }): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
+  /**
+   * P5 O7 M3 (§N): a byte stream under an act sent on this link, on the current channel (or the next, while none is);
+   * closed('not-offered') at once when the peer lists no `rl2.streams`, and closed('carrier') with its channel.
+   */
+  openStream(request: StreamRequest, sink: StreamSink): RemoteStream;
   /** `person`: a person acted on this machine (also lifts `refused`). */
   probe(reason: ProbeReason): void;
 }
@@ -223,6 +230,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
   const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
   const subs = new SubTable({ send, current: () => current !== null, peerCapabilities, timing, log });
+  const streams = new StreamTable({ send, current: () => current !== null, peerCapabilities, log });
 
   // The carrier a reported `up` stands on: the last current channel's, so a reconnect within the grace over the same
   // carrier is heard as nothing, and a switch is heard.
@@ -416,6 +424,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     armExpiry();
     acts.onCurrent();
     subs.onCurrent();
+    streams.onCurrent();
     flushCalls();
     if (result.carrier === 'direct') closeRelay();
     else armRecheck();
@@ -452,6 +461,12 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       case 'resumed':
       case 'ended':
         return subs.receive(message);
+      case 'streamOpened':
+      case 'streamRefused':
+      case 'streamData':
+      case 'streamCredit':
+      case 'streamClose':
+        return streams.receive(message);
       case 'ping':
         send({ t: 'pong', at: message.at });
         return;
@@ -474,6 +489,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     recheckTimer = clear(recheckTimer);
     acts.onLost();
     if (reason === 'removed') return refuse('removed');
+    streams.onLost();
     if (state === 'closed' || state === 'refused') return;
     log(`the ${was?.carrier ?? ''} channel was lost (${reason}); reconnecting`);
     if (state === 'up') {
@@ -502,6 +518,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     clearExpiry = null;
     closeRelay();
     subs.close('removed');
+    streams.close('removed');
     acts.close('removed');
     failCalls('removed');
     notify();
@@ -589,6 +606,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         const old = current;
         current = null;
         acts.onLost();
+        streams.onLost(); // a stream is its channel's: the old channel's end at the endpoint ends them there too
         log('the direct carrier answers again: switching from the relay');
         adopt(result);
         old.channel.close('closed');
@@ -753,6 +771,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     act: (request) => acts.act(request, ended()),
     requery: (op) => acts.requery(op, ended()),
     subscribe: (request, sink) => subs.subscribe(request, sink, ended()),
+    openStream: (request, sink) => streams.open(request, sink, ended()),
     probe,
     close() {
       if (state === 'closed') return;
@@ -765,6 +784,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       const was = current;
       current = null;
       subs.close('closed');
+      streams.close('closed');
       acts.close('closed');
       failCalls('closed');
       was?.channel.close('closed');

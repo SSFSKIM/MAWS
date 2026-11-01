@@ -5,7 +5,7 @@ import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
-import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, RemoteLink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
+import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
 export const MINI = 'MiniMachineRef00000000' as MachineRef;
 
@@ -156,6 +156,14 @@ export class FakeLink implements RemoteLink {
       cursor: () => sub.at,
       close: () => void (sub.closed = true),
     };
+  }
+
+  /** P5 O7 M3: each stream opened, as the suite reads it; its sink is the suite's to drive. */
+  readonly streams: Array<{ request: StreamRequest; sink: StreamSink; closed: string | null }> = [];
+  openStream(request: StreamRequest, sink: StreamSink): RemoteStream {
+    const entry = { request, sink, closed: null as string | null };
+    this.streams.push(entry);
+    return { id: `stream-${this.streams.length}`, send: () => {}, control: () => {}, credit: () => {}, close: (reason = 'closed') => void (entry.closed = reason), queued: () => 0 };
   }
 
   /** The subscriptions still open. */
