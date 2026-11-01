@@ -835,16 +835,24 @@ test('O17 scene 2, handover: the app attaching during a start and during an acti
       const created = await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
       expect(await scene.render()).toMatchObject({ browserSessions: 1, browserTabs: 1 });
       const artifact = await scene.daemon.request<{ artifact: { id: string } }>('artifacts.create', { kind: 'html', title: 'Handover export', content: { bytes: new TextEncoder().encode('<!doctype html><title>x</title><p>handover</p>'), name: 'index.html' } });
-      const inFlight = cua.call('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Runtime.evaluate', params: { expression: 'new Promise((r) => setTimeout(r, 30000))', awaitPromise: true }, timeoutMs: 60_000 });
+      const { hellos } = await cua.state();
+      // the loss and the reconnection each timed when observed: the loss as the command's answer arrives, the app's serving
+      // as the connector's next hello (a 50 ms read of its state), so neither the launch nor the export is inside the bound
+      let lostAt = 0;
+      const inFlight = cua.call('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Runtime.evaluate', params: { expression: 'new Promise((r) => setTimeout(r, 30000))', awaitPromise: true }, timeoutMs: 60_000 }).then((answer) => ((lostAt = Date.now()), answer));
       const exporting = scene.daemon.request<{ path: string }>('artifacts.export', { artifactId: artifact.artifact.id, format: 'pdf' });
       const second = await launchOver(scene);
       launches.push(second);
-      const lost = await inFlight;
-      const lostAt = Date.now();
-      expect(lost, 'the command in flight ends with its connection').toMatchObject({ ok: false, error: 'lost' });
-      expect((await exporting).path.startsWith(join(scene.userData, 'artifacts', artifact.artifact.id, 'exports')), 'the export completes').toBe(true);
+      expect(await inFlight, 'the command in flight ends with its connection').toMatchObject({ ok: false, error: 'lost' });
+      let servedAt = 0;
+      for (const deadline = Date.now() + 30_000; servedAt === 0 && Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
+        const now = await cua.state().catch(() => null);
+        if (now !== null && now.connected === true && now.hellos! > hellos!) servedAt = Date.now();
+      }
+      expect(servedAt, 'cua reconnected, to the app').toBeGreaterThan(0);
+      expect(servedAt - lostAt, 'served within cua’s 5 s retry, and the read’s slack').toBeLessThan(5_000 + 3_000);
       await servedByApp(second);
-      expect(Date.now() - lostAt, 'served within cua’s 5 s retry, and the poll’s slack').toBeLessThan(5_000 + 3_000);
+      expect((await exporting).path.startsWith(join(scene.userData, 'artifacts', artifact.artifact.id, 'exports')), 'the export completes').toBe(true);
       await expect.poll(async () => (await scene.render()).browserTabs ?? 0, { message: 'the session’s headless tabs closed' }).toBe(0);
       await quitApp(second);
     });

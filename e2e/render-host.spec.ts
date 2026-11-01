@@ -406,6 +406,7 @@ type PersonInput = Extract<BrowserEngineRequest['operation'], { op: 'input' }>['
 interface EngineFacts {
   sessions: Record<string, { tabs: number; creating: number; held: string }>;
   screencast: { tabs: number; images: number; viewers: { id: string; tabId: string; control: boolean; inFlight: number; encoding: number; waiting: number }[] };
+  views: { tabId: string; appSessionId: string; contentsId: number | null }[]; // fix 2: the view the engine holds for each tab
 }
 const P3_IDENTITY = { ref: 'e2e-render-host-pass3', name: 'pass3', project: { key: 'e2e', name: 'e2e', smnsId: null } };
 
@@ -467,6 +468,15 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
     }, [urlPart, expression] as const) as Promise<T | null>;
   const tabIdOf = (path: string) => wire.states.at(-1)?.tabs.find((tab) => tab.url === pages.url(path))?.tabId ?? null;
   const inspect = () => app.evaluate(() => (globalThis as unknown as { __maws_tab_engine: { inspect(): EngineFacts } }).__maws_tab_engine.inspect());
+  // the view the engine holds for a tab (its inspection names it by webContents id), offscreen or not, and how many windows
+  // show: never a URL lookup, which can miss a document not yet committed
+  const viewFacts = async (tabId: string) => {
+    const contentsId = (await inspect()).views.find((view) => view.tabId === tabId)?.contentsId ?? null;
+    return app.evaluate(({ BaseWindow, webContents }, id) => {
+      const contents = id === null ? undefined : webContents.fromId(id);
+      return { held: contents !== undefined, offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
+    }, contentsId);
+  };
   const lines: string[] = [];
   try {
     await test.step('prepare: the session’s socket listens and admits mawsd’s relay; cua’s creation sequence makes an offscreen tab behind the fence', async () => {
@@ -481,12 +491,8 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       expect(typeof tab.id).toBe('number');
       expect(wire.work, 'the fence held before the first tab').toEqual([{ appSessionId: P3, held: true }]);
       await expect.poll(() => tabIdOf('/still'), { message: 'the inventory pushed with the tab' }).not.toBeNull();
-      const facts = await app.evaluate(({ BaseWindow, webContents }, url) => {
-        const contents = webContents.getAllWebContents().find((each) => each.getURL() === url);
-        return { offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
-      }, pages.url('/still'));
-      expect(facts, 'the tab renders offscreen and no window is shown').toEqual({ offscreen: true, shown: 0 });
-      expect(await inPage<number[]>('/still', '[innerWidth, innerHeight]'), 'the agent’s viewport').toEqual([1280, 800]);
+      expect(await viewFacts(tabIdOf('/still')!), 'the tab renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
+      await expect.poll(() => inPage<number[]>('/still', '[innerWidth, innerHeight]'), { message: 'the agent’s viewport, once the page commits' }).toEqual([1280, 800]);
     });
 
     await test.step('the frame subscription gives an offscreen view a first frame, and a still page nothing more after its acknowledgement', async () => {
@@ -537,12 +543,8 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       await expect.poll(() => tabIdOf('/popup')).not.toBeNull();
       await inPage('/popup', `window.open(${JSON.stringify(pages.url('/child'))}, '_blank'); true`); // with a user gesture
       await expect.poll(() => tabIdOf('/child'), { message: 'the popup adopted as a tab of the session' }).not.toBeNull();
-      const facts = await app.evaluate(({ BaseWindow, webContents }, url) => {
-        const contents = webContents.getAllWebContents().find((each) => each.getURL() === url);
-        return { offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
-      }, pages.url('/child'));
-      expect(facts, 'the adopted popup renders offscreen and no window is shown').toEqual({ offscreen: true, shown: 0 });
-      expect(await inPage<number[]>('/child', '[innerWidth, innerHeight]'), 'the popup at the agent’s viewport').toEqual([1280, 800]);
+      expect(await viewFacts(tabIdOf('/child')!), 'the adopted popup renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
+      await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { message: 'the popup at the agent’s viewport, once it commits' }).toEqual([1280, 800]);
       const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
       await host!.request('tabs.remove', { tabId: child.id });
       await host!.request('tabs.remove', { tabId: opener.id });
