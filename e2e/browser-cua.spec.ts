@@ -841,14 +841,18 @@ test('O17 scene 2, handover: the app attaching during a start and during an acti
       let lostAt = 0;
       const inFlight = cua.call('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Runtime.evaluate', params: { expression: 'new Promise((r) => setTimeout(r, 30000))', awaitPromise: true }, timeoutMs: 60_000 }).then((answer) => ((lostAt = Date.now()), answer));
       const exporting = scene.daemon.request<{ path: string }>('artifacts.export', { artifactId: artifact.artifact.id, format: 'pdf' });
+      // the reconnection watched from before the app's launch, so its time is when it happened, not when the launch returned
+      let servedAt = 0;
+      const watching = (async () => {
+        for (const deadline = Date.now() + 90_000; servedAt === 0 && Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
+          const now = await cua.state().catch(() => null);
+          if (now !== null && now.connected === true && now.hellos! > hellos!) servedAt = Date.now();
+        }
+      })();
       const second = await launchOver(scene);
       launches.push(second);
       expect(await inFlight, 'the command in flight ends with its connection').toMatchObject({ ok: false, error: 'lost' });
-      let servedAt = 0;
-      for (const deadline = Date.now() + 30_000; servedAt === 0 && Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
-        const now = await cua.state().catch(() => null);
-        if (now !== null && now.connected === true && now.hellos! > hellos!) servedAt = Date.now();
-      }
+      await watching;
       expect(servedAt, 'cua reconnected, to the app').toBeGreaterThan(0);
       expect(servedAt - lostAt, 'served within cua’s 5 s retry, and the read’s slack').toBeLessThan(5_000 + 3_000);
       await servedByApp(second);

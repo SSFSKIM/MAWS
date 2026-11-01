@@ -733,6 +733,29 @@ describe('a viewer’s subscription', () => {
     expect(await t.op(B, { op: 'input', subscriptionId: 'v1', seq: 2, event: { kind: 'blur' } }), 'bound to its session').toMatchObject({ ok: false });
   });
 
+  // P5 O17 M8 fix 3: the takeover gate is presence's (agent/control.ts): a person's input takes a tab the agent drives
+  // (`human`, pushed with the inventory), and leaves an idle tab idle, as a local person's click does
+  it('a controlling viewer’s press takes a tab the agent drives (`human`, in the pushed inventory) and leaves an idle tab idle', async () => {
+    const press = (t: Awaited<ReturnType<typeof viewed>>, seq: number) => t.op(A, { op: 'input', subscriptionId: 'v1', seq, event: { kind: 'pointer', type: 'down', x: 3, y: 4, button: 'left', buttons: 1, clickCount: 1, modifiers: [] } });
+    const controlOf = (t: Awaited<ReturnType<typeof viewed>>) => t.states(A).at(-1)?.tabs.find((tab) => tab.tabId === t.tabId)?.control;
+
+    const driven = await viewed();
+    expect((await driven.op(A, { op: 'open', subscriptionId: 'v1', tabId: driven.tabId, control: true })).ok).toBe(true);
+    const [cuaTab] = await driven.host.request<{ id: number }[]>('tabs.query');
+    await driven.host.request('debugger.attach', { tabId: cuaTab!.id });
+    await driven.host.request('debugger.sendCommand', { debuggee: { tabId: cuaTab!.id }, method: 'Runtime.evaluate', params: { expression: '1' } });
+    await expect.poll(() => controlOf(driven), { message: 'the agent’s acting command takes the tab' }).toBe('agent');
+    expect(await press(driven, 1)).toEqual({ ok: true, value: null });
+    await expect.poll(() => controlOf(driven), { message: 'the person’s press takes it from the agent, and the inventory is pushed' }).toBe('human');
+    driven.engine.dispose();
+
+    const idle = await viewed();
+    expect((await idle.op(A, { op: 'open', subscriptionId: 'v1', tabId: idle.tabId, control: true })).ok).toBe(true);
+    expect(await press(idle, 1)).toEqual({ ok: true, value: null });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(controlOf(idle), 'a press on a tab no agent drives leaves it idle').toBe('idle');
+  });
+
   it('answers a text input once the page has inserted it, and one whose insertion failed with the reason', async () => {
     const t = await viewed();
     await t.op(A, { op: 'open', subscriptionId: 'v1', tabId: t.tabId, control: true });

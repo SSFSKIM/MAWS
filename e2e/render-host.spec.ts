@@ -460,23 +460,37 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
     const answer = await ask(operation);
     expect(answer, `${operation.op}${answer.ok ? '' : `; the render host said:\n${scene!.stderr().split('\n').filter((line) => line.includes('[browser]') || line.includes('[render-host]') || line.includes('peer')).slice(-40).join('\n')}`}`).toEqual({ ok: true, value: operation.op === 'inventory' ? expect.anything() : null });
   };
-  // a page's own reading, in the render host's main (never through cua's lease, which a person's input may hold)
-  const inPage = <T>(urlPart: string, expression: string) =>
-    app.evaluate(async ({ webContents }, [part, code]) => {
-      const contents = webContents.getAllWebContents().find((each) => each.getURL().includes(part));
-      return contents ? ((await contents.executeJavaScript(code, true)) as unknown) : null;
-    }, [urlPart, expression] as const) as Promise<T | null>;
   const tabIdOf = (path: string) => wire.states.at(-1)?.tabs.find((tab) => tab.url === pages.url(path))?.tabId ?? null;
   const inspect = () => app.evaluate(() => (globalThis as unknown as { __maws_tab_engine: { inspect(): EngineFacts } }).__maws_tab_engine.inspect());
+  const contentsIdOf = async (tabId: string) => (await inspect()).views.find((view) => view.tabId === tabId)?.contentsId ?? null;
   // the view the engine holds for a tab (its inspection names it by webContents id), offscreen or not, and how many windows
   // show: never a URL lookup, which can miss a document not yet committed
   const viewFacts = async (tabId: string) => {
-    const contentsId = (await inspect()).views.find((view) => view.tabId === tabId)?.contentsId ?? null;
+    const contentsId = await contentsIdOf(tabId);
     return app.evaluate(({ BaseWindow, webContents }, id) => {
       const contents = id === null ? undefined : webContents.fromId(id);
       return { held: contents !== undefined, offscreen: contents?.isOffscreen() ?? null, shown: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length };
     }, contentsId);
   };
+  // a page's own reading, in the render host's main (never through cua's lease, which a person's input may hold): the tab
+  // at `path` in the inventory, its view by the engine's own id, and its document the one committed at that URL; anything
+  // else throws, saying what was missing (a poll retries it; a one-shot call fails loudly, never reads null)
+  const inPage = async <T,>(path: string, expression: string): Promise<T> => {
+    const tabId = tabIdOf(path);
+    if (tabId === null) throw new Error(`no tab at ${path} in the inventory`);
+    const contentsId = await contentsIdOf(tabId);
+    if (contentsId === null) throw new Error(`the engine holds no view for ${path} (${tabId})`);
+    const read = await app.evaluate(async ({ webContents }, [id, url, code]) => {
+      const contents = webContents.fromId(id as number);
+      if (!contents) return { missing: 'no webContents' };
+      if (contents.getURL() !== url) return { missing: `the committed document is ${JSON.stringify(contents.getURL())}` };
+      return { value: (await contents.executeJavaScript(code as string, true)) as unknown };
+    }, [contentsId, pages.url(path), expression] as const);
+    if ('missing' in read) throw new Error(`${path}: ${read.missing}`);
+    return read.value as T;
+  };
+  // the tab's document committed and loaded, before a one-shot action in it
+  const committed = (path: string) => expect.poll(() => inPage<string>(path, 'document.readyState').catch(() => null), { timeout: 15_000, message: `${path} committed and loaded` }).toBe('complete');
   const lines: string[] = [];
   try {
     await test.step('prepare: the session’s socket listens and admits mawsd’s relay; cua’s creation sequence makes an offscreen tab behind the fence', async () => {
@@ -513,8 +527,14 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       const tab = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/input'), group: { key: 's', title: 'cua' } });
       await expect.poll(() => tabIdOf('/input')).not.toBeNull();
       const tabId = tabIdOf('/input')!;
+      await committed('/input');
       await ok({ op: 'open', subscriptionId: 'person', tabId, control: true });
       await expect.poll(() => wire.frames.some((f) => f.subscriptionId === 'person'), { timeout: 10_000, message: 'a frame before any pointer input' }).toBe(true);
+      // the agent drives the tab first (an acting command through its lease): the takeover gate gives a person's input the
+      // tab only from the agent, as a local person's click does (agent/control.ts; an idle tab stays idle)
+      await host!.request('debugger.attach', { tabId: tab.id });
+      await host!.request('debugger.sendCommand', { debuggee: { tabId: tab.id }, method: 'Runtime.evaluate', params: { expression: 'document.title' }, timeoutMs: 10_000 });
+      await expect.poll(() => wire.states.at(-1)?.tabs.find((each) => each.tabId === tabId)?.control, { message: 'the agent’s acting command takes the tab' }).toBe('agent');
       let seq = 0;
       const input = (event: PersonInput) => ok({ op: 'input', subscriptionId: 'person', seq: ++seq, event });
       const centre = { x: BUTTON.x + BUTTON.width / 2, y: BUTTON.y + BUTTON.height / 2 };
@@ -541,6 +561,7 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
     await test.step('an adopted window.open popup is offscreen too, and no window is shown', async () => {
       const opener = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/popup'), group: { key: 's', title: 'cua' } });
       await expect.poll(() => tabIdOf('/popup')).not.toBeNull();
+      await committed('/popup'); // the one-shot window.open runs in the opener's own document, never its blank first one
       await inPage('/popup', `window.open(${JSON.stringify(pages.url('/child'))}, '_blank'); true`); // with a user gesture
       await expect.poll(() => tabIdOf('/child'), { message: 'the popup adopted as a tab of the session' }).not.toBeNull();
       expect(await viewFacts(tabIdOf('/child')!), 'the adopted popup renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
@@ -554,6 +575,7 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       const tab = await host!.request<{ id: number }>('tabs.create', { url: pages.url('/anim'), group: { key: 's', title: 'cua' } });
       await expect.poll(() => tabIdOf('/anim')).not.toBeNull();
       const tabId = tabIdOf('/anim')!;
+      await committed('/anim');
       const rate = async (ms: number) => {
         const before = (await inPage<number>('/anim', '__frames'))!;
         await new Promise((resolve) => setTimeout(resolve, ms));
