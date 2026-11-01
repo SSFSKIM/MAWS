@@ -814,6 +814,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     each(eventListeners, 'engine-host', message);
   });
   hosts.onState('pty-host', (state) => {
+    // P5 O7 M3: the endpoint's remote terminals tell the host's loss (a restart counted) from a reconnect (`ready` again)
+    each(eventListeners, 'pty-host', { name: 'pty.hostState', payload: state });
     if (state.state === 'ready') return void settleCredit(); // every link while no app holds the credit
     ptyRelay.dropApp(`the pty host is ${state.state}`);
   });

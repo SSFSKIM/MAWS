@@ -108,6 +108,32 @@ export class FakePtyHost {
     this.ptys.get(ptyId)!.checkpoint = offset;
   }
 
+  /** mawsd's supervisor's state of the pty host, as the endpoint hears it (`pty.hostState`). */
+  #restarts = 0;
+  #pid = 9000;
+  hostState(state: 'starting' | 'ready' | 'restarting' | 'crashed'): void {
+    const payload = { state, pid: state === 'ready' ? this.#pid : null, restarts: this.#restarts, revision: 0 };
+    for (const listener of this.#events) listener('pty-host', { name: 'pty.hostState', payload });
+  }
+
+  /** The connection to the host drops and comes back: the process, its ptys and its offsets live on. */
+  reconnect(): void {
+    this.hostState('restarting');
+    this.hostState('ready');
+  }
+
+  /** The host process dies: its ptys with it, a restart counted (`restarting`); `relaunched` brings a new one up. */
+  die(): void {
+    this.ptys.clear();
+    this.#restarts += 1;
+    this.hostState('restarting');
+  }
+
+  relaunched(): void {
+    this.#pid += 1;
+    this.hostState('ready');
+  }
+
   /** The pty exits: `pty.exit` on the pty host's events. */
   exit(ptyId: string): void {
     const pty = this.ptys.get(ptyId)!;

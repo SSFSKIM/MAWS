@@ -59,13 +59,13 @@ async function run(f: Fixture, r: Remote, name: string, args: Record<string, unk
   return { action, outcome: (await done(r, action, from)) as { state: string; result?: Record<string, unknown> } };
 }
 
-type PtyOpen = { from?: number; epoch?: string; inputFrom?: number; credit?: number };
+type PtyOpen = { from?: number; epoch?: string; inputFrom?: number; inputSent?: number; credit?: number };
 
 /** A pty stream opened under `op`: its id and the endpoint's answer (`streamOpened` or `streamRefused`). */
 async function openPty(r: Remote, op: string, ptyId: string, o: PtyOpen = {}): Promise<{ id: string; answer: Msg }> {
   const id = id16();
   const from = r.inbox.length;
-  await r.channel.send({ t: 'streamOpen', id, kind: 'pty', op, credit: o.credit ?? 1024 * 1024, pty: { ptyId, from: o.from ?? 0, inputEpoch: o.epoch ?? id16(), inputFrom: o.inputFrom ?? 0 } });
+  await r.channel.send({ t: 'streamOpen', id, kind: 'pty', op, credit: o.credit ?? 1024 * 1024, pty: { ptyId, from: o.from ?? 0, inputEpoch: o.epoch ?? id16(), inputFrom: o.inputFrom ?? 0, ...(o.inputSent === undefined ? {} : { inputSent: o.inputSent }) } });
   return { id, answer: await waitFor(r, (m) => m.id === id && (m.t === 'streamOpened' || m.t === 'streamRefused'), `the answer to stream ${id}`, from) };
 }
 
@@ -890,5 +890,98 @@ describe('a forward to a server on ::1 alone', () => {
     await until(() => closeOf(a, id), 'the response and the close');
     expect(output(a, id).text).toMatch(/^HTTP\/1\.1 200 OK[\s\S]*hello over ::1 from \/vite$/);
     expect(closeOf(a, id)).toBe('closed');
+  });
+});
+
+// ---- The milestone review: input across an endpoint restart, the pty host's loss ----------------------------------------
+
+/** The endpoint stopped and started again on the same machine state, org, engine host and pty host (its ledger kept). */
+async function restarted(f: Fixture & { pty: FakePtyHost }): Promise<Fixture & { pty: FakePtyHost }> {
+  await f.endpoint.stop();
+  started.splice(started.indexOf(f), 1);
+  return start({ services: f.services, host: f.host, records: f.records, chain: f.chain, key: f.key, pty: f.pty });
+}
+
+describe('input across an endpoint restart', () => {
+  it('drops the resend of input the endpoint can’t vouch for (below the device’s `inputSent`): a write that landed is not run twice', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const epoch = id16();
+    const first = await openPty(a, action.opId, ptyId, { epoch });
+    await a.channel.send({ t: 'streamData', id: first.id, offset: 0, data: b64('echo command\r') });
+    await until(() => f.pty.writes.length === 1, 'the write');
+    // The device never saw its refund; mawsd restarts, the pty host, its shell and the op ledger survive.
+    const g = await restarted(f);
+    const a2 = await openRemote(g, org.a1, org.A);
+    const second = await openPty(a2, action.opId, ptyId, { epoch, inputFrom: 0, inputSent: 13 });
+    expect(second.answer.t).toBe('streamOpened');
+    await a2.channel.send({ t: 'streamData', id: second.id, offset: 0, data: b64('echo command\r') });
+    await a2.channel.send({ t: 'streamData', id: second.id, offset: 13, data: b64('ls\r') });
+    await until(() => g.pty.writes.length >= 2, 'the next input written');
+    await sleep(30);
+    expect(g.pty.writes.map((w) => w.data)).toEqual(['echo command\r', 'ls\r']);
+    // The dropped resend is taken all the same: its credit comes back.
+    await until(() => ofStream(a2, second.id).filter((m) => m.t === 'streamCredit').reduce((n, m) => n + (m.bytes as number), 0) === 16, 'both chunks refunded');
+    // A new app run's epoch after the restart writes from 0.
+    const third = await openPty(a2, action.opId, ptyId, { epoch: id16() });
+    await a2.channel.send({ t: 'streamData', id: third.id, offset: 0, data: b64('pwd\r') });
+    await until(() => g.pty.writes.length === 3, 'the new epoch’s first input');
+    expect(g.pty.writes.map((w) => w.data)).toEqual(['echo command\r', 'ls\r', 'pwd\r']);
+  });
+});
+
+describe('the pty host lost', () => {
+  it('ends a remote terminal `exit` at once when the pty host dies (no exit status: lost), its reopen refused `unknown`; a reconnect to the host keeps it', async () => {
+    const f = await start();
+    f.pty.hostState('ready');
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const { id } = await openPty(a, action.opId, ptyId);
+    // The connection drops and comes back: the stream lives on, output and input with it.
+    f.pty.reconnect();
+    await sleep(30);
+    f.pty.emit(ptyId, 'still here');
+    await a.channel.send({ t: 'streamData', id, offset: 0, data: b64('x') });
+    await until(() => output(a, id).text === 'still here' && f.pty.writes.length === 1, 'output and input after the reconnect');
+    expect(closeOf(a, id)).toBeUndefined();
+    // The process dies: the stream closes before any new host is up.
+    f.pty.die();
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('exit');
+    expect(a.channel.closed).toBe(false);
+    f.pty.relaunched();
+    expect((await openPty(a, action.opId, ptyId)).answer).toMatchObject({ t: 'streamRefused', reason: 'unknown' });
+  });
+
+  it('ends after a reconnect a stream whose pty is gone from the host reached again, and keeps the others', async () => {
+    const f = await start();
+    const gone = f.pty.spawn('app-1', 't1');
+    const kept = f.pty.spawn('app-1', 't2');
+    const a = await openRemote(f, org.a1, org.A);
+    const one = await openPty(a, (await run(f, a, 'pty.attach', { ptyId: gone })).action.opId, gone);
+    const two = await openPty(a, (await run(f, a, 'pty.attach', { ptyId: kept })).action.opId, kept);
+    // Its exit came while the host was out of reach: no `pty.exit` was heard.
+    f.pty.ptys.get(gone)!.info.alive = false;
+    f.pty.reconnect();
+    await until(() => closeOf(a, one.id), 'the close');
+    expect(closeOf(a, one.id)).toBe('exit');
+    await sleep(30);
+    expect(closeOf(a, two.id)).toBeUndefined();
+  });
+
+  it('ends every remote terminal at the next `ready` when the host’s death came before any state was heard', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const { id } = await openPty(a, action.opId, ptyId);
+    f.pty.die(); // no baseline: this restart can't be told from the count
+    await sleep(30);
+    f.pty.relaunched();
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('exit');
   });
 });

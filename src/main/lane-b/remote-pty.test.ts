@@ -94,4 +94,24 @@ describe('remote terminal streams (P5 O7 M3)', () => {
     l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
     expect(l.last().controls).toEqual([{ resize: { cols: 120, rows: 40 } }]);
   });
+
+  it('names on each stream the end of the input already sent (`inputSent`), beside its first unrefunded offset', async () => {
+    const l = lab();
+    await l.cmd('pty.spawn', { appSessionId: 'app-1', cols: 80, rows: 24 });
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 0, inputSent: 0 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'ls\r' });
+    l.last().sink.credit(3); // taken
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'echo hi\r' }); // sent, its refund lost with the channel
+    l.last().sink.closed('carrier');
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 3, inputSent: 11 });
+    // Input while no stream is open is held, never sent: it doesn't count as sent until a stream takes it.
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'pwd\r' });
+    l.last().sink.closed('carrier');
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 3, inputSent: 11 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    expect(Buffer.concat(l.last().sent).toString()).toBe('echo hi\rpwd\r');
+    l.last().sink.closed('carrier');
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 3, inputSent: 15 });
+  });
 });

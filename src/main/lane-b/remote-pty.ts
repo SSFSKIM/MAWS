@@ -22,7 +22,9 @@
 //   stream's `nextOffset`. The renderer acknowledges nothing below that, so its credit goes back as it is answered.
 // - Input is numbered per pty from zero in an `inputEpoch` minted once per adapter (an app run), so the machine drops a
 //   resend and a new app run under the same device keys is never read as one. What the machine has not yet taken (its
-//   refunds) is held here and sent again from its first offset on the next stream.
+//   refunds) is held here and sent again from its first offset on the next stream, which also names the end of what was
+//   already sent (`inputSent`): a machine that lost its record of the epoch (its endpoint restarted) drops the resend
+//   below it rather than write it twice, at most once.
 // - Resize is a stream control. The latest geometry is sent again on every stream (one in flight may die with its
 //   channel; the pty takes a size it has as nothing).
 // - A pty's exit closes its stream `exit` after its output: the stream is opened once more from its end to read the exit
@@ -100,6 +102,8 @@ type Pty = {
   inputNext: number;
   held: Uint8Array[];
   heldBytes: number;
+  /** The end of the input handed to a stream in this epoch: an endpoint that lost its record drops what lies below it. */
+  inputSent: number;
   /** The latest geometry the renderer asked for: sent on every stream, since one in flight may die with its channel. */
   geometry: { cols: number; rows: number } | null;
   attach: Attach | null;
@@ -152,7 +156,7 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     const key = keyOf(link.machine, ptyId);
     let pty = ptys.get(key);
     if (pty === undefined) {
-      pty = { machine: link.machine, link, ptyId, op, stream: null, serial: 0, live: false, phase: 'streaming', next: 0, openedAt: 0, credited: 0, rendered: 0, inputNext: 0, held: [], heldBytes: 0, geometry: null, attach: null, retries: 0, retryTimer: null, exitSaid: false };
+      pty = { machine: link.machine, link, ptyId, op, stream: null, serial: 0, live: false, phase: 'streaming', next: 0, openedAt: 0, credited: 0, rendered: 0, inputNext: 0, held: [], heldBytes: 0, inputSent: 0, geometry: null, attach: null, retries: 0, retryTimer: null, exitSaid: false };
       ptys.set(key, pty);
     }
     Object.assign(pty, { link, op, phase: 'streaming', exitSaid: false, retries: 0 });
@@ -168,7 +172,7 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     pty.openedAt = pty.next;
     const mine = () => serial === pty.serial;
     pty.stream = pty.link.openStream(
-      { kind: 'pty', op: pty.op, pty: { ptyId: pty.ptyId, from, inputEpoch: epoch, inputFrom: pty.inputNext - pty.heldBytes } },
+      { kind: 'pty', op: pty.op, pty: { ptyId: pty.ptyId, from, inputEpoch: epoch, inputFrom: pty.inputNext - pty.heldBytes, inputSent: pty.inputSent } },
       {
         opened: (opened) => mine() && onOpened(pty, opened),
         data: (offset, bytes) => mine() && onData(pty, offset, bytes),
@@ -191,7 +195,10 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
       return end(pty, null);
     }
     if (pty.attach !== null && ring !== null) Object.assign(pty.attach, { ring, chunks: [], at: ring.ringStart });
-    if (pty.heldBytes > 0) pty.stream!.send(concat(pty.held));
+    if (pty.heldBytes > 0) {
+      pty.stream!.send(concat(pty.held));
+      pty.inputSent = pty.inputNext;
+    }
     if (pty.geometry !== null) pty.stream!.control({ resize: pty.geometry }); // idempotent: the pty takes the size it has
     finishAttach(pty);
   }
@@ -415,7 +422,10 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
         pty.held.push(bytes);
         pty.heldBytes += bytes.byteLength;
         pty.inputNext += bytes.byteLength;
-        if (pty.live) pty.stream!.send(bytes);
+        if (pty.live) {
+          pty.stream!.send(bytes);
+          pty.inputSent = pty.inputNext;
+        }
         return ok(undefined);
       }
       case 'pty.resize': {

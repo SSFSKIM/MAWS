@@ -88,8 +88,13 @@ export const STREAM_CHUNK_BYTES = 64 * 1024;
 export const STREAM_CREDIT_MAX = 4 * 1024 * 1024;
 /** The most streams one channel holds at once (`busy` past it). */
 export const MAX_STREAMS = 32;
-/** A pty stream's start: the output offset it reads from (the pty host's), and its input's epoch and offset (the device's). */
-export type StreamPtyOpen = { ptyId: string; from: number; inputEpoch: string; inputFrom: number };
+/**
+ * A pty stream's start: the output offset it reads from (the pty host's), and its input's epoch and offset (the device's).
+ * `inputFrom`: the device's earliest input not yet refunded, resent from there. `inputSent`: the end of the input the
+ * device already sent in this epoch (absent: `inputFrom`); an endpoint holding no record of the epoch (it restarted, or
+ * forgot it) can't tell what of `[inputFrom, inputSent)` it wrote, and drops it: input is at most once.
+ */
+export type StreamPtyOpen = { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
 export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string } };
 /** `pty.ringStart`: where the output this opening delivers starts, max(from, the ring's start); a value past `from` says
  * the ring moved past it. `credit`: the endpoint's, for the device's bytes. */
@@ -150,7 +155,8 @@ const isStreamId = (v: unknown) => isBase64urlOf(v, 16);
 const CHUNK_TEXT = /^[A-Za-z0-9_-]+$/;
 const CHUNK_TEXT_MAX = Math.ceil((STREAM_CHUNK_BYTES * 4) / 3);
 const isChunk = (v: unknown) => typeof v === 'string' && v.length >= 2 && v.length <= CHUNK_TEXT_MAX && v.length % 4 !== 1 && CHUNK_TEXT.test(v);
-const isPtyOpen = (v: unknown) => isObject(v) && isText(v.ptyId, 128) && isCount(v.from) && isStreamId(v.inputEpoch) && isCount(v.inputFrom);
+const isPtyOpen = (v: unknown) =>
+  isObject(v) && isText(v.ptyId, 128) && isCount(v.from) && isStreamId(v.inputEpoch) && isCount(v.inputFrom) && (v.inputSent === undefined || (isCount(v.inputSent) && v.inputSent >= v.inputFrom));
 const isTcpOpen = (v: unknown) => isObject(v) && isText(v.forward, 128);
 const streamOpen = (m: Fields) =>
   isStreamId(m.id) &&

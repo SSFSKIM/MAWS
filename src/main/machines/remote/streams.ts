@@ -28,7 +28,7 @@ export interface StreamRequest {
   op: string;
   /** What the endpoint may send before a refund; STREAM_OPEN_CREDIT by default, at most STREAM_CREDIT_MAX. */
   credit?: number;
-  pty?: { ptyId: string; from: number; inputEpoch: string; inputFrom: number };
+  pty?: { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
   tcp?: { forward: string };
 }
 /** `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, and the endpoint's credit for this side's bytes. */

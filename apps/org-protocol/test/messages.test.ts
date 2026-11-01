@@ -77,6 +77,7 @@ describe('streams', () => {
 
   it('reads a pty open with its start and a tcp open with its forward', () => {
     expect(read('device', open())).toBe('message');
+    expect(read('device', open({ pty: { ...pty, inputFrom: 3, inputSent: 8 } }))).toBe('message');
     expect(read('device', open({ kind: 'tcp', pty: undefined, tcp: { forward: 'fw-1' } }))).toBe('message');
   });
 
@@ -94,6 +95,8 @@ describe('streams', () => {
       open({ pty: { ...pty, inputEpoch: 'e' } }),
       open({ pty: { ...pty, from: -1 } }),
       open({ pty: { ...pty, inputFrom: 1.5 } }),
+      open({ pty: { ...pty, inputFrom: 3, inputSent: 2 } }),
+      open({ pty: { ...pty, inputSent: -1 } }),
       open({ pty: { ...pty, ptyId: '' } }),
     ])
       expect(read('device', bad)).toBe('malformed');

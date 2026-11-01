@@ -29,7 +29,9 @@
 // stream opens and closes `behind` at once. The pty's own flow control is untouched (the endpoint takes no credit, `mawsd`'s
 // seam). Input is written through `pty.write` in order; the endpoint keeps the next input offset per `(device, ptyId,
 // inputEpoch)` while a stream holds it and for RESUME_MS after, drops what it already wrote (a resend after a reopen), and
-// forgets an older epoch when a new one opens, which starts at its `inputFrom` (zero for an app run's first stream).
+// forgets an older epoch when a new one opens. An epoch it holds no record of (new, or lost to a restart) starts at the
+// device's `inputSent`, the end of what it already sent: a resend of that is dropped, since nothing here says whether it
+// was written (zero for an app run's first stream).
 // Bytes are UTF-8 to `pty.write`'s string, a character split across chunks or reopens written whole. A write the pty host
 // refused closes the stream `unavailable` with the offset short of its chunk, unrefunded, so the reopen's resend is
 // written; one whose outcome is unknown (thrown, timed out, the host gone) closes it `unavailable` with the offset past
@@ -473,6 +475,8 @@ export class Streams {
   readonly #checks = new Map<unknown, number>();
   /** Counts `recheck` calls, so a decision asked while one began is asked again (`decide`). */
   #epoch = 0;
+  /** The pty host's restarts as its last `pty.hostState` counted them; null before the first. */
+  #hostRestarts: number | null = null;
   readonly #offRemoved: () => void;
 
   constructor(ctx: StreamsContext) {
@@ -508,13 +512,42 @@ export class Streams {
     for (const stream of this.#byPty.get(frame.ptyId) ?? []) stream.frame(frame.offset, frame.data);
   }
 
-  /** The pty host's events: a pty that exits closes its streams after what they hold. */
+  /**
+   * The pty host's events: a pty that exits closes its streams `exit` after what they hold. `pty.hostState` (mawsd's
+   * supervisor's state of the pty host) tells the host's loss from a reconnect to it: a transition that counts one more
+   * restart is the process gone, and every pty with it, so each stream closes `exit` at once (no status: the device reads
+   * it as lost); `ready` is the host reached again, whose ptys are listed, a stream on one it no longer runs closing
+   * likewise (a new process, or an exit the reconnect's gap hid), the others kept.
+   */
   event(owner: string, message: { name: string; payload: unknown }): void {
-    if (owner !== 'pty-host' || message.name !== 'pty.exit' || !isObject(message.payload) || !isText(message.payload.ptyId)) return;
-    for (const stream of this.#byPty.get(message.payload.ptyId) ?? []) {
+    if (owner !== 'pty-host' || !isObject(message.payload)) return;
+    const payload = message.payload;
+    if (message.name === 'pty.exit' && isText(payload.ptyId)) return this.#exited([...(this.#byPty.get(payload.ptyId) ?? [])]);
+    if (message.name !== 'pty.hostState') return;
+    const restarts = Number.isSafeInteger(payload.restarts) ? (payload.restarts as number) : null;
+    const died = restarts !== null && this.#hostRestarts !== null && restarts > this.#hostRestarts;
+    if (restarts !== null) this.#hostRestarts = restarts;
+    if (died) this.#exited([...this.#byPty.values()].flatMap((set) => [...set]));
+    if (payload.state === 'ready') void this.#revalidate();
+  }
+
+  /** Streams whose pty is gone: closed `exit` after what they hold (one still opening, once open). */
+  #exited(streams: readonly PtyStream[]): void {
+    for (const stream of streams) {
       if (stream.pending !== null) stream.exited = true;
       else stream.closeAfter('exit');
     }
+  }
+
+  /** The pty host reached again: the streams of a pty it no longer runs end; a list it can't answer leaves them. */
+  async #revalidate(): Promise<void> {
+    const held = [...this.#byPty].map(([ptyId, set]) => [ptyId, [...set]] as const);
+    if (held.length === 0) return;
+    const listed = await this.#ctx.dispatch('pty-host', 'pty.list', undefined);
+    if (!listed.ok) return this.#ctx.log(`endpoint: the pty host's terminals could not be listed after it was reached again: ${listed.error.code}`);
+    const ptys: unknown[] = isObject(listed.value) && Array.isArray(listed.value.ptys) ? listed.value.ptys : [];
+    const running = new Set(ptys.flatMap((p) => (isObject(p) && isText(p.ptyId) && p.alive !== false ? [p.ptyId] : [])));
+    for (const [ptyId, streams] of held) if (!running.has(ptyId)) this.#exited(streams);
   }
 
   /**
@@ -626,10 +659,10 @@ export class Streams {
   }
 
   async #openPty({ channel, m, act, binding, who, placeholder, install }: Opening): Promise<void> {
-    const { ptyId, from, inputEpoch, inputFrom } = m.pty!;
+    const { ptyId, from, inputEpoch, inputFrom, inputSent } = m.pty!;
     const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
     const dispatch = dispatchAs(this.#ctx.dispatch, channel.client);
-    const record = this.#input(binding.device, ptyId, inputEpoch, inputFrom);
+    const record = this.#input(binding.device, ptyId, inputEpoch, inputFrom, inputSent ?? inputFrom);
     const stream = new PtyStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), ptyId, record, dispatch, this.#ctx.log);
     // Frames from now on are held while the ring is read, then trimmed against it.
     let set = this.#byPty.get(ptyId);
@@ -718,13 +751,17 @@ export class Streams {
     if (refusal !== 'gone') refuse(refusal);
   }
 
-  /** The device's input record for a pty: kept for its epoch, a new epoch replacing it from its `inputFrom`. */
-  #input(device: string, ptyId: string, epoch: string, inputFrom: number): InputRecord {
+  /**
+   * The device's input record for a pty: kept for its epoch. An epoch it holds no record of (a new one, or one it lost to
+   * a restart or forgot past RESUME_MS) starts at the device's `inputSent`: what the device sent before may have been
+   * written, and nothing here says what, so a resend of it is dropped (at most once; a fresh epoch's is 0).
+   */
+  #input(device: string, ptyId: string, epoch: string, inputFrom: number, inputSent: number): InputRecord {
     const key = `${device}\n${ptyId}`;
     let record = this.#inputs.get(key);
     if (record === undefined || record.epoch !== epoch) {
       record?.forget?.();
-      record = { epoch, next: inputFrom, carry: new Uint8Array(0), chain: Promise.resolve(), holders: 0, forget: null };
+      record = { epoch, next: inputSent, carry: new Uint8Array(0), chain: Promise.resolve(), holders: 0, forget: null };
       this.#inputs.set(key, record);
     } else {
       // A reopen in the same epoch: what the endpoint wrote stands; bytes the device says it won't send again are skipped.
