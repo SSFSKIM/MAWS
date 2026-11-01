@@ -4,7 +4,8 @@
 //
 // - `isLoopbackLink`: the link names a loopback host, so out of a remote session it is never opened on this Mac. Any
 //   scheme with a host: `localhost` and any `*.localhost`, all of 127.0.0.0/8 (in every form the URL parser normalizes
-//   to it), `0.0.0.0`, `[::1]`, `[::]` and IPv4-mapped 127/8 (`[::ffff:127.x.x.x]`), with a port written or not.
+//   to it), `0.0.0.0`, `[::1]`, `[::]`, and an IPv4-mapped address of either (`[::ffff:127.x.x.x]`, `[::ffff:0.0.0.0]`,
+//   which reach this Mac's IPv4 loopback just the same), with a port written or not.
 // - `loopbackPort`: the subset that opens in the in-app browser as a forward (`remote.forward.open`): http or https on
 //   `localhost`, `127.0.0.1` or `0.0.0.0` (the endpoint connects the machine's 127.0.0.1), the port the link writes or its
 //   scheme's default (80, 443), written or implied.
@@ -22,8 +23,18 @@ function parse(url: string): URL | null {
   }
 }
 
-/** The host as the tests read it: lower case (the parser's), without a trailing dot. */
-const hostOf = (parsed: URL) => parsed.hostname.replace(/\.$/, '');
+/** The host as the tests read it: lower case (the parser lowers only a special scheme's), without a trailing dot. */
+const hostOf = (parsed: URL) => parsed.hostname.toLowerCase().replace(/\.$/, '');
+
+const isLoopbackIpv4 = (host: string) => host === '0.0.0.0' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+
+/** The IPv4 address an IPv4-mapped IPv6 host embeds (the parser prints `::ffff:a.b.c.d` as `[::ffff:hhhh:hhhh]`), or null. */
+function mappedIpv4(host: string): string | null {
+  const mapped = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(host);
+  if (mapped === null) return null;
+  const [high, low] = [parseInt(mapped[1], 16), parseInt(mapped[2], 16)];
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
+}
 
 /** Whether the link names a loopback host, by any scheme, with a port written or not. */
 export function isLoopbackLink(url: string): boolean {
@@ -32,9 +43,9 @@ export function isLoopbackLink(url: string): boolean {
   const host = hostOf(parsed);
   if (host === '') return false;
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === '0.0.0.0' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  // The parser compresses IPv6: ::1, :: and IPv4-mapped 127/8 (`::ffff:7fxx:xxxx`).
-  return host === '[::1]' || host === '[::]' || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host);
+  if (isLoopbackIpv4(host) || host === '[::1]' || host === '[::]') return true; // the parser compresses IPv6
+  const mapped = mappedIpv4(host);
+  return mapped !== null && isLoopbackIpv4(mapped);
 }
 
 /** The machine port a forwardable loopback link names (written, or its scheme's default), or null for any other link. */

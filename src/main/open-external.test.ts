@@ -78,7 +78,7 @@ describe('openExternalUrl', () => {
     expect(forwardedElsewhere('http://localhost:5173/', local)).toBe(false);
     expect(forwardedElsewhere('https://example.com:8443/', other)).toBe(false);
     // a default port, written or implied, and a loopback host no forward reaches are refused all the same
-    for (const url of ['http://localhost/', 'http://localhost:80/', 'https://127.0.0.1:443/', 'http://[::1]:8080/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) expect(forwardedElsewhere(url, other), url).toBe(true);
+    for (const url of ['http://localhost/', 'http://localhost:80/', 'https://127.0.0.1:443/', 'http://[::1]:8080/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/', 'http://[::ffff:0.0.0.0]:3000/', 'http://[::ffff:0:0]:3000/', 'http://[::ffff:127.0.0.1]:3000/', 'http://[::ffff:7f00:1]:3000/']) expect(forwardedElsewhere(url, other), url).toBe(true);
     expect(forwardedElsewhere('http://[::1]:8080/', local)).toBe(false);
   });
 });

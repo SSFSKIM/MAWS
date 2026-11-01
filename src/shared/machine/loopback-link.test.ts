@@ -17,7 +17,7 @@ describe('loopback links (P5 O7 M3, "Forwarding")', () => {
   });
 
   it('forwards no other link', () => {
-    for (const url of ['http://example.com:8080/', 'http://192.168.1.4:8080/', 'ftp://localhost:21/', 'ws://localhost:3000/', 'mailto:a@localhost', 'not a url', 'http://[::1]:8080/', 'http://127.0.0.2:8080/', 'http://app.localhost:3000/', 'file:///etc/hosts']) {
+    for (const url of ['http://example.com:8080/', 'http://192.168.1.4:8080/', 'ftp://localhost:21/', 'ws://localhost:3000/', 'mailto:a@localhost', 'not a url', 'http://[::1]:8080/', 'http://127.0.0.2:8080/', 'http://app.localhost:3000/', 'http://[::ffff:127.0.0.1]:8080/', 'http://[::ffff:7f00:1]:8080/', 'http://[::ffff:0.0.0.0]:8080/', 'file:///etc/hosts']) {
       expect(loopbackPort(url), url).toBeNull();
     }
   });
@@ -37,8 +37,15 @@ describe('loopback links (P5 O7 M3, "Forwarding")', () => {
       'http://[::1]:8080/',
       'http://[::]:8080/',
       'http://[0:0:0:0:0:0:0:1]/',
+      // IPv4-mapped, dotted and as the parser prints it ([::ffff:0:0], [::ffff:7f00:1])
+      'http://[::ffff:0.0.0.0]:8080/',
+      'http://[::ffff:0:0]:8080/',
       'http://[::ffff:127.0.0.1]:8080/',
+      'http://[::ffff:7f00:1]:8080/',
+      'http://[0:0:0:0:0:ffff:7f00:1]/',
+      'http://[::ffff:127.255.0.9]/',
       'ws://localhost:3000/socket',
+      'vnc://LOCALHOST:5900', // a non-special scheme's host isn't lowered by the parser
       'ftp://127.0.0.1/',
       'vnc://localhost:5900',
     ]) {
@@ -47,7 +54,7 @@ describe('loopback links (P5 O7 M3, "Forwarding")', () => {
   });
 
   it('is not one for another host, or a link with no host', () => {
-    for (const url of ['https://example.com/', 'http://localhost.example.com/', 'http://128.0.0.1/', 'http://10.0.0.1/', 'http://[::2]/', 'http://[::ffff:10.0.0.1]/', 'mailto:a@localhost', 'file:///etc/hosts', 'not a url', 'javascript:alert(1)']) {
+    for (const url of ['https://example.com/', 'http://localhost.example.com/', 'http://128.0.0.1/', 'http://10.0.0.1/', 'http://[::2]/', 'http://[::ffff:10.0.0.1]/', 'http://[::ffff:a00:1]/', 'http://[::ffff:128.0.0.1]/', 'http://[::ffff:0:1]/', 'vnc://LOCALHOST.example.com/', 'mailto:a@localhost', 'file:///etc/hosts', 'not a url', 'javascript:alert(1)']) {
       expect(isLoopbackLink(url), url).toBe(false);
     }
   });
