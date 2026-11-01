@@ -28,7 +28,7 @@
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
-import { gradeOf, type SessionRank } from '@shared/ipc/grades';
+import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
 import { holdsToSchema, type SessionRanks } from './authorize';
@@ -195,54 +195,60 @@ export class Calls {
     if (filter === undefined || typeof grade !== 'string' || !isSessionRank(grade)) return { ok: false, code: 'unavailable' };
     if (!holdsToSchema(m.name, m.input)) return { ok: false, code: 'malformed' };
     const unavailable = (code: string) => ({ ok: false as const, code: code === 'host_unavailable' || code === 'timeout' ? 'unavailable' : code });
+    // Every placement the call sees of a session is one the caller must hold the grade on: the narrowing read's
+    // (`session.list`), `session.get`'s, and each record heard from here on. None may widen the caller's rights.
+    const heard = new Map<string, Placement[]>();
+    this.#heard.add(heard);
+    const done = (result: Result): Result => (this.#heard.delete(heard), result);
     let ranks: SessionRanks;
     let input = m.input === null ? undefined : m.input;
+    let listed = new Map<string, Placement>();
     try {
       ranks = await this.ctx.ranks(member);
       if (filter.narrow !== undefined && isObject(input)) {
-        const viewed = await this.#viewed(dispatch, ranks, grade);
-        if (viewed === null) return { ok: false, code: 'unavailable' };
+        const read = await this.#listed(dispatch);
+        if (read === null) return done({ ok: false, code: 'unavailable' });
+        listed = read;
+        const viewed = [...read].filter(([, placement]) => ranks.holds(placement, grade)).map(([id]) => id);
         if (viewed.length <= SESSION_SEARCH_SESSIONS_MAX) input = filter.narrow(input, viewed);
       }
     } catch (error) {
       this.ctx.log(`endpoint: a \`${m.name}\` call could not be narrowed: ${(error as Error).message}`);
-      return { ok: false, code: 'unavailable' };
+      return done({ ok: false, code: 'unavailable' });
     }
-    const response = await dispatch('machine', m.name, input);
-    if (!response.ok) return unavailable(response.error.code);
+    const response = await dispatch('machine', m.name, input).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
+    if (!response.ok) return done(unavailable(response.error.code));
     const output = response.value ?? null;
     const sessions = [...new Set(filter.sessions(output))];
-    // Every record heard from here on is one more placement the caller must hold the grade on, beside `session.get`'s.
-    const heard = new Map<string, Placement[]>();
-    this.#heard.add(heard);
     let placed: Map<string, Placement>;
     try {
       placed = new Map(await Promise.all(sessions.map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
     } catch (error) {
-      this.#heard.delete(heard);
       this.ctx.log(`endpoint: a \`${m.name}\` answer could not be cut: ${(error as Error).message}`);
-      return { ok: false, code: 'unavailable' };
+      return done({ ok: false, code: 'unavailable' });
     }
     return () => {
       this.#heard.delete(heard);
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
-      const holds = (id: string): boolean => [placed.get(id) ?? null, ...(heard.get(id) ?? [])].every((placement) => ranks.holds(placement, grade));
-      return { ok: true, output: filter.keep(output, (id) => id !== null && holds(id)) };
+      const seen = (id: string): Placement[] => [...(listed.has(id) ? [listed.get(id)!] : []), placed.get(id) ?? null, ...(heard.get(id) ?? [])];
+      return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade))) };
     };
   }
 
   /**
-   * The machine's sessions (`session.list`, the archived left out as search leaves them) the caller holds `grade` on by
-   * their records: which rows a narrowed read searches, never who may see them (the cut decides that). Null when the
-   * spine can't answer.
+   * The machine's sessions (`session.list`, the archived left out as search leaves them), each placed by its record:
+   * the ones the caller holds the grade on are which rows a narrowed read searches, and every placement is one more the
+   * cut holds the caller to (milestone re-check). Null when the spine can't answer.
    */
-  async #viewed(dispatch: EndpointServices['dispatch'], ranks: SessionRanks, grade: SessionRank): Promise<string[] | null> {
+  async #listed(dispatch: EndpointServices['dispatch']): Promise<Map<string, Placement> | null> {
     const listed = await dispatch('machine', 'session.list', {});
     if (!listed.ok || !isObject(listed.value) || !Array.isArray(listed.value.sessions)) return null;
-    return listed.value.sessions.flatMap((record: unknown) => {
+    const placements = new Map<string, Placement>();
+    for (const record of listed.value.sessions as unknown[]) {
       const id = isObject(record) ? record.appId : undefined;
-      return isText(id, 512) && ranks.holds(recordedPlacement(id, record), grade) ? [id] : [];
-    });
+      if (isText(id, 512)) placements.set(id, recordedPlacement(id, record));
+    }
+    return placements;
   }
 
   /** `mawsd`'s status as a remote caller sees it: no file paths (P5 O2). */
