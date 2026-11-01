@@ -9,7 +9,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import type { Attachment } from './doc';
 import type { Serialized } from './serialize';
-import { classifyRemoteFile, planRemoteSend, remoteMessage, resetRemoteUploads, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
+import { classifyRemoteFile, composeRemoteSend, planRemoteSend, remoteMessage, resetRemoteUploads, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
 
 const MiB = 1024 * 1024;
 const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -123,5 +123,24 @@ describe('the message a send with uploads makes', () => {
     const message = remoteMessage({ ...s, text: '', display: '' }, [], ['/w/.claude/desk-uploads/r/u.0.txt'], '/w');
     expect(message.content).toBe('@.claude/desk-uploads/r/u.0.txt');
     expect(message.display).toBe('@.claude/desk-uploads/r/u.0.txt');
+  });
+});
+
+// M4c fix wave 1 (review finding 4): the inline fit is judged on the message as sent, its path mentions with it
+describe('a send with uploads at the channel’s bound', () => {
+  it('moves the last inline image to the uploads while the message with its mentions would not fit', async () => {
+    const s = { mode: 'send', text: 'look', content: 'look', display: 'look', pastedContents: {}, omitted: 0, empty: false } as Serialized;
+    // an image that fits beside the text alone, with a byte or so to spare: the PDF's mention will not fit beside it
+    const encodedSpare = REMOTE_INLINE_MAX_BYTES - JSON.stringify([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } }, { type: 'text', text: 'look' }]).length;
+    const big = { ...image('i1', 0), data: 'A'.repeat(encodedSpare - 8), bytes: Math.floor(((encodedSpare - 8) * 3) / 4) };
+    const doc = pdf('p1', 1000);
+    expect(planRemoteSend('look', [big, doc]).inline).toEqual([big]); // the plan alone keeps it inline
+    const fake = fakeClient();
+    const sending = composeRemoteSend(fake.client, R, s, [big, doc], '/work/app-r');
+    await fake.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.pdf'] });
+    await fake.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.1.png'] });
+    const sent = await sending;
+    expect(fake.invoked('files.upload').map((c) => (c as { files: { name: string }[] }).files.map((f) => f.name))).toEqual([['p1.pdf'], ['i1.png']]); // the PDF once, then the image
+    expect(sent).toEqual({ ok: true, message: expect.objectContaining({ content: 'look\n\n@.claude/desk-uploads/app-r/u.0.pdf @.claude/desk-uploads/app-r/u.1.png' }) });
   });
 });

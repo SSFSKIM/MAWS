@@ -20,7 +20,7 @@ import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; //
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Attachment } from './doc';
-import { planRemoteSend, remoteMessage, uploadAttachments } from './remote-uploads'; // P5 O7 M4
+import { composeRemoteSend, planRemoteSend } from './remote-uploads'; // P5 O7 M4
 import type { Serialized } from './serialize';
 
 // A dispatch answers null when the host accepted the submission, else the error to show.
@@ -132,21 +132,21 @@ export async function submitRemoteSerialized(
   cwd: string,
   retry?: () => void,
 ): Promise<boolean> {
-  const { inline, upload } = planRemoteSend(s.text, attachments);
+  const { upload } = planRemoteSend(s.text, attachments);
   if (s.empty || upload.length === 0 || !controls.capability('send').available) return submitHumanSerialized(controls, client, appSessionId, s, retry);
   const sending = beginRemoteSend(appSessionId);
-  let paths: string[];
+  let message: Serialized;
   try {
-    const uploaded = await uploadAttachments(client, appSessionId, upload);
-    if (!uploaded.ok) {
-      warn(uploaded.error, retry, undefined, retryLabel(appSessionId));
+    const composed = await composeRemoteSend(client, appSessionId, s, attachments, cwd);
+    if (!composed.ok) {
+      warn(composed.error, retry, undefined, retryLabel(appSessionId));
       return false;
     }
-    paths = uploaded.paths;
+    message = composed.message;
   } finally {
     sending();
   }
-  return submitHumanSerialized(controls, client, appSessionId, remoteMessage(s, inline, paths, cwd), retry);
+  return submitHumanSerialized(controls, client, appSessionId, message, retry);
 }
 
 // P2-A: a `!` or `#` submission on a record with no ready process acquires the session first. Whether it may go on: a

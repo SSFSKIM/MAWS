@@ -53,6 +53,7 @@ import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
+import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
 import { SPAWN_WORDS, spawnOnMachine, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
@@ -174,7 +175,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
-  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
+  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.worktree?.path ?? record?.directory ?? ''); // M4c fix wave 1: an idle worktree session runs in its worktree
   const repo = useGitWatch(appSessionId, setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
@@ -307,6 +308,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       if (spawnAt !== null) {
         try {
           const doc = handle.current?.doc() ?? emptyDoc();
+          // a mention of this Mac's file names nothing there (a drop's own became its upload): said, the draft kept
+          const local = fileMentionsOf(doc);
+          if (local.length > 0) {
+            warn(ON_THIS_MAC(local, spawnAt.name));
+            return false;
+          }
           if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
           const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default' }, client);
           if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
@@ -514,6 +521,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               suggestion={suggestion}
               onSuggestionTaken={() => setSuggestion(null)}
               uploadsTo={uploadsTo}
+              searchesFiles={spawnAt === null}
             />
           </div>
         }

@@ -45,7 +45,8 @@ import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, paragraph, textNode } from './editor/doc';
+import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
+import { ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
@@ -158,7 +159,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean; setContent(content: unknown): boolean }; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -903,6 +904,22 @@ describe('a New chat tab started on another machine', () => {
     expect(editorOf().editor.getText()).toBe('build it and test it'); // the edit stayed
   });
 
+  // M4c fix wave 1 (review finding 2): this Mac's files are not offered, and a mention of one never goes to the machine
+  it('offers none of this Mac’s files once another machine is chosen, and refuses to start with a mention of one', async () => {
+    const stub = stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('@no');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200))); // past the search's debounce
+    expect(invoked('git.lsFiles')).toEqual([]);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('read '), mentionNode({ id: 'notes.txt', label: 'notes.txt', kind: 'file' }))])));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual([ON_THIS_MAC(['notes.txt'], 'mini')]));
+    expect(invoked('session.spawn')).toEqual([]);
+    expect(stub.start).not.toHaveBeenCalled();
+    expect(editorOf().editor.getText()).toContain('read');
+  });
+
   it('takes a file for the chosen machine, and back on this Mac refuses to start without it', async () => {
     const stub = stubIntent({}, {}, chosen);
     useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
@@ -1363,6 +1380,47 @@ describe('a lane B session on another machine', () => {
 
   // P5 O7 M4 (the M4b report's order for a spawn with attachments): the session a New chat tab spawned is handed that
   // tab's document; its composer, once open, sends it once through the remote path: the files up, then one message
+  // M4c fix wave 1 (review finding 3): an idle worktree session (no engine status) runs in its worktree, where main
+  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from
+  const idleInWorktree = () => {
+    const WT = '/work/app-r/.claude/worktrees/feature';
+    const s = useSessions.getState();
+    const engine = new Map(s.engine);
+    engine.delete(R);
+    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: '/work/app-r', worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
+    return `${WT}/.claude/desk-uploads/app-r/u.0.txt`;
+  };
+
+  it('mentions an upload to an idle worktree session relative to its worktree', async () => {
+    const uploaded = idleInWorktree();
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('look');
+    queueComposerAttachment(R, { files: [new File(['hi'], 'notes.txt', { type: 'text/plain' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('notes.txt'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: [uploaded] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'look\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  it('sends the document a spawn handed to a session in a worktree relative to that worktree', async () => {
+    const uploaded = idleInWorktree();
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], [{ id: 'h2', kind: 'file', name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true }]));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: [uploaded] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this\n\n@.claude/desk-uploads/app-r/u.0.txt' }]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
   it('sends the document a spawn handed it once it opens: its file goes up, then one message names it', async () => {
     window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
     const notes = { id: 'h1', kind: 'file' as const, name: 'notes.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true };

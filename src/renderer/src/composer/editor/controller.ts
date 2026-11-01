@@ -18,7 +18,7 @@ import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { openWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, docOf, emptyDoc, hardBreak, isMultiline, MENTION, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSpace, openInterim, replaceInterim, settleFinal, syncSelectionFromDOM } from './dictation-plugin'; // E9
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
@@ -103,6 +103,9 @@ export interface ControllerInputs {
   // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
   // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
   uploadsTo?: string | null;
+  // P5 O7 M4 (fix wave 1): whether the @-menu offers this Mac's files (false: the chat is to start on another machine,
+  // where none of them can be read)
+  searchesFiles?: boolean;
 }
 
 // The component's state the controller sets.
@@ -190,7 +193,10 @@ export class EditorController {
   }
 
   update(inputs: ControllerInputs): void {
+    const before = this.inputs.uploadsTo ?? null;
     this.inputs = inputs;
+    // P5 O7 M4 (fix wave 1): the chat is now to run on another machine: a local drop's mention becomes its upload
+    if (before === null && (inputs.uploadsTo ?? null) !== null && this.heldDrops.size > 0) void this.heldDropsToUploads();
   }
 
   attach(editor: TiptapEditor): void {
@@ -205,6 +211,7 @@ export class EditorController {
       additionalDirectories,
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
+      searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
       placeholder: this.inputs.suggestion ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
@@ -507,14 +514,37 @@ export class EditorController {
       .run();
   }
 
-  private insertMention(path: string): void {
-    if (this.busy) return;
+  private insertMention(path: string): string | null {
+    if (this.busy) return null;
     const id = mentionPath(path, this.inputs.cwd);
     this.editor
       ?.chain()
       .focus()
       .insertContent([mentionNode({ id, label: mentionLabel(id), kind: 'file' }), textNode(' ')])
       .run();
+    return id;
+  }
+
+  // P5 O7 M4 (fix wave 1): each local drop's mention (by its id) with the file it named, while this mount lives: if the
+  // chat is then to run on another machine, the bytes go up instead (a path on this Mac names nothing there)
+  private heldDrops = new Map<string, File>();
+
+  private async heldDropsToUploads(): Promise<void> {
+    const editor = this.editor;
+    if (!editor) return;
+    const mentioned: { id: string; from: number; to: number; file: File }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      const id = String(node.attrs.id);
+      const file = node.type.name === MENTION && node.attrs.kind === 'file' ? this.heldDrops.get(id) : undefined;
+      if (file !== undefined) mentioned.push({ id, from: pos, to: pos + node.nodeSize, file });
+    });
+    if (mentioned.length === 0) return;
+    // the mentions go (their trailing space with them), then the files come in as a drop on the machine would
+    const tr = editor.state.tr;
+    for (const { from, to } of [...mentioned].reverse()) tr.delete(from, tr.doc.textBetween(to, Math.min(to + 1, tr.doc.content.size)) === ' ' ? to + 1 : to);
+    editor.view.dispatch(tr);
+    for (const { id } of mentioned) this.heldDrops.delete(id);
+    await this.addFiles(mentioned.map((m) => m.file));
   }
 
   private setAttachments(next: Attachment[]): void {
@@ -540,12 +570,22 @@ export class EditorController {
       const out = await downscaleImage(blob, mediaType);
       if (!this.taking(epoch, signal)) return false;
       const refusal = imageRefusal(name, out.bytes);
-      if (refusal) warn(refusal);
+      // P5 O7 M4 (fix wave 1): to another machine, an image past the inline bound goes up as the file it is
+      if (refusal && this.inputs.uploadsTo) {
+        const upload = await this.uploadOf(name, blob, mediaType);
+        if (!this.taking(epoch, signal)) return false;
+        this.addAttachment(upload);
+      } else if (refusal) warn(refusal);
       else this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
     } catch {
       warn(`${name} could not be read as an image`);
     }
     return true;
+  }
+
+  // P5 O7 M4: a file to go up to the session's machine at the send, its bytes held as a PDF's are
+  private async uploadOf(name: string, blob: Blob, mediaType: string): Promise<Attachment> {
+    return { id: atomId('attachment'), kind: 'file', name, mediaType: mediaType === '' ? 'application/octet-stream' : mediaType, bytes: blob.size, data: await fileBase64(blob), persisted: true };
   }
 
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
@@ -568,11 +608,13 @@ export class EditorController {
         if (!taking()) return false;
         this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
       } else if (action.kind === 'upload') {
-        // P5 O7 M4: a file to go up to the session's machine at the send, its bytes held as a PDF's are
-        const data = await fileBase64(file);
+        const upload = await this.uploadOf(file.name, file, file.type);
         if (!taking()) return false;
-        this.addAttachment({ id: atomId('attachment'), kind: 'file', name: file.name, mediaType: file.type === '' ? 'application/octet-stream' : file.type, bytes: file.size, data, persisted: true });
-      } else if (action.kind === 'mention') this.insertMention(action.path);
+        this.addAttachment(upload);
+      } else if (action.kind === 'mention') {
+        const id = this.insertMention(action.path);
+        if (id !== null) this.heldDrops.set(id, file);
+      }
       else if (action.kind === 'text') {
         const text = await file.text();
         if (!taking()) return false;

@@ -88,9 +88,12 @@ const GROUPS: { group: AtItem['group']; label: string }[] = [
   { group: 'skills', label: 'Skills' },
 ];
 
+const NO_DIRECTORIES: readonly string[] = [];
+
 export function AtMenu(props: PopupProps) {
-  const { appSessionId, cwd, additionalDirectories, catalog } = props.ctx;
-  const files = useFiles(appSessionId, cwd, additionalDirectories, props.query);
+  const { appSessionId, cwd, additionalDirectories, catalog, searchesFiles = true } = props.ctx;
+  // P5 O7 M4 (fix wave 1): a chat to start on another machine is offered none of this Mac's files
+  const files = useFiles(appSessionId, searchesFiles ? cwd : '', searchesFiles ? additionalDirectories : NO_DIRECTORIES, props.query);
   const others = useMemo(() => atItems(catalog, props.query), [catalog, props.query]);
   const rows = useMemo(() => (files === null ? [SEARCHING, ...others.slice(0, ROW_LIMIT - 1).map(rowOf)] : [...files, ...others].slice(0, ROW_LIMIT).map(rowOf)), [files, others]);
   const { active, setActive, choose } = useListKeys(props, rows);

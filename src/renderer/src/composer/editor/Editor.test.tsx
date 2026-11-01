@@ -3,7 +3,7 @@ import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import type { Transaction } from '@tiptap/pm/state';
 import { EditorView } from '@tiptap/pm/view';
 import { createRef } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
@@ -14,7 +14,7 @@ import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
 import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
-import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
+import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
@@ -875,5 +875,47 @@ describe('a drop on a session on another machine', () => {
     const handle = await mountRemote();
     await act(async () => void (await handle.current!.attachFiles([new File(['%PDF'], 'spec.pdf', { type: 'application/pdf' })])));
     expect(handle.current!.doc().attrs?.attachments).toMatchObject([{ kind: 'document', name: 'spec.pdf' }]);
+  });
+
+  // M4c fix wave 1 (review finding 1): an image still past the inline bound once resized goes up as the file it is
+  it('holds an image still over 5 MB after resizing as a file to upload, its own bytes, rather than refusing it', async () => {
+    const MiB = 1024 * 1024;
+    vi.stubGlobal('createImageBitmap', async () => ({ width: 4000, height: 3000, close: () => {} }));
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        getContext() {
+          return { drawImage: () => {} };
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array(6 * MiB)], { type: 'image/png' }); // high entropy: still past 5 MB
+        }
+      },
+    );
+    onTestFinished(() => void vi.unstubAllGlobals());
+    const handle = await mountRemote();
+    const photo = new File([new Uint8Array(7 * MiB).fill(7)], 'photo.png', { type: 'image/png' });
+    await act(async () => void (await handle.current!.attachFiles([photo])));
+    expect(notices()).toEqual([]);
+    const [held] = attachmentsOf(handle.current!.doc());
+    expect(held).toMatchObject({ kind: 'file', name: 'photo.png', mediaType: 'image/png', bytes: 7 * MiB });
+    expect(held!.data.slice(0, 8)).toBe('BwcHBwcH'); // the dropped bytes, not the re-encoding
+  });
+
+  // M4c fix wave 1 (review finding 2): a file dropped while the chat was this Mac's is mentioned by its local path; once
+  // the chat is to run on another machine, the mention becomes an upload of the bytes the drop held
+  it('turns a local drop’s mention into an upload once the chat is to run on another machine', async () => {
+    useNotices.setState({ notices: [] });
+    const handle = createRef<EditorHandle>();
+    const local = { ...client, pathForFile: () => '/w/notes.txt' } as MawsBridge;
+    const view = (uploadsTo: string | null) => <Editor appSessionId={APP} cwd="/w" sessionId={null} drafts={drafts(null).port} client={local} handle={handle} onSubmit={async () => true} uploadsTo={uploadsTo} />;
+    const { rerender } = render(view(null));
+    await act(async () => {});
+    await act(async () => void (await handle.current!.attachFiles([new File(['hi'], 'notes.txt', { type: 'text/plain' })])));
+    expect(handle.current!.serialize().text).toBe('@notes.txt');
+    rerender(view('mini'));
+    await waitFor(() => expect(attachmentsOf(handle.current!.doc())).toMatchObject([{ kind: 'file', name: 'notes.txt', data: 'aGk=' }]));
+    expect(handle.current!.serialize().text.trim()).toBe('');
+    expect(notices()).toEqual([]);
   });
 });

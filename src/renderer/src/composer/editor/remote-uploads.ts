@@ -18,7 +18,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
-import type { Attachment } from './doc';
+import { MENTION, type Attachment, type ComposerDoc } from './doc';
 import { IMAGE_BYTE_TYPES, MAX_SOURCE_IMAGE_BYTES, mentionPath } from './paste';
 import { mentionText } from './schema';
 import type { Serialized } from './serialize';
@@ -34,6 +34,21 @@ export function classifyRemoteFile(file: { name: string; type: string; size: num
   if (file.type === 'application/pdf') return { kind: 'pdf' };
   return { kind: 'upload' };
 }
+
+/** The file mentions of a document (each `@path`): on a chat to start on another machine, paths on this Mac. */
+export function fileMentionsOf(doc: ComposerDoc): string[] {
+  const ids: string[] = [];
+  const walk = (node: ComposerDoc) => {
+    if (node.type === MENTION && node.attrs?.kind === 'file') ids.push(String(node.attrs.id));
+    node.content?.forEach(walk);
+  };
+  walk(doc);
+  return ids;
+}
+
+/** Words for mentions of this Mac's files on a chat to start on another machine (not dropped here, so no bytes held). */
+export const ON_THIS_MAC = (ids: readonly string[], machine: string): string =>
+  `${ids.map((id) => mentionText({ id, kind: 'file' })).join(', ')} ${ids.length === 1 ? 'is a file' : 'are files'} on this Mac, which ${machine} can’t read; drag ${ids.length === 1 ? 'it' : 'them'} into the message to send ${ids.length === 1 ? 'it' : 'them'}, or remove the mention`;
 
 /** Words for a file the + menu answered by its path alone (no bytes read): nothing of it can reach the machine. */
 export const PICKED_BY_PATH = (name: string, machine: string): string => `${name} can’t be sent to ${machine} from here; drag it into the message instead`;
@@ -145,6 +160,23 @@ export async function uploadAttachments(client: MawsBridge, appSessionId: AppSes
   }
   const paths = attachments.map(known);
   return paths.every((path): path is string => path !== null) ? { ok: true, paths } : { ok: false, error: 'the machine answered no path for an upload' };
+}
+
+/**
+ * Uploads what the plan sends up and makes the message (M4c fix wave 1): the inline fit judged again on the message as
+ * sent, its path mentions with it, the last inline image going up too while it would not fit the channel.
+ */
+export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, attachments: readonly Attachment[], cwd: string): Promise<{ ok: true; message: Serialized } | { ok: false; error: string }> {
+  let { inline, upload } = planRemoteSend(s.text, attachments);
+  for (;;) {
+    const uploaded = await uploadAttachments(client, appSessionId, upload);
+    if (!uploaded.ok) return uploaded;
+    const message = remoteMessage(s, inline, uploaded.paths, cwd);
+    const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content;
+    if (inline.length === 0 || encoder.encode(JSON.stringify(content)).length <= REMOTE_INLINE_MAX_BYTES) return { ok: true, message };
+    upload = [...upload, inline[inline.length - 1]!];
+    inline = inline.slice(0, -1);
+  }
 }
 
 /** The message a send with uploads makes: the inline images, then the text with each path as a mention. */
