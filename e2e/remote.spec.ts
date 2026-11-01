@@ -195,16 +195,28 @@ async function newChat(page: Page, project: string): Promise<string> {
   await invoke(page, 'session.intent.patch', { appSessionId: tab!, patch: { permissionMode: 'default' } });
   return tab!;
 }
-// The address the pane's composer moved to on B, other than `before` (a spawn's tab moving to its new session).
-async function movedTo(page: Page, machine: MachineRef, before: string | null): Promise<string> {
+// The address the pane's composer moved to on B, other than `before` (a spawn's tab moving to its new session); waited
+// past main's spawn bound (210 s from the sheet), so a spawn still pending says so. A failure quotes the toasts (a
+// refusal's words), the pane's statuses and `said`.
+async function movedTo(page: Page, machine: MachineRef, before: string | null, said: () => Promise<string>): Promise<string> {
   let address: string | null = null;
   await expect
     .poll(async () => {
       address = await main(page).locator(`[data-composer^="${machine}/"]`).first().getAttribute('data-composer', { timeout: 1_000 }).catch(() => null);
       return address !== null && address !== before;
-    }, { timeout: 120_000, message: `the tab moves to a new session on ${machine}\n${mainSaid(page)}` })
-    .toBe(true);
+    }, { timeout: 240_000, message: `the tab moves to a new session on ${machine}` })
+    .toBe(true)
+    .catch(async (error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(page)}\n${mainSaid(page)}\n${await said()}`);
+    });
   return address!;
+}
+// What the pane says now: its composers' addresses and its statuses, for a failure.
+async function paneSaid(page: Page): Promise<string> {
+  const composers = await main(page).locator('[data-composer]').evaluateAll((els) => els.map((el) => el.getAttribute('data-composer'))).catch(() => []);
+  const statuses = await main(page).getByRole('status').allTextContents().catch(() => []);
+  const toasts = ((await page.locator('[data-toast-viewport]').textContent({ timeout: 1_000 }).catch(() => null)) ?? '').trim();
+  return `the pane's composers: ${composers.join(', ') || 'none'}; its statuses: ${statuses.join(' | ') || 'none'}; the toasts: ${toasts || 'none'}`;
 }
 const bareOf = (address: string) => address.slice(address.indexOf('/') + 1);
 // The files a session's desk-uploads holds on B (its parts' `.staging` directory left out).
@@ -496,6 +508,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       .poll(async () => (await invoke<Projects>(again, 'session.projects.list', undefined)).projects.find((p) => p.directory === aCheckout)?.org?.key ?? null, { timeout: 30_000 })
       .toBe(`smns:${PROJECT}`);
 
+    // B's own lines about the spawn and the sessions it started, for a failure
+    const bSaid = async () => {
+      const intents = await b.request<{ intents: { appSessionId: string; location: unknown }[] }>('session.intent.list').catch((error: unknown) => String(error));
+      const engines = await b.request<unknown[]>('engine.sessions').catch((error: unknown) => String(error));
+      const lines = b.log().split('\n').filter((line) => /spawn|session\.(create|start|intent)|machine\.op|step-up|refus|setup|replay|endpoint/i.test(line));
+      return `B's intents: ${JSON.stringify(intents)}\nB's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
+    };
     let first = '';
     await test.step('M4: "+ Session" on B starts a session that opens in A’s pane', async () => {
       await newChat(again, A_PROJECT);
@@ -503,7 +522,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await composerOf(again).click();
       await again.keyboard.type(SPAWN_BRIEF);
       await again.keyboard.press('Enter');
-      first = await movedTo(again, b.ref, address); // the pane showed B’s first session before the New chat tab
+      first = await movedTo(again, b.ref, address, bSaid); // the pane showed B’s first session before the New chat tab
       await expect(main(again).getByText(SPAWN_REPLY).first(), `the new session's reply in A's pane\n${mainSaid(again)}\nB's log:\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 60_000 });
       expect(JSON.stringify(await writtenOn(bareOf(first))), 'B’s new session was written the brief').toContain(SPAWN_BRIEF);
       type Spawned = { directory: string; launchedBy?: { member: string } };
@@ -533,7 +552,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await dropTextFile(again, WORKTREE_FILE);
       await again.keyboard.type(WORKTREE_TEXT);
       await again.keyboard.press('Enter');
-      const second = bareOf(await movedTo(again, b.ref, first));
+      const second = bareOf(await movedTo(again, b.ref, first, bSaid));
       await expect(main(again).getByText(WORKTREE_REPLY).first(), `the worktree session's reply in A's pane\n${mainSaid(again)}\nB's log:\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 120_000 });
       type Spawned = { worktree: { path: string } | null };
       expect((await b.request<Spawned | null>('session.get', { appSessionId: second }))?.worktree?.path, 'B’s session runs in the new worktree').toBe(worktree);
