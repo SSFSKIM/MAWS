@@ -266,6 +266,7 @@ export function stagePart(base: string, session: string, upload: string, offset:
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Unsafe(`${path} is not a regular file`);
+    if (stat.nlink !== 1) throw new Unsafe(`${path} has other links: a part is never appended through one`); // a hard link to another file passes the no-link open
     if (stat.size !== offset) return 'out-of-order';
     if (offset + bytes.length > max) {
       closeSync(fd);
@@ -286,7 +287,7 @@ export function stagePart(base: string, session: string, upload: string, offset:
 }
 
 // Upload `upload`'s staging published into the root under `nameOf(its first bytes)`: the name. The staging is opened with
-// no link on its way and checked a regular file, and that descriptor alone is read from then on, so a leaf or an
+// no link on its way and checked a regular file with no other link (a hard link is no symlink, so the open passes it), and that descriptor alone is read from then on, so a leaf or an
 // ancestor swapped after the check changes nothing published; the destination is created exclusively with no link on
 // its way under the root still pinned (`writeNew`'s rule: a name already there is AlreadyThere, nothing written over
 // it), filled from the descriptor and checked whole, and removed when anything fails. Once the file is published the
@@ -299,6 +300,7 @@ export function promoteStaged(base: string, session: string, upload: string, nam
     try {
       const stat = fstatSync(from);
       if (!stat.isFile()) throw new Unsafe(`${join(staging.path, upload)} is not a regular file`);
+      if (stat.nlink !== 1) throw new Unsafe(`${join(staging.path, upload)} has other links: nothing is published from one`);
       const head = Buffer.alloc(Math.min(16, stat.size));
       const named = nameOf(head.subarray(0, readSync(from, head, 0, head.length, 0)));
       publishFrom(root, named, from, stat.size);

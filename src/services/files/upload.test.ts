@@ -2,7 +2,7 @@
 // bounded bytes written into a session's attachments directory with lane A's rules, refusals as values with nothing
 // written, the root recorded before the first byte and swept a day after its last upload. Scratch directories only
 // (realpath'd: the system temp root is itself a link on macOS), never a real repository or `~`.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -438,6 +438,39 @@ describe('files.upload in parts', () => {
       ).toThrow(Unsafe);
       expect(readdirSync(away).sort()).toEqual([UPLOAD, 'secret']);
       expect(readdirSync(moved)).toEqual(['.staging']); // nothing published in the real root either
+    });
+
+    // The milestone review's finding: a hard link is no symlink, so the no-link open passes it; a staging with another link
+    // is refused before any append and before any promotion, so neither writes to nor publishes an outside file
+    it('refuses a staging swapped for a hard link to an outside file of its size: the next part appends nothing to it', async () => {
+      const base = dir();
+      const away = outside();
+      const bytes = whole(3 * 1024 * 1024);
+      const { run } = upload({ directory: base });
+      expect(await run(partOf(bytes, 0, false))).toEqual({ status: 'ok', paths: [] });
+      const staged = join(stagingIn(base), UPLOAD);
+      const target = join(away, 'same-size');
+      writeFileSync(target, Buffer.alloc(PART, 9));
+      rmSync(staged);
+      linkSync(target, staged);
+      expect(await run(partOf(bytes, 1, true))).toMatchObject({ status: 'refused' });
+      expect(readFileSync(target).equals(Buffer.alloc(PART, 9))).toBe(true); // nothing appended
+      expect(readdirSync(rootIn(base))).toEqual(['.staging']); // nothing published
+    });
+
+    it('refuses to promote a staging that has another link, publishing nothing', () => {
+      const base = dir();
+      const away = outside();
+      const bytes = whole(1024);
+      expect(stagePart(base, ID, UPLOAD, 0, bytes, UPLOAD_FILE_MAX_BYTES)).toBe('staged');
+      const target = join(away, 'outside-copy');
+      writeFileSync(target, 'an outside file');
+      const staged = join(stagingIn(base), UPLOAD);
+      rmSync(staged);
+      linkSync(target, staged);
+      expect(() => promoteStaged(base, ID, UPLOAD, () => 'up1.0.txt')).toThrow(Unsafe);
+      expect(readdirSync(rootIn(base))).toEqual(['.staging']);
+      expect(readFileSync(target, 'utf8')).toBe('an outside file');
     });
 
     it('answers AlreadyThere for a name already in the root, writing nothing over it and keeping the staging', () => {
