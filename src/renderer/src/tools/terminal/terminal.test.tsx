@@ -114,7 +114,8 @@ const registry = vi.hoisted(() => {
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 
-const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, REMOTE_ADOPTION_TIMEOUT_MS, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, REMOTE_ATTACH_TIMEOUT_MS, REMOTE_LIST_TIMEOUT_MS, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } = await import('@shared/machine/remote-pending');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -573,15 +574,15 @@ describe('a restored tab of another machine’s session', () => {
     expect(other.ui.getState().lostAtQuit).toBe(false);
   });
 
-  it('bounds the wait above main’s 60 s pending bound; a late list leaves the shell it re-adopted running', async () => {
-    expect(REMOTE_ADOPTION_TIMEOUT_MS).toBe(65_000);
+  it('bounds the list above main’s act bound; a late list leaves the shell it re-adopted running', async () => {
+    expect(REMOTE_LIST_TIMEOUT_MS).toBeGreaterThan(REMOTE_ACT_PENDING_MS);
     vi.useFakeTimers();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const remote = remoteAdoption();
     const state = restoredRemote('terminal:slow');
     await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS);
     expect(state.terminalId).toBeNull(); // a non-owner may still be at the sheet
-    await vi.advanceTimersByTimeAsync(REMOTE_ADOPTION_TIMEOUT_MS - ADOPTION_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(REMOTE_LIST_TIMEOUT_MS - ADOPTION_TIMEOUT_MS);
     expect(state.terminalId).toBe('t1');
     expect(state.ui.getState()).toMatchObject({ adopting: false, lostAtQuit: false });
     remote.list(['terminal:slow']);
@@ -589,6 +590,64 @@ describe('a restored tab of another machine’s session', () => {
     expect(registry.terminals.close).not.toHaveBeenCalled();
     expect(logged).toHaveBeenCalledTimes(2);
     logged.mockRestore();
+  });
+
+  // M3c fix wave 1: main's attach is an act (up to its act bound, a non-owner at the sheet) and then the ring's replay under
+  // a bound of its own, so the renderer waits above both together
+  it('adopts the same shell after a slow confirmation and a delayed replay that main still answers in time', async () => {
+    expect(REMOTE_ATTACH_TIMEOUT_MS).toBeGreaterThan(REMOTE_ATTACH_PENDING_MS);
+    vi.useFakeTimers();
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    remote.list(['terminal:r']);
+    await vi.advanceTimersByTimeAsync(55_000 + 15_000); // confirmed at 55 s, the ring's bytes in 15 s more
+    expect(state.terminalId).toBeNull();
+    remote.attach();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.terminalId).toBe('t1');
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(registry.terminals.release).not.toHaveBeenCalled();
+  });
+
+  it('lets an attach go past main’s whole budget: the shell is left running and the tab opens a new one', async () => {
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:r');
+    remote.list(['terminal:r']);
+    await vi.advanceTimersByTimeAsync(REMOTE_ATTACH_TIMEOUT_MS - 1);
+    expect(state.terminalId).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(registry.terminals.release).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    expect(state.terminalId).toBe('t2');
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+  });
+
+  // M3c fix wave 1: closing the Terminal tab is the kill gesture (beforeClose kills, as locally); a dispose nobody asked for
+  // (the session removed or archived, its machine settling without it) lets another machine's shell go and kills nothing
+  // there, where a kill is an act a non-owner would be asked to confirm out of nowhere
+  it('a dispose nobody asked for releases another machine’s shell instead of killing it; closing the tab still kills it', async () => {
+    const disposedTab = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:r', params: {} });
+    terminalTool.dispose(disposedTab);
+    expect(registry.terminals.release).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+
+    const closedTab = terminalTool.createState({ appSessionId: R, session: SESSION_R, instanceId: 'terminal:r2', params: {} });
+    await expect(terminalTool.beforeClose(closedTab)).resolves.toBe(true);
+    expect(registry.terminals.close).toHaveBeenCalledWith('t2');
+  });
+
+  it('a restored tab disposed while it re-adopts releases the shell re-adopted under its label', async () => {
+    const remote = remoteAdoption();
+    const state = restoredRemote('terminal:gone');
+    terminalTool.dispose(state);
+    remote.list(['terminal:gone']);
+    remote.attach();
+    await vi.waitFor(() => expect(registry.terminals.release).toHaveBeenCalledWith('t1'));
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 
   it('says it is reconnecting while it looks for its shell, and names the machine when the previous shell is gone', async () => {

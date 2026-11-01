@@ -5,6 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PtyInfo } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '@shared/machine/remote-pending';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { ipc } from '../../ipc/client';
 import { panelHost } from '../../panel/host';
@@ -151,10 +152,13 @@ export function adoptTerminals(accept: (info: PtyInfo) => boolean = () => true):
 // registry's adopt given the session; the registry keeps the answer for the session's other tabs until a spawn or an exit
 // there). Each tab adopts for its own label alone: the machine's own app lists its tabs' shells under the same session. A
 // new tab lists nothing (no shell can be under a label minted now), and no remote tab waits on the local `pty.list`.
-// Every list and attach is an act a non-owner confirms at the sheet, which main answers within its pending bound (60 s,
-// `sendPendingMs` in src/main/lane-b/remote.ts), so this wait is bounded above it; a shell it re-adopted late is left
-// running, as a local one is.
-export const REMOTE_ADOPTION_TIMEOUT_MS = 65_000;
+// Every list and attach is an act a non-owner confirms at the sheet, which main answers within its act bound, and an
+// attach then waits for the ring's replay under a bound of its own (src/shared/machine/remote-pending.ts); each wait here
+// is bounded a margin above main's, so main's typed answer comes first. A shell re-adopted late is left running, as a
+// local one is.
+const REMOTE_ADOPTION_MARGIN_MS = 5_000;
+export const REMOTE_LIST_TIMEOUT_MS = REMOTE_ACT_PENDING_MS + REMOTE_ADOPTION_MARGIN_MS;
+export const REMOTE_ATTACH_TIMEOUT_MS = REMOTE_ATTACH_PENDING_MS + REMOTE_ADOPTION_MARGIN_MS;
 interface RemoteAdoption {
   done: boolean;
   listed: boolean; // the machine answered the list
@@ -188,15 +192,15 @@ function adoptRemote(state: TerminalTabState, owner: AppSessionId): RemoteAdopti
   });
   const expire = (): Adopting[] => {
     expired = true;
-    console.error(`[terminal] pty.listFor did not answer within ${REMOTE_ADOPTION_TIMEOUT_MS} ms; ${label} opens a new shell`);
+    console.error(`[terminal] pty.listFor did not answer within ${REMOTE_LIST_TIMEOUT_MS} ms; ${label} opens a new shell`);
     return [];
   };
   const attach = ({ id, attached }: Adopting) =>
     bounded(attached, () => {
-      leave(id, `pty.attach for ${label} did not answer within ${REMOTE_ADOPTION_TIMEOUT_MS} ms`);
+      leave(id, `pty.attach for ${label} did not answer within ${REMOTE_ATTACH_TIMEOUT_MS} ms`);
       return null;
-    }, REMOTE_ADOPTION_TIMEOUT_MS);
-  adoption.wait = bounded(listed, expire, REMOTE_ADOPTION_TIMEOUT_MS)
+    }, REMOTE_ATTACH_TIMEOUT_MS);
+  adoption.wait = bounded(listed, expire, REMOTE_LIST_TIMEOUT_MS)
     .then((adopting) => Promise.all(adopting.map(attach)))
     .then(() => {
       adoption.done = true;
@@ -240,7 +244,7 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   // label gone or the close already under way, and re-closing is idempotent; expected, not a leak.
   if (disposed.has(state)) {
     const orphan = terminals.list().find((info) => info.label === state.instanceId);
-    if (orphan) terminals.close(orphan.id).catch((error: unknown) => console.error(`[terminal] could not end ${orphan.id} of a closed tab`, error));
+    if (orphan) endUnasked(orphan.id, orphan.appSessionId, 'of a closed tab');
     return null;
   }
   const current = state.ui.getState().terminalId;
@@ -337,8 +341,17 @@ function dispose(state: TerminalTabState): void {
   disposed.add(state);
   const { terminalId } = state.ui.getState();
   state.ui.setState({ confirmClose: false, process: null, confirmed: false, closeError: null });
-  if (!terminalId || !terminals.get(terminalId)) return;
-  terminals.close(terminalId).catch((error: unknown) => console.error(`[terminal] could not end ${terminalId} on dispose`, error));
+  const handle = terminalId ? terminals.get(terminalId) : undefined;
+  if (handle) endUnasked(handle.info.id, handle.info.appSessionId, 'on dispose');
+}
+
+// A terminal whose tab went without the owner's close: a local shell is killed, as before; P5 O7 M3 (fix wave 1) another
+// machine's is let go and lives on there (the spec's "the shell lives with the machine until killed"), since a kill there
+// is an act a non-owner would be asked to confirm with nothing on screen asking for it. The tab's own close
+// (`beforeClose`) still kills it.
+function endUnasked(id: TerminalId, appSessionId: AppSessionId, why: string): void {
+  if (isRemote(appSessionId)) return terminals.release(id);
+  terminals.close(id).catch((error: unknown) => console.error(`[terminal] could not end ${id} ${why}`, error));
 }
 
 export const terminalTool: PanelTool<TerminalTabState, TerminalParams> = {
