@@ -11,6 +11,13 @@
 // port), opens a forward of the machine's loopback port for the sending device (forwards.ts) and answers `{forward,
 // port}`, which a `tcp` stream names. The forward is held by the channel the act came on, and by the channel of any
 // reseal the ledger answers while the forward is kept, so a device that reconnects within the window keeps it.
+//
+// P5 O12 M11 (with the architect, 2026-11-01): the ledger opens with `orphanAtOpen`. The grant and the state are
+// idempotent (a grant kept twice is kept once; a delivered state already adopted adopts nothing), so a claim the last
+// process left unfinished answers a query `expired`, the outcome nobody can say any more, with no read-back, and a new
+// act under its id stays `in-progress`, never run again; a device that wants the effect seals a new operation.
+// `forward.open`'s forwards live in this process's memory, so one its last process left unfinished is gone with it: an
+// orphan answered `expired` leaves the device to open a fresh forward, as a forward past its window does (P5 O7 M3).
 import type { Action } from 'org-protocol';
 import { OpLedger, type OpAnswer, type OpQueryAnswer } from '@shared/host/op-ledger';
 import type { RemoteChannel } from './channels';
@@ -42,7 +49,7 @@ export class EndpointActions {
 
   /** The ledger read and compacted (the endpoint's start). */
   open(): void {
-    this.#ledger = OpLedger.open(this.ctx.stateDir(), 'ops.jsonl', { now: this.ctx.now, log: (line) => this.ctx.log(`endpoint: ${line}`) });
+    this.#ledger = OpLedger.open(this.ctx.stateDir(), 'ops.jsonl', { now: this.ctx.now, log: (line) => this.ctx.log(`endpoint: ${line}`), orphanAtOpen: true });
   }
 
   /** Why its ledger answers nothing until mawsd restarts, or null (the status shows it). */

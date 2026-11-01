@@ -26,7 +26,7 @@ import type { EndpointActions } from './endpoint-actions';
 import type { QueryAnswer, Rl10 } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
 import type { SessionTarget } from './sources';
-import { resolveTarget } from './targets';
+import { resolveTarget, type Spawner } from './targets';
 
 export type QueriesContext = {
   authorize(request: AuthorizeRequest, who: Who, now: number): Promise<Decision>;
@@ -40,7 +40,7 @@ export type QueriesContext = {
 };
 
 /** An executor's answer, as read here: its state, the op's outcome, and the binding it stored (absent: none). */
-type Answer = { state: string; outcome?: unknown; binding: { member: string; target: SessionTarget | null; name: string } | null | 'unplaceable' };
+type Answer = { state: string; outcome?: unknown; binding: { member: string; target: SessionTarget | null; launchedBy?: Spawner; name: string } | null | 'unplaceable' };
 
 const REVEALING: ReadonlySet<string> = new Set(['done', 'refused', 'in-progress']);
 const SILENT: ReadonlySet<string> = new Set(['not-received', 'expired', 'unavailable']);
@@ -78,7 +78,8 @@ export class Queries {
     if (!REVEALING.has(answer.state)) return queried({ state: 'unavailable' });
     if (answer.binding === 'unplaceable') return queried({ state: 'unavailable' });
     if (answer.binding === null) return queried({ state: 'refused', reason: 'grade' });
-    const input: QueryBinding = { member: answer.binding.member, target: answer.binding.target };
+    const { member, target, launchedBy } = answer.binding;
+    const input: QueryBinding = { member, target, ...(launchedBy === undefined ? {} : { launchedBy }) }; // P5 O12 M11: the placement's spawner
     const decision = await this.ctx.authorize({ kind: 'query', name: answer.binding.name, input }, who, this.ctx.now());
     if (!decision.ok) return queried({ state: 'refused', reason: decision.reason });
     return queried({ state: answer.state as QueriedMessage['state'], ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }) });
@@ -99,13 +100,15 @@ export class Queries {
     // The stored target is the lane B session's stable id; its record is read through the engine session it has now.
     // A pty op acts on the machine (`shell`), whatever session its claim names: its standing is the machine's right.
     let target: SessionTarget | null = null;
+    let launchedBy: Spawner | undefined; // P5 O12 M11
     if (owner !== 'pty-host' && value.target !== null && value.target !== undefined) {
       const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, { dispatch, log: (line) => this.ctx.log(line) }) : null;
       if ((resolved?.kind === 'refused' && resolved.reason === 'unavailable') || (resolved?.kind === 'session' && resolved.unavailable === true)) return { state: value.state as string, binding: 'unplaceable' };
       if (resolved?.kind !== 'session') return { state: value.state as string, binding: null };
       target = resolved.target;
+      launchedBy = resolved.launchedBy;
     }
-    return { state: value.state as string, ...(value.state === 'done' ? { outcome: outcomeOf(value.outcome) } : {}), binding: { member: value.member, target, name: value.name } };
+    return { state: value.state as string, ...(value.state === 'done' ? { outcome: outcomeOf(value.outcome) } : {}), binding: { member: value.member, target, ...(launchedBy === undefined ? {} : { launchedBy }), name: value.name } };
   }
 
   /** The endpoint's own ledger: its actions' target is the machine. */

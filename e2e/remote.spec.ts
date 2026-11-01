@@ -80,9 +80,8 @@ const COMMIT = 'Committed from A';
 const SPAWNED_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b3';
 const SPAWN_BRIEF = 'Start on B, please.';
 const SPAWN_REPLY = 'Started on B from A.';
-// The first spawned session is listed late, past main's few quick tries at placing it (0.5 to 4 s): the pane says it
-// waits for B to list the session (main waits up to 60 s from the spawn's settlement), then opens it
-const SMINOS_LATE_MS = 10_000;
+// P5 O12 M11: a spawned session opens in the pane before B's sminos lists it (B's endpoint ranks its spawner from the
+// spine's launchedBy until sminos's record arrives), so the pane never gives up on it and any waiting line clears unlisted
 const LISTING_WAIT = (machine: string) => `Waiting for ${machine} to list the new session…`;
 const CANT_PLACE = (machine: string) => `${machine} can’t place this session`;
 const WORKTREE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b4';
@@ -521,9 +520,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       return `B's intents: ${JSON.stringify(intents)}\nB's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
     };
     // sminos's part in a spawn (the harness's fake stands in for it, as for B's first session): B's sminos lists every
-    // session on its machine, which is what gives its owners a rank on it at B's endpoint; until it does, A's pane can't
-    // place the session. `runsOnB`: the session B's engine host runs as the pinned engine session; `listSpawned` lists it
-    // then, as sminos would on its start.
+    // session on its machine, which then decides its owners' rank on it at B's endpoint; until it does, B's endpoint
+    // ranks the spawner as its owner from the spine's launchedBy (P5 O12 M11). `runsOnB`: the session B's engine host
+    // runs as the pinned engine session; `listSpawned` lists it then, as sminos would on its start.
     const runsOnB = async (engine: string): Promise<string> => {
       type Live = { appSessionId: string; engineSessionId: string | null };
       let spawnedApp: string | undefined;
@@ -546,31 +545,34 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       return spawnedApp;
     };
     let first = '';
-    await test.step('M4: "+ Session" on B starts a session that opens in A’s pane, once B’s sminos lists it however late', async () => {
+    await test.step('M4 and O12 M11: "+ Session" on B starts a session that opens in A’s pane before B’s sminos lists it', async () => {
       await newChat(again, A_PROJECT);
       await chooseMachine(again, B_NAME);
       await composerOf(again).click();
       await again.keyboard.type(SPAWN_BRIEF);
       await again.keyboard.press('Enter');
       const spawnedApp = await runsOnB(SPAWNED_SESSION);
-      const runningAt = Date.now();
-      // B's sminos slow to list it: the pane waits for the listing, and holds that past main's quick tries, never
-      // giving up with "can't place"; the scenario's own delay, not a bound on MAWS
-      const waiting = main(again).getByText(LISTING_WAIT(B_NAME));
-      await expect(waiting, `the pane waits for B to list the new session\n${await paneSaid(again)}\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
-      await expect
-        .poll(async () => {
-          if ((await main(again).getByText(CANT_PLACE(B_NAME)).count()) > 0) return 'gave up';
-          if (!(await waiting.isVisible())) return 'stopped waiting';
-          return Date.now() - runningAt >= SMINOS_LATE_MS ? 'held' : 'waiting';
-        }, { timeout: SMINOS_LATE_MS + 30_000, intervals: [250] })
-        .toMatch(/^(held|gave up|stopped waiting)$/);
-      expect(await main(again).getByText(CANT_PLACE(B_NAME)).count(), `still waiting, not given up, ${SMINOS_LATE_MS} ms after B ran the session\n${await paneSaid(again)}`).toBe(0);
-      await expect(waiting, 'still the waiting line').toBeVisible();
-      await listOnB(SPAWNED_SESSION, spawnedApp, checkout, 'B’s spawned session');
-      first = await movedTo(again, b.ref, address, bSaid); // the pane showed B’s first session before the New chat tab
-      await expect(waiting).toHaveCount(0);
+      // Nothing listed on B: B's endpoint ranks A's member as the spawner (the bridge), so the pane opens the session and
+      // never gives up with "can't place"; a waiting line it shows before B's engine host runs the session clears unlisted
+      let gaveUp = false;
+      let watching = true;
+      const watch = (async () => {
+        while (watching) {
+          if ((await main(again).getByText(CANT_PLACE(B_NAME)).count().catch(() => 0)) > 0) gaveUp = true;
+          await again.waitForTimeout(250).catch(() => (watching = false));
+        }
+      })();
+      try {
+        first = await movedTo(again, b.ref, address, bSaid); // the pane showed B’s first session before the New chat tab
+      } finally {
+        watching = false;
+        await watch;
+      }
+      expect(gaveUp, `the pane never said it can't place the session\n${await paneSaid(again)}`).toBe(false);
+      await expect(main(again).getByText(LISTING_WAIT(B_NAME)), `no waiting line once the session opened, nothing listed on B\n${await paneSaid(again)}`).toHaveCount(0);
       expect(bareOf(first), 'the tab moved to the session B started').toBe(spawnedApp);
+      // B's sminos records it later with the spawner as owner (its M11 record), and the record taking over changes nothing
+      await listOnB(SPAWNED_SESSION, spawnedApp, checkout, 'B’s spawned session');
       await expect(main(again).getByText(SPAWN_REPLY).first(), `the new session's reply in A's pane\n${mainSaid(again)}\nB's log:\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 60_000 });
       expect(JSON.stringify(await writtenOn(bareOf(first))), 'B’s new session was written the brief').toContain(SPAWN_BRIEF);
       type Spawned = { directory: string; launchedBy?: { member: string } };

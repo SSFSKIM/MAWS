@@ -21,6 +21,7 @@ import type { LaunchWatch } from './launch-watch';
 import type { ReplaySeam } from './replay-seam';
 import type { OwnerChannelLaunches } from '../owner/launch'; // P2-C (2026-10-09)
 import type { RewindNotes } from './rewind-note'; // P5 O3-D M4
+import type { SpawnerProofs } from './spawner-proof'; // P5 O12 M11
 
 // The service's dependencies, resolved (the engine's environment in hand).
 export interface Setup {
@@ -46,6 +47,7 @@ export interface Setup {
   stopWaitMs: number;
   watches: Set<LaunchWatch>; // halted when the service is disposed
   rewinds: RewindNotes; // P5 O3-D M4 (D18): the rewind a resume repeats before any input
+  spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, written before each launch of its session
 }
 
 // ---- failures ------------------------------------------------------------------------------------------------------

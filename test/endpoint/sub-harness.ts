@@ -14,6 +14,9 @@
 // `bus`), for a call and for `machine.op`'s claimed run alike, and the machine's own events (`emitMachine`: git's, the
 // files service's, scm's, `session.changed`) reach the endpoint as `mawsd`'s front sends them, whatever an app does.
 //
+// P5 O12 M11: `session.list` answers every record the suite injected, by `appId` as the index lists them (the handed-off
+// mark's pruning reads it).
+//
 // The org: A, an admin who owns the machine (device a1); B, a member (b1); C, a member with a phone (c1, web-cards).
 import * as fs from 'node:fs';
 import type { Server } from 'node:http';
@@ -452,6 +455,7 @@ export class FakeSpine {
   async dispatch(name: string, input: unknown, client?: ClientRef): Promise<HostResponse | null> {
     const appSessionId = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
     if (name === 'session.get') return ok(typeof appSessionId === 'string' ? (this.records.get(appSessionId) ?? null) : null);
+    if (name === 'session.list') return ok({ sessions: [...this.records.values()].map((record) => ({ appId: record.appSessionId, ...record })), revision: 1 });
     if (name === 'machine.op' && this.#ops !== null) {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'machine.op'>, { client: client ?? {} } as HandlerContext)) : no('internal');
