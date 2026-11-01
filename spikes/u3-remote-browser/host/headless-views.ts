@@ -3,13 +3,13 @@
 // window and no pane, so each tab's view gets a hidden window of its own at the viewport the agent works in (1280×800),
 // made when the store creates the view and closed when the store destroys it. In `offscreen` the view was made with
 // offscreen webPreferences (the host's createView) and still sits in a hidden window, which gives it its size (a first
-// run with no window read the page at 0×0 and painted nothing); the two `hidden` modes differ only in
-// the page's background throttling, which the host sets; `shown` shows the window without focus, which is invisible to
+// run with no window read the page at 0×0 and painted nothing); the host's variants (main.ts `VARIANTS`) vary
+// the page's background throttling and the power save blocker over these three placements; `shown` shows the window without focus, which is invisible to
 // anyone on Linux, where the only display is the render host's own Xvfb, and is not a mode for a person's Mac.
 import { BaseWindow } from 'electron';
 import type { TabEntry } from '../../../src/main/browser/tabs';
 
-export type TabWindowMode = 'hidden' | 'hidden-unthrottled' | 'offscreen' | 'shown';
+export type TabWindowMode = 'hidden' | 'offscreen' | 'shown';
 
 export interface HeadlessViewsOptions {
   mode: TabWindowMode;

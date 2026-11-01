@@ -300,9 +300,51 @@ await phase('subscription: text page ticking at 10 Hz', async () => {
 });
 await phase('subscription: click to paint', () => clickRun(10, 500));
 
+// The subscription's stream across what the agent does to the tab's one CDP session (FINDINGS §5.4): its plain
+// screenshot (a screencast start, a frame, a stop), its detach and its re-attach, each followed by a reading of the
+// viewer's frames. The subscription started in `subscription: text page ticking` is still running (a click run never
+// stops it); the page goes back to its clock and is left 3 s to settle (the scroll phase's overlay scrollbar long
+// gone). cua's `Page.screencastFrame` notifications are counted over the phase: only the agent's own frame belongs.
+let cuaHeld = true; // the lease taken in `cua primitives`
+await phase('subscription: collision with the agent screenshot and release', async () => {
+  if (!cua || cuaTabId === null) throw new Error('no cua lease');
+  const casts = () => cua.counts['debugger.event Page.screencastFrame']?.n ?? 0;
+  const brief3 = (s) => ({ frames: s.frames, fps: s.fps, medianIntervalMs: s.medianIntervalMs, p95IntervalMs: s.p95IntervalMs, bytesPerSecond: s.bytesPerSecond });
+  const readFor = async (ms) => {
+    const from = Date.now();
+    await sleep(ms);
+    return brief3(frameStats(frames, { from, to: Date.now() }));
+  };
+  await evalPage('setMode("tick")');
+  await sleep(3000);
+  const ticks0 = await evalPage('window.__ticks');
+  const castsBefore = casts();
+  const before = await readFor(2000);
+  const agentScreenshot = await attempt(() => vendorScreenshot(cuaTabId));
+  const afterScreenshot = await readFor(3000);
+  const detach = await attempt(() => cua.request('debugger.detach', { tabId: cuaTabId }));
+  if (!detach.failed) cuaHeld = false;
+  const afterDetach = await readFor(3000);
+  const reattach = await attempt(() => cua.request('debugger.attach', { tabId: cuaTabId }));
+  if (!reattach.failed) cuaHeld = true;
+  const afterReattach = await readFor(3000);
+  const ticks1 = await evalPage('window.__ticks');
+  return {
+    before,
+    agentScreenshot: brief(agentScreenshot, (v) => v),
+    afterScreenshot,
+    detach: brief(detach),
+    afterDetach,
+    reattach: brief(reattach),
+    afterReattach,
+    pageTicks: ticks1 - ticks0,
+    cuaScreencastFramesDuringPhase: casts() - castsBefore,
+  };
+});
+
 await phase('cua release', async () => {
   await ask('stop');
-  if (cua && cuaTabId !== null) await cua.request('debugger.detach', { tabId: cuaTabId });
+  if (cua && cuaTabId !== null && cuaHeld) await cua.request('debugger.detach', { tabId: cuaTabId });
   return { inspect: await ask('inspect') };
 });
 

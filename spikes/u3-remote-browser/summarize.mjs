@@ -23,6 +23,7 @@ for (const name of readdirSync(results).sort()) {
   const step = (n) => host.steps?.find((s) => s.name === n);
   const tick = p['text page ticking at 10 Hz (cdp)'];
   modes[name] = {
+    variant: { name: host.variant ?? name, nothrottle: host.nothrottle ?? null, powerSaveBlocker: host.powerSaveBlocker ?? null, blockerHeld: step('power save blocker held') ?? null, blockerReleased: step('power save blocker released') ?? null, tabBackgroundThrottling: step('tab loaded')?.backgroundThrottling ?? null },
     ready: { msFromSpawn: r.ready?.msFromSpawn, hostSaysReady: !!r.ready?.cuaSocket, versions: step('ready')?.versions, dockVisible: step('ready')?.dockVisible, headless: step('ready')?.headless, noSandbox: step('ready')?.noSandbox, pageState: step('tab loaded')?.pageState, peer: step('cua socket')?.peer },
     cua: pick(p['cua primitives'], ['helloMs', 'tabs', 'attach', 'title', 'visibility', 'captureScreenshot', 'vendorScreenshot', 'cuaClick', 'cuaClickLanded', 'createdTab', 'windows', 'failed']),
     screencastStatic: p['screencast static'],
@@ -32,6 +33,7 @@ for (const name of readdirSync(results).sort()) {
     collision: p['collision with the agent screenshot'],
     subscriptionTick10Hz: pick(p['subscription: text page ticking at 10 Hz'], cadence),
     subscriptionClickToPaint: pick(p['subscription: click to paint'], trips),
+    subscriptionCollision: p['subscription: collision with the agent screenshot and release'] ?? null,
     memory: {
       atReadyNoTab: memoryOf(step('memory at ready, no tab')),
       oneTabIdle: memoryOf(step('memory one tab loaded, idle')),

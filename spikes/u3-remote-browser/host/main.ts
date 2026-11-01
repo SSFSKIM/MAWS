@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, session, WebContentsView } from 'electron';
+import { app, powerSaveBlocker, session, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { partitionFor, Partitions } from '../../../src/main/browser/partition';
 import { guardPage, preparePermissions } from '../../../src/main/browser/permissions';
@@ -38,7 +38,27 @@ const pageUrl = arg('--page-url');
 const screencastSocket = arg('--screencast-socket');
 const trustPid = Number(arg('--trust-pid') ?? process.ppid);
 const repo = arg('--repo') ?? process.cwd();
-const mode = (arg('--tab-window') ?? 'hidden') as TabWindowMode;
+// The tab modes the driver names (`--tab-window`): where the view lives (headless-views.ts) and, for the throttle
+// readings on macOS (FINDINGS §5.2: a ~6 Hz page clock and a ~180 ms paint clock offscreen), one factor at a time
+// against plain `offscreen`: `-psb` holds powerSaveBlocker's 'prevent-app-suspension' (App Nap) in this process from
+// `ready` to the exit, `-nothrottle` makes every tab's view with `backgroundThrottling: false`.
+const VARIANTS: Record<string, { mode: TabWindowMode; nothrottle: boolean; psb: boolean }> = {
+  hidden: { mode: 'hidden', nothrottle: false, psb: false },
+  'hidden-unthrottled': { mode: 'hidden', nothrottle: true, psb: false },
+  offscreen: { mode: 'offscreen', nothrottle: false, psb: false },
+  'offscreen-psb': { mode: 'offscreen', nothrottle: false, psb: true },
+  'offscreen-nothrottle': { mode: 'offscreen', nothrottle: true, psb: false },
+  shown: { mode: 'shown', nothrottle: false, psb: false },
+};
+const variantName = arg('--tab-window') ?? 'hidden';
+const variant = VARIANTS[variantName];
+if (!variant) {
+  // no throw before `ready`: Electron would answer an uncaught error at load with a dialog
+  console.error(`[u3-host] unknown --tab-window ${variantName}: one of ${Object.keys(VARIANTS).join(', ')}`);
+  process.exit(64);
+}
+const mode = variant.mode;
+const holdPowerSaveBlocker = variant.psb || args.includes('--power-save-blocker');
 const accessory = args.includes('--accessory');
 
 mkdirSync(out, { recursive: true });
@@ -49,7 +69,7 @@ if (accessory && process.platform === 'darwin') app.setActivationPolicy('accesso
 app.on('window-all-closed', () => {}); // a render host outlives its windows (FINDINGS §1.2)
 
 const startedAt = Date.now();
-const result: { mode: TabWindowMode; steps: Record<string, unknown>[]; errors: { name: string; message: string }[] } = { mode, steps: [], errors: [] };
+const result: { mode: TabWindowMode; variant: string; nothrottle: boolean; powerSaveBlocker: boolean; steps: Record<string, unknown>[]; errors: { name: string; message: string }[] } = { mode, variant: variantName, nothrottle: variant.nothrottle, powerSaveBlocker: holdPowerSaveBlocker, steps: [], errors: [] };
 const save = () => writeFileSync(join(out, 'result.json'), JSON.stringify(result, null, 2));
 const step = (name: string, data: Record<string, unknown> = {}) => {
   result.steps.push({ name, atMs: Date.now() - startedAt, ...data });
@@ -118,6 +138,21 @@ async function main() {
     dockVisible: process.platform === 'darwin' ? (app.dock?.isVisible() ?? null) : null,
   });
   memory('at ready, no tab');
+  // Who holds the blocker and for how long: the render host's own browser process, from its `ready` to its exit (the
+  // `power save blocker released` step), so a reader of the idle scene knows what a held blocker would cost.
+  let blocker: { id: number; startedAtMs: number } | null = null;
+  if (holdPowerSaveBlocker) {
+    const id = powerSaveBlocker.start('prevent-app-suspension');
+    blocker = { id, startedAtMs: Date.now() - startedAt };
+    step('power save blocker held', { type: 'prevent-app-suspension', id, holderPid: process.pid, holder: 'the render host browser process', started: powerSaveBlocker.isStarted(id) });
+  }
+  const releaseBlocker = () => {
+    if (!blocker) return;
+    const started = powerSaveBlocker.isStarted(blocker.id);
+    powerSaveBlocker.stop(blocker.id);
+    step('power save blocker released', { id: blocker.id, holderPid: process.pid, wasStarted: started, heldMs: Date.now() - startedAt - blocker.startedAtMs });
+    blocker = null;
+  };
 
   const emitted: Record<string, number> = {};
   const emit: BrowserEmit = (name) => void (emitted[name] = (emitted[name] ?? 0) + 1); // nobody listens: no renderer here
@@ -129,7 +164,7 @@ async function main() {
     createView: mode === 'offscreen'
       ? (tab, adopted) => {
           partitions.session(tab.partition);
-          return adopted ? new WebContentsView({ webContents: adopted }) : new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences(), offscreen: true } });
+          return adopted ? new WebContentsView({ webContents: adopted }) : new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences(), ...(variant.nothrottle && { backgroundThrottling: false }), offscreen: true } });
         }
       : createTabView(partitions),
     resolvePartition: () => partitionFor(null, []).partition,
@@ -168,13 +203,13 @@ async function main() {
   const opened = store.open({ appSessionId, url: pageUrl, select: true });
   const entry = store.require(opened.tab.tabId);
   const wc = entry.view!.webContents;
-  if (mode === 'hidden-unthrottled') wc.setBackgroundThrottling(false);
+  if (variant.nothrottle && mode !== 'offscreen') wc.setBackgroundThrottling(false); // offscreen: set in its webPreferences above
   await new Promise<void>((resolve) => {
     if (!wc.isLoading()) return resolve();
     wc.once('did-stop-loading', () => resolve());
   });
   const pageState = await wc.executeJavaScript('({visibility: document.visibilityState, hidden: document.hidden, w: innerWidth, h: innerHeight, dpr: devicePixelRatio, title: document.title})');
-  step('tab loaded', { tabId: opened.tab.tabId, url: entry.tab.url, title: entry.tab.title, loading: entry.tab.loading, pageState, osr: wc.isOffscreen() });
+  step('tab loaded', { tabId: opened.tab.tabId, url: entry.tab.url, title: entry.tab.title, loading: entry.tab.loading, pageState, osr: wc.isOffscreen(), backgroundThrottling: wc.getBackgroundThrottling(), powerSaveBlocker: blocker !== null && powerSaveBlocker.isStarted(blocker.id) });
   memory('one tab loaded, idle');
 
   if (!screencastSocket) throw new Error('no --screencast-socket');
@@ -188,6 +223,7 @@ async function main() {
     inspect: () => ({ cua: cua.inspect(), emitted, cuaLog: cuaLog.slice(-20) }),
     exit: () => {
       step('exit asked');
+      releaseBlocker();
       screencast.close();
       cua.dispose();
       views.dispose();

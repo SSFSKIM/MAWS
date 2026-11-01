@@ -43,7 +43,8 @@ log "electron $("$electron" --version 2>/dev/null) at $electron on $(uname -srm)
 
 node "$here/build.mjs" 2>&1 | tee -a "$results/run.log"
 xvfb=(xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp")
-for mode in hidden hidden-unthrottled offscreen shown; do
+modes=${U3_MODES:-hidden,hidden-unthrottled,offscreen,shown} # the tab modes to run, comma-separated (host/main.ts VARIANTS names them all)
+for mode in ${modes//,/ }; do
   rm -rf "$results/$mode"
   log "mode $mode"
   timeout -k 10 300 node "$here/driver.mjs" --out "$results/$mode" --mode "$mode" --repo "$repo" -- "${xvfb[@]}" "$electron" --headless --hide-scrollbars "$here/build/host.cjs" 2>"$results/$mode.driver-stderr.txt"

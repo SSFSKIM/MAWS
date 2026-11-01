@@ -8,6 +8,8 @@
 # Chromium's own), and each run's Chromium profile lives under /tmp/u3-*/ and is removed after it.
 #
 #   cd <worktree> && pnpm install --frozen-lockfile && bash spikes/u3-remote-browser/macos/run.sh
+#   U3_MODES=offscreen,offscreen-psb,offscreen-nothrottle bash spikes/u3-remote-browser/macos/run.sh   (the throttle rerun:
+#   one factor each against plain offscreen; the variants are host/main.ts's VARIANTS)
 set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -19,7 +21,8 @@ log() { printf '[u3 %s] %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$results/run
 log "electron $("$electron" --version 2>/dev/null | tr -d '\n') on $(sw_vers -productVersion) $(uname -m); node $(node --version); addon $(ls "$repo/native/peer-auth/prebuilds/darwin-arm64/peer-auth.node" 2>&1)"
 
 node "$here/build.mjs" 2>&1 | tee -a "$results/run.log"
-for mode in hidden hidden-unthrottled offscreen; do
+modes=${U3_MODES:-hidden,hidden-unthrottled,offscreen} # the tab modes to run, comma-separated (host/main.ts VARIANTS names them all)
+for mode in ${modes//,/ }; do
   rm -rf "$results/$mode"
   log "mode $mode"
   node "$here/driver.mjs" --out "$results/$mode" --mode "$mode" --repo "$repo" -- "$electron" "$here/build/host.cjs" --accessory 2>"$results/$mode.driver-stderr.txt" &
