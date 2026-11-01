@@ -378,6 +378,28 @@ describe('the drop’s cleanup', () => {
     expect(existsSync(t.socketOf(A)), 'no socket listens for the refused session').toBe(false);
   });
 
+  it('makes a drop sent while a prepare cleans the partition wait for that prepare, then tear down what it made', async () => {
+    let release!: () => void;
+    const retry = new Promise<void>((resolve) => (release = resolve));
+    let storage = 0;
+    const t = await droppable((what) => {
+      if (what === 'cache') return Promise.resolve();
+      storage += 1;
+      return storage === 1 ? Promise.reject(new Error('first clear failed')) : storage === 2 ? retry : Promise.resolve();
+    });
+    t.send('d1', 'drop');
+    await expect.poll(() => t.answered('d1')?.ok).toBe(false);
+    t.send('p2', 'prepare');
+    await expect.poll(() => storage).toBe(2); // the prepare's clear of what d1 left, held
+    t.send('d2', 'drop');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect([t.answered('p2'), t.answered('d2')]).toEqual([undefined, undefined]);
+    release();
+    await expect.poll(() => [t.answered('p2'), t.answered('d2')]).toEqual([{ ok: true, value: null }, { ok: true, value: null }]);
+    expect(existsSync(t.socketOf(A)), 'the prepared socket closed by the drop after it').toBe(false);
+    expect(t.engine.inspect().sessions).toEqual({});
+  });
+
   it('serves a prepare once it has cleaned the partition its last drop left uncleared', async () => {
     let failures = 1;
     const t = await droppable(async (what) => {

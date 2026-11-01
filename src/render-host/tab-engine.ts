@@ -14,8 +14,8 @@
 //   pushed (`browserEngine.state`); a session already served answers at once.
 // - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its partition's
 //   storage and cache cleared, its browser work reported zero, then answered null (the partition's reason when it could
-//   not be cleared). Only that session's tabs close. A second drop meanwhile joins it; a `prepare` of the session waits
-//   for it, then cleans a partition it left uncleared, or is refused with the reason.
+//   not be cleared). Only that session's tabs close. A session's prepares and drops run one at a time, in the order
+//   sent; a prepare cleans a partition a drop left uncleared first, or is refused with the reason.
 // - `inventory`: the session's tabs, bounded (screencast.ts), or `unavailable` for a session not served here.
 // The inventory is pushed again at each change of the session's tabs (the store's coalesced `browser.tabs.changed`), only
 // when it changed; nothing polls.
@@ -103,7 +103,6 @@ export interface TabEngine {
 // A session this engine serves, from its `prepare` until its `drop`
 interface Served {
   parent: AppSessionId | null; // a side thread's parent, whose tabs it reaches
-  ready: Promise<void>;
   creating: number; // creations in flight
   fence: 'none' | 'held' | Promise<void>; // the session's browser work: none, held, or its acquire in flight
   told: string | null; // the inventory last pushed
@@ -116,7 +115,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   const { call, log, machine } = deps;
   const caps = deps.caps ?? HEADLESS_TABS;
   const served = new Map<AppSessionId, Served>();
-  const dropping = new Map<AppSessionId, Promise<null>>(); // a drop in flight: a second drop joins it, a prepare waits for it
+  const chains = new Map<AppSessionId, Promise<unknown>>(); // each session's prepares and drops, one at a time (`serially`)
   const opened = new Map<string, Session>(); // every partition opened, cleared at its session's drop
   const uncleared = new Set<string>(); // partitions a drop could not clear: the session's next prepare cleans them first
 
@@ -302,49 +301,40 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
 
   // ---- the operations ----------------------------------------------------------------------------------------------
 
+  // A session's prepares and drops run one at a time, each once the one before has settled, its failure included: a
+  // drop sent while a prepare runs tears down what that prepare made, a second drop finds nothing served and answers at
+  // once, and a prepare finds the partition a drop left uncleared. Each step still checks, after each await, that it
+  // serves the session before making anything for it (the engine may be disposed meanwhile).
+  function serially(appSessionId: AppSessionId, step: () => Promise<null>): Promise<null> {
+    const run = (chains.get(appSessionId) ?? Promise.resolve()).then(step);
+    const settled = run.catch(() => {});
+    chains.set(appSessionId, settled);
+    void settled.then(() => chains.get(appSessionId) === settled && chains.delete(appSessionId));
+    return run;
+  }
+
   async function prepare(appSessionId: AppSessionId): Promise<null> {
-    const existing = served.get(appSessionId);
-    if (existing) return existing.ready.then(() => null);
-    const session: Served = { parent: null, ready: Promise.resolve(), creating: 0, fence: 'none', told: null };
+    if (served.has(appSessionId)) return null;
+    const session: Served = { parent: null, creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
-    const dropped = dropping.get(appSessionId);
-    session.ready = (async () => {
-      await dropped?.catch(() => {}); // its socket gone and its partition's clears settled
-      if (served.get(appSessionId) !== session) throw new Error(`the headless browser on ${machine} dropped this session while preparing it`);
+    const serves = () => {
+      if (served.get(appSessionId) !== session) throw new Error(`the headless browser on ${machine} no longer serves this session`);
+    };
+    try {
       const why = uncleared.has(headlessPartition(appSessionId)) ? await clearPartition(appSessionId) : null;
       if (why !== null) throw new Error(why);
+      serves();
       if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
       const [parent, , relay] = await Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
+      serves();
       session.parent = parent;
-    })();
-    try {
-      await session.ready;
+      return null;
     } catch (error) {
-      if (served.get(appSessionId) === session) {
-        served.delete(appSessionId);
-        void cua.closeSession(appSessionId);
-      }
+      if (served.get(appSessionId) === session) served.delete(appSessionId);
+      await cua.closeSession(appSessionId);
       throw error;
     }
-    if (served.get(appSessionId) !== session) throw new Error(`the headless browser on ${machine} dropped this session while preparing it`);
-    return null;
-  }
-
-  // A drop of a session not served joins the drop in flight (answered as it is); a drop of a session prepared again since
-  // runs after that one, so the barrier a prepare waits for only ever lengthens.
-  function drop(appSessionId: AppSessionId): Promise<null> {
-    const previous = dropping.get(appSessionId);
-    const session = served.get(appSessionId);
-    if (!session) return previous ?? Promise.resolve(null);
-    served.delete(appSessionId);
-    const run = (async () => {
-      await previous?.catch(() => {});
-      return dropSession(appSessionId, session);
-    })();
-    dropping.set(appSessionId, run);
-    void run.catch(() => {}).then(() => dropping.get(appSessionId) === run && dropping.delete(appSessionId));
-    return run;
   }
 
   // §B: nothing of the session's browsing outlives it here. Both clears settle; one that failed leaves the partition
@@ -365,7 +355,10 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return why;
   }
 
-  async function dropSession(appSessionId: AppSessionId, session: Served): Promise<null> {
+  async function drop(appSessionId: AppSessionId): Promise<null> {
+    const session = served.get(appSessionId);
+    if (!session) return null;
+    served.delete(appSessionId);
     store.removeSession(appSessionId);
     await cua.closeSession(appSessionId);
     const why = await clearPartition(appSessionId);
@@ -381,7 +374,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
 
   return {
     request({ id, appSessionId, operation }) {
-      const run = operation.op === 'prepare' ? prepare(appSessionId) : operation.op === 'drop' ? drop(appSessionId) : Promise.resolve(inventory(appSessionId));
+      const run = operation.op === 'inventory' ? Promise.resolve(inventory(appSessionId)) : serially(appSessionId, () => (operation.op === 'prepare' ? prepare : drop)(appSessionId));
       run.then(
         (value) => {
           answer(id, { ok: true, value });
@@ -396,6 +389,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       ),
     }),
     dispose() {
+      served.clear();
       dialogs.dispose();
       cua.dispose();
       cursor.dispose();
