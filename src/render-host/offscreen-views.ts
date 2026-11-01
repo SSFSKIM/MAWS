@@ -26,6 +26,9 @@ export function offscreenPreferences(): WebPreferences {
 
 export class OffscreenViews {
   readonly childPreferences: WebPreferences = offscreenPreferences();
+  // P5 O17 M8 fix 6: Chromium makes a popup's child before it is adopted, at the size the open's window options give it; an
+  // offscreen child made at Chromium's default reads its page at 0×0 (pass 3's real run): it is made at the viewport
+  readonly childSize = { ...HEADLESS_VIEWPORT };
   private window: BaseWindow | null = null;
   private readonly placed = new Set<TabEntry>();
 

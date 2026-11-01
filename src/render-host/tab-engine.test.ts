@@ -211,7 +211,9 @@ describe('the tab engine under a stand-in Electron', () => {
     const host = await t.host(A);
     await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
     const answer = popup(activated(newestPage()), 'http://127.0.0.1:4000/popup');
-    expect(answer).toMatchObject({ action: 'allow', overrideBrowserWindowOptions: { webPreferences: offscreenPreferences() } });
+    // P5 O17 M8 fix 6: Chromium makes the child before it is adopted, at the size the open's window options give it: the
+    // agent's viewport, so the offscreen child never reads its page at 0×0 before its placement
+    expect(answer).toMatchObject({ action: 'allow', overrideBrowserWindowOptions: { width: HEADLESS_VIEWPORT.width, height: HEADLESS_VIEWPORT.height, useContentSize: true, show: false, webPreferences: offscreenPreferences() } });
     const child = new (await import('./electron.fake')).FakePage();
     (answer as { createWindow(options: unknown): unknown }).createWindow({ webContents: child });
     expect(made.views).toHaveLength(2);

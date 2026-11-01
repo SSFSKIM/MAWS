@@ -590,7 +590,14 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       }
       await expect.poll(() => tabIdOf('/child'), { timeout: 10_000, message: 'the popup adopted as a tab of the session' }).not.toBeNull();
       expect(await viewFacts(tabIdOf('/child')!), 'the adopted popup renders offscreen and no window is shown').toEqual({ held: true, offscreen: true, shown: 0 });
-      await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { message: 'the popup at the agent’s viewport, once it commits' }).toEqual([1280, 800]);
+      // what the real Electron made of the adopted child, beside the reading (M4's open question for this run)
+      const childFacts = async () => app.evaluate(({ webContents }, id) => {
+        const contents = id === null ? undefined : webContents.fromId(id);
+        return contents ? { type: contents.getType(), offscreen: contents.isOffscreen(), painting: contents.isPainting(), frameRate: contents.getFrameRate() } : null;
+      }, await contentsIdOf(tabIdOf('/child')!));
+      await expect.poll(() => inPage<number[]>('/child', '[innerWidth, innerHeight]'), { timeout: 15_000, message: 'the popup at the agent’s viewport, once it commits and is placed' }).toEqual([1280, 800]).catch(async (error: unknown) => {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\nthe adopted child: ${JSON.stringify(await childFacts())}`, { cause: error });
+      });
       const child = (await host!.request<{ id: number; url: string }[]>('tabs.query')).find((each) => each.url === pages.url('/child'))!;
       await host!.request('tabs.remove', { tabId: child.id });
       await host!.request('tabs.remove', { tabId: opener.id });

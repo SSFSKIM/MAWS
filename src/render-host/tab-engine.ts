@@ -78,6 +78,7 @@ export const headlessPartition = (appSessionId: AppSessionId): string => `maws-h
 // Where the views live (offscreen-views.ts's OffscreenViews; a stand-in in the tests)
 export interface TabEngineViews {
   readonly childPreferences: WebPreferences;
+  readonly childSize: { width: number; height: number }; // P5 O17 M8: an adopted popup's size at Chromium's creation of it
   createView(tab: BrowserTab, adopted?: WebContents): WebContentsView;
   place(entry: TabEntry): void;
   unplace(entry: TabEntry): void;
@@ -200,7 +201,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   store.onViewCreated((entry) => {
     navigator.attach(entry);
     guardPage(entry);
-    attachWindowOpen(entry, { store: popups, linkTarget: () => 'in-app', seam, childPreferences: views.childPreferences });
+    attachWindowOpen(entry, { store: popups, linkTarget: () => 'in-app', seam, childPreferences: views.childPreferences, childSize: views.childSize });
     attachInputSeams(entry);
     views.place(entry);
   });

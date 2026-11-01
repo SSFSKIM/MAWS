@@ -66,10 +66,13 @@ export interface WindowOpenDeps {
   linkTarget(): LinkTarget;
   seam: Pick<BrowserSeam, 'line' | 'openExternal'>;
   childPreferences: WebPreferences; // view.ts `tabWebPreferences`, applied to the child over whatever the page asked
+  // P5 O17 M8: the child's size at its creation, before it is adopted (the render host's offscreen child: the agent's
+  // viewport, never Chromium's 0×0 default); the app's child is sized by its pane's placement, so it names none
+  childSize?: { width: number; height: number };
   now?(): number;
 }
 
-export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, childPreferences, now = Date.now }: WindowOpenDeps): void {
+export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, childPreferences, childSize, now = Date.now }: WindowOpenDeps): void {
   // `createWindow`'s answer must be Chromium's child itself. A child that could not become a tab (its view could not be
   // made or wired) is handed back and closed on the next tick, once Electron has taken it back, so it never lingers as
   // an invisible page. A link opened with a modifier (⌘-click, ⇧-click) comes through Electron's `-new-window` path,
@@ -115,7 +118,7 @@ export function attachWindowOpen(entry: TabEntry, { store, linkTarget, seam, chi
           action: 'allow',
           outlivesOpener: true,
           // the browser preload is not among these: a child never ran one named here, so it is the partition's (view.ts)
-          overrideBrowserWindowOptions: { webPreferences: childPreferences },
+          overrideBrowserWindowOptions: { ...(childSize && { ...childSize, useContentSize: true, show: false }), webPreferences: childPreferences },
           // Chromium's child is in the options; the view must adopt that very webContents (Electron checks)
           createWindow: (options) => adoptChild(entry, url, decision.select, (options as { webContents?: WebContents }).webContents, loadOptionsOf(referrer, postBody)),
         };
