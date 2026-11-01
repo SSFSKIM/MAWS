@@ -153,7 +153,10 @@ export class MawsToolServer {
         return;
       case 'tools/call':
         // fix wave 2: the e2e's gate keeps a call out of flight until it opens (under MAWS_E2E alone)
-        if (this.deps.gate && toolCallOf(params).name !== 'ask') void this.deps.gate().then(() => this.call(requestId, id, params));
+        if (this.deps.gate && toolCallOf(params).name !== 'ask') {
+          this.deps.log(`e2e: ${requestId} waits for the call gate`);
+          void this.deps.gate().then(() => (this.deps.log(`e2e: ${requestId} passed the call gate`), this.call(requestId, id, params)));
+        }
         else void this.call(requestId, id, params);
         return;
       default:

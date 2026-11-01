@@ -156,7 +156,9 @@ export class Supervision {
         if (race) {
           this.racing = true;
           this.deps.log('e2e: the handover waits for a call to start before its freeze');
-          grace = Math.max(0, grace - (await race(() => this.delivering(this.deps.table.list()).inFlight, () => this.drain !== null)));
+          const waited = await race(() => this.delivering(this.deps.table.list()).inFlight, () => this.drain !== null);
+          this.deps.log(`e2e: the race ended after ${waited} ms, ${this.delivering(this.deps.table.list()).inFlight} calls in flight`);
+          grace = Math.max(0, grace - waited);
         }
         const drain = this.armHandover();
         const settled = drain.settled || (await drain.settledWithin(grace));
