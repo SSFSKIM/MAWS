@@ -477,6 +477,8 @@ export class Streams {
   #epoch = 0;
   /** The pty host's restarts as its last `pty.hostState` counted them; null before the first. */
   #hostRestarts: number | null = null;
+  /** The pty host's last state was `crashed`: it runs no terminal this endpoint can reach until it is `ready` again. */
+  #hostCrashed = false;
   readonly #offRemoved: () => void;
 
   constructor(ctx: StreamsContext) {
@@ -516,8 +518,10 @@ export class Streams {
    * The pty host's events: a pty that exits closes its streams `exit` after what they hold. `pty.hostState` (mawsd's
    * supervisor's state of the pty host) tells the host's loss from a reconnect to it: a transition that counts one more
    * restart is the process gone, and every pty with it, so each stream closes `exit` at once (no status: the device reads
-   * it as lost); `ready` is the host reached again, whose ptys are listed, a stream on one it no longer runs closing
-   * likewise (a new process, or an exit the reconnect's gap hid), the others kept.
+   * it as lost); so does `crashed` (the supervisor gave up on it, no successor follows), and until the host is `ready`
+   * again a pty stream's open is refused `unknown`, which the device's reopen for the exit's status takes as final;
+   * `ready` is the host reached again, whose ptys are listed, a stream on one it no longer runs closing likewise (a new
+   * process, or an exit the reconnect's gap hid), the others kept.
    */
   event(owner: string, message: { name: string; payload: unknown }): void {
     if (owner !== 'pty-host' || !isObject(message.payload)) return;
@@ -527,7 +531,8 @@ export class Streams {
     const restarts = Number.isSafeInteger(payload.restarts) ? (payload.restarts as number) : null;
     const died = restarts !== null && this.#hostRestarts !== null && restarts > this.#hostRestarts;
     if (restarts !== null) this.#hostRestarts = restarts;
-    if (died) this.#exited([...this.#byPty.values()].flatMap((set) => [...set]));
+    this.#hostCrashed = payload.state === 'crashed' || (this.#hostCrashed && payload.state !== 'ready');
+    if (died || payload.state === 'crashed') this.#exited([...this.#byPty.values()].flatMap((set) => [...set]));
     if (payload.state === 'ready') void this.#revalidate();
   }
 
@@ -661,6 +666,8 @@ export class Streams {
   async #openPty({ channel, m, act, binding, who, placeholder, install }: Opening): Promise<void> {
     const { ptyId, from, inputEpoch, inputFrom, inputSent } = m.pty!;
     const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
+    // A crashed host runs no pty this endpoint reaches: final for the device (its terminal ends as lost), not a retry.
+    if (this.#hostCrashed) return refuse('unknown');
     const dispatch = dispatchAs(this.#ctx.dispatch, channel.client);
     const record = this.#input(binding.device, ptyId, inputEpoch, inputFrom, inputSent ?? inputFrom);
     const stream = new PtyStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), ptyId, record, dispatch, this.#ctx.log);

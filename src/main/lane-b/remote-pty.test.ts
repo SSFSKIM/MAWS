@@ -16,6 +16,7 @@ function lab(pendingMs = 60_000) {
   link.peers = ['rl2.executor.machine', 'rl2.streams'];
   link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'pty.spawn' ? { ptyId: 'pty-1', pid: 7 } : { info: INFO, ringStart: 0, nextOffset: 0 } });
   const emitted: Array<{ name: string; payload: unknown }> = [];
+  const logs: string[] = [];
   const pty = createRemotePty({
     remote: () => link,
     emit: (_machine, name, payload) => void emitted.push({ name, payload }),
@@ -23,11 +24,11 @@ function lab(pendingMs = 60_000) {
     pendingMs,
     timing: { streamRetryMs: RETRY, inputHeldMax: 4 << 20 },
     now: Date.now,
-    log: () => {},
+    log: (line) => void logs.push(line),
   });
   const cmd = (name: CommandName, fields: Record<string, unknown>) => pty.dispatch(link, name, fields);
   const last = (): FakeStream => link.streams.at(-1)!;
-  return { link, pty, emitted, cmd, last };
+  return { link, pty, emitted, logs, cmd, last };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -113,5 +114,41 @@ describe('remote terminal streams (P5 O7 M3)', () => {
     expect(Buffer.concat(l.last().sent).toString()).toBe('echo hi\rpwd\r');
     l.last().sink.closed('carrier');
     expect(l.last().request.pty).toMatchObject({ inputFrom: 3, inputSent: 15 });
+  });
+
+  it('gives back the offsets of input dropped unsent at a terminal’s end: bound again, its open is well formed and the next keystroke goes once', async () => {
+    const l = lab();
+    await l.cmd('pty.spawn', { appSessionId: 'app-1', cols: 80, rows: 24 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'ab' });
+    l.last().sink.credit(2);
+    // The channel drops; typed while it is down, the input is held, never sent; the reopen is refused for good.
+    l.last().sink.closed('carrier');
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'c' });
+    l.last().sink.closed('removed');
+    expect(l.emitted.filter((e) => e.name === 'pty.exit')).toHaveLength(1);
+    // The grant comes back and the renderer attaches the shell again: the same epoch, from the end of what was sent.
+    const answer = l.cmd('pty.attach', { ptyId: 'pty-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 2, inputSent: 2 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    expect(await answer).toMatchObject({ ok: true });
+    await l.cmd('pty.write', { ptyId: 'pty-1', data: 'd' });
+    expect(l.last().sent.map((b) => Buffer.from(b).toString())).toEqual(['d']);
+    l.last().sink.closed('carrier');
+    expect(l.last().request.pty).toMatchObject({ inputFrom: 2, inputSent: 3 });
+    expect(l.logs.filter((line) => line.includes('a bug'))).toEqual([]);
+  });
+
+  it('ends a terminal as lost once its stream closes `exit` and the reopen that reads the status is refused `unknown` (its host crashed)', async () => {
+    const l = lab();
+    await l.cmd('pty.spawn', { appSessionId: 'app-1', cols: 80, rows: 24 });
+    l.last().sink.opened({ pty: { info: INFO, ringStart: 0, nextOffset: 0 }, credit: 1 << 20 });
+    l.last().sink.closed('exit');
+    expect(l.link.streams).toHaveLength(2); // opened again at once, to read the exit's status
+    l.last().sink.closed('unknown');
+    expect(l.emitted.filter((e) => e.name === 'pty.exit')).toEqual([{ name: 'pty.exit', payload: { ptyId: 'pty-1', exitCode: null, signal: null } }]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(l.link.streams).toHaveLength(2); // no more opens
   });
 });

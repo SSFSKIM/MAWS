@@ -171,8 +171,16 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     pty.live = false;
     pty.openedAt = pty.next;
     const mine = () => serial === pty.serial;
+    // Input is sent in order and refunded only once sent, so the first unrefunded offset never passes the end of what
+    // was sent. An open that broke it would be malformed to the machine, which ends the whole channel: were it ever
+    // broken, it is said and the end of what was sent taken as that offset (input stays at most once).
+    const inputFrom = pty.inputNext - pty.heldBytes;
+    if (inputFrom > pty.inputSent) {
+      log(pty, `its first unrefunded input offset ${inputFrom} is past the end of what was sent, ${pty.inputSent}: a bug; the open names ${inputFrom} for both`);
+      pty.inputSent = inputFrom;
+    }
     pty.stream = pty.link.openStream(
-      { kind: 'pty', op: pty.op, pty: { ptyId: pty.ptyId, from, inputEpoch: epoch, inputFrom: pty.inputNext - pty.heldBytes, inputSent: pty.inputSent } },
+      { kind: 'pty', op: pty.op, pty: { ptyId: pty.ptyId, from, inputEpoch: epoch, inputFrom, inputSent: pty.inputSent } },
       {
         opened: (opened) => mine() && onOpened(pty, opened),
         data: (offset, bytes) => mine() && onData(pty, offset, bytes),
@@ -336,8 +344,11 @@ export function createRemotePty(deps: RemotePtyDeps): RemotePty {
     pty.stream?.close();
     pty.stream = null;
     pty.live = false;
+    // The held input is dropped: what was never sent gives its offsets back (the machine wrote nothing past `inputSent`),
+    // so a terminal bound again goes on in the same epoch from there, `inputFrom` = `inputSent`.
     pty.held = [];
     pty.heldBytes = 0;
+    pty.inputNext = pty.inputSent;
     if (reason !== null) log(pty, `ended (${reason})`);
     sayExit(pty, null);
     const attach = pty.attach;

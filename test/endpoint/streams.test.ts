@@ -984,4 +984,26 @@ describe('the pty host lost', () => {
     await until(() => closeOf(a, id), 'the close');
     expect(closeOf(a, id)).toBe('exit');
   });
+
+  it('ends every remote terminal `exit` when the host is `crashed` for good (no restart counted), refuses its reopen `unknown` while it stays down, and a host back `ready` revives none', async () => {
+    const f = await start();
+    f.pty.hostState('ready');
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const { id } = await openPty(a, action.opId, ptyId);
+    f.pty.hostState('crashed');
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('exit');
+    // The device's reopen to read the exit's status: final, at once.
+    expect((await openPty(a, action.opId, ptyId)).answer).toMatchObject({ t: 'streamRefused', reason: 'unknown' });
+    // The host comes back with its pty: the settled stream stays settled, and only a new open reaches the pty.
+    const before = ofStream(a, id).length;
+    f.pty.hostState('ready');
+    f.pty.emit(ptyId, 'later');
+    await sleep(30);
+    expect(ofStream(a, id)).toHaveLength(before);
+    expect((await openPty(a, action.opId, ptyId)).answer).toMatchObject({ t: 'streamOpened' });
+    expect(a.channel.closed).toBe(false);
+  });
 });
