@@ -14,18 +14,26 @@
 //     local-only (`remoteDaemonStatus`: file paths). Any other `machine` row (P5 O7 M2: a lane B session's record, app
 //     events and history; O6's `machine.identity`) goes through `dispatch` to the machine's services as an engine-host
 //     row goes to the engine host; anything else answers `unavailable`.
+//   - P5 O7 M6: an `each-session` row (`attention.list`, `session.search`), admitted at `list` for the machine, answers for
+//     every session: its input is held to the registry's schema here (authorization's step 2 skips a row that carries its
+//     own grade), the machine's services answer it, and the answer keeps only the sessions the caller holds the
+//     registry's grade on (`view`), each placed by its record. The cut is made as the answer goes, in one synchronous
+//     step, against the records as they stand then: a caller below the floor learns nothing of another session.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
+import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
+import { holdsToSchema, type SessionRanks } from './authorize';
 import type { RemoteChannel } from './channels';
-import { rankAtLeast, sessionRank } from './grades';
+import { isSessionRank, rankAtLeast, sessionRank } from './grades';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
 import type { Subscription } from './subscriptions';
+import { placeRecorded, type Placement } from './targets';
 
 export type CallsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -39,11 +47,14 @@ export type CallsContext = {
   records: RecordSource;
   machineOwners(): Promise<string[]>;
   recordFor(report: SessionReport): Promise<Signed<Listing> | null>;
+  /** P5 O7 M6: the member's ranks on the machine's sessions (`Authorizer.ranks`), for the `each-session` cut. */
+  ranks(member: string): Promise<SessionRanks>;
   offers?: Offers;
   log(line: string): void;
 };
 
 type Fields = Record<string, unknown>;
+type Result = { ok: true; output: unknown } | { ok: false; code: string };
 const isObject = (v: unknown): v is Fields => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isText = (v: unknown, max = 256): v is string => typeof v === 'string' && v !== '' && v.length <= max;
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
@@ -93,6 +104,23 @@ function pythonNumber(v: number): string {
   return e < -4 || e >= 16 ? `${mantissa}e${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}` : String(v);
 }
 
+const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSessionId, 512) ? v.appSessionId : null);
+
+/**
+ * P5 O7 M6: each `each-session` row's answer, by the sessions it names: `attention.list`'s items, `session.search`'s
+ * hits, each by its `appSessionId`; `keep` answers it with only what `kept` holds (a part naming no session is dropped).
+ */
+const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(output: unknown, kept: (id: string | null) => boolean): unknown }> = {
+  'attention.list': {
+    sessions: (output) => (Array.isArray(output) ? output.map(sessionOf).filter((id) => id !== null) : []),
+    keep: (output, kept) => (Array.isArray(output) ? output.filter((item) => kept(sessionOf(item))) : []),
+  },
+  'session.search': {
+    sessions: (output) => (isObject(output) && Array.isArray(output.hits) ? output.hits.map(sessionOf).filter((id) => id !== null) : []),
+    keep: (output, kept) => (isObject(output) ? { ...output, hits: Array.isArray(output.hits) ? output.hits.filter((hit) => kept(sessionOf(hit))) : [] } : output),
+  },
+};
+
 export class Calls {
   constructor(private readonly ctx: CallsContext) {}
 
@@ -106,13 +134,15 @@ export class Calls {
       channel.send(result.ok ? { t: 'result', id: m.id, ok: true, output: result.output } : { t: 'result', id: m.id, ok: false, error: { code: result.code } });
     };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
-    let run: Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
-    if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
+    // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
+    let run: Promise<Result | (() => Result)>;
+    if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
+    else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
-    run.then(answer, (error: unknown) => {
+    run.then((result) => answer(typeof result === 'function' ? result() : result), (error: unknown) => {
       this.ctx.log(`endpoint: a \`${m.name.slice(0, 64)}\` call failed: ${(error as Error).message}`);
       answer({ ok: false, code: 'unavailable' });
     });
@@ -124,6 +154,39 @@ export class Calls {
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
     return { ok: false, code };
+  }
+
+  /**
+   * P5 O7 M6: an `each-session` read, answered by the machine's services and cut to the sessions `member` holds the
+   * registry's grade on. Every read is made first (the answer, each session's placement by its record, the member's
+   * ranks); what it resolves to is the cut, which `execute` takes in the same synchronous step as it sends the answer.
+   */
+  async #eachSession(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result | (() => Result)> {
+    const filter = Object.hasOwn(EACH_SESSION, m.name) ? EACH_SESSION[m.name] : undefined;
+    const grade = gradeOf(m.name);
+    if (filter === undefined || typeof grade !== 'string' || !isSessionRank(grade)) return { ok: false, code: 'unavailable' };
+    if (!holdsToSchema(m.name, m.input)) return { ok: false, code: 'malformed' };
+    const response = await dispatch('machine', m.name, m.input === null ? undefined : m.input);
+    if (!response.ok) return { ok: false, code: response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code };
+    const output = response.value ?? null;
+    const sessions = [...new Set(filter.sessions(output))];
+    const placed = new Map<string, Placement>(
+      await Promise.all(
+        sessions.map(async (id): Promise<[string, Placement]> => {
+          try {
+            return [id, await placeRecorded(id, dispatch)];
+          } catch (error) {
+            this.ctx.log(`endpoint: a \`${m.name}\` answer could not place a session: ${(error as Error).message}`);
+            return [id, null];
+          }
+        }),
+      ),
+    );
+    const ranks = await this.ctx.ranks(member);
+    return () => {
+      if (!ranks.current()) return { ok: false, code: 'unavailable' };
+      return { ok: true, output: filter.keep(output, (id) => id !== null && ranks.holds(placed.get(id) ?? null, grade)) };
+    };
   }
 
   /** `mawsd`'s status as a remote caller sees it: no file paths (P5 O2). */

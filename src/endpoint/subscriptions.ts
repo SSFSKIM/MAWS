@@ -31,8 +31,9 @@
 // (interest.ts).
 //
 // Feeds (P5 O7 M4, §R): a `sub` naming a feed is one of the table's subscriptions too, re-checked as any, and streamed by
-// the feeds' plane (plane-feeds.ts); a session's `checkout` feed is no interest in its stream. A feed that names no
-// session (M6's `attention`) is not offered by this build: it is answered `not-offered` at once.
+// the feeds' plane (plane-feeds.ts); a session's `checkout` feed is no interest in its stream. The machine's `attention`
+// feed (M6) names no session, so it has no target to re-check: its plane hears every change of access instead
+// (`Plane.accessChanged`) and cuts what it carries to the member's sessions as it goes.
 import { MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SessionSubMessage, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
@@ -66,6 +67,11 @@ export interface Plane {
    * held the session's subscriptions for their re-check, so it reaches a device only after a current grant.
    */
   recordChanged?(target: SessionTarget): void;
+  /**
+   * P5 O7 M6: access may have changed (a record moved, or a new head), for a subscription the table can't re-check by its
+   * target (the machine's `attention` feed). Called after the table held what it re-checks.
+   */
+  accessChanged?(): void;
   stop(): void;
 }
 
@@ -77,11 +83,12 @@ export class Subscription implements StreamSource {
   readonly id: string;
   readonly channel: RemoteChannel;
   readonly who: Who;
-  readonly session: SessionRef;
+  /** Its session; null for the machine's `attention` feed (P5 O7 M6), which names none. */
+  readonly session: SessionRef | null;
   readonly view: 'full' | 'cards';
   readonly cursor: Cursor | null;
   /** The `sub` message it answers (a later `sub` of the same id replaces it); a feed's names it (`feed`). */
-  readonly message: SessionSubMessage;
+  readonly message: SubMessage;
   /** The session as authorization placed it, once authorized. */
   target: SessionTarget | null = null;
   /**
@@ -102,12 +109,12 @@ export class Subscription implements StreamSource {
   readonly #window: StreamWindow;
   readonly #over: (sub: Subscription) => void;
 
-  constructor(channel: RemoteChannel, message: SessionSubMessage, window: StreamWindow, over: (sub: Subscription) => void) {
+  constructor(channel: RemoteChannel, message: SubMessage, window: StreamWindow, over: (sub: Subscription) => void) {
     this.id = message.sub;
     this.channel = channel;
     this.who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
-    this.session = message.session;
-    this.view = message.view ?? 'full';
+    this.session = message.feed === 'attention' ? null : message.session;
+    this.view = message.feed === 'attention' ? 'full' : (message.view ?? 'full');
     this.cursor = message.cursor;
     this.message = message;
     this.#credit = Math.min(message.credit, SUB_CREDIT_MAX);
@@ -282,7 +289,7 @@ export class Subscriptions {
   }
 
   /** The channel's `sub` route: registered now, then `authorized` (the gate, which calls `start` or `refused`). */
-  receive(channel: RemoteChannel, m: SubMessage, authorized: (channel: RemoteChannel, m: SessionSubMessage) => void): void {
+  receive(channel: RemoteChannel, m: SubMessage, authorized: (channel: RemoteChannel, m: SubMessage) => void): void {
     if (channel.closed) return;
     let subs = this.#channels.get(channel);
     if (subs === undefined) {
@@ -294,14 +301,13 @@ export class Subscriptions {
     }
     const before = subs.get(m.sub);
     if (before !== undefined) this.#close(before, false);
-    if (m.feed === 'attention') return void channel.send({ t: 'ended', sub: m.sub, reason: 'not-offered' });
     if (subs.size >= MAX_SUBS) return void channel.send({ t: 'ended', sub: m.sub, reason: 'busy' });
     subs.set(m.sub, new Subscription(channel, m, this.#windows.get(channel)!, (sub) => this.#ended(sub)));
     authorized(channel, m);
   }
 
   /** The gate's `sub` executor: the subscription authorized, to its plane. */
-  start(channel: RemoteChannel, m: SessionSubMessage, decision: Granted): void {
+  start(channel: RemoteChannel, m: SubMessage, decision: Granted): void {
     const sub = this.#channels.get(channel)?.get(m.sub);
     if (sub === undefined || sub.message !== m || sub.ended) return;
     sub.target = decision.target ?? null;
@@ -313,7 +319,7 @@ export class Subscriptions {
    * The gate refused it: it ends with the reason. A `sub` already replaced by a newer one of its id, or unsubscribed,
    * is answered nothing: an `ended` under its id would end the newer one at the device.
    */
-  refused(channel: RemoteChannel, m: SessionSubMessage, reason: string): void {
+  refused(channel: RemoteChannel, m: SubMessage, reason: string): void {
     const sub = this.#channels.get(channel)?.get(m.sub);
     if (sub === undefined || sub.message !== m) return;
     this.#channels.get(channel)?.delete(m.sub);
@@ -358,6 +364,7 @@ export class Subscriptions {
         this.#check(kept.key, message, kept.who, (verdict) => verdict === 'refused' && plane.forget?.(kept.key));
       }
     }
+    this.#ctx.planes.feeds.accessChanged?.();
   }
 
   stop(): void {
@@ -379,7 +386,7 @@ export class Subscriptions {
    * decisions; an answer the endpoint can't give now (`unavailable`: the engine host away, a read timed out) is asked
    * again after each of the retry delays, and is `unanswered` after the last, as is a check that failed outright.
    */
-  #check(key: unknown, message: SessionSubMessage, who: Who, verdict: (verdict: 'granted' | 'refused' | 'unanswered') => void, attempt = 0): void {
+  #check(key: unknown, message: SubMessage, who: Who, verdict: (verdict: 'granted' | 'refused' | 'unanswered') => void, attempt = 0): void {
     const n = attempt === 0 ? (this.#checks.get(key) ?? 0) + 1 : this.#checks.get(key)!;
     this.#checks.set(key, n);
     const current = () => this.#checks.get(key) === n && !(key instanceof Subscription && key.ended);
@@ -419,7 +426,8 @@ export class Subscriptions {
     const subs = this.#channels.get(sub.channel);
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
     sub.close();
-    if (sub.target !== null) this.#plane(sub).close(sub, retain);
+    // Opened by its plane once authorized: a session's with its target; the machine's feed with none.
+    if (sub.target !== null || sub.message.feed === 'attention') this.#plane(sub).close(sub, retain);
     this.#report(sub.channel);
   }
 
@@ -434,13 +442,13 @@ export class Subscriptions {
   /** The channel's lane B sessions, as its viewer's interest. */
   #report(channel: RemoteChannel): void {
     if (channel.closed) return;
-    const sessions = [...(this.#channels.get(channel)?.values() ?? [])].filter((s) => s.session.lane === 'B' && s.message.feed === undefined && s.target !== null && !s.ended).map((s) => s.session.id);
+    const sessions = [...(this.#channels.get(channel)?.values() ?? [])].flatMap((s) => (s.message.feed === undefined && s.message.session.lane === 'B' && s.target !== null && !s.ended ? [s.message.session.id] : []));
     this.#ctx.interest.report(viewerOf(channel), sessions);
   }
 
   /** The plane that streams `sub`: its lane's, or the feeds'. */
   #plane(sub: Subscription): Plane {
-    return sub.message.feed === undefined ? this.#ctx.planes[sub.session.lane] : this.#ctx.planes.feeds;
+    return sub.message.feed === undefined ? this.#ctx.planes[sub.message.session.lane] : this.#ctx.planes.feeds;
   }
 }
 

@@ -33,7 +33,8 @@
 // asked again.
 // The endpoint's own actions (`endpoint.grant`, `endpoint.state`) carry their authority in their signatures and take no
 // grade. A `sub` takes `view` on its session, or ownership for the `cards` view, and a feed (P5 O7 M4) one the offer
-// table lists: a session's `checkout` feed takes `view` on it; a `query` is answered only to the member
+// table lists: a session's `checkout` feed takes `view` on it, the machine's `attention` feed (M6) `list`, which every
+// member holds, for any device but a web-cards one; a `query` is answered only to the member
 // who sent the operation, while they still hold `view` on its stored target (M7 brings the binding), and to a web-cards
 // device only for what its class may do on a session its member owns.
 //
@@ -51,9 +52,14 @@
 // `grade` for everyone. The spawner comes from the spine record placement read (a query's, from its placement in
 // queries.ts), kept in the decision's reads: every reader of the record in one decision sees the same answer, and the
 // bridge's standing is part of what `recordsMoved` compares, so a record arriving mid-decision takes the decision again.
-import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right, SessionRef, SessionSubMessage } from 'org-protocol';
+//
+// P5 O7 M6: the `each-session` rule's second half (`ranks`). A row it governs is admitted at step 4 at `list`, for the
+// machine; what it answers is then cut per session, at the registry's grade, by a check that reads the session's record
+// when it is asked, with the machine's owners as the head now gives them: the cut and the answer's sending happen in one
+// synchronous step, so a record change can't come between them.
+import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right, SessionRef, SubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
-import { gradeOf as declaredGrade, type Grade, type GradeSpec } from '@shared/ipc/grades';
+import { gradeOf as declaredGrade, type Grade, type GradeSpec, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-effect';
 import { machineOwnerMembers } from './grants';
@@ -63,7 +69,7 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Resolved, type Spawner } from './targets';
+import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Placement, type Resolved, type Spawner } from './targets';
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
@@ -80,6 +86,12 @@ export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reaso
 export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner };
 /** The sender an act's ledger stored, which a stream opened under the act (or kept open) is authorized against. */
 export type StreamBinding = { member: string; device: string };
+/**
+ * P5 O7 M6: a member's standing on any lane B session, checked synchronously against its record as it stands when asked.
+ * `current`: whether the head and everything else the machine's owners were read against still stand; a check made once
+ * it doesn't holds nothing, and its holder reads the ranks again.
+ */
+export type SessionRanks = { holds(placement: Placement, grade: SessionRank): boolean; current(): boolean };
 
 export type AuthorizeContext = {
   ref(): string | null;
@@ -222,6 +234,28 @@ export class Authorizer {
     return refuse('unavailable');
   }
 
+  /**
+   * P5 O7 M6: `member`'s ranks on the machine's lane B sessions (the `each-session` rule's cut and the `attention` feed's),
+   * with the machine's owners as the head at `now` gives them. Read again, once, when what it rests on moved meanwhile;
+   * moved again, it is not `current`.
+   */
+  async ranks(member: string, now: number): Promise<SessionRanks> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const org = this.ctx.org();
+      const ref = this.ctx.ref();
+      const before = this.#stamp();
+      const current = () => sameStamp(before, this.#stamp());
+      const owners = org === null || ref === null ? [] : await machineOwnerMembers(org.head, org.certificates, ref, new Date(now));
+      if (!current()) continue;
+      const records = this.ctx.records;
+      return {
+        current,
+        holds: (placement, grade) => placement !== null && current() && rankAtLeast(sessionRank(recordOf(records, placement.target, placement.launchedBy), member, owners), grade),
+      };
+    }
+    return { current: () => false, holds: () => false };
+  }
+
   /** What a decision rests on beyond the records it reads: the head, the certificates, the policy and the grant ledger. */
   #stamp(): readonly unknown[] {
     const org = this.ctx.org();
@@ -329,10 +363,7 @@ export class Authorizer {
 
   /** The input holds to its registry command's schema; JSON's `null` stands for no input. */
   #validInput(name: string, input: unknown): boolean {
-    const commands: WireRegistry['commands'] = (this.ctx.registry ?? REGISTRY).commands;
-    const command = Object.hasOwn(commands, name) ? commands[name] : undefined;
-    if (command === undefined) return false;
-    return command.input.safeParse(input).success || (input === null && command.input.safeParse(undefined).success);
+    return holdsToSchema(name, input, this.ctx.registry);
   }
 
   /** The grade the input's effect takes (null: the action's signatures are its authority), or a refusal. */
@@ -368,10 +399,15 @@ export class Authorizer {
   /**
    * A subscription: `view` on its session (`full`), or ownership (`cards`); a web-cards device the cards of its own. A
    * feed the offer table lists (P5 O7 M4): a session's `checkout` feed, `view` on that lane B session, never a web-cards
-   * device's.
+   * device's; the machine's `attention` feed (M6), `list` on the machine, which every member holds, never a web-cards
+   * device's either (its class reads listings and answers, step 3). What that feed carries is cut per session as it goes.
    */
   async #sub(input: unknown, who: Who, reads: Reads): Promise<Decision> {
-    const message = input as SessionSubMessage;
+    const message = input as SubMessage;
+    if (message.feed === 'attention') {
+      if (!this.#offers.feeds.includes('attention')) return refuse('not-offered');
+      return who.clientClass === 'web-cards' ? refuse('class') : { ok: true };
+    }
     const feed = message.feed;
     if (feed === undefined ? !this.#offers.subscriptions.includes(message.session.lane) : !this.#offers.feeds.includes(feed)) return refuse('not-offered');
     if (feed !== undefined && message.session.lane !== 'B') return refuse('no-target');
@@ -429,6 +465,17 @@ export class Authorizer {
     if (typeof spec === 'string' && isMachineGrade(spec) && !(await this.ctx.rights(who.member)).includes(spec)) return refuse('grade');
     return { ok: true };
   }
+}
+
+/**
+ * Whether `input` holds to the registry command `name`'s schema (JSON's `null` standing for no input): step 2's check, and
+ * `calls.ts`' for a row that carries its own grade (P5 O7 M6's `each-session` rows), which step 2 skips.
+ */
+export function holdsToSchema(name: string, input: unknown, registry: WireRegistry = REGISTRY): boolean {
+  const commands: WireRegistry['commands'] = registry.commands;
+  const command = Object.hasOwn(commands, name) ? commands[name] : undefined;
+  if (command === undefined) return false;
+  return command.input.safeParse(input).success || (input === null && command.input.safeParse(undefined).success);
 }
 
 function sameStamp(a: readonly unknown[], b: readonly unknown[]): boolean {

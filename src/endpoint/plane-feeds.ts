@@ -18,8 +18,12 @@
 //
 // A feed lives with its channel and its access (the table re-checks it as any subscription), and ends `behind` when the
 // device leaves more than its backlog unread: the device opens it again, as after a reconnect.
+//
+// P5 O7 M6: the machine's `attention` feed is this plane's too, run by attention-feed.ts: it names no session, and cuts
+// what it carries to the member's sessions at every change of access the table tells this plane of.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
+import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import type { Plane, Subscription } from './subscriptions';
 import { withinBounds, type CheckoutBounds } from './targets';
@@ -27,6 +31,8 @@ import { withinBounds, type CheckoutBounds } from './targets';
 export type PlaneFeedsContext = {
   dispatch: EndpointServices['dispatch'];
   bounds: CheckoutBounds;
+  /** The member's ranks on the machine's sessions, for the `attention` feed's cut (P5 O7 M6). */
+  ranks: AttentionFeedsContext['ranks'];
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -53,12 +59,15 @@ export class PlaneFeeds implements Plane {
   /** The epoch of every `checkout` feed this endpoint opens: a restarted endpoint's feeds begin again. */
   readonly #epoch = `checkout:${randomBytes(9).toString('base64url')}`;
   readonly #open = new Map<Subscription, Open>();
+  readonly #attention: AttentionFeeds;
 
   constructor(ctx: PlaneFeedsContext) {
     this.#ctx = ctx;
+    this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
+    if (sub.message.feed === 'attention') return this.#attention.open(sub);
     const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
@@ -67,19 +76,27 @@ export class PlaneFeeds implements Plane {
 
   close(sub: Subscription): void {
     this.#open.delete(sub);
+    this.#attention.close(sub);
   }
 
   stop(): void {
     this.#open.clear();
+    this.#attention.stop();
+  }
+
+  /** A record changed or a new head came (P5 O7 M6): the `attention` feeds' cuts, worked out again. */
+  accessChanged(): void {
+    this.#attention.accessChanged();
   }
 
   /** A machine event (`onEvent`, owner `machine`): to every feed it concerns. */
   event(owner: string, message: { name: string; payload: unknown }): void {
+    this.#attention.event(owner, message);
     if (owner !== 'machine' || this.#open.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
     if (name === 'files.changed' || name === 'scm.remote.output') {
-      for (const open of this.#open.values()) if (open.sub.session.id === payload.appSessionId) this.#send(open, name, payload);
+      for (const open of this.#open.values()) if (open.sub.session!.id === payload.appSessionId) this.#send(open, name, payload);
     } else if (name === 'git.changed' && typeof payload.repoRoot === 'string') {
       const repoRoot = payload.repoRoot;
       for (const open of this.#open.values()) {
@@ -94,7 +111,7 @@ export class PlaneFeeds implements Plane {
     } else if (name === 'session.changed' && isObject(payload.record)) {
       const record = payload.record;
       for (const open of this.#open.values()) {
-        if (open.sub.session.id !== record.appId) continue;
+        if (open.sub.session!.id !== record.appId) continue;
         this.#send(open, name, payload);
         void this.#readBounds(open, record);
       }
@@ -125,7 +142,7 @@ export class PlaneFeeds implements Plane {
   }
 
   async #record(open: Open, dispatch: EndpointServices['dispatch']): Promise<Record<string, unknown> | null> {
-    const answer = await dispatch('machine', 'session.get', { appSessionId: open.sub.session.id });
+    const answer = await dispatch('machine', 'session.get', { appSessionId: open.sub.session!.id });
     return answer.ok && isObject(answer.value) ? answer.value : null;
   }
 

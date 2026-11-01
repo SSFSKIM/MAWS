@@ -143,7 +143,7 @@ export class PlaneA implements Plane {
     const cursor = sub.cursor;
     const up = cursor === null ? undefined : this.#upstreams.get(cursor.epoch);
     if (cursor !== null && up !== undefined) {
-      if (up.session === sub.session.id && up.who.member === sub.who.member && up.who.device === sub.who.device) {
+      if (up.session === sub.session!.id && up.who.member === sub.who.member && up.who.device === sub.who.device) {
         // The device's own resumable cursor (a channel it left half-open gives its upstream up).
         if (up.sub !== null && up.sub !== sub) {
           const old = up.sub;
@@ -193,7 +193,7 @@ export class PlaneA implements Plane {
     if (m.session === null) return;
     if (m.kind === 'raised' || m.kind === 'settled') {
       this.pending.update(m);
-      for (const [sub, card] of this.#cards) if (sub.session.id === m.session && !sub.ended) this.#cardEv(sub, card, m);
+      for (const [sub, card] of this.#cards) if (sub.session!.id === m.session && !sub.ended) this.#cardEv(sub, card, m);
     }
     if (m.kind === 'host') return;
     for (const up of [...this.#upstreams.values()]) {
@@ -208,7 +208,7 @@ export class PlaneA implements Plane {
   pendingSet(project: string, raised: readonly unknown[]): void {
     this.pending.set(project, raised);
     for (const [sub, card] of this.#cards) {
-      if (sub.ended || this.#ctx.member(sub.session.id)?.project !== project) continue;
+      if (sub.ended || this.#ctx.member(sub.session!.id)?.project !== project) continue;
       this.#cardSnap(sub, card);
     }
   }
@@ -265,7 +265,7 @@ export class PlaneA implements Plane {
    * context for it: the launch goes to the phone, which signs it.
    */
   #cardBody(sub: Subscription): { raised: Raised[]; launch: string | null } {
-    return { raised: this.pending.of(sub.session.id), launch: this.#ctx.member(sub.session.id)?.launch ?? null };
+    return { raised: this.pending.of(sub.session!.id), launch: this.#ctx.member(sub.session!.id)?.launch ?? null };
   }
 
   /**
@@ -274,7 +274,7 @@ export class PlaneA implements Plane {
    */
   recordChanged(target: SessionTarget): void {
     if (target.lane !== 'A') return;
-    for (const [sub, card] of this.#cards) if (sub.session.id === target.session && !sub.ended) this.#cardSnap(sub, card);
+    for (const [sub, card] of this.#cards) if (sub.session!.id === target.session && !sub.ended) this.#cardSnap(sub, card);
   }
 
   /**
@@ -306,9 +306,9 @@ export class PlaneA implements Plane {
 
   /** A fresh upstream subscription for `sub`, answered `snapshot` at its new epoch. */
   #fresh(sub: Subscription): void {
-    const member = this.#ctx.member(sub.session.id);
+    const member = this.#ctx.member(sub.session!.id);
     if (member === null || member.lane !== 'A') return sub.end('unavailable');
-    const up = new Upstream(sub.session.id, member.project, sub.who);
+    const up = new Upstream(sub.session!.id, member.project, sub.who);
     this.#upstreams.set(up.epoch, up);
     this.#attach(up, sub);
     this.#ctx.send({ t: 'subscribe', project: up.project, session: up.session, agentId: null, sub: up.epoch });

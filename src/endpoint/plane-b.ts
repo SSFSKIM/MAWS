@@ -44,7 +44,7 @@ export class PlaneB implements Plane {
   }
 
   open(sub: Subscription): void {
-    const handle = this.#streams.openStream({ app: sub.session.id, cursor: sub.cursor === null ? null : { epoch: sub.cursor.epoch, seq: sub.cursor.seq, ...(sub.cursor.idx === undefined ? {} : { idx: sub.cursor.idx }) }, view: sub.view, from: 'start' }, sinkOf(sub));
+    const handle = this.#streams.openStream({ app: sub.session!.id, cursor: sub.cursor === null ? null : { epoch: sub.cursor.epoch, seq: sub.cursor.seq, ...(sub.cursor.idx === undefined ? {} : { idx: sub.cursor.idx }) }, view: sub.view, from: 'start' }, sinkOf(sub));
     this.#handles.set(sub, handle);
     // Room to send more (credit came, the device took its stream, a hold ended): the journal reads on.
     sub.onRoom = () => this.#streams.room(handle);
