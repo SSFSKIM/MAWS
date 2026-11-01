@@ -21,9 +21,10 @@
 // `handed-off.json` in the endpoint's state directory: marked at the lane B join, and at any read of a lane B record
 // placed under its appSessionId, before the read answers. No record is used before its mark is durable: a mark that
 // can't be written yet withholds the record (`record` answers none) and counts as handed off, so the session is closed
-// to everyone until a later write succeeds. A lane B record the join can't place (the engine host away) is marked by its
-// engine session, which a later placement on that engine session finds. The mark is pruned of the app sessions the spine
-// no longer holds, once a process, when first read; an engine session's mark goes once its record is joined.
+// to everyone until a later write succeeds. A lane B record not yet joined is marked by its engine session before the
+// join awaits the engine host (which may be away, or no longer list it), and a placement on that engine session finds it
+// and marks its app session in its stead, as the join does once it places the record. The mark is pruned of the app
+// sessions the spine no longer holds, once a process, when first read.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -144,9 +145,9 @@ export class Members implements RecordSource, CheckoutSource {
     // is held at once (by its engine session) by a first record that grants it nothing; told again once joined
     this.#changed(member, before);
     if (member.lane === 'B' && !this.#apps.has(member.session)) {
+      this.#mark('engines', member.session); // P5 O12 M11: seen, on disk before the join, which may never place it
       await this.#join(member.session);
       if (this.#apps.has(member.session)) this.#changed(member, undefined);
-      else this.#mark('engines', member.session); // P5 O12 M11: not placed, so marked by its engine session
     }
     // A lane B session the join placed is restated under its appSessionId too, which its listing went by.
     const listing = this.listingId(member.session);
@@ -217,20 +218,24 @@ export class Members implements RecordSource, CheckoutSource {
   record(target: SessionTarget): SessionRecord | null {
     const member = this.#members.get(target.session);
     if (member === undefined || member.lane !== target.lane) return null;
-    if (target.lane === 'B' && target.appSessionId !== '' && !this.#mark('apps', target.appSessionId)) return null;
+    if (target.lane === 'B' && target.appSessionId !== '' && !this.#placed(target.session, target.appSessionId)) return null;
     return this.recordOf(member.session);
   }
 
   /**
    * P5 O12 M11: whether a sminos record was seen for an engine session of the lane B session `target` (its app session,
    * or the engine session placed, for a record the join could not place), after which the bridge never applies to it.
-   * Every session reads as handed off while the mark can't be read, and once marked though not yet on disk.
+   * Every session reads as handed off while the mark can't be read, and once marked though not yet on disk. An engine
+   * session's mark found under a placement passes to its app session, so the next engine session (a `/clear`) is covered.
    */
   handedOff(target: SessionTarget): boolean {
     const durable = this.#marks();
     if (durable === null || target.lane !== 'B') return true;
     const { appSessionId: app, session } = target;
-    return durable.apps.has(app) || this.#pending.apps.has(app) || durable.engines.has(session) || this.#pending.engines.has(session);
+    if (durable.apps.has(app) || this.#pending.apps.has(app)) return true;
+    if (!durable.engines.has(session) && !this.#pending.engines.has(session)) return false;
+    if (app !== '') this.#placed(session, app);
+    return true;
   }
 
   /** The record authorization reads of a session, by its engine session id, whatever its lane; null when none is held. */
@@ -271,7 +276,7 @@ export class Members implements RecordSource, CheckoutSource {
 
   /**
    * Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined.
-   * P5 O12 M11: each app session joined is marked handed off, its engine session's own mark then needless.
+   * P5 O12 M11: each app session joined is marked handed off in its engine session's stead.
    */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
@@ -285,7 +290,7 @@ export class Members implements RecordSource, CheckoutSource {
     for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
       if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
       this.#apps.set(status.engineSessionId, status.appSessionId);
-      if (this.#mark('apps', status.appSessionId)) this.#unmarkEngine(status.engineSessionId);
+      this.#placed(status.engineSessionId, status.appSessionId);
     }
   }
 
@@ -314,18 +319,28 @@ export class Members implements RecordSource, CheckoutSource {
     return durable !== null && this.#persist(durable);
   }
 
-  /** P5 O12 M11: an engine session's mark dropped, once its app session's is on disk. */
-  #unmarkEngine(session: string): void {
+  /**
+   * P5 O12 M11: the engine session `session` placed under `app`: the app session marked, the engine session's own mark
+   * dropped, in one write; whether the app session's mark is on disk (a write that fails changes nothing on disk, the
+   * app session's mark waiting, counted, with the rest).
+   */
+  #placed(session: string, app: string): boolean {
     const durable = this.#marks();
-    if (durable === null || !durable.engines.has(session)) return;
-    durable.engines.delete(session);
-    if (!this.#persist(durable)) durable.engines.add(session);
+    this.#pending.apps.add(app);
+    if (durable === null) return false;
+    if (durable.apps.has(app) && !durable.engines.has(session) && !this.#pending.engines.has(session)) {
+      this.#pending.apps.delete(app);
+      return true;
+    }
+    return this.#persist(durable, { engines: [session] }) || durable.apps.has(app);
   }
 
-  /** P5 O12 M11: the mark written whole, the pending marks with it; whether the write held. */
-  #persist(durable: MarkSets): boolean {
+  /** P5 O12 M11: the mark written whole, the pending marks with it, less `drop`; whether the write held (nothing changes when not). */
+  #persist(durable: MarkSets, drop: { apps?: readonly string[]; engines?: readonly string[] } = {}): boolean {
     const apps = new Set([...durable.apps, ...this.#pending.apps]);
     const engines = new Set([...durable.engines, ...this.#pending.engines]);
+    for (const app of drop.apps ?? []) apps.delete(app);
+    for (const session of drop.engines ?? []) engines.delete(session);
     try {
       this.#ctx.marks?.write({ appSessionIds: [...apps], engineSessionIds: [...engines] });
     } catch (error) {
@@ -354,8 +369,7 @@ export class Members implements RecordSource, CheckoutSource {
     const held = new Set(sessions.flatMap((record) => (isObject(record) && isId(record.appId) ? [record.appId] : [])));
     const gone = before.filter((app) => !held.has(app));
     if (gone.length === 0) return;
-    for (const app of gone) durable.apps.delete(app);
-    if (!this.#persist(durable)) for (const app of gone) durable.apps.add(app);
+    this.#persist(durable, { apps: gone });
   }
 
   async #report(member: Member): Promise<void> {

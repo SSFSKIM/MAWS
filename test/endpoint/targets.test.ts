@@ -381,9 +381,9 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
     const sm = await sminos(f);
     f.host.hold('engine.sessions');
+    const from = b.inbox.length;
     sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { access: 'private' }) });
     await until(() => f.endpoint.rl10.members.get('eng-s') !== null, 'the record');
-    const from = b.inbox.length;
     f.host.row('app-s', 1);
     expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ reason: 'removed' });
     expect(evs(b, 'sb', from)).toEqual([]);
@@ -515,9 +515,29 @@ describe('the spawner as owner (P5 O12 M11)', () => {
       const g = await startEndpoint(org, started, withSminosRecords(f));
       const b = await openRemote(g, org.b1, org.B);
       expect(await statusOf(b, 'app-u')).toBe('grade');
-      // once sminos restates it and the join places it, the app session's own mark replaces the engine session's
-      await sminos(g, [laneAMember(), laneBMember('eng-u', [org.C], { access: 'private' })]);
-      await until(() => handedOff(g).includes('app-u') && marksOf(g).engineSessionIds.length === 0, 'the app session marked in its stead');
+      // placed on that engine session, the mark passed to its app session, so a `/clear` after it is covered too
+      expect(marksOf(g)).toEqual({ version: 1, appSessionIds: ['app-u'], engineSessionIds: [] });
+      const s = g.host.session('app-u');
+      s.engineSessionId = 'eng-u2';
+      g.spine.set('app-u', 'eng-u2', { launchedBy: launchedBy(org.B) });
+      expect(await statusOf(b, 'app-u')).toBe('grade');
+    });
+
+    // the review's round 2: the sight is on disk before the join awaits the engine host, so a restart while the join is
+    // outstanding loses nothing
+    it('after an endpoint restart while the first record’s join is still outstanding', async () => {
+      const f = await startEndpoint(org, started, withSminosRecords());
+      spawned(f, 'app-h', org.B, { recorded: 'eng-h', live: 'eng-h' });
+      f.host.hold('engine.sessions');
+      await sminos(f, [laneAMember(), laneBMember('eng-h', [org.C], { access: 'private' })]);
+      await until(() => marksOf(f).engineSessionIds.includes('eng-h'), 'the engine session marked before its join');
+      f.sminos?.close();
+      await f.endpoint.stop();
+      started.splice(started.indexOf(f), 1);
+      const g = await startEndpoint(org, started, withSminosRecords(f));
+      const b = await openRemote(g, org.b1, org.B);
+      expect(await statusOf(b, 'app-h')).toBe('grade');
+      f.host.release('engine.sessions');
     });
   });
 
