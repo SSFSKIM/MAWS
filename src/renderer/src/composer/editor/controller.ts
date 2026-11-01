@@ -196,7 +196,13 @@ export class EditorController {
     const before = this.inputs.uploadsTo ?? null;
     this.inputs = inputs;
     // P5 O7 M4 (fix wave 1): the chat is now to run on another machine: a local drop's mention becomes its upload
-    if (before === null && (inputs.uploadsTo ?? null) !== null && this.heldDrops.size > 0) void this.heldDropsToUploads();
+    const after = inputs.uploadsTo ?? null;
+    if (before === null && after !== null && this.heldDrops.size > 0) {
+      const converting = this.heldDropsToUploads(after).finally(() => {
+        if (this.converting === converting) this.converting = null;
+      });
+      this.converting = converting;
+    }
   }
 
   attach(editor: TiptapEditor): void {
@@ -330,6 +336,18 @@ export class EditorController {
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
   async submit(): Promise<void> {
+    // M4c fix wave 2: a local drop's conversion to its upload under way: the submission waits for it
+    const converting = this.converting;
+    if (converting !== null) {
+      if (this.submitAfterConverting) return; // one submission waits; another Send meanwhile adds none
+      this.submitAfterConverting = true;
+      try {
+        await converting;
+      } finally {
+        this.submitAfterConverting = false;
+      }
+      return this.submit();
+    }
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
@@ -528,23 +546,59 @@ export class EditorController {
   // P5 O7 M4 (fix wave 1): each local drop's mention (by its id) with the file it named, while this mount lives: if the
   // chat is then to run on another machine, the bytes go up instead (a path on this Mac names nothing there)
   private heldDrops = new Map<string, File>();
+  // M4c fix wave 2: the conversion under way; a submission waits for it, so it never goes without the files
+  private converting: Promise<void> | null = null;
+  private submitAfterConverting = false;
 
-  private async heldDropsToUploads(): Promise<void> {
+  // M4c fix wave 2: transactional. Every file is judged and read first; then, in one transaction, the mentions of those
+  // that can go are replaced by their attachments. A refused or unreadable one keeps its mention, with words that say
+  // why; a document changed meanwhile (an unmount, a submission) takes nothing.
+  private async heldDropsToUploads(machine: string): Promise<void> {
     const editor = this.editor;
     if (!editor) return;
-    const mentioned: { id: string; from: number; to: number; file: File }[] = [];
-    editor.state.doc.descendants((node, pos) => {
+    const ids = new Set<string>();
+    editor.state.doc.descendants((node) => {
       const id = String(node.attrs.id);
-      const file = node.type.name === MENTION && node.attrs.kind === 'file' ? this.heldDrops.get(id) : undefined;
-      if (file !== undefined) mentioned.push({ id, from: pos, to: pos + node.nodeSize, file });
+      if (node.type.name === MENTION && node.attrs.kind === 'file' && this.heldDrops.has(id)) ids.add(id);
     });
-    if (mentioned.length === 0) return;
-    // the mentions go (their trailing space with them), then the files come in as a drop on the machine would
+    const ready = new Map<string, Attachment>();
+    const said: string[] = [];
+    for (const id of ids) {
+      const file = this.heldDrops.get(id)!;
+      const action = classifyRemoteFile(file, machine);
+      if (action.kind === 'refused') {
+        said.push(action.reason);
+        continue;
+      }
+      try {
+        ready.set(id, await this.remoteAttachmentOf(file, action.kind));
+      } catch {
+        said.push(`${file.name} could not be read`);
+      }
+    }
+    if (!this.live || this.busy || this.editor !== editor) return;
+    said.forEach((words) => warn(words));
+    if (ready.size === 0) return;
     const tr = editor.state.tr;
-    for (const { from, to } of [...mentioned].reverse()) tr.delete(from, tr.doc.textBetween(to, Math.min(to + 1, tr.doc.content.size)) === ' ' ? to + 1 : to);
+    const spans: { from: number; to: number }[] = [];
+    tr.doc.descendants((node, pos) => {
+      if (node.type.name === MENTION && ready.has(String(node.attrs.id))) spans.push({ from: pos, to: pos + node.nodeSize });
+    });
+    // the mentions go (their trailing space with them), the attachments come in, in one step
+    for (const { from, to } of spans.reverse()) tr.delete(from, tr.doc.textBetween(to, Math.min(to + 1, tr.doc.content.size)) === ' ' ? to + 1 : to);
+    tr.setDocAttribute('attachments', markPersisted([...attachmentsOf(editor.getJSON()), ...ready.values()]));
     editor.view.dispatch(tr);
-    for (const { id } of mentioned) this.heldDrops.delete(id);
-    await this.addFiles(mentioned.map((m) => m.file));
+    for (const id of ready.keys()) this.heldDrops.delete(id);
+  }
+
+  // What a file becomes on a session on another machine, read whole (no refusal: classified first).
+  private async remoteAttachmentOf(file: File, kind: 'image' | 'pdf' | 'upload'): Promise<Attachment> {
+    if (kind === 'pdf') return { id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data: await fileBase64(file), persisted: true };
+    if (kind === 'image') {
+      const out = await downscaleImage(file, file.type).catch(() => null);
+      if (out !== null && imageRefusal(file.name, out.bytes) === null) return { id: atomId('attachment'), kind: 'image', name: file.name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true };
+    }
+    return this.uploadOf(file.name, file, file.type);
   }
 
   private setAttachments(next: Attachment[]): void {

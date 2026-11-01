@@ -918,4 +918,42 @@ describe('a drop on a session on another machine', () => {
     expect(handle.current!.serialize().text.trim()).toBe('');
     expect(notices()).toEqual([]);
   });
+
+  // M4c fix wave 2: the conversion is transactional, and a submission waits for it
+  const localThenRemote = async (file: File, onSubmit: (s: Serialized, handle: EditorHandle) => Promise<boolean> = async () => true) => {
+    useNotices.setState({ notices: [] });
+    const handle = createRef<EditorHandle>();
+    const local = { ...client, pathForFile: (f: File) => `/w/${f.name}` } as MawsBridge;
+    const view = (uploadsTo: string | null) => <Editor appSessionId={APP} cwd="/w" sessionId={null} drafts={drafts(null).port} client={local} handle={handle} onSubmit={(s) => onSubmit(s, handle.current!)} uploadsTo={uploadsTo} />;
+    const { rerender } = render(view(null));
+    await act(async () => {});
+    await act(async () => void (await handle.current!.attachFiles([file])));
+    return { handle, remote: () => rerender(view('mini')) };
+  };
+
+  it('keeps a local drop’s mention that can’t go to the machine, saying why, when the chat turns to it', async () => {
+    const huge = new File(['x'], 'huge.zip', { type: 'application/zip' });
+    Object.defineProperty(huge, 'size', { value: 33 * 1024 * 1024 });
+    const { handle, remote } = await localThenRemote(huge);
+    remote();
+    await waitFor(() => expect(notices()).toEqual(['huge.zip is over 32 MB, the most a file to mini can be']));
+    expect(handle.current!.serialize().text).toBe('@huge.zip'); // in place, not lost
+    expect(attachmentsOf(handle.current!.doc())).toEqual([]);
+  });
+
+  it('holds a Send made while a dropped file is still being read until it is attached, then sends it once', async () => {
+    let release!: () => void;
+    const notes = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+    const read = notes.arrayBuffer.bind(notes);
+    notes.arrayBuffer = () => new Promise<ArrayBuffer>((resolve) => (release = () => void read().then(resolve)));
+    const sent: { text: string; files: string[] }[] = [];
+    const { handle, remote } = await localThenRemote(notes, async (s, editor) => (sent.push({ text: s.text, files: attachmentsOf(editor.doc()).map((a) => a.name) }), true));
+    remote();
+    act(() => handle.current!.submit());
+    act(() => handle.current!.submit()); // a second Enter meanwhile
+    await act(async () => {});
+    expect(sent).toEqual([]); // waits for the read
+    await act(async () => release());
+    await waitFor(() => expect(sent).toEqual([{ text: '', files: ['notes.txt'] }]));
+  });
 });
