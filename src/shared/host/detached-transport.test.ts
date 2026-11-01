@@ -1130,6 +1130,24 @@ describe('the detached transport: the handover', () => {
     expect(spawn).toHaveBeenCalledOnce();
   });
 
+  // P5 O16 M3c fix wave 1 (the version skew between two capable builds, which e2e:cross-build cannot run before landing):
+  // a host of another build at an older or a newer minor of the major, listing host.holder, hands over as one at this
+  // minor does, and the successor this app starts is welcomed and served
+  for (const skew of [-1, 1]) {
+    it(`another build a minor ${skew < 0 ? 'behind' : 'ahead'} that lists host.holder hands over, and the successor is served`, async () => {
+      const { fake: old, asked } = await handingOverFake({ buildId: 'another-build', minor: WIRE_MINOR + skew, counts: { liveSessions: 1, rows: 1 } });
+      void supervisor.start();
+      await until(() => asked.length === 1);
+      expect(asked[0]).toEqual({ graceMs: 10_000 });
+      await old.die(); // drained at once: it detaches and exits
+      await until(() => state().state === 'ready');
+      expect(state().pid).not.toBe(old.pid);
+      expect(states.some((s) => s.state === 'ready' && s.pid === old.pid), 'never served').toBe(false);
+      expect(supervisor.peer('engine-host')).toMatchObject({ major: SOCKET_PROTOCOL, minor: WIRE_MINOR });
+      expect(spawn).toHaveBeenCalledOnce();
+    });
+  }
+
   it('a host asked to exit when idle whose pid outlives its closed socket is read as that exit, not a quiet close (#413)', async () => {
     onDemand();
     const old = await startFake({
