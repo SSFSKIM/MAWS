@@ -862,3 +862,33 @@ describe('a write whose outcome is unknown', () => {
     expect(f.pty.writes.map((w) => w.data)).toEqual(['a', 'éb']);
   });
 });
+
+// ---- IPv6 loopback: a dev server bound to `localhost` on ::1 alone ------------------------------------------------------
+
+describe('a forward to a server on ::1 alone', () => {
+  let ipv6 = false;
+  beforeAll(async () => {
+    const probe = createTcpServer();
+    ipv6 = await new Promise<boolean>((resolve, reject) => {
+      probe.once('error', (error: NodeJS.ErrnoException) => (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT' ? resolve(false) : reject(error)));
+      probe.listen(0, '::1', () => resolve(true));
+    });
+    if (ipv6) await new Promise((resolve) => probe.close(resolve));
+  });
+
+  it('carries an HTTP round trip: 127.0.0.1 is refused, so ::1 is tried once and connects', async (ctx) => {
+    if (!ipv6) ctx.skip();
+    const f = await start();
+    const server = createServer((req, res) => res.end(`hello over ::1 from ${req.url}`));
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '::1', resolve));
+    const a = await openRemote(f, org.a1, org.A);
+    const { action, outcome } = await run(f, a, 'forward.open', { port: (server.address() as AddressInfo).port });
+    const { id, answer } = await openTcp(a, action.opId, outcome.result!.forward as string);
+    expect(answer).toMatchObject({ t: 'streamOpened' });
+    await a.channel.send({ t: 'streamData', id, offset: 0, data: GET('/vite') });
+    await until(() => closeOf(a, id), 'the response and the close');
+    expect(output(a, id).text).toMatch(/^HTTP\/1\.1 200 OK[\s\S]*hello over ::1 from \/vite$/);
+    expect(closeOf(a, id)).toBe('closed');
+  });
+});

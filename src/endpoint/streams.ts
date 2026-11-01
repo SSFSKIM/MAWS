@@ -37,7 +37,8 @@
 // keystroke shows as a missing echo. Resize is `streamControl {resize: {cols, rows}}`, through `pty.resize`. A pty that
 // exits closes its streams `exit` after the output they hold.
 //
-// A tcp stream connects to `127.0.0.1:<port>` at its open (`streamOpened` after the connect, `unreachable` on failure),
+// A tcp stream connects to `127.0.0.1:<port>` at its open, and to `[::1]:<port>` once when that is refused (a server
+// bound to `localhost` on ::1 alone); `streamOpened` after the connect, `unreachable` when neither connects,
 // and ends whole with either side's close (the device's resets the socket at once: nothing could carry what it still
 // sends). The socket is paused while the device's credit is out, so its own flow
 // control holds the peer (it is never closed `behind`).
@@ -89,7 +90,7 @@ export type StreamsContext = {
   now(): number;
   log(line: string): void;
   /** The suites' seams: how a tcp stream connects, the input epochs' window, the re-check's retries, a stuck send's deadline. */
-  connect?(port: number): Socket;
+  connect?(port: number, host: Loopback): Socket;
   resumeMs?: number;
   recheckRetryMs?: readonly number[];
   transmitDeadlineMs?: number;
@@ -677,15 +678,25 @@ export class Streams {
     const refuse = (reason: StreamRefusal) => void (channel.closed || channel.send({ t: 'streamRefused', id: m.id, reason } as EndpointMessage));
     const forward = this.#ctx.forwards.hold(binding.device, m.tcp!.forward, channel);
     if (forward === null) return refuse('unknown');
-    const socket = (this.#ctx.connect ?? connectLoopback)(forward.port);
-    const connected = await new Promise<boolean>((resolve) => {
-      socket.once('connect', () => resolve(true));
-      socket.once('error', () => resolve(false));
-    });
-    if (!connected) {
-      socket.destroy();
-      return refuse('unreachable');
+    const connect = this.#ctx.connect ?? connectLoopback;
+    // 127.0.0.1, then ::1 once only when that was refused (Node 17+ servers bound to `localhost`, Vite's among them, often
+    // listen on ::1 alone); the answer is the last attempt's. A cancelled opening starts no further attempt.
+    let socket: Socket | null = null;
+    for (const host of LOOPBACKS) {
+      if (placeholder.ended || channel.closed) return;
+      const attempt = connect(forward.port, host);
+      const outcome = await new Promise<string>((resolve) => {
+        attempt.once('connect', () => resolve('connected'));
+        attempt.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'error'));
+      });
+      if (outcome === 'connected') {
+        socket = attempt;
+        break;
+      }
+      attempt.destroy();
+      if (outcome !== 'ECONNREFUSED') break;
     }
+    if (socket === null) return refuse('unreachable');
     // The connection may end while the binding is decided (its listeners come with the stream): such an open is
     // `unreachable`, never a live stream on a dead socket.
     let lost = false;
@@ -827,8 +838,12 @@ function unavailableOr(response: { ok: false; error: { code: string } }, fallbac
   return response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : fallback;
 }
 
-function connectLoopback(port: number): Socket {
-  return createConnection({ host: '127.0.0.1', port });
+/** The machine's own addresses a forward connects to, in order: never another, never a name to look up. */
+type Loopback = '127.0.0.1' | '::1';
+const LOOPBACKS: readonly Loopback[] = ['127.0.0.1', '::1'];
+
+function connectLoopback(port: number, host: Loopback): Socket {
+  return createConnection({ host, port });
 }
 
 const UTF8 = new TextDecoder();
