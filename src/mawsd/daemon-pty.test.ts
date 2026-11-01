@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFailed, vi
 import { createHostRuntime, type HostRegister } from '@shared/host/runtime';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { HIGH_WATERMARK } from '../pty-host/flow';
+import { openPtyOpsLedger, ptyOps } from '../pty-host/ops';
 import { ptyHostRegister, type PtyHostRegister } from '../pty-host/register';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { MawsdScene, until, type RawApp } from '../../test/support/mawsd-scene';
@@ -30,11 +31,16 @@ const decoder = new TextDecoder();
 let scene: MawsdScene;
 let registers: PtyHostRegister[];
 let calls: { name: string; input: unknown }[];
+// P5 O7 M3: when set before the pty host comes up, its ledger's kill waits on it (the ledger and the table stay real)
+let killGate: Promise<void> | null;
+let killRuns: number;
 
 beforeEach(() => {
   scene = new MawsdScene('maws-mp-');
   registers = [];
   calls = [];
+  killGate = null;
+  killRuns = 0;
   scene.ptySpawn = (pid) => bringUp(pid);
   onTestFailed(() => void process.stdout.write(`--- mawsd's log\n${scene.logs.join('\n')}\n`));
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -48,15 +54,34 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-// The pty host's real handlers, each request recorded as it arrives.
+// The pty host's real handlers, each request recorded as it arrives. Under a kill gate, `pty.op` and `pty.opQuery` are
+// the real ledger's over the real table, its kill held until the gate opens.
 function bringUp(pid: number) {
-  const real = ptyHostRegister({ hostVersion: '9.9.9', capture: async () => ({ ...ENV }), launcher: ENV, opsDir: scene.ptyProfile.dir });
+  const gate = killGate;
+  const real = ptyHostRegister({ hostVersion: '9.9.9', capture: async () => ({ ...ENV }), launcher: ENV, ...(gate === null && { opsDir: scene.ptyProfile.dir }) });
   registers.push(real);
+  const held =
+    gate &&
+    ptyOps({
+      ledger: openPtyOpsLedger(scene.ptyProfile.dir),
+      table: {
+        spawn: (input) => real.table()!.spawn(input),
+        listFor: (input) => real.table()!.listFor(input),
+        attachMetadata: (ptyId) => real.table()!.attachMetadata(ptyId),
+        kill: async (input) => {
+          await gate;
+          killRuns += 1;
+          return real.table()!.kill(input);
+        },
+      },
+    });
   const recorded: HostRegister = (on, emit, client) =>
     real.register(
       ((name: string, handler: (input: unknown, ctx: unknown) => Promise<unknown>) =>
         (on as (n: string, h: (input: unknown, ctx: unknown) => Promise<unknown>) => void)(name, async (input, ctx) => {
           calls.push({ name, input });
+          if (held && name === 'pty.op') return held.op(input as never);
+          if (held && name === 'pty.opQuery') return held.opQuery(input as never);
           return handler(input, ctx);
         })) as never,
       emit,
@@ -232,5 +257,40 @@ describe('a remote act through the pty host’s ledger (P5 O7 M3)', () => {
     expect(scene.spawn.mock.calls.length).toBe(hosts); // adopted, not restarted
     expect(table().list().ptys.filter((pty) => pty.alive)).toHaveLength(1);
     expect(calls.filter((call) => call.name === 'pty.spawn')).toHaveLength(0); // the ledger ran the table's spawn itself, once
+  });
+
+  it('a kill in flight across mawsd’s restart completes in the adopted pty host: its query goes in-progress to done with the original binding, once, no host replaced', async () => {
+    let open!: () => void;
+    killGate = new Promise((resolve) => (open = resolve));
+    const first = new SeamEndpoint();
+    const daemon = await scene.start({ endpoint: first });
+    const shell = (label: string) => remoteAct('pty.spawn', { appSessionId: 'app-session-remote', label, cwd: tmpdir(), cols: 80, rows: 24, shell: '/bin/sh', args: ['-c', 'exec cat'] });
+    const doomed = answered(await first.s.dispatch('pty-host', 'pty.op', shell('doomed')));
+    const { ptyId } = (doomed.result as { value: { ptyId: string } }).value;
+    answered(await first.s.dispatch('pty-host', 'pty.op', shell('kept'))); // a live pty after the kill, so the new mawsd never parks the host
+    const hosts = scene.spawn.mock.calls.length;
+
+    const kill = remoteAct('pty.kill', { ptyId });
+    const lost = first.s.dispatch('pty-host', 'pty.op', kill).catch((error: unknown) => error); // its answer is lost with the daemon
+    const ask = (endpoint: SeamEndpoint) => endpoint.s.dispatch('pty-host', 'pty.opQuery', { opId: kill.opId, opCreated: kill.opCreated, tombstoneIfAbsent: true }).then(answered);
+    const binding = { member: 'member-2', device: 'device-2', fingerprint: 'fp-2', target: ptyId, name: 'pty.kill' };
+    await vi.waitFor(async () => expect(await ask(first)).toEqual({ state: 'in-progress', ...binding }), { timeout: WAIT_MS, interval: 20 });
+
+    await daemon.stop('test'); // the pty host keeps running, the kill held in its handler
+    scene.daemons.length = 0;
+    await lost;
+    const second = new SeamEndpoint();
+    await scene.start({ endpoint: second });
+    expect(await ask(second)).toEqual({ state: 'in-progress', ...binding }); // adopted mid-op: the same claim, still running
+    expect(await second.s.dispatch('pty-host', 'pty.op', kill).then(answered)).toEqual({ state: 'in-progress' }); // a reseal runs nothing
+
+    open();
+    await vi.waitFor(async () => expect(await ask(second)).toEqual({ state: 'done', outcome: { ok: true }, ...binding }), { timeout: WAIT_MS, interval: 20 });
+    expect(await second.s.dispatch('pty-host', 'pty.op', kill).then(answered)).toEqual({ state: 'done', result: { ok: true } });
+    expect(killRuns).toBe(1);
+    await until(() => !table().list().ptys.some((pty) => pty.ptyId === ptyId), WAIT_MS, 'the killed pty removed');
+    expect(table().list().ptys.filter((pty) => pty.alive).map((pty) => pty.label)).toEqual(['kept']);
+    expect(scene.spawn.mock.calls.length).toBe(hosts); // adopted, never replaced
+    expect(registers).toHaveLength(1);
   });
 });
