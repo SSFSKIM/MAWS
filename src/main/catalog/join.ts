@@ -16,11 +16,12 @@
 //   manifest entry, each in route order.
 // - Installed state is the cwd's: `here` when any route is installed in a scope that applies here, `elsewhere` when only
 //   in another project.
+import { DIRECTORY_MARKETPLACE } from '@shared/catalog/engine-view';
 import type { CatalogItem, Ownership } from '@shared/ipc/schema/catalog';
 import { repositoryLocation } from '@shared/plugins/source-key';
 import { connectorRoute, directoryEntryName, identityOf, knownFromDetail, knownFromDirectory, pluginListings, type EngineView, type EntryListing, type Known, type TestSourceData } from './normalize';
 import type { DirectoryPlugin, NetworkData, PluginDetail } from './records';
-import { DIRECTORY_MARKETPLACE, OFFICIAL } from './sources';
+import { OFFICIAL } from './sources';
 
 export interface CatalogInput {
   network: NetworkData;

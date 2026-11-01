@@ -81,6 +81,6 @@ describe('rule B: staying code reads the spine only through the view', () => {
 
   it('keeps the no-Electron rule on what stays machine-bound under src/main/', async () => {
     expect(await rulesFired("import { app } from 'electron';\nexport const a = app;\n", MACHINE_BOUND_CLIENT)).toEqual(['no-restricted-imports']);
-    expect(await rulesFired("import { app } from 'electron';\nexport const a = app;\n", 'src/main/connectors/oauth-root.ts')).toEqual([]);
+    expect(await rulesFired("import { app } from 'electron';\nexport const a = app;\n", 'src/main/connectors/legacy-custody.ts')).toEqual([]); // P5 O4 M2 (D20)
   });
 });

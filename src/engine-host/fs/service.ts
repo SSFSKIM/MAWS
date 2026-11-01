@@ -60,6 +60,14 @@ export const READ_LISTS_CAP = 256;
 // JSONL (158 MB for 625 MB), and before this a follow lived as long as the host. Long enough that switching away and
 // back keeps it; reopening after it costs one read-through again (about 3.5 s for 600 MB, never blocking the host).
 export const FOLLOW_RELEASE_MS = 2 * 60_000;
+// The least time between two passes a session's agent-file changes drive: a change after a quiet spell is read at once
+// (a followed transcript's next `Agent` tool result looks its child's meta up), and what changes while a pass runs or
+// within this of its end gathers into one more. A workflow writing many agents at once costs a pass per window, and each
+// pass reads only the files that changed, not the session's whole `subagents/` tree (thousands of files for a long one).
+export const AGENT_SETTLE_MS = 100;
+// After a pass that failed, how long the next one its changes drive waits: a tree that keeps failing to read is not
+// walked again on every write.
+export const AGENT_RETRY_MS = 5_000;
 
 // The sessions some client holds open (process-table.ts `interest`), and a hook that fires when that may have changed.
 export interface InterestSource {
@@ -77,6 +85,7 @@ export interface FsServiceOptions {
   startScanFallbackMs?: number;
   window?: WindowBudget; // tests' smaller pages
   releaseMs?: number; // FOLLOW_RELEASE_MS
+  agentRetryMs?: number; // AGENT_RETRY_MS
 }
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
@@ -99,6 +108,23 @@ interface FollowEntry {
   workflowIds: Map<string, number>; // deliveries per workflow.progress id in this follow, for the occurrence suffix
   workflowWork: Promise<unknown>; // workflow deliveries run one at a time, in change order
   usedAt: number; // its last read, or the last moment its session was in some client's interest
+}
+
+// A session's agent listing kept current, one pass at a time: a walk of the whole tree when a caller asks for the list
+// (`listAgents`) or a change is one only a walk can settle, else a read of the agent files that changed alone
+// (SubagentReader.update). Changes drive a pass only while something reads the list (`agentsRead`); until then they
+// gather here, for a session whose list was read before.
+interface AgentSync {
+  dir: string | null; // the session directory its listing in `agents` was read from
+  changed: Set<string>; // agent files changed since the last pass began (sidecar rels)
+  stale: boolean; // a pass failed: the next one walks
+  failedAt: number | null; // when the last pass failed, if the one after has not succeeded since
+  endedAt: number; // when the last pass ended
+  walk: Deferred<SubagentEntry[]> | null; // a walk asked for and not yet begun, which every caller since shares
+  pass: Promise<unknown> | null; // the pass running now
+  timer: ReturnType<typeof setTimeout> | null; // the wait before the next pass changes drive
+  begun: number; // passes begun so far: the running one's number, while one runs
+  waiters: { through: number; resolve: () => void }[]; // agentsCaughtUp's, each until pass `through` ends
 }
 
 // W7: one contested session, watched for the foreign process's first write since the contest began.
@@ -141,6 +167,7 @@ export class FsService {
   private reconcile: ReturnType<typeof setInterval> | null = null;
   private readonly window: WindowBudget | undefined;
   private readonly releaseMs: number;
+  private readonly agentRetryMs: number;
   private interest: InterestSource | null = null; // absent (tests, diagnostics), follows are never released for it
   private interested: ReadonlySet<AppSessionId> = new Set();
   private offInterest: (() => void) | null = null;
@@ -149,7 +176,7 @@ export class FsService {
   private readonly subagentReader = new SubagentReader();
   private readonly searchReader = new SearchTextReader();
   private readonly agents = new Map<SessionId, SubagentEntry[]>(); // each session's agents as last listed
-  private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
+  private readonly agentSyncs = new Map<SessionId, AgentSync>(); // every session whose agents were listed or asked for
   private readonly workflowReader = new WorkflowReader();
   private readonly workflowRuns = new Map<SessionId, Set<string>>();
   private sidecarReconcile: Promise<void> | null = null;
@@ -169,6 +196,7 @@ export class FsService {
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
     this.releaseMs = options.releaseMs ?? FOLLOW_RELEASE_MS;
+    this.agentRetryMs = options.agentRetryMs ?? AGENT_RETRY_MS;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
     this.discovery = new Discovery(options.paths);
@@ -214,6 +242,7 @@ export class FsService {
     this.offInterest?.();
     for (const entry of this.follows.values()) entry.follow.stop();
     this.follows.clear();
+    for (const sync of this.agentSyncs.values()) if (sync.timer) clearTimeout(sync.timer);
     this.searchReader.stop();
   }
 
@@ -344,7 +373,7 @@ export class FsService {
     const sessionId = this.sessionOf(appSessionId);
     const followed = this.follows.get(followKey(appSessionId, null));
     const entry = followed ?? (quiet
-      ? await this.ensureFollow(appSessionId, null, async () => this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true), historyKey(appSessionId))
+      ? await this.ensureFollow(appSessionId, null, () => this.quietFollow(appSessionId, sessionId), historyKey(appSessionId))
       : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
     entry.usedAt = Date.now();
     return snapshotOf(entry.follow, request);
@@ -366,6 +395,8 @@ export class FsService {
     // A session in the union now, or leaving it now, was wanted until this moment.
     for (const entry of this.follows.values()) if (next.has(entry.follow.appSessionId) || this.interested.has(entry.follow.appSessionId)) entry.usedAt = now;
     this.interested = new Set(next);
+    // A session some client holds open again has its list read from now on: the changes gathered meanwhile are read.
+    for (const [sessionId, sync] of this.agentSyncs) if ((sync.changed.size > 0 || sync.stale) && this.agentsRead(sessionId)) this.scheduleAgentPass(sessionId, sync);
   }
 
   private releaseUnwanted(now = Date.now()): void {
@@ -485,6 +516,14 @@ export class FsService {
     return entry;
   }
 
+  // The quiet follow of a session's older history (eventsSnapshot): its backfill finds the agents' metas in the listing,
+  // so a listing held is brought up to date first (a session nothing read meanwhile gathered its changes), and a
+  // session never listed is walked, as the session's own follow walks.
+  private async quietFollow(appSessionId: AppSessionId, sessionId: SessionId): Promise<FollowEntry> {
+    await (this.agents.has(sessionId) ? this.agentsCaughtUp(sessionId) : this.listAgents(sessionId));
+    return this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true);
+  }
+
   private newFollow(
     appSessionId: AppSessionId,
     sessionId: SessionId,
@@ -509,27 +548,122 @@ export class FsService {
     return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve(), usedAt: Date.now() };
   }
 
-  // Lists the session's agents (one listing at a time per session) and tells main when a bound session's agent set or
-  // one of their metas changed.
+  // The session's agents from a walk that begins after this call (one asked for and not yet begun is shared).
   private listAgents(sessionId: SessionId): Promise<SubagentEntry[]> {
-    const previous = this.agentListing.get(sessionId) ?? Promise.resolve();
-    const run = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const dir = this.sessionDir(sessionId);
-        const agents = dir === null ? [] : await this.subagentReader.list(dir);
-        const before = this.agents.get(sessionId) ?? [];
-        this.agents.set(sessionId, agents);
-        const appSessionId = this.bindings.appIdOf(sessionId);
-        if (appSessionId !== null && agentSetKey(before) !== agentSetKey(agents)) this.send('fs.subagentsChanged', { appSessionId, agents });
-        return agents;
+    const sync = this.agentSyncOf(sessionId);
+    sync.walk ??= deferred();
+    const answer = sync.walk.promise;
+    this.runAgentPass(sessionId, sync);
+    return answer;
+  }
+
+  // An agent transcript or meta under the session's `subagents/` changed: read by the next pass, if something reads the
+  // session's list; else it waits for a reader, kept only for a session whose list was read before (any other is walked
+  // whole when first asked for).
+  private agentFileChanged(sessionId: SessionId, rel: string): void {
+    const read = this.agentsRead(sessionId);
+    if (!read && !this.agentSyncs.has(sessionId)) return;
+    const sync = this.agentSyncOf(sessionId);
+    sync.changed.add(rel);
+    if (read) this.scheduleAgentPass(sessionId, sync);
+  }
+
+  // Whether something reads the session's agent list now: a follow of it (the backfill finds an `Agent` tool use's child
+  // in it), or a client holding it open (its task graph applies `fs.subagentsChanged`). With no interest source (tests,
+  // diagnostics), any bound session.
+  private agentsRead(sessionId: SessionId): boolean {
+    const appSessionId = this.bindings.appIdOf(sessionId);
+    if (appSessionId !== null && (this.interest === null || this.interested.has(appSessionId))) return true;
+    for (const entry of this.follows.values()) if (entry.sessionId === sessionId) return true;
+    if (appSessionId !== null) for (const key of this.starting.keys()) if (key.startsWith(`${appSessionId}\0`)) return true;
+    return false;
+  }
+
+  private agentSyncOf(sessionId: SessionId): AgentSync {
+    let sync = this.agentSyncs.get(sessionId);
+    if (sync === undefined) this.agentSyncs.set(sessionId, (sync = { dir: null, changed: new Set(), stale: false, failedAt: null, endedAt: -Infinity, walk: null, pass: null, timer: null, begun: 0, waiters: [] }));
+    return sync;
+  }
+
+  // A pass driven by changes begins AGENT_SETTLE_MS after the last one ended, at once if that is past, and AGENT_RETRY_MS
+  // after a failed one; while one runs, its end schedules the next.
+  private scheduleAgentPass(sessionId: SessionId, sync: AgentSync): void {
+    if (sync.pass !== null || sync.timer !== null || this.stopped) return;
+    const now = Date.now();
+    const wait = Math.max(sync.endedAt + AGENT_SETTLE_MS - now, sync.failedAt === null ? 0 : sync.failedAt + this.agentRetryMs - now);
+    if (wait <= 0) {
+      this.runAgentPass(sessionId, sync);
+      return;
+    }
+    sync.timer = setTimeout(() => {
+      sync.timer = null;
+      if (this.agentsRead(sessionId)) this.runAgentPass(sessionId, sync);
+    }, wait);
+  }
+
+  // Settles once every agent-file change gathered for the session so far is in its listing; null when none waits. A
+  // follow folds a transcript record only after this (pokeFollows): the engine writes a child's meta before the parent's
+  // `Agent` tool result, and the backfill looks the child up when it folds that result, once. The pass owed to the
+  // changes (or to a listing that failed to read) begins now rather than after AGENT_SETTLE_MS; within a failed pass's
+  // retry wait nothing is owed, and the fold does not wait.
+  private agentsCaughtUp(sessionId: SessionId): Promise<void> | null {
+    const sync = this.agentSyncs.get(sessionId);
+    if (sync === undefined) return null;
+    const owed = (sync.changed.size > 0 || sync.stale) && (sync.failedAt === null || Date.now() >= sync.failedAt + this.agentRetryMs);
+    if (sync.pass === null && !owed) return null;
+    const through = sync.begun + (owed ? 1 : 0);
+    const done = new Promise<void>((resolve) => sync.waiters.push({ through, resolve }));
+    if (owed) this.runAgentPass(sessionId, sync);
+    return done;
+  }
+
+  // One pass over the session's agents, unless one is running (its end starts the next): a walk when one was asked for,
+  // a pass failed, or there is no listing of this directory to bring up to date; else the changed files read alone,
+  // which falls back to a walk when it cannot be sure. Tells main when a bound session's agent set or one of their metas
+  // changed.
+  private runAgentPass(sessionId: SessionId, sync: AgentSync): void {
+    if (sync.pass !== null) return;
+    if (sync.timer !== null) clearTimeout(sync.timer);
+    sync.timer = null;
+    const { walk, changed, stale } = sync;
+    if (walk === null && changed.size === 0 && !stale) {
+      settleWaiters(sync, Infinity); // nothing left to read
+      return;
+    }
+    Object.assign(sync, { walk: null, changed: new Set<string>(), stale: false });
+    const number = ++sync.begun;
+    const dir = this.sessionDir(sessionId);
+    const before = this.agents.get(sessionId);
+    const pass = (async () => {
+      const updated = walk === null && !stale && dir !== null && before !== undefined && sync.dir === dir ? await this.subagentReader.update(dir, before, changed) : null;
+      const agents = updated ?? (dir === null ? [] : await this.subagentReader.list(dir));
+      sync.dir = dir;
+      this.agents.set(sessionId, agents);
+      const appSessionId = this.bindings.appIdOf(sessionId);
+      if (appSessionId !== null && !sameAgentSet(before ?? [], agents)) this.send('fs.subagentsChanged', { appSessionId, agents });
+      return agents;
+    })();
+    sync.pass = pass;
+    void pass
+      .then(
+        (agents) => {
+          sync.failedAt = null;
+          walk?.resolve(agents);
+        },
+        (error: unknown) => {
+          sync.stale = true;
+          sync.failedAt = Date.now();
+          if (walk) walk.reject(error);
+          else logAgentListFailure(error);
+        },
+      )
+      .finally(() => {
+        sync.pass = null;
+        sync.endedAt = Date.now();
+        settleWaiters(sync, number);
+        if (sync.walk !== null || sync.waiters.length > 0) this.runAgentPass(sessionId, sync);
+        else if (sync.changed.size > 0 && this.agentsRead(sessionId)) this.scheduleAgentPass(sessionId, sync);
       });
-    this.agentListing.set(sessionId, run);
-    void run.then(
-      () => this.agentListing.get(sessionId) === run && this.agentListing.delete(sessionId),
-      () => this.agentListing.get(sessionId) === run && this.agentListing.delete(sessionId),
-    );
-    return run;
   }
 
   // One `workflow.progress` per run whose progress changed since this follow last delivered it (every run when
@@ -562,13 +696,29 @@ export class FsService {
     return entry.workflowWork;
   }
 
+  // Pokes the followers `which` picks (its side effects, a new location, apply now), each once its session's agent
+  // listing has caught up (agentsCaughtUp), at once when nothing waits. The follower reads what the transcript holds
+  // when it is poked, which may be past what was written when the poke was asked for, so what was reported while it
+  // waited is waited for too: once more, not for as long as writes keep coming.
   private pokeFollows(which: (entry: FollowEntry) => boolean): void {
-    for (const entry of this.follows.values()) if (which(entry)) void entry.follow.poke();
+    const picked = new Map<SessionId, FollowEntry[]>();
+    for (const entry of this.follows.values()) if (which(entry)) picked.set(entry.sessionId, [...(picked.get(entry.sessionId) ?? []), entry]);
+    for (const [sessionId, entries] of picked) {
+      const poke = (waits: number) => {
+        const caughtUp = waits > 0 ? this.agentsCaughtUp(sessionId) : null;
+        if (caughtUp !== null) {
+          void caughtUp.then(() => poke(waits - 1));
+          return;
+        }
+        for (const entry of entries) void entry.follow.poke(); // a follow stopped meanwhile reads nothing
+      };
+      poke(2);
+    }
   }
 
-  // Under `<sessionId>/`: the title sidecar folds into the summary; an agent transcript or meta re-lists the agents and
-  // pokes that agent's follower; a workflow snapshot or journal tells main, and a snapshot advances a followed
-  // session's progress. Workflow scripts and task outputs are read on demand, never on change.
+  // Under `<sessionId>/`: the title sidecar folds into the summary; an agent transcript or meta is read into the agent
+  // listing (agentFileChanged) and pokes that agent's follower; a workflow snapshot or journal tells main, and a snapshot
+  // advances a followed session's progress. Workflow scripts and task outputs are read on demand, never on change.
   private onSidecarChange(change: Extract<StoreChange, { kind: 'sidecar' }>): void {
     const { rel, sessionId } = change;
     if (rel === 'custom-title.json') {
@@ -589,8 +739,7 @@ export class FsService {
       return;
     }
     if (!AGENT_SIDECAR.test(rel)) return;
-    const followed = [...this.follows.values()].some((entry) => entry.sessionId === sessionId);
-    if (appSessionId !== null || followed) this.listAgents(sessionId).catch(logAgentListFailure);
+    this.agentFileChanged(sessionId, rel);
     const path = join(this.paths.projects, change.slug, sessionId, rel);
     this.pokeFollows((entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path);
   }
@@ -651,7 +800,7 @@ export class FsService {
         const appSessionId = this.bindings.appIdOf(sessionId);
         if (appSessionId === null) continue;
         try {
-          await this.listAgents(sessionId);
+          if (this.agentsRead(sessionId)) await this.listAgents(sessionId); // one nothing reads is walked when it is next asked for
           const before = this.workflowRuns.get(sessionId) ?? new Set<string>();
           const { runs } = await this.workflows(appSessionId);
           for (const runId of new Set([...before, ...runs.map((run) => run.runId)])) this.send('fs.workflowChanged', { appSessionId, runId });
@@ -864,10 +1013,37 @@ const WORKFLOW_SNAPSHOT = /^workflows\/([^/]+)\.json$/;
 const WORKFLOW_JOURNAL = /^subagents\/workflows\/([^/]+)\/journal\.jsonl$/;
 const AGENT_SIDECAR = /^subagents\/(?:.+\/)?agent-[^/]+\.(?:jsonl|meta\.json)$/;
 
-// What `fs.subagentsChanged` reports a change of: the agent set and their metas. An agent transcript's size and mtime
-// change on every append and ride along in the payload without being a change themselves.
-function agentSetKey(agents: readonly SubagentEntry[]): string {
-  return JSON.stringify(agents.map(({ agentId, transcriptPath, runId, meta }) => [agentId, transcriptPath, runId, meta]));
+// What `fs.subagentsChanged` reports a change of: the agent set, in order, and their metas. An agent transcript's size
+// and mtime change on every append and ride along in the payload without being a change themselves. An entry an
+// incremental pass left alone is the same object in both lists, so only the entries it read again are compared.
+function sameAgentSet(before: readonly SubagentEntry[], after: readonly SubagentEntry[]): boolean {
+  return before.length === after.length && before.every((agent, i) => agent === after[i] || agentKey(agent) === agentKey(after[i]));
+}
+
+function settleWaiters(sync: AgentSync, through: number): void {
+  const ready = sync.waiters.filter((waiter) => waiter.through <= through);
+  sync.waiters = sync.waiters.filter((waiter) => waiter.through > through);
+  for (const { resolve } of ready) resolve();
+}
+
+function agentKey({ agentId, transcriptPath, runId, meta }: SubagentEntry): string {
+  return JSON.stringify([agentId, transcriptPath, runId, meta]);
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((onValue, onError) => {
+    resolve = onValue;
+    reject = onError;
+  });
+  return { promise, resolve, reject };
 }
 
 function followKey(appSessionId: AppSessionId, agentId: AgentId | null): string {

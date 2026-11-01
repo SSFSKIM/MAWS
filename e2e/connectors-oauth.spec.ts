@@ -10,24 +10,42 @@
 //          other browser or registration; the record is ciphertext, 0600 in a 0700 directory; an open HTTP server beside
 //          it is read through D with no bearer, and neither server is ever presented the other's.
 //   oauth relaunch: after an ordinary quit and relaunch nothing reaches the fixture until an open-phase engine has
-//          observed it again; then D reads on the sealed grant (mock keychain) with no browser. Disconnect revokes and
-//          forgets, the revocation endpoint up or down, and leaves D blocked; a Connect's listener pending at shutdown is
-//          closed with the app.
+//          observed it again; then D reads on the sealed grant with no browser. Disconnect revokes and forgets, the
+//          revocation endpoint up or down, and leaves D blocked; a Connect's listener pending at shutdown closes with its
+//          owner, nothing exchanged or saved.
 //   oauth trust binding (P3-HD Decision Log 45 and 46): a query-bearing request URL whose protected-resource metadata
 //          names another query's resource, and an authorization server whose discovery would leave its origin (a `//`
 //          path, its own candidates answering 404, another loopback origin serving a document naming that issuer), each
 //          end the owner's Connect before any listener, registration, consent or browser; the other origin is never
 //          asked anything and nothing is minted or sealed.
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 1 and 2, Interfaces §B, D10, D26): on the
+// daemon shape the connectors and MAWS's own OAuth run in the profile's `mawsd`, so the callback listener is `mawsd`'s
+// (the browser is still opened by the app, whose open log the fake browser follows), this build's grants are sealed
+// under the machine's key (format 2), and an app's quit no longer ends the connectors' state: a scene that relaunches
+// for a fresh owner ends the profile's machine after the quit (connector-scene.ts `endMachine`). Two cases are U7's:
+//   oauth adoption: a grant in the format a pre-O4 build kept it, the record's JSON sealed by the app's own safeStorage
+//          under the mock keychain (format 1), is adopted at the next launch: main opens it, `mawsd` re-seals the same
+//          record under the machine's key in place (format 2), the sheet lists it as MAWS's saved connection, and D
+//          reads on it after a fresh observation with no consent, registration or code exchange.
+//   oauth adoption refused: a format 1 file no safeStorage sealed is left at the launch's adoption and stays an
+//          unreadable row; it fails closed (the server's row says a saved connection can't be read, no bearer, no call,
+//          no browser) until Forget removes it, and the next Connect makes a new grant, read through D.
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
+import { CONNECT_CALLBACK_TIMEOUT_MS } from '../src/services/connectors/deadlines';
 import { CONNECTORS_COPY as C, SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, SERVER, TOOL, TOOL_NAME, wait, WATCH_MS, withScene, type ConnectorScene } from './support/connector-scene';
 import { createPageIn, expectQuietJournals, Refreshes, serverConnected, serverRow, sessionJournals } from './support/connector-direct-scene';
-import { addedListeners, bearerCrossings, pageVariant, plaintextHits, scanScratchTree } from './support/connector-direct-checks';
+import { addedListeners, bearerCrossings, openMachineSealed, pageVariant, plaintextHits, scanScratchTree } from './support/connector-direct-checks';
 import { allow, evidence, stopEngine } from './support/connector-direct-acceptance';
 import { tcpListeners } from './support/processes';
-import { browserOpens, cleanShot, connectionWords, connectThroughBrowser, documentTexts, expectScratchCustody, httpEntry, listenersOnPort, MainOutput, mcpRequestsSince, openLogOf, sealedRecords, toolCallAttempts } from './support/connector-direct-oauth';
-import { assertOpenPhase, enterOAuthPhase, enterOpenPhase, readOAuthLog, scanForSecrets, startOAuthFixture, summarizeOAuthLog, updateOAuthControl, type OAuthFixture, type OAuthFixturePaths } from './support/connector-oauth';
+import { browserOpens, cleanShot, connectionWords, connectorsPid, connectThroughBrowser, documentTexts, expectScratchCustody, httpEntry, listenersOnPort, MainOutput, mcpRequestsSince, openLogOf, sealedRecords, toolCallAttempts } from './support/connector-direct-oauth';
+import {
+  assertOpenPhase, enterOAuthPhase, enterOpenPhase, readOAuthLog, scanForSecrets, sealWithAppSafeStorage, startOAuthFixture, summarizeOAuthLog, unopenableLegacy, updateOAuthControl, writeLegacySealed,
+  type OAuthFixture, type OAuthFixturePaths,
+} from './support/connector-oauth';
 
 test.skip(process.env.MAWS_CONNECTORS_OAUTH_E2E !== '1', 'the own-OAuth e2e runs under pnpm e2e:connectors-oauth (MAWS_CONNECTORS_OAUTH_E2E=1)');
 test.describe.configure({ timeout: 180_000 });
@@ -86,6 +104,7 @@ function expectSealed(scene: ConnectorScene, fixture: OAuthFixture, count: numbe
   expect((store.parentMode ?? 0o777) & 0o077, 'connectors is owner-only').toBe(0);
   const needles = [fixture.resourceUrl, fixture.origin, new URL(fixture.origin).host, '"accessToken"', '"refreshToken"', '"tokens"', 'series:read', 'Bearer', 'client_id'];
   for (const record of store.records) {
+    expect(record.format, 'sealed under the machine’s key (format 2, P5 O4)').toBe(2);
     expect(record.mode, 'a sealed record is 0600').toBe(0o600);
     expect(record.ciphertext, 'the sealed format line and one base64 body').not.toBeNull();
     expect(plaintextHits(record.ciphertext!, needles), 'nothing of the identity or tokens is readable in the ciphertext').toEqual([]);
@@ -282,9 +301,12 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         const sealedBefore = expectSealed(scene, series, 1);
 
         // an ordinary quit and a relaunch: nothing reaches the server; the saved grant is listed but is no source. The
-        // fixture is open again before the relaunch, so no engine could ever observe its OAuth phase
+        // fixture is open again before the relaunch, so no engine could ever observe its OAuth phase. P5 O4: on the daemon
+        // shape the connectors' state is the machine's and outlives the quit (D10), so the machine ends with the app here,
+        // as the connectors ended with main before O4
         const supervisor = await scene.supervisor(run.page);
         await scene.quit(run);
+        await scene.endMachine();
         const quitAt = Date.now();
         enterOpenPhase(series);
         run = await output.launch(scene);
@@ -357,14 +379,22 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         expect(blockedAgain.last).not.toMatch(/^ok/);
         expect(mcpRequestsSince(series, disconnectedAt), 'D sent nothing after the Disconnect').toEqual([]);
 
-        // a Connect waiting in the browser when the app quits: its listener closes with the app, nothing is saved
+        // a Connect waiting in the browser when the app quits: its listener closes with its owner, nothing is saved. The
+        // owner is main on the embedded shape, which closes it with the app; on the daemon shape (P5 O4 M2) it is `mawsd`,
+        // which outlives the app, and the flow is bounded by its own callback deadline (oauth-flow.ts), so it closes by then
         sheet = await scene.openSheet(run.page);
         row = serverRow(sheet, SERVER, 'source');
         const pending = await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin, follow: false });
+        const machineOwned = pending.pid !== run.child.pid;
         const exchanges = summaryOf(series).oauth.codeExchanges;
         const documents = await documentTexts(run.page);
         await scene.quit(run);
-        expect(listenersOnPort(pending.port), 'the pending listener closed with the app').toEqual([]);
+        const pendingQuitAt = Date.now();
+        if (machineOwned) {
+          await expect.poll(() => listenersOnPort(pending.port), { timeout: CONNECT_CALLBACK_TIMEOUT_MS + 15_000, intervals: [1_000], message: 'the pending listener closed by its flow’s deadline' }).toEqual([]);
+          test.info().annotations.push({ type: 'pending listener', description: `mawsd's, closed ${Date.now() - pendingQuitAt} ms after the app's quit` });
+        }
+        expect(listenersOnPort(pending.port), 'the pending listener closed').toEqual([]);
         expect(summaryOf(series).oauth.codeExchanges, 'no code was exchanged for it').toBe(exchanges);
         expectSealed(scene, series, 0);
 
@@ -434,7 +464,7 @@ test('oauth trust binding: another query’s resource and discovery off the issu
         enterOAuthPhase(peer, { enginePids: [engine.pid] }, { advertise: { authorizationServer: issuer } });
         enterOAuthPhase(elsewhere, { enginePids: [engine.pid] }, { advertise: { issuer } });
 
-        const pid = run.child.pid!;
+        const pid = await connectorsPid(run); // P5 O4: the connectors' process, `mawsd` on the daemon shape
         const ended: Record<string, unknown> = {};
         for (const [artifactId, title, server, why] of [[page1.artifactId, PAGE_TITLE, SERVER, 'resource'], [page2.artifactId, PEER_TITLE, PEER, 'issuer']] as const) {
           ({ frame } = await scene.openPage(run.page, artifactId, title));
@@ -471,5 +501,201 @@ test('oauth trust binding: another query’s resource and discovery off the issu
       }
     },
     { server: () => httpEntry(`${tenant!.resourceUrl}?tenant=alpha`), servers: () => ({ [PEER]: httpEntry(peer!.resourceUrl) }), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
+  );
+});
+
+// ---- P5 O4 M2: U7's adoption (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 2, Interfaces §B, D26) ----
+
+const oauthDir = (scene: ConnectorScene) => join(scene.userData, 'connectors', 'oauth');
+// The two records' facts compared in memory: a boolean, so no token is ever printed by a failed expectation
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const ADOPTED = /\[connectors\] adopted 1 of 1 legacy grants\n/;
+const LEFT = /\[connectors\] adopted 0 of 1 legacy grants; left: (unopened|invalid) 1\n/;
+
+test('oauth adoption: a grant the app’s own safeStorage sealed (format 1) is adopted at the next launch, re-sealed under the machine’s key, and read through D with no consent', async () => {
+  test.setTimeout(900_000);
+  const info = test.info();
+  let series: OAuthFixture | undefined;
+  await withScene(
+    'oauthadopt',
+    info,
+    async (scene) => {
+      const retained: string[] = [];
+      try {
+        series = await startOAuthFixture({ root: scene.root, id: 'series' });
+        const fixtures = [series];
+        const openLog = openLogOf(scene);
+        const output = new MainOutput();
+        let run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        const { artifactId } = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+        let { frame } = await scene.openPage(run.page, artifactId);
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        assertOpenPhase(series);
+        const first = await scene.ownerStart(run.page);
+        await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, TOOL_NAME);
+        await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+        const refreshes = new Refreshes(frame, () => toolCallAttempts(series!));
+        await refreshes.mark();
+        await stopEngine(scene, run, first);
+        enterOAuthPhase(series, { enginePids: [first.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+
+        // a grant to adopt: this build's Connect (one consent), read once through D
+        let sheet = await scene.openSheet(run.page);
+        await connectThroughBrowser({ run, row: serverRow(sheet, SERVER, 'source'), server: SERVER, openLog, origin: series.origin });
+        await expect(serverRow(sheet, SERVER, 'source').locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+        await refreshes.until('direct', WATCH_MS + 30_000);
+        const beforeQuit = answeredTokens(series).filter((token) => token.startsWith('1.'));
+        expect(beforeQuit.length, 'read on the grant before the adoption').toBeGreaterThan(0);
+        expectSealed(scene, series, 1);
+
+        // the page's tab closed, so nothing refreshes the grant's tokens from here; then the record as a pre-O4 build kept
+        // it: the same JSON sealed by the app's own safeStorage under the mock keychain (expectScratchCustody above)
+        await run.page.getByRole('button', { name: `Close ${PAGE_TITLE}`, exact: true }).click();
+        await expect(run.page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`)).toHaveCount(0);
+        await wait(3_000);
+        const [grant] = sealedRecords(scene).records;
+        const record = openMachineSealed(oauthDir(scene), grant!.connectionId, grant!.text); // in memory only: it holds the tokens
+        const original = JSON.parse(record) as { version: number; connectionId: string; identity: unknown; tokens: unknown };
+        expect(original.version === 1 && original.connectionId === grant!.connectionId, 'a version 1 record of its own id').toBe(true);
+        const legacy = await sealWithAppSafeStorage(run.maws.app, record);
+
+        // the profile's machine ends with the app, so the next launch's mawsd has made no write for the id (the adoption
+        // replaces only a file its process never committed, D23), and the file becomes format 1 in place
+        await scene.quit(run);
+        await scene.endMachine();
+        const kept = sealedRecords(scene).records;
+        expect(kept.length === 1 && kept[0]!.text === grant!.text, 'nothing rewrote the grant after it was read').toBe(true);
+        writeLegacySealed(oauthDir(scene), grant!.connectionId, legacy);
+        expect(sealedRecords(scene).records.map(({ connectionId, format, mode }) => ({ connectionId, format, mode })), 'a format 1 file in its place').toEqual([{ connectionId: grant!.connectionId, format: 1, mode: 0o600 }]);
+        enterOpenPhase(series);
+
+        // the next launch adopts it at the machine host's first streaming: main opens it, mawsd re-seals the same record
+        run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        await expect.poll(() => sealedRecords(scene).records.map(({ connectionId, format }) => ({ connectionId, format })), { timeout: 30_000, message: 'the record adopted in place: format 2 under its id' }).toEqual([{ connectionId: grant!.connectionId, format: 2 }]);
+        await expect.poll(() => output.text(), { timeout: 10_000, message: 'main said the adoption' }).toMatch(ADOPTED);
+        const adopted = JSON.parse(openMachineSealed(oauthDir(scene), grant!.connectionId, sealedRecords(scene).records[0]!.text)) as typeof original;
+        expect(adopted.connectionId === original.connectionId && sameJson(adopted.identity, original.identity) && sameJson(adopted.tokens, original.tokens), 'the same record, re-sealed under the machine’s key').toBe(true);
+        const sealed = expectSealed(scene, series, 1);
+
+        // listed as MAWS's saved connection (readable, not an unreadable row); after a fresh observation D reads on it
+        ({ frame } = await scene.openPage(run.page, artifactId));
+        refreshes.remounted(frame, toolCallAttempts(series));
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        sheet = await scene.openSheet(run.page);
+        await expect(serverRow(sheet, SERVER, 'saved'), 'the adopted connection is listed as MAWS’s').toContainText(S.savedRow);
+        await expect(sheet.locator('[data-connector-server][data-kind="unreadable"]'), 'no unreadable row').toHaveCount(0);
+        await cleanShot(info, 'oauth-adopted-saved.png', sheet.locator('[data-connectors-servers]'), run.page, fixtures);
+        await scene.closeSheet(run.page);
+        await refreshes.mark();
+        assertOpenPhase(series);
+        const second = await scene.ownerStart(run.page);
+        await refreshes.until('engine', WATCH_MS + 30_000);
+        await stopEngine(scene, run, second);
+        enterOAuthPhase(series, { enginePids: [first.pid, second.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+        const reused = await refreshes.until('direct', WATCH_MS + 30_000);
+        const afterAdoption = answeredTokens(series).filter((token) => token !== 'none');
+        const last = afterAdoption.at(-1)!.split('.').map(Number);
+        expect(last[0], 'the same grant').toBe(1);
+        expect(last[1], 'on a token rotated past every one used before the adoption').toBeGreaterThan(Math.max(...beforeQuit.map((token) => Number(token.split('.')[1]))));
+        const summary = summaryOf(series).oauth;
+        expect(summary.refusals, 'the adopted refresh token was the latest: no replay').toEqual({});
+        expect(summary, 'no other registration, consent or code exchange').toMatchObject({ registrations: 1, authorizations: 1, codeExchanges: 1 });
+        expect(browserOpens(openLog), 'no browser after the adoption').toBe(1);
+        sheet = await scene.openSheet(run.page);
+        await expect(serverRow(sheet, SERVER, 'source').locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+
+        const documents = await documentTexts(run.page);
+        retained.push(await retain(info, 'oauth-adoption', { series: phasesOf(series), beforeQuit, afterAdoption, reused, sealed, opens: browserOpens(openLog), refreshes: refreshes.seen }, fixtures));
+        await scene.quit(run);
+        expectQuietJournals(sessionJournals(scene));
+        await expectNothingRetained(info, 'oauth-adoption', scene, fixtures, [output.text(), ...documents, ...retained]);
+      } finally {
+        await series?.close();
+      }
+    },
+    { server: () => httpEntry(series!.resourceUrl), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
+  );
+});
+
+test('oauth adoption refused: an unopenable format 1 file stays an unreadable row that fails closed until Forget removes it; the next Connect makes a new grant', async () => {
+  test.setTimeout(900_000);
+  const info = test.info();
+  let series: OAuthFixture | undefined;
+  await withScene(
+    'oauthunreadable',
+    info,
+    async (scene) => {
+      const retained: string[] = [];
+      try {
+        series = await startOAuthFixture({ root: scene.root, id: 'series' });
+        const fixtures = [series];
+        const openLog = openLogOf(scene);
+        // planted before the profile's first launch: a format 1 header over bytes no safeStorage sealed
+        const planted = randomUUID();
+        writeLegacySealed(oauthDir(scene), planted, unopenableLegacy());
+        const output = new MainOutput();
+        const run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        await expect.poll(() => output.text(), { timeout: 30_000, message: 'main said the adoption left it' }).toMatch(LEFT);
+        expect(sealedRecords(scene).records.map(({ connectionId, format }) => ({ connectionId, format })), 'left in place, format 1').toEqual([{ connectionId: planted, format: 1 }]);
+
+        const { artifactId } = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+        const { frame } = await scene.openPage(run.page, artifactId);
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        assertOpenPhase(series);
+        const engine = await scene.ownerStart(run.page);
+        await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, TOOL_NAME);
+        await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+        const refreshes = new Refreshes(frame, () => toolCallAttempts(series!));
+        await stopEngine(scene, run, engine);
+        enterOAuthPhase(series, { enginePids: [engine.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+        await refreshes.mark();
+
+        // fails closed: the server's row says a saved connection can't be read; no bearer, no call, no browser
+        let parked = await refreshes.next(WATCH_MS + 30_000);
+        if (/^ok .* via=engine$/.test(parked.last)) parked = await refreshes.next(WATCH_MS + 30_000); // a read the stopped engine had begun
+        expect(parked.last, 'not read').not.toMatch(/^ok/);
+        expect(parked.submitted, 'no tools/call was sent').toBe(0);
+        expect(summaryOf(series).oauth, 'no bearer and no call reached the server').toMatchObject({ toolCallAttempts: 0, authorizationHeaders: 0, registrations: 0 });
+        expect(browserOpens(openLog), 'no browser').toBe(0);
+        const sheet = await scene.openSheet(run.page);
+        const row = serverRow(sheet, SERVER, 'source');
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('unavailable', 'unknown'), { timeout: 20_000 });
+        const unreadable = serverRow(sheet, S.unreadableRow, 'unreadable');
+        await expect(unreadable).toContainText(S.unreadableNote);
+        await cleanShot(info, 'oauth-unreadable.png', sheet.locator('[data-connectors-servers]'), run.page, fixtures);
+
+        // Forget removes it (one gesture)
+        await unreadable.getByRole('button', { name: S.forgetLabel }).click();
+        await expect(sheet.locator('[data-connector-server][data-kind="unreadable"]'), 'the unreadable row is gone').toHaveCount(0, { timeout: 20_000 });
+        await expect.poll(() => sealedRecords(scene).records.length, { timeout: 10_000, message: 'its file removed' }).toBe(0);
+
+        // the next Connect makes a fresh grant (one consent), sealed under the machine's key, read through D
+        await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin });
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+        expect(summaryOf(series).oauth, 'one registration, consent and code exchange').toMatchObject({ registrations: 1, authorizations: 1, codeExchanges: 1 });
+        const sealed = expectSealed(scene, series, 1);
+        expect(sealedRecords(scene).records[0]!.connectionId, 'a new record, not the forgotten one').not.toBe(planted);
+        const read = await refreshes.until('direct', WATCH_MS + 30_000);
+        expect(answeredTokens(series).at(-1)!.startsWith('1.'), 'read on the new grant').toBe(true);
+        expect(browserOpens(openLog), 'the Connect’s one browser').toBe(1);
+
+        const documents = await documentTexts(run.page);
+        retained.push(await retain(info, 'oauth-adoption-refused', { series: phasesOf(series), parked, read, sealed, opens: browserOpens(openLog), refreshes: refreshes.seen }, fixtures));
+        await scene.quit(run);
+        expectQuietJournals(sessionJournals(scene));
+        await expectNothingRetained(info, 'oauth-adoption-refused', scene, fixtures, [output.text(), ...documents, ...retained]);
+      } finally {
+        await series?.close();
+      }
+    },
+    { server: () => httpEntry(series!.resourceUrl), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
   );
 });

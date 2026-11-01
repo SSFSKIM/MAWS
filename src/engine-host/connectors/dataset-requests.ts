@@ -200,11 +200,14 @@ export class DatasetRefreshRequests {
   }
 }
 
-/** The host's registry as its entry wires it: announced on the host's event, asked only with an app attached, ended
- * when the app goes (P5 O3-D M3: the app's presence, Interfaces §D; for a client that does not signal it, its connection,
- * as E10 had it). One per host, given to the artifacts surface, the connector leg and the engine IPC. */
-export function hostDatasetRefresh(emit: HostEmit, presence: AppPresence): DatasetRefreshRequests {
-  const requests = new DatasetRefreshRequests({ announce: (requestId) => void emit('maws.artifact.datasetRefresh', { requestId }), hasClient: presence.attached });
-  presence.onGone(() => requests.clientGone());
+/** The host's registry as its entry wires it: announced on the host's event, asked only while the refresh has an owner,
+ * ended when that owner goes. The owner is the connectors' presence (P5 O4 M2, @shared/host/runtime's
+ * `connectorsPresence`, Interfaces §D): a client that listed `host.connectors` (a post-O4 `mawsd`, whose broker answers
+ * with no app) while its connection is ready; for any other client the app's presence, as at O3-D (a pre-O4 `mawsd`'s
+ * app attachment; main's direct link's or a utility port's connection, as E10 had it). One per host, given to the
+ * artifacts surface, the connector leg and the engine IPC. */
+export function hostDatasetRefresh(emit: HostEmit, connectorsPresence: AppPresence): DatasetRefreshRequests {
+  const requests = new DatasetRefreshRequests({ announce: (requestId) => void emit('maws.artifact.datasetRefresh', { requestId }), hasClient: connectorsPresence.attached });
+  connectorsPresence.onGone(() => requests.clientGone());
   return requests;
 }

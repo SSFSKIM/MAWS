@@ -10,7 +10,7 @@
 //
 // Only for the app's replay launches under C10's seam (MAWS_E2E=1 with a MAWS_E2E_REPLAY_FIXTURES list), and only into
 // a config home that canonically lies under the OS temporary directory, the e2e's scratch store, proved as the OAuth
-// custody guard proves its profile (main/connectors/oauth-root.ts): never ~/.claude, whatever the environment names.
+// custody guard proves its profile (src/main/connectors/legacy-custody.ts): never ~/.claude, whatever the environment names.
 // The proof names the config home by its real path, and the seed keeps every write on it: before it creates or writes
 // anything, the config home must still be its own real path, and the projects and project directories it goes through
 // must be directories, never symlinks (a link there would carry the write out of the scratch store); the transcript

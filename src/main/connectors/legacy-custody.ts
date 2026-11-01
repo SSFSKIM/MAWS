@@ -16,14 +16,19 @@
 //   anything but its own version 1 record, or that the machine declines or cannot take, is left too. Records cross as
 //   opened; the machine validates them (`invalid`).
 // - The log names counts and closed reasons only, never an id's record.
+// - P5 O4 M2 (D20, D21): Electron's sealer (format 1, safeStorage's asynchronous API) and the MAWS_E2E custody guard
+//   that stands before each of its operations live here, with the one composition of the two (`legacySealer`), since
+//   only the adoption still asks the Keychain: the machine's custody (src/services/connectors/custody.ts) never does.
+//   This is the one machine-bound file under src/main/connectors/ that imports Electron (eslint.config.js).
 //
-// Imports nothing from src/services/ (lint rule B): the seam and the record types are @shared/connectors/'s. M2 brings
-// the Electron sealer and the MAWS_E2E custody guard here.
-import { constants } from 'node:fs';
+// Imports nothing from src/services/ (lint rule B): the seam and the record types are @shared/connectors/'s.
+import { constants, realpathSync } from 'node:fs';
 import { open, readdir, type FileHandle } from 'node:fs/promises';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
+import { app, safeStorage } from 'electron';
 import type { ConnectorOAuthRecord } from '@shared/connectors/oauth-types';
-import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { SEALED_FORMAT_V1, type AsyncSafeStorage, type ConnectorOAuthSealer, type E2ECustodyFacts } from '@shared/connectors/sealer';
 
 const SUFFIX = '.sealed';
 const FILE_LIMIT_BYTES = 1_048_576; // the store's bound
@@ -44,6 +49,82 @@ export interface AdoptLegacyDeps {
   sealer: ConnectorOAuthSealer;
   adopt(connectionId: string, record: ConnectorOAuthRecord): Promise<{ adopted: boolean; reason?: string }>;
   log(line: string): void;
+}
+
+// Electron's safeStorage through its asynchronous API only, each call after app readiness: the synchronous methods
+// can block main's event loop on a keychain prompt. Its files are format 1; it binds no connection id.
+export function electronOAuthSealer(safeStorage: AsyncSafeStorage, ready: () => Promise<unknown>): ConnectorOAuthSealer {
+  return {
+    format: SEALED_FORMAT_V1,
+    async available() {
+      try {
+        await ready();
+        return await safeStorage.isAsyncEncryptionAvailable();
+      } catch {
+        return false;
+      }
+    },
+    async seal(text) {
+      await ready();
+      return safeStorage.encryptStringAsync(text);
+    },
+    async open(sealed) {
+      await ready();
+      const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(sealed);
+      return { text: result, reseal: shouldReEncrypt };
+    },
+  };
+}
+
+const canonical = (path: string): string | null => {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return null;
+  }
+};
+
+// P3-HD M3c2 (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, Decision Log 28): the sealer itself outside
+// MAWS_E2E; under it, one that proves custody before each operation and otherwise fails closed. The E2E launch runs
+// Chromium on its mock keychain (src/main/app.ts); the guard proves, at each call, that the switch is present and that
+// the app's userData is the scratch profile the harness named (MAWS_USER_DATA) under the OS temporary directory,
+// canonically, or answers unavailable without asking safeStorage. A test checking the profile from outside cannot
+// protect a decryption of a saved record at startup; this does.
+export function guardE2ECustody(sealer: ConnectorOAuthSealer, facts: E2ECustodyFacts): ConnectorOAuthSealer {
+  if (!facts.e2e) return sealer;
+  const safe = (): boolean => {
+    if (!facts.mockKeychain()) return false;
+    const named = facts.scratch();
+    if (!named) return false;
+    const profile = canonical(facts.userData());
+    const scratch = canonical(named);
+    const tmp = canonical(facts.tmp());
+    return profile !== null && tmp !== null && profile === scratch && profile.startsWith(tmp.endsWith(sep) ? tmp : tmp + sep);
+  };
+  const refuse = () => new Error('E2E custody unproven: safeStorage was not asked');
+  return {
+    format: sealer.format,
+    available: async () => safe() && sealer.available(),
+    seal: async (text, id) => {
+      if (!safe()) throw refuse();
+      return sealer.seal(text, id);
+    },
+    open: async (sealed, id) => {
+      if (!safe()) throw refuse();
+      return sealer.open(sealed, id);
+    },
+  };
+}
+
+// The adoption's sealer in production: Electron's, behind the guard. Lazy: nothing asks safeStorage until it is used.
+export function legacySealer(): ConnectorOAuthSealer {
+  return guardE2ECustody(electronOAuthSealer(safeStorage, () => app.whenReady()), {
+    e2e: Boolean(process.env.MAWS_E2E),
+    mockKeychain: () => app.commandLine.hasSwitch('use-mock-keychain'),
+    userData: () => app.getPath('userData'),
+    scratch: () => process.env.MAWS_USER_DATA,
+    tmp: tmpdir,
+  });
 }
 
 // The connection ids whose file's first line is format 1, sorted.

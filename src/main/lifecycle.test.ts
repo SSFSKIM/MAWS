@@ -40,6 +40,7 @@ vi.mock('electron', () => {
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
     powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+    safeStorage: {}, // P5 O4 M2: the legacy grants' sealer, asked nothing with no format 1 file
     systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
   };
 });
@@ -47,10 +48,9 @@ vi.mock('./hosts', () => ({ createHosts: () => ({ hosts: fake.hosts, daemon: nul
 vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
-vi.mock('./connectors', () => ({ startConnectors: () => ({ stop: vi.fn() }) })); // P3-H H3b: the connector broker's main side
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, CommandFailure: Error /* C11 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: vi.fn(() => () => {}) /* P5 O4 M2 */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O3-C (M4): the services entry's roots, stubbed as main sees them: the machine's identity (no machine.json under the

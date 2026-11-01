@@ -8,21 +8,32 @@
 //          Notion's enhanced Markdown under its title, from MAWS's own instance of the server (not the engine's), with no
 //          session started and no prompt in any journal; the receipt is the sheet's, the header's ("Sent to Notion") and
 //          the library row's, and Open in Notion opens the page the server named.
+//          P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 5; D15, D29, D30): delivery is the
+//          machine's (the profile's `mawsd` on the daemon shape) but for its export, main's step. Before that Send, a
+//          cancel inside the export phase (main's send held after its export, src/main/delivery/e2e-hold.ts) sends
+//          nothing and removes the export's file; after it, an app relaunched within the spine's quiet period still reads
+//          the receipt in the library's row, the machine having kept it.
 //   drive: the gws CLI's stand-in (support/fake-gws.mjs) on a login-shell PATH the scratch shell home pins. The CLI absent
 //          (the sheet says so, offers its install, sends nothing); present and signed out; a refused login, once
 //          answered by the CLI and once a login that never ends (0.22.5's, ended by the owner's Cancel), the CLI still
 //          signed out and MAWS holding nothing; then the CLI's own login completed and the upload of the document as a
-//          Word file under its title, with its receipt.
+//          Word file under its title, with its receipt. P5 O4 M2: gws runs in the profile's `mawsd`, with the environment
+//          its own login shell gives it; the daemon inherits the scratch shell home (ZDOTDIR), and the launch names zsh as
+//          the login shell, so the capture reads the scratch zsh profile whatever shell the runner's account has. D38: a
+//          send to Drive while gws is absent is refused before anything is exported.
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { FIXTURE_SERVER } from './support/connector-engine';
 import { expectQuietJournals, sessionJournals } from './support/connector-direct-scene';
-import { invoke, value, withScene } from './support/connector-scene';
+import { invoke, value, wait, withScene } from './support/connector-scene';
 import { launchMaws } from './support/launch';
 import { coldHttpDelivery } from './support/connector-cold-delivery';
+import { MainOutput } from './support/connector-direct-oauth';
+import { HOLD_MAX_MS } from '../src/main/delivery/e2e-hold';
 
 test.skip(process.env.MAWS_DELIVERY_E2E !== '1', 'the delivery group runs under MAWS_DELIVERY_E2E=1 (pnpm e2e:delivery)');
 test.describe.configure({ timeout: 300_000 });
@@ -55,6 +66,11 @@ async function writeDocument(page: Page, spaceId?: string): Promise<{ id: string
 }
 
 const header = (page: Page) => page.locator('[data-region="main"] [data-editor-header]');
+// P5 O4 M2: an artifact's exports, where main's export writes a send's file (`<profile>/artifacts/<id>/exports/`)
+const exportsOf = (userData: string, artifactId: string) => {
+  const dir = join(userData, 'artifacts', artifactId, 'exports');
+  return existsSync(dir) ? readdirSync(dir) : [];
+};
 const sheetOf = (page: Page) => page.locator('[data-send-to]');
 const status = (page: Page) => sheetOf(page).locator('[data-send-to-status]');
 const connection = (page: Page) => sheetOf(page).locator('[data-send-to-connection]');
@@ -65,7 +81,10 @@ test('notion: the document header’s Send to makes a readable page through MAWS
     'delivery-notion',
     info,
     async (scene) => {
-      const { page } = await scene.launch();
+      const output = new MainOutput(); // main's log: the sign its send's cancel was marked
+      let run = await output.launch(scene);
+      let { page } = run;
+      const daemon = value(await invoke(page, 'host.status', undefined)).transport === 'daemon';
       // a live session in the project, the owner's Start from an HTML page's Connectors sheet (no message, no model)
       const pageId = await scene.createPage(page);
       await scene.openPage(page, pageId);
@@ -80,6 +99,28 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       await expect(connection(page)).toHaveText(/Through MAWS’s own connection: “notion” in your user settings\./, { timeout: 30_000 });
       await expect(sheetOf(page).getByText('MAWS sends it itself: no session, no Claude turn.')).toBeVisible();
       await info.attach('notion-sheet', { body: await page.screenshot(), contentType: 'image/png' });
+
+      // P5 O4 M2 (D15, D29): the owner's Cancel inside the export phase. Main's send is held after its export while the
+      // hold file exists; the cancel is answered then, and once the hold lifts the export's file goes and nothing is sent
+      const hold = join(scene.root, 'delivery-hold');
+      writeFileSync(hold, '');
+      await sheetOf(page).getByRole('button', { name: 'Send', exact: true }).click();
+      await expect.poll(() => exportsOf(scene.userData, id), { timeout: 60_000, message: 'the export written, its send held' }).toHaveLength(1);
+      await sheetOf(page).getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(sheetOf(page)).toHaveCount(0);
+      // the page sends its cancel without awaiting it, so the hold lifts only once main says it marked the run
+      await expect.poll(() => output.text(), { timeout: 15_000, message: 'main marked the held run cancelled' }).toMatch(/\[delivery\] a send was cancelled in its export phase \(run [0-9a-f-]{36}\)/);
+      rmSync(hold);
+      await expect.poll(() => exportsOf(scene.userData, id), { timeout: 15_000, message: 'the cancelled export’s file removed' }).toEqual([]);
+      await wait(3_000);
+      expect(scene.calls().slice(before).filter((entry) => entry.server === NOTION && entry.method === 'tools/call'), 'the cancelled send reached Notion with nothing').toEqual([]);
+      await expect(header(page).getByRole('button', { name: 'Sent to Notion' }), 'no receipt for the cancelled send').toHaveCount(0);
+      expect(value(await invoke(page, 'delivery.receipts', undefined)).receipts, 'and the machine keeps none').toEqual([]);
+
+      // the sheet again, and the send
+      await header(page).getByRole('button', { name: 'Send to…' }).click();
+      await expect(sheetOf(page)).toHaveAttribute('data-send-to', 'notion');
+      await expect(connection(page)).toHaveText(/Through MAWS’s own connection: “notion” in your user settings\./, { timeout: 30_000 });
       await sheetOf(page).getByRole('button', { name: 'Send', exact: true }).click();
       await expect(status(page)).toHaveText(`Sent to Notion as “${DOC}”.`, { timeout: 60_000 });
       await info.attach('notion-receipt', { body: await page.screenshot(), contentType: 'image/png' });
@@ -109,10 +150,22 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       await expect(header(page).getByRole('button', { name: 'Sent to Notion' })).toBeVisible();
       await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
       await expect(page.locator(`[data-library] [data-artifact-row="${id}"] [data-part="receipt"]`)).toHaveText(/^Sent to Notion · /);
+      expect(exportsOf(scene.userData, id), 'the machine removed the export it sent').toEqual([]);
+
+      // P5 O4 M2 (D30, Q4): the receipt is the machine's, kept for the spine's residency: an app relaunched within its
+      // quiet period reads it in the library's row (on the embedded shape a quit empties it, as before O4)
+      if (daemon) {
+        await scene.quit(run);
+        run = await scene.launch();
+        page = run.page;
+        await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+        await expect(page.locator(`[data-library] [data-artifact-row="${id}"] [data-part="receipt"]`), 'the receipt after the relaunch').toHaveText(/^Sent to Notion · /, { timeout: 20_000 });
+        expect(value(await invoke(page, 'delivery.receipts', undefined)).receipts, 'the machine’s one receipt').toMatchObject([{ target: 'notion', artifactId: id }]);
+      }
     },
     {
       servers: (scene) => ({ [NOTION]: { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', NOTION, '--log', scene.log, '--tools', JSON.stringify(['notion-create-pages']), '--mode', 'notion'] } }),
-      env: (scene) => ({ MAWS_E2E_OPEN_LOG: join(scene.root, 'open.log') }),
+      env: (scene) => ({ MAWS_E2E_OPEN_LOG: join(scene.root, 'open.log'), MAWS_E2E_DELIVERY_HOLD: join(scene.root, 'delivery-hold') }), // P5 O4 M2: the hold
     },
   );
 });
@@ -176,7 +229,9 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
   const info = test.info();
   const scratch = gwsScratch();
   const maws = await launchMaws({
-    env: { MAWS_HARNESS: '0', MAWS_E2E_OPEN_LOG: scratch.openLog },
+    // P5 O4 M2: zsh named as the login shell, so the daemon's capture reads the scratch zsh profile below (ZDOTDIR)
+    // the export hold (src/main/delivery/e2e-hold.ts) lets the absent step see that no export starts
+    env: { MAWS_HARNESS: '0', MAWS_E2E_OPEN_LOG: scratch.openLog, SHELL: '/bin/zsh', MAWS_E2E_DELIVERY_HOLD: join(scratch.root, 'delivery-hold') },
     prepare: ({ shellHome }) => {
       // the login shell's PATH holds the scratch bin and the system's alone, so no real gws is ever found
       const profile = `export PATH=${sh(scratch.bin)}:/usr/bin:/bin:/usr/sbin:/sbin\nexport FAKE_GWS_DIR=${sh(scratch.state)}\n`;
@@ -185,7 +240,7 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
   });
   try {
     const { page } = maws;
-    await writeDocument(page);
+    const { id } = await writeDocument(page);
     await header(page).getByRole('button', { name: 'Send to…' }).click();
     await sheetOf(page).getByRole('radio', { name: 'Google Drive' }).click();
     await expect(sheetOf(page)).toHaveAttribute('data-send-to', 'drive');
@@ -198,6 +253,23 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
       await expect(sheetOf(page).getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
       await info.attach('drive-absent', { body: await page.screenshot(), contentType: 'image/png' });
       expect(gwsRuns(scratch)).toEqual([]);
+      // P5 O4 M2 (D38): a send asked all the same (a page that did not read the status again) is refused before the export.
+      // The export hold is in place: an export would be written and then held up to HOLD_MAX_MS, so an answer well inside
+      // that, with the hold still there and no export on disk, is main's own refusal before the export, not the machine's
+      const hold = join(scratch.root, 'delivery-hold');
+      writeFileSync(hold, '');
+      try {
+        const bound = HOLD_MAX_MS / 4;
+        let answer: Awaited<ReturnType<typeof invoke<'delivery.send'>>> | null = null;
+        void invoke(page, 'delivery.send', { runId: randomUUID(), target: 'drive', artifactId: id, format: 'docx', destination: { kind: 'default' } }).then((given) => (answer = given));
+        await expect.poll(() => answer, { timeout: bound, message: 'answered while the hold stands: no export was held' }).not.toBeNull();
+        expect(value(answer!), 'refused as absent').toEqual({ ok: false, why: 'absent' });
+        expect(existsSync(hold), 'the hold still in place').toBe(true);
+        expect(exportsOf(maws.userData, id), 'nothing was exported').toEqual([]);
+        expect(gwsRuns(scratch), 'nothing was uploaded').toEqual([]);
+      } finally {
+        rmSync(hold, { force: true });
+      }
     });
 
     await test.step('installed, signed out: the CLI’s own login is offered', async () => {

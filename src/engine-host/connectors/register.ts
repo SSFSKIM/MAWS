@@ -4,7 +4,9 @@
 // answered at once from the store at its commit or from the operation table, so none outlives the supervisor's 10 s
 // dispatch; a tool's own duration is carried by `connectors.operation` and `connectors.take`. The store's committed grant
 // changes go out as `connectors.grantChanged` (the tool and the change, nothing more). Every operation and outcome ends
-// when the app goes (P5 O3-D M3: the app's presence, @shared/host/runtime's AppPresence), and at the host's shutdown.
+// when its owner goes, and at the host's shutdown. The owner is the connectors' presence (P5 O4 M2,
+// @shared/host/runtime's `connectorsPresence`): a client that listed `host.connectors` (a post-O4 `mawsd`) until its
+// connection ends; any other client's app (P5 O3-D M3: the app's presence; a direct link's connection).
 import { HostCommandError, type AppPresence, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
@@ -59,9 +61,9 @@ function refused(reason: ArtifactRefusal['reason'], message: string, data: Recor
 
 // `close` (the end of the host's shutdown) ends everything. P3-HD M2: `closeDirect`, which the shutdown starts beside the
 // sessions' stop and awaits, ends route D's work and resolves once every owned process of its connections is gone.
-export function registerConnectors(on: HostOn, emit: HostEmit, presence: Pick<AppPresence, 'onGone'>, deps: ConnectorsSurfaceDeps): { close(): void; closeDirect(): Promise<void>; statusCache: ConnectorStatusCache } {
+export function registerConnectors(on: HostOn, emit: HostEmit, connectorsPresence: Pick<AppPresence, 'onGone'>, deps: ConnectorsSurfaceDeps): { close(): void; closeDirect(): Promise<void>; statusCache: ConnectorStatusCache } {
   const { store } = deps;
-  // P3-HD: route D's observations, host memory for main's attachment only (cleared with the operations below)
+  // P3-HD: route D's observations, host memory for its owner's attachment only (cleared with the operations below; P5 O4 M2: the connectors' presence)
   const statusCache = deps.statusCache ?? new ConnectorStatusCache();
   const calls =
     deps.calls ??
@@ -72,7 +74,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, presence: Pick<Ap
       datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), // E3
       statusCache, // P3-HD
     });
-  // P3-HD M2: route D's host half over the same store and observations; its connections live for main's attachment
+  // P3-HD M2: route D's host half over the same store and observations; its connections live for its owner's attachment
   const direct =
     deps.direct ??
     new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, ...(deps.deliveryConfig && { deliverySources: new ConfiguredDeliverySources(deps.deliveryConfig) }), pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
@@ -121,9 +123,10 @@ export function registerConnectors(on: HostOn, emit: HostEmit, presence: Pick<Ap
       statusCache.launched(appSessionId, launchId);
     }
   });
-  // The app's going ends its attachment, not the host: everything of it goes now (P3-HD: the observations, and direct work
-  // with its credentials, whose processes' end follows), and the next attachment starts afresh.
-  const stopGone = presence.onGone(() => {
+  // The owner's going (the app's, or a declaring `mawsd`'s connection, P5 O4 M2) ends its work, not the host: everything
+  // of it goes now (P3-HD: the observations, and direct work with its credentials, whose processes' end follows), and the
+  // next owner starts afresh.
+  const stopGone = connectorsPresence.onGone(() => {
     calls.close();
     statusCache.clear(); // P3-HD
     void direct.close(); // P3-HD M2

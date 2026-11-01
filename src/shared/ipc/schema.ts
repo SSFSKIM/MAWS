@@ -295,6 +295,8 @@ export const MACHINE_EVENTS = [
   'git.changed', 'files.changed', 'scm.remote.output', // P5 O3-E M2: the checkouts', composed with the spine (O3 Decision Log 17)
   'render.request', 'render.exit', // P5 O5 M3: the render host's work, posted to it alone
   'render.hostGeneration', // P5 O5 M4: the engine host's link generation, to the render host alone
+  'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
+  'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

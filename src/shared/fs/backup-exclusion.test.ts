@@ -1,10 +1,11 @@
 // Keeping a path out of Time Machine (P5-O10, the device key's follow-up): NSURLIsExcludedFromBackupKey, the sticky
 // exclusion that rides on the item itself, set through osascript on macOS only.
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { guardedEntryProblems } from '../../../test/support/guarded-entry';
 import { excludeFromBackup } from './backup-exclusion';
 
 const STICKY_EXCLUSION = 'com.apple.metadata:com_apple_backup_excludeItem';
@@ -31,6 +32,23 @@ describe('excludeFromBackup', () => {
     const [args] = runs as [string[]];
     expect(args.slice(4)).toEqual(['--', resolve(SCRIPT_SHAPED)]);
     expect(args.filter((arg) => arg === '-e')).toHaveLength(1);
+  });
+
+  // P5 O4 M2 (class 1a runs 41205847879, 41207737677): the script's text rides in whichever bundle chunk holds this
+  // module (mawsd's deferred ones among them), whose guard reads every `import(` call text as a load; the JXA bridge's
+  // import must not read as one
+  it('carries a script whose text the bundle guard reads as no load', async () => {
+    let script = '';
+    await excludeFromBackup('/profile/device', { platform: 'darwin', run: async (_file, args) => void (script = args[3]!) });
+    expect(script).toContain('"Foundation"');
+    const dir = await mkdtemp(join(tmpdir(), 'maws-backup-guard-'));
+    try {
+      const chunk = join(dir, 'chunk.js');
+      await writeFile(chunk, `'use strict';\nconst SCRIPT = \`${script}\`;\nmodule.exports = { SCRIPT };\n`); // as the build inlines it
+      expect(guardedEntryProblems({ entry: chunk, root: dir, deferred: false })).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('elsewhere does nothing, and says it excluded nothing', async () => {

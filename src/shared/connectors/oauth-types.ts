@@ -1,6 +1,6 @@
 // P3-HD M3a: what MAWS's own OAuth grant for one HTTP connector is (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md
 // M3 and Decision Log 13/18; P3 co-work Decision Log 98 (5)). Main's and the machine's only: nothing here enters the
-// engine host, a renderer or a log. The flow (src/main/connectors/oauth-flow.ts) produces a grant, the sealed store
+// engine host, a renderer or a log. The flow (src/services/connectors/oauth-flow.ts) produces a grant, the sealed store
 // (oauth-store.ts beside it) keeps it under a stable `connectionId`; the provider (M3c) orchestrates both. Here, on
 // neutral ground, since P5 O4 M1 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D20): main's legacy reader and the
 // services library both name a record, and neither imports the other.

@@ -3,11 +3,18 @@
 // engine's marketplaces and Anthropic's directory; connectors from the directory's servers), per Customize page `cwd`
 // (null: the user configuration), cached on disk and refreshed every 24 h. Only display metadata and install routes
 // cross; nothing of it reaches an agent.
+// P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D16, D25): the catalog splits by the
+// fact's owner. The engine's reads per cwd and the watch over the engine's plugin state are the machine's
+// (`catalog.engine`, `catalog.engineRefresh`, `catalog.engineChanged`, served by `mawsd` on the daemon shape); the network
+// sources, their cache, the icons and the join stay main's, and `catalog.home/query/item/refresh/icon/postures/sources`
+// keep their shape over the machine half.
 import * as z from 'zod';
+import { EngineViewWireSchema } from '../../catalog/engine-view';
 import type { CommandSpec } from './common';
 import { PluginsCwdSchema } from './plugins';
 
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M3
 
 export const CatalogKindSchema = z.enum(['plugin', 'connector']);
 export const OwnershipSchema = z.enum(['anthropic', 'partner', 'community', 'added']);
@@ -139,8 +146,21 @@ export const commands = {
     z.strictObject({ cwd: CwdSchema }),
     z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable() })) }),
   ),
+  // P5 O4 M3: the machine's half. One cwd's engine view, held until an invalidation, with the generation of the
+  // machine's reads when it was asked for (moved by every invalidation) and the serial of the read behind it (new for
+  // every read, never repeated by a later spine load or daemon), so the person's half keeps a catalog it built under the
+  // revision the view was read at; `view` null when even the engine's configuration could not be asked
+  'catalog.engine': machine(
+    z.strictObject({ cwd: CwdSchema }),
+    z.strictObject({ generation: z.number().int().nonnegative(), serial: z.number().int().nonnegative(), view: EngineViewWireSchema.nullable() }),
+  ),
+  // Refresh's engine half: every held view forgotten (`catalog.engineChanged` follows)
+  'catalog.engineRefresh': machine(z.void(), z.strictObject({ ok: z.literal(true) })),
 } as const satisfies Record<`catalog.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'catalog.changed': z.strictObject({}), // once per refresh that changed anything and once per engine-read invalidation
+  // P5 O4 M3: the machine's reads were invalidated, on `plugins.changed`, on its watch of the engine's plugin state or on
+  // `catalog.engineRefresh`: every view (`all`), or one project's
+  'catalog.engineChanged': z.discriminatedUnion('scope', [z.strictObject({ scope: z.literal('all') }), z.strictObject({ scope: z.literal('cwd'), cwd: z.string() })]),
 } as const satisfies Record<`catalog.${string}`, z.ZodType>;

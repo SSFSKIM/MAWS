@@ -2,11 +2,15 @@
 // and 85; the P3 interface ledger's X9 amendment and X23 grant rows): an artifact page's connector calls and watches,
 // and route E's engine leg.
 //
-// Main's, renderer-callable: one page lease per owner window and artifact (`connectors.open`), its declaration, calls,
-// watches, visibility and close, answered by main's broker (src/main/connectors). A page's own payload (the tools it
-// declares, a call's or a watch's request) crosses as it came, `unknown`, so the broker answers a malformed one with its
-// closed `invalid: request` rather than an IPC error. A watch's refreshes reach the owning window alone as
-// `connectors.watchUpdate`, never every window.
+// The machine's (P5 O4 M2, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C: `machine`-owned, composed
+// with the spine, `mawsd`'s on the daemon shape and main's embedded binding's on the embedded one), renderer-callable:
+// one page lease per asking client and artifact (`connectors.open`), its declaration, calls, watches, visibility and
+// close, answered by the broker (src/services/connectors). A page's own payload (the tools it declares, a call's or a
+// watch's request) crosses as it came, `unknown`, so the broker answers a malformed one with its closed `invalid:
+// request` rather than an IPC error. A watch's refreshes are `connectors.watchUpdate`, to every client (D9: the renderer
+// routes them by lease and drops one it does not hold). The app reports the window that shows each page
+// (`connectors.windowShown`, main-only), and hands the machine the grants Electron's safeStorage sealed
+// (`connectors.adoptGrant`, main-only, U7).
 //
 // The engine host's, main's alone (never bridged): the grant store's reads and writes and route E's engine leg. A tool
 // call outlives the supervisor's 10 s dispatch bound, so it is three commands and an event: `connectors.start` answers
@@ -30,7 +34,7 @@ import { isMcpName, isMcpUrl, MCP_TRANSPORTS } from '../../plugins/cli'; // P4-A
 import { PluginsBinarySchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins'; // P4-AGG M4
 import { JsonValueSchema, type CommandSpec } from './common';
 
-const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M2
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 
 const ArtifactId = z.uuid();
@@ -352,43 +356,88 @@ export const ConnectorSignInChangedSchema = z.strictObject({
 export type ConnectorSignInChanged = z.infer<typeof ConnectorSignInChangedSchema>;
 // P4-AGG M4 end
 
+// P5 O4 M2 (U7, Interfaces §C): a saved grant's record as the sealed store keeps it (the version line aside), crossing
+// once from the app to the machine at the adoption (`connectors.adoptGrant`), as `connectors.directStart`'s credential
+// crosses (the same uid; P3-HD's rule). The store's own schema is this one with its `version` (src/services/connectors/
+// oauth-store.ts), so the two never drift; the metadata and the registration are checked against the MCP SDK's schemas
+// there.
+const OAuthText = z.string().min(1).max(16_384);
+export const ConnectorOAuthRecordJsonSchema = z.strictObject({
+  connectionId: z.uuid(),
+  identity: z.strictObject({
+    requestUrl: z.string().min(1).max(8_192),
+    server: z.string().min(1).max(256),
+    scope: z.enum(['user', 'local', 'app']),
+    configPath: z.string().min(1).max(4_096),
+    entryPath: z.array(z.string().max(4_096)).max(8),
+  }),
+  issuer: z.string().min(1).max(8_192),
+  resource: z.string().min(1).max(8_192),
+  redirectUri: z.string().min(1).max(8_192),
+  authorizationServer: z.record(z.string(), z.unknown()),
+  client: z.record(z.string(), z.unknown()),
+  tokens: z.strictObject({
+    accessToken: OAuthText,
+    refreshToken: OAuthText.optional(),
+    tokenType: z.literal('Bearer'),
+    grantedScope: z.string().max(8_192).optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
+    obtainedAt: z.number().int().nonnegative(),
+  }),
+  savedAt: z.number().int().nonnegative(),
+});
+export const CONNECTOR_ADOPT_REFUSALS = ['present', 'absent', 'stale', 'invalid', 'io', 'unavailable'] as const;
+export type ConnectorAdoptRefusal = (typeof CONNECTOR_ADOPT_REFUSALS)[number];
+
 const Lease = z.strictObject({ leaseId: LeaseId });
 const LeaseWatch = z.strictObject({ leaseId: LeaseId, watchId: WatchId });
 
 export const commands = {
-  // ── main's, a page's lease (relayed by its owner window's ArtifactHost adapter) ──
-  // A hidden lease on the artifact for the asking window.
-  'connectors.open': main(z.strictObject({ artifactId: ArtifactId }), z.strictObject({ leaseId: LeaseId })),
+  // ── the machine's, a page's lease (relayed by its owner window's ArtifactHost adapter) ──
+  // A hidden lease on the artifact for the asking client (hidden until the app reports its window shown).
+  'connectors.open': machine(z.strictObject({ artifactId: ArtifactId }), z.strictObject({ leaseId: LeaseId })),
   // `tools`: the page's `{server, tool}` pairs, as it sent them.
-  'connectors.declare': main(z.strictObject({ leaseId: LeaseId, tools: z.unknown() }), ConnectorDeclareOutcomeSchema),
+  'connectors.declare': machine(z.strictObject({ leaseId: LeaseId, tools: z.unknown() }), ConnectorDeclareOutcomeSchema),
   // `request`: the page's `{server, tool, args?}`. Answers once the tool has (no fixed bound: a tool may take minutes).
   // E3: `dataset`, the trusted owner's sink beside the request (never the page's): the result becomes the dataset's
   // snapshot in the host, and the outcome's `result` is the publication's metadata.
-  'connectors.call': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorCallOutcomeSchema),
+  'connectors.call': machine(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorCallOutcomeSchema),
   // `request`: the page's `{server, tool, args?, intervalMs}`; its refreshes arrive as `connectors.watchUpdate`.
-  'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorWatchStartSchema),
-  'connectors.unwatch': main(LeaseWatch, z.strictObject({ stopped: z.boolean() })),
+  'connectors.watch': machine(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorWatchStartSchema),
+  'connectors.unwatch': machine(LeaseWatch, z.strictObject({ stopped: z.boolean() })),
   // The owner's Refresh (after its Start, say): one now, when the watch is visible, granted and idle.
   // E3 panel (Decision Log 17): `probe`, the trusted owner's liveness check of its dataset watch: `refreshing` then says
   // whether that watch lives, and nothing is woken, checked, called or rescheduled.
-  'connectors.refresh': main(z.strictObject({ ...LeaseWatch.shape, probe: z.boolean().optional() /* E3 panel */ }), z.strictObject({ refreshing: z.boolean() })),
+  'connectors.refresh': machine(z.strictObject({ ...LeaseWatch.shape, probe: z.boolean().optional() /* E3 panel */ }), z.strictObject({ refreshing: z.boolean() })),
   // The surface shown or hidden: hidden, the lease calls nothing.
-  'connectors.visibility': main(z.strictObject({ leaseId: LeaseId, visible: z.boolean() }), z.strictObject({ ok: z.boolean() })),
-  'connectors.close': main(Lease, z.strictObject({ closed: z.boolean() })),
-  // P3-HD M3c2 start: the owner's, from the Connectors sheet (main's, bridged; no page reaches them)
-  // The rows for the artifact's declared `tools` and its durable grants; bounded by main.
-  'connectors.servers': main(z.strictObject({ artifactId: ArtifactId, tools: z.array(ConnectorToolRefSchema).max(256) }), ConnectorServersSchema),
-  'connectors.connect': main(OwnerSource, ConnectorOwnerAckSchema),
-  'connectors.reconnect': main(OwnerSource, ConnectorOwnerAckSchema), // an explicit replacement: the old sign-in is withdrawn first
-  'connectors.disconnect': main(z.strictObject({ connectionId: ConnectionId }), ConnectorOwnerAckSchema), // MAWS's own only; no current source needed
+  'connectors.visibility': machine(z.strictObject({ leaseId: LeaseId, visible: z.boolean() }), z.strictObject({ ok: z.boolean() })),
+  'connectors.close': machine(Lease, z.strictObject({ closed: z.boolean() })),
+  // P3-HD M3c2 start: the owner's, from the Connectors sheet (bridged; no page reaches them)
+  // The rows for the artifact's declared `tools` and its durable grants; bounded by the owner's query.
+  'connectors.servers': machine(z.strictObject({ artifactId: ArtifactId, tools: z.array(ConnectorToolRefSchema).max(256) }), ConnectorServersSchema),
+  'connectors.connect': machine(OwnerSource, ConnectorOwnerAckSchema),
+  'connectors.reconnect': machine(OwnerSource, ConnectorOwnerAckSchema), // an explicit replacement: the old sign-in is withdrawn first
+  'connectors.disconnect': machine(z.strictObject({ connectionId: ConnectionId }), ConnectorOwnerAckSchema), // MAWS's own only; no current source needed
   // P3-HD M3c2 end
   // P4-AGG M4 start: Customize › Connectors (above)
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
   // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
-  'connectors.signIn': main(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema), // path: the file the entry is in
-  'connectors.signInCancel': main(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
+  'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema), // path: the file the entry is in
+  'connectors.signInCancel': machine(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
   // P4-AGG M4 end
+  // P5 O4 M2 start (Interfaces §C, §F; D8, D23): main's alone, never bridged.
+  // The window that shows the asking page (its `ClientRef`), shown and not minimized or not, as the app reads it; a page
+  // whose window was never reported is hidden (fail closed).
+  'connectors.windowShown': machine(z.strictObject({ shown: z.boolean() }), z.strictObject({ ok: z.literal(true) })),
+  // A grant Electron's safeStorage sealed (format 1), opened by the app and re-sealed by the machine under its own key:
+  // the file is replaced only while it is still that format 1 file nobody forgot. `present`: the id's file is no longer
+  // format 1, or another record holds the identity; `absent`: no file; `stale`: forgotten or saved meanwhile.
+  'connectors.adoptGrant': machine(
+    z.strictObject({ connectionId: z.uuid(), record: ConnectorOAuthRecordJsonSchema }),
+    z.union([z.strictObject({ adopted: z.literal(true) }), z.strictObject({ adopted: z.literal(false), reason: z.enum(CONNECTOR_ADOPT_REFUSALS) })]),
+  ),
+  // P5 O4 M2 end
   // ── the engine host's, main's alone ──
   'connectors.grants': host(z.strictObject({ artifactId: ArtifactId }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
   'connectors.grant': host(z.strictObject({ artifactId: ArtifactId, grant: ConnectorGrantRequestSchema }), z.strictObject({ grant: ConnectorGrantSchema })),
@@ -428,7 +477,7 @@ export const commands = {
 } as const satisfies Record<`connectors.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
-  // main's, to the window holding the lease only
+  // the machine's, to every client (P5 O4 M2, D9: the renderer routes it by lease and drops a lease it does not hold)
   'connectors.watchUpdate': ConnectorWatchUpdateSchema,
   // the engine host's: an operation ended (its outcome waits for `connectors.take`)
   'connectors.operation': z.strictObject({ operationId: OperationId }),
@@ -436,8 +485,13 @@ export const events = {
   'connectors.grantChanged': ConnectorGrantChangedSchema,
   // P3-HD: the engine host's: a direct operation ended (its answer waits for `connectors.directTake`)
   'connectors.directOperation': z.strictObject({ operationId: OperationId }),
-  // P3-HD M3c2: main's, to the windows that read the artifact's server rows: they changed (read them again); nothing else
+  // P3-HD M3c2: the machine's (P5 O4 M2), to every client: the rows of an artifact some client read changed (read them
+  // again); nothing else
   'connectors.serversChanged': z.strictObject({ artifactId: ArtifactId }),
-  // P4-AGG M4: main's, to every window: a sign-in operation moved
+  // P4-AGG M4: the machine's (P5 O4 M2), to every client: a sign-in operation moved
   'connectors.signInChanged': ConnectorSignInChangedSchema,
+  // P5 O4 M2 (D28): main's, to its windows, at each streaming of the machine host after the launch's first: `mawsd`'s
+  // leases ended with its connection, so the renderer's connectors client opens every surface's lease again. Off the
+  // wire (main to its renderer), never on the embedded shape.
+  'connectors.reset': z.strictObject({}),
 } as const satisfies Record<`connectors.${string}`, z.ZodType>;

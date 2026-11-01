@@ -8,7 +8,7 @@ export const commands = [
   'connectors.add', 'connectors.remove', 'connectors.signIn', 'connectors.signInCancel', // P4-AGG M4: Customize › Connectors
 ] as const;
 
-export const events = ['connectors.watchUpdate', 'connectors.operation', 'connectors.grantChanged', 'connectors.directOperation' /* P3-HD */, 'connectors.serversChanged' /* P3-HD M3c2: main's, targeted */, 'connectors.signInChanged' /* P4-AGG M4: main's */] as const;
+export const events = ['connectors.watchUpdate', 'connectors.operation', 'connectors.grantChanged', 'connectors.directOperation' /* P3-HD */, 'connectors.serversChanged' /* P3-HD M3c2 */, 'connectors.signInChanged' /* P4-AGG M4 */, 'connectors.reset' /* P5 O4 M2: main's, to its windows (D28) */] as const;
 
 // The grant store and route E's engine leg: main's alone, never bridged to a window (a window grants and revokes through
 // main's `artifacts.*` grant commands, which take the route's fingerprint and stop work in flight first).
@@ -19,4 +19,7 @@ export const mainOnlyCommands = [
   'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directTake', 'connectors.directCancel', 'connectors.directClose',
   // P4-B5: the owner's delivery through route D, and route E's observation of one live session
   'connectors.directLocate', 'connectors.directSend', 'connectors.observe',
+  // P5 O4 M2 (Interfaces §C): the machine's, main's alone to send: the page's window as the app reads it (D8), and a grant
+  // the app opened from Electron's safeStorage for the machine to re-seal (U7, D23)
+  'connectors.windowShown', 'connectors.adoptGrant',
 ] as const;

@@ -103,6 +103,7 @@ class FakeRoot implements SpineRoot {
       this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}${kinds}`);
     });
     hosts.onEvent('session.brokerItems', ({ appSessionId, items }) => void this.seen.push(`${phase()} brokerItems ${appSessionId} ${items.map((i) => i.summary).join(',') || 'none'}`));
+    hosts.onEvent('maws.artifact.datasetRefresh', ({ requestId }) => void this.seen.push(`${phase()} datasetRefresh ${requestId}`)); // P5 O4 M2
     hosts.onEvent('session.status', ({ status }) => {
       this.seen.push(`${phase()} status ${status.appSessionId} ${status.process}`);
       this.statuses.set(status.appSessionId, status);
@@ -299,6 +300,27 @@ describe('the hold and the barrier', () => {
     expect(logs).toContainEqual(expect.stringMatching(/^\[spine\] the hold drained: 3 events \(\d+ bytes\)$/));
   });
 
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §D, D12): the connectors' broker is a part
+  // of the spine, so an agent's refresh announced to a cold daemon must wake it and reach it, never be dropped
+  it('an agent’s dataset refresh while cold is a trigger: held through the barrier and delivered to the loaded spine', async () => {
+    const REQUEST = '00000000-0000-4000-8000-000000000001';
+    const spine = seam();
+    link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+    await vi.waitFor(() => expect(roots).toHaveLength(1));
+    const root = (await spine.ensure('command')) as FakeRoot;
+    link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST.replace(/1$/, '2') });
+    expect(root.seen).toEqual([`held datasetRefresh ${REQUEST}`, `live datasetRefresh ${REQUEST.replace(/1$/, '2')}`]);
+    expect(loads).toBe(1);
+  });
+
+  it('another event while cold is still dropped, waking nothing', async () => {
+    const spine = seam();
+    link.emit('plugins.changed', {});
+    await sleep(10);
+    expect(spine.state()).toBe('cold');
+    expect(loads).toBe(0);
+  });
+
   it('a batch while cold wakes nothing when events do not wake the spine (M2 in production)', async () => {
     const spine = seam({ wakeOnEvents: false });
     link.batch('s1', 1);
@@ -373,6 +395,55 @@ describe('the hold and the barrier', () => {
     await spine.ensure('command');
     await ping();
     expect(link.calls.map((call) => call.name)).toEqual(['engine.ping', 'engine.ping', 'engine.ping']);
+  });
+
+  // P5 O4 D43 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md): an agent's dataset refresh is a need, not an event.
+  // The agent asked for it and it runs through the asking session's engine, so the load it wakes or reaches is wanted:
+  // its requests to an engine host that is not ready are sent (the supervisor holds them), never refused.
+  describe('an agent’s dataset refresh is a need', () => {
+    const REQUEST = '00000000-0000-4000-8000-000000000001';
+    const pinged = () => link.calls.filter((call) => call.name === 'engine.ping').length;
+
+    it('a cold seam woken by the announcement loads wanted: an engine host that is not ready is sent its requests', async () => {
+      const spine = seam();
+      link.leave();
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const answer = await roots.at(-1)!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(answer).not.toMatchObject({ error: { message: expect.stringContaining('not sent') } });
+      expect(pinged()).toBe(1);
+      expect(logs).toContain('[spine] loading (event)');
+    });
+
+    it('a batch’s load stays unwanted until the announcement reaches it, then is wanted', async () => {
+      const spine = seam();
+      link.leave();
+      link.batch('s1', 1);
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const ping = () => roots.at(-1)!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(await ping()).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining('engine.ping not sent') } });
+      expect(pinged()).toBe(0); // a batch alone wakes no engine host
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
+      await ping();
+      expect(pinged()).toBe(1);
+    });
+
+    it('an announcement reaching a batch’s load while it loads marks it wanted', async () => {
+      link.stream();
+      const release = link.gate('engine.sessions'); // the load's resync waits: the seam is loading
+      const spine = seam();
+      link.batch('s1', 1);
+      await vi.waitFor(() => expect(roots).toHaveLength(1));
+      expect(spine.state()).toBe('loading');
+      link.emit('maws.artifact.datasetRefresh', { requestId: REQUEST }); // held
+      release();
+      await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+      const root = roots[0]!;
+      expect(root.seen).toContain(`held datasetRefresh ${REQUEST}`);
+      link.leave();
+      await root.hosts.dispatch('engine-host', 'engine.ping', undefined);
+      expect(pinged()).toBe(1);
+    });
   });
 });
 
@@ -682,6 +753,53 @@ describe('the yield', () => {
       'held brokerItems s1 Bash: git status',
     ]);
     expect(spine.status().heldDropped).toBe(0);
+  });
+
+  // P5 O4 D43, the task review: an agent's dataset refresh held across a provisional yield is a need the lift's load keeps
+  // (wanted: an engine host that is not ready is sent its requests); a batch held across the same lift wakes none.
+  it.each([
+    ['an agent’s dataset refresh is a need', () => link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }), 1],
+    ['a batch alone is none', () => link.emit('session.eventBatch', failed(2)), 0],
+  ])('held across a provisional yield, %s of the load its lift resumes', async (_what, announce, sent) => {
+    let candidate: number | null = 777;
+    const spine = await provisionally(() => candidate);
+    announce(); // held
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    const answer = await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+    expect(link.calls.filter((call) => call.name === 'engine.ping')).toHaveLength(sent);
+    if (sent === 0) expect(answer).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  // (the re-review) the announcement itself the first trigger: its own load attempt meets the candidate, and the yield it
+  // makes holds its need for the lift
+  it('a dataset refresh that wakes a cold seam into a provisional yield is a need of the load its lift resumes', async () => {
+    let candidate: number | null = 777;
+    link.stream();
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }); // the trigger, met by the candidate
+    await vi.waitFor(() => expect(spine.state()).toBe('yielded'));
+    candidate = null;
+    spine.yield(null); // the app's hello lists machine.spine
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined);
+    expect(link.calls.filter((call) => call.name === 'engine.ping')).toHaveLength(1);
+  });
+
+  // ...and a hold discarded takes its need with it: once confirmed, the next event's load is no longer wanted
+  it('a provisional yield confirmed forgets the dataset refresh it held: a batch’s load after it stays unwanted', async () => {
+    const spine = await provisionally(() => (live.has(777) ? 777 : null));
+    link.emit('maws.artifact.datasetRefresh', { requestId: '00000000-0000-4000-8000-000000000001' }); // held
+    spine.yield(777); // its hello lists no machine.spine
+    live.delete(777);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    link.batch('s1', 3);
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    link.leave();
+    expect(await roots[0]!.hosts.dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
   });
 
   // Confirmed, the yield is a yield as before: its hold discarded, counted; the coalesced parts kept for the load after it

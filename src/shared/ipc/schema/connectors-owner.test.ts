@@ -1,9 +1,10 @@
 // P3-HD M3c2: the owner's per-server connector commands (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, M3,
-// Decision Log 22, 29, 30 and 33). Trusted owner commands, main's and bridged like H's grant commands; the page's
-// portable API gains nothing. A row selects safe fields only: never a request URL, resource, issuer, client or token.
+// Decision Log 22, 29, 30 and 33). Trusted owner commands, bridged like H's grant commands (the machine's since P5 O4
+// M2); the page's portable API gains nothing. A row selects safe fields only: never a request URL, resource, issuer,
+// client or token.
 import { describe, expect, it } from 'vitest';
 import { MAIN_ONLY_COMMANDS, NAMES } from '../names';
-import { HOST_EVENTS, commands } from '../schema';
+import { HOST_EVENTS, MACHINE_EVENTS, commands } from '../schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '../validate';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -12,14 +13,16 @@ const CONNECTION = '33333333-3333-4333-8333-333333333333';
 const source = { kind: 'source', handle: HANDLE, server: 'notes', scope: 'user', transport: 'http', path: '/Users/me/.claude.json', tools: ['search'], needsDiscovery: false } as const;
 
 describe('the owner’s connector server commands', () => {
-  it('are main’s and bridged; the event is main-emitted and never on the host wire', () => {
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C): the machine's since the services move
+  it('are the machine’s and bridged; the event is the machine host’s, never the engine host’s', () => {
     for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect'] as const) {
-      expect(commands[name].owner, name).toBe('main');
+      expect(commands[name].owner, name).toBe('machine');
       expect([...NAMES.connectors.commands], name).toContain(name);
       expect(MAIN_ONLY_COMMANDS, name).not.toContain(name);
     }
     expect([...NAMES.connectors.events]).toContain('connectors.serversChanged');
     expect(HOST_EVENTS).not.toContain('connectors.serversChanged');
+    expect(MACHINE_EVENTS).toContain('connectors.serversChanged');
   });
 
   it('take an artifact and its tools, or an opaque source handle, or a saved connection id: never a URL or a path', () => {

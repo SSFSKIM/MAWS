@@ -5,11 +5,15 @@
 //   the scene's own canonical profile under the OS temporary directory (the product's guard stands before every real
 //   safeStorage call; this is the scene's own check of the same facts);
 // - `MainOutput` keeps main's stdout and stderr across the scene's launches, for the secret scan;
-// - `connectThroughBrowser` is the owner's Connect from the sheet: the callback listener main binds (exactly
-//   127.0.0.1, read with lsof), the reviewed fake browser following only the fixture's authorization and that callback,
-//   and the listener closed after its one answer. The raw open log carries the authorization URL's state and PKCE
-//   challenge: only the reviewed helpers read it, in memory; nothing here prints, attaches or asserts on its text;
+// - `connectThroughBrowser` is the owner's Connect from the sheet: the callback listener the connectors' process binds
+//   (exactly 127.0.0.1, read with lsof), the reviewed fake browser following only the fixture's authorization and that
+//   callback, and the listener closed after its one answer. The raw open log carries the authorization URL's state and
+//   PKCE challenge: only the reviewed helpers read it, in memory; nothing here prints, attaches or asserts on its text.
+//   P5 O4 M2: the connectors run in the profile's `mawsd` on the daemon shape, so the listener is `mawsd`'s there
+//   (`connectorsPid`), and main's on the embedded one; the browser is still opened by the app (the client port's
+//   Electron half writes the open log);
 // - `sealedRecords` reads `<userData>/connectors/oauth/` (modes, the format line, the ciphertext), never decrypting;
+//   this build's grants are format 2 (the machine's key file), format 1 is safeStorage's, which only the adoption reads;
 // - `cleanShot` attaches a screenshot only after the live documents scanned clean (the whole-scratch scan is
 //   ./connector-direct-checks.ts `scanScratchTree`).
 import { execFileSync } from 'node:child_process';
@@ -24,7 +28,7 @@ import { followAuthorization, openExternalUrls, type FollowedAuthorization } fro
 import { readOAuthLog, scanForSecrets, type OAuthFixturePaths } from './connector-oauth';
 import { onLaunched } from './launch';
 import { tcpListeners } from './processes';
-import type { ConnectorScene, Run } from './connector-scene';
+import { invoke, value, type ConnectorScene, type Run } from './connector-scene';
 
 export const httpEntry = (url: string): Record<string, unknown> => ({ type: 'http', url });
 export const openLogOf = (scene: ConnectorScene): string => join(scene.root, 'open.log');
@@ -40,11 +44,18 @@ const canonical = (path: string | null): string | null => {
 
 // Main's own facts, compared before the owner touches anything that could reach safeStorage.
 export async function expectScratchCustody(run: Run, scene: ConnectorScene): Promise<{ mockKeychain: boolean; profile: 'scene' }> {
-  const facts = await run.maws.app.evaluate(({ app }) => ({ mockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), userData: app.getPath('userData'), scratch: process.env.MAWS_USER_DATA ?? null }));
-  const problems = custodyProblems({ mockKeychain: facts.mockKeychain, userData: canonical(facts.userData), scratch: canonical(facts.scratch), expected: canonical(scene.userData), tmp: canonical(tmpdir()) });
+  const { mockKeychain } = await expectMockCustody(run.maws.app, scene.userData);
+  scene.note('custody', { mockKeychain, profile: 'scene' });
+  return { mockKeychain, profile: 'scene' };
+}
+
+// The same check for any launch on the scratch profile `userData` (P5 O4 M4: cross-build's scenes seal a grant with no
+// connector scene around them).
+export async function expectMockCustody(app: ElectronApplication, userData: string): Promise<{ mockKeychain: boolean }> {
+  const facts = await app.evaluate(({ app }) => ({ mockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), userData: app.getPath('userData'), scratch: process.env.MAWS_USER_DATA ?? null }));
+  const problems = custodyProblems({ mockKeychain: facts.mockKeychain, userData: canonical(facts.userData), scratch: canonical(facts.scratch), expected: canonical(userData), tmp: canonical(tmpdir()) });
   expect(problems, 'main runs on the mock keychain with the scene’s own scratch profile').toEqual([]);
-  scene.note('custody', { mockKeychain: facts.mockKeychain, profile: 'scene' });
-  return { mockKeychain: facts.mockKeychain, profile: 'scene' };
+  return { mockKeychain: facts.mockKeychain };
 }
 
 // Main's stdout and stderr from each launch (Playwright pipes both), kept across relaunches.
@@ -79,23 +90,33 @@ export function browserOpens(openLog: string): number {
 export interface Bound {
   address: string; // lsof's spelling: exactly 127.0.0.1:<port>
   port: number;
+  pid?: number; // the process that bound it (a pending Connect's: `follow: false`)
   followed?: Pick<FollowedAuthorization, 'authorizeStatus' | 'outcome' | 'callbackStatus'> & { callbackPortMatches: boolean };
 }
 
-// The owner's Connect (or Reconnect) on a server's row: the listener it binds in main, and unless `follow` is false the
-// fake browser through the fixture's consent to that listener, which then closes.
+// P5 O4 M2: the process the connectors run in, which binds a Connect's callback listener: the profile's `mawsd` on the
+// daemon shape (host.status names it), main on the embedded one.
+export async function connectorsPid(run: Run): Promise<number> {
+  const status = value(await invoke(run.page, 'host.status', undefined));
+  if (status.transport !== 'daemon') return run.child.pid!;
+  if (status.daemon === null) throw new Error('host.status names no mawsd on the daemon shape');
+  return status.daemon.pid;
+}
+
+// The owner's Connect (or Reconnect) on a server's row: the listener it binds in the connectors' process, and unless
+// `follow` is false the fake browser through the fixture's consent to that listener, which then closes.
 export async function connectThroughBrowser(options: { run: Run; row: Locator; server: string; openLog: string; origin: string; reconnect?: boolean; follow?: boolean }): Promise<Bound> {
-  const pid = options.run.child.pid!;
+  const pid = await connectorsPid(options.run);
   const before = tcpListeners(pid);
   const afterOpens = browserOpens(options.openLog);
   await options.row.getByRole('button', { name: options.reconnect ? S.reconnectLabel(options.server) : S.connectLabel(options.server) }).click();
   let added: string[] = [];
-  await expect.poll(() => (added = addedListeners(before, tcpListeners(pid))).length, { timeout: 20_000, message: 'the Connect bound a callback listener in main' }).toBeGreaterThan(0);
+  await expect.poll(() => (added = addedListeners(before, tcpListeners(pid))).length, { timeout: 20_000, message: 'the Connect bound a callback listener in the connectors’ process' }).toBeGreaterThan(0);
   expect(added, 'one listener').toHaveLength(1);
   const address = added[0]!;
   const port = loopbackPort(address);
   expect(port, `the listener is bound on exactly 127.0.0.1 (lsof: ${address})`).not.toBeNull();
-  if (options.follow === false) return { address, port: port! };
+  if (options.follow === false) return { address, port: port!, pid };
   const followed = await followAuthorization({ openLog: options.openLog, afterOpens, origin: options.origin });
   const safe = { authorizeStatus: followed.authorizeStatus, outcome: followed.outcome, callbackStatus: followed.callbackStatus, callbackPortMatches: followed.callbackPort === port };
   expect(safe, 'the fixture consented and MAWS’s listener took the code').toEqual({ authorizeStatus: 302, outcome: 'code', callbackStatus: 200, callbackPortMatches: true });
@@ -103,16 +124,18 @@ export async function connectThroughBrowser(options: { run: Run; row: Locator; s
   return { address, port: port!, followed: safe };
 }
 
-// The sheet's words for an HTTP source row in a given connection state (copy.ts's own sentence).
-export function connectionWords(state: NonNullable<Extract<ConnectorServerRow, { kind: 'source' }>['connection']>['state']): string {
-  return S.connection({ kind: 'source', handle: '00000000-0000-4000-8000-000000000000', server: 'x', scope: 'user', path: '/x', transport: 'http', tools: [], needsDiscovery: false, connection: { state } });
+// The sheet's words for an HTTP source row in a given connection state (copy.ts's own sentence); `why` for `unavailable`.
+type SourceConnection = NonNullable<Extract<ConnectorServerRow, { kind: 'source' }>['connection']>;
+export function connectionWords(state: SourceConnection['state'], why?: SourceConnection['why']): string {
+  return S.connection({ kind: 'source', handle: '00000000-0000-4000-8000-000000000000', server: 'x', scope: 'user', path: '/x', transport: 'http', tools: [], needsDiscovery: false, connection: { state, ...(why && { why }) } });
 }
 
 export interface SealedRecord {
   connectionId: string; // the file's opaque name
   mode: number;
   text: string; // for in-memory scans only; never retained
-  ciphertext: Buffer | null; // null: the file is not the sealed format
+  format: 1 | 2 | null; // P5 O4: the format line; null: the file is not a sealed format
+  ciphertext: Buffer | null; // null: the file is not a sealed format
 }
 export interface SealedStore {
   dirMode: number | null; // <userData>/connectors/oauth
@@ -132,7 +155,7 @@ export function sealedRecords(scene: ConnectorScene): SealedStore {
           const path = join(dir, name);
           const text = readFileSync(path, 'utf8');
           const read = readSealedText(text);
-          return { connectionId: name.slice(0, -'.sealed'.length), mode: statSync(path).mode & 0o777, text, ciphertext: read.ok ? read.ciphertext : null };
+          return { connectionId: name.slice(0, -'.sealed'.length), mode: statSync(path).mode & 0o777, text, format: read.ok ? read.format : null, ciphertext: read.ok ? read.ciphertext : null };
         })
     : [];
   return { dirMode: mode(dir), parentMode: mode(parent), records };
