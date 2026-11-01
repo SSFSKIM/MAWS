@@ -12,6 +12,15 @@
 // replaces what was held: a session held before the welcome, or listed at the hub, that the restatement left out left
 // while sminos or the endpoint was away, and is withdrawn as if it had sent `gone` (M3's note: its listing would
 // otherwise stay at the hub for good). A connection that ends before its `restated` withdraws nothing.
+//
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the handed-off mark. Until the
+// endpoint first sees a sminos record for a lane B session, authorization ranks the spawner the spine's record names
+// (`launchedBy`) as its owner (authorize.ts's bridge); once it has, the record decides, and a missing record fails closed,
+// never back to the spawner. The records here are a cache (empty at each start, a record dropped at `gone`, a `/clear`'s
+// new engine session's record a few seconds behind it), so that first sight is kept on disk per appSessionId,
+// `handed-off.json` in the endpoint's state directory: marked at the lane B join, and at any read of a lane B record
+// placed under its appSessionId, before the read answers, so no record is used before its mark is durable. It is pruned
+// of the app sessions the spine no longer holds, once a process, when first read.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -74,6 +83,11 @@ export type MembersContext = {
   forget(session: string): void;
   log(line: string): void;
   now(): number;
+  /**
+   * P5 O12 M11: the handed-off mark on disk: `read` null while the state can't be read, `write` throwing when it can't be
+   * written. Absent (a suite's), the mark is kept in memory only.
+   */
+  marks?: { read(): readonly string[] | null; write(appSessionIds: readonly string[]): void };
 };
 
 export class Members implements RecordSource, CheckoutSource {
@@ -85,6 +99,8 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
+  /** P5 O12 M11: the handed-off mark, read on first use; null until then. */
+  #handedOff: Set<string> | null = null;
 
   constructor(ctx: MembersContext) {
     this.#ctx = ctx;
@@ -179,9 +195,31 @@ export class Members implements RecordSource, CheckoutSource {
     return null;
   }
 
+  /** P5 O12 M11: a lane B record read under its appSessionId marks that app session handed off first (`handOff`). */
   record(target: SessionTarget): SessionRecord | null {
     const member = this.#members.get(target.session);
-    return member === undefined || member.lane !== target.lane ? null : this.recordOf(member.session);
+    if (member === undefined || member.lane !== target.lane) return null;
+    if (target.lane === 'B') this.handOff(target.appSessionId);
+    return this.recordOf(member.session);
+  }
+
+  /**
+   * P5 O12 M11: whether a sminos record was seen for an engine session of the lane B app session `appSessionId`, after
+   * which the bridge never applies to it. Every app session reads as handed off while the mark can't be read.
+   */
+  handedOff(appSessionId: string): boolean {
+    const marks = this.#marks();
+    return marks === null || marks.has(appSessionId);
+  }
+
+  /** P5 O12 M11: `appSessionId` marked handed off, on disk before this returns; a write that fails is logged, the mark kept in memory. */
+  handOff(appSessionId: string): void {
+    if (appSessionId === '') return;
+    const marks = this.#marks();
+    if (marks === null) return this.#ctx.log(`endpoint: lane B session ${appSessionId} could not be marked handed off: the mark can't be read`);
+    if (marks.has(appSessionId)) return;
+    marks.add(appSessionId);
+    this.#writeMarks(marks);
   }
 
   /** The record authorization reads of a session, by its engine session id, whatever its lane; null when none is held. */
@@ -220,7 +258,10 @@ export class Members implements RecordSource, CheckoutSource {
     return false;
   }
 
-  /** Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined. */
+  /**
+   * Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined.
+   * P5 O12 M11: each app session joined is marked handed off.
+   */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
     let response;
@@ -231,8 +272,54 @@ export class Members implements RecordSource, CheckoutSource {
     }
     if (!response.ok || !Array.isArray(response.value)) return;
     for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
-      if (isId(status.appSessionId) && isId(status.engineSessionId) && this.#members.get(status.engineSessionId)?.lane === 'B') this.#apps.set(status.engineSessionId, status.appSessionId);
+      if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
+      this.#apps.set(status.engineSessionId, status.appSessionId);
+      this.handOff(status.appSessionId);
     }
+  }
+
+  /** P5 O12 M11: the handed-off mark, read on its first use (then pruned once); null while it can't be read. */
+  #marks(): Set<string> | null {
+    if (this.#handedOff !== null) return this.#handedOff;
+    if (this.#ctx.marks === undefined) return (this.#handedOff = new Set());
+    let read: readonly string[] | null;
+    try {
+      read = this.#ctx.marks.read();
+    } catch (error) {
+      this.#ctx.log(`endpoint: the handed-off mark could not be read: ${(error as Error).message}`);
+      return null;
+    }
+    if (read === null) return null;
+    this.#handedOff = new Set(read);
+    void this.#prune(this.#handedOff);
+    return this.#handedOff;
+  }
+
+  #writeMarks(marks: ReadonlySet<string>): void {
+    try {
+      this.#ctx.marks?.write([...marks]);
+    } catch (error) {
+      this.#ctx.log(`endpoint: the handed-off mark could not be written (${(error as Error).message}); it holds until the endpoint restarts`);
+    }
+  }
+
+  /** P5 O12 M11: the mark loses each app session the spine no longer holds (deleted); a spine that can't answer keeps them all. */
+  async #prune(marks: Set<string>): Promise<void> {
+    const before = [...marks];
+    if (before.length === 0) return;
+    let response;
+    try {
+      response = await this.#ctx.dispatch('machine', 'session.list', { includeArchived: true });
+    } catch {
+      return;
+    }
+    const sessions = response.ok && isObject(response.value) && Array.isArray(response.value.sessions) ? response.value.sessions : null;
+    if (sessions === null) return;
+    const held = new Set(sessions.flatMap((record) => (isObject(record) && isId(record.appId) ? [record.appId] : [])));
+    const gone = before.filter((app) => !held.has(app));
+    if (gone.length === 0) return;
+    for (const app of gone) marks.delete(app);
+    this.#writeMarks(marks);
   }
 
   async #report(member: Member): Promise<void> {

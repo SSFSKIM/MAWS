@@ -38,6 +38,16 @@
 // asking channel's `ClientRef` (`Who.client`), as its executors' do. A lane B session is placed by the machine's index and
 // bound to the engine session the engine host runs for it now (targets.ts): a request the index's engine session would
 // authorize while the host runs another is `unavailable`.
+//
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the spawner as owner. A lane
+// B session a remote member spawned (the spine record's `launchedBy`, written once by `session.spawn`) is that member's
+// from its first second, before sminos's record of it reaches this endpoint: for a lane B target the record source holds
+// nothing for, of an app session it has never seen a record for (`handedOff`, kept on disk), the record read is the
+// bridge, `{owners: [the spawner], access: 'private'}`, so the spawner holds the session and nobody else does (the
+// machine's owners included, as on a session with no record). Once a record was seen, it decides, and a missing one is
+// `grade` for everyone. The spawner comes from the spine record placement read (a query's, from its placement in
+// queries.ts), kept in the decision's reads: every reader of the record in one decision sees the same answer, and the
+// bridge's standing is part of what `recordsMoved` compares, so a record arriving mid-decision takes the decision again.
 import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right, SessionRef, SessionSubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec } from '@shared/ipc/grades';
@@ -50,15 +60,18 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Resolved } from './targets';
+import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Resolved, type Spawner } from './targets';
 
 /** `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. */
 export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub'; name: string; input: unknown; action?: Action; session?: SessionRef };
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
 export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
 export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reason: RefusalReason };
-/** What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. */
-export type QueryBinding = { member: string; target: SessionTarget | null };
+/**
+ * What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. P5 O12 M11:
+ * `launchedBy`, the spawner the placement of a lane B target read from the spine's record.
+ */
+export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner };
 
 export type AuthorizeContext = {
   ref(): string | null;
@@ -101,6 +114,15 @@ type Standing = { decision: Decision; presence?: () => Promise<Decision> };
 const decided = (decision: Decision): Standing => ({ decision });
 /** The part of a record a decision rests on. */
 const standingOf = (record: SessionRecord | null) => (record === null ? null : JSON.stringify([record.owners, record.access ?? 'listed', record.shares ?? []]));
+/**
+ * P5 O12 M11: the record a decision reads of `target`: the source's, else, for a lane B session spawned by `launchedBy`'s
+ * member whose app session the source has never seen a record for, the bridge, its spawner its only owner.
+ */
+function recordOf(records: RecordSource, target: SessionTarget, launchedBy: Spawner | undefined): SessionRecord | null {
+  const record = records.record(target);
+  if (record !== null || target.lane !== 'B' || launchedBy === undefined || records.handedOff?.(target.appSessionId) !== false) return record;
+  return { session: target.session, lane: 'B', owners: [launchedBy.member], access: 'private' };
+}
 const QUERYABLE_BY_WEB_CARDS: ReadonlySet<string> = new Set(['session.answer', 'sminos.answer', 'sminos.decide']);
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -108,7 +130,7 @@ const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 class Reads implements EffectReads {
   #owners: Promise<string[]> | null = null;
   readonly #pending = new Map<string, Promise<string | null>>();
-  readonly #records = new Map<string, { target: SessionTarget; standing: string | null }>();
+  readonly #records = new Map<string, { target: SessionTarget; launchedBy?: Spawner; standing: string | null }>();
 
   constructor(
     private readonly ctx: AuthorizeContext,
@@ -124,15 +146,16 @@ class Reads implements EffectReads {
     return (this.#owners ??= machineOwnerMembers(this.org.head, this.org.certificates, this.ref, this.now));
   }
 
-  record(target: SessionTarget): SessionRecord | null {
-    const record = this.ctx.records.record(target);
-    this.#records.set(`${target.lane}\n${target.session}`, { target, standing: standingOf(record) });
+  /** P5 O12 M11: `launchedBy`, the spawner the target's placement read (`recordOf`'s bridge). */
+  record(target: SessionTarget, launchedBy?: Spawner): SessionRecord | null {
+    const record = recordOf(this.ctx.records, target, launchedBy);
+    this.#records.set(`${target.lane}\n${target.session}`, { target, launchedBy, standing: standingOf(record) });
     return record;
   }
 
-  /** Whether a record read here now stands otherwise. */
+  /** Whether a record read here now stands otherwise (P5 O12 M11: the bridge's standing included). */
   recordsMoved(): boolean {
-    for (const { target, standing } of this.#records.values()) if (standingOf(this.ctx.records.record(target)) !== standing) return true;
+    for (const { target, launchedBy, standing } of this.#records.values()) if (standingOf(recordOf(this.ctx.records, target, launchedBy)) !== standing) return true;
     return false;
   }
 
@@ -234,7 +257,7 @@ export class Authorizer {
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
-    const record = target === undefined ? null : reads.record(target);
+    const record = target === undefined ? null : reads.record(target, resolved.kind === 'session' ? resolved.launchedBy : undefined);
     const atFloor = await this.#stands(floor, target, record, who, reads);
     if (atFloor !== null) return no(atFloor);
     // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
@@ -349,7 +372,7 @@ export class Authorizer {
     const resolved: Resolved = await resolveSubscription(message.session, { dispatch: reads.dispatch, log: (line) => this.ctx.log(line) });
     if (resolved.kind === 'refused') return refuse(resolved.reason);
     if (resolved.kind !== 'session') return refuse('grade');
-    const record = reads.record(resolved.target);
+    const record = reads.record(resolved.target, resolved.launchedBy);
     const owners = await reads.owners();
     const allowed = cards ? owns(record, who.member, owners) : rankAtLeast(sessionRank(record, who.member, owners), 'view');
     if (!allowed) return refuse(webCards ? 'class' : 'grade');
@@ -361,7 +384,7 @@ export class Authorizer {
   async #query(request: AuthorizeRequest, who: Who, reads: Reads): Promise<Decision> {
     const binding = request.input as QueryBinding;
     if (binding.member !== who.member) return refuse('grade');
-    const record = binding.target === null ? null : reads.record(binding.target);
+    const record = binding.target === null ? null : reads.record(binding.target, binding.launchedBy);
     // A web-cards device hears only what its class may do: an answer or approval on a session its member owns.
     if (who.clientClass === 'web-cards' && !(QUERYABLE_BY_WEB_CARDS.has(request.name) && owns(record, who.member, await reads.owners()))) return refuse('class');
     if (binding.target !== null) {

@@ -134,6 +134,13 @@ const LegacySchema = z.union([
 const HostsSchema = z.record(z.string().min(1), z.record(z.string().min(1), z.number().int().nonnegative()));
 
 /**
+ * P5 O12 M11: the lane B app sessions a sminos record was seen for (rl10/members.ts's handed-off mark), after which the
+ * bridge from the spine's `launchedBy` never applies to them. Not the enrollment's: an unenroll leaves it, so a later
+ * enrollment never hands a session back to its spawner.
+ */
+const HandedOffSchema = z.strictObject({ version: z.literal(1), appSessionIds: z.array(z.string().min(1)) });
+
+/**
  * A delegated machine's delegation (O14 M1, Interfaces §B): its id, name prefix and private key, written by `provision`
  * before its redemption; it signs the certificate's retirement, and `retire` destroys it.
  */
@@ -185,6 +192,7 @@ export type NotifiedFile = z.infer<typeof NotifiedSchema>;
 export type WebAuthnFile = z.infer<typeof WebAuthnSchema>;
 export type LegacyFile = z.infer<typeof LegacySchema>;
 export type HostsFile = z.infer<typeof HostsSchema>;
+export type HandedOffFile = z.infer<typeof HandedOffSchema>;
 export type DelegationFile = z.infer<typeof DelegationSchema>;
 export type ProvisioningFile = z.infer<typeof ProvisioningSchema>;
 export type RetirementFile = z.infer<typeof RetirementSchema>;
@@ -207,6 +215,7 @@ export const FILES = {
   provisioning: 'provisioning.json',
   retirement: 'retirement.json',
   authority: 'records-authority.json',
+  handedOff: 'handed-off.json', // P5 O12 M11
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -226,6 +235,7 @@ export class EndpointState {
   #webauthn: WebAuthnFile = {};
   #legacy: LegacyFile | null = null;
   #hosts: HostsFile = {};
+  #handedOff: readonly string[] = []; // P5 O12 M11
   #delegation: DelegationFile | null = null;
   #provisioning: ProvisioningFile | null = null;
   #retirement: RetirementFile | null = null;
@@ -266,6 +276,7 @@ export class EndpointState {
       const webauthn = read(FILES.webauthn, WebAuthnSchema);
       const legacy = read(FILES.legacy, LegacySchema);
       const hosts = read(FILES.hosts, HostsSchema);
+      const handedOff = read(FILES.handedOff, HandedOffSchema);
       const delegation = read(FILES.delegation, DelegationSchema);
       const provisioning = read(FILES.provisioning, ProvisioningSchema);
       const retirement = read(FILES.retirement, RetirementSchema);
@@ -294,6 +305,7 @@ export class EndpointState {
       state.#webauthn = webauthn ?? {};
       state.#legacy = legacy;
       state.#hosts = hosts ?? {};
+      state.#handedOff = handedOff?.appSessionIds ?? [];
       state.#delegation = delegation;
       state.#provisioning = provisioning;
       state.#retirement = retirement;
@@ -356,6 +368,10 @@ export class EndpointState {
   get hosts(): HostsFile {
     return this.#hosts;
   }
+  /** P5 O12 M11: the lane B app sessions handed off to sminos's records; empty when none was. */
+  get handedOff(): readonly string[] {
+    return this.#handedOff;
+  }
   /** Each listed session's last listing; empty when none was made. */
   get listings(): ListingsFile {
     return this.#listings;
@@ -408,6 +424,10 @@ export class EndpointState {
   setHosts(value: HostsFile): void {
     this.#write(FILES.hosts, HostsSchema.parse(value));
     this.#hosts = value;
+  }
+  setHandedOff(appSessionIds: readonly string[]): void {
+    this.#write(FILES.handedOff, HandedOffSchema.parse({ version: 1, appSessionIds: [...appSessionIds] }));
+    this.#handedOff = [...appSessionIds];
   }
   setDelegation(value: DelegationFile): void {
     this.#write(FILES.delegation, DelegationSchema.parse(value));

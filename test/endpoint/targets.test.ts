@@ -6,9 +6,20 @@
 // `unavailable`. Where the engine host holds a live row, the engine session placement authorized against must be the one
 // the request runs on (a read, a subscription's opening, an act), else `unavailable`. And each channel is one asker on
 // the machine: a `ClientRef` minted at its admission, carried by every `dispatch` its requests make, ended at its close.
+//
+// P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions and Acceptance 10): a lane B
+// session a member spawned (the spine record's `launchedBy`) is that member's until sminos's record of it reaches the
+// endpoint, for every reader (a call, an act, a subscription, a query) and nobody else's; then the record decides, a
+// record arriving mid-decision taking the decision again; and once a record was seen for the app session (the handed-off
+// mark on disk), a missing one is `grade` for everyone, across an endpoint restart, a `/clear` and a `gone`.
+import * as fs from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ClientRef } from '@shared/ipc/client';
-import { act, done, makeOrg, openRemote, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
+import { EndpointState } from '../../src/endpoint/state/store';
+import { fakeServices } from './fake-services';
+import { act, CHECKOUT, done, laneAMember, makeOrg, of, openRemote, PROJECT, Records, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -232,5 +243,219 @@ describe('a ClientRef per channel', () => {
     a.channel.close('closed');
     await until(() => gone(first), 'the closed channel’s ref ended');
     expect(gone(second)).toBe(false);
+  });
+});
+
+// ---- P5 O12 M11: the spawner as owner ---------------------------------------------------------------------------------
+
+/** Lane B's records as sminos reports them on RL10: the endpoint's own members and their handed-off mark, not the suite's map. */
+class SminosRecords extends Records {
+  #members: RecordSource | null = null;
+  override bindLaneA(source: RecordSource): void {
+    super.bindLaneA(source);
+    this.#members = source;
+  }
+  override record(target: SessionTarget): SessionRecord | null {
+    return this.#members?.record(target) ?? null;
+  }
+  handedOff(appSessionId: string): boolean {
+    return this.#members?.handedOff?.(appSessionId) ?? true;
+  }
+}
+
+const launchedBy = (member: string) => ({ member, device: 'b1', opId: 'op-spawn-000000000001', action: null });
+/** A lane B session `member` spawned: the spine's record (its `launchedBy`; its engine session, or none yet) and the engine host's live row. */
+function spawned(f: Fixture, app: string, member: string, engine: { recorded: string | null; live: string }): HostSession {
+  const s = f.host.add(app, engine.live);
+  f.spine.set(app, engine.recorded, { launchedBy: launchedBy(member) });
+  return s;
+}
+/** sminos's member frame of a lane B session. */
+const laneBMember = (session: string, owners: string[], fields: Record<string, unknown> = {}) => ({
+  session, alias: 'spawned', project: PROJECT, lane: 'B', state: 'idle', title: 'spawned', cwd: CHECKOUT, owners, ownersProof: [], origin: { kind: 'maws', requester: owners[0] }, ...fields,
+});
+const sendOf = (f: Fixture, r: Remote, s: HostSession, content: string) =>
+  r.device.action({ machine: f.ref, action: 'session.send', session: s.appSessionId, context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: s.appSessionId, content } });
+const codeOf = (m: Msg) => (m.ok === true ? 'ok' : (m.error as { code: string }).code);
+const statusOf = async (r: Remote, app: string) => codeOf(await call(r, 'session.status', { appSessionId: app }));
+const markPath = (f: Fixture) => join(f.services.machine.stateDir, 'handed-off.json');
+const handedOff = (f: Fixture): string[] => (fs.existsSync(markPath(f)) ? (JSON.parse(fs.readFileSync(markPath(f), 'utf8')) as { appSessionIds: string[] }).appSessionIds : []);
+const withSminosRecords = (f?: Fixture) => ({ records: new SminosRecords(), ...(f && { services: f.services, host: f.host, chain: f.chain, key: f.key }) });
+
+describe('the spawner as owner (P5 O12 M11)', () => {
+  it('serves its spawner’s call, read, full subscription, act and query while sminos holds no record, and nobody else, the machine’s owner included', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await statusOf(b, 'app-s')).toBe('ok');
+    expect(codeOf(await call(b, 'session.events', { appSessionId: 'app-s', afterSeq: null, limit: 10 }))).toBe('ok');
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
+    const send = sendOf(f, b, s, 'from the spawner');
+    const from = b.inbox.length;
+    expect(await act(b, send)).toBe('ok');
+    expect(await done(b, send, from)).toMatchObject({ state: 'done' });
+    await b.channel.send({ t: 'query', opId: send.opId, opCreated: send.opCreated, executor: 'engine-host' });
+    expect(await waitFor(b, (m) => m.t === 'queried' && m.opId === send.opId, 'the query’s answer')).toMatchObject({ state: 'done' });
+
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await statusOf(a, 'app-s')).toBe('grade');
+    expect(await subscribe(a, 'sa', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'ended', reason: 'grade' });
+    expect(await act(a, sendOf(f, a, s, 'not the spawner'))).toBe('grade');
+    expect(f.host.runs.map((run) => run.content)).toEqual(['from the spawner']);
+    expect(handedOff(f)).toEqual([]);
+  });
+
+  it('lets sminos’s record decide once it arrives: as its owner the spawner keeps everything; under other owners, only what the record grants', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
+    const sm = await sminos(f, [laneAMember(), laneBMember('eng-s', [org.B])]);
+    await until(() => handedOff(f).includes('app-s'), 'the hand-off on disk');
+    expect(fs.statSync(markPath(f)).mode & 0o777).toBe(0o600);
+    expect(await statusOf(b, 'app-s')).toBe('ok');
+    expect(of(b, 'sb').some((m) => m.t === 'ended')).toBe(false);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await statusOf(a, 'app-s')).toBe('grade');
+
+    // O8's record actions moved the owners: the spawner keeps the share the record gives, no more
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { shares: [{ member: org.B, grade: 'view' }] }) });
+    await until(() => f.endpoint.rl10.members.get('eng-s')?.owners[0] === org.C, 'the moved record');
+    expect(await statusOf(b, 'app-s')).toBe('ok');
+    expect(await act(b, sendOf(f, b, s, 'no longer mine'))).toBe('grade');
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { access: 'private' }) });
+    await until(() => f.endpoint.rl10.members.get('eng-s')?.access === 'private', 'the record without the share');
+    expect(await statusOf(b, 'app-s')).toBe('grade');
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end')).toMatchObject({ reason: 'removed' });
+    expect(f.host.runs).toEqual([]);
+  });
+
+  it('takes a decision again when a record arrives during it', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    f.host.request('app-s', 'question', 'rq-1');
+    f.host.request('app-s', 'question', 'rq-2');
+    const sm = await sminos(f);
+    const b = await openRemote(f, org.b1, org.B);
+    const answer = (requestId: string) =>
+      b.device.action({ machine: f.ref, action: 'session.answer', session: 'app-s', context: { lane: 'B', launchId: s.launchId, engineSessionId: 'eng-s' }, args: { appSessionId: 'app-s', requestId, answer: { kind: 'question', answers: { 'Which way?': 'left' } } } });
+    expect(await act(b, answer('rq-1'))).toBe('ok'); // the bridge's decision, nothing arriving
+
+    // the decision reads the pending request (the answer's grade) after the record: a record taking the session from
+    // its spawner arrives meanwhile, and the decision taken again stands on it
+    const pendingReads = () => f.host.calls.filter((c) => c.name === 'session.pendingRequest').length;
+    const before = pendingReads();
+    f.host.hold('session.pendingRequest');
+    const acked = act(b, answer('rq-2'));
+    await until(() => pendingReads() > before, 'the decision reading the pending request');
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { access: 'private' }) });
+    await until(() => f.endpoint.rl10.members.get('eng-s') !== null, 'the record');
+    f.host.release('session.pendingRequest');
+    expect(await acked).toBe('grade');
+    expect(pendingReads()).toBe(before + 1); // the second decision stopped at the record, before the pending request
+
+    // a record that came and went during the decision leaves no record, but the hand-off: the bridge's own standing
+    // moved, so the decision is taken again, and with nothing to bridge it is `grade`
+    const t = spawned(f, 'app-t', org.B, { recorded: 'eng-t', live: 'eng-t' });
+    f.host.request('app-t', 'question', 'rq-3');
+    const again = pendingReads();
+    f.host.hold('session.pendingRequest');
+    const gone = act(b, b.device.action({ machine: f.ref, action: 'session.answer', session: 'app-t', context: { lane: 'B', launchId: t.launchId, engineSessionId: 'eng-t' }, args: { appSessionId: 'app-t', requestId: 'rq-3', answer: { kind: 'question', answers: { 'Which way?': 'left' } } } }));
+    await until(() => pendingReads() > again, 'the decision reading the pending request');
+    sm.send({ t: 'member', ...laneBMember('eng-t', [org.B]) });
+    sm.send({ t: 'member', session: 'eng-t', gone: true });
+    await until(() => handedOff(f).includes('app-t') && f.endpoint.rl10.members.get('eng-t') === null, 'the record come and gone');
+    f.host.release('session.pendingRequest');
+    expect(await gone).toBe('grade');
+  });
+
+  it('holds while the spine’s record has no engine session yet, placed on the engine host’s live one', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    spawned(f, 'app-n', org.B, { recorded: null, live: 'eng-live' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'session.status', { appSessionId: 'app-n' })).toMatchObject({ ok: true, output: { engineSessionId: 'eng-live' } });
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-n' })).toMatchObject({ t: 'subbed' });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await statusOf(a, 'app-n')).toBe('grade');
+  });
+
+  it('is still `unavailable` to its spawner while the index lags the live engine session, and `grade` to everyone else', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    spawned(f, 'app-l', org.B, { recorded: 'eng-old', live: 'eng-new' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await statusOf(b, 'app-l')).toBe('unavailable');
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-l' })).toMatchObject({ t: 'ended', reason: 'unavailable' });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await statusOf(a, 'app-l')).toBe('grade');
+  });
+
+  it('bridges nothing for a session whose spine record names no spawner', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    f.host.add('app-x', 'eng-x');
+    f.spine.set('app-x', 'eng-x');
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await statusOf(b, 'app-x')).toBe('grade');
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await statusOf(a, 'app-x')).toBe('grade');
+  });
+
+  describe('never again once a record was seen, the next member frame withheld', () => {
+    it('after sminos withdraws the record (`gone`)', async () => {
+      const f = await startEndpoint(org, started, withSminosRecords());
+      spawned(f, 'app-g', org.B, { recorded: 'eng-g', live: 'eng-g' });
+      const sm = await sminos(f, [laneAMember(), laneBMember('eng-g', [org.B])]);
+      const b = await openRemote(f, org.b1, org.B);
+      expect(await statusOf(b, 'app-g')).toBe('ok');
+      sm.send({ t: 'member', session: 'eng-g', gone: true });
+      await until(() => f.endpoint.rl10.members.get('eng-g') === null, 'the record withdrawn');
+      expect(await statusOf(b, 'app-g')).toBe('grade');
+      expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-g' })).toMatchObject({ t: 'ended', reason: 'grade' });
+    });
+
+    it('after a `/clear`, until the new engine session’s record arrives', async () => {
+      const f = await startEndpoint(org, started, withSminosRecords());
+      const s = spawned(f, 'app-c', org.B, { recorded: 'eng-1', live: 'eng-1' });
+      const sm = await sminos(f, [laneAMember(), laneBMember('eng-1', [org.B])]);
+      const b = await openRemote(f, org.b1, org.B);
+      expect(await statusOf(b, 'app-c')).toBe('ok');
+      // the conversation goes on as eng-2, the engine host and the index both saying so; sminos's record of it lags
+      s.engineSessionId = 'eng-2';
+      f.spine.set('app-c', 'eng-2', { launchedBy: launchedBy(org.B) });
+      expect(await statusOf(b, 'app-c')).toBe('grade');
+      const a = await openRemote(f, org.a1, org.A);
+      expect(await statusOf(a, 'app-c')).toBe('grade');
+      // its record arrives, its predecessor's owners carried by sminos: it decides
+      sm.send({ t: 'member', ...laneBMember('eng-2', [org.B]) });
+      await until(() => f.endpoint.rl10.members.get('eng-2') !== null, 'the new engine session’s record');
+      expect(await statusOf(b, 'app-c')).toBe('ok');
+    });
+
+    it('after an endpoint restart, before sminos restates', async () => {
+      const f = await startEndpoint(org, started, withSminosRecords());
+      spawned(f, 'app-r', org.B, { recorded: 'eng-r', live: 'eng-r' });
+      await sminos(f, [laneAMember(), laneBMember('eng-r', [org.B])]);
+      await until(() => handedOff(f).includes('app-r'), 'the hand-off on disk');
+      f.sminos?.close();
+      await f.endpoint.stop();
+      started.splice(started.indexOf(f), 1);
+      const g = await startEndpoint(org, started, withSminosRecords(f));
+      expect(g.endpoint.rl10.members.get('eng-r')).toBeNull();
+      const b = await openRemote(g, org.b1, org.B);
+      expect(await statusOf(b, 'app-r')).toBe('grade');
+      // a session spawned since, never handed off, is bridged as before
+      spawned(g, 'app-new', org.B, { recorded: 'eng-new', live: 'eng-new' });
+      expect(await statusOf(b, 'app-new')).toBe('ok');
+    });
+  });
+
+  it('prunes the mark of the app sessions the spine no longer holds, when first read', async () => {
+    const services = fakeServices();
+    EndpointState.open(services.machine.stateDir).setHandedOff(['app-deleted', 'app-kept']);
+    const f = await startEndpoint(org, started, { ...withSminosRecords(), services });
+    spawned(f, 'app-kept', org.B, { recorded: 'eng-k', live: 'eng-k' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await statusOf(b, 'app-kept')).toBe('grade'); // handed off before this start: no bridge
+    await until(() => !handedOff(f).includes('app-deleted'), 'the deleted app session pruned');
+    expect(handedOff(f)).toEqual(['app-kept']);
   });
 });
