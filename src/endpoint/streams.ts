@@ -34,7 +34,8 @@
 // refused closes the stream `unavailable` with the offset short of its chunk, unrefunded, so the reopen's resend is
 // written; one whose outcome is unknown (thrown, timed out, the host gone) closes it `unavailable` with the offset past
 // the chunk, so the resend is dropped: input is at most once, since a doubled Enter runs a command twice where a lost
-// keystroke shows as a missing echo. Resize is `streamControl {resize: {cols, rows}}`, through `pty.resize`. A pty that exits closes its streams `exit` after the output they hold.
+// keystroke shows as a missing echo. Resize is `streamControl {resize: {cols, rows}}`, through `pty.resize`. A pty that
+// exits closes its streams `exit` after the output they hold.
 //
 // A tcp stream connects to `127.0.0.1:<port>` at its open (`streamOpened` after the connect, `unreachable` on failure),
 // and ends whole with either side's close (the device's resets the socket at once: nothing could carry what it still
@@ -53,8 +54,8 @@ import {
   STREAM_CHUNK_BYTES,
   STREAM_CREDIT_MAX,
   type DeviceStreamMessage,
-  type RefusalReason,
   type EndpointMessage,
+  type RefusalReason,
   type StreamControlMessage,
   type StreamDataMessage,
   type StreamKind,
