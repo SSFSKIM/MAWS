@@ -553,7 +553,7 @@ describe('mawsd render', () => {
     return managers.run(command, args);
   };
   const entryName = `44.4.5-${sha.slice(0, 12)}`;
-  const renderLock: CliDeps['renderLock'] = async () => async () => {}; // a Mac has no flock; the lock's own cases are render-install.test.ts's
+  const renderLock: CliDeps['renderLock'] = async () => ({ check: () => {}, release: async () => {} }); // a Mac has no flock; the lock's own cases are render-install.test.ts's
   const cacheRoot = () => join(scene.root, 'home', '.local', 'share', 'maws', 'mawsd', 'render');
 
   it('is Linux’s: on a Mac the app’s own binary renders, so there is nothing to install (exit 2)', async () => {

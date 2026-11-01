@@ -6,7 +6,7 @@
 // left is verified and completed, or cleaned; two installers at once leave one entry; an entry nothing pins and nothing
 // runs from is pruned. Each case runs in a scratch home with the downloads, `unzip`, `sudo`, `ldd` and /proc faked, and
 // the helper's ownership read from what the fake `sudo` did (a test cannot chown to root).
-import { fork } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,7 @@ let unzipped: number;
 let lockHeld: boolean;
 let lockWaiters: (() => void)[];
 let waitsExpected: boolean;
+let lockLost: string | null;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-render-install-'));
@@ -50,11 +51,13 @@ beforeEach(() => {
   lockHeld = false;
   lockWaiters = [];
   waitsExpected = false;
+  lockLost = null;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 // The cache root's lock as flock holds it, in this process (a Mac has no flock): exclusive, handed to the next waiter at
 // release. A wait throws unless the case runs two at once on purpose, so no case can hang on a lock nobody releases.
+// `loseLock` is its holder ending before the release (flock's child killed): `check` says so from then on.
 const lock: FileLock = async (_path, waiting) => {
   if (lockHeld) {
     if (!waitsExpected) throw new Error('an unexpected wait for the cache lock');
@@ -62,11 +65,20 @@ const lock: FileLock = async (_path, waiting) => {
     await new Promise<void>((resolve) => lockWaiters.push(resolve));
   }
   lockHeld = true;
-  return async () => {
-    const next = lockWaiters.shift();
-    if (next !== undefined) next();
-    else lockHeld = false;
+  return {
+    check: () => {
+      if (lockLost !== null) throw new Error(`lost the install lock: its holder exited (status ${lockLost})`);
+    },
+    release: async () => {
+      const next = lockWaiters.shift();
+      if (next !== undefined) next();
+      else lockHeld = false;
+    },
   };
+};
+const loseLock = (status: string) => {
+  lockLost = status;
+  lockHeld = false; // the kernel let it go
 };
 
 const ok = { status: 0, stdout: '', stderr: '' };
@@ -407,6 +419,38 @@ describe('an install', () => {
     expect(listing()).toEqual([]);
   });
 
+  // The lock lost midway (its holder ended while the installer lives: PR #428 re-review): nothing that no rerun undoes is
+  // done after the loss, nothing is published, and a whole staging is left for the next run
+  it('stops when the lock is lost during the download: no helper set, nothing published, the staging left', async () => {
+    const download = async (_url: string, to: string) => {
+      writeFileSync(to, zipBytes);
+      loseLock('9');
+    };
+    await expect(installRenderRuntime(markerDeps({ download }))).rejects.toThrow(/lost the install lock: its holder exited \(status 9\)/);
+    expect(sudoCalls()).toEqual([]);
+    expect(listing()).toEqual([stagingName(pin)]);
+  });
+
+  it('stops when the lock is lost at the helper step or before the rename: nothing published', async () => {
+    for (const step of ['chown', 'chmod', 'publishing']) {
+      rmSync(root(), { recursive: true, force: true });
+      lockLost = null;
+      calls = [];
+      const checkpoint = (at: string) => void (at === step && loseLock('SIGKILL'));
+      await expect(installRenderRuntime(markerDeps({ checkpoint })), step).rejects.toThrow(/lost the install lock/);
+      expect(existsSync(entry()), `lost at ${step}`).toBe(false);
+      expect(sudoCalls(), `lost at ${step}`).toEqual(step === 'chown' ? [] : step === 'chmod' ? [`sudo -n chown root:root ${join(staging(), 'chrome-sandbox')}`] : expect.any(Array));
+      expect(listing(), `lost at ${step}`).toEqual([stagingName(pin)]);
+    }
+  });
+
+  it('an uninstall stops when the lock is lost before it removes anything', async () => {
+    await installRenderRuntime(markerDeps());
+    const outcome = uninstallRenderRuntime(markerDeps({ processes: () => (loseLock('9'), running) }));
+    await expect(outcome).rejects.toThrow(/lost the install lock/);
+    expect(listing()).toEqual([runtimeName(pin)]);
+  });
+
   it('copies from the zip a pack carries beside it (--render) rather than downloading, after verifying it', async () => {
     const packZip = join(dir, 'dist', 'electron-v44.4.5-linux-x64.zip');
     mkdirSync(join(dir, 'dist'));
@@ -471,13 +515,30 @@ describe.runIf(process.platform === 'linux')('the cache lock', () => {
     let saidOnce: () => void = () => {};
     const waiting = new Promise<void>((resolve) => (saidOnce = resolve));
     let secondHolds = false;
-    const second = flockFile(path, () => (said += 1, saidOnce())).then((release) => ((secondHolds = true), release));
+    const second = flockFile(path, () => (said += 1, saidOnce())).then((hold) => ((secondHolds = true), hold));
     await waiting; // its try without blocking found the lock held
     expect(secondHolds).toBe(false);
-    await first();
-    await (await second)();
+    await first.release();
+    await (await second).release();
     expect(secondHolds).toBe(true);
     expect(said).toBe(1);
+  });
+
+  it('says it is lost when its holder child ends before the release', async () => {
+    const hold = await flockFile(join(dir, '.install-lock'), () => expect.unreachable('waited'));
+    hold.check();
+    expect(spawnSync('pkill', ['-KILL', '-P', String(process.pid), '-x', 'flock']).status).toBe(0);
+    const lost = () => {
+      try {
+        hold.check();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    while (!lost()) await new Promise((resolve) => setImmediate(resolve)); // the child's exit, once node has read it
+    expect(() => hold.check()).toThrow(/lost the install lock .*: its holder exited \(status SIGKILL\)/);
+    await hold.release();
   });
 
   it('is let go when its holder dies, however it dies', async () => {
@@ -496,7 +557,7 @@ describe.runIf(process.platform === 'linux')('the cache lock', () => {
     let said = 0;
     const taken = flockFile(path, () => (said += 1));
     holder.kill('SIGKILL'); // no release ran: its pipe to the flock ends with it
-    await (await taken)();
+    await (await taken).release();
     expect(said).toBeLessThanOrEqual(1);
   });
 });
