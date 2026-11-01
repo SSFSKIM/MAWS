@@ -11,7 +11,8 @@
 //                                node-pty), copied from the installed tree as Node would resolve them
 //   bin/maws-session-host        the session host for the pack's platform (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md,
 //                                M1): the committed prebuild native/session-host/prebuilds/<platform>-<arch>/, mode 0755;
-//                                required on Linux, where every lane B launch runs under it
+//                                required on Linux, where every lane B launch runs under it; its `--version` is a
+//                                smoke check (M4)
 //   package.json                 a minimal one, naming the release ({ mawsd: { release, commit, platform, arch, node } })
 //   runtime/                     on Linux only: the pinned Node (packaging/mawsd/node.json), downloaded from nodejs.org,
 //                                checked against its sha256 before it is unpacked, and put through the smoke checks
@@ -145,6 +146,24 @@ function addSessionHost({ root, into, platform, arch }) {
   chmodSync(join(into, 'bin', 'maws-session-host'), 0o755);
 }
 
+// P5 O16 M4: the pack's session host answers `--version` with the version and protocol major the engine host it ships
+// beside expects (src/engine-host/holder/protocol.ts), so a stale or foreign prebuild refuses the pack.
+function smokeSessionHost({ root, pack }) {
+  const binary = join(pack, 'bin', 'maws-session-host');
+  if (!existsSync(binary)) return;
+  const source = readFileSync(join(root, 'src', 'engine-host', 'holder', 'protocol.ts'), 'utf8');
+  const constant = (name) => {
+    const found = new RegExp(`export const ${name} = '?([0-9.]+)'?;`).exec(source);
+    if (!found) throw new Error(`src/engine-host/holder/protocol.ts declares no ${name}`);
+    return found[1];
+  };
+  const expected = `maws-session-host ${constant('SESSION_HOST_VERSION')} protocol ${constant('SESSION_HOST_PROTOCOL')}`;
+  const ran = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 30_000 });
+  if (ran.status !== 0) throw new Error(`smoke check session host failed (${ran.status ?? ran.signal ?? ran.error?.message}): ${(ran.stderr || ran.stdout || '').trim()}`);
+  const out = ran.stdout.trim();
+  if (out !== expected) throw new Error(`smoke check session host printed ${JSON.stringify(out)}, not ${JSON.stringify(expected)}`);
+}
+
 // The smoke checks, with the runtime: its version is the pin; `node:sqlite` loads without a flag; `--disable-sigusr1`
 // is accepted; a .ts file importing another by its .ts extension runs under default type stripping (residue 23); and
 // node-pty's addon, as the pack carries it, loads.
@@ -206,6 +225,7 @@ export async function pack({
       smoke({ node: join(staged, 'runtime', 'bin', 'node'), version: node, pack: staged });
     }
     addSessionHost({ root, into: staged, platform, arch });
+    smokeSessionHost({ root, pack: staged });
     release = `${version}-${commit}-${contentId(staged)}`;
     const packageJson = { name: 'maws-mawsd', version, private: true, main: 'out/main/mawsd.js', mawsd: { release, commit, platform, arch, node } };
     writeFileSync(join(staged, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`);

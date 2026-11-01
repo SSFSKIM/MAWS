@@ -8,6 +8,7 @@ import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { isAlive, isSameProcess, procStartOf } from '../supervisor-files';
 import { hostsDirOf, sessionHostBinary, sessionHostPaths, type SessionHostPaths } from './files';
 import { HostMessageSchema, HostStreamDecoder, RING_RECORD_OVERHEAD, SESSION_HOST_PROTOCOL, SESSION_HOST_VERSION, controlLine, stdinRecord, type ClientMessage, type HostItem } from './protocol';
 
@@ -210,6 +211,28 @@ describe.skipIf(!HAVE_BINARY)('the session host binary', () => {
     const roster = JSON.parse(readFileSync(host.paths.roster, 'utf8')) as Record<string, unknown>;
     expect(roster).toMatchObject({ protocol: 1, pid: host.proc.pid, state: 'ready', socket: host.paths.socket, binary: BINARY, child: null, fence: 0 });
     expect(roster.procStart).toBe(hello.procStart);
+  });
+
+  // P5 O16 M4: the host's start identities and the engine host's (supervisor-files.ts procStartOf) are one read, so a
+  // successor's liveness check (isSameProcess) and the sweep's child identity agree with the roster on each platform:
+  // procps's `ps` on the pool's Linux unit job, BSD's under unit:darwin.
+  it("records its own and its child's start exactly as the engine host reads a process's start", { timeout: LONG }, async () => {
+    const host = await startHost();
+    const { client: w, hello } = await host.auth();
+    w.send({ t: 'attach', role: 'writer', fence: 1 });
+    await w.expect('attached');
+    const spawned = await launch(w, ['/bin/cat']);
+    const pid = host.proc.pid!;
+    const child = spawned.pid as number;
+    expect(hello.procStart).not.toBe('');
+    expect(hello.procStart).toBe(procStartOf(pid));
+    expect(spawned.procStart).not.toBe('');
+    expect(spawned.procStart).toBe(procStartOf(child));
+    const roster = JSON.parse(readFileSync(host.paths.roster, 'utf8')) as { procStart: string; child: { pid: number; procStart: string } | null };
+    expect(roster.procStart).toBe(procStartOf(pid));
+    expect(roster.child).toEqual({ pid: child, procStart: procStartOf(child) });
+    expect(isSameProcess({ pid, procStart: roster.procStart }, { isAlive, procStartOf })).toBe(true);
+    expect(isSameProcess(roster.child!, { isAlive, procStartOf })).toBe(true);
   });
 
   it('keeps its files private: 0700 directory, 0600 socket, roster, token and log', { timeout: LONG }, async () => {

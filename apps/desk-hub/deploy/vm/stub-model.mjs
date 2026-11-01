@@ -6,6 +6,9 @@
 // - a main-loop request whose last user text says `o10-m11 ticks <k> <tag>` starts a tool loop: `echo o10-m11 tick
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
+// - a main-loop request of the holder's acceptance run (P5 O16 M4; its first message `o16-holder go <tag> <s>`) gets
+//   holder.mjs's script (`holderStep`): a background `sleep <s>`, a Bash call that raises a permission, the turn's
+//   text, then the text answering the shell's completion;
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; the relay's health check
 //   (GET /api/hello) 200, so a MAWS gateway launch pointed here by MAWS_RELAY_URL (lane B's engine) starts; any other
@@ -17,6 +20,7 @@ import console from 'node:console';
 import { createServer } from 'node:http';
 import process from 'node:process';
 import { setTimeout } from 'node:timers';
+import { holderStep } from './holder.mjs';
 import { jsonOf, sseOf, textTurn, toolTurn } from './stub-api.mjs';
 
 const arg = (name, fallback) => {
@@ -45,6 +49,8 @@ const isMainLoop = (body) => Array.isArray(body.tools) && body.tools.some((t) =>
 
 /** The turn a main-loop request gets: decided by its last user message alone. */
 export function answer(body) {
+  const step = holderStep(body);
+  if (step) return step.tool ? toolTurn(step.tool.id, step.tool.name, step.tool.input) : textTurn(step.text);
   const last = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user');
   const text = textOf(last?.content);
   const tick = TICK.exec(text);
@@ -89,6 +95,11 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
         return res.end();
       }
       const turn = isMainLoop(body) ? answer(body) : textTurn('o10-m11');
+      const step = isMainLoop(body) ? holderStep(body) : null;
+      if (step) {
+        const last = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user');
+        console.log(`${new Date().toISOString()} holder ${step.tool ? step.tool.id : JSON.stringify(step.text)} after ${JSON.stringify(textOf(last?.content).slice(0, 240))}`);
+      }
       const id = `msg_o10m11_${++served}`;
       console.log(`${new Date().toISOString()} ${isMainLoop(body) ? 'main' : 'side'} ${turn.stop} ${turn.blocks.map((b) => b.type).join(',')}`);
       setTimeout(() => {
