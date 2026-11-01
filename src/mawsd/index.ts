@@ -57,7 +57,7 @@ function run({ kind, dir }: RunArgs, profileDir: string): void {
   if (process.env.MAWS_E2E === '1') {
     process.on('SIGUSR2', () => {
       try {
-        writeE2eResources(join(dir, 'e2e-resources.json'));
+        writeE2eResources(join(dir, 'e2e-resources.json'), daemon?.e2eBrowser() ?? null);
       } catch (error) {
         log(`the e2e resource report was not written: ${error instanceof Error ? error.message : String(error)}`); // never fatal
       }

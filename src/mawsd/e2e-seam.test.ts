@@ -62,7 +62,9 @@ describe('the e2e resource report', () => {
       writeFileSync(file, 'stale');
       writeE2eResources(file);
       const read = JSON.parse(readFileSync(file, 'utf8')) as ReturnType<typeof e2eResources> & { at: string };
-      expect(read).toMatchObject({ resources: expect.any(Array), modules: expect.any(Array), at: expect.any(String) });
+      expect(read).toMatchObject({ resources: expect.any(Array), modules: expect.any(Array), at: expect.any(String), browser: null });
+      writeE2eResources(file, { broker: null, sockets: {}, holds: [] }); // P5 O17 M8: the daemon's browser facts beside them
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ browser: { broker: null, sockets: {}, holds: [] } });
       expect(readdirSync(dir)).toEqual(['e2e-resources.json']); // no temp file left beside it
     } finally {
       rmSync(dir, { recursive: true, force: true });

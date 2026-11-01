@@ -35,7 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { clearSocketPath, makePrivateDirectory } from '@shared/host/private-listen';
 import { assertPrivateSocket } from '@shared/host/private-path';
 import { authorizePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from '../main/browser/cua/peer';
-import type { BrowserDemand, BrowserRouteReading, BrowserTarget, CuaBroker } from './cua-broker'; // types alone: the chunk loads at the first admitted cold peer
+import type { BrowserDemand, BrowserRouteReading, BrowserTarget, CuaBroker, CuaBrokerInspection } from './cua-broker'; // types alone: the chunk loads at the first admitted cold peer
 
 export type CuaBrokerChunk = typeof import('./cua-broker');
 export const loadCuaBroker = (): Promise<CuaBrokerChunk> => import('./cua-broker');
@@ -92,6 +92,7 @@ export interface CuaSockets {
   routeChanged(appSessionId: AppSessionId): void; // P5 O17 M1: the session's route was read anew: an older epoch's connections end; listen or stop
   sessions(): AppSessionId[];
   inspect(): Record<string, CuaSocketInspection>;
+  broker(): CuaBrokerInspection | null; // P5 O17 M8: the cold broker's connections; null before its chunk loaded
   close(): void;
 }
 
@@ -482,6 +483,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     },
     sessions: () => [...sessions.keys()],
     inspect: () => Object.fromEntries([...sessions].map(([appSessionId, session]) => [appSessionId, { listening: session.server !== null, relayed: session.relayed, refused: session.refused, waiting: session.pending.size }])),
+    broker: () => broker?.inspect() ?? null,
     close() {
       for (const [appSessionId, session] of sessions) quiet(appSessionId, session);
       broker?.close();

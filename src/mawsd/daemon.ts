@@ -139,7 +139,8 @@ import { refusalLog } from './refusal-log';
 import { SpineReaders } from './spine-readers';
 import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
-import { createCuaSockets, type CuaSockets } from './cua-socket'; // P5 O5 M5
+import { createCuaSockets, type CuaSocketInspection, type CuaSockets } from './cua-socket'; // P5 O5 M5
+import type { CuaBrokerInspection } from './cua-broker'; // P5 O17 M8: a type alone, the chunk stays deferred
 import { browserCapability, createSessionCapabilities, headlessReason, type HeadlessFacts } from './session-capabilities'; // P5 O5 M5
 import { createBrowserWork } from './browser-work'; // P5 O17 M3
 import { createBrowserRoute } from './browser-route'; // P5 O17 M5
@@ -212,6 +213,9 @@ export interface RunningDaemon {
   status(): Promise<DaemonStatus>;
   stop(reason: string, code?: number): Promise<void>; // the exit order; a second call joins the first
   render: RenderService; // P5 O5 M4 (Interfaces §G): the library's Export as artifacts.export runs it, for O4's Send to
+  // P5 O17 M8: the browser's idle facts for the e2e resource report (index.ts, SIGUSR2 under MAWS_E2E=1), read only then:
+  // the cold broker's connections (null before its chunk loaded), each session's socket, the sessions held for browser work
+  e2eBrowser(): { broker: CuaBrokerInspection | null; sockets: Record<string, CuaSocketInspection>; holds: AppSessionId[] };
 }
 
 type FrameListener = Parameters<DaemonServices['onFrame']>[0];
@@ -1047,11 +1051,21 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const lineage = root && root.view.unavailable() === null ? root.view.record(appSessionId)?.lineage : null;
     return lineage?.kind === 'side-thread' ? lineage.parentAppSessionId : null;
   };
+  // P5 O17 M8 (e2e only, MAWS_E2E=1 with MAWS_E2E_BROWSER_START_HOLD=1, read once here): every headless start waits,
+  // before it begins, for the first app's attachment, so a scene can attach during a start deterministically; the start
+  // then goes on under the demand it was given, which the handover has ended. Nothing is armed otherwise
+  let releaseStarts = () => {};
+  const startHold = env.MAWS_E2E === '1' && env.MAWS_E2E_BROWSER_START_HOLD === '1' ? new Promise<void>((resolve) => (releaseStarts = resolve)) : null;
+  let startHeld = startHold !== null;
   const route = createBrowserRoute({
     machine,
     app: () => front.browserSocket() !== null,
     headless: browserHeadless,
-    ensureBrowser: (demand) => render.ensureBrowser(demand),
+    ensureBrowser: (demand) => {
+      if (!startHeld) return render.ensureBrowser(demand);
+      log(`[browser] e2e: the start of ${demand.appSessionId} held until an app attaches`);
+      return startHold!.then(() => render.ensureBrowser(demand));
+    },
     dropBrowser: (appSessionId) => render.dropBrowser(appSessionId),
     engineOf: (appSessionId) => render.browserEngine(appSessionId),
     socketPath: renderSocketOf,
@@ -1102,6 +1116,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const followTabEngine = () => {
     if (stopping !== null) return; // the exit closes the sockets and the clients: no flip to tell
     browserInputs(() => cua?.target(front.browserSocket())); // P5 O17 M5: the routes' epochs minted before the sockets move
+    if (startHeld && front.browserSocket() !== null) {
+      startHeld = false; // P5 O17 M8: the e2e start hold, released once the handover has moved the routes
+      log('[browser] e2e: the held starts released by an app’s attachment');
+      releaseStarts();
+    }
   };
   const browserSocketFor = (appSessionId: AppSessionId): string | null => {
     const path = cua?.ensure(appSessionId) ?? null;
@@ -1489,7 +1508,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
   clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
-  return { paths, ref, hosts, services, projects, status, stop, render: { exportForLibrary: (input) => render.exportForLibrary(input) } };
+  return {
+    paths, ref, hosts, services, projects, status, stop, render: { exportForLibrary: (input) => render.exportForLibrary(input) },
+    e2eBrowser: () => ({ broker: cua?.broker() ?? null, sockets: cua?.inspect() ?? {}, holds: browserWork.held() }),
+  };
 }
 
 // An endpoint document channel's end, as main's relay holds a window's port (doc-relay.ts's RelayPort).

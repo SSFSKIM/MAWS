@@ -284,14 +284,14 @@ interface Stand {
 // The daemon on a stand-in Mac with the session's engine live (ENGINE), and an observer that hears the capability events
 // `connect: false`: a spawned render host connects when the test says (`host().connect()`); `holdBack`: each holds those
 // `asked`: the observer reads the session's capabilities before its first status, so it is told each change from then on
-async function stand(options: { quietMs?: number; addon?: null; engineHost?: boolean; connect?: boolean; holdBack?: ('prepare' | 'drop')[]; asked?: (reading: Record<string, unknown>) => void } = {}): Promise<Stand> {
+async function stand(options: { quietMs?: number; addon?: null; engineHost?: boolean; connect?: boolean; holdBack?: ('prepare' | 'drop')[]; asked?: (reading: Record<string, unknown>) => void; env?: Record<string, string> } = {}): Promise<Stand> {
   const hosts: RenderHost[] = [];
   const addon = options.addon === null ? null : fakeAddon();
   const daemon = await scene.start({
     permanentClient: true,
     tmp: TMP,
     platform: 'darwin',
-    env: { MAWS_USER_DATA: scene.root, MAWS_RENDER_QUIET_MS: String(options.quietMs ?? 60_000) },
+    env: { MAWS_USER_DATA: scene.root, MAWS_RENDER_QUIET_MS: String(options.quietMs ?? 60_000), ...options.env },
     cua: { loadAddon: () => addon },
     render: {
       runtime: () => ({ available: true }),
@@ -397,6 +397,17 @@ describe('the first browser with no app (acceptance 1)', () => {
     expect(t.changes(), 'the reading never changed').toEqual([]);
   });
 
+  // P5 O17 M8: what e2e:daemon-idle-render reads at its window through the SIGUSR2 report
+  it('reports the browser’s idle facts for the e2e: no broker before the first peer; then its connections, the sockets and the holds', async () => {
+    const t = await stand();
+    expect(t.daemon.e2eBrowser()).toEqual({ broker: null, sockets: { [S]: { listening: true, relayed: 0, refused: 0, waiting: 0 } }, holds: [] });
+    const cua = await firstTab();
+    expect(t.daemon.e2eBrowser()).toMatchObject({ broker: { cold: 0, promoting: 0, spliced: 1, buffered: 0 }, holds: [S] });
+    expect((await cua.request('tabs.remove', { tabId: 1 })).result).toEqual({});
+    await until(() => t.daemon.e2eBrowser().holds.length === 0, 3_000, 'the hold cleared');
+    cua.socket.destroy();
+  });
+
   it('names a side thread’s parent in its prepare, read from mawsd’s own index (M4’s question): the render host reads no lineage', async () => {
     const t = await stand();
     await firstTab();
@@ -492,6 +503,33 @@ describe('the handover (acceptance 3)', () => {
     expect(t.host().ops(), 'nothing prepared for a period that ended').toEqual([]);
     expect(cua.heard.filter((message) => message.id === 7), 'the trigger never answered twice').toHaveLength(0);
     app.leave();
+  });
+
+  // P5 O17 M8: the e2e seam that makes scene 2's attachment during a start deterministic
+  it('under MAWS_E2E_BROWSER_START_HOLD a start waits for the first app, whose attachment settles it: cua’s trigger ends unanswered, nothing starts', async () => {
+    const t = await stand({ env: { MAWS_E2E: '1', MAWS_E2E_BROWSER_START_HOLD: '1' } });
+    const cua = Connector.open();
+    await until(() => cua.hellos() === 1, 3_000, 'the broker’s hello');
+    cua.socket.write(frame({ jsonrpc: '2.0', id: 7, method: 'tabs.create', params: { url: 'http://127.0.0.1:4000/' } }));
+    await until(() => scene.logs.some((line) => line.includes(`[browser] e2e: the start of ${S} held until an app attaches`)), 3_000, 'the start held');
+    await sleep(200);
+    expect(t.hosts, 'nothing spawned while held').toEqual([]);
+    const app = await attachApp();
+    await until(() => cua.closed, 3_000, 'the waiting trigger ended with its epoch');
+    await until(() => scene.logs.some((line) => line.includes('[browser] e2e: the held starts released by an app’s attachment')), 3_000, 'released');
+    await sleep(200);
+    expect(t.hosts, 'the released start began nothing').toEqual([]);
+    expect((await renderStatus(t.daemon)).starts).toBe(0);
+    expect(cua.heard.filter((message) => message.id === 7), 'the trigger never answered').toHaveLength(0);
+    app.leave();
+  });
+
+  it('without MAWS_E2E=1 the hold is never armed', async () => {
+    const t = await stand({ env: { MAWS_E2E_BROWSER_START_HOLD: '1' } });
+    const cua = await firstTab();
+    expect(t.hosts).toHaveLength(1);
+    expect(scene.logs.some((line) => line.includes('[browser] e2e: the start of'))).toBe(false);
+    cua.socket.destroy();
   });
 
   it('a prepare answered after the app took over is undone with drop, and never splices', async () => {

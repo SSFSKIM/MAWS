@@ -46,9 +46,10 @@ export function e2eResources(): { resources: string[]; modules: string[] } {
   return { resources: process.getActiveResourcesInfo(), modules: Object.keys(cache).map((path) => basename(path)) };
 }
 
-// The report, written whole (a temp file renamed over the last)
-export function writeE2eResources(file: string): void {
+// The report, written whole (a temp file renamed over the last), with the daemon's browser facts when it runs (its
+// e2eBrowser(), read here at the signal and never before; null otherwise)
+export function writeE2eResources(file: string, browser: unknown = null): void {
   const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify({ at: new Date().toISOString(), ...e2eResources() }));
+  writeFileSync(temp, JSON.stringify({ at: new Date().toISOString(), ...e2eResources(), browser }));
   renameSync(temp, file);
 }
