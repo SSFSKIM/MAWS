@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { preAmendmentIndex, summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
 import { Index } from './index';
-import { MIGRATIONS, REPAIRS } from './migrations';
+import { ADDED_COLUMNS, MIGRATIONS, REPAIRS } from './migrations';
 
 describe('the index opens, migrates and refuses what it cannot own', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -58,9 +58,79 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string; notnull: number }[]).map((c) => [c.name, c.type, c.notnull]);
       expect(columns).toContainEqual(['removed_at', 'TEXT', 0]);
       expect(columns).toContainEqual(['gateway_routed', 'INTEGER', 0]); // v2: null is unknown
+      expect(columns).toContainEqual(['launched_by', 'TEXT', 0]); // P5 O7 M4's added column (ADDED_COLUMNS): null for every session but a remote spawn
     } finally {
       db.close();
     }
+  });
+
+  // P5 O7 M4 (ADDED_COLUMNS): `launched_by` is added at any version without moving `user_version`, so a file the build
+  // before wrote gains it, and the build before (which knows 15) still opens a file this one wrote; a record keeps its
+  // `launchedBy` across opens, and one written without it reads none.
+  it('adds launched_by to a file at 15 that lacks it, user_version unmoved, and a record keeps its launchedBy', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const first = open(path);
+    const kept = first.sessions.createForLaunch({ directory: '/w', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } }).record;
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec('ALTER TABLE sessions DROP COLUMN launched_by'); // the file as the build before leaves it
+    raw.close();
+    const reopened = open(path);
+    expect(reopened.applied).toEqual([]);
+    expect(reopened.sessions.get(kept.appId)?.launchedBy).toBeUndefined();
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: 'op-1', action: { action: 'session.spawn', signature: 'sig' } };
+    const spawned = reopened.sessions.createForLaunch({ directory: '/w', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null }, launchedBy }).record;
+    reopened.close();
+    expect(inspect(path).version).toBe(15);
+    const again = open(path);
+    expect(again.applied).toEqual([]);
+    expect(again.sessions.get(spawned.appId)?.launchedBy).toEqual(launchedBy);
+  });
+
+  // P5 O7 M4 (the architect's conditions on ADDED_COLUMNS): the guard iterates the constant itself, so every future entry
+  // is held to exist on a fresh file once its migrations have run
+  it('a fresh file holds every added column once its migrations have run, user_version at the last migration', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const index = open(path);
+    expect(index.applied).toEqual(MIGRATIONS.map((migration) => migration.version));
+    index.close();
+    opened.pop();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      for (const { table, column } of ADDED_COLUMNS) {
+        const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((info) => info.name);
+        expect(columns, `${table}.${column}`).toContain(column);
+      }
+    } finally {
+      db.close();
+    }
+    expect(inspect(path).version).toBe(MIGRATIONS.length);
+  });
+
+  it('adds no column to a file at a newer user_version: it stays read-only and unavailable, its bytes unchanged', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    for (const migration of MIGRATIONS) raw.exec(migration.sql); // the schema as this app knows it, but no added column
+    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`); // as a newer build leaves it
+    raw.close();
+    const before = readFileSync(path);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const index = open(path);
+    expect(index.readOnly).toBe(true);
+    expect(index.unavailable).toBe(`user_version ${MIGRATIONS.length + 1} is newer than this app knows (${MIGRATIONS.length})`);
+    index.close();
+    opened.pop();
+    expect(readFileSync(path).equals(before)).toBe(true);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      for (const { table, column } of ADDED_COLUMNS) {
+        const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((info) => info.name);
+        expect(columns, `${table}.${column}`).not.toContain(column);
+      }
+    } finally {
+      db.close();
+    }
+    expect(inspect(path).version).toBe(MIGRATIONS.length + 1);
   });
 
   it('v2 makes a v1 default routed flag unknown and keeps the ones a verification wrote', () => {
@@ -93,7 +163,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     });
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms'].sort()); // v4 adds four
+      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS)
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
       expect(indexes).toContain('sessions_project');
     } finally {
@@ -377,6 +447,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const reference = join(dir.path, 'reference.sqlite');
       const raw = new DatabaseSync(reference);
       for (const migration of MIGRATIONS) raw.exec(migration.sql);
+      for (const { table, column, definition } of ADDED_COLUMNS) raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); // P5 O7 M4
       raw.close();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

@@ -255,6 +255,31 @@ describe('session records in the index', () => {
     expect(allocated.record.appId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
+  // P5 O7 M4 (launchedBy write-once): O12 reads a record's launchedBy as a trust input, so only the launch's insert writes
+  // it; no update, discovery merge, rebind or yield to another binding sets, changes or clears it
+  it('keeps the launchedBy its launch inserted through updates, discovery, a rebind, and another launch wanting its engine id', () => {
+    const launchedBy = { member: 'mem-a', device: 'dev-1', opId: 'op-1', action: { action: 'session.spawn', signature: 'sig' } };
+    const { record } = index.sessions.createForLaunch({ ...LAUNCH, launchedBy });
+    const appId = record.appId;
+    expect(index.sessions.createForLaunch({ ...LAUNCH, appSessionId: appId }).record.launchedBy).toEqual(launchedBy); // a launch reusing the row writes nothing
+    index.sessions.setPinned(appId, true);
+    index.sessions.update(appId, { title: { text: 'Named', source: 'user' }, archived: true, branch: 'feature' });
+    index.sessions.setPinned(appId, false);
+    index.sessions.update(appId, { title: null, archived: false });
+    const first = sessionIdFor(81);
+    index.sessions.bindEngineId(appId, first);
+    index.sessions.upsertFromSummary(summary({ sessionId: first, customTitle: 'From the transcript' })); // discovery's merge
+    expect(index.sessions.get(appId)?.launchedBy).toEqual(launchedBy);
+    index.sessions.bindEngineId(appId, sessionIdFor(82)); // a rebind (`/clear`)
+    index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(82) }));
+    expect(index.sessions.get(appId)?.launchedBy).toEqual(launchedBy);
+    // another launch binding the spawned record's engine id is refused: the record is never yielded (deleted) as bare
+    const other = index.sessions.createForLaunch(LAUNCH).record;
+    expect(() => index.sessions.bindEngineId(other.appId, sessionIdFor(82))).toThrow(`already bound to app session ${appId}`);
+    expect(index.sessions.get(appId)?.launchedBy).toEqual(launchedBy);
+    expect(other.launchedBy).toBeUndefined();
+  });
+
   it('bindEngineId then unbindEngineId leaves engineSessionId null and pin, title and directory as they were', () => {
     const { record } = index.sessions.createForLaunch(LAUNCH);
     const appId = record.appId;

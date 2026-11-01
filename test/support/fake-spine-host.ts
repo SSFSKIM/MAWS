@@ -5,7 +5,8 @@
 // (an empty scan, no holders, no sessions, the configure pushes accepted, an empty library), plays
 // `session.replay.launch` through the engine host's own replay side (`ReplayHost` with the engine's normalizer, the
 // in-process pattern of src/services/index/replay.test.ts), and raises, for each permission the replay asks, the
-// `session.brokerItems` frame the broker would publish for it. Anything else answers `host_unavailable`.
+// `session.brokerItems` frame the broker would publish for it. A test adds its own with `answer`; anything else answers
+// `host_unavailable`.
 //
 // `held()` counts the listeners and the resync the spine holds on it, so a test can see a root's stop release them all.
 import { ReplayHost } from '../../src/engine-host/fs/replay/host';
@@ -54,7 +55,7 @@ export class FakeSpineHost implements SpineHosts {
     'session.replay.control': (input) => this.replays.control(input),
   };
 
-  // A test's own answer to a command beyond the connect's (P5 O4 M2: delivery's `artifacts.get`)
+  // A test's own answer to a command beyond the connect's (P5 O4 M2: delivery's `artifacts.get`; P5 O7 M4: `session.launch` for a spawn's setup)
   answer<N extends CommandName>(name: N, answer: (input: CommandInput<N>) => CommandOutput<N>): void {
     this.answers[name] = answer as Answer;
   }

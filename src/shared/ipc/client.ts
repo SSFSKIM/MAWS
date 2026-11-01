@@ -12,6 +12,19 @@ export interface ClientRef {
 
 export interface HandlerContext {
   readonly client: ClientRef;
+  // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): the claim a remote act runs under,
+  // set by `machine.op` for the run it claimed (the member and device the endpoint verified, the action's fingerprint, and
+  // the sealed action when the endpoint sent it); absent for a local client's own command.
+  readonly op?: HandlerOp;
+}
+
+export interface HandlerOp {
+  readonly opId: string;
+  readonly opCreated: string;
+  readonly member: string;
+  readonly device: string;
+  readonly fingerprint: string;
+  readonly action?: unknown;
 }
 
 // A ClientRef its owner ends (P5 O1 M5): main's page instances (src/main/ipc/clients.ts) and a host's remote clients

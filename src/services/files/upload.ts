@@ -13,9 +13,9 @@
 import { realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
+import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, type FilesUploadInput, type FilesUploadOutput, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { AlreadyThere, excludeUploads, rootOf, saveFiles, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, excludeUploads, promoteStaged, rootOf, saveFiles, stagePart, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
 import { allowlistOf } from './allowlist';
@@ -24,11 +24,13 @@ import { allowlistOf } from './allowlist';
 export const UPLOADS_UNAVAILABLE: FilesUploadOutput = { status: 'refused', reason: 'uploads are not available this run' };
 // Lane B's own file names: the only ones its rollback and its sweep remove (lane A's are `<id>.<0-3>.<media ext>`)
 const UPLOAD_FILE = /^[A-Za-z0-9_-]{1,128}\.[0-7](?:\.[a-z0-9]{1,16})?$/;
+// P5 O7 M4: a remote upload's staging, named by the sender's upload id (UploadPartSchema's pattern)
+const STAGED_FILE = /^[A-Za-z0-9_-]{16,128}$/;
 export const UPLOAD_SWEEP_MS = 3600_000; // as lane A's driver sweeps its own
 
 // `<profile>/sessions/uploads.json`: lane B's roots, swept of lane B's files alone.
 export function uploadRootsOf(file: string, options: { now?: () => number; log: (line: string) => void }): UploadRecords {
-  return uploadRecords(file, UPLOAD_FILE, options);
+  return uploadRecords(file, UPLOAD_FILE, { ...options, staged: STAGED_FILE });
 }
 
 // The roots swept once soon after the start (never inside it) and then every UPLOAD_SWEEP_MS, until the answer is called.
@@ -74,7 +76,28 @@ export interface UploadDeps {
 
 export function createUpload({ sessions, roots, git, mint = uploadId, log }: UploadDeps): (input: FilesUploadInput) => Promise<FilesUploadOutput> {
   const directoriesOf = allowlistOf(sessions);
-  return async ({ appSessionId, files }) => {
+  // P5 O7 M4 ("Uploads in parts"): one part of a remote upload staged after the parts before it (every part but the last
+  // is REMOTE_UPLOAD_PART_BYTES, so the staged size says which index comes next), the whole bounded as one file is, and
+  // at the last moved into the root under the name a one-call upload would give it, which alone answers its path.
+  const uploadPart = (base: string, id: AppSessionId, root: string, part: UploadPart, bytes: Buffer, name: string): FilesUploadOutput => {
+    try {
+      const staged = stagePart(base, id, part.upload, part.index * REMOTE_UPLOAD_PART_BYTES, bytes, UPLOAD_FILE_MAX_BYTES);
+      if (staged === 'out-of-order') return refused('part out of order');
+      if (staged === 'too-large') return refused(`the file exceeds ${UPLOAD_FILE_MAX_BYTES / 1024 / 1024} MiB, so nothing was saved`);
+      if (!part.last) return { status: 'ok', paths: [] };
+      const upload = mint();
+      const stored = promoteStaged(base, id, part.upload, (head) => {
+        const ext = extensionOf(name, head);
+        return ext === null ? `${upload}.0` : `${upload}.0.${ext}`;
+      });
+      return { status: 'ok', paths: [join(root, stored)] };
+    } catch (error) {
+      if (error instanceof AlreadyThere) return refused(`${error.file} is already there`);
+      if (error instanceof Unsafe) return refused(`a path on the way is a link or not a directory (${error.message})`);
+      return refused(`the part could not be written (${errorText(error)}), so nothing was saved`);
+    }
+  };
+  return async ({ appSessionId, files, part }) => {
     const id = appSessionId as AppSessionId;
     // The working directory the session's launch is given: its worktree when it runs in one, else its directory
     const directories = directoriesOf(id);
@@ -87,7 +110,6 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
     } catch (error) {
       return refused(`the session’s working directory could not be read (${errorText(error)}), so nothing was saved`);
     }
-    const upload = mint();
     const root = rootOf(base, id);
     try {
       roots.record(id, root);
@@ -100,6 +122,8 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
       if (error instanceof Unsafe) return refused(`the upload was not saved: ${error.message}`);
       log(`${id}: ${root} was not excluded from git (${errorText(error)})`);
     }
+    if (part !== undefined) return uploadPart(base, id, root, part, Buffer.from(files[0]!.bytes, 'base64'), files[0]!.name);
+    const upload = mint();
     const named = files.map((file, n) => {
       const bytes = Buffer.from(file.bytes, 'base64');
       const ext = extensionOf(file.name, bytes);

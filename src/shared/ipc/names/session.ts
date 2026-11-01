@@ -34,6 +34,7 @@ export const commands = [
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
   'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
+  'session.spawn', // P5 O7 M4: a lane B session started here at another machine's request
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)

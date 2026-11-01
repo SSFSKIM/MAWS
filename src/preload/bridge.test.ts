@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { localMachineArgument, localMachineFromArgv } from '@shared/machine/page-argument';
 import { createBridge as createBridgeOf, type BridgeTransport } from './bridge';
@@ -59,6 +60,14 @@ describe('preload bridge', () => {
     const result = await createBridge(transport).invoke('settings.set', { theme: 'dark' }, OTHER);
     expect(transport.invoke).toHaveBeenCalledWith('maws:cmd:settings.set', { theme: 'dark' }, OTHER);
     expect(result).toEqual({ ok: true, value: 'answer' });
+  });
+
+  // P5 O7 M4: the session a path-class command is made from crosses with its machine, as given
+  it('passes a machine with its session through as the invoke’s last argument', async () => {
+    const { transport } = fakeTransport();
+    const target = { machine: OTHER, session: 'app-1' as AppSessionId };
+    await createBridge(transport).invoke('git.status', { directory: '/r' }, target);
+    expect(transport.invoke).toHaveBeenCalledWith('maws:cmd:git.status', { directory: '/r' }, target);
   });
 
   // P5 O6 M2: the raw bridge's convenience for e2e specs and harness pages; the renderer client always names one

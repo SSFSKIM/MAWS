@@ -53,6 +53,31 @@ export function soughtIn(events: readonly SessionEvent[], target: MessageUuid, s
 // One event's share of a window: its JSON's length.
 export const eventBytes = (event: SessionEvent): number => JSON.stringify(event).length;
 
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): a bounded read (`session.events`'
+// `maxBytes`) counts what a channel counts, the UTF-8 bytes of the answer's JSON, so a window cut by it fits a message
+// whatever its text. `utf8Length` measures a string without encoding it (JSON.stringify escapes a lone surrogate, so the
+// surrogates it meets are pairs); an event's share is its JSON's bytes and the comma after it in the answer's array.
+export function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+export const eventUtf8Bytes = (event: SessionEvent): number => utf8Length(JSON.stringify(event)) + 1;
+
+// A window's budget under a bounded read's `bound` (the bytes its events may take): the soft and the hard budget both
+// within it, so a turn past it is cut at it, never kept whole.
+export function boundedBudget(budget: WindowBudget, bound: number): WindowBudget {
+  return { soft: Math.min(budget.soft, bound), hard: Math.min(budget.hard, bound) };
+}
+
 /**
  * The first index of the window that ends just before `end` (exclusive): `events.slice(start, end)` is the page, and
  * `start > 0` says older history remains (its cursor is `events[start].id`). `sizeOf(i)` is event `i`'s bytes.

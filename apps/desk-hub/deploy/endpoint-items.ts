@@ -452,7 +452,8 @@ export async function item8(scene: Scene, report: ItemReport): Promise<void> {
     await report.check('8', 'what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', async () => {
       const said: string[] = [];
       said.push(await refusedAs(mine, mine.device.action({ machine: scene.ref, action: 'pty.spawn', args: {} }), 'not-offered'));
-      for (const name of ['settings.get', 'files.read', 'host.op']) {
+      // files.reveal acts on the asking client, which no remote row offers (P5 O7 M4 offers files.read, which this probed before)
+      for (const name of ['settings.get', 'files.reveal', 'host.op']) {
         const answer = await mine.call(name, {});
         if (answer.ok || answer.code !== 'not-offered') throw new Error(`${name} was answered ${answer.ok ? 'ok' : answer.code}`);
         said.push(`${name}: not-offered`);

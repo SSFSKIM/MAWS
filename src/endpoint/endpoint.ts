@@ -31,7 +31,8 @@
 // Subscriptions and reads (M8): a `sub` is registered at once and authorized by the gate, then streamed by its lane's
 // plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
 // authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
-// device's lane B subscriptions are interest (OX5).
+// device's lane B subscriptions are interest (OX5). P5 O7 M4: a `sub` may name a session's `checkout` feed, streamed by
+// the feeds' plane from the spine's events, within the same checkout bounds the `checkout` target rule reads.
 //
 // `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
 // every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
@@ -59,6 +60,7 @@ import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
+import { PlaneFeeds } from './plane-feeds';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
@@ -68,6 +70,7 @@ import type { EndpointModule, EndpointServices } from './services';
 import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
 import { Subscriptions } from './subscriptions';
+import { CheckoutBounds } from './targets';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
 import { directPort, type InterfaceTable } from './tailnet';
 
@@ -133,6 +136,10 @@ export class Endpoint implements EndpointModule {
   readonly subscriptions: Subscriptions;
   readonly planeA: PlaneA;
   readonly planeB: PlaneB;
+  /** The feeds (P5 O7 M4): a session's `checkout` feed. */
+  readonly planeFeeds: PlaneFeeds;
+  /** Lane B sessions' checkout bounds, which the `checkout` rule and the `checkout` feed both read. */
+  readonly checkoutBounds = new CheckoutBounds();
   readonly interest: Interest;
   /** Remote reads (M8). */
   readonly calls: Calls;
@@ -290,6 +297,7 @@ export class Endpoint implements EndpointModule {
       settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
       records: authorization.records ?? this.rl10.members,
       checkouts: this.checkouts,
+      checkoutBounds: this.checkoutBounds,
       dispatch: (...request) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(...request);
@@ -358,6 +366,7 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, log, backlogBytes: seams.backlogBytes });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
@@ -365,7 +374,7 @@ export class Endpoint implements EndpointModule {
       recheckRetryMs: seams.recheckRetryMs,
       transmitDeadlineMs: seams.transmitDeadlineMs,
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
-      planes: { A: this.planeA, B: this.planeB },
+      planes: { A: this.planeA, B: this.planeB, feeds: this.planeFeeds },
       interest: this.interest,
       records: recordSource,
       now: this.deps.now,
@@ -400,12 +409,12 @@ export class Endpoint implements EndpointModule {
       sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
       subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
     });
-    const gated = this.gate.routes();
+    const { sub: gatedSub, ...gated } = this.gate.routes();
     this.channels.setRoutes({
       ...gated,
       act: (channel, m) => this.actions.receive(channel, m, gated.act),
       query: (channel, m) => this.queries.route(channel, m),
-      sub: (channel, m) => this.subscriptions.receive(channel, m, gated.sub),
+      sub: (channel, m) => this.subscriptions.receive(channel, m, gatedSub),
       credit: (channel, m) => this.subscriptions.credit(channel, m),
       unsub: (channel, m) => this.subscriptions.unsub(channel, m),
     });
@@ -430,6 +439,7 @@ export class Endpoint implements EndpointModule {
     this.#unseam.push(
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);
+        this.planeFeeds.event(owner, message);
         this.laneB.event(owner, message);
       }),
       services.onAttachment((attached) => this.planeB.attachment(attached)),

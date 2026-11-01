@@ -2,10 +2,13 @@
 // PDF, HTML, audio, video, a binary that is not an image and an image past the cap are not drawn in MAWS. The button is
 // offered only for a file `files.openExternal` would hand to the OS (`opensExternally`, shared with the service), so a
 // binary MAWS will not open reads its size and nothing more.
+// P5 O7 M4: for a lane B session on another machine it would open the file on that machine's desktop, so it stays
+// greyed and says where the file is ("on <machine>"), until M5 routes it.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ipc } from '../../../ipc/client';
+import { ELSEWHERE_WORDS, useElsewhereMachine } from '../../../lane-b/remote-session';
 import { formatSize, VIEWER_COPY } from '../copy';
 import { externalKindOf } from './kinds';
 import type { ViewerEntry } from './viewer-store';
@@ -14,6 +17,7 @@ const button = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg h
 
 export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessionId; path: string }) {
   const [problem, setProblem] = useState<string | null>(null);
+  const elsewhere = useElsewhereMachine(appSessionId);
   const open = async () => {
     const result = await ipc.invoke('files.openExternal', { appSessionId, path });
     if (!result.ok) setProblem(VIEWER_COPY.refused(result.error.message));
@@ -21,9 +25,10 @@ export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessio
   };
   return (
     <span className="inline-flex items-center gap-2">
-      <button type="button" className={button} onClick={() => void open()}>
+      <button type="button" className={`${button} disabled:text-fg-faint disabled:hover:bg-transparent`} disabled={elsewhere !== null} title={elsewhere === null ? undefined : ELSEWHERE_WORDS.title(elsewhere)} onClick={() => void open()}>
         {VIEWER_COPY.openExternally}
       </button>
+      {elsewhere !== null ? <span className="text-ui-sm text-fg-faint">{ELSEWHERE_WORDS.on(elsewhere)}</span> : null}
       {problem ? (
         <span role="alert" className="text-ui-sm text-danger">
           {problem}

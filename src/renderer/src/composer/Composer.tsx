@@ -32,7 +32,7 @@ import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore } from '../stores/composer';
-import { toast } from '../stores/notices';
+import { toast, useNotices } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
@@ -48,11 +48,13 @@ import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
-import { isRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
+import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode
+import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
+import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
+import { SPAWN_WORDS, spawnOnMachine, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -68,6 +70,9 @@ import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { isBusy, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
+
+// P5 O7 M4: a New chat tab back on this Mac with files dropped for another machine, which have no path here.
+export const FILES_FOR_ANOTHER_MACHINE = (names: readonly string[]): string => `${names.join(', ')} can go only to another machine; remove ${names.length === 1 ? 'it' : 'them'}, or choose that machine again`;
 
 // W3 (B7): how close two Escs must come to count as the terminal's Esc Esc.
 export const ESC_ESC_MS = 800;
@@ -170,8 +175,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
-  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
-  const repo = useGitWatch(machineOf(appSessionId), setup ? null : cwd || null, client);
+  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.worktree?.path ?? record?.directory ?? ''); // M4c fix wave 1: an idle worktree session runs in its worktree
+  const repo = useGitWatch(appSessionId, setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);
@@ -197,6 +202,15 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
   const sendingRemote = useRemoteSending(appSessionId);
   const machineName = useMachineMark(appSessionId).name;
+  // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts), and so
+  // does a New chat tab whose machine menu chose another machine (sessions/remote-spawn.ts), where Send spawns it
+  const remoteB = useIsRemoteLaneB(appSessionId);
+  const setupProject = setup?.project?.projectId ?? null;
+  const projectKey = useSessions((s) => (setupProject === null ? null : (s.projects.get(setupProject)?.org?.key ?? null)));
+  const spawnTarget = useSpawnTarget(appSessionId, projectKey);
+  const spawnAt = setup ? spawnTarget : null;
+  const spawning = useSpawning(appSessionId);
+  const uploadsTo = setup ? (spawnAt?.name ?? null) : remoteB ? machineName : null;
   // P2-A: a record with no ready process sends by acquiring it (C12's send-to-resume, for every eligible record): its
   // availability decides the control, and a terminal or job holding it is named
   const holder = record?.holder ?? null;
@@ -282,6 +296,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
+  const startAnew = useRef(false); // P5 O7 M4: the next spawn is the person's "Start a new session"
 
   const onSubmit = async (s: Serialized): Promise<boolean> => {
     const retry = () => handle.current?.submit();
@@ -290,6 +305,47 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       const where = setup.intent.location; // New chat: Send waits for a project
       if (where === null || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
       setStarting(appSessionId, true);
+      // P5 O7 M4: another machine chosen: one `session.spawn` there, the tab moving to its session once it answers
+      if (spawnAt !== null) {
+        try {
+          const doc = handle.current?.doc() ?? emptyDoc();
+          // a mention of this Mac's file names nothing there (a drop's own became its upload): said, the draft kept
+          const local = fileMentionsOf(doc);
+          if (local.length > 0) {
+            warn(ON_THIS_MAC(local, spawnAt.name));
+            return false;
+          }
+          if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
+          const fresh = startAnew.current; // the person's "Start a new session"
+          startAnew.current = false;
+          const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default', fresh }, client);
+          if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
+          if (spawned.started) return true;
+          // a start the machine took but hasn't confirmed: the try checks on it (the same op), it never starts another;
+          // only the person's explicit choice, offered once a check still can't confirm it, starts anew
+          if (spawned.startNew) {
+            const id = toast({
+              level: 'warning',
+              text: spawned.words,
+              actions: [
+                { label: SPAWN_WORDS.checkAgain, run: () => (useNotices.getState().dismiss(id), retry()) },
+                { label: SPAWN_WORDS.startNew(spawnAt.name), run: () => (useNotices.getState().dismiss(id), (startAnew.current = true), retry()) },
+              ],
+              dismissible: true,
+            });
+          } else warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
+          return false;
+        } finally {
+          setStarting(appSessionId, false);
+        }
+      }
+      // P5 O7 M4: a file held for another machine has no path here: say so rather than start without it
+      const elsewhere = attachmentsOf(handle.current?.doc() ?? emptyDoc()).filter((a) => a.kind === 'file');
+      if (elsewhere.length > 0) {
+        setStarting(appSessionId, false);
+        toast({ level: 'warning', text: FILES_FOR_ANOTHER_MACHINE(elsewhere.map((a) => a.name)), actions: [], dismissible: true });
+        return false;
+      }
       try {
         const start: Dispatch = async () => {
           const result = await setup.start({ content: s.content, display: s.display });
@@ -302,6 +358,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
+    // P5 O7 M4: to a session on another machine, its files go up first and the message names their paths there
+    if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven });
     if (!decided.enabled) return false;
@@ -388,6 +446,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   }, [docked]);
   if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
   useEffect(() => handle.current?.refreshPlaceholder(), [suggestion]);
+  // P5 O7 M4: a session the machine menu spawned with attachments sends the document it was handed (its draft) once,
+  // when it can take a message: its files go up, then one message names their paths (sessions/remote-spawn.ts)
+  const takesMessages = !setup && controls !== null && controls.capability('send').available;
+  useEffect(() => {
+    if (takesMessages && takeFirstSend(appSessionId)) void handle.current?.restored().then(() => handle.current?.submit());
+  }, [takesMessages, appSessionId]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 
   return (
@@ -396,6 +460,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {phase !== null && (
         <p role="status" aria-label="Setup" className="m-0 text-ui-sm text-fg-muted">
           {phase}
+        </p>
+      )}
+      {/* P5 O7 M4: a New chat tab's session starting on another machine (the sheet and Touch ID come first) */}
+      {spawning !== null && (
+        <p role="status" aria-label="Starting" className="m-0 text-ui-sm text-fg-muted">
+          {spawning}
         </p>
       )}
       {/* P5 O7 M2: a send on its way to a session on another machine */}
@@ -464,6 +534,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               onSubmit={onSubmit}
               suggestion={suggestion}
               onSuggestionTaken={() => setSuggestion(null)}
+              uploadsTo={uploadsTo}
+              searchesFiles={spawnAt === null}
             />
           </div>
         }

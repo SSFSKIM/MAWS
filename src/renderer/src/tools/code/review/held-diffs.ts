@@ -7,7 +7,9 @@
 // its mutations overtook (E11).
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiff, GitDiffFile, GitDiffInput } from '@shared/ipc/schema/git';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
+import { pathTarget } from '../../../ipc/machine';
 import type { useGit } from '../../../stores/git';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch, type PatchFile } from './review-model';
 
@@ -81,7 +83,8 @@ function answered(diff: GitDiff): ScopeDiff {
 }
 
 // `set` is the owning store's: the cache writes only its `diffs` and `files`.
-export function createHeldDiffs<T extends { machine: MachineRef }>(client: MawsBridge, set: (update: (s: HeldDiffState) => Partial<HeldDiffState>) => void, spec: HeldDiffSpec<T>): HeldDiffs<T> {
+// P5 O7 M4: a target made from a session names it on its reads (another machine's checkout is read by its session).
+export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSessionId }>(client: MawsBridge, set: (update: (s: HeldDiffState) => Partial<HeldDiffState>) => void, spec: HeldDiffSpec<T>): HeldDiffs<T> {
   const { keys } = spec;
   const held = new Map<string, Held<T>>();
   const fileLoads = new Map<string, symbol>();
@@ -96,7 +99,7 @@ export function createHeldDiffs<T extends { machine: MachineRef }>(client: MawsB
     }
     h.reading = true;
     const overtaken = spec.overtaken?.(h.target);
-    const result = await settled(client.invoke('git.diff', spec.input(h.target), { machine: h.target.machine }));
+    const result = await settled(client.invoke('git.diff', spec.input(h.target), pathTarget(h.target.machine, h.target.session)));
     h.reading = false;
     if (held.get(key) !== h) return; // released meanwhile
     if (!overtaken?.()) {
@@ -159,7 +162,7 @@ export function createHeldDiffs<T extends { machine: MachineRef }>(client: MawsB
       const generation = Symbol();
       fileLoads.set(key, generation);
       set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-      void settled(client.invoke('git.diff', spec.input(target, path), { machine: target.machine })).then((result) => {
+      void settled(client.invoke('git.diff', spec.input(target, path), pathTarget(target.machine, target.session))).then((result) => {
         if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
         const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
         set((s) => ({ files: mapWith(s.files, key, next) }));

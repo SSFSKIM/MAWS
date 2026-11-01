@@ -148,5 +148,7 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
   if (placeholders.length > 0) display = [display, ...placeholders].filter((part) => part !== '').join(' ');
 
   const content: string | ContentBlock[] = blocks.length === 0 ? wire : wire.trim() === '' ? blocks : [...blocks, { type: 'text', text: wire }];
-  return { mode: 'send', text: wire, content, display, pastedContents, omitted, empty: wire.trim() === '' && blocks.length === 0, ...(attachmentNames.length > 0 && { attachmentNames }) };
+  // P5 O7 M4: a file to upload is no block (it goes up at the send), but a draft holding one is something to send
+  const uploads = attachments.some((a) => a.kind === 'file');
+  return { mode: 'send', text: wire, content, display, pastedContents, omitted, empty: wire.trim() === '' && blocks.length === 0 && !uploads, ...(attachmentNames.length > 0 && { attachmentNames }) };
 }

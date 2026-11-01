@@ -31,7 +31,41 @@ describe('query', () => {
     for (const executor of ['pty-host', 'main', '', 7]) expect(readMessage('device', query(executor)).kind).toBe('malformed');
   });
 
-  it('is at minor 1 of major 1', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 1 });
+});
+
+// P5 O7 M4: a call may name the session a path-class read is made from (`rl2.call-session`), and a `sub` may name a feed
+// (`rl2.feeds`): `checkout` with its session, `attention` with none, each with an `(epoch, seq)` cursor and no view.
+describe('call.session and sub.feed', () => {
+  const call = (fields: Record<string, unknown> = {}) => ({ t: 'call', id: 'c1', name: 'git.status', input: { directory: '/w' }, ...fields });
+  const sub = (fields: Record<string, unknown>) => ({ t: 'sub', sub: 's1', cursor: null, credit: 1024, ...fields });
+  const B = { lane: 'B', id: 'app-1' };
+
+  it('reads a call with or without a session, and refuses one whose session is no session reference', () => {
+    expect(readMessage('device', call()).kind).toBe('message');
+    expect(readMessage('device', call({ session: B })).kind).toBe('message');
+    for (const session of [null, 'app-1', { lane: 'C', id: 'x' }, { lane: 'B', id: '' }]) expect(readMessage('device', call({ session })).kind).toBe('malformed');
+  });
+
+  it('reads a checkout feed with its session and an attention feed with none, either from a snapshot or an (epoch, seq) cursor', () => {
+    expect(readMessage('device', sub({ feed: 'checkout', session: B })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'checkout', session: B, cursor: { epoch: 'checkout:boot', seq: 4 } })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'attention' })).kind).toBe('message');
+  });
+
+  it('refuses a feed it does not name, a checkout feed with no session, an attention feed with one, a feed with a view or an idx', () => {
+    expect(readMessage('device', sub({ feed: 'git', session: B })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'checkout' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'attention', session: B })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'checkout', session: B, view: 'full' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'checkout', session: B, cursor: { epoch: 'e', seq: 1, idx: 0 } })).kind).toBe('malformed');
+  });
+
+  it('reads a session’s own subscription as before', () => {
+    expect(readMessage('device', sub({ session: B, view: 'cards', cursor: { epoch: 'launch-1', seq: 2, idx: 1 } })).kind).toBe('message');
+    expect(readMessage('device', sub({})).kind).toBe('malformed');
+  });
+
+  it('is at minor 2 of major 1', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 2 });
   });
 });

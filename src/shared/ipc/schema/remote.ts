@@ -73,4 +73,8 @@ export const events = {
   // newest window (the engine host's disk read); `older`, an older page (or a seek, a subagent's slice). The renderer's
   // bar for that answer says the history can't be shown here yet (new messages still appear), not that it is lost.
   'remote.historyTooLarge': z.strictObject({ appSessionId: AppSessionIdSchema, window: z.enum(['newest', 'older']) }),
+  // P5 O7 M4 ("Uploads in parts"): a `files.upload` to a session on another machine crosses as parts, each its own act;
+  // after each lands (and once before the first), how far one file of the call has come: `file`, its index in the call's
+  // `files`; `sent` of `parts` landed. The composer's chip for that file shows it.
+  'remote.upload': z.strictObject({ appSessionId: AppSessionIdSchema, file: z.number().int().nonnegative(), name: z.string(), sent: z.number().int().nonnegative(), parts: z.number().int().positive() }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

@@ -13,7 +13,7 @@ import { type MawsBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../../ipc/client';
-import { checkoutKey, machineFor } from '../../../ipc/machine';
+import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
@@ -30,6 +30,7 @@ export interface DiffTarget {
   directory: string;
   scope: GitScope;
   base: string | null; // This branch's base; null for the other scopes
+  session?: AppSessionId; // P5 O7 M4: the session the scope is read for, named on its reads (not part of its key)
 }
 
 // `failed`: the call itself failed; not kept, so the next lookup asks again.
@@ -43,7 +44,7 @@ export interface ReviewStore {
   refresh(target: DiffTarget): void; // re-read now (the tool shown again, a focus request)
   statusChanged(checkout: string): void; // a new status for the git store's checkout: every held scope of it re-reads, trailing
   loadFile(target: DiffTarget, path: string): void;
-  lookupBase(machine: MachineRef, repoRoot: string, branch: string): void;
+  lookupBase(machine: MachineRef, repoRoot: string, branch: string, session?: AppSessionId): void; // P5 O7 M4: `session`, the read's
   reset(): void; // tests
 }
 
@@ -82,14 +83,14 @@ export function createReviewStore(
 
       loadFile: heldDiffs.loadFile,
 
-      lookupBase(machine, repoRoot, branch) {
+      lookupBase(machine, repoRoot, branch, session) {
         const key = baseKey(machine, repoRoot, branch);
         const known = get().bases.get(key);
         if (known && !(known.status === 'unavailable' && known.failed)) return;
         set((s) => ({ bases: mapWith(s.bases, key, { status: 'loading' }) }));
         // C10's answer: null when `refs/heads/<branch>` does not resolve, which for the branch HEAD names means it has no
         // commits yet; `base` is the main worktree's branch, `HEAD` when that is detached.
-        void settled(client.invoke('git.worktree.branch', { repoRoot, branch }, { machine })).then((result) => {
+        void settled(client.invoke('git.worktree.branch', { repoRoot, branch }, pathTarget(machine, session))).then((result) => {
           const next: BaseLookup = !result.ok
             ? { status: 'unavailable', reason: result.error.message, failed: true }
             : result.value === null
@@ -171,18 +172,18 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
   const lookup = useReview((s) => (repoRoot !== null && branchName !== null ? baseOf(s, machine, repoRoot, branchName) : undefined));
   const branch = useMemo(() => branchOf(status, lookup), [status, lookup]);
 
-  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
+  useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
   useEffect(() => {
-    if (repoRoot !== null && branchName !== null) useReview.getState().lookupBase(machine, repoRoot, branchName);
-  }, [machine, repoRoot, branchName]);
+    if (repoRoot !== null && branchName !== null) useReview.getState().lookupBase(machine, repoRoot, branchName, appSessionId);
+  }, [machine, repoRoot, branchName, appSessionId]);
 
   const known = status !== null;
   const base = branch.base;
   const target = useMemo<DiffTarget | null>(() => {
     if (!known || scope === null || scope === 'turn') return null;
-    if (scope === 'branch') return base === null ? null : { machine, directory, scope, base };
-    return { machine, directory, scope, base: null };
-  }, [known, scope, machine, directory, base]);
+    if (scope === 'branch') return base === null ? null : { machine, directory, scope, base, session: appSessionId };
+    return { machine, directory, scope, base: null, session: appSessionId };
+  }, [known, scope, machine, directory, base, appSessionId]);
   useEffect(() => (target ? useReview.getState().hold(target) : undefined), [target]);
   const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
 

@@ -19,6 +19,12 @@ export interface SubscribeRequest {
   session: SessionRef;
   view?: 'full' | 'cards';
   cursor?: Cursor | null;
+  /**
+   * P5 O7 M4 (§R): the session's `checkout` feed rather than its stream, sent only to a peer that listed `rl2.feeds`
+   * (an older endpoint would read it as the session's own stream); for any other the subscription ends `not-offered`,
+   * never sent. Every opening is a snapshot, so a feed resubscribes with no cursor and its `view` is not sent.
+   */
+  feed?: 'checkout';
 }
 export interface SubscriptionSink {
   /** A snapshot or missing starts the stream over from `at`. */
@@ -45,6 +51,8 @@ export interface SubTableDeps {
   /** Sends on the current channel; false when none is current. */
   send(message: DeviceMessage): boolean;
   current(): boolean;
+  /** The capabilities the current channel's peer listed in `h2`; null while none is current (P5 O7 M4: feeds). */
+  peerCapabilities(): readonly string[] | null;
   timing: RemoteTiming;
   log(line: string): void;
 }
@@ -123,7 +131,7 @@ export class SubTable {
 
   /** A channel became current: every subscription again, from its cursor, with fresh credit. */
   onCurrent(): void {
-    for (const entry of this.#entries.values()) {
+    for (const entry of [...this.#entries.values()]) {
       entry.assembly = null;
       entry.pending = null;
       this.#dropCredit(entry);
@@ -187,8 +195,15 @@ export class SubTable {
   }
 
   #sub(entry: Entry): void {
-    const { session, view } = entry.request;
-    this.#deps.send({ t: 'sub', sub: entry.id, session, ...(view === undefined ? {} : { view }), cursor: entry.cursor, credit: this.#deps.timing.SUB_INITIAL_CREDIT });
+    const { session, view, feed } = entry.request;
+    const credit = this.#deps.timing.SUB_INITIAL_CREDIT;
+    if (feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session, ...(view === undefined ? {} : { view }), cursor: entry.cursor, credit });
+    // What the peer could not read never goes: the feed ends here, as the endpoint would end a name it does not offer.
+    if (this.#deps.peerCapabilities()?.includes('rl2.feeds') !== true) {
+      this.#remove(entry);
+      return void queueMicrotask(() => entry.sink.ended('not-offered'));
+    }
+    this.#deps.send({ t: 'sub', sub: entry.id, session, feed, cursor: null, credit });
   }
 
   #page(entry: Entry, at: Cursor, page: number, last: boolean, body: unknown): void {

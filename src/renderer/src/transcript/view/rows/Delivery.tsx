@@ -6,9 +6,12 @@
 // `urgency: 'high'` takes the accent border. It stays in view when its turn folds (isPersistentRow). E2 (M5): once the
 // host recorded a file (it has a deliverable id), its name is a button that opens it; P3-L M6b: the id is the File
 // artifact's, opened in the panel's Artifacts tool.
+// P5 O7 M4: on a lane B session on another machine both buttons would act on that machine's desktop, so they stay greyed
+// and say where the file is ("on <machine>"), until M5 routes them.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
+import { ELSEWHERE_WORDS, useElsewhereMachine } from '../../../lane-b/remote-session'; // P5 O7 M4
 import { DELIVERY, deliveryHeading } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
@@ -22,6 +25,8 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
   const actions = useActions();
   const [problem, setProblem] = useState<{ text: string } | null>(null); // a new object per refusal, so each one is shown its full time
   const recorded = actionable ? file.id : null; // E2: the artifact id the name opens; none while pending or refused
+  const elsewhere = useElsewhereMachine(appSessionId); // P5 O7 M4
+  const desktop = { disabled: appSessionId === null || elsewhere !== null, ...(elsewhere !== null && { title: ELSEWHERE_WORDS.title(elsewhere) }) };
   useEffect(() => {
     if (problem === null) return;
     const timer = setTimeout(() => setProblem(null), REFUSAL_SHOWN_MS);
@@ -47,13 +52,14 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
       {actionable && (
         <span className="transcript-delivery-actions">
           {opensExternally(file.name) && (
-            <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.openExternally, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.openDelivered)()}>
+            <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.openExternally, file.name)} {...desktop} onClick={() => void run(actions.openDelivered)()}>
               {DELIVERY.openExternally}
             </button>
           )}
-          <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.reveal, file.name)} disabled={appSessionId === null} onClick={() => void run(actions.revealDelivered)()}>
+          <button type="button" className="transcript-quiet-button" aria-label={DELIVERY.actionLabel(DELIVERY.reveal, file.name)} {...desktop} onClick={() => void run(actions.revealDelivered)()}>
             {DELIVERY.reveal}
           </button>
+          {elsewhere !== null && <span className="transcript-delivery-elsewhere">{ELSEWHERE_WORDS.on(elsewhere)}</span>}
         </span>
       )}
       {problem && (
