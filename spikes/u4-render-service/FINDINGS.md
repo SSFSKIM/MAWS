@@ -109,7 +109,7 @@ A hidden window is the wrong home for an agent's tab: Chromium treats the page a
 | Click to paint, 20 clicks: median, p95 (min to max) | 44, 53 ms (36 to 56) | 56.5, 65 ms (47 to 66) | 47.5, 55 ms (40 to 57) |
 | Host to viewer per frame (median) | 1 ms | 1 ms | 1 ms |
 
-A screencast sends a frame only when the page paints, so its cost is the page's change rate times the frame's size: a still page costs nothing, a page changing at 10 Hz costs 1.40 MB/s at quality 60 for this dense serif article (every frame a whole 1280×800 JPEG of about 140 KB), and continuous scrolling 6 to 9 MB/s, which the end-to-end ack would pace down to what a channel carries. The click-to-paint round trip is local (no channel in it): dispatch, the page's handler, the paint and the frame's delivery.
+A screencast sends a frame only when the page paints, so its cost is the page's change rate times the frame's size: a still page costs nothing, a page changing at 10 Hz costs 1.40 MB/s at quality 60 for this dense serif article (every frame a whole 1280×800 JPEG of about 140 KB), and continuous scrolling 6 to 9 MB/s. Only the CDP source is flow-controlled: the driver acks each CDP frame and the host acks Chromium only then (`driver.mjs`'s frame handler, `host/screencast.ts`'s `ack`), so that stream can be paced to what a channel carries. The subscription source has no acks: the host encodes every frame and writes it with no regard for the socket's backpressure (`host/screencast.ts`'s `send` and the `beginFrameSubscription` callback). The subscription readings establish frame size, cadence and continuity, not that its stream adapts to a slower channel; on a local socket nothing was slow. The click-to-paint round trip is local (no channel in it): dispatch, the page's handler, the paint and the frame's delivery.
 
 **The viewer's screencast and the agent's share one CDP attachment, and collide.** The tab has one `TabDebugger` (one CDP session) that cua's lease and any other user share. Two faults, in every painting mode: the agent's plain screenshot (a screencast start, one frame, a stop) ends the viewer's stream (10 fps before, 0.3 fps in the 3 s after, back to 10 only when the viewer restarts it); and cua's connection forwards every event of its leased tab to cua's host (`connection.ts` `forward`, a `'*'` listener), so the viewer's frames reached the agent's host while it held the lease: 525 to 706 `Page.screencastFrame` events, 104 to 141 MB, in the 45 s of the screencast phases. Electron's own frame subscription (`webContents.beginFrameSubscription`, encoded with `toJPEG(60)` in the host) uses no CDP session and gives the same stream: 10.0 fps, 100 ms median interval, 1,403,580 to 1,403,772 B/s at a 10 Hz page in the three painting modes, click to paint 46.5 to 48.5 ms median (p95 54 to 59 ms). In `hidden` it delivers nothing either.
 
@@ -126,7 +126,7 @@ In `offscreen` with the stream stopped: the browser 181,920 KiB, the GPU process
 
 ### 5.2 The macOS half (the mini through CI-opt, 2026-11-01 03:25:59Z to 03:31:53Z)
 
-CI-opt ran `pnpm install --frozen-lockfile && bash spikes/u3-remote-browser/macos/run.sh` on the mini host (macOS 27.0 arm64, GUI session Aqua; Electron 44.4.5, Chrome 152; Node 26.4.0 for the driver) at a3a0d7c87, after one fix to the probe: `host/linux-peer.ts` read `/proc/stat` when the bundle loaded it, which threw on darwin before `READY` in every mode of the first attempt at dec050198 (it now reads it at its first lookup). The host ran with the accessory policy (`dockVisible: false`) and the committed darwin-arm64 peer addon, the driver as the trusted root; three modes, `hidden`, `hidden-unthrottled`, `offscreen` (no `shown`: a shown window is on a person's screen on a Mac). Every mode reached `READY` in 0.63 to 1.21 s from the spawn and the host exited 0 (`macos/evidence/run.txt`, `<mode>-driver.json` `ready`, `hostExit`). The only stderr line is one in `hidden`, `sandbox_extension_issue_file failed for …/Electron Helper.app/Contents/Resources: 1 (Operation not permitted)` (`hidden-driver.json` `hostStderrTail`), which affected no step: the repository's unsigned Electron helper under a worktree path.
+CI-opt ran `pnpm install --frozen-lockfile && bash spikes/u3-remote-browser/macos/run.sh` on the mini host (macOS 27.0 arm64, GUI session Aqua; Electron 44.4.5, Chrome 152; Node 26.4.0 for the driver) at a3a0d7c87, after one fix to the probe: `host/linux-peer.ts` read `/proc/stat` when the bundle loaded it, which threw on darwin before `READY` in every mode of the first attempt at dec050198 (it now reads it at its first lookup). The host ran with the accessory policy (`dockVisible: false`) and the committed darwin-arm64 peer addon, the driver as the trusted root; three modes, `hidden`, `hidden-unthrottled`, `offscreen` (no `shown`: a shown window is on a person's screen on a Mac). Every mode reached `READY` in 0.63 to 1.21 s from the spawn and the host exited 0 (`macos/evidence/run.txt`, `<mode>-driver.json` `ready`, `hostExit`). The only stderr line is one in `hidden`, `sandbox_extension_issue_file failed for …/Electron Helper.app/Contents/Resources: 1 (Operation not permitted)` (`hidden-driver.json` `hostStderrTail`), which affected no step: nonblocking noise from the repository's unsigned Electron helper under a worktree path, coinciding with no step failure.
 
 **The tab engine and cua** (`<mode>-driver.json`, phase `cua primitives`). Every primitive answered in every mode: hello 1 ms, attach 1 to 27 ms, `Runtime.evaluate` 0 to 1 ms, the agent's click 2 to 41 ms and landed, `tabs.create` loaded in 72 to 107 ms in a hidden window of its own. Unlike Linux, `Page.captureScreenshot` answers on macOS from a hidden window too: 614 ms the first time in `hidden` and 80 ms for the second tab, 81 and 99 ms in `hidden-unthrottled`, 62 and 74 ms in `offscreen`; the vendor's screencast screenshot 59, 14 and 26 ms. The page reads `visibilityState` `hidden` in both hidden modes and `visible` offscreen; `devicePixelRatio` is 2 in a hidden window and 1 offscreen (`tab loaded` step).
 
@@ -180,7 +180,7 @@ CI-opt ran `U3_MODES=offscreen,offscreen-psb,offscreen-nothrottle` through `maco
 - `-psb` holds `powerSaveBlocker.start('prevent-app-suspension')` in the render host's browser process from `ready` to the exit;
 - `-nothrottle` makes each tab's offscreen view with `backgroundThrottling: false`.
 
-The evidence is `macos/evidence/pass3/` (`run.txt`, `summary.json`, `<variant>-driver.json`). Every variant was `READY` in 0.61 to 0.79 s from the spawn and exited 0 with no error. The only stderr line is a `viz` "Frame latency is negative: -0.002 ms" in `offscreen` (`offscreen-driver.json` `hostStderrTail`).
+The evidence is `macos/evidence/pass3/` (`run.txt`, `summary.json`, `<variant>-driver.json`). Every variant was `READY` in 0.61 to 0.79 s from the spawn and exited 0 with no error. The only stderr line is a `viz` `ERROR` "Frame latency is negative: -0.002 ms" in `offscreen` (`offscreen-driver.json` `hostStderrTail`): nonblocking noise, coinciding with no step failure (that variant's every phase completed).
 
 **The variants took effect** (`tab loaded` and the blocker steps in each `driver.json`'s `host.steps`):
 - `offscreen-psb`: the blocker started at 115 ms, held by pid 72754 (the render host's browser process; `started: true`), was still active when the tab loaded, and was released at the exit after **84,106 ms** (`power save blocker held` / `released`).
@@ -208,7 +208,7 @@ The frame subscription holds the page's own rate through every act of the agent'
 | Scrolling on a 16 ms timer: fps; the page's tick rate | 53.5; 57.2 Hz | 56.9; 59 Hz | 57.4; 59.5 Hz |
 | Median frame at the clock; at 10 fps | 127,554 B; 1,275,540 B/s | 127,552 B; 1,275,520 B/s | 127,563 B; 1,275,625 B/s |
 
-Neither factor lifts the clock. The page's 100 ms timer runs at 6.3 to 6.7 Hz with the blocker held and with throttling off, as it does without them. Click to paint stays a sawtooth of 33 to 189 ms with a median of 108 to 113.5 ms. So App Nap is not the cause, and neither is the view's `backgroundThrottling`. The slowdown is specific: a 16 ms timer runs at 57 to 59.5 Hz and the screencast follows it at 53.5 to 57.4 fps, so continuous animation is not capped. What runs late is a slow timer (100 ms becomes about 150 to 180 ms), and with it the next paint after an idle page is touched.
+Neither factor lifts the clock. The page's 100 ms timer runs at 6.3 to 6.7 Hz with the blocker held and with throttling off, as it does without them. Click to paint stays a sawtooth of 33 to 189 ms with a median of 108 to 113.5 ms. So App Nap is not the cause, and neither is the view's `backgroundThrottling`. The slowdown is specific to the timer's period. In the same views the 16 ms `setInterval` that drives the scroll phase runs at 57 to 59.5 Hz and the screencast follows it at 53.5 to 57.4 fps, while the 100 ms `setInterval` of the clock is held near 6 Hz (about 150 to 180 ms per tick), and the next paint after an idle page is touched waits on the same slow cadence. A short timer running near its rate beside a long one stretched by half or more points at the timer alignment or wake-up batching Chromium applies to longer timers in a frame it does not count as foreground, more than at a cap on painting. `requestAnimationFrame` was not measured: the fixture drives both modes with `setInterval` (`page.html`).
 
 **Memory, physical footprint with one tab idle:** 140,497 KiB (`offscreen`), 134,369 KiB (`offscreen-psb`) and 134,369 KiB (`offscreen-nothrottle`). Streaming: 215,393, 315,793 and 254,337 KiB. Ten seconds after the stream stopped: 172,385, 177,553 and 177,537 KiB (host steps `memory …`). The blocker adds nothing measurable at idle, and is not needed.
 
@@ -217,16 +217,41 @@ Neither factor lifts the clock. The page's 100 ms timer runs at 6.3 to 6.7 Hz wi
 - **The primitive server runs in the render host without a renderer rewrite: holds.** `src/main/browser/` ran unchanged on both platforms, and no renderer code is involved. Four things had to be added around it (§5.3).
   - In `offscreen` every primitive answered on both platforms; `Page.captureScreenshot` took 108 to 135 ms on Linux and 62 to 74 ms on the mini.
   - A hidden window fails on Linux, where captures never answer. On macOS a hidden window answers captures, but a person's view of it never paints.
-- **Under 1.5 MB/s at 10 fps for a text page: holds.** A dense 1280×800 article at quality 60 costs 140 KB per frame on Linux, measured at 10.0 fps as 1,403,585 to 1,403,784 B/s, a 7% margin. On the mini it costs 128 KB per frame, 1,275,485 to 1,282,170 B/s at 10 fps; the mini's page painted at only 5.7 to 6.4 fps, so that figure is the median frame times ten. The subscription source reads the same within 4%. A still page costs nothing, continuous scrolling costs 6 to 9 MB/s (paced by the viewer's acks), and a denser page or a higher quality would cross the line.
-- **The three sides under about 3,000 new or changed lines: holds by estimate.** About 2,550, with a range of 2,000 to 3,200 (the three sides in §5.3's terms):
-  - the render host's tab engine about 1,350 with tests;
-  - the RL2 kind about 550;
-  - the renderer's screencast view with input about 650.
+- **Under 1.5 MB/s at 10 fps for a text page: holds.** A dense 1280×800 article at quality 60 costs 140 KB per frame on Linux, measured at 10.0 fps as 1,403,585 to 1,403,784 B/s, a 7% margin. On the mini it costs 128 KB per frame, 1,275,485 to 1,282,170 B/s at 10 fps; the mini's page painted at only 5.7 to 6.4 fps, so that figure is the median frame times ten. The subscription source reads the same within 4%. A still page costs nothing, continuous scrolling costs 6 to 9 MB/s, and a denser page or a higher quality would cross the line. A remote channel slower than the page's rate must be absorbed by flow control: the CDP source has it (end-to-end acks), while the subscription source as probed has none (§5.1), which condition 2 adds.
+- **The three sides under about 3,000 new or changed lines: holds at the estimate's centre, about 2,540 (range about 1,900 to 3,200), with flow control counted.** The estimate is a judgement, not a count. Its derivation follows so it can be checked.
+  - **Reused unchanged, and not counted:**
+    - the in-app browser's main side the probe ran as is (`src/main/browser/` `tabs.ts`, `view.ts`'s `createTabView`, `partition.ts`, `permissions.ts`, `navigation.ts`, `window-open.ts`, `input.ts`, `debugger.ts`, and `cua/` whole);
+    - the render host's root and `machine.sock` client (`src/render-host/`, 754 lines with tests);
+    - the render seam's spawn, hold, quiet clock and backoff (`src/mawsd/render-seam.ts`, 661 lines);
+    - M5's per-session cua socket and relay;
+    - O7's §N stream mechanics (credit, `streamData`, `streamControl`, the stream's authorization);
+    - the renderer's Browser tool shell (`src/renderer/src/tools/browser/`, 2,845 lines).
+  - **The render host's tab engine, about 1,315:**
+    - the composition in the render host, about 120 (the probe's `host/main.ts` composes it in about 70);
+    - the offscreen placement, about 50 (the probe's `host/headless-views.ts`, 56);
+    - the frame source with bounded flow control, about 140: the subscription, the JPEG encode, latest-frame-wins or credits, and the open, close and input ops (the probe's `host/screencast.ts` is 160 with its CDP path and no flow control);
+    - the uid peer policy on Linux in `cua/peer.ts` and `cua/index.ts`, about 35;
+    - cua's event forwarding scoped to the agent's own commands, about 30;
+    - the seam's tab-engine role, about 260: the start on an accepted cua connection, the hold bounded by cua's hello wait, the handover when an app attaches, the lifetime with held tabs, and the relay target switched between the app and the render host;
+    - the wire, about 80: the render host's tab-engine hello capability, the frame feed's names, and the capability's `viewed`;
+    - unit tests, about 450: the placement, the peer policy, the frame source with its slow-viewer case (about 120), and the seam's trigger, handover and lifetime (about 250);
+    - `e2e:browser-cua`'s no-app scene extended to the render host, about 150.
+  - **The RL2 kind, about 580:**
+    - the kind and its capability in the protocol package, about 40;
+    - the endpoint's stream: open under the session's grade, fed from `mawsd`'s frame feed over `machine.sock`, about 150;
+    - the stream's credits mapped onto the frame source's flow control, about 40;
+    - the device adapter's open and its delivery to the renderer, about 100;
+    - tests, about 250.
+  - **The renderer's screencast view with input, about 640:**
+    - the frame painter (decode and draw on a canvas), about 80;
+    - mouse, wheel and keys mapped and scaled to the tab's viewport, with focus, about 160;
+    - the Browser tool's branch for a remote session's tab, with a minimal tab strip fed over the link, about 150;
+    - tests, about 250.
 
-  The mini added nothing that changes the estimate but the throttle probe below.
+  The first, coarser figure (about 2,550 without itemised flow control) and this one agree. The range is about ±25%: the seam's handover and the remote tab strip are the least certain items. The high end crosses the ~3,000 line, so M8's re-plan counts again against its own design.
 
 Other readings the criterion does not bar:
-- **Latency.** The local click-to-paint median is 44 to 56.5 ms on Linux in every painting mode. On the mini it is 49 ms in `hidden-unthrottled` but 108 to 120.5 ms in `offscreen` (pass 2 and pass 3, p95 141 to 177), from the roughly 180 ms clock of an idle offscreen page, which neither the power save blocker nor `backgroundThrottling: false` lifts (§5.5).
+- **Latency.** The local click-to-paint median is 44 to 56.5 ms on Linux in every painting mode. On the mini it is 49 ms in `hidden-unthrottled` but 108 to 120.5 ms in `offscreen` (pass 2 and pass 3, p95 141 to 177), from the roughly 180 ms clock of an idle offscreen page, which neither the power save blocker nor `backgroundThrottling: false` lifts (§5.5); a 16 ms timer in the same view runs near its rate.
 - **Memory.** One tab costs about 0.5 to 0.6 GiB RSS on Linux. On the mini it costs 134,369 to 140,497 KiB of physical footprint idle and up to 177,553 KiB after streaming, across both passes.
 - **The collision.** It belongs to the CDP source (§5.4). The frame subscription is unaffected (§5.5).
 
@@ -240,13 +265,14 @@ Other readings the criterion does not bar:
 
 M8's re-plan must carry these conditions, each with its test:
 1. **Offscreen tab views** in the render host, never hidden windows.
-2. **The viewer's frames from Electron's frame subscription** (or the offscreen view's own paint), never a CDP screencast on the attachment cua's lease shares. Settled on the mini by pass 3: the subscription kept the page's rate through the agent's screenshot, detach and re-attach, and cua's host saw only its own frame. M8's test repeats that scene.
+2. **The viewer's frames from Electron's frame subscription** (or the offscreen view's own paint), never a CDP screencast on the attachment cua's lease shares. Settled on the mini by pass 3: the subscription kept the page's rate through the agent's screenshot, detach and re-attach, and cua's host saw only its own frame. M8's test repeats that scene. The subscription stream also needs bounded flow control, which the probe did not have: latest-frame-wins (at most one frame encoded and in flight per viewer, a newer one replacing an unsent one) or credits refunded by the viewer, never an unbounded queue. A slow-viewer test shows it: a viewer reading at a fraction of the page's rate sees the newest frame within a bound, and the host's memory and queue stay flat.
 3. **One bounded probe of the macOS offscreen clock.** A slow page timer runs at about 6 Hz in place of 10, and an idle page's next paint waits up to about 180 ms. App Nap and the view's background throttling are ruled out (§5.5). The probe's candidates:
    - what `document.visibilityState` and the frame's occlusion read inside an offscreen view over time;
    - offscreen rendering's `setFrameRate` and BeginFrame pacing when nothing is invalidated;
-   - Chromium's timer alignment for frames it treats as hidden or occluded.
+   - Chromium's timer alignment for frames it treats as hidden or occluded (a 16 ms timer near its rate beside a 100 ms one near 6 Hz points here);
+   - `requestAnimationFrame`'s rate in an offscreen view, which the fixture did not exercise.
 
-   If the clock cannot be lifted cheaply, M8 records the known limit on macOS: about 110 ms click to paint offscreen (Linux 56.5 ms), with timer-driven page animation at about 6 Hz. rAF-paced animation and scrolling run at 54 to 57 fps.
+   If the clock cannot be lifted cheaply, M8 records the known limit on macOS: about 110 ms click to paint offscreen (Linux 56.5 ms), and a page's 100 ms timers running near 6 Hz; a 16 ms timer, and scrolling driven by it, ran at 54 to 57 fps; `requestAnimationFrame` is unmeasured and the probe measures it.
 4. **No power save blocker.** It does not lift the clock (§5.5), so it never enters the idle scene.
 5. **A uid peer policy for the cua server on Linux**, which today refuses every peer without the darwin-arm64 addon.
 6. **cua's event forwarding scoped to what the agent asked for.** A leased tab's attachment otherwise carries every other user's events to the agent's host; the CDP-source collision forwarded 104 to 141 MB.
