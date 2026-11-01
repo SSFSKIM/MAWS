@@ -29,8 +29,12 @@
 //      A's own checkout of the same org project (a `.smns` naming B's project) starts sessions on B through the machine
 //      menu: one with its text as the brief, opening in A's pane with its reply and recording A's member as its
 //      requester; one in a new worktree with a dropped file, which goes up under the worktree's desk-uploads before the
-//      one message that names it.
-// B's spawned sessions run on journals of their own, the next fixtures on B's replay list.
+//      one message that names it; then (M6) B starts a session of its own that A has no tab of and whose first turn asks
+//      a permission: it shows in A's Needs you under its listed row and counts in the dock badge (`app.dock` read in
+//      main), ⌘⇧J (its menu item) opens it in A's pane, and the answer there clears both; conversation search finds a
+//      word of B's transcript under B; its second turn asks again with its tab closed, and B's daemon stopped greys that
+//      item in Needs you and takes it out of the badge.
+// B's spawned sessions and its M6 session run on journals of their own, the next fixtures on B's replay list.
 // No wall-clock bound beyond Playwright's own timeouts: the measured numbers are M7's.
 // Run by `pnpm e2e:remote` (MAWS_REMOTE_E2E=1).
 import { execFileSync } from 'node:child_process';
@@ -38,7 +42,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
@@ -47,6 +51,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import { mainTabById, openSurface, surface } from './support/shell';
 import { SideJournal } from './support/side-replay';
@@ -104,6 +109,17 @@ const LINK_ASK = 'Where does the dev server listen?';
 const LINK_TEXT = 'the dev server';
 const devServerUrl = (port: number) => `http://[::]:${port}/`;
 const linkReply = (port: number) => `It serves B’s checkout at [${LINK_TEXT}](<${devServerUrl(port)}>).`;
+// M6: B's own session that asks while A has no tab of it, started on B as B's owner starts one: a permission at its first
+// turn, answered from A, then one at its second turn that still waits when B's daemon stops
+const WAITING_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b5';
+const WAITING_TITLE = 'B’s waiting session';
+const WAITING_ASK = 'Check the build on B.';
+const WAITING_FIRST = 'first-asked';
+const WAITING_REPLY = 'The build on B is fine.';
+const WAITING_AGAIN = 'Check it once more.';
+const WAITING_SECOND = 'second-asked';
+// M6: a word of B's first session's transcript (its first prompt, FIRST) and of no session's title once B's owner names it
+const SEARCHED = 'hello';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
 // The repository's own settings, so the runner's global ones (a hooks path, signing, an identity) change nothing B's
@@ -239,6 +255,17 @@ async function paneSaid(page: Page): Promise<string> {
   return `the pane's composers: ${composers.join(', ') || 'none'}; its statuses: ${statuses.join(' | ') || 'none'}; the toasts: ${toasts || 'none'}`;
 }
 const bareOf = (address: string) => address.slice(address.indexOf('/') + 1);
+// A wait whose failure quotes what `said` reads then, at the failure, rather than before the wait.
+async function quoting<T>(wait: Promise<T>, said: () => Promise<string> | string): Promise<T> {
+  return wait.catch(async (error: unknown) => {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await said()}`);
+  });
+}
+// M6: a session's row in A's Needs you (by its address), the heading that counts the live rows, and the dock badge main
+// sets ('' at none)
+const needsYouRow = (page: Page, address: string) => sidebarOf(page).getByRole('list', { name: 'Needs you' }).locator(`button[data-needs-you="${address}"]`);
+const needsYouCount = (page: Page, count: number) => sidebarOf(page).getByRole('heading', { name: `Needs you · ${count}` });
+const dockBadge = (app: ElectronApplication) => app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
 // The files a session's desk-uploads holds on B (its parts' `.staging` directory left out).
 const uploadedFiles = (cwd: string, app: string) => readdirSync(join(cwd, '.claude', 'desk-uploads', app)).filter((name) => !name.startsWith('.'));
 
@@ -348,11 +375,20 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     spawned.turn(SPAWN_REPLY);
     const spawnedFixture = spawned.write(journals, 'b-spawned');
     const worktreeFixture = join(journals, 'b-spawned-worktree.jsonl');
+    // M6: the session B starts last, while A has no tab of it: a permission its first turn asks (answered from A), then
+    // one its second turn asks (the replay holds at its `allow` until B's daemon stops)
+    const waiting = new SideJournal(WAITING_SESSION, checkout);
+    const asked = waiting.prompt();
+    waiting.permission(asked, 'Bash', { command: `echo ${WAITING_FIRST}`, description: 'Print a word' }, WAITING_FIRST);
+    waiting.reply(asked, WAITING_REPLY);
+    waiting.completed(asked);
+    waiting.permission(waiting.prompt(), 'Bash', { command: `echo ${WAITING_SECOND}`, description: 'Print a word' }, WAITING_SECOND);
+    const waitingFixture = waiting.write(journals, 'b-waiting');
     scene = await startRemoteScene({
       scratch: join(root, 'scene'),
       aUserData,
       b: {
-        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [fixture, spawnedFixture, worktreeFixture].join(',') },
+        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [fixture, spawnedFixture, worktreeFixture, waitingFixture].join(',') },
         // B's checkout trusted, and the default mode the journal was recorded under (sessions.spec.ts's launchCase)
         prepare: ({ claudeConfigDir }) => {
           writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
@@ -698,6 +734,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } });
     keepMainLines(a);
     const again = a.page;
+    const againApp = a.app;
     await expect
       .poll(async () => {
         const m = await machineOf(again, b.ref);
@@ -829,6 +866,90 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(mention, `the message names the upload's path on B: ${JSON.stringify(written)}`).not.toBeNull();
       expect(readFileSync(join(worktree, mention!), 'utf8'), 'the path, from the worktree, holds the dropped bytes').toBe(WORKTREE_FILE.content);
       expect(uploadedFiles(worktree, second), 'under the worktree’s desk-uploads').toHaveLength(1);
+    });
+
+    // M6: B's own session, started on B as B's owner starts one (its journal the last on B's replay list), which A has
+    // no tab of and no record of; sminos lists it, sharing it with A's member, and the endpoint's attention feed then
+    // says what waits on it.
+    let waitingApp = '';
+    let waitingAddress = '';
+    const waitingTurnOver = async () => (await b.request<{ turn: unknown }>('session.status', { appSessionId: waitingApp })).turn === null;
+    const waitingComposer = () => main(again).locator(`[data-composer="${waitingAddress}"]`);
+    await test.step('M6: a permission B’s session asks with no tab of it on A shows in Needs you under its listed row and in the dock badge; ⌘⇧J opens it in A’s pane, and the answer there clears both', async () => {
+      await showProjectList(again);
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'nothing waits before B asks' }).toBe('');
+      waitingApp = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+      waitingAddress = addressOf(b.ref, waitingApp);
+      await b.request('session.intent.patch', { appSessionId: waitingApp, patch: { gateway: 'direct' } });
+      const begun = await b.request<{ status: string }>('session.start', { appSessionId: waitingApp, message: { content: WAITING_ASK, display: WAITING_ASK }, options: {} });
+      expect(begun.status, `B's session starts: ${JSON.stringify(begun)}`).not.toBe('needs_trust');
+      await scene!.sminos.list({ engine: WAITING_SESSION, app: waitingApp, owners: [scene!.member], project: PROJECT, title: WAITING_TITLE, cwd: checkout });
+      // With no record of A's the listed row stands in: the row reads B's name for its project and the listing's title.
+      const row = needsYouRow(again, waitingAddress);
+      await quoting(expect(row, 'B’s permission in A’s Needs you').toHaveAccessibleName(`${B_NAME} · ${WAITING_TITLE} · Approval needed`, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
+      await expect(needsYouCount(again, 1)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the dock badge counts it' }).toBe('1');
+      // ⌘⇧J is the menu item's chord; the item is clicked in main, since a menu accelerator never reaches the menu
+      // through Playwright's keys (support/menu.ts)
+      expect(await againApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('attention.next')?.accelerator ?? null)).toBe('Cmd+Shift+J');
+      await menu(againApp, 'attention.next');
+      await quoting(expect(waitingComposer(), '⌘⇧J opens B’s session in A’s pane').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      const card = main(again).getByRole('group', { name: 'Approval needed' });
+      await expect(card, 'the permission card in A’s pane').toBeVisible({ timeout: 60_000 });
+      await expect(card).toContainText(`echo ${WAITING_FIRST}`);
+      await card.getByRole('radio', { name: 'Allow once' }).click();
+      await card.getByRole('button', { name: 'Allow', exact: true }).click();
+      await expect(card).toBeHidden({ timeout: 30_000 });
+      await quoting(expect(main(again).getByText(WAITING_REPLY).first(), 'the turn goes on on B').toBeVisible({ timeout: 60_000 }), () => b.log().slice(-3000));
+      await expect(row, 'answered: gone from Needs you').toHaveCount(0, { timeout: 30_000 });
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'answered: gone from the dock badge' }).toBe('');
+      await expect.poll(waitingTurnOver, { timeout: 30_000 }).toBe(true);
+      // its tab closed again, for its second ask
+      await menu(againApp, 'tab.close');
+      await expect(waitingComposer(), 'B’s session’s tab closed').toHaveCount(0, { timeout: 30_000 });
+    });
+
+    await test.step('M6: conversation search finds a word of B’s transcript, its hit under B', async () => {
+      // B's owner names B's first session as sminos lists it, so its title (its first prompt until now) holds no
+      // SEARCHED: B's index answers it from the transcript's text, with a snippet
+      await b.request('session.update', { appSessionId: app, patch: { title: { text: TITLE, source: 'user' } } });
+      type Searched = { hits: { appSessionId: string; snippet: string | null }[]; indexing: boolean; incomplete: boolean };
+      let onB: Searched | null = null;
+      await quoting(
+        expect
+          .poll(async () => {
+            onB = await b.request<Searched>('session.search', { query: SEARCHED });
+            return (onB.hits.find((hit) => hit.appSessionId === app)?.snippet ?? '').toLowerCase().includes(SEARCHED);
+          }, { timeout: 60_000, message: 'B’s own index finds the word in its first session’s transcript' })
+          .toBe(true),
+        () => `B's own search answered: ${JSON.stringify(onB)}`,
+      );
+      const field = sidebarOf(again).getByRole('searchbox', { name: 'Search projects and sessions' });
+      await field.fill(SEARCHED);
+      await sidebarOf(again).getByRole('button', { name: `Search in conversations for ‘${SEARCHED}’`, exact: true }).click();
+      const palette = again.getByRole('dialog', { name: 'Command palette' });
+      await expect(palette).toBeVisible();
+      // B's hits are a group headed by B's name once a machine other than this Mac has any; its wrapper names B's ref
+      const underB = palette.getByRole('group', { name: B_NAME, exact: true });
+      await quoting(expect(underB.getByRole('option').filter({ hasText: SEARCHED }), 'the hit under B').toHaveCount(1, { timeout: 60_000 }), async () => `the palette: ${await palette.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      expect(await underB.evaluate((el) => el.closest('[data-search-machine]')?.getAttribute('data-search-machine') ?? null), 'the group is B’s').toBe(b.ref);
+      await again.keyboard.press('Escape');
+      await expect(palette).toHaveCount(0);
+      await field.fill('');
+    });
+
+    await test.step('M6: B’s daemon stopped greys what its session asks with its tab closed, and the dock badge drops', async () => {
+      await b.request('session.send', { appSessionId: waitingApp, content: WAITING_AGAIN });
+      const row = needsYouRow(again, waitingAddress);
+      await quoting(expect(row, 'the second ask in A’s Needs you').toHaveAccessibleName(/ · Approval needed$/, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
+      await expect(needsYouCount(again, 1)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the second ask counts in the dock badge' }).toBe('1');
+      await b.stop();
+      // main greys a machine's items at its link's `down`: drawn after the live rows, out of the count and the badge
+      await quoting(expect(row, 'greyed once B is gone').toHaveAttribute('data-greyed', 'true', { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
+      await expect(row).toHaveAccessibleName(/ · Approval needed, machine offline$/);
+      await expect(needsYouCount(again, 0)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'a greyed item leaves the dock badge' }).toBe('');
     });
   } finally {
     await a?.cleanup();
