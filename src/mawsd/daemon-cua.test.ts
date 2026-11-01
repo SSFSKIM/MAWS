@@ -10,7 +10,7 @@ import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { machineName } from '@shared/machine/identity';
 import { cuaSocketDir } from '@shared/daemon/files';
 import { takeSpineLock } from '../services/settings/spine-lock';
@@ -61,8 +61,8 @@ async function attachApp(): Promise<{ engine: RawApp; machine: RawApp; dir: stri
   });
   await new Promise<void>((resolve) => server.listen(join(dir, `${S}.sock`), resolve));
   closers.push(() => server.close());
-  const engine = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY] });
-  const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+  const engine = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] }); // P5 O4 M2 (D11)
+  const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] }); // P5 O4 M2 (D11): an app's hello lists machine.connectors, or it is refused
   machine.ready();
   expect(await machine.request('machine.client', { browserSocket: dir })).toMatchObject({ ok: true });
   return { engine, machine, dir, heard: () => Buffer.concat(chunks).toString(), peers };
@@ -106,7 +106,7 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
       },
     });
     await scene.start({ spine: { load }, tmp: TMP });
-    const client = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const client = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] }); // P5 O4 M2 (D11)
     expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
     const path = deps!.browserSocket(S as never);
     expect(path).toBe(socketOf());
