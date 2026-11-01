@@ -713,6 +713,53 @@ describe('the cold route (P5 O17 M1)', () => {
     expect(demands).toHaveLength(0);
   });
 
+  // The cross-milestone review's finding: a peer waiting for its engine's root was admitted in the period it was accepted
+  // in, and is ended with that period (§B: the handover ends pending connections), never served under the next one
+  it.each([
+    ['the route moves to a new epoch', 'epoch'],
+    ['the route moves to a new epoch nobody announced', 'silent epoch'],
+    ['an app attaches', 'app'],
+  ] as const)('a peer waiting for its engine’s root is ended, never admitted under the next epoch, when %s', async (_, what) => {
+    const addon = fakeAddon();
+    const { sockets, readings, demands, loads, appDir } = coldStand({ addon });
+    readings.set(A, { state: 'cold', epoch: 'old-epoch' });
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.create', params: {} }));
+    await until(() => sockets.inspect().A!.waiting === 1); // no engine known yet: a root wait
+    const app = appSocket(appDir, A);
+    await app.listening;
+    if (what === 'app') sockets.target(appDir);
+    readings.set(A, { state: what === 'app' ? 'relay' : 'cold', epoch: 'new-epoch' });
+    if (what !== 'silent epoch') {
+      sockets.routeChanged(A);
+      await until(client.closed, 1000); // at once, well inside the root wait
+      expect(sockets.inspect().A!.waiting).toBe(0);
+    }
+    sockets.engineProcess(A, ENGINE); // the engine becomes known: nothing of the old epoch is decided under the new one
+    await until(client.closed, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(client.heard().length).toBe(0);
+    expect(app.peers).toHaveLength(0);
+    expect(demands).toHaveLength(0);
+    expect(loads()).toBe(0);
+    expect(sockets.inspect().A).toMatchObject({ waiting: 0, refused: 0 });
+  });
+
+  it('a peer waiting for its engine’s root under the current epoch is still decided at the root', async () => {
+    const addon = fakeAddon();
+    const { sockets, readings } = coldStand({ addon });
+    readings.set(A, { state: 'cold', epoch: 'e1' });
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const client = engineClient(path);
+    await until(() => sockets.inspect().A!.waiting === 1);
+    sockets.routeChanged(A); // read anew, the same epoch: the wait stands
+    sockets.engineProcess(A, ENGINE);
+    await until(() => messagesOf(client.heard()).length === 1); // the broker's hello
+    expect(client.closed()).toBe(false);
+  });
+
   it('a peer waiting for the broker’s chunk ends with its session; a session made again under the same id never admits it', async () => {
     const addon = fakeAddon();
     const loader = heldLoader();

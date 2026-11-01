@@ -95,7 +95,9 @@ interface Pair {
 interface Session {
   path: string;
   server: Server | null; // listening while a tab engine is attached
-  pending: Map<Socket, { acceptedAt: number; timer: NodeJS.Timeout }>; // accepted, unread, waiting for the engine's root
+  // accepted, unread, waiting for the engine's root; P5 O17: under the route's epoch it was accepted in (null with no
+  // cold route), ended with that epoch
+  pending: Map<Socket, { acceptedAt: number; timer: NodeJS.Timeout; epoch: string | null }>;
   pairs: Set<Pair>;
   relayed: number;
   refused: number;
@@ -154,6 +156,18 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     return options.cold!.reading(appSessionId).state === 'starting' || options.cold!.live(appSessionId);
   };
   const sameRoot = (a: ProcessRoot | null, b: ProcessRoot | null) => a?.pid === b?.pid && a?.start === b?.start;
+  // P5 O17: the route's epoch, the period a peer is admitted in (§B; null with no cold route, O5 M5's relay alone)
+  const epochOf = (appSessionId: AppSessionId): string | null => options.cold?.reading(appSessionId).epoch ?? null;
+  // The sockets waiting for their engine's root, those `keep` does not keep ended (P5 O17: by the epoch they were accepted in)
+  const endPending = (session: Session, keep: (epoch: string | null) => boolean = () => false) => {
+    for (const [socket, { timer, epoch }] of [...session.pending]) {
+      if (keep(epoch)) continue;
+      clearTimeout(timer);
+      session.pending.delete(socket);
+      socket.destroy();
+    }
+    if (session.pending.size === 0) session.busyNoted = false;
+  };
   // P5 O17 M1: the sockets held for the broker's chunk, those `keep` does not keep ended
   const endAwaiting = (session: Session, keep: (entry: { epoch: string; root: ProcessRoot | null }) => boolean = () => false) => {
     for (const [socket, entry] of [...session.awaiting]) {
@@ -249,9 +263,9 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
   // the socket is held on its session, in the pending budget, bound to that epoch and the engine it was checked against:
   // a teardown in between ends it, and at the load it is admitted only if its session, epoch and engine are still the
   // ones it was checked under
-  const toBroker = (appSessionId: AppSessionId, session: Session, socket: Socket) => {
+  const toBroker = (appSessionId: AppSessionId, session: Session, socket: Socket, epoch: string) => {
     const cold = options.cold!;
-    const entry = { epoch: cold.reading(appSessionId).epoch, root: engineRoots.get(appSessionId) ?? null };
+    const entry = { epoch, root: engineRoots.get(appSessionId) ?? null };
     if (broker) return broker.admit(appSessionId, socket, entry.epoch);
     if (pendingFull(session)) {
       session.refused += 1;
@@ -275,24 +289,27 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     );
   };
 
-  // A checked peer goes to the attached app, or on a cold route to the broker (P5 O17 M1)
-  const serve = (appSessionId: AppSessionId, session: Session, socket: Socket) => {
+  // A checked peer goes to the attached app, or on a cold route to the broker under its epoch (P5 O17 M1)
+  const serve = (appSessionId: AppSessionId, session: Session, socket: Socket, epoch: string | null) => {
     if (tabEngine !== null) return relay(appSessionId, session, socket);
-    if (coldServes(appSessionId)) return toBroker(appSessionId, session, socket);
+    if (coldServes(appSessionId) && epoch !== null) return toBroker(appSessionId, session, socket, epoch);
     socket.destroy();
   };
 
   // The verdict on an accepted socket, which nothing has read yet: refused, counted and destroyed unread; let in, relayed.
-  const decide = (appSessionId: AppSessionId, session: Session, socket: Socket, acceptedAt: number) => {
+  // P5 O17: only in the period it was accepted in: a socket whose route's epoch moved meanwhile (an epoch nobody
+  // announced with routeChanged included) is ended unread, as the handover ends pending connections (§B)
+  const decide = (appSessionId: AppSessionId, session: Session, socket: Socket, acceptedAt: number, epoch: string | null) => {
     session.pending.delete(socket);
     if (session.pending.size === 0) session.busyNoted = false;
     if (socket.destroyed) return;
+    if (epoch !== epochOf(appSessionId)) return void socket.destroy();
     const addon = peerAddon();
     if (addon === null) {
       if (options.uidBoundary) {
         if (!session.moduleNoted) log(`cua socket of ${appSessionId}: no peer identity check here (module_unavailable): the uid is the boundary`);
         session.moduleNoted = true;
-        return serve(appSessionId, session, socket);
+        return serve(appSessionId, session, socket, epoch);
       }
       if (!session.moduleNoted) log(`cua socket of ${appSessionId}: refused peers (module_unavailable; run scripts/build-peer-auth.sh)`);
       session.moduleNoted = true;
@@ -305,11 +322,12 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       log(refusalLine(appSessionId, refusal));
       return void socket.destroy();
     }
-    serve(appSessionId, session, socket);
+    serve(appSessionId, session, socket, epoch);
   };
 
   const admit = (appSessionId: AppSessionId, session: Session, socket: Socket) => {
     const acceptedAt = Date.now();
+    const epoch = epochOf(appSessionId); // P5 O17: the period it is admitted in
     socket.on('error', () => {}); // a socket destroyed while it waits, or a relayed one's reset, reports nothing
     const addon = peerAddon();
     if (addon && !hasLiveRoot(appSessionId, addon)) {
@@ -319,13 +337,13 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         session.busyNoted = true;
         return void socket.destroy();
       }
-      const timer = setTimeout(() => decide(appSessionId, session, socket, acceptedAt), PEER_ROOT_WAIT_MS);
+      const timer = setTimeout(() => decide(appSessionId, session, socket, acceptedAt, epoch), PEER_ROOT_WAIT_MS);
       // its place comes back at the verdict, at most PEER_ROOT_WAIT_MS on: a peer's own close is not seen on a socket
       // nothing reads (pauseOnConnect), and reading it before the check is what the check exists to prevent
-      session.pending.set(socket, { acceptedAt, timer });
+      session.pending.set(socket, { acceptedAt, timer, epoch });
       return;
     }
-    decide(appSessionId, session, socket, acceptedAt);
+    decide(appSessionId, session, socket, acceptedAt, epoch);
   };
 
   const listen = (appSessionId: AppSessionId, session: Session) => {
@@ -353,11 +371,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       session.server = null;
       rmSync(session.path, { force: true });
     }
-    for (const [socket, { timer }] of session.pending) {
-      clearTimeout(timer);
-      socket.destroy();
-    }
-    session.pending.clear();
+    endPending(session);
     for (const pair of [...session.pairs]) endPair(pair);
     session.pairs.clear();
     endAwaiting(session); // P5 O17 M1
@@ -424,9 +438,9 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         broker?.end(appSessionId); // P5 O17 M1: the broker's connections were checked against it too
       }
       if (!root || !session) return;
-      for (const [socket, { acceptedAt, timer }] of [...session.pending]) {
+      for (const [socket, { acceptedAt, timer, epoch }] of [...session.pending]) {
         clearTimeout(timer);
-        decide(appSessionId, session, socket, acceptedAt);
+        decide(appSessionId, session, socket, acceptedAt, epoch);
       }
     },
     remove(appSessionId) {
@@ -440,7 +454,8 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     routeChanged(appSessionId) {
       const session = sessions.get(appSessionId);
       if (!session) return;
-      const epoch = options.cold?.reading(appSessionId).epoch;
+      const epoch = epochOf(appSessionId);
+      endPending(session, (accepted) => accepted === epoch); // P5 O17: an older epoch's, still waiting for its engine's root
       endAwaiting(session, (entry) => entry.epoch === epoch); // P5 O17 M1: an older epoch's, still waiting for the chunk
       broker?.routeChanged(appSessionId);
       if (tabEngine === null) settle(appSessionId, session);
