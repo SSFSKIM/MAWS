@@ -5,6 +5,8 @@
 // capture load it; the front's render-client facts (a ready, an end, an answer) reach it only once it is loaded, since
 // only a loaded seam starts a render host. A load that fails (a bundle replaced under this daemon) answers the asker
 // with its reason, and the next request tries again. From `stop()` on nothing loads: a request is refused at once.
+// P5 O5 M5: its `capabilities()` (the session capabilities' render entries) are the seam's once it is loaded, else read
+// from the same facts without loading it (a seam not loaded has not failed).
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
@@ -12,6 +14,7 @@ import type { DaemonRender } from '@shared/ipc/schema/daemon';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport } from '@shared/ipc/schema/maws';
 import type { FrontRender } from './front';
 import type { RenderSeam, RenderSeamOptions, RenderService } from './render-seam';
+import { renderCapabilities, type RenderCapabilities, type RenderFacts } from './session-capabilities'; // P5 O5 M5
 
 export type RenderChunk = typeof import('./render-seam');
 export const loadRenderChunk = (): Promise<RenderChunk> => import('./render-seam');
@@ -21,6 +24,7 @@ export interface RenderHandleOptions {
   load(): Promise<RenderChunk>; // rejects with the reason it may not load (daemon.ts's bundle-swap check)
   compose(chunk: RenderChunk): RenderSeamOptions; // the daemon's wiring, given the loaded chunk's command line and authors
   answerEngine: RenderSeamOptions['answerEngine']; // a refusal's answer when the seam could not load
+  facts(): Omit<RenderFacts, 'failure'>; // P5 O5 M5: what the render entries read while the seam is not loaded
   log(line: string): void;
 }
 
@@ -29,13 +33,14 @@ export interface RenderHandle extends RenderService {
   front: FrontRender;
   captureForE2e(request: MawsArtifactCapture): Promise<MawsArtifactCapturedResult>;
   loaded(): RenderSeam | null;
+  capabilities(): RenderCapabilities; // P5 O5 M5: never loads the seam
   status(): DaemonRender;
   stop(): Promise<void>;
 }
 
 const OFF: DaemonRender = { state: 'off', detail: null, pid: null, starts: 0, requests: 0 };
 
-export function createRenderHandle({ machine, load, compose, answerEngine, log }: RenderHandleOptions): RenderHandle {
+export function createRenderHandle({ machine, load, compose, answerEngine, facts, log }: RenderHandleOptions): RenderHandle {
   let seam: RenderSeam | null = null;
   let loading: Promise<RenderSeam> | null = null;
   let stopped = false;
@@ -92,6 +97,7 @@ export function createRenderHandle({ machine, load, compose, answerEngine, log }
       exportForLibrary: (input) => handle.exportForLibrary(input),
     },
     loaded: () => seam,
+    capabilities: () => seam?.capabilities() ?? renderCapabilities({ ...facts(), failure: null }),
     status: () => seam?.status() ?? OFF,
     async stop() {
       stopped = true;

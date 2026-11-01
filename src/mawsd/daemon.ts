@@ -71,6 +71,14 @@
 // over. To an engine host whose welcome lists `host.render`, `host.attachment` says `render: true` at each streaming
 // of the permanent link and at each presence change; every welcome lists `machine.render`; `daemon.status.render` is
 // the seam's state; a render client is no client for the clocks (the seam holds the daemon while a request is in flight).
+//
+// P5 O5 M5 (Interfaces §H, §I): the per-session cua sockets (cua-socket.ts) in the cua directory, made at step (6) with
+// the other sockets. A launch is told the daemon's socket for its session (the spine's `browserSocket`), which listens
+// while the attached app's `machine.client` names its own cua directory (the relay's target) and relays each checked
+// connection there; a raw `session.status` names the session's engine for the peer check (and sets up the socket of an
+// engine that outlived a daemon, D-16); a removed session's socket goes. The peer identity addon loads from the app's
+// Resources as the app loads it, at the first session's socket (never at an idle start, acceptance 14). `session.capabilities` is the front's, answered from the render handle's and the cua
+// sockets' readings; `session.capabilitiesChanged` follows each flip of a session the daemon holds a socket for.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -81,7 +89,8 @@ import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-sup
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
-import { cuaSocketPath } from '@shared/browser/cua-socket';
+import { cuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
@@ -114,6 +123,7 @@ import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOIN
 import { createServicesFront, spineTakes } from './front';
 import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
+import { readRenderRuntime, renderCacheRoot, watchRenderCache } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
@@ -121,6 +131,9 @@ import { refusalLog } from './refusal-log';
 import { SpineReaders } from './spine-readers';
 import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
+import { createCuaSockets, type CuaSockets } from './cua-socket'; // P5 O5 M5
+import { browserCapability, createSessionCapabilities } from './session-capabilities'; // P5 O5 M5
+import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
 // P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
@@ -174,7 +187,9 @@ export interface DaemonOptions {
   claimSpine?: boolean;
   singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
   // P5 O5 M4: the render seam's chunk, the render host's spawn and the runtime's report (a fake host and platform)
-  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime };
+  // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's), and the watch itself (a double)
+  render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string; watchCache?: typeof watchRenderCache };
+  cua?: { loadAddon?: () => PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon's load (a double), the relay's wait
 }
 
 export interface RunningDaemon {
@@ -358,11 +373,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       bus: front.bus,
       clientPort: front.port, // §E: the asking client's connection, or the attached app's
       interest: () => new Set(union()),
-      // the session's socket in the attached app's cua directory, from its machine.client (P5 O3-D M5b)
-      browserSocket: (appSessionId) => {
-        const dir = front.browserSocket();
-        return dir === null ? null : cuaSocketPath(dir, appSessionId);
-      },
+      // P5 O5 M5: the daemon's own socket for the session, stable for its life, listening while a tab engine is attached
+      // (the app's machine.client) and relayed to it; P5 O3-D M5b told the app's own, absent while no app was attached
+      browserSocket: (appSessionId) => browserSocketFor(appSessionId),
       trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
       env,
@@ -556,6 +569,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let toldPresent = false; // the last attachment told the permanent link's host
   // P5 O5 M4 (Interfaces §F): `render: true` to a host whose welcome lists host.render, an older one never hearing the field
   const engineHostRenders = () => hosts.peer('engine-host')?.capabilities.includes(HOST_RENDER_CAPABILITY) ?? false;
+  // What the render entries read (the panel's sweep#2): only a connected engine host whose welcome lists no host.render
+  // predates rendering; none connected is a cold host, which starts on demand as this build
+  const engineHostMayRender = () => hosts.peer('engine-host') === null || engineHostRenders();
   const tellAttachment = (attached: boolean): Promise<void> => {
     if (hosts.parked('engine-host')) return Promise.resolve();
     const input = engineHostRenders() ? { attached, render: true } : { attached };
@@ -780,6 +796,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // and what is available follows the app again (a permanent link replaced by an older host's)
     if (permanentLink) hosts.sayReady('engine-host');
     else if (available !== engineRelay.attachedApp()) availability(engineRelay.attachedApp());
+    sessionCapabilities.refresh(); // P5 O5 M5: whether this engine host renders (its welcome) reads in the render entries
   });
   hosts.onStreaming('engine-host', () => {
     if (permanentLink && !available) availability(true); // P5 O3-D M3: events are available from here on, with or without an app
@@ -792,6 +809,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
   hosts.onRaw('engine-host', (message) => {
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
+    if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
     engineRelay.deliver(message);
     each(eventListeners, 'engine-host', message);
   });
@@ -888,6 +906,18 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
     return (answer.value as { outcome: 'delivered' | 'not_pending' }).outcome;
   };
+  // the render runtime on this machine: a Mac with the app binary always has it; on Linux (P5 O5 M6) the render cache's
+  // entry for this daemon's own release's pin (render-runtime.ts), read at each check: the release it started from, which
+  // a flip of `current` leaves in place until the unit restarts it
+  const linuxRuntime = () => readRenderRuntime({ appRoot: join(dirname(entryOnDisk), '..', '..'), home: homedir(), arch: process.arch, machine, path: env.PATH });
+  const renderRuntime =
+    options.render?.runtime ??
+    ((): RenderRuntime => {
+      if (platform === 'darwin') return { available: true };
+      if (platform !== 'linux') return { available: false, reason: `the render runtime is not installed on ${machine}` };
+      const reading = linuxRuntime();
+      return reading.available ? { available: true } : reading;
+    });
   const render = createRenderHandle({
     machine,
     load: () => {
@@ -901,14 +931,17 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         (() => {
           const replaced = bundleReplaced(); // as the hosts' beforeSpawn: another build's binary renders nothing for this one
           if (replaced !== null) throw new Error(replaced);
-          return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(options.modules.self), '..', '..'), profile: profileDir, env }), log);
+          if (platform !== 'linux') return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(options.modules.self), '..', '..'), profile: profileDir, env }), log);
+          const reading = linuxRuntime(); // P5 O5 M6: the cache's Electron under xvfb-run, on this release's entry
+          if (!reading.available) throw new Error(reading.reason);
+          return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(entryOnDisk), '..', '..'), profile: profileDir, env, linux: reading }), log);
         }),
       post: (request) => front.postRender('render.request', request),
       postExit: () => front.postRender('render.exit', {}),
       answerEngine,
       quietMs: () => renderQuietMs ?? chunk.DEFAULT_QUIET_MS,
-      runtime: options.render?.runtime ?? (() => (platform === 'darwin' ? { available: true } : { available: false, reason: `the render runtime is not installed on ${machine}` })), // Linux's is M6's
-      engineHostRenders,
+      runtime: renderRuntime,
+      engineHostRenders: engineHostMayRender,
       appAttached: () => appPresent(),
       // the session titles a document's comments name are the spine's records: a cold or released spine is loaded for
       // the export (a trigger, never at idle: acceptance 14), waited for at most RENDER_AUTHORS_SPINE_WAIT_MS of the
@@ -927,11 +960,81 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return chunk.renderAuthors(settingsPaths(profileDir).client, view && view.unavailable() === null ? view.records() : null);
       },
       hold: (reason) => services.hold(reason),
+      // P5 O5 M5: a session's render entries follow the seam's state; an unavailable seam reads available again once its
+      // window has passed, with no state change of its own, so the reading is taken again then
+      onState: (state) => {
+        sessionCapabilities.refresh();
+        if (state === 'unavailable') setTimeout(() => sessionCapabilities.refresh(), chunk.FAILURE_WINDOW_MS + 100).unref();
+      },
       log,
     }),
     answerEngine,
+    facts: () => ({ machine, runtime: renderRuntime(), engineHostRenders: engineHostMayRender(), appAttached: appPresent() }), // P5 O5 M5
     log,
   });
+
+  // --- the cua sockets and the session capabilities (P5 O5 M5; cua-socket.ts, session-capabilities.ts) -----------------
+  const cuaDir = cuaSocketDir(profileDir, options.tmp ?? tmpdir());
+  let cua: CuaSockets | null = null; // made at step (6), with the other sockets
+  const launchedHere = new Set<AppSessionId>(); // told to a launch: kept past its engine's exit (its next launch names it)
+  const askedAbout = new Set<AppSessionId>(); // a client asked for its capabilities: followed past its engine's exit, to its removal
+  // P5 O5 M6: on Linux, `mawsd render install` and `uninstall` flip the render entries with nothing else changing, so the
+  // cache is watched (one descriptor) while a flip has somewhere to go: a session's capabilities are tracked and a client
+  // the bus's events reach (the app, an observer on machine.sock) is ready. It is released at the last of either, and at
+  // the exit: nothing runs for it at start, at idle, or for sessions no one is there to hear about
+  let cacheWatch: { close(): void } | null = null;
+  let tracked = false;
+  let eventClients = () => 0; // the front's, once it exists (below)
+  let cacheWatchEnded = false;
+  const syncCacheWatch = () => {
+    const wanted = platform === 'linux' && !cacheWatchEnded && tracked && eventClients() > 0;
+    if (wanted && cacheWatch === null) cacheWatch = (options.render?.watchCache ?? watchRenderCache)(options.render?.cacheRoot ?? renderCacheRoot(homedir()), () => sessionCapabilities.refresh());
+    if (!wanted && cacheWatch !== null) {
+      cacheWatch.close();
+      cacheWatch = null;
+    }
+  };
+  const sessionCapabilities = createSessionCapabilities({
+    render: () => render.capabilities(),
+    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null }),
+    emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
+    tracking: (any) => ((tracked = any), syncCacheWatch()),
+  });
+  // The attached app's cua directory, as its machine.client said it (none while no app is attached): the sockets listen
+  // or stop; and whatever a session's capabilities read may have changed with it
+  const followTabEngine = () => {
+    if (stopping !== null) return; // the exit closes the sockets and the clients: no flip to tell
+    cua?.target(front.browserSocket());
+    sessionCapabilities.refresh();
+  };
+  const browserSocketFor = (appSessionId: AppSessionId): string | null => {
+    const path = cua?.ensure(appSessionId) ?? null;
+    if (path === null) return null;
+    launchedHere.add(appSessionId);
+    sessionCapabilities.track(appSessionId);
+    return path;
+  };
+  // Each raw session.status names the session's engine for the peer check (never the spine's view, so a browser
+  // connection loads nothing); one that runs sets up its socket (an engine that outlived a daemon keeps the path it was
+  // told, D-16), and an exited one whose socket no launch of this daemon was told gives it up (a trust bootstrap's).
+  const engineSeen = (payload: unknown) => {
+    const { appSessionId, status } = (payload ?? {}) as { appSessionId?: unknown; status?: { process?: unknown; pid?: unknown } };
+    if (cua === null || typeof appSessionId !== 'string' || typeof status !== 'object' || status === null) return;
+    const id = appSessionId as AppSessionId;
+    const running = status.process !== 'exited';
+    if (running && cua.ensure(id) !== null) sessionCapabilities.track(id);
+    cua.engineProcess(id, running && typeof status.pid === 'number' ? status.pid : null);
+    if (!running && !launchedHere.has(id)) {
+      cua.remove(id);
+      if (!askedAbout.has(id)) sessionCapabilities.forget(id); // the panel's scalpel-4#2: an asker hears its next flip
+    }
+  };
+  const sessionRemoved = (appSessionId: AppSessionId) => {
+    launchedHere.delete(appSessionId);
+    askedAbout.delete(appSessionId);
+    cua?.remove(appSessionId);
+    sessionCapabilities.forget(appSessionId);
+  };
 
   // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
@@ -945,14 +1048,23 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
-    readiness: () => presenceChanged(),
+    readiness: () => (presenceChanged(), syncCacheWatch()), // P5 O5 M6: the cache's watch follows the event clients too
     beforeSpineCommand: wakeForDiscovery,
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
     render: { ...render.front, clientReady: () => (front.postRender('render.hostGeneration', { generation: renderGeneration }), render.front.clientReady()) },
+    // P5 O5 M5: a session asked about is followed from then on, so the asker hears its next flip (forgotten at its removal);
+    // the answer is what the next flip compares against (the panel's scalpel-4#3: `ask` posts it first when it changed)
+    capabilities: (appSessionId) => (askedAbout.add(appSessionId), sessionCapabilities.ask(appSessionId)),
+    browserChanged: followTabEngine, // P5 O5 M5
     log,
   });
+  eventClients = () => front.eventClients(); // P5 O5 M6: the cache's watch reads them from here on
   front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
+  // P5 O5 M5: a removed session's cua socket goes with it
+  front.events((name, payload) => {
+    if (name === 'session.removed') sessionRemoved((payload as { appSessionId: AppSessionId }).appSessionId);
+  });
 
   // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
   const artifacts = createArtifactsEndpoint({
@@ -1071,6 +1183,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     clocks.relaysBetween(engineRelay.between() || ptyRelay.between());
     // P5 O5 M4: a render client is no client for the clocks (the seam holds the daemon while a request is in flight)
     clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0) - front.renderClients());
+    followTabEngine(); // P5 O5 M5: the attached app (and with it the tab engine) may have come or gone
   };
   const counts = (host: 'engine-host' | 'pty-host') => () => {
     const welcome = hosts.welcome(host);
@@ -1078,6 +1191,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   try {
     if (paths.socketDir !== dir) makePrivateDirectory(paths.socketDir);
+    // P5 O5 M5: the cua sockets' directory (in the fallback directory when its own paths would not fit), and the peer
+    // check's addon from the app's Resources as the app loads it (process.resourcesPath is Electron's, absent here),
+    // loaded at the first session's socket, never at start: an idle mawsd holds no native addon (acceptance 14)
+    const appPath = join(dirname(options.modules.self), '..', '..');
+    const loadAddon = options.cua?.loadAddon ?? (() => loadPeerAddon(peerAddonPath({ packaged, resourcesPath: dirname(appPath), appRoot: appPath })));
+    cua = createCuaSockets({
+      dir: cuaDir,
+      loadAddon: () => {
+        const addon = loadAddon();
+        if (addon === null) log(platform === 'darwin' ? '[cua] the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)' : '[cua] no peer identity addon on this platform: the uid is the cua sockets\' boundary');
+        else log('[cua] the peer identity addon loaded');
+        return addon;
+      },
+      uidBoundary: platform !== 'darwin',
+      log,
+      onChange: () => sessionCapabilities.refresh(),
+      ...(options.cua?.relayConnectWaitMs !== undefined && { relayConnectWaitMs: options.cua.relayConnectWaitMs }),
+    });
     const engineServer = createServer({ allowHalfOpen: options.halfOpen ?? true });
     engineClients = serveSocketClients(engineServer, {
       runtime: engineRelay,
@@ -1088,6 +1219,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         engineAppPid = connected ? (appPid ?? null) : null;
         presenceChanged(); // its machine.sock connection may be ready already
         announced(connected, peer, appPid);
+        followTabEngine(); // P5 O5 M5: the app the front names as attached is this pid's
       },
       identity: () => identity,
       counts: counts('engine-host'),
@@ -1167,6 +1299,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       artifacts.close(); // P5 O5 M2: its connections, a page's load in flight included
+      cua?.close(); // P5 O5 M5: every session's socket, its relayed connections with it
+      cacheWatchEnded = true; // P5 O5 M6
+      syncCacheWatch();
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);

@@ -9,6 +9,8 @@ export const BROWSER_COPY = {
   title: 'Browser',
   newTab: 'New tab',
   noSession: 'Open a session to browse beside it',
+  // P5 O5 M5: the session's agent has no browser on its machine (the session's capabilities), with mawsd's reason
+  agentUnavailable: (reason: string | null) => (reason === null ? 'The agent has no browser here' : `The agent has no browser here: ${reason}`),
   tabGone: 'That tab was closed',
   empty: { title: 'Start browsing', body: 'Enter a URL to open a page' },
   suspended: { open: (url: string) => `Open ${url}`, note: 'Tabs are restored unloaded' },

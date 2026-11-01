@@ -322,11 +322,14 @@ describe('the services front', () => {
   it('a render.client: its ready and end told to the seam, its posts its alone, and no bus event reaches it', () => {
     const { served, client, render } = front();
     const [app, renderer] = [client([MACHINE_SPINE_CAPABILITY]), client([RENDER_CLIENT_CAPABILITY])];
+    expect(served.eventClients(), 'none said ready').toBe(0);
     app.ready();
+    expect(served.eventClients()).toBe(1);
     expect(served.postRender('render.request', { id: 'r0', kind: 'capture', request: {} } as never), 'none ready').toBe(false);
     renderer.ready();
     expect(render.ready).toBe(1);
     expect(served.renderClients()).toBe(1);
+    expect(served.eventClients(), 'P5 O5 M6: the bus’s events never reach a render client').toBe(1);
     expect(served.postRender('render.exit', {})).toBe(true);
     expect(renderer.events()).toEqual(['render.exit']);
     expect(app.events()).toEqual([]);
@@ -337,6 +340,9 @@ describe('the services front', () => {
     expect(served.postRender('render.exit', {}), 'its connection gone').toBe(false);
     expect(render.gone).toBe(1);
     expect(served.renderClients()).toBe(0);
+    app.close();
+    served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never); // the closed port refuses: the client is gone
+    expect(served.eventClients()).toBe(0);
   });
 
   it('takes render.answer from a render.client alone, and refuses an id the seam did not post', async () => {
@@ -384,5 +390,29 @@ describe('the services front', () => {
     const [own, named] = forwarded.map((entry) => entry.client as { id: string });
     expect(own!.id).toMatch(/^\d+$/);
     expect(named!.id).toMatch(/^\d+\/page:1$/);
+  });
+
+  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §I): a session's capabilities, cold
+  it('answers session.capabilities cold from the daemon\'s reading, never loading the spine, to a client and the endpoint alike', async () => {
+    const asked: string[] = [];
+    const { served, client, ensure } = front({ capabilities: (appSessionId) => (asked.push(appSessionId), { browser: { available: false, reason: 'no browser is attached on mini' } }) });
+    const answer = await client().request('session.capabilities', { appSessionId: 's1' });
+    expect(answer).toMatchObject({ ok: true, value: { browser: { available: false, reason: 'no browser is attached on mini' } } });
+    expect(await served.dispatch('session.capabilities', { appSessionId: 's2' })).toMatchObject({ ok: true });
+    expect(asked).toEqual(['s1', 's2']);
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('tells the daemon when the attached app\'s browser socket may have changed: its machine.client, and the end of a client that sent one', async () => {
+    let changed = 0;
+    const { served, client } = front({ isApp: () => true, browserChanged: () => void changed++ });
+    const app = client([MACHINE_SPINE_CAPABILITY]);
+    const other = client();
+    expect(await app.request('machine.client', { browserSocket: '/u/browser/cua' })).toMatchObject({ ok: true });
+    expect(changed).toBe(1);
+    expect(served.browserSocket()).toBe('/u/browser/cua');
+    other.close();
+    served.close();
+    expect(changed).toBe(2); // the app's connection ended (the other sent none)
   });
 });

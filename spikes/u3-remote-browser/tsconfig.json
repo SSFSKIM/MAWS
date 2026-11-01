@@ -1,0 +1,7 @@
+{
+  // The probe's own typecheck (pnpm exec tsc -p spikes/u3-remote-browser): host/ against the src/main/browser modules it
+  // composes. Not part of the repository's projects; the spike is never merged into the product.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "composite": false, "noEmit": true, "allowJs": true, "checkJs": false, "types": ["node"], "allowImportingTsExtensions": true, "paths": { "@shared/*": ["../../src/shared/*"], "@artifacts/*": ["../../src/artifacts/*"] } },
+  "include": ["host/**/*.ts", "lib/*.d.mts"]
+}

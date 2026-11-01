@@ -72,9 +72,10 @@
 //                       capture renders it, and `artifacts.export`, machine-owned now, is answered in main (the router's
 //                       fallback) for the library's Export and with Send to's `dialect`, the peer's `mawsd` rendering
 //                       nothing;
-//   (downgrade, render) the peer's app on this build's unit `mawsd`: the peer's library Export stays its main's, and the
-//                       unit's render seam renders beside it (a capture through `daemon.e2eRender` from a bare
-//                       machine.sock client, the render host started by the unit's `mawsd`).
+//   (downgrade, render) retired at O5's landing 2: the pair it staged, a pre-render peer's app on this build's unit
+//                       `mawsd`, is one this build's `mawsd` refuses (D11: every peer before the render service predates
+//                       O4), and every later peer renders, so it could only skip. The (pre-O4 app, daemon) scene holds
+//                       the refusal; the unit's render seam is held by e2e:daemon-unit and daemon-render.test.ts.
 // A session's `artifact_screenshot` and `artifact_export` through either pair is not driven: the unit and render-seam
 // unit tests (src/mawsd/daemon-render.test.ts) hold that a post-O5 `mawsd` takes the engine host's requests and posts
 // them to no client, and that an older one's are answered by main's listeners (src/main/artifacts/index.ts).
@@ -1133,41 +1134,6 @@ test('(update, render) this build’s app on the peer’s unit mawsd, which list
       expect(readFileSync(sendTo.path).subarray(1, 4).toString('latin1')).toBe('PNG');
       expect(s.daemonLog(), 'the peer’s mawsd rendered nothing').not.toMatch(/\[render\]|\[render-host\]/);
       said.push(`  welcome: ${welcome.trim()}`, `  page, capture (640x480), library Export (${pdf.path}) and Send to's export (${sendTo.path}) answered in main`);
-      await s.quit(run);
-      record(said);
-    });
-  });
-});
-
-test('(downgrade, render) the peer’s app on this build’s unit mawsd: its library Export stays its main’s, and the unit’s render seam renders beside it', async () => {
-  const { here, peer } = builds();
-  test.skip(rendersOn(peer) || !rendersOn(here) || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not a build of the daemon shape before the render service`);
-  // P5 O4 (D11): this build's mawsd refuses an app from O3-D to before O4, which every peer before the render service is;
-  // the (pre-O4 app, daemon) scene holds that refusal, so the pair is not staged here
-  test.skip(appObeysConnectors(here) && !appObeysConnectors(peer), `this build’s mawsd refuses the peer’s app (wire ${wireOf(peer)}), which lists no ${CONNECTORS_CLIENT_CAPABILITY}: the (pre-O4 app, daemon) scene's`);
-  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
-  await withScratch('xb-render-downgrade', async (s) => {
-    await withUnit(s, here, 'xb-render-downgrade', async (unit) => {
-      const said = [`${peer.label} (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
-      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
-      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
-      expect(machineWelcome(run.output(), unit.pid), 'this build’s mawsd lists machine.render, which the peer’s main does not read').toContain('machine.render');
-      const { id, revision } = await createPage(run);
-      const pdf = await exported(run, { artifactId: id, format: 'pdf' }); // the peer's registry keeps artifacts.export main's
-      expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
-      expect(s.daemonLog(), 'the peer’s library Export is its main’s: no render host').not.toContain('[render] starting the render host');
-
-      const windows = () => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
-      const before = await windows();
-      const to = join(s.root, 'render-downgrade.png');
-      await unit.request('daemon.e2eRender', { artifactId: id, revision, width: 640, height: 480, to }, 120_000);
-      const png = readFileSync(to);
-      expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([640, 480]);
-      expect(s.daemonLog(), 'the unit’s mawsd started its render host for the capture').toContain('[render] starting the render host for artifact_screenshot');
-      expect((await unit.status()).render, 'daemon.status.render').toMatchObject({ state: 'ready', starts: 1 });
-      expect(await windows(), 'no capture window in the peer’s main').toBe(before);
-      said.push(`  the peer's library Export in its main (${pdf.path}); the unit's render seam captured ${id} at 640x480 beside it`);
       await s.quit(run);
       record(said);
     });
