@@ -14,7 +14,8 @@
 //   pushed (`browserEngine.state`); a session already served answers at once.
 // - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its partition's
 //   storage and cache cleared, its browser work reported zero, then answered null (the partition's reason when it could
-//   not be cleared). Only that session's tabs close. A `prepare` of the session meanwhile waits for the drop to end.
+//   not be cleared). Only that session's tabs close. A second drop meanwhile joins it; a `prepare` of the session waits
+//   for it, then cleans a partition it left uncleared, or is refused with the reason.
 // - `inventory`: the session's tabs, bounded (screencast.ts), or `unavailable` for a session not served here.
 // The inventory is pushed again at each change of the session's tabs (the store's coalesced `browser.tabs.changed`), only
 // when it changed; nothing polls.
@@ -115,8 +116,9 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   const { call, log, machine } = deps;
   const caps = deps.caps ?? HEADLESS_TABS;
   const served = new Map<AppSessionId, Served>();
-  const dropping = new Map<AppSessionId, Promise<unknown>>(); // a drop's run, which a prepare of its session waits for
+  const dropping = new Map<AppSessionId, Promise<null>>(); // a drop in flight: a second drop joins it, a prepare waits for it
   const opened = new Map<string, Session>(); // every partition opened, cleared at its session's drop
+  const uncleared = new Set<string>(); // partitions a drop could not clear: the session's next prepare cleans them first
 
   // ---- the composition --------------------------------------------------------------------------------------------
 
@@ -307,7 +309,10 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     served.set(appSessionId, session);
     const dropped = dropping.get(appSessionId);
     session.ready = (async () => {
-      await dropped; // its partition cleared, its socket gone
+      await dropped?.catch(() => {}); // its socket gone and its partition's clears settled
+      if (served.get(appSessionId) !== session) throw new Error(`the headless browser on ${machine} dropped this session while preparing it`);
+      const why = uncleared.has(headlessPartition(appSessionId)) ? await clearPartition(appSessionId) : null;
+      if (why !== null) throw new Error(why);
       if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
       const [parent, , relay] = await Promise.all([parentOf(appSessionId), cua.listening(appSessionId), relayed]);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
@@ -326,30 +331,51 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     return null;
   }
 
+  // A drop of a session not served joins the drop in flight (answered as it is); a drop of a session prepared again since
+  // runs after that one, so the barrier a prepare waits for only ever lengthens.
   function drop(appSessionId: AppSessionId): Promise<null> {
-    const run = dropSession(appSessionId);
-    const settled = run.catch(() => {});
-    dropping.set(appSessionId, settled);
-    void settled.then(() => dropping.get(appSessionId) === settled && dropping.delete(appSessionId));
+    const previous = dropping.get(appSessionId);
+    const session = served.get(appSessionId);
+    if (!session) return previous ?? Promise.resolve(null);
+    served.delete(appSessionId);
+    const run = (async () => {
+      await previous?.catch(() => {});
+      return dropSession(appSessionId, session);
+    })();
+    dropping.set(appSessionId, run);
+    void run.catch(() => {}).then(() => dropping.get(appSessionId) === run && dropping.delete(appSessionId));
     return run;
   }
 
-  async function dropSession(appSessionId: AppSessionId): Promise<null> {
-    const session = served.get(appSessionId);
-    if (!session) return null;
-    served.delete(appSessionId);
+  // §B: nothing of the session's browsing outlives it here. Both clears settle; one that failed leaves the partition
+  // marked, its reason returned. A session that opened no tab opened no partition.
+  async function clearPartition(appSessionId: AppSessionId): Promise<string | null> {
+    const name = headlessPartition(appSessionId);
+    const partition = opened.get(name);
+    if (!partition) return null;
+    const settled = await Promise.allSettled([partition.clearStorageData(), partition.clearCache()]);
+    const failed = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (!failed) {
+      uncleared.delete(name);
+      return null;
+    }
+    uncleared.add(name);
+    const why = `the headless browser on ${machine} could not clear this session’s partition: ${messageOf(failed.reason)}`;
+    log(`[browser] ${appSessionId}: ${why}`);
+    return why;
+  }
+
+  async function dropSession(appSessionId: AppSessionId, session: Served): Promise<null> {
     store.removeSession(appSessionId);
     await cua.closeSession(appSessionId);
-    // §B: nothing of the session's browsing outlives it here (a session that opened no tab opened no partition)
-    const partition = opened.get(headlessPartition(appSessionId));
-    const uncleared = partition ? await Promise.all([partition.clearStorageData(), partition.clearCache()]).then(() => null, (error: unknown) => messageOf(error)) : null;
+    const why = await clearPartition(appSessionId);
     // the zero only after an acquire that succeeded: one refused or failed made no tab and holds nothing to report, and a
     // zero sent while it is in flight could fail it (or a newer one) at mawsd, so an acquire in flight is waited out
     const fence = session.fence;
     session.fence = 'none';
     const held = fence === 'held' || (fence !== 'none' && (await fence.then(() => true, () => false)));
     if (held) await work(appSessionId, false).catch((error: unknown) => log(`[browser] the zero of ${appSessionId}'s browser work was refused: ${messageOf(error)}`));
-    if (uncleared !== null) throw new Error(`the headless browser on ${machine} could not clear this session’s partition: ${uncleared}`);
+    if (why !== null) throw new Error(why);
     return null;
   }
 

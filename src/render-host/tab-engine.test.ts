@@ -325,6 +325,72 @@ describe('the tab engine’s sessions', () => {
   });
 });
 
+// The drop's cleanup as a barrier (fix 2; the task re-review's regressions, m4-drop-order.test.ts): a second drop joins
+// the one in flight, both clears settle before anything answers, and a partition left uncleared is cleaned by the next
+// prepare or that prepare is refused.
+describe('the drop’s cleanup', () => {
+  // A prepared session with one tab, its partition opened; `clear` decides each clear's outcome
+  async function droppable(clear: (what: 'storage' | 'cache') => Promise<void>) {
+    const t = stand({ clear: (_partition, what) => clear(what) });
+    await t.ask(A, 'prepare');
+    const host = await t.host(A);
+    await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
+    const answered = (id: string) => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === id)?.input.result as { ok: boolean; error?: string } | undefined;
+    const send = (id: string, op: 'prepare' | 'drop') => t.engine.request({ id, appSessionId: A, operation: { op } });
+    return { ...t, answered, send };
+  }
+
+  it('makes a second drop join the one in flight: neither drop nor a prepare answers while its storage is being cleared', async () => {
+    let release!: () => void;
+    const storage = new Promise<void>((resolve) => (release = resolve));
+    const t = await droppable((what) => (what === 'storage' ? storage : Promise.resolve()));
+    t.send('d1', 'drop');
+    await expect.poll(() => t.calls.some((c) => c.name === 'clear storage')).toBe(true);
+    t.send('d2', 'drop');
+    t.send('p2', 'prepare');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect([t.answered('d1'), t.answered('d2'), t.answered('p2')]).toEqual([undefined, undefined, undefined]);
+    release();
+    await expect.poll(() => [t.answered('d1'), t.answered('d2'), t.answered('p2')]).toEqual([{ ok: true, value: null }, { ok: true, value: null }, { ok: true, value: null }]);
+    expect(t.calls.filter((c) => c.name.startsWith('clear')).map((c) => c.name)).toEqual(['clear storage', 'clear cache']); // one cleanup
+  });
+
+  it('waits for both clears when one fails, answering the drop with the reason only once the other has settled', async () => {
+    let release!: () => void;
+    const cache = new Promise<void>((resolve) => (release = resolve));
+    const t = await droppable((what) => (what === 'storage' ? Promise.reject(new Error('storage failed')) : cache));
+    t.send('d1', 'drop');
+    await expect.poll(() => t.calls.some((c) => c.name === 'clear cache')).toBe(true);
+    t.send('p2', 'prepare');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect([t.answered('d1'), t.answered('p2')]).toEqual([undefined, undefined]);
+    release();
+    await expect.poll(() => t.answered('d1')).toEqual({ ok: false, error: 'the headless browser on mini could not clear this session’s partition: storage failed' });
+  });
+
+  it('refuses a prepare while the partition its last drop could not clear still cannot be cleared', async () => {
+    const t = await droppable((what) => (what === 'storage' ? Promise.reject(new Error('storage failed')) : Promise.resolve()));
+    t.send('d1', 'drop');
+    await expect.poll(() => t.answered('d1')?.ok).toBe(false);
+    t.send('p2', 'prepare');
+    await expect.poll(() => t.answered('p2')).toEqual({ ok: false, error: 'the headless browser on mini could not clear this session’s partition: storage failed' });
+    expect(t.engine.inspect().sessions).toEqual({});
+    expect(existsSync(t.socketOf(A)), 'no socket listens for the refused session').toBe(false);
+  });
+
+  it('serves a prepare once it has cleaned the partition its last drop left uncleared', async () => {
+    let failures = 1;
+    const t = await droppable(async (what) => {
+      if (what === 'storage' && failures-- > 0) throw new Error('storage failed');
+    });
+    t.send('d1', 'drop');
+    await expect.poll(() => t.answered('d1')?.ok).toBe(false);
+    t.send('p2', 'prepare');
+    await expect.poll(() => t.answered('p2')).toEqual({ ok: true, value: null });
+    expect(t.calls.filter((c) => c.name === 'clear storage')).toHaveLength(2); // cleaned again before serving
+  });
+});
+
 describe('a headless page’s JavaScript dialogs', () => {
   const dialog = (page: FakePage, dialogType: string) => {
     const answered = vi.fn();
