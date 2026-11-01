@@ -7,6 +7,9 @@
 // conversation's branch, Design §12), never in a fresh tab of the thread's own session. The panel rule holds: nothing
 // switches the main view; the tool is activated only when its session is the one shown, and otherwise waits in that
 // session's panel with a line saying where (a toast, or a browser chrome's line while a browser is on screen).
+//
+// P5 O7 M3 ("Forwarding"): a loopback link out of another machine's session opens the same way, carrying its forward, so
+// the tool opens the forward first and the page on its local port (../forward.ts).
 import { validateBrowserUrl } from '@shared/browser/url';
 import type { AppSessionId } from '@shared/graph/ids';
 import { panelHost, shownSession } from '../../../panel/host';
@@ -15,6 +18,7 @@ import { toast } from '../../../stores/notices';
 import { useSessions } from '../../../stores/sessions';
 import { browserTool, type BrowserParams } from '../BrowserTool';
 import { sessionsOnScreen } from '../covering';
+import { forwardOf, type ForwardTarget } from '../forward';
 import { raiseNotice } from '../store';
 import { COMMENT_COPY } from './copy';
 
@@ -24,7 +28,7 @@ export function browserSessionOf(appSessionId: AppSessionId): AppSessionId {
   return lineage?.kind === 'side-thread' ? lineage.parentAppSessionId : appSessionId;
 }
 
-export function openBrowserUrl(appSessionId: AppSessionId, url: string): void {
+export function openBrowserUrl(appSessionId: AppSessionId, url: string, forward?: ForwardTarget): void {
   const checked = validateBrowserUrl(url);
   if (!checked.ok) {
     say('commentCannotOpen', url, { level: 'warning', text: COMMENT_COPY.cannotOpen(url) });
@@ -32,8 +36,18 @@ export function openBrowserUrl(appSessionId: AppSessionId, url: string): void {
   }
   const session = browserSessionOf(appSessionId);
   const shown = shownSession() === session;
-  panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId: session, params: { target: checked.url, appSessionId: session }, activate: shown });
+  const params: BrowserParams = { target: checked.url, appSessionId: session, ...(forward !== undefined && { forward }) };
+  panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId: session, params, activate: shown });
   if (!shown) say('commentOpenedElsewhere', titleOf(session), { level: 'info', text: COMMENT_COPY.openedElsewhere(titleOf(session)) });
+}
+
+// P5 O7 M3: a link out of a session's transcript or terminal, taken when it is a forward (a loopback link of another
+// machine's session) and opened in the in-app browser without asking; false leaves it to its surface's own opening.
+export function openForwardedLink(appSessionId: AppSessionId, url: string): boolean {
+  const forward = forwardOf(appSessionId, url);
+  if (forward === null) return false;
+  openBrowserUrl(appSessionId, url, forward);
+  return true;
 }
 
 // P4 W2-C (tracker 2026-10-07; E4a Decision Log 28, A-47): an app toast over a browser pane on screen freezes the pane to

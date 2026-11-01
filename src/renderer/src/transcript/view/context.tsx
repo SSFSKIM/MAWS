@@ -16,7 +16,9 @@ export interface TranscriptActions {
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
   // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine.
   openFile(path: string, line?: number, appSessionId?: AppSessionId | null): void;
-  openExternal(url: string): void; // C5: layout.openExternal
+  // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
+  // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
+  openExternal(url: string, appSessionId?: AppSessionId | null): void;
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts). P5 O6 M4: `appSessionId` is the session

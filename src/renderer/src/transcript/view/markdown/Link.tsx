@@ -2,7 +2,8 @@
 // `https:`, `http:`, `mailto:` and the chip schemes. A web link opens through C5's open-external command and never
 // navigates the renderer; `maws-path:` is a path chip opening the file (whether it exists is not known here);
 // `maws-image:` is an image chip naming its source, loading nothing (§4.1); `maws-artifact:` (P3-F wave S, F14) is an
-// artifact chip; a link whose href the gates removed is its text.
+// artifact chip; a link whose href the gates removed is its text. P5 O7 M3: a web link carries its row's session, whose
+// machine decides whether a loopback link is a forward (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md).
 import type { ComponentProps, MouseEvent } from 'react';
 import type { ExtraProps } from 'streamdown';
 import { artifactLink, parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
@@ -80,7 +81,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
       title={href}
       onClick={(event) => {
         event.preventDefault();
-        actions.openExternal(href);
+        actions.openExternal(href, session);
       }}
     >
       {children}

@@ -8,6 +8,9 @@
 // - a `tabId` selects that tab;
 // - nothing leaves the session's own state.
 //
+// P5 O7 M3: a target with a `forward` (a loopback link of another machine's session) opens that forward first and the
+// page on its local port (./forward.ts), the tab then marked "forwarded from <machine>" in the strip.
+//
 // Closing the tool's panel tab closes no browser tab (they are the session's), and dispose sends nothing: the pane's
 // unmount already let go of its placement.
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,6 +19,7 @@ import { validateBrowserUrl } from '@shared/browser/url';
 import { ipc } from '../../ipc/client';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { BROWSER_COPY } from './copy';
+import { openForward, type ForwardTarget } from './forward';
 import { BrowserIcon } from './icons';
 import { browser } from './store';
 import { BrowserView } from './View';
@@ -25,6 +29,7 @@ export interface BrowserParams {
   tabId?: string;
   appSessionId?: AppSessionId; // the session the target or tab belongs to, else the one the tool shows
   requestId?: string; // show_pane's request: the same id from two windows reaches one tab in main
+  forward?: ForwardTarget; // P5 O7 M3: the target is a loopback link of the machine named, opened through a forward
 }
 
 const warnRefused = (what: string) => (result: { ok: true } | { ok: false; error: { message: string } }) => {
@@ -47,6 +52,7 @@ export class BrowserHandle {
     if (params?.target !== undefined) {
       const checked = validateBrowserUrl(params.target);
       if (!checked.ok) return;
+      if (params.forward !== undefined) return void openForward(this.client, appSessionId, checked.url, params.forward, params.requestId);
       const request = { appSessionId, url: checked.url, select: true, reuse: 'url' as const, ...(params.requestId !== undefined && { requestId: params.requestId }) };
       void this.client.invoke('browser.tabs.open', request).then(warnRefused('opening a tab'));
     } else if (params?.tabId !== undefined) {

@@ -2,7 +2,7 @@
 // of the named session through main, with the request's id; with a tab id it selects that tab; with nothing it leaves
 // the session's own state. The body lists its session on mount (Decision Log 44 (a)); a main tab whose tab main no
 // longer knows shows the session's browser headed "That tab was closed" (Decision Log 21).
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -14,6 +14,11 @@ import { BrowserHandle, browserTool } from './BrowserTool';
 import { BrowserTab } from './BrowserTab';
 import { BROWSER_COPY } from './copy';
 import { browser, resetBrowser } from './store';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { forwards, resetForwards } from './forward';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { useMachines } from '../../stores/machines';
 
 // P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A and MAIN_B.
 const MAIN_A = 'app-a' as AppSessionId;
@@ -67,6 +72,18 @@ describe('BrowserHandle.open', () => {
     resetBrowser();
   });
 
+  // P5 O7 M3: a loopback link of another machine's session, routed here with its forward
+  it('a target with a forward opens the forward on this app, then the page on its local port in the session', async () => {
+    const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
+    const forward = { machine: OTHER_MACHINE, port: 5173 };
+    new BrowserHandle(A, { target: 'http://localhost:5173/app', forward, appSessionId: R, requestId: 'r2' }, fake.client);
+    expect(fake.invoked('remote.forward.open')).toEqual([forward]);
+    expect(fake.invoked('browser.tabs.open')).toEqual([]);
+    await fake.reply('remote.forward.open', { localPort: 54321 });
+    expect(fake.invoked('browser.tabs.open')).toEqual([{ appSessionId: R, url: 'http://127.0.0.1:54321/app', select: true, reuse: 'url', requestId: 'r2' }]);
+    resetForwards();
+  });
+
   it('nothing, a refused target, or no session at all sends nothing', () => {
     const handle = new BrowserHandle(A, undefined, fake.client);
     handle.open(undefined);
@@ -83,6 +100,7 @@ describe('the tool and the main tab', () => {
     resetBrowser();
     main = installFakeMain((name, input) => {
       if (name === 'browser.tabs.list') return ok({ tabs: input.appSessionId === MAIN_A ? [browserTab(T1, MAIN_A)] : [], selected: { [String(input.appSessionId)]: input.appSessionId === MAIN_A ? T1 : null } });
+      if (name === 'remote.forward.open') return ok({ localPort: 54321 }); // P5 O7 M3
       return ok();
     });
   });
@@ -109,6 +127,31 @@ describe('the tool and the main tab', () => {
     rerender(<Body state={state} ctx={ctxOf(B)} />);
     await act(async () => {});
     expect(main.callsOf('browser.tabs.list')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_B }]);
+  });
+
+  // P5 O7 M3: a refused forward, in place of the pane while the tab it was over stays selected
+  it('in the panel, a refused forward says why in the machine’s name, with Try again and Dismiss, over its tab only', async () => {
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: 'mini' } as MachineState]]) });
+    const refused = (selected: string | null) =>
+      forwards.setState({
+        failures: new Map([[A, { url: 'http://localhost:5173/', forward: { machine: OTHER_MACHINE, port: 5173 }, error: { code: 'internal', message: 'x', issues: { refusal: 'grade' } }, selected }]]),
+      });
+    const Body = browserTool.render;
+    refused(T1);
+    render(<Body state={new BrowserHandle(A, undefined)} ctx={ctxOf(A)} />);
+    await act(async () => {});
+    expect(screen.getByRole('heading', { name: 'Couldn’t open port 5173 on mini' })).toBeTruthy();
+    expect(screen.getByText('This Mac isn’t allowed to open ports on mini')).toBeTruthy();
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.forwarded.tryAgain })));
+    expect(main.callsOf('remote.forward.open')).toEqual([{ machine: OTHER_MACHINE, port: 5173 }]);
+    expect(screen.queryByRole('heading', { name: 'Couldn’t open port 5173 on mini' })).toBeNull(); // opened: the pane is back
+    act(() => refused(T1));
+    act(() => void fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.forwarded.dismiss })));
+    expect(document.querySelector('[data-browser-page="forward-failed"]')).toBeNull();
+    act(() => refused(T2)); // over a tab no longer selected
+    expect(document.querySelector('[data-browser-page="forward-failed"]')).toBeNull();
+    resetForwards();
+    useMachines.setState({ machines: new Map() });
   });
 
   it('a main tab whose tab is gone is headed “That tab was closed”; one that exists is not', async () => {
