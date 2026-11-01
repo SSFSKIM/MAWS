@@ -337,13 +337,12 @@ export class Endpoint implements EndpointModule {
       grant: (value) => this.#grant(value),
       deliver: (states, transitions) => this.#deliver(states, transitions),
       openForward: async (who, port) => {
-        // The act was decided before this ran: the sender's `shell` is decided again now, and the forward made on its
-        // answer at once, so a grant ended meanwhile makes none (a later end removes it at its re-check).
-        const decision = await this.streams.decide('forward.open', who, { ...who, clientClass: 'native-mac' });
-        if (!decision.ok) return { ok: false, error: { code: decision.reason } };
-        const forward = this.forwards.open(who, port);
-        if (forward === null) return { ok: false, error: { code: 'busy' } };
-        return { ok: true, value: { forward: forward.id, port } };
+        // The act was decided before this ran: the sender's `shell` is decided again now, and the forward made in the same
+        // step as that answer, so a grant ended meanwhile makes none (a later end removes it at its re-check).
+        const made = await this.streams.decide('forward.open', who, { ...who, clientClass: 'native-mac' }, () => this.forwards.open(who, port));
+        if (!made.ok) return { ok: false, error: { code: made.reason } };
+        if (made.value === null) return { ok: false, error: { code: 'busy' } };
+        return { ok: true, value: { forward: made.value.id, port } };
       },
       holdForward: (device, forward, channel) => void this.forwards.hold(device, forward, channel),
       now: this.deps.now,

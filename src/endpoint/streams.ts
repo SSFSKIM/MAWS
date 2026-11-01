@@ -30,10 +30,11 @@
 // seam). Input is written through `pty.write` in order; the endpoint keeps the next input offset per `(device, ptyId,
 // inputEpoch)` while a stream holds it and for RESUME_MS after, drops what it already wrote (a resend after a reopen), and
 // forgets an older epoch when a new one opens, which starts at its `inputFrom` (zero for an app run's first stream).
-// Bytes are UTF-8 to `pty.write`'s string, a character split across chunks or reopens written whole. The offset moves
-// past a chunk only once its write landed: one that failed, threw or timed out closes the stream `unavailable`, its chunk
-// unrefunded, so the reopen's resend is written (an unknown outcome may so land twice, never silently not). Resize is `streamControl {resize: {cols,
-// rows}}`, through `pty.resize`. A pty that exits closes its streams `exit` after the output they hold.
+// Bytes are UTF-8 to `pty.write`'s string, a character split across chunks or reopens written whole. A write the pty host
+// refused closes the stream `unavailable` with the offset short of its chunk, unrefunded, so the reopen's resend is
+// written; one whose outcome is unknown (thrown, timed out, the host gone) closes it `unavailable` with the offset past
+// the chunk, so the resend is dropped: input is at most once, since a doubled Enter runs a command twice where a lost
+// keystroke shows as a missing echo. Resize is `streamControl {resize: {cols, rows}}`, through `pty.resize`. A pty that exits closes its streams `exit` after the output they hold.
 //
 // A tcp stream connects to `127.0.0.1:<port>` at its open (`streamOpened` after the connect, `unreachable` on failure),
 // and ends whole with either side's close (the device's resets the socket at once: nothing could carry what it still
@@ -52,6 +53,7 @@ import {
   STREAM_CHUNK_BYTES,
   STREAM_CREDIT_MAX,
   type DeviceStreamMessage,
+  type RefusalReason,
   type EndpointMessage,
   type StreamControlMessage,
   type StreamDataMessage,
@@ -262,8 +264,11 @@ abstract class Stream implements StreamSource {
 }
 
 /** What the endpoint keeps of one device's input to one pty: the epoch, the next offset, the decoder, the write order. */
-/** `carry`: the bytes of a UTF-8 character the last landed chunk began and didn't finish, written with the next. */
+/** `carry`: the bytes of a UTF-8 character the last written chunk began and didn't finish, written with the next. */
 type InputRecord = { epoch: string; next: number; carry: Uint8Array; chain: Promise<void>; holders: number; forget: (() => void) | null };
+
+/** A failed host answer that may come after the write ran: the request timed out, or the host went away with it. */
+const OUTCOME_UNKNOWN = new Set(['timeout', 'host_unavailable']);
 
 class PtyStream extends Stream {
   /** The next output offset the device is owed; earlier bytes of a frame are trimmed. */
@@ -324,9 +329,10 @@ class PtyStream extends Stream {
   }
 
   /**
-   * The device's input, written in order. The record moves past a chunk only once its write landed: a write that failed,
-   * threw or timed out ends the stream `unavailable` with the chunk unrefunded and the record where the last landed write
-   * left it, so the device's reopen resends it and it is written (a write whose outcome is unknown may so land twice).
+   * The device's input, written in order. A write the pty host refused ends the stream `unavailable` with the chunk
+   * unrefunded and the record short of it, so the reopen's resend is written. A write whose outcome is unknown (it threw,
+   * timed out, or the host went away with it) moves the record and its decoder past the chunk first, so the resend is
+   * dropped: at most once.
    */
   input(m: StreamDataMessage): void {
     const bytes = Buffer.from(m.data, 'base64url');
@@ -343,8 +349,14 @@ class PtyStream extends Stream {
         if (end <= record.next) return; // a resend of what was written
         const { text, carry } = utf8Cut(record.carry, bytes.subarray(record.next - m.offset));
         if (text !== '') {
-          const written = await this.host('pty-host', 'pty.write', { ptyId: this.ptyId, data: text });
-          if (!written.ok) throw new Error(written.error.code);
+          const written = await this.host('pty-host', 'pty.write', { ptyId: this.ptyId, data: text }).catch((error: unknown) => {
+            [record.next, record.carry] = [end, carry];
+            throw error;
+          });
+          if (!written.ok) {
+            if (OUTCOME_UNKNOWN.has(written.error.code)) [record.next, record.carry] = [end, carry];
+            throw new Error(written.error.code);
+          }
         }
         record.next = end;
         record.carry = carry;
@@ -583,15 +595,18 @@ export class Streams {
   }
 
   /**
-   * A stream's binding decided against the rights now: asked again when a re-check began while it was asked (a grant
-   * kept or ended meanwhile), so nothing opened on its answer missed a revocation; `unavailable` after three such.
-   * The endpoint asks it too before a forward is made, since the `forward.open` act was decided before its effect ran.
+   * A stream's binding decided against the rights now, and on a grant `publish` run in the same synchronous step as the
+   * check that no re-check began meanwhile: nothing a re-check could miss happens between them, so what `publish` makes
+   * (a stream installed and opened, a forward) is either seen by every later re-check or never made. A decision a
+   * re-check overtook is asked again; `unavailable` after three. The endpoint asks it before a forward is made too, since
+   * the `forward.open` act was decided before its effect ran.
    */
-  async decide(act: string, binding: StreamBinding, who: Who): Promise<Decision> {
+  async decide<R>(act: string, binding: StreamBinding, who: Who, publish: () => R): Promise<{ ok: true; value: R } | { ok: false; reason: RefusalReason }> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const epoch = this.#epoch;
       const decision = await this.#ctx.authorize({ kind: 'stream', name: act, input: binding }, who, this.#ctx.now());
-      if (epoch === this.#epoch) return decision;
+      if (epoch !== this.#epoch) continue;
+      return decision.ok ? { ok: true, value: publish() } : decision;
     }
     return { ok: false, reason: 'unavailable' };
   }
@@ -634,20 +649,27 @@ export class Streams {
     const nextOffset = replay.nextOffset as number;
     // An offset past what the pty has emitted is none the device read from it.
     if (from > nextOffset) return fail('malformed');
-    // The binding decided now, after every read and before anything crosses: a grant ended while the ring was read opens nothing.
-    const decision = await this.decide(act, binding, who);
-    if (placeholder.ended || channel.closed || stream.ended) return fail(null);
-    if (!decision.ok) return fail(decision.reason === 'unavailable' ? 'unavailable' : 'grade');
-    install(stream);
-    stream.open({ pty: { info, ringStart, nextOffset } });
-    // Past the backlog while the ring was read: open and at once `behind`, the device reopening from its offset.
-    if (stream.overrun) return stream.end('behind');
-    stream.push(ringStart, bytes);
-    stream.sent = nextOffset;
-    const pending = stream.pending ?? [];
-    stream.pending = null;
-    for (const frame of pending) stream.frame(frame.offset, frame.data);
-    if (stream.exited || info.alive === false) stream.closeAfter('exit');
+    // The binding decided now, after every read and before anything crosses, and the stream published in the same step:
+    // a grant ended while the ring was read, or before the publication, opens nothing.
+    const decided = await this.decide(act, binding, who, () => {
+      if (placeholder.ended || channel.closed || stream.ended) return false;
+      install(stream);
+      stream.open({ pty: { info, ringStart, nextOffset } });
+      // Past the backlog while the ring was read: open and at once `behind`, the device reopening from its offset.
+      if (stream.overrun) {
+        stream.end('behind');
+        return true;
+      }
+      stream.push(ringStart, bytes);
+      stream.sent = nextOffset;
+      const pending = stream.pending ?? [];
+      stream.pending = null;
+      for (const frame of pending) stream.frame(frame.offset, frame.data);
+      if (stream.exited || info.alive === false) stream.closeAfter('exit');
+      return true;
+    });
+    if (!decided.ok) return fail(decided.reason === 'unavailable' ? 'unavailable' : 'grade');
+    if (!decided.value) fail(null);
   }
 
   async #openTcp({ channel, m, act, binding, who, placeholder, install }: Opening): Promise<void> {
@@ -663,16 +685,25 @@ export class Streams {
       socket.destroy();
       return refuse('unreachable');
     }
-    const decision = await this.decide(act, binding, who);
-    if (placeholder.ended || channel.closed || !decision.ok || this.#ctx.forwards.get(forward.device, forward.id) !== forward) {
-      socket.resetAndDestroy();
-      if (!placeholder.ended && !channel.closed) refuse(decision.ok ? 'unknown' : decision.reason === 'unavailable' ? 'unavailable' : 'grade');
-      return;
-    }
-    const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward);
-    install(stream);
-    stream.attach(socket);
-    stream.open({});
+    // The connection may end while the binding is decided (its listeners come with the stream): such an open is
+    // `unreachable`, never a live stream on a dead socket.
+    let lost = false;
+    socket.once('close', () => (lost = true));
+    socket.on('error', () => {});
+    const decided = await this.decide(act, binding, who, (): StreamRefusal | 'gone' | null => {
+      if (placeholder.ended || channel.closed) return 'gone';
+      if (lost || socket.destroyed) return 'unreachable';
+      if (this.#ctx.forwards.get(forward.device, forward.id) !== forward) return 'unknown';
+      const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward);
+      install(stream);
+      stream.attach(socket);
+      stream.open({});
+      return null;
+    });
+    const refusal = decided.ok ? decided.value : decided.reason === 'unavailable' ? 'unavailable' : 'grade';
+    if (refusal === null) return;
+    if (!socket.destroyed) socket.resetAndDestroy();
+    if (refusal !== 'gone') refuse(refusal);
   }
 
   /** The device's input record for a pty: kept for its epoch, a new epoch replacing it from its `inputFrom`. */

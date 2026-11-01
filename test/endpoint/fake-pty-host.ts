@@ -33,6 +33,8 @@ export class FakePtyHost {
   #replayHeld: Promise<void> | null = null;
   /** The next this many `pty.write`s fail (`internal`), writing nothing. */
   failWrites = 0;
+  /** The next this many `pty.write`s land and then their reply is lost: a throw, or this failed answer. */
+  lostReplies: Array<'throw' | 'timeout' | 'host_unavailable'> = [];
   readonly #frames = new Set<FrameListener>();
   readonly #events = new Set<EventListener>();
   #next = 0;
@@ -144,6 +146,9 @@ export class FakePtyHost {
           return no('internal');
         }
         this.writes.push({ ptyId: i.ptyId as string, data: i.data as string });
+        const lost = this.lostReplies.shift();
+        if (lost === 'throw') throw new Error('the reply was lost');
+        if (lost !== undefined) return no(lost);
         return ok(undefined);
       }
       case 'pty.resize': {

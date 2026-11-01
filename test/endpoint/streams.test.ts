@@ -9,6 +9,7 @@ import { createServer, type Server } from 'node:http';
 import { createServer as createTcpServer, type AddressInfo, type Server as TcpServer, type Socket } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
+import type { Decision } from '../../src/endpoint/authorize';
 import { OFFERS } from '../../src/endpoint/offers';
 import { STREAM_BACKLOG_BYTES } from '../../src/endpoint/streams';
 import { FakePtyHost } from './fake-pty-host';
@@ -634,5 +635,230 @@ describe('a device’s close of a forwarded connection', () => {
     await a.channel.send({ t: 'streamClose', id, reason: 'closed' });
     await Promise.race([closed, sleep(2000).then(() => Promise.reject(new Error('the machine’s side was not reset')))]);
     expect(sockets[0].destroyed).toBe(true);
+  });
+});
+
+// ---- Fix wave 2 (the task review): a revocation against the publication, a connection lost while decided, at most once --
+
+/** The `nth` stream decision from now on (1-based) passed through `wrap`; every other decision untouched. */
+function onStreamDecision(f: Fixture, nth: number, wrap: (decided: Promise<Decision>) => Promise<Decision>): void {
+  const authorizer = f.endpoint.authorizer;
+  const original = authorizer.authorize.bind(authorizer);
+  let seen = 0;
+  authorizer.authorize = (request, who, now) => {
+    const decided = original(request, who, now);
+    return request.kind === 'stream' && ++seen === nth ? wrap(decided) : decided;
+  };
+}
+
+/** `member`'s grant ended at once, with no await between the ledger's write and the re-check it starts. */
+function withdrawNow(f: Fixture, member: string): void {
+  const state = f.endpoint.parts!.state;
+  const ledger = state.ledger!;
+  const grants = { ...ledger.grants };
+  delete grants[member];
+  state.setLedger({ ...ledger, grants });
+  f.endpoint.channels.refreshCaps();
+}
+
+/** `fn` run `depth` microtasks from now. */
+function inMicrotasks(depth: number, fn: () => void): void {
+  queueMicrotask(() => (depth === 0 ? fn() : inMicrotasks(depth - 1, fn)));
+}
+
+/** A decision answered as it was, `fn` queued `depth` microtasks behind its answer. */
+const thenQueue = (depth: number, fn: () => void) => async (decided: Promise<Decision>) => {
+  const decision = await decided;
+  inMicrotasks(depth, fn);
+  return decision;
+};
+
+/** A decision computed at once and answered once `held` resolves. */
+const heldUntil = (held: Promise<void>) => async (decided: Promise<Decision>) => {
+  const decision = await decided;
+  await held;
+  return decision;
+};
+
+const DEPTHS = [0, 1, 2, 3, 4];
+
+describe('a revocation against the publication', () => {
+  it('leaves no pty stream live when the withdrawal runs a microtask behind the final decision’s grant, at any depth', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    let version = 1;
+    expect(await grant(f, org.B, ['shell'], version)).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    const { action } = await run(f, b, 'pty.attach', { ptyId });
+    for (const depth of DEPTHS) {
+      onStreamDecision(f, 2, thenQueue(depth, () => withdrawNow(f, org.B)));
+      const { id, answer } = await openPty(b, action.opId, ptyId);
+      await sleep(30);
+      if (answer.t === 'streamOpened') expect([depth, closeOf(b, id)]).toEqual([depth, 'removed']);
+      else expect([depth, answer.reason]).toEqual([depth, 'grade']);
+      await b.channel.send({ t: 'streamData', id, offset: 0, data: b64('x') });
+      await sleep(20);
+      expect([depth, f.pty.writes]).toEqual([depth, []]);
+      expect(await grant(f, org.B, ['shell'], ++version)).toContain('shell');
+    }
+    expect(b.channel.closed).toBe(false);
+  });
+
+  it('leaves no tcp stream live when the withdrawal runs a microtask behind the final decision’s grant, at any depth', async () => {
+    const f = await start();
+    const server = await http();
+    let version = 1;
+    for (const depth of DEPTHS) {
+      expect(await grant(f, org.B, ['shell'], version++)).toContain('shell');
+      const b = await openRemote(f, org.b1, org.B);
+      const { action, outcome } = await run(f, b, 'forward.open', { port: server.port });
+      const before = server.sockets.length;
+      onStreamDecision(f, 2, thenQueue(depth, () => withdrawNow(f, org.B)));
+      const { id, answer } = await openTcp(b, action.opId, outcome.result!.forward as string);
+      await sleep(30);
+      if (answer.t === 'streamOpened') expect([depth, closeOf(b, id)]).toEqual([depth, 'removed']);
+      else expect([depth, answer.reason]).toEqual([depth, 'grade']);
+      expect([depth, f.endpoint.forwards.list()]).toEqual([depth, []]);
+      expect([depth, server.sockets.slice(before).every((socket) => socket.destroyed)]).toEqual([depth, true]);
+      drop(b);
+      await until(() => f.endpoint.channels.size === 0, 'the channel gone');
+    }
+  });
+
+  it('leaves no forward when the withdrawal runs a microtask behind its effect’s decision, at any depth', async () => {
+    const f = await start();
+    const server = await http();
+    let version = 1;
+    expect(await grant(f, org.B, ['shell'], version)).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    for (const depth of DEPTHS) {
+      onStreamDecision(f, 1, thenQueue(depth, () => withdrawNow(f, org.B)));
+      const { outcome } = await run(f, b, 'forward.open', { port: server.port });
+      await sleep(30);
+      expect([depth, f.endpoint.forwards.list()]).toEqual([depth, []]);
+      if (outcome.state === 'failed') expect([depth, outcome]).toEqual([depth, { state: 'failed', error: { code: 'grade' } }]);
+      expect(await grant(f, org.B, ['shell'], ++version)).toContain('shell');
+    }
+    expect(server.sockets).toEqual([]);
+  });
+
+  it('asks again when a re-check starts while the final decision is pending: the pty stream, the tcp stream and the forward are refused `grade`', async () => {
+    const f = await start();
+    const server = await http();
+    const ptyId = f.pty.spawn('app-1');
+    expect(await grant(f, org.B, ['shell'], 1)).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    const attach = await run(f, b, 'pty.attach', { ptyId });
+    const forward = await run(f, b, 'forward.open', { port: server.port });
+    const asked = (n: number) => {
+      let release!: () => void;
+      onStreamDecision(f, n, heldUntil(new Promise<void>((resolve) => (release = resolve))));
+      return () => release();
+    };
+
+    let release = asked(2);
+    const pty = id16();
+    await b.channel.send({ t: 'streamOpen', id: pty, kind: 'pty', op: attach.action.opId, credit: 1024 * 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } });
+    await sleep(30);
+    withdrawNow(f, org.B);
+    release();
+    await until(() => ofStream(b, pty).length > 0, 'the pty stream’s answer');
+    expect(ofStream(b, pty)).toEqual([{ t: 'streamRefused', id: pty, reason: 'grade' }]);
+    expect(await grant(f, org.B, ['shell'], 2)).toContain('shell');
+
+    release = asked(1);
+    const action = await shellAct(f, b, 'forward.open', { port: server.port });
+    const from = b.inbox.length;
+    expect(await act(b, action)).toBe('ok');
+    await sleep(30);
+    withdrawNow(f, org.B);
+    release();
+    expect(await done(b, action, from)).toEqual({ state: 'failed', error: { code: 'grade' } });
+    expect(await grant(f, org.B, ['shell'], 3)).toContain('shell');
+
+    // The forward made before the withdrawals went with the first one's re-check.
+    expect(forward.outcome.state).toBe('done');
+    expect(f.endpoint.forwards.list()).toEqual([]);
+    const again = await run(f, b, 'forward.open', { port: server.port });
+    release = asked(2);
+    const tcp = id16();
+    await b.channel.send({ t: 'streamOpen', id: tcp, kind: 'tcp', op: again.action.opId, credit: 1024 * 1024, tcp: { forward: again.outcome.result!.forward as string } });
+    await until(() => server.sockets.length === 1, 'the connection');
+    await sleep(20);
+    withdrawNow(f, org.B);
+    release();
+    await until(() => ofStream(b, tcp).length > 0, 'the tcp stream’s answer');
+    expect(ofStream(b, tcp)).toEqual([{ t: 'streamRefused', id: tcp, reason: 'grade' }]);
+    await until(() => server.sockets[0].destroyed, 'the connection reset');
+    expect(b.channel.closed).toBe(false);
+  });
+});
+
+describe('a forwarded connection lost while its stream is decided', () => {
+  it('is refused `unreachable`, never opened, and the channel is kept', async () => {
+    const f = await start();
+    const server = await http();
+    const a = await openRemote(f, org.a1, org.A);
+    const { action, outcome } = await run(f, a, 'forward.open', { port: server.port });
+    let release!: () => void;
+    onStreamDecision(f, 2, heldUntil(new Promise<void>((resolve) => (release = resolve))));
+    const id = id16();
+    await a.channel.send({ t: 'streamOpen', id, kind: 'tcp', op: action.opId, credit: 1024 * 1024, tcp: { forward: outcome.result!.forward as string } });
+    await until(() => server.sockets.length === 1, 'the connection');
+    server.sockets[0].resetAndDestroy();
+    await sleep(30);
+    release();
+    await until(() => ofStream(a, id).length > 0, 'the answer');
+    await sleep(20);
+    expect(ofStream(a, id)).toEqual([{ t: 'streamRefused', id, reason: 'unreachable' }]);
+    expect(a.channel.closed).toBe(false);
+    expect(f.endpoint.channels.size).toBe(1);
+    // The forward stands: a stream on it connects again.
+    const next = await openTcp(a, action.opId, outcome.result!.forward as string);
+    expect(next.answer.t).toBe('streamOpened');
+  });
+});
+
+describe('a write whose outcome is unknown', () => {
+  for (const lost of ['throw', 'timeout', 'host_unavailable'] as const) {
+    it(`is at most once: the write lands and its reply is lost (${lost}), the stream closes \`unavailable\`, and the reopen’s resend is dropped`, async () => {
+      const f = await start();
+      const ptyId = f.pty.spawn('app-1');
+      const a = await openRemote(f, org.a1, org.A);
+      const { action } = await run(f, a, 'pty.attach', { ptyId });
+      const epoch = id16();
+      const first = await openPty(a, action.opId, ptyId, { epoch });
+      f.pty.lostReplies = [lost];
+      await a.channel.send({ t: 'streamData', id: first.id, offset: 0, data: b64('ls\n') });
+      await until(() => closeOf(a, first.id), 'the close');
+      expect(closeOf(a, first.id)).toBe('unavailable');
+      expect(f.pty.writes.map((w) => w.data)).toEqual(['ls\n']);
+      const second = await openPty(a, action.opId, ptyId, { epoch, inputFrom: 0 });
+      await a.channel.send({ t: 'streamData', id: second.id, offset: 0, data: b64('ls\n') });
+      await a.channel.send({ t: 'streamData', id: second.id, offset: 3, data: b64('pwd\n') });
+      await until(() => f.pty.writes.length === 2, 'the next chunk written');
+      await sleep(30);
+      expect(f.pty.writes.map((w) => w.data)).toEqual(['ls\n', 'pwd\n']);
+      expect(closeOf(a, second.id)).toBeUndefined();
+    });
+  }
+
+  it('moves the decoder past the chunk too: a character the lost chunk began is finished by the next chunk after the reopen', async () => {
+    const f = await start();
+    const ptyId = f.pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    const { action } = await run(f, a, 'pty.attach', { ptyId });
+    const epoch = id16();
+    const e = Buffer.from('é');
+    const first = await openPty(a, action.opId, ptyId, { epoch });
+    f.pty.lostReplies = ['throw'];
+    await a.channel.send({ t: 'streamData', id: first.id, offset: 0, data: b64(Buffer.concat([Buffer.from('a'), e.subarray(0, 1)])) });
+    await until(() => closeOf(a, first.id), 'the close');
+    const second = await openPty(a, action.opId, ptyId, { epoch, inputFrom: 0 });
+    await a.channel.send({ t: 'streamData', id: second.id, offset: 0, data: b64(Buffer.concat([Buffer.from('a'), e.subarray(0, 1)])) });
+    await a.channel.send({ t: 'streamData', id: second.id, offset: 2, data: b64(Buffer.concat([e.subarray(1), Buffer.from('b')])) });
+    await until(() => f.pty.writes.length === 2, 'the next chunk written');
+    await sleep(30);
+    expect(f.pty.writes.map((w) => w.data)).toEqual(['a', 'éb']);
   });
 });
