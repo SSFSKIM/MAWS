@@ -20,7 +20,7 @@ import { OFFERS } from '../../src/endpoint/offers';
 import type { AllowlistRecord } from '../../src/services/files/allowlist';
 import { registerFilesHandlers } from '../../src/services/files/register';
 import { iso } from './org-fixtures';
-import { evs, makeOrg, of, openRemote, snapshots, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { evs, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -299,11 +299,13 @@ function shared(f: Fixture, appSessionId: string, share: 'view' | 'converse' | n
   f.records.set({ lane: 'B', session: `eng-${appSessionId}`, owners: ['@machine'], ...(share === null ? {} : { shares: [{ member, grade: share }] }) }, appSessionId);
 }
 
+/** The feed opened, and the snapshot this opening sent (its pages may follow its `subbed`). */
 async function attentionFeed(r: Remote, sub: string): Promise<{ subbed: Msg; snap: Item[] }> {
+  const from = r.inbox.length;
   const subbed = await feed(r, sub, null, 'attention');
   if (subbed.t !== 'subbed') return { subbed, snap: [] };
-  const snap = await until(() => snapshots(r, sub).at(-1), `the snapshot of ${sub}`);
-  return { subbed, snap: snap as unknown as Item[] };
+  const snap = await snapshot(r, sub, from);
+  return { subbed, snap: snap.body as unknown as Item[] };
 }
 
 const bodies = (r: Remote, sub: string, from = 0) => evs(r, sub, from).map((e) => e.body as { appSessionId: string; items: Item[] });
