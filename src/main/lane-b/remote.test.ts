@@ -17,6 +17,9 @@ import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
+import { startNotifier } from '../attention/notifier';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -833,13 +836,43 @@ describe('the attention feed beside a session’s stream', () => {
     expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
   });
 
+  // fix wave 4 (the milestone re-check): the dock counts what Needs you shows, and the handover raises nothing again
+  it('counts a live fallback item in the dock badge and raises it once across the handover from the feed to the stream', async () => {
+    const l = lab();
+    const badges: number[] = [];
+    const raised: string[] = [];
+    let clock = 0;
+    const stop = startNotifier(fakeSpineView(), {
+      port: { notify: (_c, request) => (raised.push(request.body), { close: () => {} }), badge: (_c, count) => void badges.push(count), focus: () => ({}) as never },
+      isFocused: () => false, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: () => true, emitFrom: () => true,
+      remote: l.adapter.attention, now: () => clock,
+    });
+    clock = 60_000; // the machine first reached past the startup window: its first snapshot is raised
+    try {
+      const sub = await live(l);
+      const feed = fed(l, [asked]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      expect(badges.at(-1)).toBe(1);
+      feed.sink.ended('not-offered'); // the link stays up
+      expect(badges.at(-1)).toBe(1);
+      expect(raised).toHaveLength(1);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([])); // the stream says it answered
+      expect(badges.at(-1)).toBe(0);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked, error]));
+      expect(badges.at(-1)).toBe(1);
+      expect(raised).toHaveLength(2); // the error, new; the permission seen before
+    } finally {
+      stop();
+    }
+  });
+
   it('gives a machine’s sessions back to their streams when the feed couldn’t carry a change (`omitted`)', async () => {
     const l = lab();
     const sub = await live(l);
     const feed = fed(l, [asked]);
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked])); // held, unsaid while the feed follows
     feed.sink.event({ epoch: 'attention:boot', seq: 1 }, { omitted: 'too-large', bytes: 5 * 1024 * 1024 });
-    expect(l.adapter.attention.machine(MINI)!.sessions.size).toBe(0);
+    expect([...l.adapter.attention.machine(MINI)!.sessions]).toEqual([[APP, [asked]]]); // fix wave 4: the streams' items, effective
     expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: false });
     expect(attentionOf(l).at(-1)).toEqual(['att-req-1']);
     expect(feed.closed).toBe(true);

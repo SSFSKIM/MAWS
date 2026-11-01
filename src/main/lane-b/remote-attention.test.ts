@@ -310,5 +310,45 @@ describe('the attention feed', () => {
     expect(l.attention.follows(MINI)).toBe(false);
     expect(l.unfed).toEqual([MINI, MINI]);
   });
+
+  // fix wave 4: the machine's effective items, which the badge and the notifier read
+  it('exposes the streams’ items as the machine’s once its feed no longer speaks, and says when they change; the feed’s again at its snapshot', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    const a = permission('app-1');
+    l.snapshot([a]);
+    l.streams.set(MINI, [a]);
+    l.attention.streamsChanged(MINI, 'app-1');
+    expect(l.changes.filter((c) => c.kind === 'session')).toEqual([]); // fed: the feed speaks
+    l.feed().sink.ended('not-offered');
+    expect([...l.attention.machine(MINI)!.sessions]).toEqual([['app-1', [a]]]);
+    l.streams.set(MINI, []);
+    l.attention.streamsChanged(MINI, 'app-1');
+    expect(l.changes.at(-1)).toEqual({ machine: MINI, kind: 'session', app: 'app-1' });
+    expect(l.attention.machine(MINI)!.sessions.size).toBe(0);
+    // a feed back on the next channel speaks once its snapshot came
+    l.streams.set(MINI, [a]);
+    l.mini.set('down', null);
+    l.mini.set('up');
+    expect(l.attention.follows(MINI)).toBe(true);
+    expect([...l.attention.machine(MINI)!.sessions]).toEqual([['app-1', [a]]]);
+    const b = question('app-2');
+    l.snapshot([b]);
+    expect([...l.attention.machine(MINI)!.sessions]).toEqual([['app-2', [b]]]);
+  });
+
+  it('keeps saying the streams’ items, greyed, at a page’s announcement while a returning feed has not sent its snapshot', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    const a = permission('app-1');
+    l.snapshot([a]);
+    l.streams.set(MINI, [a]);
+    l.feed().sink.ended('not-offered');
+    l.mini.set('down', null);
+    l.mini.set('up'); // a new channel: the feed asked again
+    expect(l.attention.follows(MINI)).toBe(true);
+    l.attention.sayAgain();
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: true });
+  });
 });
 

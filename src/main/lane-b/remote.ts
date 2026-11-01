@@ -272,6 +272,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
         attentionFed: () => attention.follows(machine), // fix wave 1: the feed's items are the session's attention
+        attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
@@ -299,7 +300,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   function forget(machine: MachineRef, app: string, lane: Lane): void {
     if (lane.open || lane.sending || lane.sends.length > 0) return;
     const lanes = machines.get(machine)?.lanes;
-    if (lanes?.get(app) === lane) lanes.delete(app);
+    if (lanes?.get(app) !== lane) return;
+    lanes.delete(app);
+    if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
   const interest = createRemoteInterest({

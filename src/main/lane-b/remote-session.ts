@@ -95,6 +95,8 @@ export interface RemoteSessionDeps {
    * the stream keeps its items but says none, so neither overwrites the other.
    */
   attentionFed?(): boolean;
+  /** Fix wave 4: the stream's items changed (said or not): the machine's effective items may be these. */
+  attentionChanged?(): void;
   log(line: string): void;
 }
 
@@ -420,6 +422,7 @@ export class RemoteSession {
       }
       this.#lastParts.items = items;
       if (this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
+      this.#deps.attentionChanged?.();
     }
   }
 

@@ -41,7 +41,10 @@ export interface RemoteMachineAttention {
   readonly name: string;
   /** Offline (its link `down`, or made again) since its last snapshot: out of the badge, raising nothing. */
   readonly greyed: boolean;
-  /** Each session's items, by its bare id; a session with none is absent. */
+  /**
+   * Each session's items, by its bare id; a session with none is absent. Fix wave 4: the machine's effective items, the
+   * feed's once its snapshot came on the current opening (`fed`), else its sessions' streams' (`streamItems`).
+   */
   readonly sessions: ReadonlyMap<string, readonly AttentionItem[]>;
 }
 /** What changed: every session of the machine (a snapshot), one session (an `ev`), its greying, or the machine left. */
@@ -57,7 +60,9 @@ export interface RemoteAttention {
   follows(machine: MachineRef): boolean;
   /** Fix wave 1: a session's items said again from the feed (a page's `session.get`), while the feed follows. */
   replay(machine: MachineRef, app: string): void;
-  /** Fix wave 1: every following machine's state said again (a page that just announced itself); one whose feed ended says nothing. */
+  /** Fix wave 4: a session's stream's items changed (its parts, or its lane let go): heard while they are the machine's. */
+  streamsChanged(machine: MachineRef, app: string): void;
+  /** Fix wave 1: every machine's state said again (a page that just announced itself): the feed's once fed, else its streams'. */
   sayAgain(): void;
   /** Heard after each change has been said to the renderer. */
   onChange(listener: (change: RemoteAttentionChange) => void): () => void;
@@ -94,6 +99,11 @@ type Feed = {
   greyed: boolean;
   /** A `remote.attention` was said for the machine: its state goes on being said. */
   said: boolean;
+  /**
+   * Fix wave 4: the feed's cache is the machine's items: a snapshot came on its current opening. Until then (an opening
+   * after a channel with no feed), and whenever no feed follows, the streams' items are.
+   */
+  fed: boolean;
   off(): void;
 };
 
@@ -111,7 +121,16 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
   const changed = (change: RemoteAttentionChange) => {
     for (const listener of [...listeners]) listener(change);
   };
-  const viewOf = (machine: MachineRef, feed: Feed): RemoteMachineAttention => ({ machine, name: feed.link.name, greyed: feed.greyed, sessions: feed.sessions });
+  /** The streams' items, by session. */
+  const streamSessions = (machine: MachineRef): Map<string, AttentionItem[]> => {
+    const sessions = new Map<string, AttentionItem[]>();
+    for (const item of deps.streamItems(machine)) sessions.set(item.appSessionId, [...(sessions.get(item.appSessionId) ?? []), item]);
+    return sessions;
+  };
+  const effective = (machine: MachineRef, feed: Feed) => (feed.fed ? feed.sessions : streamSessions(machine));
+  const viewOf = (machine: MachineRef, feed: Feed): RemoteMachineAttention => ({ machine, name: feed.link.name, greyed: feed.greyed, sessions: effective(machine, feed) });
+  /** The machine's state as it stands: the feed's cache once fed, else its streams' items (fix waves 3 and 4). */
+  const say = (machine: MachineRef, feed: Feed) => (feed.fed ? sayAll(machine, feed) : sayStreams(machine, feed));
 
   /** The machine's whole state to the renderer. */
   function sayAll(machine: MachineRef, feed: Feed): void {
@@ -143,6 +162,7 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
       if (session !== null && session.items.length > 0) feed.sessions.set(session.app, session.items);
     }
     feed.greyed = false;
+    feed.fed = true;
     sayAll(machine, feed);
     changed({ machine, kind: 'snapshot' });
   }
@@ -163,6 +183,7 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
   function noFeed(machine: MachineRef, feed: Feed): void {
     feed.refusedOn = feed.link.peerCapabilities();
     feed.greyed = false;
+    feed.fed = false;
     if (feed.said || feed.sessions.size > 0) {
       feed.sessions = new Map();
       sayStreams(machine, feed);
@@ -245,8 +266,7 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
     if (feed.link.peerCapabilities() === null) feed.refusedOn = null;
     if (feed.link.state() === 'down' && !feed.greyed) {
       feed.greyed = true;
-      if (following(feed) && (feed.said || feed.sessions.size > 0)) sayAll(machine, feed);
-      else if (!following(feed) && feed.said) sayStreams(machine, feed); // fix wave 3: the streams' items, greyed
+      if (feed.said || feed.sessions.size > 0) say(machine, feed); // the feed's, or (fix waves 3, 4) the streams', greyed
       changed({ machine, kind: 'greyed' });
     }
     ensure(machine, feed);
@@ -268,14 +288,14 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
   }
 
   function attach(machine: MachineRef, link: RemoteLink, was: Feed | undefined): void {
-    const feed: Feed = { link, sub: null, timer: null, backoffMs: retryMs[0], refusedOn: null, sessions: was?.sessions ?? new Map(), greyed: false, said: was?.said ?? false, off: () => {} };
+    const feed: Feed = { link, sub: null, timer: null, backoffMs: retryMs[0], refusedOn: null, sessions: was?.sessions ?? new Map(), greyed: false, said: was?.said ?? false, fed: was?.fed ?? false, off: () => {} };
     feeds.set(machine, feed);
     const offs = [link.onState(() => moved(machine, feed)), link.onCaps(() => moved(machine, feed))];
     feed.off = () => offs.forEach((off) => off());
     // A link made again: what the old one said stands, greyed, until the new one's snapshot.
     if (was !== undefined && (was.said || was.sessions.size > 0)) {
       feed.greyed = true;
-      sayAll(machine, feed);
+      say(machine, feed);
       changed({ machine, kind: 'greyed' });
     }
     moved(machine, feed);
@@ -314,14 +334,18 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
     },
     replay(machine, app) {
       const feed = feeds.get(machine);
-      if (stopped || feed === undefined || !following(feed)) return;
-      deps.emit(machine, 'attention.changed', { appSessionId: app as AppSessionId, items: feed.sessions.get(app) ?? [] });
+      if (stopped || feed === undefined || !following(feed)) return; // the stream says its own
+      deps.emit(machine, 'attention.changed', { appSessionId: app as AppSessionId, items: effective(machine, feed).get(app) ?? [] });
+    },
+    streamsChanged(machine, app) {
+      const feed = feeds.get(machine);
+      if (!stopped && feed !== undefined && !feed.fed) changed({ machine, kind: 'session', app });
     },
     sayAgain() {
       if (stopped) return;
       // a feed that follows speaks for its machine; one that ended has given its sessions back to their streams, whose
       // items are said in its place (fix wave 3), never its emptied cache
-      for (const [machine, feed] of feeds) if (feed.said) (following(feed) ? sayAll : sayStreams)(machine, feed);
+      for (const [machine, feed] of feeds) if (feed.said) say(machine, feed); // fix wave 4: a returning feed is fed only at its snapshot
     },
     onChange(listener) {
       listeners.add(listener);
