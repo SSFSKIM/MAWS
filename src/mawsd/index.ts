@@ -117,8 +117,8 @@ function commandLine(argv: readonly string[]): void {
     out: (text) => void process.stdout.write(text),
     err: (text) => void process.stderr.write(text),
     stdin: { isTTY: process.stdin.isTTY === true, read: readStdin, prompt: hiddenPrompt },
-    run: (command, args) => {
-      const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
+    run: (command, args, options) => {
+      const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: options?.timeoutMs ?? 30_000 });
       return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? (result.error ? String(result.error) : '') };
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

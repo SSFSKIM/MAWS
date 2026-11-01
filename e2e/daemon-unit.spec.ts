@@ -4,6 +4,13 @@
 // domain. launchd starts `mawsd` at load; a kill -9 is followed by a new pid (KeepAlive, a crash); `mawsd restart` gives
 // a new `mawsd` with the engine host's pid unchanged (the new one adopts it); `uninstall` leaves no plist and no job.
 //
+// P5 O5 M6 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 6's second half): the render host's first run
+// under a unit. The unit's `mawsd` (Electron as Node, under launchd) is asked an export over machine.sock with no app
+// anywhere; it spawns the app's binary windowless as its own child (this checkout's Electron with the app root, as every
+// scene launches the app), the PDF lands under the profile, `mawsd.log` shows the start and the quiet exit, and the
+// status reads no render host after it. Linux's half (the render cache's Electron under Xvfb and a systemd user unit) is
+// the acceptance VM's run (spikes/u4-render-service/FINDINGS.md §4): no gate lane runs Linux e2e.
+//
 // It loads real LaunchAgents, so it runs only in CI (the hosted Macs, or the gate's own Mac): `pnpm e2e:daemon-unit`
 // refuses outside CI before Playwright starts, and so does this file before any test (./support/daemon-unit-guard.mjs). Its
 // first step removes every `dev.maws.mawsd.e2e-*` an earlier run left (.github/scripts/launchd-sweep.sh), and the gate
@@ -16,6 +23,7 @@ import { expect, test } from '@playwright/test';
 import { ciRefusal, e2eLabel, homeInstanceRefusal, OWNER_UNIT_LABEL, runIdOf } from './support/daemon-unit-guard.mjs';
 import { REPO_ROOT } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
+import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon'; // P5 O5 M6
 
 const ON = process.env.MAWS_DAEMON_UNIT_E2E === '1';
 test.skip(!ON, 'the launchd group runs under pnpm e2e:daemon-unit (MAWS_DAEMON_UNIT_E2E=1), in CI only');
@@ -131,6 +139,48 @@ test('the LaunchAgent: launchd starts mawsd at load; a kill -9 is followed by a 
     // whatever happened: this case's job and plist, then every process of the scratch (the engine and pty hosts)
     spawnSync('launchctl', ['bootout', `gui/${UID}/${label}`]);
     rmSync(plist, { force: true });
+    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+test('the render host under the LaunchAgent: the unit’s mawsd spawns the app’s binary windowless for an export with no app, the PDF under the profile, then ends it when quiet', async () => {
+  test.setTimeout(240_000);
+  expect(existsSync(MAWSD), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o5-unit-')));
+  const profile = join(root, 'profile');
+  const pids = new Set<number>();
+  let unit: UnitDaemon | null = null;
+  let leftover: unknown = null;
+  const log = () => (existsSync(join(profile, 'mawsd', 'mawsd.log')) ? readFileSync(join(profile, 'mawsd', 'mawsd.log'), 'utf8') : '');
+  try {
+    // the scratch engine store, as a launch gives a private daemon; a short quiet period so the scene sees the host end
+    const env = { CLAUDE_CONFIG_DIR: join(profile, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(profile, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop', MAWS_RENDER_QUIET_MS: '5000' };
+    unit = await installUnitDaemon({ root: REPO_ROOT, userData: profile, label: e2eLabel(RUN, 'render'), env });
+    pids.add(unit.pid);
+    expect((await unit.status()).render, 'no render host at the unit’s start').toMatchObject({ state: 'off', pid: null });
+
+    const page = '<!doctype html><html><head><title>Unit</title></head><body><h1>UNIT_RENDER_HOST</h1></body></html>';
+    const { artifact } = await unit.request<{ artifact: { id: string; revision: number } }>('artifacts.create', { kind: 'html', title: 'Unit page', content: { bytes: new TextEncoder().encode(page), name: 'index.html' } });
+    const exported = await unit.request<{ path: string; revision: number }>('artifacts.export', { artifactId: artifact.id, format: 'pdf' }, 150_000);
+    expect(exported.path.startsWith(join(profile, 'artifacts', artifact.id, 'exports')), 'the file is under the profile').toBe(true);
+    expect(readFileSync(exported.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+
+    const started = /\[render\] starting the render host for the library’s Export \(pid (\d+)\)/.exec(log());
+    expect(started, `mawsd.log names the render host's start:\n${log()}`).not.toBeNull();
+    const host = Number(started![1]);
+    pids.add(host);
+    expect(log()).toContain(`[render] the render host is ready (pid ${host})`);
+    if (isAlive(host)) {
+      expect(ps(host, 'ppid'), 'the unit’s mawsd spawned it').toBe(String(unit.pid));
+      expect(ps(host, 'command'), 'the app’s binary, windowless, on the profile').toContain(`--render-host ${profile}`);
+    }
+    await expect.poll(log, { timeout: 30_000, message: 'the render host ended after its quiet period' }).toContain('[render] quiet for 5 s: ending the render host');
+    await expect.poll(() => isAlive(host), { timeout: 15_000, message: 'the render host exited' }).toBe(false);
+    expect((await unit.status()).render, 'the status reads no render host after it').toMatchObject({ state: 'off', pid: null });
+  } finally {
+    unit?.remove(); // before the scratch's processes end: KeepAlive would restart a killed unit
     await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
     rmSync(root, { recursive: true, force: true });
   }

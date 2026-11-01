@@ -32,6 +32,7 @@
 import { spawn as spawnProcess, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
@@ -543,6 +544,8 @@ export function exitReason(code: number | null, signal: string | null, line: str
       return `the render host could not reach mawsd${said ? `: ${said}` : ''}`;
     case 70:
       return `the render host failed${said ? `: ${said}` : ''}`;
+    case 3: // P5 O5 M6: src/render-host/host.ts's EXIT_NO_SANDBOX
+      return `the render host refused to run without Chromium’s sandbox${said ? `: ${said}` : ''}`;
     case 0:
       return 'the render host exited before it was ready';
     default:
@@ -591,9 +594,10 @@ export interface RenderCommandFacts {
   platform: NodeJS.Platform;
   packaged: boolean;
   execPath: string; // the binary `mawsd` runs as (Electron run as Node on a Mac: the app's own, or a checkout's Electron)
-  appRoot: string; // a checkout's app root (out/main/../..), the script argument a checkout's Electron needs
+  appRoot: string; // a checkout's app root (out/main/../..), the script argument a checkout's Electron needs; on Linux the release's root
   profile: string;
   env: NodeJS.ProcessEnv;
+  linux?: { electron: string; xvfbRun: string }; // P5 O5 M6: the render runtime's reading (render-runtime.ts)
 }
 
 export interface RenderCommand {
@@ -601,23 +605,37 @@ export interface RenderCommand {
   args: string[];
   env: NodeJS.ProcessEnv;
   cwd: string;
-  argv0: string;
+  argv0?: string;
+  group?: boolean; // P5 O5 M6: a process group of its own, every kill addressed to it whole
 }
 
-// The render host's command line on a Mac: the app's binary without ELECTRON_RUN_AS_NODE (the unit's environment sets it
-// for `mawsd`), its profile named, from a checkout the app root as the script argument. Linux is M6's.
-export function renderCommand({ platform, packaged, execPath, appRoot, profile, env }: RenderCommandFacts): RenderCommand {
-  if (platform !== 'darwin') throw new Error(`the render runtime is not installed on this ${platform} machine`);
+// The display the render host's GTK needs on Linux (FINDINGS §1.2): one Xvfb per render host's life, its own display
+// number (-a), no TCP listener
+export const XVFB_SERVER_ARGS = '-screen 0 1280x800x24 -nolisten tcp';
+
+// The render host's command line (Interfaces §E). On a Mac: the app's binary without ELECTRON_RUN_AS_NODE (the unit's
+// environment sets it for `mawsd`), its profile named, from a checkout the app root as the script argument. On Linux
+// (P5 O5 M6): the release's entry (the dispatcher, whose bootstrap loads no native module of the hosts') under the render
+// cache's Electron, inside xvfb-run, `--headless` for Chromium's software compositing and `--hide-scrollbars` for the
+// captures; never `--no-sandbox` (the render host refuses it, and Chromium aborts without its helper configured). Its own
+// process group, since a SIGTERM to xvfb-run's shell does not reliably reach Electron and Xvfb must end with it.
+export function renderCommand({ platform, packaged, execPath, appRoot, profile, env, linux }: RenderCommandFacts): RenderCommand {
+  if (platform !== 'darwin' && (platform !== 'linux' || linux === undefined)) throw new Error(`the render runtime is not installed on this ${platform} machine`);
   const childEnv: NodeJS.ProcessEnv = { ...env, MAWS_USER_DATA: profile };
   delete childEnv.ELECTRON_RUN_AS_NODE;
   delete childEnv.NODE_OPTIONS;
+  if (platform === 'linux' && linux !== undefined) {
+    const args = ['-a', '-s', XVFB_SERVER_ARGS, linux.electron, '--headless', '--hide-scrollbars', join(appRoot, 'out', 'main', 'index.js'), '--render-host', profile];
+    return { command: linux.xvfbRun, args, env: childEnv, cwd: profile, group: true };
+  }
   return { command: execPath, args: [...(packaged ? [] : [appRoot]), '--render-host', profile], env: childEnv, cwd: profile, argv0: 'maws-render-host' };
 }
 
 // The render host started: its stderr read line by line into the daemon's log (its stdout too), its last `[render-host]`
 // line kept as its own reason for an exit.
 export function spawnRenderHost(command: RenderCommand, log: (line: string) => void): RenderChild {
-  const process: ChildProcess = spawnProcess(command.command, command.args, { env: command.env, cwd: command.cwd, argv0: command.argv0, stdio: ['ignore', 'pipe', 'pipe'], detached: false });
+  const group = command.group === true;
+  const process: ChildProcess = spawnProcess(command.command, command.args, { env: command.env, cwd: command.cwd, ...(command.argv0 !== undefined && { argv0: command.argv0 }), stdio: ['ignore', 'pipe', 'pipe'], detached: group });
   let last: string | null = null;
   const read = (stream: NodeJS.ReadableStream | null) => {
     if (!stream) return;
@@ -648,7 +666,14 @@ export function spawnRenderHost(command: RenderCommand, log: (line: string) => v
   });
   return {
     pid: process.pid ?? null,
-    kill: (signal) => void process.kill(signal),
+    kill: (signal) => {
+      if (!group || process.pid === undefined) return void process.kill(signal);
+      try {
+        globalThis.process.kill(-process.pid, signal); // the group: Electron, its helpers, xvfb-run and its Xvfb
+      } catch {
+        // the group is gone already
+      }
+    },
     onExit(listener) {
       if (ended) return listener(ended.code, ended.signal);
       listeners.push(listener);

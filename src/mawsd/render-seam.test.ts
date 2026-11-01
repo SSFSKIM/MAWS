@@ -5,7 +5,7 @@
 // never spawns; the host is ended after the quiet period and a request after that starts it again; its stop answers the
 // table and ends the host; the answers reach the asker in its own shape (an undelivered inspection's file removed, a
 // library refusal with its IPC error).
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,8 +16,17 @@ import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS } from '@shared/maws/tools';
 import { EXPORT_BUDGET_MS } from '../render/export';
-import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, renderAuthors, renderCommand, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
+import { until } from '../../test/support/mawsd-scene';
+import { ANSWER_DEADLINE_MS, createRenderSeam, exitReason, renderAuthors, renderCommand, spawnRenderHost, START_DEADLINE_MS, START_WATCHDOG_MS, type RenderChild, type RenderRuntime, type RenderSeam, type RenderSeamOptions } from './render-seam';
 
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
 const PNG = { ok: true, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErrors: [] };
 const capture = (requestId: string): MawsArtifactCapture => ({ appSessionId: 'app-1' as never, requestId: requestId as never, artifactId: ARTIFACT, revision: 2, width: 640, height: 480 });
@@ -620,7 +629,8 @@ describe('the render host’s exit before its ready (exitReason)', () => {
     expect(exitReason(2, null, null)).toBe('the render host was started without a profile');
     expect(exitReason(null, 'SIGKILL', null)).toBe('the render host was ended by SIGKILL');
     expect(exitReason(0, null, null)).toBe('the render host exited before it was ready');
-    expect(exitReason(3, null, '[render-host] cannot start: Chromium’s sandbox is not configured')).toBe('the render host exited 3: Chromium’s sandbox is not configured');
+    // P5 O5 M6: 3 is the render host's refusal to run without Chromium's sandbox (src/render-host/host.ts)
+    expect(exitReason(3, null, '[render-host] cannot start: --no-sandbox was passed')).toBe('the render host refused to run without Chromium’s sandbox: --no-sandbox was passed');
   });
 });
 
@@ -634,7 +644,49 @@ describe('the render host’s command line on a Mac (Interfaces §E)', () => {
     expect(checkout.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
   });
 
-  it('refuses on another platform (the Linux runtime is M6’s)', () => {
+  it('refuses on a platform with no render runtime, and on Linux without the cache’s Electron', () => {
+    expect(() => renderCommand({ platform: 'win32', packaged: false, execPath: '/node', appRoot: '/repo', profile: '/p', env })).toThrow(/not installed/);
     expect(() => renderCommand({ platform: 'linux', packaged: false, execPath: '/node', appRoot: '/repo', profile: '/p', env })).toThrow(/not installed/);
+  });
+});
+
+// P5 O5 M6 (Interfaces §E, FINDINGS §1.2, §1.3): on Linux the release's entry under the render cache's Electron, inside a
+// virtual display of its own, Chromium compositing in software, never without its sandbox; in a process group of its
+// own, which every kill addresses whole (a SIGTERM to xvfb-run's shell does not reliably reach Electron)
+describe('the render host’s command line on Linux (Interfaces §E)', () => {
+  const env = { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--max-old-space-size=64', PATH: '/usr/bin:/bin', MAWS_USER_DATA: '/old' };
+  const linux = { electron: '/home/u/.local/share/maws/mawsd/render/44.4.5-04586a0ec46c/electron', xvfbRun: '/usr/bin/xvfb-run' };
+
+  it('runs the release’s out/main/index.js under the cache’s Electron in xvfb-run, --headless and --hide-scrollbars, never --no-sandbox, as a group', () => {
+    const command = renderCommand({ platform: 'linux', packaged: false, execPath: '/release/runtime/bin/node', appRoot: '/release', profile: '/home/u/.config/MAWS', env, linux });
+    expect(command).toEqual({
+      command: '/usr/bin/xvfb-run',
+      args: ['-a', '-s', '-screen 0 1280x800x24 -nolisten tcp', linux.electron, '--headless', '--hide-scrollbars', '/release/out/main/index.js', '--render-host', '/home/u/.config/MAWS'],
+      env: { PATH: '/usr/bin:/bin', MAWS_USER_DATA: '/home/u/.config/MAWS' },
+      cwd: '/home/u/.config/MAWS',
+      group: true,
+    });
+    expect(command.args).not.toContain('--no-sandbox');
+  });
+
+  it('kills the whole group: Electron, its helpers and the Xvfb beside it', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'maws-render-group-'));
+    try {
+      // a shell standing in for xvfb-run: a child of its own (the display) beside the command it runs, which ignores TERM
+      // the way a shell waiting on its child does not pass it on
+      const script = join(at, 'xvfb-run');
+      writeFileSync(script, `#!/bin/sh\nsleep 60 &\necho $! > ${join(at, 'display.pid')}\n"$@"\n`, { mode: 0o755 });
+      const lines: string[] = [];
+      const child = spawnRenderHost({ command: script, args: ['sh', '-c', 'echo "[render-host] ready: stand-in"; exec sleep 60'], env: { PATH: process.env.PATH }, cwd: at, group: true }, (line) => lines.push(line));
+      await until(() => existsSync(join(at, 'display.pid')) && lines.length > 0, 5_000, 'the stand-in started');
+      const display = Number(readFileSync(join(at, 'display.pid'), 'utf8'));
+      const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.onExit((code, signal) => resolve({ code, signal })));
+      child.kill('SIGTERM');
+      await exited;
+      await until(() => !isAlive(display), 5_000, 'the display ended with the group');
+      expect(lines).toContain('[render-host] ready: stand-in');
+    } finally {
+      rmSync(at, { recursive: true, force: true });
+    }
   });
 });

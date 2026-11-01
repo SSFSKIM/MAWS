@@ -123,6 +123,7 @@ import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOIN
 import { createServicesFront, spineTakes } from './front';
 import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
+import { readRenderRuntime } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
@@ -875,8 +876,18 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
     return (answer.value as { outcome: 'delivered' | 'not_pending' }).outcome;
   };
-  // the render runtime on this machine: a Mac with the app binary always has it; Linux's is M6's
-  const renderRuntime = options.render?.runtime ?? ((): RenderRuntime => (platform === 'darwin' ? { available: true } : { available: false, reason: `the render runtime is not installed on ${machine}` }));
+  // the render runtime on this machine: a Mac with the app binary always has it; on Linux (P5 O5 M6) the render cache's
+  // entry for this daemon's own release's pin (render-runtime.ts), read at each check: the release it started from, which
+  // a flip of `current` leaves in place until the unit restarts it
+  const linuxRuntime = () => readRenderRuntime({ appRoot: join(dirname(entryOnDisk), '..', '..'), home: homedir(), arch: process.arch, machine, path: env.PATH });
+  const renderRuntime =
+    options.render?.runtime ??
+    ((): RenderRuntime => {
+      if (platform === 'darwin') return { available: true };
+      if (platform !== 'linux') return { available: false, reason: `the render runtime is not installed on ${machine}` };
+      const reading = linuxRuntime();
+      return reading.available ? { available: true } : reading;
+    });
   const render = createRenderHandle({
     machine,
     load: () => {
@@ -890,7 +901,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         (() => {
           const replaced = bundleReplaced(); // as the hosts' beforeSpawn: another build's binary renders nothing for this one
           if (replaced !== null) throw new Error(replaced);
-          return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(options.modules.self), '..', '..'), profile: profileDir, env }), log);
+          if (platform !== 'linux') return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(options.modules.self), '..', '..'), profile: profileDir, env }), log);
+          const reading = linuxRuntime(); // P5 O5 M6: the cache's Electron under xvfb-run, on this release's entry
+          if (!reading.available) throw new Error(reading.reason);
+          return chunk.spawnRenderHost(chunk.renderCommand({ platform, packaged, execPath, appRoot: join(dirname(entryOnDisk), '..', '..'), profile: profileDir, env, linux: reading }), log);
         }),
       post: (request) => front.postRender('render.request', request),
       postExit: () => front.postRender('render.exit', {}),

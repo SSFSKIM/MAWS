@@ -3,6 +3,7 @@
 // fake unit managers (test/support/fake-units.ts) in a scratch home: what each command prints and exits with, the daemon
 // up and down, and the secret-reading commands' path, `enroll`'s and `endpoint provision`'s (stdin or a prompt, never
 // argv; sent as `secret`; never logged or printed).
+import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -96,6 +97,7 @@ describe('mawsd status', () => {
     expect(lines[5]).toBe('pty host     parked');
     expect(lines[6]).toBe('clients      none');
     expect(lines[7]).toBe('endpoint     {"enrolled":false}');
+    expect(lines[8]).toBe('render       off'); // P5 O5 M6: no render host runs
   });
 
   it('running with no endpoint module (a daemon a test starts with none): the endpoint line is its null detail', async () => {
@@ -519,6 +521,72 @@ describe('mawsd install and uninstall', () => {
 
   it('is not available where there is no unit manager', async () => {
     expect((await cli(['install', '--label', 'dev.maws.mawsd.e2e-9'], { platform: 'win32' })).code).toBe(2);
+  });
+});
+
+// P5 O5 M6 (Interfaces §J): the render runtime's commands, from a pack carrying its pin and the zip beside it (`pnpm
+// mawsd:pack --render`); `unzip`, `sudo` and `ldd` faked, the helper's ownership read for real (so here it is never
+// root-owned, as on a machine whose sudo cannot set it)
+describe('mawsd render', () => {
+  const zip = Buffer.from('a zip of electron for linux-x64');
+  const sha = createHash('sha256').update(zip).digest('hex');
+  const pack = () => {
+    const dist = join(scene.root, 'checkout', 'dist', 'mawsd');
+    const root = fakePack(dist, 'a1b2c3d4');
+    mkdirSync(join(root, 'packaging', 'mawsd'), { recursive: true });
+    writeFileSync(join(root, 'packaging', 'mawsd', 'electron.json'), JSON.stringify({ version: '44.4.5', sha256: { [`linux-${process.arch}`]: sha } }));
+    writeFileSync(join(dist, `electron-v44.4.5-linux-${process.arch}.zip`), zip);
+    return packProgram(root);
+  };
+  const ran: string[] = [];
+  const run: CliDeps['run'] = (command, args, options) => {
+    if (command === 'unzip') {
+      ran.push(`unzip ${options?.timeoutMs ?? 'default'}`);
+      const into = args[args.indexOf('-d') + 1]!;
+      for (const name of ['electron', 'chrome-sandbox']) writeFileSync(join(into, name), name);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    if (command === 'sudo' || command === 'ldd') {
+      ran.push(`${command} ${args.join(' ')}`);
+      return { status: 0, stdout: command === 'ldd' ? '\tlibgtk-3.so.0 => not found\n' : '', stderr: '' };
+    }
+    return managers.run(command, args);
+  };
+  const entryName = `44.4.5-${sha.slice(0, 12)}`;
+  const cacheRoot = () => join(scene.root, 'home', '.local', 'share', 'maws', 'mawsd', 'render');
+
+  it('is Linux’s: on a Mac the app’s own binary renders, so there is nothing to install (exit 2)', async () => {
+    const mac = await cli(['render', 'install']);
+    expect(mac.code).toBe(2);
+    expect(mac.err).toContain('the render runtime is installed on Linux');
+  });
+
+  it('status on a machine without the runtime says so, and how to install it', async () => {
+    const { code, out } = await cli(['render', 'status'], { platform: 'linux', self: pack(), run });
+    expect(code).toBe(0);
+    expect(out).toContain(`render runtime 44.4.5 (linux-${process.arch}) · not installed`);
+    expect(out).toMatch(/the render service: unavailable: the render runtime 44\.4\.5 is not installed on .*: run mawsd render install/);
+  });
+
+  it('install from the pack’s zip unpacks it without a download; with the helper not root-owned it publishes nothing and says so (exit 1)', async () => {
+    ran.length = 0;
+    const installed = await cli(['render', 'install'], { platform: 'linux', self: pack(), run });
+    expect(installed.code).toBe(1);
+    expect(installed.err).toContain('sandbox missing: run mawsd render install with sudo');
+    expect(installed.err).toContain(join(cacheRoot(), `.staged-${entryName}`));
+    expect(ran[0]).toBe('unzip 300000');
+    expect(ran.filter((line) => line.startsWith('sudo'))).toHaveLength(2);
+    const status = await cli(['render', 'status', '--json'], { platform: 'linux', self: pack(), run });
+    expect(JSON.parse(status.out)).toMatchObject({ state: 'staged', sandbox: 'not configured', missingLibraries: ['libgtk-3.so.0'], reading: { available: false, reason: expect.stringMatching(/^Chromium’s sandbox is not configured on /) } });
+    const removed = await cli(['render', 'uninstall'], { platform: 'linux', self: pack(), run });
+    expect(removed.code).toBe(0);
+    expect(removed.out).toBe(`removed .staged-${entryName}\n`);
+  });
+
+  it('takes install, uninstall and status alone', async () => {
+    expect((await cli(['render'], { platform: 'linux' })).code).toBe(1);
+    expect((await cli(['render', 'frob'], { platform: 'linux' })).code).toBe(1);
+    expect((await cli(['render', 'install', '--json'], { platform: 'linux' })).code).toBe(1);
   });
 });
 

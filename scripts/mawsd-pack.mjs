@@ -12,15 +12,23 @@
 //   package.json                 a minimal one, naming the release ({ mawsd: { release, commit, platform, arch, node } })
 //   runtime/                     on Linux only: the pinned Node (packaging/mawsd/node.json), downloaded from nodejs.org,
 //                                checked against its sha256 before it is unpacked, and put through the smoke checks
+//   packaging/mawsd/electron.json   the render runtime's pin (P5 O5 M6, Interfaces §J), which the release's mawsd reads
+//                                to find the render cache's entry it needs
+//
+// With --render (Linux; P5 O5 M6), the pinned Electron's Linux zip is downloaded from Electron's GitHub release, checked
+// against the pin's sha256, and left beside the pack (`<out>/electron-v<version>-linux-<arch>.zip`, never in it: the
+// release stays free of its 123 MB), so `mawsd render install` run from the pack installs the runtime without a
+// download of its own.
 //
 // A mismatch, a failed smoke check or a missing dependency refuses the pack and leaves none. The pack's path is the one
-// line printed on stdout; the build's output goes to stderr. Options: --out <dir> (default dist/mawsd), --no-build.
+// line printed on stdout; the build's output goes to stderr. Options: --out <dir> (default dist/mawsd), --no-build,
+// --render.
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -94,17 +102,13 @@ async function fetchTo(url, to) {
   writeFileSync(to, Buffer.from(await response.arrayBuffer()));
 }
 
-// The pinned Node for `target` (`linux-x64`), unpacked into `into` as bin/node and its LICENSE.
-async function addRuntime({ into, target, manifestPath, cache, download, log }) {
-  const pinned = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const sum = pinned.sha256?.[target];
-  if (typeof sum !== 'string') throw new Error(`${manifestPath} has no pinned Node runtime for ${target}`);
-  const file = `node-v${pinned.version}-${target}.tar.gz`;
+// `url`'s file in the download cache, checked against `sum` (the pin in `manifestPath`) before it is kept: a damaged
+// cache entry is fetched again, a mismatch refuses and keeps nothing.
+async function pinnedDownload({ url, file, sum, manifestPath, cache, download, log }) {
   const archive = join(cache, file);
   mkdirSync(cache, { recursive: true });
-  if (existsSync(archive) && sha256Of(archive) !== sum) rmSync(archive); // a damaged cache is fetched again
+  if (existsSync(archive) && sha256Of(archive) !== sum) rmSync(archive);
   if (!existsSync(archive)) {
-    const url = `https://nodejs.org/dist/v${pinned.version}/${file}`;
     log(`mawsd:pack: downloading ${url}`);
     const partial = `${archive}.${process.pid}.part`;
     await download(url, partial);
@@ -115,6 +119,25 @@ async function addRuntime({ into, target, manifestPath, cache, download, log }) 
     }
     renameSync(partial, archive);
   }
+  return archive;
+}
+
+// P5 O5 M6: the render runtime's zip for `target`, from the download cache (fetched and checked if absent)
+async function renderZip({ target, manifestPath, cache, download, log }) {
+  const pinned = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const sum = pinned.sha256?.[target];
+  if (typeof sum !== 'string') throw new Error(`${manifestPath} has no pinned render runtime for ${target}`);
+  const file = `electron-v${pinned.version}-${target}.zip`;
+  return pinnedDownload({ url: `https://github.com/electron/electron/releases/download/v${pinned.version}/${file}`, file, sum, manifestPath, cache, download, log });
+}
+
+// The pinned Node for `target` (`linux-x64`), unpacked into `into` as bin/node and its LICENSE.
+async function addRuntime({ into, target, manifestPath, cache, download, log }) {
+  const pinned = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const sum = pinned.sha256?.[target];
+  if (typeof sum !== 'string') throw new Error(`${manifestPath} has no pinned Node runtime for ${target}`);
+  const file = `node-v${pinned.version}-${target}.tar.gz`;
+  const archive = await pinnedDownload({ url: `https://nodejs.org/dist/v${pinned.version}/${file}`, file, sum, manifestPath, cache, download, log });
   const unpacked = mkdtempSync(join(cache, 'unpack-'));
   try {
     const top = `node-v${pinned.version}-${target}`;
@@ -165,9 +188,12 @@ export async function pack({
   commit = commitOf(root),
   build = true,
   manifest = join(root, 'packaging', 'mawsd', 'node.json'),
+  electronManifest = join(root, 'packaging', 'mawsd', 'electron.json'), // P5 O5 M6
+  render = false,
   download = fetchTo,
   log = (line) => process.stderr.write(`${line}\n`),
 } = {}) {
+  if (render && platform !== 'linux') throw new Error('--render packs the Linux render runtime: a Mac renders with the app’s own binary');
   if (build) {
     const built = spawnSync('pnpm', ['build:main-preload'], { cwd: root, stdio: ['ignore', 2, 2] });
     if (built.status !== 0) throw new Error(`pnpm build:main-preload failed (${built.status ?? built.signal})`);
@@ -184,6 +210,8 @@ export async function pack({
       const from = join(root, dir);
       cpSync(from, join(staged, dir), { recursive: true, filter: (path) => relative(from, path).split('/')[0] !== 'node_modules' });
     }
+    if (existsSync(electronManifest)) cpSync(electronManifest, join(staged, 'packaging', 'mawsd', 'electron.json')); // P5 O5 M6: the render runtime's pin
+    else if (render) throw new Error(`--render needs the render runtime's pin, ${electronManifest}`);
     let node = null;
     if (platform === 'linux') {
       node = await addRuntime({ into: join(staged, 'runtime'), target: `linux-${arch}`, manifestPath: manifest, cache: join(out, DOWNLOADS), download, log });
@@ -193,8 +221,10 @@ export async function pack({
     const packageJson = { name: 'maws-mawsd', version, private: true, main: 'out/main/mawsd.js', mawsd: { release, commit, platform, arch, node } };
     writeFileSync(join(staged, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`);
     // the output directory holds this pack alone (and the download cache)
+    const zip = render ? await renderZip({ target: `linux-${arch}`, manifestPath: electronManifest, cache: join(out, DOWNLOADS), download, log }) : null;
     for (const name of readdirSync(out)) if (name !== DOWNLOADS && join(out, name) !== staged) rmSync(join(out, name), { recursive: true, force: true });
     renameSync(staged, join(out, release));
+    if (zip !== null) cpSync(zip, join(out, basename(zip))); // beside the pack, where its `mawsd render install` looks
   } catch (error) {
     rmSync(staged, { recursive: true, force: true });
     throw error;
@@ -207,8 +237,9 @@ function options(argv) {
   const parsed = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--no-build') parsed.build = false;
+    else if (argv[i] === '--render') parsed.render = true;
     else if (argv[i] === '--out' && argv[i + 1]) parsed.out = resolve(argv[++i]);
-    else throw new Error(`mawsd:pack does not take ${argv[i]}; usage: mawsd-pack.mjs [--out <dir>] [--no-build]`);
+    else throw new Error(`mawsd:pack does not take ${argv[i]}; usage: mawsd-pack.mjs [--out <dir>] [--no-build] [--render]`);
   }
   return parsed;
 }
