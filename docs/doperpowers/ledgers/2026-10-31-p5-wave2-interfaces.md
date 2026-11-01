@@ -107,6 +107,13 @@
 | with O7 and O10: `rl2.browser-screencast`, the `browser.screencast` kind with its envelope and one-frame backlog exception, the `browser.inventory` feed, `machine.browserControl` (`approve`), `EndpointServices.browser` | RL2 and endpoint surface | O7 M5 reserves the kind and the capability; O17 M9 builds them | O17 M9, M10 |
 | the bridge `browser.remote.open`, `.select`, `.takeControl`, `.releaseControl`, `.input`, `.ack`, `.close` and its events `.inventory`, `.frame`, `.closed`; `src/main/browser/remote-view.ts`; `src/renderer/src/tools/browser/remote/` | main-owned bridge (`client`) and app modules | O17 M9, M10 | the renderer |
 | env `MAWS_E2E_LINUX_HEADLESS=1` | test support | O17 M8 | the Linux pass-3 run |
+| `CuaSockets.routeChanged`, `CuaSocketsOptions.cold` and `.loadBroker`, `CuaColdRoute`, `loadCuaBroker`, `CuaBrokerChunk` | `mawsd`-internal (`src/mawsd/cua-sockets.ts` and the broker's deferred chunk) | O17 M1 | O17 M5, M8 |
+| `BrowserRouteState`, `BrowserRouteReading`, `createCuaBroker`, `CuaBrokerOptions`, `CuaBrokerLimits`, `CuaBrokerInspection`, `BROKER_PROTOCOL_VERSION`, `BROKER_PROFILE_NAME` | `src/mawsd/cua-broker.ts` | O17 M1 | O17 M5, M8 |
+| `judgeUidPeer`, `PeerRefusalReason` `'not_private'`, `PeerRefusal.detail?`, `PeerAdmission` `{via: 'uid'}`, `CuaBackendDeps.peer.platform?` and `.uid?` (a test seam) | `src/main/browser/cua/peer.ts` (`mawsd` imports it) | O17 M2 | O17 M4, O5's relay |
+| `createEventScope`, `CuaEventScope` with `willSend(childSession, method, params)` returning that send's own settlement `(ok) => void` and `detached(childSession, targetId)` (no `answered`; O17's Decision Log amends its §J) | `src/main/browser/cua/event-scope.ts` | O17 M2 | O17 M4 |
+| `CuaBroker.admit(id, socket, epoch)`, the epoch argument from M1's fix | `src/mawsd/cua-broker.ts` | O17 M1 | O17 M5, M8 |
+| `BrowserWork.holding(engine, appSessionId)`, `oldHostReason`, `reconnectingReason` | `src/mawsd/browser-work.ts` | O17 M3 | O17 M5, M8 |
+| `FrontBrowser {work, selected}` with `selected` returning `FrontSelection {engine, period}` (the frontier fix; M5 supplies the route's epoch as the period), `FrontOptions.browser?` (none: `NO_BROWSER`) | `src/mawsd/front.ts` | O17 M3 | O17 M5 |
 
 ## Shared files and who goes first
 
@@ -155,6 +162,7 @@
 | `tsconfig.node.json` (lists `stores/git.ts`, `ipc/client.ts`, `ipc/machine.ts` explicitly), `src/renderer/src/ipc/client.ts` (reads the bridge as `globalThis.maws`) | O7 M4 | the second lander keeps the explicit list and the global read |
 | `test/support/fake-spine-host.ts` | O4 (typed `answer`), O7 M4 (spawn's launch stub against it) | keeps O4's typed form |
 | O16's engine-host files (`budget.ts`, `work-state.ts`, `idle-release.ts`, `process-table.ts`, `launcher.ts`, `session-status.ts`, `session.ts`, `index.ts`, `ipc.ts`, `src/shared/host/runtime.ts`, `src/shared/engine/status.ts`, `socket-protocol.ts`; `holder/reap.ts` tests only) | O16, then O17 M3 (schema, grade and capability lines) and M7 | O16 lands first; O17's M7 edits on O16's landed code |
+| `src/main/machines/link-surface.ts` | O17 M3 (`host.browserIdle` and the `browserEngine` namespace on the client side), O16 (`daemon.engineHandover` on the client side) | additions beside additions; whoever lands second rebases its entries |
 
 ## Start order
 
@@ -181,3 +189,4 @@
 - 2026-11-01, the architect: O7 M4 landed (PR #427, merge da1cc2563); its names and two shared files added.
 - 2026-11-01, the architect: O17's names and its shared files with O16, at its execution document's landing (PR #430).
 - 2026-11-01, p5-desk-track-owner: O12 M11's MAWS half (PR #431): its names as built (the proof file's path and module, the endpoint's `Spawner`, `QueryBinding.launchedBy`, `RecordSource.handedOff`, `handed-off.json`) and the endpoint files it shares with O7.
+- 2026-11-01, the architect: O17 M1 to M3's names (the cold broker, the event scope, the browser-work hold and the front's selection) and `src/main/machines/link-surface.ts` as a shared file of O16 and O17, at O5's close (P5 Decision Log 192).
