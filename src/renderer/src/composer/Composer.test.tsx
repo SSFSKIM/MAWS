@@ -47,6 +47,7 @@ import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
 import { ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
+import { forgetSubmissions } from './editor/controller'; // M4c re-review: a reload's fresh modules
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
@@ -934,8 +935,10 @@ describe('a New chat tab started on another machine', () => {
     await type('build it');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
-    cleanup(); // the page reloads before mini answers
-    useRemoteSpawn.setState({ chosen: new Map() });
+    cleanup(); // the page reloads before mini answers: a new page's modules, with only the window's session storage
+    useRemoteSpawn.setState({ chosen: new Map(), spawning: new Map() });
+    useComposerStore.setState({ starting: new Set() });
+    forgetSubmissions();
     restoreHeldAttempts();
     mount([{ index: 0, id: A }]);
     await type('build it');

@@ -157,6 +157,8 @@ export const TYPED_DECIDE_MS = 300;
 // only the initiating flight writes the stored draft, even if no editor remains mounted.
 interface Submission { doc: ComposerDoc; done: Promise<boolean> }
 const submissions = new Map<AppSessionId, Submission>();
+/** A page reload (tests): the new page holds no submission of the old one's, whose answer it never sees. */
+export const forgetSubmissions = (): void => submissions.clear();
 
 // E9: the open dictation sink's bookkeeping.
 interface Dictation { ended: boolean; onEnded(): void }
