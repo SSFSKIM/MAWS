@@ -211,6 +211,9 @@ export interface Welcomed {
 // host of another build that hands its sessions over, served until its calls are quiet, then asked to (host-supervisor.ts)
 export interface ServedFacts {
   updatePending: boolean;
+  // P5 O16 M3c fix wave 3b: the host's drain is armed already (its status, asked before the link is reported): a client
+  // that reconnected mid-deferral takes it straight back into the handover, never serving the frozen host as ready
+  draining?: { inFlight: number; tool?: string };
 }
 
 export interface DetachedEvents {
@@ -549,8 +552,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       const answer = adopting; // P5 O2 M3: answered once served, not by the attempt's end
       adopting = null;
       finish();
-      serve(socket, leftover, proc, welcome, otherBuild && !updatePending, updatePending);
-      answer?.(true);
+      serve(socket, leftover, proc, welcome, otherBuild && !updatePending, updatePending, (servedIt) => answer?.(servedIt));
     }
 
     function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null, form: Form): void {
@@ -737,7 +739,10 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   // The welcomed connection: C1's envelope through a SocketPort; the layer's own `refuse replaced` is read here.
   // `otherBuild`: a supervisor of another build still running sessions, asked to exit when idle unless already asked.
   // `updatePending` (P5 O16 M3c fix wave 2): one of another build that hands over, told to the host supervisor.
-  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean, updatePending = false): void {
+  // Fix wave 3b: a host that hands over, reached directly (not through a relay, whose host is the relay's), is asked its
+  // status on the fresh link before the link is reported, so a drain armed already reaches the host supervisor with the
+  // link (`draining`); no answer within helloTimeoutMs, or an error, reads as none. `then`: whether the link was reported.
+  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean, updatePending: boolean, then: (servedIt: boolean) => void): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
     const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, handovers: new Map(), replaced: false, recycled: null };
@@ -750,6 +755,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     }
     if (updatePending) log(`supervisor pid ${welcome.pid} runs build ${welcome.peer.build} with ${welcome.liveSessions} sessions live; serving it until its calls are quiet, then asking it to hand them over`);
     const listeners: ((data: unknown) => void)[] = [];
+    let early: unknown[] | null = null; // fix wave 3b: what arrived while the status was asked, for the link's listeners
     port.on('message', ({ data }) => {
       const refuse = readTolerant(ServerRefuseSchema, data);
       if (refuse.ok) {
@@ -758,23 +764,64 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         return;
       }
       if (routeHandoverAnswer(connection.handovers, data)) return; // P5 O16 M3b: the transport's own ask
+      if (early) return void early.push(data);
       for (const listener of listeners) listener(data);
     });
-    port.onClose(() => closed(connection));
+    let reported = false;
+    port.onClose(() => {
+      if (!reported) then(false); // closed while its status was asked: never reported, the close is read as any other
+      closed(connection);
+    });
     const { peer } = welcome;
     log(`connected to supervisor pid ${welcome.pid} build ${peer.build} wire ${peer.major}.${peer.minor} capabilities [${peer.capabilities.join(', ')}] (${welcome.liveSessions} live of ${welcome.rows} rows)`);
-    events.connected(
-      {
-        postMessage: (message) => void port.postMessage(message),
-        close: () => port.close(),
-        onMessage: (listener) => void listeners.push(listener),
-        postDoc: (channel, frame) => port.postDoc(channel, frame), // P3-A M5
-        onDoc: (listener) => port.onDoc(listener), // P3-A M5
-      },
-      welcome,
-      { updatePending },
-    );
+    const report = (draining?: ServedFacts['draining']) => {
+      if (reported || served !== connection || stopped) return;
+      reported = true;
+      const held = early ?? [];
+      early = null;
+      events.connected(
+        {
+          postMessage: (message) => void port.postMessage(message),
+          close: () => port.close(),
+          onMessage: (listener) => void listeners.push(listener),
+          postDoc: (channel, frame) => port.postDoc(channel, frame), // P3-A M5
+          onDoc: (listener) => port.onDoc(listener), // P3-A M5
+        },
+        welcome,
+        draining ? { updatePending: false, draining } : { updatePending },
+      );
+      for (const data of held) for (const listener of listeners) listener(data);
+      then(true);
+    };
+    if (options.relayed || !peer.capabilities.includes(HOLDER_CAPABILITY)) {
+      report();
+      return port.start();
+    }
+    early = [];
     port.start();
+    void askStatus(port, connection.handovers, timing.helloTimeoutMs).then((draining) => report(draining ?? undefined)); // the host supervisor logs it
+  }
+
+  // Fix wave 3b: `host.supervisorStatus` on a fresh port, answered through `answers` (as a handover ask is): its drain,
+  // when it is armed; null when it is not, or no answer came within `ms`, or the port closed first.
+  function askStatus(port: SocketPort, answers: Map<string, (data: unknown) => void>, ms: number): Promise<ServedFacts['draining'] | null> {
+    const id = `transport-status-${++handoverAsks}`;
+    return new Promise((resolve) => {
+      const settle = (draining: ServedFacts['draining'] | null) => {
+        clearTimeout(timer);
+        answers.delete(id);
+        resolve(draining);
+      };
+      const timer = setTimeout(() => settle(null), ms);
+      answers.set(id, (data) => {
+        const res = data as { ok?: unknown; value?: { holder?: { handover?: unknown; inFlight?: unknown; tool?: unknown } } };
+        const holder = res.ok === true ? res.value?.holder : undefined;
+        if (holder?.handover !== 'draining') return settle(null);
+        settle({ inFlight: typeof holder.inFlight === 'number' ? holder.inFlight : 0, ...(typeof holder.tool === 'string' && { tool: holder.tool }) });
+      });
+      const request: HostRequest = { t: 'req', id, name: 'host.supervisorStatus', input: undefined };
+      if (!port.postMessage(request)) settle(null);
+    });
   }
 
   function closed(connection: Served): void {
@@ -809,12 +856,25 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return events.lost('deliberate');
     }
     // P5 O16 M3b (D40): a host asked to hand over: its successor is spawned once it is gone, never parked. Fix wave 3:
-    // whether it handed over or crashed mid-drain is the host supervisor's to read (above)
+    // whether it handed over or crashed mid-drain is the host supervisor's to read (above). Fix wave 3b: it is looked at
+    // until gone within `exitWaitMs`, as an idle exit is (#413); one that outlives that lost only its socket, so it is
+    // reconnected to (quiet), met draining at the welcome and taken back into the handover
     if (connection.exitAsked === 'replace') {
-      log(`supervisor pid ${connection.proc.pid}, asked to hand over, closed its connection; starting its successor`);
-      awaitDeath = connection.proc;
       const idleAsked = idleArmed !== null && idleArmed.pid === connection.proc.pid && idleArmed.procStart === connection.proc.procStart;
-      return after(timing.pidPollMs, () => events.lost({ replace: spawned.get(connection.proc.pid) ?? { code: null, signal: null }, idleAsked }));
+      const settleBy = Date.now() + timing.exitWaitMs;
+      const settled = () => {
+        const exit = spawned.get(connection.proc.pid) ?? null;
+        if (exit === null && sameProcess(connection.proc)) {
+          if (Date.now() < settleBy) return after(timing.pidPollMs, settled);
+          log(`supervisor pid ${connection.proc.pid}, asked to hand over, closed its connection and still runs; reconnecting to it`);
+          unserved = connection.proc;
+          return events.lost('quiet');
+        }
+        log(`supervisor pid ${connection.proc.pid}, asked to hand over, is gone; starting its successor`);
+        awaitDeath = connection.proc;
+        events.lost({ replace: exit ?? { code: null, signal: null }, idleAsked });
+      };
+      return after(timing.pidPollMs, settled);
     }
     unserved = connection.proc;
     events.disconnected();

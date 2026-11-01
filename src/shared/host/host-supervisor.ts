@@ -317,6 +317,7 @@ interface Host {
   drainStopped: MainPort | null; // P5 O16 M3c fix wave 3: the draining link a stop-all was written to (its close is planned)
   drainHears: boolean; // fix wave 3: the draining link carried the host's events (a ready line was said on it)
   relayed: boolean; // fix wave 3: reached through a relay (main's daemon shape), whose handovers are the relay's to ask
+  drainMet: number | null; // fix wave 3b: the last process met with its drain armed already (its lines logged once)
   handoverListeners: Set<(state: EngineHandoverState | null) => void>;
 }
 
@@ -387,6 +388,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       drainStopped: null, // P5 O16 M3c fix wave 3
       drainHears: false,
       relayed: false,
+      drainMet: null,
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
@@ -730,6 +732,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           logDropped('socket documents.closed', closed.dropped);
           host.relay?.closed(closed.value.channel, closed.value.reason); // P5 O2 M5: with its reason
         });
+        // fix wave 3b: a host met with its drain armed already never reads ready; it goes straight back into the handover
+        if (facts?.draining && host.transport) {
+          host.settleFirstLaunch();
+          settle(host); // a recycle reached it
+          return takeBack(host, welcome.pid, facts.draining);
+        }
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
         sendHeld(host, welcome.pid);
         host.settleFirstLaunch();
@@ -761,15 +769,17 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (loss !== 'quiet' && closed !== null) processGone(host, [closed]);
         // P5 O16 M3b (D40): a handover's close starts the successor, whatever is held (a deferral's caller may be gone).
         // M3c fix wave 3: at once when it left as planned (it said every row detached, a stop-all written to its drain
-        // ended it, or it was asked to exit when idle); else it crashed mid-drain, the ask notwithstanding: counted,
-        // backed off and told. A link that never carried the host's events (no ready line said on it: `mawsd`'s with
-        // no app attached) cannot hear it say so; there only the exit itself tells a crash (a signal or a failure code,
-        // known for a process this run started), as before the evidence
+        // ended it, or it was asked to exit when idle and exited cleanly); else it crashed mid-drain, the ask
+        // notwithstanding: counted, backed off and told. A link that never carried the host's events (no ready line said
+        // on it: `mawsd`'s with no app attached) cannot hear it say so; there only the exit itself tells a crash (a
+        // signal or a failure code, known for a process this run started), as before the evidence. A close whose
+        // process lives on is no `replace` (the transport reports it quiet: reconnected to, taken back; fix wave 3b)
         if (typeof loss === 'object' && 'replace' in loss) {
           const detached = closed !== null && handedOver.delete(closed);
+          // fix wave 3b: an armed idle exit, like an unheard link, makes a clean exit planned, never a proven abnormal one
           const { code, signal } = loss.replace;
-          const unheard = !host.drainHears && signal === null && (code === null || code === 0);
-          const planned = detached || unheard || (drainLink !== null && drainLink === host.drainStopped) || loss.idleAsked;
+          const abnormal = signal !== null || (code !== null && code !== 0);
+          const planned = detached || (drainLink !== null && drainLink === host.drainStopped) || (!abnormal && (!host.drainHears || loss.idleAsked));
           host.drainStopped = null;
           host.drainHears = false;
           failSent(host, planned ? 'handed its sessions over' : 'exited');
@@ -777,7 +787,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           if (host.state.state !== 'restarting') transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
           return launch(host);
         }
-        if (loss === 'quiet') return relaunch(restartBackoffMs[0]);
+        if (loss === 'quiet') {
+          if (drainLink !== null) failSent(host, 'lost its connection mid-drain'); // fix wave 3b: nothing answers them on that link
+          return relaunch(restartBackoffMs[0]);
+        }
         if (loss === 'deliberate') return deliberate();
         // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
         // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
@@ -846,14 +859,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const tool = status.holder?.tool;
     if (host.handover?.state === 'draining' && from === host.draining && inFlight !== undefined) return setHandover(host, { state: 'draining', inFlight, ...(tool !== undefined && { tool }) });
     if (from !== host.port || status.pid !== host.state.pid) return;
-    if (status.holder?.handover === 'draining' && !host.relayed) {
-      console.error(`[hosts] ${host.owner} pid ${status.pid} is already handing its sessions over; taking it back into the handover`);
-      void api.handover(host.owner, 0).then((answer) => {
-        if (!answer.ok) console.error(`[hosts] ${host.owner} pid ${status.pid} did not hand over: ${answer.error.message}`);
-      });
-      if (host.handover?.state === 'draining' && inFlight !== undefined) setHandover(host, { state: 'draining', inFlight, ...(tool !== undefined && { tool }) });
-      return;
-    }
+    if (status.holder?.handover === 'draining' && !host.relayed && host.transport) return takeBack(host, status.pid, { inFlight: inFlight ?? 0, ...(tool !== undefined && { tool }) });
     if (!host.updatePending) return;
     if (inFlight !== undefined && inFlight > 0) {
       if (host.handover === null) console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, hands over once its ${inFlight} calls in flight${tool ? ` (${tool})` : ''} finish; serving it meanwhile`);
@@ -863,6 +869,17 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     console.error(`[hosts] ${host.owner} pid ${status.pid}, of another build, is quiet; asking it to hand its sessions over`);
     void api.handover(host.owner, HANDOVER_GRACE_MS).then((answer) => {
       if (!answer.ok) console.error(`[hosts] ${host.owner} pid ${status.pid} did not hand over: ${answer.error.message}`);
+    });
+  }
+
+  // Fix wave 3 (P2), 3b: a served host met with its drain armed already, asked again (its drain is armed once) with grace
+  // 0. A host that never answers cycles (the ask fails, the link recycles, it is met again): logged once per process.
+  function takeBack(host: Host, pid: number, armed: { inFlight: number; tool?: string }): void {
+    const first = host.drainMet !== pid;
+    host.drainMet = pid;
+    if (first) console.error(`[hosts] ${host.owner} pid ${pid} is already handing its sessions over; taking it back into the handover`);
+    void drain(host, host.transport!, 0, armed).then((answer) => {
+      if (!answer.ok && first) console.error(`[hosts] ${host.owner} pid ${pid} did not hand over: ${answer.error.message}; asked again each time it is met`);
     });
   }
 
@@ -963,6 +980,33 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // E10 start: host.restart and the quit's stop-all (Task 2.3b)
   const restarted: CommandResult<'host.restart'> = { ok: true, value: undefined };
   const notRestartable = (host: Host, why: string): CommandResult<'host.restart'> => ({ ok: false, error: ipcError('host_unavailable', `${host.owner} ${why}; it cannot be restarted`) });
+
+  // P5 O16 M3b: the handover from its ask on: the link leaves ready and drains (D56), its close the replacement's (D40);
+  // a failed ask reconnects to the host (a recycle). Fix wave 3b: also a link reported with the host's drain armed
+  // already (`armed`, its status at the welcome), which never read ready: nothing held is sent to it.
+  async function drain(host: Host, transport: DetachedTransport, graceMs: number, armed?: { inFlight: number; tool?: string }): Promise<CommandResult<'host.handover'>> {
+    host.readyAsked = false; // a sayReady belonged to the connection that ends here
+    // P5 O16 M3c fix wave 2 (D63): from the ask, the update (or the owner's restart) drains; an update's wait is over
+    host.updatePending = false;
+    const waited = armed ?? host.handover;
+    setHandover(host, { state: 'draining', inFlight: waited?.inFlight ?? 0, ...(waited?.tool !== undefined && { tool: waited.tool }) });
+    unlink(host);
+    host.drainHears = host.streaming; // M3c fix wave 3: before the transition below ends the streaming
+    host.draining = host.port; // fix wave 1: the drain's replies still go to it
+    host.port = null;
+    transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
+    const answer: HandoverAnswer = await transport.handover(graceMs, () => sentAnswered(host, HANDOVER_SENT_WAIT_MS));
+    if (answer.state === 'failed') {
+      // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
+      if (host.draining) host.closedPid = host.routes.closed(host.draining); // fix wave 3: the same process, reconnected to
+      host.draining = null;
+      setHandover(host, null); // fix wave 2: the recycle's fresh welcome re-reads any update from the host's next status
+      transport.recycle(() => failSent(host, 'was recycled'));
+      return { ok: false, error: ipcError('internal', `${host.owner} did not hand over: ${answer.why}`) };
+    }
+    if (answer.state === 'deferred' && host.handover?.state === 'draining') setHandover(host, { state: 'draining', inFlight: answer.inFlight, ...(answer.tool !== undefined && { tool: answer.tool }) });
+    return { ok: true, value: answer };
+  }
 
   async function restartDetached(host: Host, transport: DetachedTransport, stopSessions: boolean): Promise<CommandResult<'host.restart'>> {
     if (host.state.state === 'ready' && host.port) {
@@ -1293,27 +1337,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       const transport = host.transport;
       if (stopped || host.quitting || !transport || !host.port || host.state.state !== 'ready') return { ok: false, error: ipcError('host_unavailable', `${owner} is ${host.parked ? 'parked' : host.state.state}; it cannot hand over`) };
       if (!host.peer?.capabilities.includes(HOLDER_CAPABILITY)) return { ok: false, error: ipcError('host_unavailable', `${owner} (build ${host.peer?.build ?? 'unknown'}) does not hand its sessions over`) };
-      host.readyAsked = false; // a sayReady belonged to the connection that ends here
-      // P5 O16 M3c fix wave 2 (D63): from the ask, the update (or the owner's restart) drains; an update's wait is over
-      host.updatePending = false;
-      const waited = host.handover;
-      setHandover(host, { state: 'draining', inFlight: waited?.inFlight ?? 0, ...(waited?.tool !== undefined && { tool: waited.tool }) });
-      unlink(host);
-      host.drainHears = host.streaming; // M3c fix wave 3: before the transition below ends the streaming
-      host.draining = host.port; // fix wave 1: the drain's replies still go to it
-      host.port = null;
-      transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
-      const answer: HandoverAnswer = await transport.handover(graceMs, () => sentAnswered(host, HANDOVER_SENT_WAIT_MS));
-      if (answer.state === 'failed') {
-        // still served: reconnected to, ready again (what the old link never answered fails at the drain's end)
-        if (host.draining) host.closedPid = host.routes.closed(host.draining); // fix wave 3: the same process, reconnected to
-        host.draining = null;
-        setHandover(host, null); // fix wave 2: the recycle's fresh welcome re-reads any update from the host's next status
-        transport.recycle(() => failSent(host, 'was recycled'));
-        return { ok: false, error: ipcError('internal', `${owner} did not hand over: ${answer.why}`) };
-      }
-      if (answer.state === 'deferred' && host.handover?.state === 'draining') setHandover(host, { state: 'draining', inFlight: answer.inFlight, ...(answer.tool !== undefined && { tool: answer.tool }) });
-      return { ok: true, value: answer };
+      return drain(host, transport, graceMs);
     },
     completionGone(owner, name, input) {
       const host = hosts[owner];

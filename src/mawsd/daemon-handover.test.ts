@@ -103,6 +103,33 @@ describe('daemon.restartEngineHost', () => {
     expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]);
   });
 
+  // fix wave 3b: with no app attached its link never says ready, so no status event ever reaches mawsd; the status it
+  // asks at the welcome tells it the drain is armed, and the frozen host is never served as ready to anyone. The ask is
+  // the transport's own, on a link just welcomed: no need, no wake
+  it('a mawsd with no app attached that meets its engine host already draining never serves it as ready; the successor follows its exit', { timeout: 30_000 }, async () => {
+    const drain = { inFlight: 1 };
+    const draining = () => ({ ...holder(1), holder: { ...holder(1).holder, handover: 'draining', inFlight: drain.inFlight, tool: 'artifact_list' } });
+    const old = await scene.engine({
+      counts: { liveSessions: 1, rows: 1 },
+      answers: {
+        'host.supervisorStatus': () => (scene.engines.length > 1 ? holder(1) : draining()),
+        'host.handover': () => (drain.inFlight > 0 ? { state: 'deferred', inFlight: drain.inFlight, tool: 'artifact_list' } : (old.handOver(), { state: 'detaching' })),
+      },
+    });
+    const daemon = await scene.start();
+    await until(() => old.named('host.handover').length >= 1, 5_000, 'taken back into the handover');
+    expect(daemon.hosts.snapshot('engine-host').state).toBe('restarting');
+    expect(daemon.hosts.handoverState('engine-host')).toEqual({ state: 'draining', inFlight: 1, tool: 'artifact_list' });
+    const cli = await scene.app('machine', { capabilities: [] });
+    const ping = cli.request('engine.ping', undefined, 20_000); // new work: held for the successor
+    await sleep(300);
+    drain.inFlight = 0;
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 15_000, 'the successor, at the next ask');
+    expect(await ping).toMatchObject({ ok: true });
+    expect(old.calls.map((call) => call.name).filter((name) => name !== 'host.handover'), 'nothing but its status reached the frozen host').toEqual(['host.supervisorStatus']);
+    expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]);
+  });
+
   it('refuses a parked engine host, and one that does not hand over, without touching it', async () => {
     scene.engineSpawn = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY] }; // a build before the handover
     const daemon = await scene.start();

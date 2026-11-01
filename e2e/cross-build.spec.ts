@@ -132,7 +132,7 @@ import { REPO_ROOT } from './support/launch';
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -515,7 +515,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
     expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
   }
-  await expect.poll(async () => (await statusOf(second.page, id)).holder?.adopted, { timeout: 60_000, message: 'the kept session adopted' }).toBe(true);
+  await expect.poll(() => adoptedOf(second.page, id), { timeout: 60_000, message: 'the kept session adopted' }).toBe(true);
   expect((await statusOf(second.page, id)).pid, 'the same engine process').toBe(engine);
   said.push(`  hello: ${hello}…`, `  handed over: supervisor pid ${kept.pid} (build ${kept.buildId}) exited by the handover; pid ${served.supervisor!.pid} (build ${build}) adopted the session (engine pid ${engine})`);
 

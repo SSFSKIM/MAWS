@@ -343,6 +343,13 @@ export async function withScratch(name: string, body: (s: Scratch) => Promise<vo
 // ---- the session ------------------------------------------------------------------------------------------------------
 
 export const statusOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.status', { appSessionId: id }));
+// P5 O16 M3c fix wave 3: whether a successor adopted `id`; a session it has not adopted yet is unknown to it, which a poll
+// reads as not yet (hosted run o16m3cfw3-2: the status was asked once the successor served, before its adoption)
+export async function adoptedOf(page: Page, id: AppSessionId): Promise<boolean | undefined> {
+  const status = await invoke(page, 'session.status', { appSessionId: id });
+  if (!status.ok && status.error.message.includes('unknown session')) return undefined;
+  return value(status).holder?.adopted;
+}
 export const eventsOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null })).events;
 export const suffix = (eventId: string) => eventId.split(':').slice(-2).join(':'); // `seq:i`: ids embed the session and launch
 export const attentionOf = async (page: Page, id: AppSessionId, kind: AttentionItem['kind']): Promise<AttentionItem[]> =>

@@ -79,7 +79,7 @@ import { isAlive, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { FakeObserver } from '../src/engine-host/holder/fake-observer'; // O16 M5
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
-import { attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
 
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs under pnpm e2e:supervisor (MAWS_SUPERVISOR_E2E=1)');
@@ -864,14 +864,6 @@ const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating th
 
 // After a deferred or waited handover: the successor adopted `id` with the same engine process, the held call was
 // answered once by the old host before it detached, the turn played on to its end, and nothing was told as a crash.
-// P5 O16 M3c fix wave 3: whether the successor adopted `id`; a session it has not adopted yet is unknown to it, which a
-// poll reads as not yet (hosted run o16m3cfw3-2: the status was asked once the successor served, before its adoption)
-async function adoptedOf(page: Page, id: AppSessionId): Promise<boolean | undefined> {
-  const status = await invoke(page, 'session.status', { appSessionId: id });
-  if (!status.ok && status.error.message.includes('unknown session')) return undefined;
-  return value(status).holder?.adopted;
-}
-
 async function heldCallAdopted(s: Scratch, run: Run, id: AppSessionId, engine: number | null): Promise<void> {
   const rows = s.journal(id);
   const answered = rows.findIndex(isToolAnswer);
