@@ -180,6 +180,17 @@ describe('the offer rows (§L, M3)', () => {
     expect(await act(b, await shellAct(f, b, 'forward.open', { port: 8080 }))).toBe('grade');
   });
 
+  it('answers a pty act `refused unavailable` when the pty host predates its ledger (`unknown_command`): nothing ran', async () => {
+    const f = await start();
+    const a = await openRemote(f, org.a1, org.A);
+    const serve = f.services.dispatch;
+    f.services.dispatch = (owner, name, input, client) =>
+      owner === 'pty-host' && name === 'pty.op' ? Promise.resolve({ t: 'res', id: 'x', ok: false, error: { code: 'unknown_command', message: 'pty.op' } }) : serve(owner, name, input, client);
+    const { outcome } = await run(f, a, 'pty.spawn', { appSessionId: 'app-1', label: 't1', cwd: '/work', cols: 80, rows: 24 });
+    expect(outcome).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(f.pty.runs).toEqual([]);
+  });
+
   it('leaves unoffered what §L keeps local: the bytes’ commands, the ledger, the ring’s read and the local registry’s', () => {
     for (const name of ['pty.list', 'pty.replay', 'pty.write', 'pty.resize', 'pty.ack', 'pty.checkpoint', 'pty.op', 'pty.opQuery', 'pty.foreground', 'pty.openLink', 'pty.hostState', 'pty.recaptureEnv'])
       expect([name, Object.hasOwn(OFFERS.commands, name)]).toEqual([name, false]);
@@ -228,6 +239,8 @@ describe('admission', () => {
     expect((await openTcp(a, forward.action.opId, 'another')).answer).toMatchObject({ t: 'streamRefused', reason: 'grade' });
     // An op nobody sent: `unknown` (a fresh act may open it).
     expect((await openPty(a, id16(), one)).answer).toMatchObject({ t: 'streamRefused', reason: 'unknown' });
+    // An output offset past what the pty emitted is no offset the device read.
+    expect((await openPty(a, mine.action.opId, one, { from: 1 })).answer).toMatchObject({ t: 'streamRefused', reason: 'malformed' });
     expect((await openPty(a, mine.action.opId, one)).answer).toMatchObject({ t: 'streamOpened' });
   });
 

@@ -598,10 +598,12 @@ export class Streams {
     if (info === undefined || bytes === null || !Number.isSafeInteger(replay.replayFrom) || !Number.isSafeInteger(replay.nextOffset)) return fail('unknown');
     const ringStart = replay.replayFrom as number;
     const nextOffset = replay.nextOffset as number;
+    // An offset past what the pty has emitted is none the device read from it.
+    if (from > nextOffset) return fail('malformed');
     install(stream);
     stream.open({ pty: { info, ringStart, nextOffset } });
     stream.push(ringStart, bytes);
-    stream.sent = Math.max(nextOffset, from);
+    stream.sent = nextOffset;
     const pending = stream.pending ?? [];
     stream.pending = null;
     for (const frame of pending) stream.frame(frame.offset, frame.data);
