@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { encodeFrame, frameDecoder, type RpcMessage } from '../main/browser/cua/framing';
 import { PROFILE_NAME, PROTOCOL_VERSION } from '../main/browser/cua/connection';
@@ -93,7 +93,7 @@ function stand(options: Partial<CuaBrokerOptions> = {}) {
     const existing = servers.get(appSessionId);
     if (existing) return existing;
     const path = join(root, `${appSessionId}.sock`);
-    const server: Server = createServer({ pauseOnConnect: true }, (socket) => broker.admit(appSessionId, socket));
+    const server: Server = createServer({ pauseOnConnect: true }, (socket) => broker.admit(appSessionId, socket, (readings.get(appSessionId) ?? { epoch: 'e1' }).epoch));
     await new Promise<void>((resolve) => server.listen(path, resolve));
     closers.push(() => server.close());
     servers.set(appSessionId, path);
@@ -147,17 +147,46 @@ describe('the cold answers', () => {
     expect(BROKER_PROFILE_NAME).toBe(PROFILE_NAME);
   });
 
-  it('an admitted connection hears one hello and then nothing: no timer, no start', async () => {
+  it('an admitted connection hears one hello and its inventory answered, arming no timer; then nothing, and no start', async () => {
     const { starts, socketOf } = stand();
-    const timers = () => process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
-    const before = timers();
-    const client = await cua(await socketOf(A));
-    await until(() => client.messages.length === 1);
+    const path = await socketOf(A);
+    // every timer armed from the connection's admission to its answer, waited for by its own events alone
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    const immediates = vi.spyOn(globalThis, 'setImmediate');
+    let armed: number;
+    let client: Awaited<ReturnType<typeof cua>>;
+    try {
+      client = await cua(path);
+      const heard = (count: number) => new Promise<void>((resolve) => (client.messages.length >= count ? resolve() : client.socket.on('data', () => client.messages.length >= count && resolve())));
+      await heard(1);
+      client.socket.write(request(1, 'tabs.query'));
+      await heard(2);
+      armed = timeouts.mock.calls.length + intervals.mock.calls.length + immediates.mock.calls.length;
+    } finally {
+      timeouts.mockRestore();
+      intervals.mockRestore();
+      immediates.mockRestore();
+    }
+    expect(armed).toBe(0);
     await settle(100);
-    expect(client.messages).toEqual([{ jsonrpc: '2.0', method: 'hello', params: { extensionId: 'maws', extensionInstanceId: 'maws:A', version: 'test', protocolVersion: 1, profileName: 'MAWS' } }]);
+    expect(client.messages).toEqual([
+      { jsonrpc: '2.0', method: 'hello', params: { extensionId: 'maws', extensionInstanceId: 'maws:A', version: 'test', protocolVersion: 1, profileName: 'MAWS' } },
+      { jsonrpc: '2.0', id: 1, result: [] },
+    ]);
     expect(starts).toHaveLength(0);
-    expect(timers()).toBeLessThanOrEqual(before); // the broker armed none
     expect(client.closed()).toBe(false);
+  });
+
+  it('a peer checked under an older epoch than the route’s is closed unread, with no hello', async () => {
+    const { broker, root } = stand();
+    const path = join(root, 'old.sock');
+    const server: Server = createServer({ pauseOnConnect: true }, (socket) => broker.admit(A, socket, 'e0'));
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    closers.push(() => server.close());
+    const client = await cua(path);
+    await until(client.closed);
+    expect(client.raw().length).toBe(0);
   });
 
   it('answers the inventory with no tabs, as often as asked, starting nothing', async () => {

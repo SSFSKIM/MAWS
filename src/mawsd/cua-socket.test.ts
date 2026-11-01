@@ -673,4 +673,91 @@ describe('the cold route (P5 O17 M1)', () => {
     sockets.remove(A);
     await until(third.closed);
   });
+
+  // The review's finding (M1 fix 1): a checked peer held for the broker's chunk is its session's, under the epoch and the
+  // engine it was checked in; a teardown while the chunk loads ends it, and at the load nothing else admits it
+  function heldLoader() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    return { loadBroker: () => gate.then(() => loadCuaBroker()), release };
+  }
+  // `peers` checked and let in: judgePeer reads the peer twice per check (once more after the walk)
+  const checked = async (addon: { peerReads: number }, peers: number) => {
+    await until(() => addon.peerReads === 2 * peers);
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  it.each([
+    ['its engine is replaced', 'engine'],
+    ['its route moves to a new epoch', 'epoch'],
+    ['its route moves to a new epoch nobody announced', 'silent epoch'],
+    ['its engine and epoch both move (the review’s case)', 'both'],
+  ] as const)('a peer waiting for the broker’s chunk is never admitted once %s', async (_, what) => {
+    const addon = fakeAddon();
+    const loader = heldLoader();
+    const { sockets, readings, demands, logs } = coldStand({ addon, loadBroker: loader.loadBroker });
+    sockets.engineProcess(A, ENGINE);
+    readings.set(A, { state: 'cold', epoch: 'old-epoch' });
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.create', params: {} }));
+    await checked(addon, 1);
+    if (what === 'engine' || what === 'both') sockets.engineProcess(A, NEXT_ENGINE);
+    if (what !== 'engine') readings.set(A, { state: 'cold', epoch: 'new-epoch' });
+    if (what === 'epoch' || what === 'both') sockets.routeChanged(A);
+    if (what !== 'silent epoch') await until(client.closed); // ended at once, while the chunk still loads
+    loader.release();
+    await until(() => logs.includes('[cua] the cold broker loaded'));
+    await until(client.closed);
+    expect(client.heard().length).toBe(0);
+    expect(demands).toHaveLength(0);
+  });
+
+  it('a peer waiting for the broker’s chunk ends with its session; a session made again under the same id never admits it', async () => {
+    const addon = fakeAddon();
+    const loader = heldLoader();
+    const { sockets, demands, logs } = coldStand({ addon, loadBroker: loader.loadBroker });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.create', params: {} }));
+    await checked(addon, 1);
+    sockets.remove(A);
+    await until(client.closed);
+    sockets.ensure(A);
+    sockets.engineProcess(A, ENGINE);
+    loader.release();
+    await until(() => logs.includes('[cua] the cold broker loaded'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(client.heard().length).toBe(0);
+    expect(demands).toHaveLength(0);
+  });
+
+  it('peers waiting for the broker’s chunk count in the pending budget; at the load the current ones are admitted', async () => {
+    const addon = fakeAddon();
+    const loader = heldLoader();
+    const { sockets } = coldStand({ addon, loadBroker: loader.loadBroker, pendingBudget: { session: 2, total: 64 } });
+    sockets.engineProcess(A, ENGINE);
+    const path = sockets.ensure(A)!;
+    await until(() => exists(path));
+    const held = [engineClient(path), engineClient(path)];
+    await checked(addon, 2);
+    const past = engineClient(path);
+    await until(past.closed, 1000);
+    expect(sockets.inspect().A!.refused).toBe(1);
+    loader.release();
+    await until(() => held.every((client) => messagesOf(client.heard()).length === 1));
+    engineClient(path); // the chunk loaded: admitted at once, the places back
+    await until(() => sockets.inspect().A!.refused === 1 && held.every((client) => !client.closed()));
+  });
+
+  it('with no app, the departure line says which sockets keep listening cold', async () => {
+    const { sockets, appDir, logs, live } = coldStand({ uidBoundary: true });
+    live.set(B, false);
+    sockets.ensure(A);
+    sockets.ensure(B);
+    sockets.target(appDir);
+    sockets.target(null);
+    expect(logs.at(-1)).toBe("[cua] no tab engine is attached: 1 of the sessions' sockets keep listening on their cold route, the others stop");
+  });
 });

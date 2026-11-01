@@ -68,7 +68,8 @@ export interface CuaBrokerInspection {
 }
 
 export interface CuaBroker {
-  admit(appSessionId: AppSessionId, socket: Socket): void; // a peer cua-socket.ts admitted, nothing of it read yet
+  // a peer cua-socket.ts admitted, nothing of it read yet, under the epoch it was checked in: a route already past it closes it
+  admit(appSessionId: AppSessionId, socket: Socket, epoch: string): void;
   routeChanged(appSessionId: AppSessionId): void; // the session's route moved: what an older epoch holds ends, its start is aborted
   end(appSessionId: AppSessionId): void; // every connection of the session ends, its start is aborted
   inspect(): CuaBrokerInspection;
@@ -354,10 +355,10 @@ export function createCuaBroker(options: CuaBrokerOptions): CuaBroker {
   };
 
   return {
-    admit(appSessionId, socket) {
+    admit(appSessionId, socket, epoch) {
       socket.on('error', () => {});
       const route = options.route(appSessionId);
-      if (route.state !== 'cold' && route.state !== 'starting' && route.state !== 'headless') return void socket.destroy();
+      if (route.epoch !== epoch || (route.state !== 'cold' && route.state !== 'starting' && route.state !== 'headless')) return void socket.destroy();
       const set = connections.get(appSessionId) ?? new Set<Connection>();
       const inSession = unspliced(set).length;
       if (inSession >= limits.cold.session || unspliced(all()).length >= limits.cold.total) {

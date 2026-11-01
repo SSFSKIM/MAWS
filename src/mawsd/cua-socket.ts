@@ -102,6 +102,9 @@ interface Session {
   moduleNoted: boolean; // the line on the addon's absence, once per socket
   busyNoted: boolean; // the line on a refusal past the waiting budget, once per burst
   promoting: number; // P5 O17 M1: the broker's promotions holding a place in the pending budget
+  // P5 O17 M1: checked peers held for the broker's chunk while it loads, each bound to the epoch and the engine it was
+  // checked under; counted in the pending budget and ended by every teardown, as a waiting or relayed socket is
+  awaiting: Map<Socket, { epoch: string; root: ProcessRoot | null }>;
 }
 
 const refusalLine = (appSessionId: string, { reason, pid }: PeerRefusal) => `cua socket of ${appSessionId}: refused peer${pid === null ? '' : ` pid ${pid}`} (${reason})`;
@@ -137,7 +140,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     return engine ? [engine] : [];
   };
   // the pending budget's count: peer-root waits and the broker's promotions together (P5 O17 M1)
-  const pendingOf = (session: Session) => session.pending.size + session.promoting;
+  const pendingOf = (session: Session) => session.pending.size + session.promoting + session.awaiting.size;
   const pendingTotal = () => [...sessions.values()].reduce((sum, session) => sum + pendingOf(session), 0);
   const pendingFull = (session: Session) => pendingOf(session) >= budget.session || pendingTotal() >= budget.total;
   // P5 O17 M1: the route's cold states, with no app attached; where they listen (§B)
@@ -149,6 +152,15 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     if (tabEngine !== null) return true;
     if (!coldServes(appSessionId)) return false;
     return options.cold!.reading(appSessionId).state === 'starting' || options.cold!.live(appSessionId);
+  };
+  const sameRoot = (a: ProcessRoot | null, b: ProcessRoot | null) => a?.pid === b?.pid && a?.start === b?.start;
+  // P5 O17 M1: the sockets held for the broker's chunk, those `keep` does not keep ended
+  const endAwaiting = (session: Session, keep: (entry: { epoch: string; root: ProcessRoot | null }) => boolean = () => false) => {
+    for (const [socket, entry] of [...session.awaiting]) {
+      if (keep(entry)) continue;
+      session.awaiting.delete(socket);
+      socket.destroy();
+    }
   };
   const hasLiveRoot = (appSessionId: AppSessionId, addon: PeerAddon) => rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
 
@@ -203,8 +215,8 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     attempt();
   };
 
-  // P5 O17 M1: a peer let in on a cold route, handed to the broker once its chunk has loaded (the first such peer loads it)
-  const toBroker = (appSessionId: AppSessionId, socket: Socket) => {
+  // P5 O17 M1: the broker's chunk, loaded once (the first admitted cold peer loads it); a failed load is tried again
+  const loadBroker = (): Promise<CuaBroker> => {
     const cold = options.cold!;
     brokerLoad ??= (options.loadBroker ?? loadCuaBroker)().then(
       (chunk) => {
@@ -226,17 +238,37 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         return broker;
       },
       (error: unknown) => {
-        brokerLoad = null; // the next peer tries again
+        brokerLoad = null;
         throw error;
       },
     );
-    brokerLoad.then(
+    return brokerLoad;
+  };
+
+  // P5 O17 M1: a peer let in on a cold route goes to the broker under the epoch it was checked in. While the chunk loads
+  // the socket is held on its session, in the pending budget, bound to that epoch and the engine it was checked against:
+  // a teardown in between ends it, and at the load it is admitted only if its session, epoch and engine are still the
+  // ones it was checked under
+  const toBroker = (appSessionId: AppSessionId, session: Session, socket: Socket) => {
+    const cold = options.cold!;
+    const entry = { epoch: cold.reading(appSessionId).epoch, root: engineRoots.get(appSessionId) ?? null };
+    if (broker) return broker.admit(appSessionId, socket, entry.epoch);
+    if (pendingFull(session)) {
+      session.refused += 1;
+      if (!session.busyNoted) log(`cua socket of ${appSessionId}: refused peers past the ${pendingOf(session) >= budget.session ? `session's ${budget.session}` : `daemon's ${budget.total}`} waiting for an engine or the browser`);
+      session.busyNoted = true;
+      return void socket.destroy();
+    }
+    session.awaiting.set(socket, entry);
+    loadBroker().then(
       (loaded) => {
-        if (socket.destroyed) return;
-        if (!sessions.has(appSessionId) || !coldServes(appSessionId)) return void socket.destroy(); // the route moved while it loaded
-        loaded.admit(appSessionId, socket);
+        if (!session.awaiting.delete(socket) || socket.destroyed) return; // ended while the chunk loaded
+        const current = sessions.get(appSessionId) === session && coldServes(appSessionId) && cold.reading(appSessionId).epoch === entry.epoch && sameRoot(engineRoots.get(appSessionId) ?? null, entry.root);
+        if (!current) return void socket.destroy(); // the session, its route or its engine moved while the chunk loaded
+        loaded.admit(appSessionId, socket, entry.epoch);
       },
       (error: unknown) => {
+        if (!session.awaiting.delete(socket)) return;
         log(`cua socket of ${appSessionId}: the cold broker could not load: ${error instanceof Error ? error.message : String(error)}`);
         socket.destroy();
       },
@@ -246,7 +278,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
   // A checked peer goes to the attached app, or on a cold route to the broker (P5 O17 M1)
   const serve = (appSessionId: AppSessionId, session: Session, socket: Socket) => {
     if (tabEngine !== null) return relay(appSessionId, session, socket);
-    if (coldServes(appSessionId)) return toBroker(appSessionId, socket);
+    if (coldServes(appSessionId)) return toBroker(appSessionId, session, socket);
     socket.destroy();
   };
 
@@ -328,6 +360,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     session.pending.clear();
     for (const pair of [...session.pairs]) endPair(pair);
     session.pairs.clear();
+    endAwaiting(session); // P5 O17 M1
     broker?.end(appSessionId); // P5 O17 M1
   };
 
@@ -349,7 +382,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         return null;
       }
       peerAddon(); // the first socket loads the addon its peer check needs, before anything can connect
-      const session: Session = { path, server: null, pending: new Map(), pairs: new Set(), relayed: 0, refused: 0, moduleNoted: false, busyNoted: false, promoting: 0 };
+      const session: Session = { path, server: null, pending: new Map(), pairs: new Set(), relayed: 0, refused: 0, moduleNoted: false, busyNoted: false, promoting: 0, awaiting: new Map() };
       sessions.set(appSessionId, session);
       if (listens(appSessionId)) listen(appSessionId, session);
       return path;
@@ -360,11 +393,19 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       tabEngine = next;
       for (const [appSessionId, session] of sessions) {
         for (const pair of [...session.pairs]) endPair(pair); // relayed to a tab engine that is no longer the attached one
+        endAwaiting(session); // P5 O17 M1: bound for the broker, which the change of tab engine replaces
         broker?.end(appSessionId); // P5 O17 M1: served cold, which an attached app replaces
         if (next === null) settle(appSessionId, session); // P5 O17 M1: a cold route keeps listening
         else if (!session.server) listen(appSessionId, session);
       }
-      log(next === null ? '[cua] no tab engine is attached: the sessions\' sockets stop listening' : `[cua] a tab engine is attached (${next}): the sessions' sockets listen`);
+      const cold = next === null ? [...sessions.values()].filter((session) => session.server !== null).length : 0;
+      log(
+        next !== null
+          ? `[cua] a tab engine is attached (${next}): the sessions' sockets listen`
+          : cold === 0
+            ? "[cua] no tab engine is attached: the sessions' sockets stop listening"
+            : `[cua] no tab engine is attached: ${cold} of the sessions' sockets keep listening on their cold route, the others stop`,
+      );
       if (had !== (next !== null)) options.onChange?.();
     },
     tabEngine: () => tabEngine,
@@ -379,6 +420,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       // (the app sees only the daemon, so it cannot hold the next engine's boundary itself)
       if (session && was && (root?.pid !== was.pid || root.start !== was.start)) {
         for (const pair of [...session.pairs]) endPair(pair);
+        endAwaiting(session); // P5 O17 M1: checked against it, still waiting for the broker's chunk
         broker?.end(appSessionId); // P5 O17 M1: the broker's connections were checked against it too
       }
       if (!root || !session) return;
@@ -398,6 +440,8 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     routeChanged(appSessionId) {
       const session = sessions.get(appSessionId);
       if (!session) return;
+      const epoch = options.cold?.reading(appSessionId).epoch;
+      endAwaiting(session, (entry) => entry.epoch === epoch); // P5 O17 M1: an older epoch's, still waiting for the chunk
       broker?.routeChanged(appSessionId);
       if (tabEngine === null) settle(appSessionId, session);
     },
