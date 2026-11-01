@@ -5,7 +5,7 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
 import { COMMAND_BUDGETS_MS, openSpineData, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandOutput, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ import { app, BrowserWindow, dialog, screen, systemPreferences } from 'electron'
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
-import { dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls
+import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
@@ -60,7 +60,6 @@ import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-gua
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { electronClientPort } from './client/electron-port'; // P5 O1 M3
-import { electronWindowShown } from './client/window-shown'; // P5 O1 M3
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
@@ -119,7 +118,7 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 import { installStorePolicies, startArtifacts } from './artifacts'; // P5 O5: registerStoreSchemes runs in the entry's shared bootstrap
 // P3-A end
 // P3-L start
-import { readResolvedThrough, registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index
+import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index; P5 O4 M3: the export formats and Save as alone
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
 // P3-L end
 // P3-B start
@@ -132,13 +131,15 @@ import { registerPresenter } from './presentations/present'; // P3-C M6
 import { registerAssetDownload } from './dashboard/download';
 import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
 // P3-E end
-import { startConnectors } from './connectors'; // P3-H H3b
-import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
-import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
-import { listenLoopback } from './connectors/oauth-callback'; // P4-AGG M4
-import { startSignIn } from './connectors/sign-in'; // P4-AGG M4
-import { startDelivery } from './delivery'; // P4-B5: the owner's Send to
 import { startCatalog } from './catalog'; // P4-AGG M2: Discover's catalog
+// P5 O4 M2 start: what stays in the app of the connectors and delivery
+import { startAppConnectors } from './connectors';
+import { adoptLegacyGrants } from './connectors/adoption';
+import { legacySealer } from './connectors/legacy-custody';
+import { electronWindowShown } from './client/window-shown';
+import { registerDeliverySend } from './delivery/send';
+import { exportHeldFor } from './delivery/e2e-hold';
+// P5 O4 M2 end
 
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
 // owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
@@ -157,11 +158,6 @@ const MAIN_BUILD: MainBuild = { version: __MAWS_VERSION__, ...__MAWS_BUILD__ };
 console.log(`[main] ${describeMainBuild(MAIN_BUILD)} · pid ${process.pid}`);
 let bringForward: () => BrowserWindow | null = () => null; // the started app's window, shown and focused (or opened)
 const OLDER = { quit: 'Quit MAWS', keep: 'Keep running' };
-// The window showing a client's page while the page lives (a dialog's parent, the connectors' veto); null once it ended.
-const windowOfClient = (client: ClientRef): BrowserWindow | null => {
-  const page = pageOf(client);
-  return page && BrowserWindow.fromWebContents(page);
-};
 function offerQuit(win: BrowserWindow, notice: string): void {
   const options = { type: 'info' as const, message: notice, buttons: [OLDER.quit, OLDER.keep], defaultId: 0, cancelId: 1 };
   void dialog.showMessageBox(win, options).then(({ response }) => {
@@ -448,14 +444,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     for (const listener of [...rosterListeners]) listener();
   });
   // The engine's environment (the login-shell capture): the spine's launches and transcripts, the checkouts' scm, and
-  // the client's Send to read it.
+  // Send to's gws (P5 O4: the spine's delivery) read it.
   const home = app.getPath('home');
   const engineEnv = captureShellEnvironment();
   // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §D): the spine, composed by its root
   // from what main binds (O3-D's mawsd calls the same root): the index with its session source, replay and the read
   // model, attention's core, the owner channel, the session service and its siblings, the configure and defaults relays
   // and the library's derived index. From here main holds of it only its view, the one way the code that stays in the
-  // app reads the spine (the notifier, the quit guard, the chat panels, the interest report, the browser, connectors,
+  // app reads the spine (the notifier, the quit guard, the chat panels, the interest report, the browser, until O4 the connectors,
   // the export authors, the org rows, Settings' reveal, and until O3-E the checkouts), and its stop. Its reverse reads
   // are ports: the sweep keeps this app's interest set (bound below, once the layout and the view exist; D11), and a
   // launch is told the browser's cua socket (E13; the browser starts below, and a launch asked before it carries none).
@@ -490,6 +486,24 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     watchReplay = spine.watches;
   }
   const view = spine.view;
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §B, §F; D8, D28, D32): the connectors are
+  // the spine's (mawsd's on the daemon shape, startSpine's above on the embedded one). The app reports each page's window
+  // to them through the router's seam before a lease command, adopts the grants Electron's safeStorage sealed once per
+  // launch (at the machine host's first streaming on the daemon shape, now on the embedded one), and at each later
+  // streaming of the machine host tells its windows `connectors.reset`, on which they rebuild their leases.
+  const appConnectors = startAppConnectors({
+    machine: data === null ? { streaming: () => hosts.streaming('machine'), onStreaming: (listener) => hosts.onStreaming('machine', listener) } : null,
+    windowShown: (client) => {
+      const page = pageOf(client);
+      const win = page && BrowserWindow.fromWebContents(page);
+      return win ? electronWindowShown(win) : null;
+    },
+    invoke: bus.invoke,
+    before: beforeCommand,
+    emit: (name, payload) => void emit(name, payload),
+    adopt: () => adoptLegacyGrants({ directory: join(profile, 'connectors', 'oauth'), sealer: legacySealer(), invoke: bus.invoke, log: (line) => console.log(line) }),
+  });
+  shutdown.add('connectors', appConnectors.stop);
 
   // ---- C5: layout store ---- (the store itself is made above, before the router: remote lane B reads it)
   registerOpenExternal();
@@ -706,82 +720,54 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     authors: exportAuthors, // P5 O5 M3
   });
   shutdown.add('artifacts', artifacts.stop);
-  // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
-  // engine host's main-only commands). At will-quit every lease, watch and pending operation ends. P4 W2-B: the stop runs
-  // after the hosts' drain, so its withdrawals answer host_unavailable in main; the host ends every operation of a main
-  // that leaves on its own (src/engine-host/connectors/register.ts, onClientGone), which the withdrawals only repeated.
-  // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
-  // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
-  // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
-  const connectors = startConnectors({
-    hosts,
-    register: registerMainHandler,
-    view, // P5 O3-C (reader R8)
-    windowShown: (client) => {
-      const win = windowOfClient(client);
-      return win && electronWindowShown(win);
-    },
-    port: clientPort,
-    direct: createDirectRoute,
-    oauth: productionConnectorOAuth,
-  });
-  shutdown.add('connectors', connectors.stop);
-  // P4-AGG M4: Customize › Connectors' Sign in, the engine's own MCP sign-in in one ready session (its credential is the
-  // engine's, in the engine's keychain item; MAWS's own OAuth store is not involved)
-  const signIn = startSignIn({
-    register: registerMainHandler,
-    emit: (name, payload) => emit(name, payload),
-    host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
-    onSessionStatus: (listener) => hosts.onEvent('session.status', (payload) => listener(payload)),
-    onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
-    port: clientPort,
-    listen: listenLoopback,
-  });
-  shutdown.add('connector sign-in', signIn.stop);
-  // P4-B5: the owner's Send to, no Claude turn: Notion through route D (MAWS's own connection), Drive through the gws CLI
-  // the owner installed, run with the login shell's environment (the CLI keeps its sign-in; MAWS holds no Google
-  // credential); the export is X31's, as the library's
-  const delivery = startDelivery({
-    register: registerMainHandler,
-    emit: (name, payload) => emit(name, payload),
-    // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the embedded
-    // shape (and on an older daemon), mawsd's render seam on the daemon shape
-    exportArtifact: async (input, options) => {
-      const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
-      if (!exported.ok) throw new Error(exported.error.message);
-      return exported.value as CommandOutput<'artifacts.export'>;
-    },
-    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-    connectors: connectors.delivery ?? null,
-    shellEnv: () => engineEnv,
-    port: clientPort,
-  });
-  shutdown.add('delivery', delivery.stop);
+  // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
+  // grants, rows and sign-ins, the engine's MCP sign-in and the owner's Send to are the machine's, composed with the spine
+  // (mawsd's on the daemon shape, startSpine's above on the embedded one). Main keeps the export step of Send to
+  // (Interfaces §G; D14, D15, D38): `delivery.send` reads the machine's status, exports as the library exports (`artifacts.export`), and hands
+  // the file to the machine's `delivery.deliver`; a cancel in its export phase is answered here.
+  shutdown.add(
+    'delivery send',
+    registerDeliverySend({
+      register: registerMainHandler,
+      before: beforeCommand,
+      // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the
+      // embedded shape (and on an older daemon), mawsd's render seam on the daemon shape; the e2e's hold around it
+      // (./delivery/e2e-hold.ts)
+      exportArtifact: exportHeldFor(async (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => {
+        const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
+        if (!exported.ok) throw new Error(exported.error.message);
+        return exported.value as CommandOutput<'artifacts.export'>;
+      }, process.env),
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      invoke: bus.invoke,
+    }),
+  );
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
   // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
-  // cwd through the host, re-read on its `plugins.changed`
+  // cwd. P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D16): those reads and the watch of the engine's
+  // plugin state are the machine's, composed with the spine (mawsd's on the daemon shape, startSpine's above on the
+  // embedded one), asked through main's own route and heard through the bus's tap, which hears mawsd's events too
   const catalog = startCatalog({
     register: registerMainHandler,
     emit: (name, payload) => emit(name, payload),
-    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-    onPluginsChanged: (listener) => hosts.onEvent('plugins.changed', () => listener()),
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never, // catalog.postures' configured servers
+    invoke: (name, input) => bus.invoke(name, input, { client: mainClient }),
+    onEngineChanged: (listener) => bus.onEmitted('catalog.engineChanged', listener),
     userData: app.getPath('userData'),
     env: process.env,
     userAgent: `MAWS/${app.getVersion()}`,
   });
   shutdown.add('catalog', catalog.stop);
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
-  // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports, whatever the index's
-  // state. P5 O3-C (D22): the client's; the library's derived index is the spine's, and `library.read` reaches the
-  // checkouts' files service.
+  // P3-L M5b: the library's export formats and Save as of an export or a stored file, whatever the index's state. P5
+  // O3-C (D22): the client's; the library's derived index is the spine's. P5 O4 M3 (D19): the reads of a stored file
+  // (content, read, open, reveal) are the machine's, composed with the spine; these two stay beside the exporters until O5.
   registerLibraryFiles(registerMainHandler, {
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     exporters: artifacts.exporters,
     root: join(app.getPath('userData'), 'artifacts'),
     downloads: () => app.getPath('downloads'),
-    port: clientPort, // Save as…, the Replace question, Open externally, Reveal
-    // M6b fix wave 2: `library.read`; P5 O3-E (Interfaces §D): the files service's files.readResolved over main's own route
-    readFile: readResolvedThrough((name, input) => bus.invoke(name, input, { client: mainClient })),
+    port: clientPort, // Save as…, the Replace question
     env: process.env,
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through

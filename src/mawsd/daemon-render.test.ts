@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { machineName } from '@shared/machine/identity';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { DaemonOptions, RunningDaemon } from './daemon';
@@ -101,7 +101,7 @@ async function awake(daemon: RunningDaemon) {
 describe('the render seam in mawsd (P5 O5 M4)', () => {
   it('lists machine.render in every welcome', async () => {
     await scene.start({ permanentClient: true });
-    const client = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    const client = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] }); // P5 O4 M2 (D11): an app's hello lists machine.connectors, or it is refused
     expect(client.first?.capabilities).toContain(MACHINE_RENDER_CAPABILITY);
   });
 

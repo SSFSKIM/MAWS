@@ -37,7 +37,7 @@ export const commands = [
   'session.capabilities', // P5 O5 M5: the session's agent capabilities on its machine
 ] as const;
 
-// P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)
+// P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)
 // P5 O3-D: a client's session streams on mawsd's services front and the mirror's visible set, main's and mawsd's clients'
 export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */] as const;
 

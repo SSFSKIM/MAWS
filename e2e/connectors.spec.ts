@@ -21,10 +21,18 @@
 //   hot relaunch (P3-H H4): main killed with the owner's session live in the detached host and relaunched at once on the
 //          same profile: the same supervisor and launch, and the restored page reads exactly once, through that engine
 //          and its server (the soak's relaunch, without its five-minute waits).
-import { createHash } from 'node:crypto';
+//   daemon restart (P5 O4 M2, docs/doperpowers/plans/2026-10-31-p5-o4-services.md acceptance 4, D28): on the daemon
+//          shape the page's lease lives in the profile's `mawsd`; the daemon asked to restart under the open, watching
+//          page (as `mawsd restart` asks), the same engine host and launch serve on, main tells the window, the renderer
+//          rebuilds the lease, and the page reads again through that engine without being reopened.
+// P5 O4 M2 (D10): on the daemon shape an app's quit no longer ends the connectors' state, which is the machine's (the
+// host's verified sources among it), so the product case ends the machine after its quit for the relaunch's fresh start.
+import { createHash, randomUUID } from 'node:crypto';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
+import { daemonPaths } from '@shared/daemon/files';
 import type { AppSessionId } from '@shared/graph/ids';
 import { callMcpTool, probeMcpCall, qualifiedMcpToolName } from '../src/engine-host/mcp-call';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { startScratchEngine, type FixtureServer, type ScratchEngine } from './support/connector-engine';
 import { invoke, pageState, TOOL, TOOL_NAME, value, wait, WATCH_MS, withScene } from './support/connector-scene';
 
@@ -225,6 +233,9 @@ test('product: the owner starts a session and grants a page’s tool from the he
     if (daemon) value(await invoke(run.page, 'session.stop', { appSessionId: engine.appSessionId as AppSessionId, reason: 'stop' }));
     await scene.quit(run);
     await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: daemon ? 'the engine stopped before the quit' : 'the engine stopped with the app' }).toBe(false);
+    // P5 O4 M2 (D10): the connectors' state is the machine's on the daemon shape and outlives the quit (the engine host's
+    // verified source would serve the page through route D at once), so the machine ends here, as it ended with main
+    if (daemon) await scene.endMachine();
     const quitCalls = scene.toolCalls().length;
 
     // relaunched on the same profile: nothing is acquired, the grant is held, the page reads paused with Start offered
@@ -286,5 +297,69 @@ test('hot relaunch: main killed and relaunched at once keeps the owner’s sessi
     await wait(5_000);
     expect(scene.toolCallsBetween(reopenedAt, Date.now()), 'the restored page read once').toMatchObject([{ pid: server, tool: TOOL }]);
     expect(scene.toolCalls()).toHaveLength(2);
+  });
+});
+
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 4, D28): a lease survives a daemon restart.
+test('daemon restart: the open page’s lease is rebuilt after its mawsd restarts, and its watch reads again through the same engine without the page being reopened', async () => {
+  test.setTimeout(300_000);
+  await withScene('restart', test.info(), async (scene) => {
+    const run = await scene.launch();
+    const status = value(await invoke(run.page, 'host.status', undefined));
+    test.skip(status.transport !== 'daemon' || status.daemon === null, 'the daemon shape’s case: an embedded app holds its leases itself');
+    const daemon = status.daemon!.pid;
+    const supervisor = await scene.supervisor(run.page);
+    const artifactId = await scene.createPage(run.page);
+    const { frame } = await scene.openPage(run.page, artifactId);
+    await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+    const engine = await scene.ownerStart(run.page);
+    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+    const sheet = await scene.openSheet(run.page);
+    await sheet.locator(`[data-connector-tool="${TOOL_NAME}"]`).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+    await scene.closeSheet(run.page);
+    await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+    const server = scene.toolCalls()[0]!.pid;
+    const before = await pageState(frame);
+    // an in-memory mark on the page's document: a reload or a reopened page would not carry it
+    const nonce = randomUUID();
+    await frame.locator('body').evaluate((body, given) => void ((body.ownerDocument.defaultView as unknown as { __restartNonce?: string }).__restartNonce = given), nonce);
+    scene.note('before the restart', { daemon, supervisor, engine, page: before });
+
+    // the private daemon asked to restart over machine.sock, as the CLI's `mawsd restart` asks: it exits 75 and the
+    // app's transports start it again; the engine host and its engine serve on
+    const reached = await reachMachine(daemonPaths(scene.userData), { build: 'e2e-connectors-restart' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    try {
+      await reached.link.request('daemon.restart', undefined);
+    } finally {
+      reached.link.close();
+    }
+    const restartedAt = Date.now();
+    let restarted = 0;
+    await expect
+      .poll(async () => {
+        const now = await invoke(run.page, 'host.status', undefined);
+        restarted = now.ok && now.value.state === 'ready' && now.value.daemon !== null && now.value.daemon.pid !== daemon ? now.value.daemon.pid : 0;
+        return restarted;
+      }, { timeout: 60_000, message: 'another mawsd serves the app' })
+      .not.toBe(0);
+    expect(await scene.supervisor(run.page), 'the same engine host').toBe(supervisor);
+    expect(await scene.live(run.page), 'the same launch, no other').toEqual([engine]);
+
+    // the page reads again, its document the same one (its count of updates goes on), through the same engine's server
+    let after = before;
+    await expect
+      .poll(async () => {
+        after = await pageState(frame);
+        return after.updates > before.updates && /^ok n=\d+ via=engine$/.test(after.last);
+      }, { timeout: WATCH_MS + 30_000, message: 'the page read again through its rebuilt lease' })
+      .toBe(true);
+    scene.note('after the restart', { daemon: restarted, page: after, ms: Date.now() - restartedAt });
+    expect(await frame.locator('body').evaluate((body) => (body.ownerDocument.defaultView as unknown as { __restartNonce?: string }).__restartNonce), 'the same page document, never reloaded').toBe(nonce);
+    expect(Number(/^ok n=(\d+)/.exec(after.last)![1]), 'the same server’s next calls').toBeGreaterThan(1);
+    const since = scene.toolCallsBetween(restartedAt, Date.now());
+    expect(since.length, 'a call after the restart').toBeGreaterThan(0);
+    expect(since.every((call) => call.pid === server && call.tool === TOOL), 'every call after the restart through the same engine’s server').toBe(true);
+    expect(scene.launches(engine.appSessionId), 'one launch, never exited').toEqual({ spawns: 1, exits: 0 });
   });
 });

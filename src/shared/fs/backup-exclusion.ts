@@ -11,8 +11,10 @@ const OSASCRIPT = '/usr/bin/osascript';
 const TIMEOUT_MS = 5_000;
 // The path arrives as argv[0], never inside the script's text. It is made absolute and follows `--`, so osascript can
 // never read it as an option: a relative path beginning `-e` would otherwise be one more script, whose own `run` answers.
+// The bridge's import is written by subscript, the same JXA call: this text rides in whichever bundle chunk holds the
+// module, whose guard (test/support/guarded-entry.ts) would read `.import(` as a load of a module named Foundation.
 const SCRIPT = [
-  'ObjC.import("Foundation");',
+  'ObjC["import"]("Foundation");',
   'function run(argv) {',
   '  const error = $();',
   '  const url = $.NSURL.fileURLWithPath(argv[0]);',

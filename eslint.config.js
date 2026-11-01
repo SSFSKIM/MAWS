@@ -37,7 +37,7 @@ const CLIENT_PORT = "A machine-bound service (P5 OX4) imports no Electron and no
 const MACHINE_BOUND = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.{ts,tsx}']; // P5 O6 M1: machine
 const MACHINE_BOUND_TESTS = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.test.{ts,tsx}'];
 const MACHINE_BOUND_ALLOWED = [
-  'src/main/connectors/oauth-root.ts', // safeStorage, O4's to replace (U7)
+  'src/main/connectors/legacy-custody.ts', // P5 O4 M2 (U7, D20): safeStorage, read once by the adoption of format 1 grants
 ];
 // `.` stands for the slash, as above
 const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:electron|.*.open-external)$/]', message: CLIENT_PORT };

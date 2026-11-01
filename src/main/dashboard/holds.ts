@@ -3,7 +3,7 @@
 // source sheet's captured snapshots and the painted cache's): main takes the engine host's main-only hold
 // (`artifacts.holdAssets`) and answers a handle it mints, bound to the asking client; only that client releases it, and
 // the client's end (its page closing, navigating or crashing) releases every hold it took (H's lease rule,
-// src/main/connectors).
+// src/services/connectors).
 // The host's id never reaches a window, and the shared host connection is never a window's authority. A Download's
 // (`holdAsset` below): main's own, through the dialog and the copy. When the host's connection goes, the host released
 // every hold it took (src/engine-host/dashboards/holds.ts), so main forgets them; a window's later release still

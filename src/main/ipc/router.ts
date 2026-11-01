@@ -28,7 +28,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
-import type { HandlerContext } from '@shared/ipc/client';
+import type { ClientRef, HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { REGISTRY, type InputOf, type NameOf, type OutputOf, type WireRegistry } from '@shared/ipc/registry';
 import { commandChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult } from '@shared/ipc/schema';
@@ -60,11 +60,18 @@ export type RegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (inpu
 // `machine` handler does not: a host runtime runs the same code, and it is always its own machine's.
 export type MainRegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (input: InputOf<R, N>, ctx: MainContext) => OutputOf<R, N> | Promise<OutputOf<R, N>>;
 
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §F, D24): a hook run before the owner switch
+// for the commands it names, on both shapes and for main's own calls alike, with the validated input and the asker: an
+// answer short-circuits the route, undefined lets it continue. The window report (src/main/connectors/windows.ts) and
+// the delivery cancel of a send in its export phase (src/main/delivery/send.ts) use it.
+export type BeforeHook = (name: CommandName, input: unknown, client: ClientRef) => Promise<CommandResult<CommandName> | undefined>;
+
 export interface Router<R extends WireRegistry> {
   install(): void; // one ipcMain.handle per name of R
   registerMain<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): void; // refuses a name R does not give to `main`
   registerMachine<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `machine`
   intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
+  before(names: readonly NameOf<R>[], hook: BeforeHook): () => void; // P5 O4 M2: the hook's disposer
   // P5 O6 M3: the route minus the sender check, for the client and machine `ctx` names; `internal` before `install`
   dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main's own in-process call, the
@@ -113,6 +120,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // exactly that name. Only the stub source installs one; a production launch never does.
   const interceptors = new Map<string, AnyHandler>();
   // ---- end C5 ---------------------------------------------------------------------------------------------------------
+  const befores = new Map<string, BeforeHook[]>(); // P5 O4 M2 (D24): by name, in registration order
 
   const registerIn = (table: Map<string, AnyHandler>, owner: 'main' | 'machine') => (name: string, handler: AnyHandler) => {
     const { owner: actual } = commands[name];
@@ -175,6 +183,18 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     };
     let answer: () => Promise<CommandResult<CommandName>>;
     const interceptor = interceptors.get(name); // C5: the stub source's seam, above
+    // P5 O4 M2 (D24): the hooks before the owner switch, for a command no interceptor shadows; the first answer is the route's
+    const hooks = interceptor ? undefined : befores.get(name);
+    if (hooks) {
+      try {
+        for (const hook of [...hooks]) {
+          const early = await hook(name as CommandName, input.value, context.client);
+          if (early !== undefined) return early;
+        }
+      } catch (error) {
+        return failed(name, error);
+      }
+    }
     if (interceptor) {
       answer = run(interceptor);
     } else if (owner === 'machine' && machine.kind === 'host' && !(name === 'artifacts.export' && machine.daemonRenders?.() === false)) {
@@ -196,11 +216,15 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     try {
       return await answer();
     } catch (error) {
-      if (error instanceof CommandFailure) return { ok: false, error: error.error }; // C4
-      if (error instanceof HostCommandError) return { ok: false, error: thrownError(error) }; // P5 O1 M5: as a host runtime answers it
-      console.error(`[ipc] ${name} failed`, error);
-      return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
+      return failed(name, error);
     }
+  }
+
+  function failed(name: string, error: unknown): CommandResult<CommandName> {
+    if (error instanceof CommandFailure) return { ok: false, error: error.error }; // C4
+    if (error instanceof HostCommandError) return { ok: false, error: thrownError(error) }; // P5 O1 M5: as a host runtime answers it
+    console.error(`[ipc] ${name} failed`, error);
+    return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
   }
 
   return {
@@ -219,6 +243,16 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
         if (interceptors.get(name) === handler) interceptors.delete(name);
       };
     }) as Router<R>['intercept'],
+    before(names, hook) {
+      for (const name of names) befores.set(name, [...(befores.get(name) ?? []), hook]);
+      return () => {
+        for (const name of names) {
+          const left = (befores.get(name) ?? []).filter((each) => each !== hook);
+          if (left.length > 0) befores.set(name, left);
+          else befores.delete(name);
+        }
+      };
+    },
     async dispatchLocal(name, input, ctx) {
       if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
       if (mainOnly.has(name)) return mainOnlyRefusal(name);
@@ -250,9 +284,11 @@ export const registerMainHandler: <N extends CommandName>(name: N, handler: Main
 export const registerMachineHandler: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void = production.registerMachine;
 // C5: the stub source's seam (above).
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
+// P5 O4 M2 (Interfaces §F, D24): the seam before the owner switch (above).
+export const beforeCommand: (names: readonly CommandName[], hook: BeforeHook) => () => void = production.before;
 // P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
-// P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`, `library.read`'s files.readResolved).
+// P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`; P5 O4: the catalog's `catalog.engine`).
 export const invokeOwn: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.invokeOwn;
 
 // The sender must be the top frame of an app window (not a subframe, not a webContents without a window) and its

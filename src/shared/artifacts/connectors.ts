@@ -59,7 +59,7 @@ export const sameConnectorTool = (a: ConnectorToolRef, b: ConnectorToolRef): boo
 export const connectorToolKey = (ref: ConnectorToolRef): string => JSON.stringify([ref.server, ref.tool]);
 
 // ── P3-H H3: a page's connector requests and their answers (P3 Decision Log 80; the P3 interface ledger's X9 amendment
-// row; P3-E's XE8). Main's broker (src/main/connectors/broker.ts) answers them; a page reaches it only through the
+// row; P3-E's XE8). Main's broker (src/services/connectors/broker.ts) answers them; a page reaches it only through the
 // `ArtifactHost` adapter. A page names a tool and its arguments, never whether the tool is read-only (the route's
 // annotations say), a fingerprint (the route reports it) or a grant (the owner's alone). ──
 

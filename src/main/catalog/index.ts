@@ -1,43 +1,49 @@
 // Discover's catalog in main (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, M2): the network sources
-// (store.ts), the engine's reads per cwd (engine-reads.ts) and the test sources joined into one list per cwd, served over
-// `catalog.*`. The catalog is the person's: no engine tool, prompt or session context carries it.
-// - `catalog.changed` fires once per refresh that changed anything and once per engine-read invalidation
-//   (`plugins.changed`; a change the watch of the engine's plugin state sees, state-watch.ts; and Refresh, which reads
-//   the engine again).
+// (store.ts), the engine's reads per cwd and the test sources joined into one list per cwd, served over `catalog.*`. The
+// catalog is the person's: no engine tool, prompt or session context carries it.
+// P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D16, D25): the catalog splits by the
+// fact's owner. The engine's reads and the watch of the engine's plugin state are the machine's (src/services/catalog/,
+// composed with the spine: `mawsd` on the daemon shape, main's embedded root on the other); this half, the person's,
+// keeps the network sources, their cache under `<userData>/catalog/`, the icons and the join, and asks the machine
+// `catalog.engine {cwd}` for a cwd's view.
+// - `catalog.changed` fires once per refresh that changed anything and once per engine-read invalidation (each
+//   `catalog.engineChanged` the machine emits: `plugins.changed`, a change its watch sees, and Refresh, which forgets
+//   its reads through `catalog.engineRefresh`).
 // - A cwd's built catalog is kept until the network data or the engine's reads move, under the revision of the reads it
-//   was built from: a read that an invalidation overtook is read again, never kept under the newer revision.
+//   was built from (the store's, and the generation and serial the machine answered): a read that an invalidation
+//   overtook (a `catalog.engineChanged` heard while it was asked) is read again, never kept under the newer revision.
 import { dirname, join } from 'node:path';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { ipcError } from '@shared/ipc/errors';
-import type { EventPayload } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandResult, EventPayload } from '@shared/ipc/schema';
 import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
-import { EngineReads, type HostCall } from './engine-reads';
-import { StateWatch, type PollFn, type WatchFn } from './state-watch';
 import { catalogPages, iconGet, NETWORK_KEYS, type IconGet } from './fetch';
 import { CatalogIcons } from './icons';
 import { buildCatalog } from './join';
-import { connectorRoute, type TestSourceData } from './normalize';
+import { connectorRoute, engineViewFromWire, type EngineView, type TestSourceData } from './normalize';
 import { configurationFingerprint, posturesOf } from './postures';
 import { homeOf, queryOf } from './query';
 import { testSources } from './sources';
 import { CatalogStore } from './store';
 
+type Call<N extends CommandName> = (name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
+
 export interface CatalogDeps {
   register: typeof registerMainHandler;
   emit(name: 'catalog.changed', payload: EventPayload<'catalog.changed'>): unknown;
-  call: HostCall; // the engine host's commands
-  onPluginsChanged(listener: () => void): () => void; // the host's `plugins.changed`
+  call: Call<'customization.serverEndpoints'>; // the engine host's configured servers, for the postures
+  invoke: <N extends 'catalog.engine' | 'catalog.engineRefresh'>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>; // the machine's half, as main asks it
+  onEngineChanged(listener: (payload: EventPayload<'catalog.engineChanged'>) => void): () => void; // the machine's `catalog.engineChanged`
   userData: string;
   env: Record<string, string | undefined>;
   userAgent: string; // MAWS and its version
   log?: (line: string) => void;
-  watch?: WatchFn; // the engine state watch's fs.watch (tests)
-  poll?: PollFn; // and its file polls (tests)
   iconGet?: IconGet; // how icons are read (tests); by default the environment's (fetch.ts)
 }
 
 const READ_ATTEMPTS = 3; // a read overtaken by an invalidation this many times in a row answers what it has, uncached
+const KEPT_CATALOGS = 16; // the built catalogs held, the most recently asked last: as many as the machine holds views
 
 export interface Catalog {
   /** One cwd's catalog now (null: the user configuration). */
@@ -48,7 +54,6 @@ export interface Catalog {
 export function startCatalog(deps: CatalogDeps): Catalog {
   const log = deps.log ?? ((line: string) => console.log(`[catalog] ${line}`));
   const store = new CatalogStore({ dir: join(deps.userData, 'catalog'), keys: NETWORK_KEYS, pages: catalogPages(deps.env, deps.userAgent), log });
-  const reads = new EngineReads(deps.call, log);
   const icons = new CatalogIcons({ dir: join(deps.userData, 'catalog', 'icons'), get: deps.iconGet ?? iconGet(deps.env, deps.userAgent), log });
   const built = new Map<string, { revision: string; items: CatalogItem[] }>();
   let tests: Promise<TestSourceData[]> | null = null;
@@ -58,45 +63,55 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   const fingerprint = configurationFingerprint(); // M4: one key for main's life
   const changed = () => void deps.emit('catalog.changed', {});
   const offStore = store.onChange(changed);
-  const offPlugins = deps.onPluginsChanged(() => {
-    reads.invalidate();
+  // The machine's reads moved: a catalog built from a view it forgot goes (every one, or the project's), and a read in
+  // flight is read again (`heard`)
+  let heard = 0;
+  const offEngine = deps.onEngineChanged((change) => {
+    heard += 1;
+    if (change.scope === 'all') built.clear();
+    else built.delete(change.cwd);
     changed();
   });
-  // an outside change to the engine's plugin state: the configuration's forgets every view, a project's its own
-  const watch = new StateWatch({
-    onChange: (scope, kind) => {
-      if (kind === 'mcp') {
-        void reads.recheckServers().then((moved) => moved && changed());
-        return;
-      }
-      reads.invalidate(scope === 'all' ? undefined : scope);
-      changed();
-    },
-    watch: deps.watch,
-    poll: deps.poll,
-    appSettings: join(deps.userData, 'machine-settings.json'), // P5 O3-A: MAWS's own servers are the machine's
-  });
 
-  // One cwd's catalog and the revision it was built under: the store's revision, the engine reads' generation at the time
-  // the view was asked for, and the serial of the read behind the view (a cwd whose view was evicted and read anew is
-  // built anew, and its old cursors restart). A view an invalidation overtook while it was read is read again. Built
-  // catalogs go with their views.
+  // One cwd's engine view as the machine answers it, with the revision part it was read under; null when the machine
+  // could not be asked (its spine refused, its daemon unreachable), which the catalog shows as an engine that could not
+  // be read: the network's items stand.
+  async function engineOf(cwd: string | null): Promise<{ view: EngineView | null; read: string } | null> {
+    const answer = await deps.invoke('catalog.engine', { cwd }).catch((error: unknown) => ({ ok: false as const, error: ipcError('internal', error instanceof Error ? error.message : String(error)) }));
+    if (!answer.ok) {
+      log(`catalog.engine failed: ${answer.error.message}`);
+      return null;
+    }
+    return { view: engineViewFromWire(answer.value.view), read: `${answer.value.generation}.${answer.value.serial}` };
+  }
+
+  // One cwd's catalog and the revision it was built under: the store's revision, the generation of the machine's reads
+  // at the time the view was asked for, and the serial of the read behind the view (a cwd whose view was evicted and read
+  // anew is built anew, and its old cursors restart). A view an invalidation overtook while it was read is read again.
   async function catalogOf(cwd: string | null): Promise<{ revision: string; items: CatalogItem[] }> {
     await store.ready();
     const key = cwd ?? '';
     for (let attempt = 1; ; attempt += 1) {
-      const generation = reads.generation;
-      const snapshot = reads.snapshot(cwd);
-      const [engine, test] = await Promise.all([snapshot.view, testData()]);
-      const current = generation === reads.generation;
-      if (!current && attempt < READ_ATTEMPTS) continue;
-      watch.sync(reads.places());
-      for (const held of built.keys()) if (!reads.holds(held === '' ? null : held)) built.delete(held);
-      const revision = `${store.revision}.${generation}.${snapshot.serial}`; // the store's data is read now, synchronously, under this revision
+      const before = heard;
+      const [engine, test] = await Promise.all([engineOf(cwd), testData()]);
+      const current = engine !== null && before === heard;
+      if (engine !== null && !current && attempt < READ_ATTEMPTS) continue;
+      const revision = `${store.revision}.${engine?.read ?? 'unread'}`; // the store's data is read now, synchronously, under this revision
       const kept = built.get(key);
-      if (kept?.revision === revision) return kept;
-      const fresh = { revision, items: buildCatalog({ network: store.data(), engine, tests: test }) };
-      if (current) built.set(key, fresh);
+      if (kept?.revision === revision) {
+        built.delete(key); // the most recently asked last
+        built.set(key, kept);
+        return kept;
+      }
+      const fresh = { revision, items: buildCatalog({ network: store.data(), engine: engine?.view ?? null, tests: test }) };
+      if (current) {
+        built.delete(key);
+        built.set(key, fresh);
+        for (const oldest of built.keys()) {
+          if (built.size <= KEPT_CATALOGS) break;
+          built.delete(oldest);
+        }
+      }
       return fresh;
     }
   }
@@ -112,12 +127,19 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     if (!item) throw new CommandFailure(ipcError('invalid_input', `the catalog has no item ${id}`));
     return item;
   });
+  // The machine's reads forgotten (its `catalog.engineChanged` says catalog.changed), then the network read again (a
+  // change there says it too). A machine that cannot be asked leaves the network's refresh to go on, then says
+  // catalog.changed itself: the renderer reads again into an engine that could not be read rather than keep the view it
+  // showed (its queries never go stale on their own).
   deps.register('catalog.refresh', async () => {
-    reads.invalidate();
-    const before = store.revision;
-    const statuses = await store.refresh();
-    if (store.revision === before) changed(); // the engine's reads moved; a network change has already said so
-    return statuses;
+    const refreshed = await deps.invoke('catalog.engineRefresh', undefined).catch((error: unknown) => ({ ok: false as const, error: ipcError('internal', error instanceof Error ? error.message : String(error)) }));
+    if (refreshed.ok) return store.refresh();
+    log(`catalog.engineRefresh failed: ${refreshed.error.message}`);
+    try {
+      return await store.refresh();
+    } finally {
+      changed();
+    }
   });
   deps.register('catalog.icon', async ({ url }) => ({ dataUrl: await icons.dataUrl(url) }));
   // M4: from the copy held (no fetch: a posture is not worth a network read), against the configured servers' endpoints
@@ -137,8 +159,7 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     items,
     stop() {
       offStore();
-      offPlugins();
-      watch.close();
+      offEngine();
       store.stop();
     },
   };

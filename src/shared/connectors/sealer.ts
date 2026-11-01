@@ -3,7 +3,7 @@
 // carries and back, and names the format line its files start with, so a store over one sealer reads a file another
 // sealer wrote as unreadable rather than asking the wrong custody to open it.
 //
-// Two sealers exist: Electron's safeStorage in main (format 1, the Keychain's, src/main/connectors/oauth-store.ts's
+// Two sealers exist: Electron's safeStorage in main (format 1, the Keychain's, src/main/connectors/legacy-custody.ts's
 // `electronOAuthSealer`), which only the one-time adoption still reads once O4 lands, and the machine's software key
 // (format 2, src/services/connectors/custody.ts). They live here, on neutral ground, so main's legacy reader and the
 // services library share the seam without either importing the other (lint rules A and B).
@@ -29,7 +29,7 @@ export interface AsyncSafeStorage {
   decryptStringAsync(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
 }
 
-// What the MAWS_E2E custody guard proves before each safeStorage operation (src/main/connectors/oauth-root.ts).
+// What the MAWS_E2E custody guard proves before each safeStorage operation (src/main/connectors/legacy-custody.ts).
 export interface E2ECustodyFacts {
   e2e: boolean; // the MAWS_E2E launch (the one that appends the mock keychain switch)
   mockKeychain(): boolean;

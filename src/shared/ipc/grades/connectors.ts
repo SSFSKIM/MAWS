@@ -37,4 +37,6 @@ export const grades = {
   'connectors.directLocate': 'internal',
   'connectors.directSend': 'internal',
   'connectors.observe': 'internal',
+  'connectors.windowShown': 'internal', // P5 O4 M2: main's report of a page's window
+  'connectors.adoptGrant': 'internal', // P5 O4 M2: main's one-time adoption (U7)
 } as const satisfies CommandGrades<'connectors'>;

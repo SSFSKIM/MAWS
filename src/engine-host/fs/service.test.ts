@@ -1,14 +1,14 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { chmod, mkdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
-import { FsService, READ_LISTS_CAP, START_SCAN_FALLBACK_MS } from './service';
+import { AGENT_SETTLE_MS, FsService, READ_LISTS_CAP, START_SCAN_FALLBACK_MS, type InterestSource } from './service';
 import { SubagentReader } from './subagents';
 import { WorkflowReader } from './workflows';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
@@ -44,7 +44,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   });
 
   // Every payload is checked against its X2 schema, as the host runtime would before posting it.
-  const start = async (watch?: WatchFn, startScanFallbackMs?: number, reconcileMs?: number) => {
+  const start = async (watch?: WatchFn, startScanFallbackMs?: number, reconcileMs?: number, agentRetryMs?: number) => {
     service = new FsService({
       paths: fixture.paths,
       emit: (name, payload) => {
@@ -56,6 +56,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       watch,
       startScanFallbackMs,
       reconcileMs,
+      agentRetryMs,
     });
     await service.start();
     return service;
@@ -141,6 +142,315 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       workflows.mockRestore();
       runs.mockRestore();
     }
+  });
+
+  describe('the agent listing under change: one pass at a time, the changed files read alone, only while read', () => {
+    const A2 = 'app-2' as AppSessionId;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const meta = (description: string) => ({ agentType: 'general-purpose', description, toolUseId: `toolu_${description}`, spawnDepth: 1 });
+    let walks: string[]; // the session directory of each walk, as it began
+    let updates: number;
+    let held: Promise<void> | null; // while set, a walk that begins reads the tree then, and answers once it settles
+    let fire: (sessionId: SessionId, rel: string) => void;
+    let projectsChanged: (path: string) => void;
+    let restore: () => void;
+    const list = SubagentReader.prototype.list;
+
+    beforeEach(() => {
+      walks = [];
+      updates = 0;
+      held = null;
+      const listSpy = vi.spyOn(SubagentReader.prototype, 'list').mockImplementation(async function (this: SubagentReader, dir: string) {
+        walks.push(dir);
+        const gate = held;
+        const agents = await list.call(this, dir);
+        await gate;
+        return agents;
+      });
+      const update = SubagentReader.prototype.update;
+      const updateSpy = vi.spyOn(SubagentReader.prototype, 'update').mockImplementation(function (this: SubagentReader, ...args: Parameters<SubagentReader['update']>) {
+        updates += 1;
+        return update.apply(this, args);
+      });
+      restore = () => {
+        listSpy.mockRestore();
+        updateSpy.mockRestore();
+      };
+    });
+    afterEach(() => restore());
+
+    // A service whose projects watch reports what `fire` names (a path under a session's directory), as FSEvents would.
+    const startReporting = async (reconcileMs?: number, agentRetryMs?: number) => {
+      let projects: ((event: string, filename: string | null) => void) | null = null;
+      const watch: WatchFn = (path, _options, listener) => {
+        if (path === fixture.paths.projects) projects = listener;
+        return Object.assign(new EventEmitter(), { close: vi.fn() });
+      };
+      const fs = await start(watch, undefined, reconcileMs, agentRetryMs);
+      fire = (sessionId, rel) => projects!('change', relative(fixture.paths.projects, join(sessionDirOf(sessionId), rel)));
+      projectsChanged = (path) => projects!('change', relative(fixture.paths.projects, path));
+      return fs;
+    };
+    const sessionDirOf = (sessionId: SessionId) => fixture.transcriptPath(sessionId).slice(0, -'.jsonl'.length);
+    const addAgent = async (sessionId: SessionId, id: string, report = true) => {
+      for (const [rel, content] of [[`subagents/agent-${id}.jsonl`, user(`u-${id}`, null, '/work/a', `do ${id}`)], [`subagents/agent-${id}.meta.json`, meta(id)]] as const) {
+        await fixture.addSidecar(sessionId, rel, content);
+        if (report) fire(sessionId, rel);
+      }
+    };
+    const lastAgents = (appSessionId: AppSessionId) => events('fs.subagentsChanged').filter((e) => e.appSessionId === appSessionId).at(-1)?.agents;
+    const walked = (sessionId: SessionId) => list.call(new SubagentReader(), sessionDirOf(sessionId)); // the test's own walk, uncounted
+    const hold = () => {
+      let release!: () => void;
+      held = new Promise((resolve) => (release = resolve));
+      return () => {
+        held = null;
+        release();
+      };
+    };
+    const interestIn = (fs: FsService) => {
+      const set = new Set<AppSessionId>();
+      let changed = () => {};
+      const source: InterestSource = { set: () => set, onChange: (listener) => ((changed = listener), () => {}) };
+      fs.watchInterest(source);
+      return {
+        add: (id: AppSessionId) => (set.add(id), changed()),
+        remove: (id: AppSessionId) => (set.delete(id), changed()),
+      };
+    };
+
+    it('a burst of agent changes during a walk costs that walk alone; what changed meanwhile is read from those files', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await settled();
+      clear();
+      const release = hold();
+      await addAgent(S1, 'a00'); // no listing yet: its pass is a walk, held here
+      await expect.poll(() => walks.length).toBe(1);
+      for (let i = 1; i < 40; i += 1) await addAgent(S1, `a${String(i).padStart(2, '0')}`);
+      await sleep(AGENT_SETTLE_MS * 3); // every change delivered and its pass due while the walk is held
+      expect(walks).toHaveLength(1);
+      release();
+      await expect.poll(() => lastAgents(A1)?.length, { timeout: 2_000 }).toBe(40);
+      await sleep(AGENT_SETTLE_MS * 3);
+      expect(walks).toHaveLength(1); // 80 changes, one walk
+      expect(updates).toBeGreaterThanOrEqual(1);
+      expect(updates).toBeLessThanOrEqual(2);
+      expect(lastAgents(A1)).toEqual(await walked(S1));
+    });
+
+    it('callers that ask during a walk share the one walk after it, which reads the changes made meanwhile', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await settled();
+      const release = hold();
+      const first = fs.subagents(A1);
+      await expect.poll(() => walks.length).toBe(1);
+      for (let i = 0; i < 10; i += 1) await addAgent(S1, `a${i}`);
+      const later = [fs.subagents(A1), fs.subagents(A1), fs.subagents(A1)];
+      await sleep(AGENT_SETTLE_MS * 3);
+      release();
+      expect((await first).agents).toEqual([]);
+      const answers = await Promise.all(later);
+      expect(answers[0].agents).toHaveLength(10);
+      for (const answer of answers) expect(answer).toEqual(answers[0]);
+      await sleep(AGENT_SETTLE_MS * 3);
+      expect(walks).toHaveLength(2);
+      expect(updates).toBe(0); // the second walk began after every change
+    });
+
+    it('a change read alone emits what a walk would: a new agent, its meta, a meta patched, an agent deleted, an append', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await addAgent(S1, 'a1', false);
+      await fs.subagents(A1);
+      await settled(); // its rescan walks the session again (the sidecar reconcile)
+      clear();
+      walks = [];
+      const step = async (change: () => Promise<unknown>, rels: string[], emits: boolean) => {
+        const before = events('fs.subagentsChanged').length;
+        await change();
+        for (const rel of rels) fire(S1, rel);
+        if (emits) await expect.poll(() => events('fs.subagentsChanged').length, { timeout: 2_000 }).toBe(before + 1);
+        else await sleep(DEBOUNCE_MS + AGENT_SETTLE_MS * 3);
+        expect(events('fs.subagentsChanged')).toHaveLength(before + (emits ? 1 : 0));
+        if (emits) expect(lastAgents(A1)).toEqual(await walked(S1));
+      };
+      await step(() => fixture.addSidecar(S1, 'subagents/agent-a2.jsonl', user('u-a2', null, '/work/a', 'do a2')), ['subagents/agent-a2.jsonl'], true);
+      await step(() => fixture.addSidecar(S1, 'subagents/agent-a2.meta.json', meta('a2')), ['subagents/agent-a2.meta.json'], true);
+      await step(() => fixture.addSidecar(S1, 'subagents/agent-a1.meta.json', { ...meta('a1'), stoppedByUser: true }), ['subagents/agent-a1.meta.json'], true);
+      await step(() => rm(join(sessionDirOf(S1), 'subagents/agent-a1.jsonl')), ['subagents/agent-a1.jsonl'], true);
+      await step(() => fixture.appendLines(join(sessionDirOf(S1), 'subagents/agent-a2.jsonl'), [user('u-more', null, '/work/a', 'more')]), ['subagents/agent-a2.jsonl'], false); // size and time alone
+      expect(walks).toEqual([]);
+      expect(updates).toBe(5);
+    });
+
+    it('a session no client holds open, and nothing follows, is not listed on change; its changes are read once one does', async () => {
+      for (const sessionId of [S1, S2]) await fixture.addTranscript('/work/a', sessionId, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      const interest = interestIn(fs);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }, { sessionId: S2, appSessionId: A2 }]);
+      await addAgent(S1, 'a1', false);
+      await fs.subagents(A1); // a client read it once, then let it go
+      await settled();
+      clear();
+      walks = [];
+      for (const sessionId of [S1, S2]) for (const id of ['b1', 'b2']) await addAgent(sessionId, id);
+      await fixture.addSidecar(S1, 'subagents/agent-a1.meta.json', { ...meta('a1'), stoppedByUser: true });
+      fire(S1, 'subagents/agent-a1.meta.json');
+      await sleep(DEBOUNCE_MS + AGENT_SETTLE_MS * 3);
+      expect(walks).toEqual([]);
+      expect(updates).toBe(0);
+      expect(events('fs.subagentsChanged')).toEqual([]);
+
+      interest.add(A1); // the changes gathered meanwhile are read, from those files alone
+      interest.add(A2); // never listed: nothing to bring up to date, and nothing to tell until a client asks
+      await expect.poll(() => lastAgents(A1)?.map((a) => a.agentId), { timeout: 2_000 }).toEqual(['a1', 'b1', 'b2']);
+      expect(lastAgents(A1)?.[0].meta).toMatchObject({ stoppedByUser: true });
+      await sleep(AGENT_SETTLE_MS * 3);
+      expect(walks).toEqual([]);
+      expect(updates).toBe(1);
+      expect(lastAgents(A2)).toBeUndefined();
+
+      interest.remove(A1);
+      await addAgent(S1, 'c1');
+      await sleep(DEBOUNCE_MS + AGENT_SETTLE_MS * 3);
+      expect(walks).toEqual([]);
+      expect(updates).toBe(1);
+    });
+
+    it('the reconcile tick walks the sessions some client holds open, and no other', async () => {
+      for (const sessionId of [S1, S2]) await fixture.addTranscript('/work/a', sessionId, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting(100);
+      const interest = interestIn(fs);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }, { sessionId: S2, appSessionId: A2 }]);
+      interest.add(A1);
+      await Promise.all([fs.subagents(A1), fs.subagents(A2)]); // both read once
+      await settled();
+      walks = [];
+      await sleep(500);
+      expect(walks.length).toBeGreaterThan(0);
+      expect(new Set(walks)).toEqual(new Set([sessionDirOf(S1)]));
+    });
+
+    it('a followed session is listed on change though no client holds it open', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      interestIn(fs);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.eventsSnapshot(A1, null); // the follow lists the agents first
+      await settled();
+      clear();
+      walks = [];
+      await addAgent(S1, 'a1');
+      await expect.poll(() => lastAgents(A1)?.map((a) => a.agentId), { timeout: 2_000 }).toEqual(['a1']);
+      expect(walks).toEqual([]);
+      expect(updates).toBeGreaterThanOrEqual(1);
+    });
+
+    // The parent's `Agent` tool use and its result, chained after the transcript's first record `u1`.
+    const agentCall = (toolUseId: string) => [
+      JSON.stringify({ type: 'assistant', uuid: `a-${toolUseId}`, parentUuid: 'u1', timestamp: '2026-09-28T10:00:01.000Z', message: { id: `msg-${toolUseId}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Agent', input: { description: 'child', prompt: 'do it', subagent_type: 'general-purpose' } }] } }),
+      JSON.stringify({ type: 'user', uuid: `r-${toolUseId}`, parentUuid: `a-${toolUseId}`, timestamp: '2026-09-28T10:00:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'done' }] } }),
+    ];
+    const lifecycle = (appSessionId: AppSessionId) =>
+      events('session.eventBatch').filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events).flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []));
+
+    it('a followed transcript folds an Agent tool result only once the child\'s meta reported before it is read', async () => {
+      const parent = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.eventsSnapshot(A1, null); // followed, its agents listed
+      await settled();
+      await addAgent(S1, 'x0'); // a pass now, so the child's files below land within AGENT_SETTLE_MS of its end
+      await addAgent(S1, 'c1'); // the engine writes the child's meta (toolu_c1) before the parent's tool result
+      await fixture.appendLines(parent, agentCall('toolu_c1'));
+      projectsChanged(parent);
+      await expect.poll(() => lifecycle(A1), { timeout: 2_000 }).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('a quiet history follow reads the agent changes its session gathered while nothing read it', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first'), ...agentCall('toolu_c1')]);
+      const fs = await startReporting();
+      interestIn(fs); // nobody holds the session open
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.subagents(A1); // listed once, before the child existed
+      await settled();
+      await addAgent(S1, 'c1');
+      await sleep(DEBOUNCE_MS + AGENT_SETTLE_MS * 2); // gathered, not read
+      expect(updates).toBe(0);
+      const page = await fs.eventsSnapshot(A1, null, {}, true);
+      expect(page.events.flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []))).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('the reconcile tick\'s poke of a follow waits for the agent changes gathered before it too', async () => {
+      const parent = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting(200);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.eventsSnapshot(A1, null);
+      await settled();
+      walks = [];
+      const release = hold();
+      const asked = fs.subagents(A1); // a walk read the tree before the child, and is held
+      await expect.poll(() => walks.length).toBeGreaterThan(0);
+      await addAgent(S1, 'c1');
+      await sleep(DEBOUNCE_MS * 2); // reported, and gathered behind the held walk, before the parent's result is written
+      await fixture.appendLines(parent, agentCall('toolu_c1')); // never reported: only the tick's poke reads it
+      await sleep(DEBOUNCE_MS + 400); // the tick has poked the follow at least once meanwhile
+      release();
+      await asked;
+      await expect.poll(() => lifecycle(A1), { timeout: 2_000 }).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('a listing whose pass failed is read again before a follow trusts it, once its retry wait has passed', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first'), ...agentCall('toolu_c1')]);
+      const fs = await startReporting(undefined, 200);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.subagents(A1); // listed before the child existed
+      await settled();
+      const failing = vi.spyOn(SubagentReader.prototype, 'update').mockRejectedValueOnce(new Error('EIO: a read failed'));
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await addAgent(S1, 'c1', false);
+        fire(S1, 'subagents/agent-c1.meta.json'); // its one pass fails, and no later change asks again
+        await expect.poll(() => logged.mock.calls.some(([message]) => String(message).includes('cannot list subagents'))).toBe(true);
+        await sleep(300); // past the retry wait
+        const page = await fs.eventsSnapshot(A1, null, {}, true);
+        expect(page.events.flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []))).toEqual(['subagent.started c1', 'subagent.finished c1']);
+      } finally {
+        failing.mockRestore();
+        logged.mockRestore();
+      }
+    });
+
+    it('a pass that fails is not tried again on every write', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting();
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await settled();
+      restore();
+      let failures = 0;
+      const failing = vi.spyOn(SubagentReader.prototype, 'list').mockImplementation(async () => {
+        failures += 1;
+        throw new Error('EIO: the tree cannot be read');
+      });
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        for (let i = 0; i < 12; i += 1) {
+          await addAgent(S1, `a${i}`);
+          await sleep(50);
+        }
+        await sleep(AGENT_SETTLE_MS * 3);
+        expect(failures).toBe(1);
+        expect(logged.mock.calls.filter(([message]) => String(message).includes('cannot list subagents'))).toHaveLength(1);
+      } finally {
+        failing.mockRestore();
+        logged.mockRestore();
+      }
+    });
   });
 
   async function threeSessions() {

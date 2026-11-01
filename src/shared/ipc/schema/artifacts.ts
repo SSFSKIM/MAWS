@@ -20,7 +20,7 @@ import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
-const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O5 M4
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O5 M4; P5 O4 M2
 
 const Id = z.uuid();
 // E3: the snapshot refs one hold names (an artifact's own assets, `assets/<name>`), 1 to 64 (ASSET_HOLD_LIMITS.groupRefs)
@@ -280,13 +280,14 @@ export const commands = {
     z.strictObject({ artifactId: Id, ref: z.string().startsWith('assets/').max(1_000), name: z.string().min(1).max(1_000).optional() }),
     z.strictObject({ path: z.string().nullable() }),
   ),
-  // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), main's:
-  // a grant is taken under the fingerprint the route reports now (the gesture carries none), refused when no route has
-  // the tool or a read grant is asked for a tool the route does not mark read-only; a revoke stops the tool's work in
-  // flight before the store is asked (src/main/connectors/broker.ts).
-  'artifacts.connectorGrants': main(z.strictObject({ artifactId: Id }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
-  'artifacts.grantConnectorTool': main(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
-  'artifacts.revokeConnectorTool': main(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
+  // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), the
+  // connectors' broker's (P5 O4 M2: `machine`, composed with the spine): a grant is taken under the fingerprint the route
+  // reports now (the gesture carries none), refused when no route has the tool or a read grant is asked for a tool the
+  // route does not mark read-only; a revoke stops the tool's work in flight before the store is asked
+  // (src/services/connectors/broker.ts).
+  'artifacts.connectorGrants': machine(z.strictObject({ artifactId: Id }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
+  'artifacts.grantConnectorTool': machine(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
+  'artifacts.revokeConnectorTool': machine(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
   // P3-H H3b end
   // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b; E's Decision Log 48 (3); the ledger's E3
   // hold-IPC row): holds over a dashboard's snapshot bytes, so a reader that captured a descriptor reads the bytes it

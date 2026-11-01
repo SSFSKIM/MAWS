@@ -2,8 +2,7 @@
 // Interfaces §A, D4 to D6, D34). Scratch directories stand in for the profile; the backup exclusion is a fake, or the
 // real helper with child_process doubled and the platform not darwin, so nothing here runs osascript, and no keychain
 // is touched. Each fresh custody over a directory is a fresh spine load.
-// The store over this custody is pinned beside the store's own suite (src/main/connectors/oauth-store.test.ts) until
-// M2 moves the store into the library.
+// The store over this custody is pinned beside the store's own suite (./oauth-store.test.ts).
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';

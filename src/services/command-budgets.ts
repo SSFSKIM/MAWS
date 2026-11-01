@@ -4,7 +4,12 @@
 // answered as mawsd finishes it rather than `timeout` while mawsd goes on; in the embedded shape they run in main
 // with no deadline of their own. A command not named here answers within the default: its own work is short, and
 // only stalled inner host calls (each bounded at 10 s) take it past that.
+import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
+import { REQUEST_TIMEOUT_MS } from '@shared/host/host-supervisor';
 import type { CommandName } from '@shared/ipc/schema';
+// P5 O4 M2 (acceptance 9): the connectors' and delivery's bounds from their constants modules alone, never their services
+import { CONNECT_CALLBACK_TIMEOUT_MS, DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, OAUTH_REQUEST_TIMEOUT_MS, OWNER_QUERY_DEADLINE_MS } from './connectors/deadlines';
+import { DELIVERY_STATUS_DEADLINE_MS, GONE_WAIT_MS, GWS_LOGIN_DEADLINE_MS, GWS_STATUS_TIMEOUT_MS, GWS_UPLOAD_TIMEOUT_MS, KILL_GRACE_MS } from './delivery/deadlines';
 import { GIT_TIMEOUT_MS } from './git/runner';
 import { GH_READ_TIMEOUT_MS } from './scm/pr-state';
 import { COMMIT_TIMEOUT_MS, LOCAL_TIMEOUT_MS, SCM_ADMIT_MS } from './scm/service';
@@ -63,6 +68,41 @@ const CHECKOUTS_BUDGETS_MS = {
   'files.upload': GIT + MARGIN_MS, // the exclude's git read (M3's write)
 } as const satisfies Partial<Record<CommandName, number>>;
 
+// P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §H): the connectors' and delivery's
+// commands whose chains pass the default, by the same rule. A host read is REQUEST_TIMEOUT_MS; a gws run that times out
+// is signalled, given KILL_GRACE_MS to SIGKILL and GONE_WAIT_MS to leave; a credential for route D is a refresh, then
+// the old epoch's close in the host. Owner actions (Connect, Reconnect, Disconnect, sign-in) answer at once and run on.
+const HOST = REQUEST_TIMEOUT_MS;
+const GWS_RUN = (timeoutMs: number) => timeoutMs + KILL_GRACE_MS + GONE_WAIT_MS;
+const CREDENTIAL = OAUTH_REQUEST_TIMEOUT_MS + OAUTH_HOST_CLOSE_TIMEOUT_MS;
+// Route D: the resolution, the credential, then the operation to its outcome
+const DIRECT = DIRECT_RESOLVE_DEADLINE_MS + CREDENTIAL + DIRECT_OPERATION_DEADLINE_MS;
+// The grant's check, then the engine route (the artifact's entry, its space, the live sessions, a session's resolve,
+// the start; the operation to its outcome; the take) or route D, the longer
+const CONNECTOR_CALL = HOST + Math.max(5 * HOST + CONNECTOR_OPERATION_DEADLINE_MS + HOST, DIRECT);
+// Notion's source found: the live sessions, the artifact's links, their observations (in parallel), then route D's locate
+const NOTION_FIND = 3 * HOST + DIRECT_RESOLVE_DEADLINE_MS;
+const CONNECTORS_BUDGETS_MS = {
+  'connectors.call': CONNECTOR_CALL + MARGIN_MS,
+  'connectors.refresh': CONNECTOR_CALL + MARGIN_MS, // a watch's refresh runs a call under the same budget
+  'connectors.servers': OWNER_QUERY_DEADLINE_MS + MARGIN_MS, // the query answers with what it has at its deadline
+  // Drive: gws's state; Notion: the find, under the sheet's deadline
+  'delivery.status': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS), DELIVERY_STATUS_DEADLINE_MS) + MARGIN_MS,
+  // Drive: gws's state, then its login; Notion: the find, then MAWS's OAuth flow (the metadata, the registration, the
+  // owner's consent to its callback, the token exchange)
+  'delivery.connect': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_LOGIN_DEADLINE_MS), NOTION_FIND + 3 * OAUTH_REQUEST_TIMEOUT_MS + CONNECT_CALLBACK_TIMEOUT_MS + OAUTH_REQUEST_TIMEOUT_MS) + MARGIN_MS,
+  // `artifacts.get`, then Drive's state and upload, or Notion's find and route D's send
+  'delivery.deliver': HOST + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN_MS,
+} as const satisfies Partial<Record<CommandName, number>>;
+
+// P5 O4 M3 (Interfaces §H): the catalog's machine half. One cwd's view as EngineReads.snapshot reads it: the engine's
+// configuration (`plugins.env`, the first read of a load), then the cwd's listings and its inventory beside the configured
+// servers (one round), then the installed directory entries' provenance beside each marketplace's manifest (one round),
+// each a host read. The library's reads (a host read, then a file or the client's answer) stay within the default.
+const CATALOG_BUDGETS_MS = {
+  'catalog.engine': 3 * HOST + MARGIN_MS,
+} as const satisfies Partial<Record<CommandName, number>>;
+
 // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md): the library's Export, answered by mawsd's render seam:
 // the render host's start (the seam's deadline for it, src/mawsd/render-seam.ts's START_DEADLINE_MS.libraryExport),
 // then the export within the library's own budget (src/render/export.ts's EXPORT_BUDGET_MS); neither module is this
@@ -72,6 +112,8 @@ const RENDER_EXPORT_MS = 55_000;
 
 export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> = {
   ...CHECKOUTS_BUDGETS_MS,
+  ...CONNECTORS_BUDGETS_MS,
+  ...CATALOG_BUDGETS_MS,
   'artifacts.export': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4
   'daemon.e2eRender': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4: the e2e's capture, within the same bounds
   // a background job's `claude stop` and the registry's clearing after it, or a terminal pane's pause and resume

@@ -89,7 +89,7 @@ describe('the refusal at engine-host.sock (§L), behind claimSpine', () => {
   it('refuses a hello without machine.spine with mawsd’s own refuse wire line, wakes no engine host, and its exit asks nothing', async () => {
     await scene.start({ claimSpine: true });
     const app = await scene.app();
-    expect(app.first).toEqual({ t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: buildIdOf(scene.self), wire: wireFingerprint(), liveSessions: 0 });
+    expect(app.first).toEqual({ t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: buildIdOf(scene.self), wire: wireFingerprint(), liveSessions: 1 }); // P5 O4 M4 (D45): at least one
     expect(scene.logs).toContainEqual(expect.stringMatching(/^engine-host\.sock: refuse wire to appPid \d+ \(build raw-app\): its hello lists no machine\.spine, so it runs a spine of its own/));
     app.exit('now');
     await until(() => scene.logs.includes('engine-host.sock: exit now on a connection the relay refused itself: nothing asked of the engine-host'), 3_000, 'the exit');
