@@ -120,7 +120,7 @@ const standingOf = (record: SessionRecord | null) => (record === null ? null : J
  */
 function recordOf(records: RecordSource, target: SessionTarget, launchedBy: Spawner | undefined): SessionRecord | null {
   const record = records.record(target);
-  if (record !== null || target.lane !== 'B' || launchedBy === undefined || records.handedOff?.(target.appSessionId) !== false) return record;
+  if (record !== null || target.lane !== 'B' || launchedBy === undefined || records.handedOff?.(target) !== false) return record;
   return { session: target.session, lane: 'B', owners: [launchedBy.member], access: 'private' };
 }
 const QUERYABLE_BY_WEB_CARDS: ReadonlySet<string> = new Set(['session.answer', 'sminos.answer', 'sminos.decide']);

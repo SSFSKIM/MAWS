@@ -35,11 +35,11 @@ export interface RecordSource {
   /** A record changed or left (M8 re-evaluates subscriptions on it). */
   onChange(listener: (target: SessionTarget) => void): () => void;
   /**
-   * P5 O12 M11: whether a record was seen for any engine session of the lane B app session `appSessionId` (the
+   * P5 O12 M11: whether a record was seen for any engine session of the lane B session `target`'s app session (the
    * handed-off mark, rl10/members.ts), after which a missing record is never bridged from the spine's `launchedBy`.
    * A source that doesn't say is taken as having seen one: no bridge.
    */
-  handedOff?(appSessionId: string): boolean;
+  handedOff?(target: SessionTarget): boolean;
 }
 
 export interface CheckoutSource {

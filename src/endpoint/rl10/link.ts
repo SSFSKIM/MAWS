@@ -140,10 +140,10 @@ export class Rl10 {
           const state = ctx.state();
           return state === null || state.refusing !== null ? null : state.handedOff;
         },
-        write: (appSessionIds) => {
+        write: (marks) => {
           const state = ctx.state();
           if (state === null) throw new Error('the endpoint has not started');
-          state.setHandedOff(appSessionIds);
+          state.setHandedOff(marks);
         },
       },
     });

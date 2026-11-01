@@ -16,10 +16,11 @@ import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ClientRef } from '@shared/ipc/client';
+import { Members, type Marks } from '../../src/endpoint/rl10/members';
 import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
 import { fakeServices } from './fake-services';
-import { act, CHECKOUT, done, laneAMember, makeOrg, of, openRemote, PROJECT, Records, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
+import { act, CHECKOUT, done, evs, laneAMember, makeOrg, of, openRemote, PROJECT, Records, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -258,8 +259,8 @@ class SminosRecords extends Records {
   override record(target: SessionTarget): SessionRecord | null {
     return this.#members?.record(target) ?? null;
   }
-  handedOff(appSessionId: string): boolean {
-    return this.#members?.handedOff?.(appSessionId) ?? true;
+  handedOff(target: SessionTarget): boolean {
+    return this.#members?.handedOff?.(target) ?? true;
   }
 }
 
@@ -279,7 +280,8 @@ const sendOf = (f: Fixture, r: Remote, s: HostSession, content: string) =>
 const codeOf = (m: Msg) => (m.ok === true ? 'ok' : (m.error as { code: string }).code);
 const statusOf = async (r: Remote, app: string) => codeOf(await call(r, 'session.status', { appSessionId: app }));
 const markPath = (f: Fixture) => join(f.services.machine.stateDir, 'handed-off.json');
-const handedOff = (f: Fixture): string[] => (fs.existsSync(markPath(f)) ? (JSON.parse(fs.readFileSync(markPath(f), 'utf8')) as { appSessionIds: string[] }).appSessionIds : []);
+const marksOf = (f: Fixture): { appSessionIds: string[]; engineSessionIds: string[] } => (fs.existsSync(markPath(f)) ? JSON.parse(fs.readFileSync(markPath(f), 'utf8')) : { appSessionIds: [], engineSessionIds: [] });
+const handedOff = (f: Fixture): string[] => marksOf(f).appSessionIds;
 const withSminosRecords = (f?: Fixture) => ({ records: new SminosRecords(), ...(f && { services: f.services, host: f.host, chain: f.chain, key: f.key }) });
 
 describe('the spawner as owner (P5 O12 M11)', () => {
@@ -369,6 +371,56 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     expect(await gone).toBe('grade');
   });
 
+  // the review's finding: before M11 a first record could only grant; under the bridge it can take, and its join awaits
+  // the engine host, so the held subscription is held at the record, by its engine session, not after the join
+  it('holds a subscription the bridge granted as soon as a first record grants its spawner nothing, before its join answers', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    f.host.attach(true);
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
+    const sm = await sminos(f);
+    f.host.hold('engine.sessions');
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { access: 'private' }) });
+    await until(() => f.endpoint.rl10.members.get('eng-s') !== null, 'the record');
+    const from = b.inbox.length;
+    f.host.row('app-s', 1);
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ reason: 'removed' });
+    expect(evs(b, 'sb', from)).toEqual([]);
+    f.host.release('engine.sessions');
+  });
+
+  // the review's finding: a mark that can't be written yet withholds the record, so nothing is decided on a sight a restart
+  // would forget; the session stays closed to everyone (no bridge) until a write holds
+  it('withholds a record whose hand-off can’t be written yet, the session closed to everyone, until a write holds', async () => {
+    let failing = true;
+    const written: Marks[] = [];
+    const members = new Members({
+      dispatch: async (_owner, name) =>
+        name === 'engine.sessions' ? { t: 'res', id: '0', ok: true, value: [{ appSessionId: 'app-w', engineSessionId: 'eng-w' }] } : { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: name } },
+      listings: { report: async () => {}, gone: async () => {} },
+      listed: () => [],
+      forget: () => {},
+      log: () => {},
+      now: Date.now,
+      marks: {
+        read: () => ({ appSessionIds: [], engineSessionIds: [] }),
+        write: (marks) => {
+          if (failing) throw new Error('ENOSPC');
+          written.push(marks);
+        },
+      },
+    });
+    await members.member(laneBMember('eng-w', [org.C], { access: 'private' }));
+    const target: SessionTarget = { lane: 'B', session: 'eng-w', appSessionId: 'app-w' };
+    expect(members.record(target)).toBeNull();
+    expect(members.handedOff(target)).toBe(true);
+    expect(written).toEqual([]);
+    failing = false;
+    expect(members.record(target)).toMatchObject({ session: 'eng-w', owners: [org.C], access: 'private' });
+    expect(written).toEqual([{ appSessionIds: ['app-w'], engineSessionIds: [] }]);
+  });
+
   it('holds while the spine’s record has no engine session yet, placed on the engine host’s live one', async () => {
     const f = await startEndpoint(org, started, withSminosRecords());
     spawned(f, 'app-n', org.B, { recorded: null, live: 'eng-live' });
@@ -446,11 +498,32 @@ describe('the spawner as owner (P5 O12 M11)', () => {
       spawned(g, 'app-new', org.B, { recorded: 'eng-new', live: 'eng-new' });
       expect(await statusOf(b, 'app-new')).toBe('ok');
     });
+
+    // the review's finding: a record the join could not place under its app session (the engine host away) is marked by
+    // its engine session, which the placement after the restart lands on
+    it('after an endpoint restart, for a record the engine host could not place under its app session', async () => {
+      const f = await startEndpoint(org, started, withSminosRecords());
+      spawned(f, 'app-u', org.B, { recorded: 'eng-u', live: 'eng-u' });
+      f.host.fail('engine.sessions');
+      await sminos(f, [laneAMember(), laneBMember('eng-u', [org.C], { access: 'private' })]);
+      await until(() => marksOf(f).engineSessionIds.includes('eng-u'), 'the engine session marked');
+      expect(handedOff(f)).not.toContain('app-u');
+      f.sminos?.close();
+      await f.endpoint.stop();
+      started.splice(started.indexOf(f), 1);
+      f.host.heal('engine.sessions');
+      const g = await startEndpoint(org, started, withSminosRecords(f));
+      const b = await openRemote(g, org.b1, org.B);
+      expect(await statusOf(b, 'app-u')).toBe('grade');
+      // once sminos restates it and the join places it, the app session's own mark replaces the engine session's
+      await sminos(g, [laneAMember(), laneBMember('eng-u', [org.C], { access: 'private' })]);
+      await until(() => handedOff(g).includes('app-u') && marksOf(g).engineSessionIds.length === 0, 'the app session marked in its stead');
+    });
   });
 
   it('prunes the mark of the app sessions the spine no longer holds, when first read', async () => {
     const services = fakeServices();
-    EndpointState.open(services.machine.stateDir).setHandedOff(['app-deleted', 'app-kept']);
+    EndpointState.open(services.machine.stateDir).setHandedOff({ appSessionIds: ['app-deleted', 'app-kept'], engineSessionIds: [] });
     const f = await startEndpoint(org, started, { ...withSminosRecords(), services });
     spawned(f, 'app-kept', org.B, { recorded: 'eng-k', live: 'eng-k' });
     const b = await openRemote(f, org.b1, org.B);
