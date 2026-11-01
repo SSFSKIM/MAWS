@@ -40,7 +40,7 @@ import { CHANNEL_HEADER_BYTES, RL1_MESSAGE_LIMIT } from './relay.ts';
 import { SIGNING_DOMAINS, type DeviceClass, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
 
 /** Each landing that adds a capability moves the minor (P5 O7, Constraints); a peer checks the capability, never the minor. */
-export const RL2_PROTOCOL = { major: 1, minor: 2 } as const;
+export const RL2_PROTOCOL = { major: 1, minor: 3 } as const;
 /** The most an `h2` or `h3` message is, on both carriers: an RL1 message less the multiplex header. */
 export const HANDSHAKE_PAGE_BYTES = RL1_MESSAGE_LIMIT - CHANNEL_HEADER_BYTES;
 /** The most an `h1` is. */
