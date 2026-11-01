@@ -1247,17 +1247,22 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(b.confirmed).toHaveLength(1);
     expect(await b.forward('open', server.port)).toEqual({ ok: true, value: { localPort } }); // kept: no act
 
-    // A drop within the window: the forward is named again on the next channel.
+    // A drop within the window: the forward is named again on the next channel. A request made at the drop's instant may
+    // be reset (§N), so the fetch waits for the next channel.
+    let channel = b.link.peerCapabilities();
     b.carriers.at(-1)!.carrier.close('dropped');
+    await onNewChannel(b, channel);
     expect(await get(localPort, '/two')).toBe('hello from /two');
     expect(b.confirmed).toHaveLength(1);
 
     // A drop past it: the endpoint forgot the forward; one fresh act.
+    channel = b.link.peerCapabilities();
     b.direct.dead = true;
     b.carriers.at(-1)!.carrier.close('dropped');
     await until(() => l.f.endpoint.forwards.list().length === 0, 'the endpoint forgetting the forward', 5000);
     b.direct.dead = false;
     b.link.probe('network');
+    await onNewChannel(b, channel);
     expect(await get(localPort, '/three')).toBe('hello from /three');
     expect(b.confirmed).toHaveLength(2);
     expect(await get(localPort, '/four')).toBe('hello from /four');
@@ -1366,6 +1371,13 @@ const servers: Server[] = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await closeServer(server);
 });
+/** The link up on a channel after `was`: each channel's `h2` list is its own (`peerCapabilities()`), none while there is none. */
+async function onNewChannel(d: Device, was: readonly string[] | null): Promise<void> {
+  await until(() => {
+    const now = d.link.peerCapabilities();
+    return now !== null && now !== was && d.link.state() === 'up';
+  }, `${d.id}'s link up on a new channel`, 10_000);
+}
 /** A dev server on the machine's loopback (this Mac's, in the suite). */
 async function httpServer(): Promise<{ port: number; sockets: Socket[]; server: Server }> {
   const sockets: Socket[] = [];
