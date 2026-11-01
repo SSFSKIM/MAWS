@@ -49,7 +49,12 @@ import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
 import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
-import { record, status } from '../support/builders';
+import { item, record, status } from '../support/builders';
+import { fakeSpineView } from '../support/fake-spine-view';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { NotificationHandle, NotifyRequest } from '@shared/client/port';
+import { startNotifier } from '../../src/main/attention/notifier';
 import { DaemonClocks } from '../../src/mawsd/clocks';
 import { engineRequests } from '../../src/mawsd/engine-requests';
 
@@ -225,6 +230,8 @@ type Device = {
   /** P5 O7 M3: `remote.forward.open` and `.close`, as main's handlers take them. */
   forward(op: 'open' | 'close', port: number): Promise<CommandResult<CommandName>>;
   tabs(...apps: string[]): void;
+  /** P5 O7 M6: the roster says the machine, as `Machines.onRemote` does once the manager made its link. */
+  roster(): void;
   /** `from`: the page and the session a path-class command is made from (MainContext's `client` and `session`). */
   route(name: string, input: unknown, from?: Partial<MainContext>): Promise<CommandResult<CommandName>>;
   cmd(name: string, input: unknown, from?: Partial<MainContext>): Promise<unknown>;
@@ -346,6 +353,9 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       return connect(l, id, keys, member, mac, options);
     },
     forward: (op, port) => (op === 'open' ? adapter.forward.open({ machine, port }) : adapter.forward.close({ machine, port })),
+    roster() {
+      for (const listener of [...remoteListeners]) listener([machine]);
+    },
     tabs(...apps) {
       const list = apps.map((app) => ({ id: `session:${addressOf(machine, app as AppSessionId)}`, kind: 'session', appSessionId: addressOf(machine, app as AppSessionId), pinned: false }));
       tabs = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { panes: [{ tabs: list, activeTabId: list[0]?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
@@ -1391,3 +1401,168 @@ function dial(port: number): Promise<Socket> {
     socket.once('error', reject);
   });
 }
+
+// ---- P5 O7 M6: attention and search across machines ---------------------------------------------------------------------
+
+/**
+ * The machine's attention service, as its spine answers `attention.list` and emits `attention.changed` (owner `machine`):
+ * a request raised on a session's launch is an item, settled when the request is answered.
+ */
+function machineAttention(l: Lab) {
+  const items = new Map<string, AttentionItem[]>();
+  l.f.spine.handle('attention.list', () => [...items.values()].flat());
+  const set = (app: string, list: AttentionItem[]) => {
+    if (list.length === 0) items.delete(app);
+    else items.set(app, list);
+    l.f.host.emitMachine('attention.changed', { appSessionId: app, items: list, silent: [] });
+  };
+  return {
+    raise(app: string, kind: 'question' | 'permission', requestId: string): AttentionItem {
+      l.host.request(app, kind, requestId);
+      const raised = item(app, kind, new Date().toISOString(), { id: `att-${requestId}` as AttentionItem['id'], request: { requestId: requestId as never, toolUseId: `tu-${requestId}` as never, taskId: null, agentId: null } });
+      set(app, [...(items.get(app) ?? []), raised]);
+      return raised;
+    },
+    settle(app: string, requestId: string): void {
+      set(app, (items.get(app) ?? []).filter((i) => i.request.requestId !== requestId));
+    },
+  };
+}
+
+/** The app's notifier over the device's adapter (this Mac's spine empty): the dock's badge and the notifications raised. */
+function notifierOf(d: Device) {
+  const badges: number[] = [];
+  const raised: Array<{ request: NotifyRequest; closed: boolean }> = [];
+  const stop = startNotifier(fakeSpineView(), {
+    port: {
+      notify: (_client, request) => {
+        const shown = { request, closed: false };
+        raised.push(shown);
+        return { close: () => void (shown.closed = true) } satisfies NotificationHandle;
+      },
+      badge: (_client, count) => void badges.push(count),
+      focus: () => ({ focused: false }) as never,
+    },
+    isFocused: () => false, // both windows unfocused
+    isViewing: () => false,
+    navigate: () => {},
+    failure: () => {},
+    settings: () => SETTINGS_DEFAULTS_V21,
+    emit: () => true,
+    emitFrom: () => true,
+    remote: d.adapter.attention,
+    now: () => Date.now() - 60_000,
+  });
+  cleanups.push(stop);
+  return { badge: () => badges.at(-1), raised };
+}
+
+const attentionSaid = (d: Device) => d.emitted.filter((e) => e.name === 'remote.attention').map((e) => e.payload as { machine: string; items: AttentionItem[]; greyed: boolean });
+const requestsOf = (items: AttentionItem[] | undefined) => (items ?? []).map((i) => i.request.requestId);
+
+describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 }, () => {
+  it('counts and raises a request on a session no tab holds, from the machine’s feed, and clears it everywhere once another device answers', async () => {
+    const l = await lab();
+    const b = await l.device('mac2');
+    const service = machineAttention(l);
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await until(() => attentionSaid(l.a).length === 1, 'the feed’s first snapshot');
+    expect(attentionSaid(l.a)).toEqual([{ machine: l.f.ref, items: [], greyed: false }]);
+
+    service.raise('app-1', 'question', 'req-q');
+    await until(() => itemsOf(l.a, 'app-1')?.length === 1, 'the request on a device with no tab');
+    expect(of(l.a, 'remote.session', 'app-1')).toEqual([]); // nothing streamed: no tab holds it
+    expect(seen.badge()).toBe(1);
+    expect(seen.raised.map((n) => n.request.title)).toEqual(['mini']);
+
+    await opened(b, 'app-1', s.launchId);
+    expect(await b.cmd('session.answer', { appSessionId: 'app-1', requestId: 'req-q', answer: { kind: 'question', answers: { 'Which way?': 'left' } } })).toEqual({ outcome: 'delivered' });
+    service.settle('app-1', 'req-q');
+    await until(() => itemsOf(l.a, 'app-1')?.length === 0, 'the item cleared on the device with no tab');
+    expect(seen.badge()).toBe(0);
+    expect(seen.raised.map((n) => n.closed)).toEqual([true]);
+    expect(attentionSaid(l.a)).toHaveLength(1);
+  });
+
+  it('greys the items when the link is forced down, out of the badge; the next up’s snapshot restores them, raising only what came meanwhile', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100 } });
+    const service = machineAttention(l);
+    l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await until(() => attentionSaid(l.a).length === 1, 'the feed’s first snapshot');
+    service.raise('app-1', 'question', 'req-q');
+    await until(() => seen.badge() === 1, 'the request counted');
+
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => attentionSaid(l.a).at(-1)?.greyed === true, 'the items greyed');
+    expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q']);
+    expect(seen.badge()).toBe(0);
+    service.raise('app-1', 'permission', 'req-p'); // raised on the machine while this Mac can't hear it
+
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    await until(() => attentionSaid(l.a).at(-1)?.greyed === false, 'the next snapshot', 15_000);
+    expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q', 'req-p']);
+    expect(seen.badge()).toBe(1);
+    expect(seen.raised.map((n) => n.request.body)).toEqual(['question for app-1', 'permission for app-1']); // the first not again
+    expect(l.a.link.state()).toBe('up');
+  });
+
+  it('empties a session whose share is withdrawn mid-feed on a member’s device, keeping the feed and the other session', async () => {
+    const l = await lab();
+    const service = machineAttention(l);
+    for (const app of ['app-1', 'app-2']) {
+      l.host.add(app);
+      l.place(app);
+      l.f.records.set({ lane: 'B', session: `eng-${app}`, owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, app);
+      service.raise(app, 'permission', `req-${app}`);
+    }
+    const b = await l.device('mac-b', { member: 'B' });
+    const seen = notifierOf(b);
+    b.roster();
+    await until(() => attentionSaid(b).length === 1, 'the member’s snapshot');
+    expect(requestsOf(attentionSaid(b)[0].items)).toEqual(['req-app-1', 'req-app-2']);
+    expect(seen.badge()).toBe(2);
+
+    l.f.records.set({ lane: 'B', session: 'eng-app-1', owners: ['@machine'] }, 'app-1');
+    await until(() => itemsOf(b, 'app-1')?.length === 0, 'the withdrawn session emptied');
+    expect(seen.badge()).toBe(1);
+    service.raise('app-2', 'question', 'req-app-2b');
+    await until(() => itemsOf(b, 'app-2')?.length === 2, 'the other session’s change');
+    expect(attentionSaid(b)).toHaveLength(1); // the same feed: no reopening
+    expect(b.link.state()).toBe('up');
+  });
+
+  it('asks no feed of an endpoint without `rl2.feeds`, saying nothing and surfacing no error', async () => {
+    endpointWithout('rl2.feeds');
+    const l = await lab();
+    machineAttention(l);
+    l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await sleep(300);
+    expect(attentionSaid(l.a)).toEqual([]);
+    expect(l.a.logs.filter((line) => line.includes('attention'))).toEqual([]);
+    expect(seen.badge()).toBe(0);
+  });
+
+  it('searches the machine over the link (`session.search` to `{machine}`), and answers `host_unavailable` while it is offline', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100, CALL_TIMEOUT_MS: 500 } });
+    l.place('app-1');
+    l.f.spine.handle('session.search', (input) => ({ hits: [{ appSessionId: 'app-1', snippet: `…${(input as { query: string }).query}…` }], indexing: false, incomplete: false }));
+    expect(await l.a.cmd('session.search', { query: 'bisect' })).toEqual({ hits: [{ appSessionId: 'app-1', snippet: '…bisect…' }], indexing: false, incomplete: false });
+
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => l.a.link.state() === 'down', 'the link down');
+    expect(await l.a.route('session.search', { query: 'bisect' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+});
+
