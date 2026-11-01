@@ -18,7 +18,7 @@ const detachedDir = detachedAt === -1 ? undefined : process.argv[detachedAt + 1]
 const mode = (process as { parentPort?: unknown }).parentPort ? 'utility' : detachedDir ? 'detached' : null;
 if (mode === null) throw new Error('the pty host runs as a utility process (process.parentPort) or detached (--detached <dir>)');
 
-const host = ptyHostRegister({ hostVersion: HOST_VERSION });
+const host = ptyHostRegister({ hostVersion: HOST_VERSION, ...(mode === 'detached' && { opsDir: detachedDir }) }); // P5 O7 M3: the ledger beside the lock
 
 if (mode === 'utility') {
   runHost(HOST_VERSION, host.register);

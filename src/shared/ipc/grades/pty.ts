@@ -15,4 +15,10 @@ export const grades = {
   'pty.foreground': 'shell',
   'pty.openLink': 'client',
   'pty.recaptureEnv': 'internal', // P5 O2 M4: main's and mawsd's, never a remote caller's
+  // P5 O7 M3: `pty.listFor` is a terminal read, `shell` as `pty.list`, reached remotely only as an act; the ledger and the
+  // ring's read are the endpoint's in `mawsd` (a remote caller reaches them only through an act and its stream), as `host.op`
+  'pty.listFor': 'shell',
+  'pty.op': 'internal',
+  'pty.opQuery': 'internal',
+  'pty.replay': 'internal',
 } as const satisfies CommandGrades<'pty'>;

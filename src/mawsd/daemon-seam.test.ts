@@ -186,6 +186,22 @@ describe('the pty host through the seam', () => {
     expect(pty.named('pty.checkpoint')).toEqual([]);
   });
 
+  // P5 O7 M3: the act through the pty host's ledger is read by its inner name, as a bare command is
+  it('pty.op of an attach goes with its inner credit: false; pty.op of pty.ack or pty.checkpoint is refused before the pty host', async () => {
+    const { endpoint } = await started();
+    const op = (name: string, input: unknown) => ({ opId: 'op-0001-abcdefghijkl', opCreated: '2026-11-01T00:00:00.000Z', claim: { member: 'm', device: 'd', fingerprint: 'f' }, name, input });
+    await expect(endpoint.s.dispatch('pty-host', 'pty.op', op('pty.attach', { ptyId: 'p-1', credit: true }))).resolves.toMatchObject({ ok: true });
+    const pty = scene.ptys.at(-1)!;
+    expect(pty.named('pty.op')).toEqual([op('pty.attach', { ptyId: 'p-1', credit: false })]);
+    for (const name of ['pty.ack', 'pty.checkpoint']) {
+      const refused = await endpoint.s.dispatch('pty-host', 'pty.op', op(name, { ptyId: 'p-1', offset: 10, state: '' }));
+      expect(refused).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringContaining(`${name} through the endpoint`) } });
+    }
+    await expect(endpoint.s.dispatch('pty-host', 'pty.op', op('pty.listFor', { appSessionId: 'a' }))).resolves.toMatchObject({ ok: true });
+    expect(pty.named('pty.op')).toHaveLength(2); // the attach and the listing went on, unchanged but for the attach's credit
+    expect(pty.named('pty.op')[1]).toEqual(op('pty.listFor', { appSessionId: 'a' }));
+  });
+
   it('a host.interest through the seam is refused: a remote viewer’s interest arrives through interest.report', async () => {
     const { endpoint } = await started();
     await expect(endpoint.s.dispatch('engine-host', 'host.interest', { sessions: ['s'] })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
