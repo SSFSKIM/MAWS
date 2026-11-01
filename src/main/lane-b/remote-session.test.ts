@@ -22,7 +22,7 @@ const catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [
 
 type Emitted = { machine: MachineRef; name: EventName; payload: Record<string, unknown> };
 
-function lab(options: { record?: () => unknown } = {}) {
+function lab(options: { record?: () => unknown; followed?: () => boolean; spawnedAt?: () => number | null; spawnWaitOver?: () => void } = {}) {
   const link = new FakeLink();
   const emitted: Emitted[] = [];
   const logs: string[] = [];
@@ -37,8 +37,11 @@ function lab(options: { record?: () => unknown } = {}) {
       if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
       emitted.push({ machine, name, payload: payload as Record<string, unknown> });
     },
-    timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], batchMax: 500 },
+    timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 30 * 60_000, batchMax: 500 },
     revision: () => ++revision,
+    ...(options.followed && { followed: options.followed }),
+    ...(options.spawnedAt && { spawnedAt: options.spawnedAt }),
+    ...(options.spawnWaitOver && { spawnWaitOver: options.spawnWaitOver }),
     log: (line) => void logs.push(line),
   });
   const names = () => emitted.map((e) => e.name);
@@ -88,6 +91,70 @@ describe('opening', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.subs).toHaveLength(1);
     expect(l.lastState()).toMatchObject({ reason: null });
+  });
+
+  // P5 O7 M4 (the architect's ruling on M4d's gap): B's endpoint ranks a lane B session by its sminos listing, so one this
+  // app just spawned answers `grade` until sminos lists it; main, which knows it spawned it, keeps asking for a minute.
+  describe('a session this app spawned', () => {
+    const WAITING = 'Waiting for mini to list the new session…';
+    const refused = (l: ReturnType<typeof lab>, until: () => boolean) =>
+      l.link.answers.set('session.get', () => (until() ? { ok: true, output: record(APP) } : { ok: false, error: { code: 'grade' } }));
+
+    it('says it waits for the machine to list it, and keeps asking past the usual retries until it is listed', async () => {
+      let listed = false;
+      const over: number[] = [];
+      const spawned = Date.now();
+      const l = lab({ spawnedAt: () => spawned, spawnWaitOver: () => void over.push(Date.now() - spawned) });
+      refused(l, () => listed);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING, controls: { send: { available: false, reason: WAITING } } });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      expect(l.link.subs).toEqual([]);
+      listed = true;
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(l.link.subs).toHaveLength(1);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: null });
+      expect(over).toHaveLength(1); // the wait let go at the first open
+    });
+
+    it('gives up a minute after the spawn settled, with “can’t place” and Try again’s ended stream, and asks no more', async () => {
+      const over: number[] = [];
+      const spawned = Date.now() - 50_000; // settled 50 s before the tab opened it: 10 s left
+      const l = lab({ spawnedAt: () => spawned, spawnWaitOver: () => void over.push(Date.now() - spawned) });
+      refused(l, () => false);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(l.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+      expect(over).toEqual([60_000]);
+      const asked = l.link.calls.length;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(l.link.calls).toHaveLength(asked);
+
+      const settled = Date.now();
+      const m = lab({ spawnedAt: () => settled, spawnWaitOver: () => {} });
+      refused(m, () => false);
+      m.session.start();
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(m.lastState()).toMatchObject({ stream: 'opening', reason: WAITING });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(m.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+      expect(m.link.calls.length).toBeLessThan(25); // asked on a backoff, not in a loop
+    });
+
+    it('leaves a session it didn’t spawn as it was: “Opening…”, then “can’t place” after 0.5, 1, 2 and 4 s', async () => {
+      const l = lab({ spawnedAt: () => null });
+      refused(l, () => false);
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: 'Opening on mini…' });
+      await vi.advanceTimersByTimeAsync(7_500);
+      expect(l.link.calls).toHaveLength(5);
+      expect(l.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+    });
   });
 
   it('counts a `grade` refusal as not placed yet, as null', async () => {
@@ -216,6 +283,57 @@ describe('an idle session', () => {
     expect(l.of('remote.gap')).toEqual([]);
   });
 
+  // O5's landing audit: each try places the session on the machine's engine host (waking a parked one) and reports
+  // interest, which restarts the machine's park clock; so an open tab on a session that isn't live tries again only when
+  // its record says it runs, carried by the checkout feed.
+  it('with its record followed, waits for it: no try in 15 min; a record that says it runs, or names another engine session, subscribes at once', async () => {
+    const l = lab({ followed: () => true });
+    const sub = await opened(l);
+    sub.sink.ended('unavailable');
+    expect(l.session.state.stream).toBe('idle');
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(l.link.subs).toHaveLength(1);
+
+    // A change that says nothing of its running (a title) is told, and tries nothing.
+    const titled = { ...record(APP), holder: { kind: 'none' as const }, title: { text: 'renamed', source: 'user' as const } };
+    l.session.recordChanged(titled);
+    expect(l.of('session.changed').at(-1)).toMatchObject({ record: titled, cause: 'live' });
+    expect(l.session.state.record).toEqual(titled);
+    expect(l.link.subs).toHaveLength(1);
+
+    l.session.recordChanged({ ...titled, holder: { kind: 'self' } });
+    expect(l.link.open()).toHaveLength(1);
+    l.link.open()[0].sink.ended('unavailable'); // it went again before the stream opened: wait again
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(l.link.subs).toHaveLength(2);
+    l.session.recordChanged({ ...titled, engineSessionId: 'eng-2' as never }); // a `/clear` elsewhere
+    expect(l.link.subs).toHaveLength(3);
+    // While the stream is open, a record is told and tries nothing.
+    l.link.open()[0].sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    l.session.recordChanged({ ...titled, holder: { kind: 'self' } });
+    expect(l.link.subs).toHaveLength(3);
+  });
+
+  it('without a feed carrying its record, tries again on a backoff that grows past the machine’s park window (10 min) and stays there', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('unavailable');
+    const tries: number[] = [];
+    const start = Date.now();
+    for (let waited = 0; waited < 2 * 60 * 60_000; waited += 1000) {
+      await vi.advanceTimersByTimeAsync(1000);
+      const open = l.link.open();
+      if (open.length === 0) continue;
+      tries.push(Date.now() - start);
+      open[0].sink.ended('unavailable');
+    }
+    const gaps = tries.map((at, i) => at - (tries[i - 1] ?? 0));
+    expect(gaps.slice(0, 4)).toEqual([1000, 2000, 4000, 8000]);
+    expect(gaps.filter((gap) => gap < 10 * 60_000).length).toBe(10); // 1 s to 512 s, then each well past the window
+    expect(gaps.slice(10).every((gap) => gap >= 17 * 60_000 && gap <= 30 * 60_000)).toBe(true);
+    expect(tries.length).toBeLessThan(15);
+  });
+
   it('ends for good on `removed`, and stops on its own at `stop`', async () => {
     const l = lab();
     const sub = await opened(l);
@@ -269,6 +387,7 @@ describe('remote.session', () => {
     l.link.setCaps({ member: 'member-a', device: 'mac1', clientClass: 'native-mac', machine: { grades: ['spawn', 'shell'] }, stateVersion: 3 });
     expect(l.lastState()).toMatchObject({ link: { rights: ['spawn', 'shell'] } });
     l.link.set('down');
-    expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: false } } });
+    // media too since M4c lifted its gap (uploads cross in parts), as a send does while the link is down
+    expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: true } } });
   });
 });

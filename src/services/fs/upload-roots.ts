@@ -24,7 +24,7 @@
 // mkdir, an unlink, an rmdir) first reopens what it touches the same way and checks it is still that directory, or a
 // regular file (`mutate`, below).
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { NotARepositoryError, type GitRun } from '../git/runner';
@@ -33,6 +33,8 @@ import { confirmOpenedSync, LinkOnTheWay, NO_LINK, walkSync, WALKED } from './no
 export const UPLOADS = ['.claude', 'desk-uploads'] as const; // under the working directory; the session's directory below
 export const EXCLUDE_LINE = '**/.claude/desk-uploads/'; // unanchored: a session in a subdirectory of the checkout matches too
 export const SWEEP_AFTER_MS = 24 * 3600_000;
+// P5 O7 M4: a remote upload's parts, staged under its root until the last arrives (`stagePart`, `promoteStaged`)
+export const STAGING = '.staging';
 
 // A lane's own file names: the only names a rollback or a sweep of its roots ever removes.
 export type OwnedFiles = RegExp;
@@ -203,8 +205,9 @@ export function saveFiles(base: string, session: string, files: readonly { name:
 // The owned files `names` (every owned file the root lists, when none are named) removed from the pinned `root`, then
 // `root` from its pinned `parent` once it is empty; nothing else, nothing recursed into. Whether everything was taken:
 // false when a mutation was refused (a pin that no longer holds, a file that is no regular file).
-function clear(parent: Pinned, root: Pinned, names: readonly string[] | undefined, owned: OwnedFiles): boolean {
+function clear(parent: Pinned, root: Pinned, names: readonly string[] | undefined, owned: OwnedFiles, staged?: OwnedFiles): boolean {
   let clean = true;
+  if (staged !== undefined && !clearStaging(root, staged, null)) clean = false; // P5 O7 M4: its staging first, whole
   let listed: string[];
   try {
     listed = names === undefined ? readdirSync(root.path) : [...names];
@@ -230,14 +233,167 @@ function clear(parent: Pinned, root: Pinned, names: readonly string[] | undefine
 // An upload's files removed (every file its lane owns, when none are named), its recorded path walked from `/` without
 // following a link, so a link an ancestor became since leads nowhere: whether it is done (a root already gone is). False
 // when anything on the way could not be reached safely or a mutation was refused, everything there left.
-export function removeFiles(root: string, owned: OwnedFiles, names?: readonly string[]): boolean {
+export function removeFiles(root: string, owned: OwnedFiles, names?: readonly string[], staged?: OwnedFiles): boolean {
   let pins: Pinned[];
   try {
     pins = walk(dirname(root), [basename(root)]);
   } catch (error) {
     return code(error) === 'ENOENT';
   }
-  return clear(pins[0]!, pins[1]!, names, owned);
+  return clear(pins[0]!, pins[1]!, names, owned, staged);
+}
+
+// ---- staged parts (P5 O7 M4, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Uploads in parts") -------------
+// A remote upload crosses its channel in parts, each its own act: the parts of upload `upload` are appended in order to
+// `<root>/.staging/<upload>` (`.staging` 0700, the file 0600 and created exclusively by the first part), and the last
+// moves the whole into the root under the name its lane gives it. The walk and the mutations are the ones above; a
+// staged name is `staged`'s, so the sweep takes back only what a staging made.
+
+// The part at byte `offset` of upload `upload` appended to its staging: 'staged'; 'out-of-order' when what is staged
+// does not end at `offset` (nothing written); 'too-large' when the whole would pass `max` (the staging removed: it can
+// never complete). A write that fails is cut back to `offset` and thrown. Throws Unsafe for a link on the way.
+export function stagePart(base: string, session: string, upload: string, offset: number, bytes: Buffer, max: number): 'staged' | 'out-of-order' | 'too-large' {
+  const staging = walk(base, [...UPLOADS, session, STAGING], true).at(-1)!;
+  still(staging);
+  const path = join(staging.path, upload);
+  let fd: number;
+  try {
+    fd = offset === 0 ? openNoLink(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600) : openNoLink(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NONBLOCK);
+  } catch (error) {
+    if (code(error) === 'EEXIST' || code(error) === 'ENOENT') return 'out-of-order'; // a first part again, or a later one with none before it
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Unsafe(`${path} is not a regular file`);
+    if (stat.nlink !== 1) throw new Unsafe(`${path} has other links: a part is never appended through one`); // a hard link to another file passes the no-link open
+    if (stat.size !== offset) return 'out-of-order';
+    if (offset + bytes.length > max) {
+      closeSync(fd);
+      fd = -1;
+      mutate(staging, { unlink: upload });
+      return 'too-large';
+    }
+    try {
+      for (let at = 0; at < bytes.length; ) at += writeSync(fd, bytes, at);
+    } catch (error) {
+      ftruncateSync(fd, offset); // the part is not left half staged
+      throw error;
+    }
+    return 'staged';
+  } finally {
+    if (fd !== -1) closeSync(fd);
+  }
+}
+
+// Upload `upload`'s staging published into the root under `nameOf(its first bytes)`: the name. The staging is opened with
+// no link on its way and checked a regular file with no other link (a hard link is no symlink, so the open passes it), and that descriptor alone is read from then on, so a leaf or an
+// ancestor swapped after the check changes nothing published; the destination is created exclusively with no link on
+// its way under the root still pinned (`writeNew`'s rule: a name already there is AlreadyThere, nothing written over
+// it), filled from the descriptor and checked whole, and removed when anything fails. Once the file is published the
+// staging's removal is best effort: a staging that cannot be removed now is the sweep's, and the upload stands. Throws
+// Unsafe for a link on the way, a staging that is not a regular file, or a root that is no longer the one walked.
+export function promoteStaged(base: string, session: string, upload: string, nameOf: (head: Buffer) => string): string {
+  const [root, staging] = walk(base, [...UPLOADS, session, STAGING]).slice(-2) as [Pinned, Pinned];
+  const from = openNoLink(join(staging.path, upload), constants.O_RDONLY | constants.O_NONBLOCK);
+  const name = ((): string => {
+    try {
+      const stat = fstatSync(from);
+      if (!stat.isFile()) throw new Unsafe(`${join(staging.path, upload)} is not a regular file`);
+      if (stat.nlink !== 1) throw new Unsafe(`${join(staging.path, upload)} has other links: nothing is published from one`);
+      const head = Buffer.alloc(Math.min(16, stat.size));
+      const named = nameOf(head.subarray(0, readSync(from, head, 0, head.length, 0)));
+      publishFrom(root, named, from, stat.size);
+      return named;
+    } finally {
+      closeSync(from);
+    }
+  })();
+  try {
+    mutate(staging, { unlink: upload });
+    still(staging);
+    if (readdirSync(staging.path).length === 0) mutate(root, { rmdir: staging });
+  } catch {
+    // the staging moved, or another upload's is beside it: the sweep takes it later
+  }
+  return name;
+}
+
+// `name` under the pinned `dir`, created exclusively, 0600, and filled with the `size` bytes the open descriptor `from`
+// holds, read by position; removed again when the copy fails or comes out short.
+function publishFrom(dir: Pinned, name: string, from: number, size: number): void {
+  still(dir);
+  const path = join(dir.path, name);
+  let to: number;
+  try {
+    to = openNoLink(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+  } catch (error) {
+    if (code(error) === 'EEXIST') throw new AlreadyThere(name);
+    throw error;
+  }
+  try {
+    const chunk = Buffer.alloc(Math.min(size, 1024 * 1024));
+    let at = 0;
+    while (at < size) {
+      const read = readSync(from, chunk, 0, Math.min(chunk.length, size - at), at);
+      if (read === 0) throw new Error(`the staging ended at ${at} of ${size} bytes`);
+      for (let written = 0; written < read; ) written += writeSync(to, chunk, written, read - written);
+      at += read;
+    }
+  } catch (error) {
+    closeSync(to);
+    try {
+      mutate(dir, { unlink: name }); // created by this promotion: never left half written
+    } catch {
+      // the root moved since: nothing more is done through it
+    }
+    throw error;
+  }
+  closeSync(to);
+}
+
+// The staged files under `root` that `staged` names, each older than `cutoff` (every one, for null), removed, and the
+// staging directory once empty; whether everything due was taken (a staging already gone is).
+function clearStaging(root: Pinned, staged: OwnedFiles, cutoff: number | null): boolean {
+  let staging: Pinned;
+  try {
+    staging = walk(root.path, [STAGING]).at(-1)!;
+  } catch (error) {
+    return code(error) === 'ENOENT';
+  }
+  let clean = true;
+  let listed: string[];
+  try {
+    listed = readdirSync(staging.path);
+  } catch {
+    return false;
+  }
+  for (const name of listed.filter((n) => staged.test(n))) {
+    try {
+      if (cutoff !== null && lstatSync(join(staging.path, name)).mtimeMs > cutoff) continue;
+      mutate(staging, { unlink: name });
+    } catch (error) {
+      if (code(error) !== 'ENOENT') clean = false;
+    }
+  }
+  try {
+    still(staging);
+    if (readdirSync(staging.path).length === 0) mutate(root, { rmdir: staging });
+  } catch (error) {
+    if (code(error) !== 'ENOENT' && cutoff === null) clean = false;
+  }
+  return clean;
+}
+
+// The stagings under the recorded `root` untouched since `cutoff` removed, the root itself left: whether it is done.
+function removeStaleStaging(root: string, staged: OwnedFiles, cutoff: number): boolean {
+  let pins: Pinned[];
+  try {
+    pins = walk(dirname(root), [basename(root)]);
+  } catch (error) {
+    return code(error) === 'ENOENT';
+  }
+  return clearStaging(pins[1]!, staged, cutoff);
 }
 
 // The upload directories excluded from the repository `base` is in (its common `info/exclude`, which every worktree of
@@ -278,8 +434,9 @@ export interface UploadRecords {
 }
 
 // A lane's record: `{version: 1, roots: [{path, session, at}]}`, 0600, written whole; `at` the last upload to the root.
-// Its sweep removes the files `owned` names and nothing else.
-export function uploadRecords(file: string, owned: OwnedFiles, { now = Date.now, log }: { now?: () => number; log: (line: string) => void }): UploadRecords {
+// Its sweep removes the files `owned` names and nothing else; with `staged` (P5 O7 M4), the stagings it names too: every
+// one of a root it removes, and in a root still in use each staging untouched for a day.
+export function uploadRecords(file: string, owned: OwnedFiles, { now = Date.now, log, staged }: { now?: () => number; log: (line: string) => void; staged?: OwnedFiles }): UploadRecords {
   const read = (): Root[] => {
     try {
       const parsed = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; roots?: unknown };
@@ -301,10 +458,15 @@ export function uploadRecords(file: string, owned: OwnedFiles, { now = Date.now,
     sweep() {
       const roots = read();
       const old = roots.filter((r) => now() - Date.parse(r.at) >= SWEEP_AFTER_MS);
+      if (staged !== undefined) {
+        for (const r of roots.filter((root) => !old.includes(root))) {
+          if (!removeStaleStaging(r.path, staged, now() - SWEEP_AFTER_MS)) log(`a staging under ${r.path} was not swept: it could not be reached without a link; it is tried again later`);
+        }
+      }
       if (old.length === 0) return 0;
       // a root that could not be reached safely, or whose removal was refused, keeps its record for a later pass
       const swept = old.filter((r) => {
-        const done = removeFiles(r.path, owned);
+        const done = removeFiles(r.path, owned, undefined, staged);
         if (!done) log(`${r.path} was not swept: it could not be reached without a link, or held what is not its own; it is tried again later`);
         return done;
       });

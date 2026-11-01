@@ -4,13 +4,22 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { addressOf } from '@shared/machine/address';
 import { loadJournal } from '../../../../../../test/support/fixtures';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { applyRemoteSession, resetRemoteLaneBStore } from '../../../lane-b/remote-session';
+import { remoteSessionState } from '../../../lane-b/test-support/remote-session';
+import { useMachines } from '../../../stores/machines';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row } from '../../model/rows';
 import { renderRow, rowOf, storeWith } from './test-support';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetRemoteLaneBStore();
+  useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+});
 
 type DeliveryRow = Extract<Row, { kind: 'delivery' }>;
 
@@ -53,5 +62,28 @@ describe('the delivery row’s file names', () => {
     expect(name.disabled).toBe(true);
     fireEvent.click(name);
     expect(actions.openArtifact).not.toHaveBeenCalled();
+  });
+});
+
+// P5 O7 M4: on a lane B session on another machine, Open externally and Reveal in Finder would act on that machine's
+// desktop: they stay greyed, saying where the file is, until M5 routes them.
+describe('a delivery on another machine’s session', () => {
+  it('greys Open externally and Reveal in Finder with “on <machine>”, and asks nothing', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+    ]);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    const { actions } = renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
+    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf' });
+    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf' });
+    expect([open.disabled, reveal.disabled]).toEqual([true, true]);
+    expect(reveal.title).toBe('This file is on mini, not on this Mac');
+    expect(screen.getByText('on mini')).toBeTruthy();
+    fireEvent.click(open);
+    fireEvent.click(reveal);
+    expect(actions.openDelivered).not.toHaveBeenCalled();
+    expect(actions.revealDelivered).not.toHaveBeenCalled();
   });
 });

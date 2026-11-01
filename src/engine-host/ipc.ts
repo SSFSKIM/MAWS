@@ -371,7 +371,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
-  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek }) => {
+  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
@@ -379,7 +379,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     // `limit` events, or `agentId`'s slice. A page before a cursor is the transcript's history whatever runs now: a
     // live session's older pages come from a quiet follow of its transcript. `seek`: the page says where it stands to that
     // message (a jump into history).
-    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }) };
+    // P5 O7 M4: `maxBytes`, the answer's UTF-8 JSON bound for a reader behind a bounded channel (acceptance 12)
+    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }), ...(maxBytes !== undefined && { maxBytes }) };
     if (deps.diskEvents && request.before !== null) return { ...(await deps.diskEvents(id, request, streams.has(id))), lastSeq: 0 };
     if (deps.diskEvents && !streams.has(id)) return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     // C4 end
@@ -392,7 +393,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     }
     // A live stream's answer is bounded by its ring and journal; one agent's slice of it is the same filter as disk's,
     // uncapped: the page is bounded already, and a cap would cut the child's own events once they pass it.
-    const page = await streamOf(appSessionId).snapshot(afterSeq, limit);
+    const page = await streamOf(appSessionId).snapshot(afterSeq, limit, maxBytes ?? null);
     const agent = request.agentId ?? null;
     return agent === null ? page : { ...page, events: agentSlice(page.events, agent, null) };
   });

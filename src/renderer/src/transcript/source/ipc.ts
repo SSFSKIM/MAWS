@@ -14,9 +14,9 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2
+import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
-import { HistoryPager, withHistoryGap, withoutOlderThanWindow } from './older';
+import { HistoryPager, withHistoryGap, withOmittedBar, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
 // How much of a spilled result is read into the detail (residue *Spilled results*): past it, the head and Open full log.
@@ -206,6 +206,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     if (!tooLarge.delete(window)) return undefined;
     return HISTORY_TOO_LARGE[window](remoteMachineName(appSessionId));
   };
+  // P5 O7 M4 (acceptance 12): a page a budgeted read answered with items left out marks where they were
+  const omittedWords = (omitted: { events: number; bytes: number }) => HISTORY_OMITTED(omitted.events, omitted.bytes, remoteMachineName(appSessionId));
   const gapPlaces = new WeakMap<SessionEvent, GapPlace>(); // P5 O7 M2: a gap told during a read, by where it goes
   // P5 O7 M2 (M2's reviews): a gap told while the history was being read is held behind it, and so would land after the
   // events the read already holds of the launch it names. It goes before the first of them at or after its `at` instead
@@ -230,7 +232,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     async (before, seek) => {
       tooLarge.delete('older');
       const page = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) }));
-      return withHistoryGap(page, bareOf(appSessionId), tooLargeWords('older')); // P5 O7 M2
+      return withOmittedBar(withHistoryGap(page, bareOf(appSessionId), tooLargeWords('older')), bareOf(appSessionId), omittedWords); // P5 O7 M2; M4: the omitted bar
     },
     (page, last) => {
       const from = page[0] === undefined ? Infinity : atOf(page[0]);
@@ -335,7 +337,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         stale = false; // this read follows the transcript again
         tooLarge.delete('newest');
         const read = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
-        const answer = withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')); // P5 O7 M2: the gap bar at a page partly gone
+        const answer = withOmittedBar(withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')), bareOf(appSessionId), omittedWords); // P5 O7 M2: the gap bar at a page partly gone; M4: and the omitted bar after its rows
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;
         const first = answer.events[0];

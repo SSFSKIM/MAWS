@@ -35,6 +35,7 @@ export const commands = [
   'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
   'session.capabilities', // P5 O5 M5: the session's agent capabilities on its machine
+  'session.spawn', // P5 O7 M4: a lane B session started here at another machine's request
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)

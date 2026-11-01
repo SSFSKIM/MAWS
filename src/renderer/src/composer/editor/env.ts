@@ -9,6 +9,7 @@ export interface EditorEnv {
   additionalDirectories: readonly string[];
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
+  searchesFiles?: boolean; // P5 O7 M4: false, the @-menu offers no files (the chat is to start on another machine)
   placeholder: string;
   files(files: File[], at?: number): void; // pasted or dropped files (`at`: where a drop landed), attached, mentioned or read as text
   pasteText(text: string): boolean; // whether a pasted text became an atom
@@ -16,4 +17,4 @@ export interface EditorEnv {
 }
 
 // What a popup needs from it, handed over as plain props each time the suggestion plugin renders.
-export type PopupContext = Pick<EditorEnv, 'appSessionId' | 'cwd' | 'additionalDirectories' | 'catalog' | 'widgets' | 'openWidget'>; // P5 O6 M4: the session, whose machine the directories are on
+export type PopupContext = Pick<EditorEnv, 'appSessionId' | 'cwd' | 'additionalDirectories' | 'catalog' | 'widgets' | 'openWidget' | 'searchesFiles'>; // P5 O6 M4: the session, whose machine the directories are on

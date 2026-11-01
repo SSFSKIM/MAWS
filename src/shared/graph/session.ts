@@ -3,6 +3,7 @@ import * as z from 'zod';
 import { AnchorSchema } from '../anchor/anchor'; // E3: X10, carried by a side thread's lineage
 import { AutoModeRefusalCodeSchema, PermissionModeSchema, TITLE_SOURCES } from './enums';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from './ids';
+import { JsonValueSchema } from '../ipc/schema/common'; // P5 O7 M4: `launchedBy.action`, a JSON value
 
 // Requested versus effective permission mode with the refusal code when they differ (D-18): `refusal` is null exactly
 // when the request was honoured, and one of AUTO_MODE_REFUSAL_CODES exactly when it was not. Both the silent downgrade
@@ -41,6 +42,14 @@ export const LineageSchema = z.strictObject({
 });
 export type Lineage = z.infer<typeof LineageSchema>;
 
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): who started a session from another
+// machine, written by `session.spawn`'s handler from the claim `machine.op` ran it under: the member and device the
+// endpoint verified, the act's op id, and the sealed spawn action as the device sent it (step-up signature included),
+// which O12's lane B observer reads to claim the member as the session's owner with the action as RL9's proof. Absent for
+// every session started on its own machine.
+export const LaunchedBySchema = z.strictObject({ member: z.string().min(1), device: z.string().min(1), opId: z.string().min(1), action: JsonValueSchema });
+export type LaunchedBy = z.infer<typeof LaunchedBySchema>;
+
 export const SessionRecordSchema = z.strictObject({
   appId: AppSessionIdSchema,
   engineSessionId: SessionIdSchema.nullable(), // null until the first frame carrying session_id
@@ -66,6 +75,7 @@ export const SessionRecordSchema = z.strictObject({
   effort: z.string().nullable(),
   permissionMode: SessionPermissionModeSchema,
   lineage: LineageSchema.nullable(), // X11 (E3); null for a root session
+  launchedBy: LaunchedBySchema.optional(), // P5 O7 M4: a remote spawn's requester and its signed action
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -10,6 +10,10 @@
 // so a session the engine host holds no row for (released, or the host parked) is placed by its record as on a machine.
 // Every dispatch is recorded with the `ClientRef` it carried.
 //
+// P5 O7 M4: the fake spine serves any handler a suite registers (`handle`, or the real services' handlers through
+// `bus`), for a call and for `machine.op`'s claimed run alike, and the machine's own events (`emitMachine`: git's, the
+// files service's, scm's, `session.changed`) reach the endpoint as `mawsd`'s front sends them, whatever an app does.
+//
 // The org: A, an admin who owns the machine (device a1); B, a member (b1); C, a member with a phone (c1, web-cards).
 import * as fs from 'node:fs';
 import type { Server } from 'node:http';
@@ -19,7 +23,7 @@ import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICA
 import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import type { SessionEvent } from '@shared/graph/events';
-import type { ClientRef, HandlerContext } from '@shared/ipc/client';
+import type { ClientRef, HandlerContext, HandlerOp } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { CommandInput } from '@shared/ipc/schema';
@@ -108,7 +112,7 @@ export class FakeEngineHost {
   readonly #holding = new Set<string>();
   /** Commands answered `host_unavailable` (the engine host away, a read timed out) until `heal`. */
   readonly #failing = new Set<string>();
-  readonly #events = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
+  readonly #events = new Set<(owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void>();
   readonly #attachments = new Set<(attached: boolean) => void>();
   readonly #upstreams = new Set<(link: { connected: boolean; generation: number }) => void>();
   #linked = true;
@@ -241,6 +245,11 @@ export class FakeEngineHost {
   emit(name: string, payload: unknown): void {
     if (!this.attached || !this.#linked) return;
     for (const listener of this.#events) listener('engine-host', { name, payload });
+  }
+
+  /** A machine event (owner `machine`, P5 O7 M4), as `mawsd`'s front sends the spine's: always, app or none. */
+  emitMachine(name: string, payload: unknown): void {
+    for (const listener of this.#events) listener('machine', { name, payload });
   }
 
   attach(attached: boolean): void {
@@ -396,6 +405,10 @@ export class FakeSpine {
   readonly records = new Map<string, Record<string, unknown>>();
   /** Each `session.acquire` the ledger ran, in order. */
   readonly acquired: string[] = [];
+  /** The spine's handlers a suite registered (P5 O7 M4), by name: answered for a call and for a claimed `machine.op` run. */
+  readonly handlers = new Map<string, (input: unknown, context: HandlerContext) => unknown>();
+  /** Each `machine.op` run of a registered handler, with the claim it ran under (`HandlerContext.op`). */
+  readonly claimed: Array<{ name: string; input: unknown; op?: HandlerOp }> = [];
   #ops: ReturnType<typeof machineOps> | null = null;
 
   constructor(private readonly host: FakeEngineHost) {}
@@ -404,8 +417,28 @@ export class FakeSpine {
   serve(services: FakeServices): void {
     this.#ops = machineOps({
       ledger: OpLedger.open(services.machine.stateDir, 'spine-ops.jsonl'),
-      invoke: async (name, input) => (name === 'session.acquire' ? { ok: true, value: this.#acquire(input as { appSessionId: string }) } : { ok: false, error: { code: 'unknown_command', message: name } }) as never,
+      invoke: async (name, input, context) => {
+        if (name === 'session.acquire') return { ok: true, value: this.#acquire(input as { appSessionId: string }) } as never;
+        const handler = this.handlers.get(name);
+        if (handler === undefined) return { ok: false, error: { code: 'unknown_command', message: name } } as never;
+        this.claimed.push({ name, input, ...(context.op === undefined ? {} : { op: context.op }) });
+        try {
+          return { ok: true, value: await handler(input, context) } as never;
+        } catch (error) {
+          return { ok: false, error: { code: 'internal', message: (error as Error).message } } as never;
+        }
+      },
     });
+  }
+
+  /** Answers `name` with `handler` (the spine's own, or a suite's stand-in). */
+  handle(name: string, handler: (input: unknown, context: HandlerContext) => unknown): void {
+    this.handlers.set(name, handler);
+  }
+
+  /** A bus the real services' `register…Handlers` register into (`handle`). */
+  get bus(): { register(name: string, handler: (input: never, context: HandlerContext) => unknown): void } {
+    return { register: (name, handler) => this.handle(name, handler as (input: unknown, context: HandlerContext) => unknown) };
   }
 
   /** A record of the session: a released one when the engine host holds no row for it. */
@@ -425,6 +458,14 @@ export class FakeSpine {
     if (name === 'machine.opQuery' && this.#ops !== null) {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(this.#ops.opQuery(checked.value as CommandInput<'machine.opQuery'>)) : no('internal');
+    }
+    const handler = this.handlers.get(name);
+    if (handler !== undefined) {
+      try {
+        return ok(await handler(input, { client: client ?? {} } as HandlerContext));
+      } catch (error) {
+        return { t: 'res', id: '0', ok: false, error: { code: 'internal', message: (error as Error).message } };
+      }
     }
     return null;
   }

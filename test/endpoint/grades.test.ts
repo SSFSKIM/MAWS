@@ -278,7 +278,7 @@ describe('only what is offered crosses', () => {
     const f = await start();
     const a = await open(f, a1, A);
     expect(await call(a, 'session.list', {})).toBe('not-offered');
-    expect(await call(a, 'files.read', { appSessionId: 'app-own', path: 'README.md' })).toBe('not-offered');
+    expect(await call(a, 'files.reveal', { appSessionId: 'app-own', path: 'README.md' })).toBe('not-offered');
     expect(await call(a, 'pty.attach', {})).toBe('not-offered');
     expect(await call(a, 'documents.open', {})).toBe('not-offered');
     expect(await send(a, laneB(f, a, 'session.launch', 'app-own'))).toBe('not-offered');

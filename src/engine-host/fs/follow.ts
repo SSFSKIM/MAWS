@@ -12,7 +12,7 @@
 // change at the next poke.
 import { open, type FileHandle } from 'node:fs/promises';
 import type { SessionEvent } from '@shared/graph/events';
-import { cronHistoryOf, eventBytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
+import { boundedBudget, CRON_HISTORY_BYTES, cronHistoryOf, eventBytes, eventUtf8Bytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, utf8Length, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { HostCommandError, type HostEmit } from '@shared/host/runtime';
 import type { SubagentLookup } from './backfill';
@@ -101,11 +101,16 @@ export interface FollowOptions {
 // What a read asks of the log: the page before `before` (an event id an earlier page started at), the first `limit`
 // events, or the slice that concerns one agent; none of them, the newest window. `seek` names a message a jump looks for:
 // the page then says where it stands to it (`sought`), so a jump walks back only to a message that is there.
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 12): `maxBytes` bounds the answer's
+// UTF-8 JSON (as `session.events` answers it, `lastSeq` included) for a reader behind a bounded channel: the window, or
+// the first `limit` events, ends where the next event would pass it, and an event alone past it is left out (`omitted`)
+// with `earlier` past it. An agent's slice keeps its own cap: it has no cursor to reach what a bound would leave out.
 export interface HistoryRequest {
   before?: EventId | null;
   limit?: number | null;
   agentId?: AgentId | null;
   seek?: MessageUuid | null;
+  maxBytes?: number | null;
 }
 
 export interface HistoryPage {
@@ -114,7 +119,13 @@ export interface HistoryPage {
   earlier?: EventId; // older history remains: the cursor that asks for the page before this one
   sought?: HistorySought; // where the page stands to the message `seek` named
   cronHistory?: SessionEvent[]; // the newest window's: the cron calls before it a whole-history read counts (cronHistoryOf)
+  omitted?: { events: number; bytes: number; seq: number | null }; // a bounded page's event alone past its budget, left out
 }
+
+// What a bounded answer's envelope (its cursor, flags and `lastSeq`) is first allowed before it is measured exactly.
+const ENVELOPE_RESERVE = 512;
+// The bytes of a page's answer, `lastSeq` included, given the bytes its events take (`eventUtf8Bytes` each, summed).
+const answerBytes = (page: HistoryPage, events: number): number => utf8Length(JSON.stringify({ ...page, events: [], lastSeq: 0 })) + Math.max(0, events - 1);
 
 // A cursor the log does not hold: the follow was started again since the page that named it (a rebind, a release).
 export const UNKNOWN_CURSOR = 'unknown history cursor';
@@ -150,6 +161,7 @@ export class Follow {
   private readonly delivered: SessionEvent[] = []; // every event delivered for this follow, in order: every page's source
   private readonly positions = new Map<EventId, number>(); // each delivered event's index (a cursor's place)
   private readonly sizes: number[] = []; // each delivered event's bytes, measured when a window first reads it
+  private readonly utf8Sizes: number[] = []; // P5 O7 M4: each one's UTF-8 bytes and comma, when a bounded read first reads it
   private readonly budget: WindowBudget;
   private phase: FollowState = 'backfilling';
   private backfilled = false; // first reached `following`: the log is history, and the follow emits from now on
@@ -218,10 +230,12 @@ export class Follow {
     const complete = this.phase === 'following';
     const before = request.before ?? null;
     if (!this.backfilled) return { events: [], complete: false, ...(before !== null && { earlier: before }) };
+    const maxBytes = request.maxBytes ?? null;
     if (request.agentId) return { events: agentSlice(this.delivered, request.agentId, this.budget.hard), complete };
-    if (before === null && request.limit != null) return { events: this.firstEvents(request.limit), complete };
+    if (before === null && request.limit != null) return { events: this.firstEvents(request.limit, maxBytes === null ? null : maxBytes - ENVELOPE_RESERVE), complete };
     const end = before === null ? this.delivered.length : this.positions.get(before);
     if (end === undefined) throw new HostCommandError({ code: 'invalid_input', message: `${UNKNOWN_CURSOR}: ${before}` });
+    if (maxBytes !== null) return this.boundedPage(before, end, request.seek ?? null, complete, maxBytes);
     const start = this.windowStart(end);
     const sought = request.seek ? soughtIn(this.delivered, request.seek, start, end) : null;
     // The newest window carries what its older history holds of the session's crons, which the Scheduled section lists
@@ -246,6 +260,7 @@ export class Follow {
     this.delivered.length = 0;
     this.positions.clear();
     this.sizes.length = 0;
+    this.utf8Sizes.length = 0;
   }
 
   private send(events: SessionEvent[]): void {
@@ -261,18 +276,62 @@ export class Follow {
   }
 
   private sizeOf = (index: number): number => (this.sizes[index] ??= eventBytes(this.delivered[index]!));
+  private utf8SizeOf = (index: number): number => (this.utf8Sizes[index] ??= eventUtf8Bytes(this.delivered[index]!));
+
+  // P5 O7 M4: the window ending before `end` whose answer stays within `maxBytes`: whole turns while they fit, a turn
+  // alone past it cut at it, an event alone past it left out (`omitted`, the cursor past it). The envelope is allowed
+  // ENVELOPE_RESERVE first and then measured: a page still over (a cursor of an unusual length) gives up its oldest
+  // events until it fits. The newest window's cron calls go in what room is left, if they fit whole.
+  private boundedPage(before: EventId | null, end: number, seek: MessageUuid | null, complete: boolean, maxBytes: number): HistoryPage {
+    const bound = maxBytes - ENVELOPE_RESERVE;
+    let start = historyWindowStart(this.delivered, end, this.utf8SizeOf, boundedBudget(this.budget, bound));
+    const pageFrom = (from: number, omitted: HistoryPage['omitted'] | null): HistoryPage => {
+      const shown = omitted === null ? from : end;
+      const sought = seek !== null ? soughtIn(this.delivered, seek, from, end) : null;
+      return { events: this.delivered.slice(shown, end), complete, ...(from > 0 && { earlier: this.delivered[from]!.id }), ...(sought && { sought }), ...(omitted !== null && { omitted }) };
+    };
+    const left = end - start === 1 && this.utf8SizeOf(start) > bound;
+    const omitted = left ? { events: 1, bytes: this.utf8SizeOf(start) - 1, seq: this.delivered[start]!.seq } : null;
+    let eventBytes = left ? 0 : this.bytesBetween(start, end);
+    let page = pageFrom(start, omitted);
+    while (answerBytes(page, page.events.length) + eventBytes > maxBytes && page.events.length > 0) {
+      eventBytes -= this.utf8SizeOf(start);
+      start += 1;
+      page = pageFrom(start, null);
+    }
+    if (before !== null) return page;
+    // The newest window's crons, in the room left, whole or not at all (their bytes are JSON lengths: a third of the room
+    // is sure to fit, whatever the text)
+    const room = maxBytes - answerBytes(page, page.events.length) - eventBytes - utf8Length(',"cronHistory":[]');
+    for (const share of [Math.min(CRON_HISTORY_BYTES, room), Math.floor(room / 3)]) {
+      if (share <= 0) break;
+      const crons = cronHistoryOf(this.delivered, start, share);
+      if (crons.length === 0) break;
+      if (crons.reduce((bytes, event) => bytes + eventUtf8Bytes(event), 0) - 1 <= room) return { ...page, cronHistory: crons };
+    }
+    return page;
+  }
+
+  private bytesBetween(from: number, to: number): number {
+    let bytes = 0;
+    for (let i = from; i < to; i++) bytes += this.utf8SizeOf(i);
+    return bytes;
+  }
 
   private windowStart(end: number): number {
     return historyWindowStart(this.delivered, end, this.sizeOf, this.budget);
   }
 
-  // The first `limit` events, as a live stream's first page is, within the hard cap.
-  private firstEvents(limit: number): SessionEvent[] {
+  // The first `limit` events, as a live stream's first page is, within the hard cap, and within `bound` (UTF-8, P5 O7 M4)
+  // for a bounded read.
+  private firstEvents(limit: number, bound: number | null): SessionEvent[] {
     let bytes = 0;
+    let utf8 = 0;
     let end = 0;
     while (end < this.delivered.length && end < limit) {
       bytes += this.sizeOf(end);
       if (bytes > this.budget.hard) break;
+      if (bound !== null && (utf8 += this.utf8SizeOf(end)) > bound) break;
       end += 1;
     }
     return this.delivered.slice(0, end);

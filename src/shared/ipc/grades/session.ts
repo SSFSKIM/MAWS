@@ -126,6 +126,7 @@ export const grades = {
   'session.observedFacts': 'view',
   'session.acquire': { floor: 'converse', byEffect: true }, // joins a ready or starting session; a resume relaunches it
   'session.recentTurns': 'view',
+  'session.spawn': 'spawn', // P5 O7 M4: a lane B session started here at another machine's request (the endpoint's spawn guard over its args)
   // main-only
   'session.mcpAuthenticate': 'internal',
   'session.mcpOAuthCallback': 'internal',

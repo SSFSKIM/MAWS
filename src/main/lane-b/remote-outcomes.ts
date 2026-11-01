@@ -33,13 +33,14 @@ const isMessage = (name: CommandName) => name === 'session.send' || name === 'se
 /** The channel's image bound, as the composer words it (MESSAGE_MAX_BYTES less headroom, base64): one sentence, shared. */
 export const TOO_LARGE_WORDS = REMOTE_TOO_LARGE_WORDS;
 
-/** What a session on another machine can't take yet, by control: closed with these words whatever the link says. */
+/**
+ * What a session on another machine can't take yet, by control: closed with these words whatever the link says. P5 O7
+ * M4 opened `media` (a file goes up to the machine as an upload, the composer's remote-uploads.ts) and `rewind` and
+ * `rewind-files` (the files panel follows the machine's checkout, so a rewind's effect on the files shows).
+ */
 export const REMOTE_GAPS: Readonly<Partial<Record<ControlKey, string>>> = {
-  media: 'files to a session on another machine wait for uploads',
   'take-over': 'not offered for a session on another machine',
   reopen: 'not offered for a session on another machine',
-  rewind: 'rewinding a session on another machine waits for its files panel',
-  'rewind-files': 'rewinding a session on another machine waits for its files panel',
   'subagent-rows': 'a subagent’s own rows aren’t carried from another machine yet',
 };
 
@@ -87,18 +88,20 @@ export function remoteLinkView(link: Pick<RemoteLink, 'state' | 'carrier' | 'ref
 }
 
 /** Why no control of the session acts from this device, or null when they do. */
-export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): string | null {
+export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'> & Partial<Pick<RemoteSessionState, 'listing'>>, link: RemoteLinkState, machine: string): string | null {
   if (link.refusal === 'removed') return `This Mac is no longer allowed on ${machine}`;
   if (link.refusal !== null) return `${machine} refused this device (${link.refusal})`;
   if (state.ended === 'closed') return `the link to ${machine} closed`;
   // The session's own right withdrawn (a share or grant taken back) while the device stays allowed on the machine.
   if (state.ended === 'removed') return `${machine} no longer lets you open this session`;
-  if (state.record === null) return state.stream === 'ended' ? `${machine} can’t place this session` : `Opening on ${machine}…`;
+  if (state.record === null && state.stream === 'ended') return `${machine} can’t place this session`;
+  // P5 O7 M4: a session this app spawned, which the machine's endpoint ranks once sminos lists it
+  if (state.record === null) return state.listing === true ? `Waiting for ${machine} to list the new session…` : `Opening on ${machine}…`;
   return null;
 }
 
 /** Every control of the session's port with the remote overlay (§K's `controls`). */
-export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
+export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'> & Partial<Pick<RemoteSessionState, 'listing'>>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
   const reason = sessionReason(state, link, machine);
   const controls = {} as Record<ControlKey, RemoteCapability>;
   for (const key of CONTROL_KEYS) {

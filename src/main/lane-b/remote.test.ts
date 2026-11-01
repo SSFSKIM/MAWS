@@ -16,6 +16,7 @@ import { record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
+import { UNRESOLVED_MAX } from './remote-spawn';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -64,6 +65,8 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
     base,
     route,
     cmd: (name: string, input: unknown, machine: MachineRef = MINI) => route(machine, name as CommandName, input, ctx),
+    // M4c fix wave 2: a command made from a tab (the envelope's session: a spawn's New chat tab)
+    cmdFrom: (name: string, input: unknown, from: string, client: MainContext['client'] = ctx.client) => route(MINI, name as CommandName, input, { ...ctx, client, session: from as AppSessionId }),
     setTabs(...apps: string[]) {
       tabs = tabsOf(...apps);
       for (const listener of layoutListeners) listener('main.tabs');
@@ -414,5 +417,335 @@ describe('the tabs and the links', () => {
     const sub = await live(l);
     l.adapter.stop();
     expect(sub.closed).toBe(true);
+  });
+});
+
+// P5 O7 M4: the checkout's writes, uploads in parts, the spawn, and the byte budget, each from the adapter's side.
+describe('the checkout and the spawn (M4)', () => {
+  const MiB = 1024 * 1024;
+  const UPLOADS = '/work/app-1/.claude/desk-uploads/app-1';
+
+  it('takes the checkout’s writes, the spawn, the watches and `files.read` (in pages); the checkout’s other reads stay the manager’s', () => {
+    const l = lab();
+    for (const name of ['files.write', 'files.upload', 'scm.stage', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel', 'session.spawn', 'git.watch', 'git.unwatch', 'files.watch', 'files.unwatch', 'files.read'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+    for (const name of ['git.status', 'git.diff', 'files.list', 'scm.status', 'session.projects.list', 'fs.agentEvents'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+  });
+
+  it('builds a checkout write as a `machine` act with neither a session nor a context, on a session no tab holds and with no status', async () => {
+    const l = lab({ tabs: [] });
+    l.link.onAct = settleWith({ state: 'refused', reason: 'grade' });
+    const write = { appSessionId: APP, path: 'README.md', content: 'hello\n', expectedHash: '0'.repeat(64) };
+    expect(await l.cmd('files.write', write)).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'files.write', args: write, executor: 'machine', sendBy: expect.any(Number) }]);
+    expect(l.link.acts.some((a) => a.request.action === 'session.acquire')).toBe(false); // not resumed
+  });
+
+  it('uploads a 5 MiB file in three parts, each its own act in order, telling the chip how far it has come, and answers the machine’s path', async () => {
+    const l = lab();
+    l.link.onAct = (act) => {
+      const { part } = act.request.args as { part: { index: number; last: boolean } };
+      act.settle({ state: 'done', result: { status: 'ok', paths: part.last ? [`${UPLOADS}/u.0.pdf`] : [] } });
+    };
+    const bytes = Buffer.alloc(5 * MiB, 3);
+    expect(await l.cmd('files.upload', { appSessionId: APP, files: [{ name: 'spec.pdf', bytes: bytes.toString('base64') }] })).toEqual({ ok: true, value: { status: 'ok', paths: [`${UPLOADS}/u.0.pdf`] } });
+    const parts = l.link.acts.map((a) => a.request);
+    expect(parts.map((p) => [p.action, p.executor, p.session, p.context])).toEqual(Array(3).fill(['files.upload', 'machine', undefined, undefined]));
+    const args = parts.map((p) => p.args as { part: { upload: string; index: number; last: boolean }; files: Array<{ name: string; bytes: string }> });
+    expect(args.map((a) => [a.part.index, a.part.last])).toEqual([[0, false], [1, false], [2, true]]);
+    expect(new Set(args.map((a) => a.part.upload)).size).toBe(1);
+    expect(Buffer.concat(args.map((a) => Buffer.from(a.files[0].bytes, 'base64'))).equals(bytes)).toBe(true);
+    expect(args.map((a) => Buffer.from(a.files[0].bytes, 'base64').length)).toEqual([2 * MiB, 2 * MiB, MiB]);
+    expect(l.of('remote.upload')).toEqual([0, 1, 2, 3].map((sent) => ({ appSessionId: APP, file: 0, name: 'spec.pdf', sent, parts: 3 })));
+  });
+
+  it('ends an upload at a part the machine refused, sending no part after it, and runs one upload at a time per session', async () => {
+    const l = lab();
+    const held: FakeAct[] = [];
+    l.link.onAct = (act) => void held.push(act);
+    const file = (name: string) => ({ appSessionId: APP, files: [{ name, bytes: Buffer.alloc(3 * MiB, 1).toString('base64') }] });
+    const first = l.cmd('files.upload', file('a.bin'));
+    const second = l.cmd('files.upload', file('b.bin'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held.map((a) => (a.request.args as { files: Array<{ name: string }> }).files[0].name)).toEqual(['a.bin']);
+    held[0].settle({ state: 'done', result: { status: 'refused', reason: 'part out of order' } });
+    expect(await first).toEqual({ ok: true, value: { status: 'refused', reason: 'part out of order' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(held.map((a) => (a.request.args as { files: Array<{ name: string }> }).files[0].name)).toEqual(['a.bin', 'b.bin']);
+    held[1].settle({ state: 'refused', reason: 'not-offered' });
+    expect(await second).toMatchObject({ ok: false, error: { issues: { refusal: 'not-offered' } } });
+    expect(held).toHaveLength(2);
+  });
+
+  it('builds the spawn as a stepped-up `machine` act on the machine, its bound running only from the moment it went out', async () => {
+    const l = lab({ tabs: [] });
+    let act!: FakeAct;
+    l.link.onAct = (a) => {
+      act = a;
+      a.move('waiting'); // at the sheet and Touch ID
+    };
+    const spawn = { checkout: '/work/repo', permission_mode: 'default', brief: 'go' };
+    let answer: unknown = null;
+    void l.cmd('session.spawn', spawn).then((r) => (answer = r));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(act.request).toEqual({ action: 'session.spawn', args: spawn, executor: 'machine', stepUp: 'required' });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(answer).toBeNull(); // the person's time at the sheet is not the machine's
+    act.move('sent');
+    await vi.advanceTimersByTimeAsync(209_999);
+    expect(answer).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(answer).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+
+  // The architect's ruling on M4d's gap: a session this app spawned waits a minute for the machine to list it.
+  it('opens a session this app spawned waiting for the machine to list it, lets the wait go at its first open, and leaves another session as it was', async () => {
+    const l = lab({ tabs: [] });
+    let listed = false;
+    l.link.answers.set('session.get', (input) => (input.appSessionId === 'app-new' && listed ? { ok: true, output: record('app-new') } : { ok: false, error: { code: 'grade' } }));
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+    expect(await l.cmd('session.spawn', { checkout: '/work/repo', permission_mode: 'default' })).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+    const reasonOf = (app: string) => l.of('remote.session').filter((p) => p.address === app).at(-1)?.reason;
+    l.setTabs('app-new', 'app-other');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(reasonOf('app-new')).toBe('Waiting for mini to list the new session…');
+    expect(reasonOf('app-other')).toBe('mini can’t place this session'); // not spawned here: given up after 7.5 s
+    listed = true;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(reasonOf('app-new')).toBeNull();
+    // the wait let go: a later open of it is any session's
+    listed = false;
+    l.setTabs();
+    await vi.advanceTimersByTimeAsync(60_000);
+    l.setTabs('app-new');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reasonOf('app-new')).toBe('Opening on mini…');
+  });
+
+  // M4c fix wave 2 (the architect's rulings): a New chat tab's spawn is one attempt, kept by the tab it is made from (the
+  // envelope's session), whatever input its next ask carries; a terminal unknown is said, never a pending start; an
+  // outcome nobody waited for is kept as its answer alone.
+  describe('a spawn’s attempt, by the tab it is made from', () => {
+    const TAB = 'new-1';
+    const spawn = { checkout: '/work/repo', permission_mode: 'default', brief: 'go' };
+    const timedOut = async (l: ReturnType<typeof lab>, from = TAB, input: unknown = spawn) => {
+      const asked = l.cmdFrom('session.spawn', input, from);
+      await vi.advanceTimersByTimeAsync(210_000);
+      expect(await asked).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    };
+
+    it('answers the tab’s next ask from the same act, whatever its input, and starts one session', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      let answer: unknown = null;
+      void l.cmdFrom('session.spawn', { ...spawn, brief: 'go, and test it' }, TAB).then((r) => (answer = r)); // edited since
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.link.acts).toHaveLength(1); // no new act: no second sheet, no second session
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(answer).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    const unknown = { ok: false, error: { code: 'internal', message: 'Couldn’t confirm whether it started on mini; check again, or check mini’s sessions', issues: { refusal: 'unknown' } } };
+
+    it('never says a terminal unknown as a pending start, and asks the same op again at each ask: a later ok opens that session, one act', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      l.link.acts[0].settle({ state: 'unknown', reason: 'expired' }); // nobody waiting
+      await vi.advanceTimersByTimeAsync(0);
+      const check = l.cmdFrom('session.spawn', spawn, TAB); // Check again
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.link.requeries.map((q) => q.request.action)).toEqual([`requery ${l.link.acts[0].opId}`]); // the same op, by query
+      l.link.requeries[0].settle({ state: 'unknown', reason: 'expired' }); // still can't be known
+      expect(await check).toMatchObject(unknown);
+      // the ledger records it later (an engine host adopted across a restart): the next ask, a Send, hears it
+      l.link.onRequery = (q) => q.settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', { ...spawn, brief: 'edited' }, TAB)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.link.acts).toHaveLength(1); // never a second act
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    it('keeps an unknown said to a waiting page for the next ask, and only a new attempt key makes a new act, carrying no session', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]);
+      l.link.onRequery = (q) => q.settle({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // a Send: asked again, still unknown
+      expect(l.link.acts).toHaveLength(1);
+      // the person's explicit "Start a new session": the renderer's next attempt key
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, `${TAB}~1`)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.link.acts).toHaveLength(2);
+      // the attempt key is a key only: never the act's session or context, never in a log line
+      for (const act of l.link.acts) expect(act.request).toEqual({ action: 'session.spawn', args: spawn, executor: 'machine', stepUp: 'required' });
+      expect(l.logs.filter((line) => line.includes(TAB))).toEqual([]);
+    });
+
+    // the milestone re-review: an unknown never becomes a new act under its key, however long ago it was
+    it('keeps an unknown past its tombstone as unresolved: the key’s Send and Check again answer unknown and make no act', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000 + 1);
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-9')).toMatchObject(unknown); // another key's own act; the sweep runs
+      expect(l.adapter.spawnsKept()).toContainEqual({ key: `${MINI}\n${TAB}`, state: 'unresolved' }); // no op, no input
+      const acts = l.link.acts.length;
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // a Send
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // Check again
+      expect(l.link.acts).toHaveLength(acts);
+      expect(l.link.requeries).toHaveLength(0); // past the horizon nothing is asked
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, `${TAB}~1`)).toMatchObject({ ok: true }); // only the explicit new key
+      expect(l.link.acts).toHaveLength(acts + 1);
+    });
+
+    it('keeps at most UNRESOLVED_MAX unresolved keys, the oldest let go first', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      for (let i = 0; i <= UNRESOLVED_MAX; i++) await l.cmdFrom('session.spawn', spawn, `tab-${i}`);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000 + 1);
+      await l.cmdFrom('session.spawn', spawn, 'tab-last'); // the sweep
+      const unresolved = l.adapter.spawnsKept().filter((k) => k.state === 'unresolved').map((k) => k.key);
+      expect(unresolved).toHaveLength(UNRESOLVED_MAX);
+      expect(unresolved).not.toContain(`${MINI}\ntab-0`);
+    });
+
+    it('keeps an outcome for the tab when the page waiting on it went: a reload during Check again starts one session', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      const before = endableClientRef('page-before');
+      let late: unknown = null;
+      void l.cmdFrom('session.spawn', spawn, TAB, before).then((r) => (late = r)); // Check again
+      await vi.advanceTimersByTimeAsync(0);
+      before.end(); // the page reloads while the check waits
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(late).toMatchObject({ ok: true }); // said to a page that is gone: not taken
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]);
+      const after = endableClientRef('page-after');
+      expect(await l.cmdFrom('session.spawn', spawn, TAB, after)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } }); // the reloaded tab's Send
+      expect(l.link.acts).toHaveLength(1);
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    it('keeps two tabs’ attempts apart, however alike their input', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l, 'new-1');
+      await timedOut(l, 'new-2');
+      expect(l.link.acts).toHaveLength(2);
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-one' } });
+      l.link.acts[1].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-two' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-2')).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-two' } });
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-1')).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-one' } });
+      expect(l.link.acts).toHaveLength(2);
+    });
+
+    it('lets the act go once it settles unasked, keeping its answer for the tab until it reads it or the bound passes', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'out' }]);
+      l.link.acts[0].settle({ state: 'done', result: { status: 'refused', reason: 'untrusted' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]); // the answer alone
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-9')).toMatchObject({ ok: true }); // any ask sweeps
+      expect(l.adapter.spawnsKept()).toEqual([]);
+      // the machine's link replaced: an act out ends unknown, kept as its answer; the adapter stopped, nothing is kept
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l, 'new-3');
+      l.setLinks(new Map([[MINI, new FakeLink()]]));
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\nnew-3`, state: 'said' }]);
+      l.adapter.stop();
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+  });
+
+  it('reads `session.events` within the byte budget only from a machine whose endpoint listed `rl2.events-budget`', async () => {
+    const l = lab();
+    await live(l);
+    l.link.answers.set('session.events', (input) => ({ ok: true, output: { events: [], lastSeq: (input.afterSeq as number | null) ?? 0, complete: true } }));
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    l.link.peers = ['rl2.executor.machine', 'rl2.events-budget'];
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(l.link.calls.filter((c) => c.name === 'session.events').map((c) => (c.input as { maxBytes?: number }).maxBytes)).toEqual([undefined, expect.any(Number)]);
+  });
+
+  // Fix wave 1 (findings 3 and 4): an idle stream that waits on its record keeps a way back whatever the feed does.
+  async function idleFollowed() {
+    const l = lab();
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await vi.advanceTimersByTimeAsync(0);
+    const streams = () => l.link.subs.filter((s) => s.request.feed === undefined);
+    const stream = () => l.link.open().find((s) => s.request.feed === undefined);
+    const feed = l.link.open().find((s) => s.request.feed === 'checkout')!;
+    stream()!.sink.ended('unavailable'); // not live: the first try
+    feed.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 }); // the feed's opening: one more try, out now
+    expect(streams()).toHaveLength(2);
+    return { l, streams, stream, feed };
+  }
+  const running = { ...record(APP), holder: { kind: 'self' as const } };
+
+  it('takes a start record that comes while a try is out once that try ends, and only once', async () => {
+    const { streams, stream, feed } = await idleFollowed();
+    feed.sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: running, cause: 'live', revision: 2 } });
+    stream()!.sink.ended('unavailable'); // the try out answers after the record
+    expect(streams()).toHaveLength(3);
+    stream()!.sink.ended('unavailable'); // it went again: the record is spent, no storm
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    expect(streams()).toHaveLength(3);
+  });
+
+  // Fix wave 2 (finding 3): the first try is a try out too.
+  it('takes a start record that comes while the opening’s first try is out once it ends, and only once', async () => {
+    const l = lab();
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await vi.advanceTimersByTimeAsync(0);
+    const streams = () => l.link.subs.filter((s) => s.request.feed === undefined);
+    const stream = () => l.link.open().find((s) => s.request.feed === undefined)!;
+    const feed = l.link.open().find((s) => s.request.feed === 'checkout')!;
+    feed.sink.subbed('snapshot', { epoch: 'checkout:boot', seq: 0 }); // the feed opens first: the stream is still opening
+    feed.sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: running, cause: 'live', revision: 2 } });
+    expect(streams()).toHaveLength(1);
+    stream().sink.ended('unavailable');
+    expect(streams()).toHaveLength(2);
+    stream().sink.ended('unavailable');
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    expect(streams()).toHaveLength(2);
+  });
+
+  it('falls back to the idle backoff when the next channel’s peer offers no feed, and stays put on `removed` or `grade`', async () => {
+    const { l, streams, stream, feed } = await idleFollowed();
+    stream()!.sink.ended('unavailable');
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(streams()).toHaveLength(2); // waiting on the record
+    l.link.peers = ['rl2.executor.machine'];
+    feed.sink.ended('not-offered');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(streams()).toHaveLength(3);
+    for (const reason of ['removed', 'grade']) {
+      const m = await idleFollowed();
+      m.stream()!.sink.ended('unavailable');
+      m.feed.sink.ended(reason);
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+      expect([reason, m.streams()]).toEqual([reason, expect.objectContaining({ length: 2 })]);
+    }
+  });
+
+  it('opens the session’s checkout feed beside its stream for a machine whose endpoint lists `rl2.feeds`, and closes it with the stream', async () => {
+    const l = lab({ timing: { unsubscribeLingerMs: 100 } });
+    l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+    await live(l);
+    expect(l.link.open().map((s) => s.request.feed ?? 'stream')).toEqual(['stream', 'checkout']);
+    l.setTabs();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(l.link.open()).toEqual([]);
   });
 });

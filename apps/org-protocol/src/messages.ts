@@ -28,10 +28,24 @@ export type SessionRef = { lane: 'A' | 'B'; id: string };
 export type Cursor = { epoch: string; seq: number; idx?: number };
 export type QueryState = 'done' | 'in-progress' | 'refused' | 'not-received' | 'expired' | 'unavailable';
 
-export type CallMessage = { t: 'call'; id: string; name: string; input: unknown };
+/** `session` (P5 O7 M4, behind `rl2.call-session`): the session a path-class read is made from, which the endpoint's
+ * `checkout` target rule reads. An older endpoint passes it by unread, and offers no row that needs it. */
+export type CallMessage = { t: 'call'; id: string; name: string; input: unknown; session?: SessionRef };
 export type ActMessage = { t: 'act'; action: Action };
 export type QueryMessage = { t: 'query'; opId: string; opCreated: string; executor: Executor };
-export type SubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; cursor: Cursor | null; credit: number };
+/**
+ * A feed (P5 O7 M4 and M6, behind `rl2.feeds`): a subscription to a machine's events that carry no session cursor, every
+ * opening a `snapshot`. `checkout` names its session; `attention` names none. A `sub` with a `feed` goes only to an
+ * endpoint that listed `rl2.feeds`: an older one would read a `checkout` feed as the session's own stream, and close the
+ * channel on an `attention` one.
+ */
+export type Feed = 'checkout' | 'attention';
+const FEEDS: readonly string[] = ['checkout', 'attention'] satisfies readonly Feed[];
+/** A session's stream (no `feed`), or its `checkout` feed. */
+export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: 'checkout'; cursor: Cursor | null; credit: number };
+/** The machine's `attention` feed (M6), which names no session. */
+export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: 'attention'; cursor: Cursor | null; credit: number };
+export type SubMessage = SessionSubMessage | MachineFeedSubMessage;
 export type CreditMessage = { t: 'credit'; sub: string; bytes: number };
 export type UnsubMessage = { t: 'unsub'; sub: string };
 
@@ -97,15 +111,16 @@ const EITHER: Record<string, (m: Fields) => boolean> = {
 
 const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
   ...EITHER,
-  call: (m) => isText(m.id, 128) && isText(m.name, 128) && 'input' in m,
+  call: (m) => isText(m.id, 128) && isText(m.name, 128) && 'input' in m && optional(m.session, isSessionRef),
   act: (m) => isAction(m.action),
   query: (m) => isOpId(m.opId) && isIsoMillis(m.opCreated) && EXECUTORS.includes(m.executor as string),
   sub: (m) =>
     isText(m.sub, 128) &&
-    isSessionRef(m.session) &&
-    optional(m.view, (v) => v === 'full' || v === 'cards') &&
-    isCursor(m.cursor, m.session.lane) &&
-    isPositive(m.credit, SUB_CREDIT_MAX),
+    isPositive(m.credit, SUB_CREDIT_MAX) &&
+    (m.feed === undefined
+      ? isSessionRef(m.session) && optional(m.view, (v) => v === 'full' || v === 'cards') && isCursor(m.cursor, m.session.lane)
+      : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view. `checkout` names its session, `attention` none.
+        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (m.feed === 'attention' ? m.session === undefined : isSessionRef(m.session))),
   credit: (m) => isText(m.sub, 128) && isPositive(m.bytes, SUB_CREDIT_MAX),
   unsub: (m) => isText(m.sub, 128),
 };

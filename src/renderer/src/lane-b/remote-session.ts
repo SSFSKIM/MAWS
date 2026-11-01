@@ -16,6 +16,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { RemoteSession } from '@shared/ipc/schema/remote';
 import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
+import { useMachines } from '../stores/machines';
+import { machineName } from '../stores/org-projects';
 import { useSessions, type SessionsState } from '../stores/sessions';
 
 export interface RemoteLaneBStore {
@@ -84,4 +86,20 @@ export const isRemoteLaneB = (appSessionId: AppSessionId): boolean =>
 export function useIsRemoteLaneB(appSessionId: AppSessionId): boolean {
   const states = useRemoteLaneB((s) => s.states);
   return useSessions((s) => remoteLaneBIn(s, states, appSessionId, ipc.localMachine));
+}
+
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M4's At its end): what acts on this Mac's own
+// desktop for a session's file (Reveal in Finder, Open externally) is not offered for a lane B session on another
+// machine, where it would act on that machine's desktop (M5 routes it if a reader appears). The control stays, greyed,
+// saying where the file is: the machine's name, or null where the control acts.
+export const ELSEWHERE_WORDS = {
+  on: (machine: string) => `on ${machine}`,
+  title: (machine: string) => `This file is on ${machine}, not on this Mac`,
+} as const;
+
+export function useElsewhereMachine(appSessionId: AppSessionId | null): string | null {
+  const states = useRemoteLaneB((s) => s.states);
+  const remote = useSessions((s) => appSessionId !== null && remoteLaneBIn(s, states, appSessionId, ipc.localMachine));
+  const name = useMachines((s) => (appSessionId === null || !isAddress(appSessionId) ? null : machineName(s.machines, machineOf(appSessionId), ipc.localMachine)));
+  return remote ? name : null;
 }

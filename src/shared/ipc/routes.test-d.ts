@@ -27,7 +27,7 @@ describe('the machine an invoke names', () => {
   });
 
   it('requires it of a path command on the client, and of no other (M4)', () => {
-    expectTypeOf<InvokeRest<'git.watch'>>().toEqualTypeOf<[opts: { machine: MachineRef }]>();
+    expectTypeOf<InvokeRest<'git.watch'>>().toEqualTypeOf<[opts: { machine: MachineRef; session?: AppSessionId }]>(); // P5 O7 M4: and the session it is made from, if any
     expectTypeOf<InvokeRest<'session.get'>>().toEqualTypeOf<[opts?: InvokeOptions]>();
     // @ts-expect-error a path command names its machine
     void bridge.invoke('git.watch', { directory: '/work' });

@@ -3,18 +3,20 @@
 // (src/engine-host/ops.ts), so the claim and the result are one process's and no crash window splits them. The ledger is
 // `<profile>/spine-ops.jsonl`, a spine file under `spine.lock` (a refused run opens none).
 //
-// `machine.op {opId, opCreated, claim, name, input}` runs only a `machine`-owned command whose grade is an act (any but
+// `machine.op {opId, opCreated, claim, name, input, action?}` runs only a `machine`-owned command whose grade is an act (any but
 // `list`, `view`, `client` and `internal`; a grade that follows its effect counts as an act), never itself, and never the
 // daemon's own namespace, which is no service's (a `daemon.restart` would end the process before its result is kept)
 // (`unavailable`); its input must hold to the command's schema (`malformed`). A known op id answers what the ledger holds
-// and runs nothing; else the claim is fsynced, the command runs through the bus's `invoke` (the table the root
-// registered, its intercept first, its output validated), and its answer (`{ok, value}` or `{ok: false, error}`, a throw
+// and runs nothing; else the claim is fsynced (with the sealed `action` beside it, P5 O7 M4), the command runs through the
+// bus's `invoke` (the table the root registered, its intercept first, its output validated) with the claim in its
+// context (`HandlerContext.op`), and its answer (`{ok, value}` or `{ok: false, error}`, a throw
 // included: it was tried) is kept and returned. `machine.opQuery` answers RL4's states with the stored binding, as
 // `host.opQuery` does. A local client's own acts (the app's, through its router) run unclaimed, as the engine host's
-// local acts run beside `host.op` (D17).
+// local acts run beside `host.op` (D17). P5 O7 M4: the ledger opens with `orphanAtOpen`: a claim the last process left with
+// no result answers `expired` (its outcome unknown, never run again) until an outcome read back replaces it (`LateOutcome`).
 import { thrownError } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
-import type { HandlerContext } from '@shared/ipc/client';
+import type { HandlerContext, HandlerOp } from '@shared/ipc/client';
 import { gradeOf } from '@shared/ipc/grades';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
@@ -53,12 +55,16 @@ export function machineOps(deps: MachineOpsDeps): { op(input: OpInput, context: 
     const appSessionId = (checked.value as { appSessionId?: unknown } | undefined)?.appSessionId;
     const target = typeof appSessionId === 'string' ? appSessionId : null;
 
-    const begun = ledger.begin(opId, opCreated, { ...claim, target, name }, () => null);
+    // P5 O7 M4: the sealed action, when the endpoint sent it, is kept with the claim (a query never says it) and handed to
+    // the handler with the claim, so a handler can record who asked and keep the proof (`session.spawn`'s `launchedBy`)
+    const action = input.action;
+    const begun = ledger.begin(opId, opCreated, { ...claim, target, name, ...(action !== undefined && { action }) }, () => null);
     if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
 
     let result: { ok: true; value: unknown } | { ok: false; error: ReturnType<typeof thrownError> };
     try {
-      const answer = await deps.invoke(name, checked.value, context);
+      const op: HandlerOp = { opId, opCreated, ...claim, ...(action !== undefined && { action }) };
+      const answer = await deps.invoke(name, checked.value, { ...context, op });
       result = answer.ok ? { ok: true, value: answer.value } : { ok: false, error: answer.error };
     } catch (error) {
       result = { ok: false, error: thrownError(error) };
@@ -79,8 +85,21 @@ export function machineOps(deps: MachineOpsDeps): { op(input: OpInput, context: 
   return { op, opQuery };
 }
 
-/** Registers `machine.op` and `machine.opQuery` over the ledger, running each claimed act through the bus's `invoke`. */
-export function registerMachineOps(bus: Pick<ServicesBus, 'register' | 'invoke'>, ledger: OpLedger): void {
+/**
+ * P5 O7 M4: the outcome of an act the last process claimed and never kept (the ledger's orphans, `orphanAtOpen`), read
+ * back where the act left it, or null when nothing says. A spawn that reached `launching` left its record, under its
+ * `launchedBy.opId`, whatever became of the process that ran it (the engine host it launched on may have been adopted
+ * across the restart); another act leaves nothing to read back, and stays unknown.
+ */
+export type LateOutcome = (name: string, opId: string) => { ok: true; value: unknown } | null;
+
+/** Registers `machine.op` and `machine.opQuery` over the ledger, running each claimed act through the bus's `invoke`. Each
+ * orphan whose outcome `lateOutcome` reads back is kept as that outcome, so a query answers it and nothing runs it again. */
+export function registerMachineOps(bus: Pick<ServicesBus, 'register' | 'invoke'>, ledger: OpLedger, lateOutcome?: LateOutcome): void {
+  for (const { opId, claim } of ledger.orphans()) {
+    const outcome = lateOutcome?.(claim.name, opId) ?? null;
+    if (outcome !== null) ledger.finish(opId, outcome);
+  }
   const { op, opQuery } = machineOps({ ledger, invoke: bus.invoke });
   bus.register('machine.op', (input, context) => op(input, context));
   bus.register('machine.opQuery', (input) => opQuery(input));

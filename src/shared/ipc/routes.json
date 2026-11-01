@@ -461,6 +461,7 @@
   "session.projects.list",
   "session.replay.fixtures",
   "session.search",
+  "session.spawn",
   "session.takeOverPane",
   "session.visible",
   "settings.claudeUsage.open",
