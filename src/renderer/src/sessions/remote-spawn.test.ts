@@ -133,7 +133,7 @@ describe('a spawn on another machine', () => {
     for (const [value, words] of answers) {
       const fake = fakeClient({ 'session.spawn': value });
       const doc = docOf([paragraph(textNode('go'))]);
-      await expect(spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client), words).resolves.toEqual({ started: false, words, checkAgain: false });
+      await expect(spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client), words).resolves.toEqual({ started: false, words, again: 'retry' });
       expect(tabOpen(LOCAL_TAB)).toBe(true);
       expect(fake.invoked('session.intent.discard')).toEqual([]);
     }
@@ -142,7 +142,7 @@ describe('a spawn on another machine', () => {
     const run = spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
     await Promise.resolve();
     await fake.fail('session.spawn', 'Not sent: mini is offline', 'host_unavailable');
-    await expect(run).resolves.toEqual({ started: false, words: 'Not sent: mini is offline', checkAgain: false }); // main's own words pass through
+    await expect(run).resolves.toEqual({ started: false, words: 'Not sent: mini is offline', again: 'retry' }); // main's own words pass through
     expect(tabOpen(LOCAL_TAB)).toBe(true);
   });
 
@@ -154,7 +154,7 @@ describe('a spawn on another machine', () => {
     await Promise.resolve();
     expect(useRemoteSpawn.getState().spawning.get(LOCAL_TAB)).toBe(SPAWN_WORDS.starting('mini'));
     await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
-    await expect(run).resolves.toEqual({ started: false, words: SPAWN_WORDS.unconfirmed('mini'), checkAgain: true });
+    await expect(run).resolves.toEqual({ started: false, words: SPAWN_WORDS.unconfirmed('mini'), again: 'check' });
     expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
 
     const edited = docOf([paragraph(textNode('fix the build and the tests'))]);
@@ -174,6 +174,41 @@ describe('a spawn on another machine', () => {
     expect(JSON.stringify(kept?.doc)).toContain('fix the build and the tests');
   });
 
+  it('names the tab it is made from, and keeps the start it is checking on across a reload of the page', async () => {
+    const fake = fakeClient();
+    const doc = docOf([paragraph(textNode('go'))]);
+    const run = spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    await Promise.resolve();
+    expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB]); // main keeps the attempt by the tab
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await run;
+    // what a reload keeps: the window's session storage, not this module's memory
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith('maws.spawn.unconfirmed:'))).toEqual([`maws.spawn.unconfirmed:${LOCAL_TAB}`]);
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+  });
+
+  it('says a start that can’t be known as such, offers no check on it, and the next Send is a new start', async () => {
+    const fake = fakeClient();
+    const ask = (text: string) => {
+      const d = docOf([paragraph(textNode(text))]);
+      return spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    };
+    const run = ask('go');
+    await Promise.resolve();
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await run;
+    const check = ask('go');
+    await Promise.resolve();
+    await fake.fail('session.spawn', SPAWN_WORDS.unknown('mini'), 'internal', { refusal: 'unknown' });
+    await expect(check).resolves.toEqual({ started: false, words: SPAWN_WORDS.unknown('mini'), again: null });
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+    const fresh = ask('go again');
+    await Promise.resolve();
+    await fake.reply('session.spawn', ok);
+    await fresh;
+    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'default', brief: 'go again' });
+  });
+
   it('after a timeout and then a refusal, the next start is a new one', async () => {
     const fake = fakeClient();
     const ask = (text: string) => {
@@ -187,7 +222,7 @@ describe('a spawn on another machine', () => {
     const again = ask('go');
     await Promise.resolve();
     await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
-    await expect(again).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), checkAgain: false });
+    await expect(again).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), again: 'retry' });
     const fresh = ask('go now');
     await Promise.resolve();
     await fake.reply('session.spawn', ok);

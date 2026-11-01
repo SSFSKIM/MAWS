@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PtyId } from '@shared/ipc/schema/pty';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { createClient, onCommandRefused } from './client';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -163,6 +163,19 @@ describe('renderer ipc client', () => {
       await expect(client.invoke('git.watch', { directory: '/work/a' }, { machine: OTHER, session: 'app-2' as AppSessionId })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
       expect(bridge.invoke).not.toHaveBeenCalled();
       expect(logged).toHaveBeenCalledTimes(2);
+    });
+
+    // M4c fix wave 2: a spawn names the New chat tab it is made from (one of this Mac's), bare, as main keeps its attempt
+    it('sends the tab of this Mac a machine-wide act is made from, bare, and refuses another machine’s', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { bridge } = fakeBridge({ ok: true, value: { status: 'ok', appSessionId: 'app-9' } });
+      const client = createClient(() => bridge);
+      const spawn = { checkout: '/srv/app', permission_mode: 'default' };
+      await client.invoke('session.spawn', spawn, { machine: OTHER, from: A });
+      expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith('session.spawn', spawn, { machine: OTHER, session: bareOf(A) });
+      await expect(client.invoke('session.spawn', spawn, { machine: OTHER, from: B })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(bridge.invoke).toHaveBeenCalledOnce();
+      expect(logged).toHaveBeenCalledOnce();
     });
 
     // M4: a path is no machine's by itself.

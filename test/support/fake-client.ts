@@ -11,13 +11,13 @@ export interface FakeClient {
   // Answers the oldest unanswered invocation of `name`, or the `nth` of those still unanswered (from 0, so a later one can
   // be answered first), and lets the promise chain settle.
   reply(name: CommandName, value: unknown, nth?: number): Promise<void>;
-  fail(name: CommandName, message?: string, code?: IpcError['code']): Promise<void>; // `internal` unless named
+  fail(name: CommandName, message?: string, code?: IpcError['code'], issues?: unknown): Promise<void>; // `internal` unless named
   // P5 O6 M4: a listener hears the machine the event came from, `TEST_MACHINE` unless the test names another.
   event(name: EventName, payload: unknown, machine?: MachineRef): void;
   pending(name: CommandName): number;
   invoked(name: CommandName): unknown[]; // the inputs, in order
   machines(name: CommandName): (MachineRef | undefined)[]; // P5 O6 M4: the machine each invocation's options named, in order
-  sessions(name: CommandName): (string | undefined)[]; // P5 O7 M4: the session each invocation's options named, in order
+  sessions(name: CommandName): (string | undefined)[]; // P5 O7 M4: the session (or M4c's tab) each invocation's options named, in order
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -37,12 +37,12 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
   const client = {
     localMachine: TEST_MACHINE,
     // the client's `opts`, or the machine the page's client hands a bridge (installed as `window.maws`)
-    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef; session?: string } | MachineRef) {
+    invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef; session?: string; from?: string } | MachineRef) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);
       const machine = typeof opts === 'string' ? opts : opts?.machine;
       named.set(name, [...(named.get(name) ?? []), machine]);
-      madeFrom.set(name, [...(madeFrom.get(name) ?? []), typeof opts === 'string' ? undefined : opts?.session]);
+      madeFrom.set(name, [...(madeFrom.get(name) ?? []), typeof opts === 'string' ? undefined : (opts?.session ?? opts?.from)]); // M4c fix wave 2: or the tab it is made from
       if (name in auto) {
         const given = auto[name];
         return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown, m: MachineRef | undefined) => unknown)(input, machine) : given });
@@ -67,7 +67,7 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
     client,
     calls,
     reply: (name, value, nth) => answer(name, { ok: true, value } as CommandResult<CommandName>, nth),
-    fail: (name, message = 'failed', code = 'internal') => answer(name, { ok: false, error: { code, message } }),
+    fail: (name, message = 'failed', code = 'internal', issues?: unknown) => answer(name, { ok: false, error: { code, message, ...(issues !== undefined && { issues }) } }),
     event: (name, payload, machine = TEST_MACHINE) => listeners.get(name)?.forEach((listener) => listener(payload, { machine })),
     pending: (name) => waiting.get(name)?.length ?? 0,
     invoked: (name) => inputs.get(name) ?? [],

@@ -46,9 +46,22 @@ export interface RemoteSpawnStore {
 }
 
 const firstSends = new Set<AppSessionId>(); // the spawned sessions whose composer sends the handed document once
-// A spawn the machine took but hadn't confirmed (`timeout`), by New chat tab: its next spawn sends the same input, which
-// main's adapter answers from the same act (one opId, queried), never a second session.
-const unconfirmed = new Map<AppSessionId, { machine: MachineRef; input: SessionSpawnInput }>();
+// A spawn the machine took but hadn't confirmed (`timeout`), by New chat tab, in the window's session storage (it outlives
+// a reload of the page, as main's attempt does): the tab's next ask is a check on it. Main answers it from the tab's
+// attempt (one act, its opId queried; never a second session); the input it sent is kept to say whether the text changed.
+const UNCONFIRMED = 'maws.spawn.unconfirmed:';
+type Unconfirmed = { machine: MachineRef; input: SessionSpawnInput };
+const unconfirmed = {
+  get(tab: AppSessionId): Unconfirmed | null {
+    const kept = sessionStorage.getItem(UNCONFIRMED + tab);
+    return kept === null ? null : (JSON.parse(kept) as Unconfirmed);
+  },
+  set: (tab: AppSessionId, value: Unconfirmed) => sessionStorage.setItem(UNCONFIRMED + tab, JSON.stringify(value)),
+  delete: (tab: AppSessionId) => sessionStorage.removeItem(UNCONFIRMED + tab),
+  clear() {
+    for (const key of Object.keys(sessionStorage)) if (key.startsWith(UNCONFIRMED)) sessionStorage.removeItem(key);
+  },
+};
 
 export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
   chosen: new Map(),
@@ -78,7 +91,7 @@ export const spawnTargetOf = (tab: AppSessionId, key: string | null): SpawnTarge
 export const useSpawnTarget = (tab: AppSessionId, key: string | null): SpawnTarget | null => useRemoteSpawn((s) => targetFor(s.chosen, tab, key));
 export const useSpawning = (tab: AppSessionId): string | null => useRemoteSpawn((s) => s.spawning.get(tab) ?? null);
 /** Whether the tab's last spawn was taken but not confirmed: its next try checks on that start. */
-export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.has(tab);
+export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.get(tab) !== null;
 
 /** The spawned session's composer sends the document it was handed (its remote draft) once it opens. */
 export function queueFirstSend(appSessionId: AppSessionId): void {
@@ -123,6 +136,7 @@ export const SPAWN_WORDS = {
   ceiling: (machine: string) => `${machine} doesn’t start sessions in this permission mode; choose a stricter mode`,
   notOffered: (machine: string) => `${machine} doesn’t take new sessions from this Mac yet; update MAWS on ${machine}`,
   malformed: (machine: string) => `${machine} couldn’t read the request; update MAWS on ${machine}`,
+  unknown: (machine: string) => `Couldn’t confirm whether it started on ${machine}; check ${machine}’s sessions before starting again`,
 } as const;
 
 /** A spawn's error in words: the machine's and the link's refusals named, main's own words as they are. */
@@ -141,6 +155,8 @@ export function spawnErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issu
       return SPAWN_WORDS.notOffered(machine);
     case 'malformed':
       return SPAWN_WORDS.malformed(machine);
+    case 'unknown':
+      return SPAWN_WORDS.unknown(machine);
     default:
       return error.message;
   }
@@ -171,7 +187,9 @@ const setSpawning = (tab: AppSessionId, words: string | null) =>
   });
 
 /** A spawn's outcome: started (the tab moved, with a note to say), or not, in words, with whether a try checks on it. */
-export type SpawnOutcome = { started: true; note?: string } | { started: false; words: string; checkAgain: boolean };
+// `again`: what the toast offers: a check on the start still out, a retry, or nothing (an outcome that can't be known: the
+// person checks the machine first, and only a deliberate Send starts again)
+export type SpawnOutcome = { started: true; note?: string } | { started: false; words: string; again: 'check' | 'retry' | null };
 
 /** Starts the session on the target's machine and moves the tab there. */
 export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge = ipc): Promise<SpawnOutcome> {
@@ -196,12 +214,15 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   setSpawning(from, again === null ? SPAWN_WORDS.starting(target.name) : SPAWN_WORDS.checking(target.name, editKept));
   let spawned: AppSessionId;
   try {
-    const result = await client.invoke('session.spawn', input, { machine: target.machine });
+    const result = await client.invoke('session.spawn', input, { machine: target.machine, from }); // main keeps the attempt by the tab
     if (!result.ok && result.error.code === 'timeout') unconfirmed.set(from, { machine: target.machine, input });
     else unconfirmed.delete(from);
-    if (!result.ok && result.error.code === 'timeout') return { started: false, words: SPAWN_WORDS.unconfirmed(target.name, editKept), checkAgain: true };
-    if (!result.ok) return { started: false, words: spawnErrorWords(result.error, target.name), checkAgain: false };
-    if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name), checkAgain: false };
+    if (!result.ok && result.error.code === 'timeout') return { started: false, words: SPAWN_WORDS.unconfirmed(target.name, editKept), again: 'check' };
+    if (!result.ok) {
+      const unknown = (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'unknown';
+      return { started: false, words: spawnErrorWords(result.error, target.name), again: unknown ? null : 'retry' };
+    }
+    if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name), again: 'retry' };
     spawned = result.value.appSessionId;
   } finally {
     setSpawning(from, null);

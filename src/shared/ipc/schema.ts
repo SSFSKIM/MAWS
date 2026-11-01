@@ -312,6 +312,7 @@ export type CommandResult<N extends CommandName> = { ok: true; value: CommandOut
 export interface InvokeOptions {
   machine?: MachineRef;
   session?: AppSessionId;
+  from?: AppSessionId; // P5 O7 M4c fix wave 2: the tab of this Mac a machine-wide act is made from (a spawn's New chat tab)
 }
 // A `path` command's options name its machine (`src/shared/ipc/routes.ts`; M4 required it): a path is no machine's by
 // itself, so every call site names the machine of the session or project it is about. Every other command's options are

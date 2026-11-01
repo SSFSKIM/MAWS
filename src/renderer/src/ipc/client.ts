@@ -66,7 +66,14 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
       if (session !== undefined && (!isAddress(session) || machineOf(session) !== machine)) {
         return refused(`${name}: it is made from session ${session}, which is not a session of machine ${machine}`) as CommandResult<typeof name>;
       }
-      const target = session === undefined ? machine : { machine, session: bareOf(session) };
+      // M4c fix wave 2: a machine-wide act made from one of this Mac's tabs (`session.spawn`'s New chat tab) names it the
+      // same way, so main keeps the act by the tab, which outlives a reload of the page
+      const from = opts !== undefined && 'from' in opts ? opts.from : undefined;
+      if (from !== undefined && (session !== undefined || !isAddress(from) || machineOf(from) !== bridge().localMachine)) {
+        return refused(`${name}: it is made from tab ${from}, which is not a tab of this Mac or names a session as well`) as CommandResult<typeof name>;
+      }
+      const made = session ?? from;
+      const target = made === undefined ? machine : { machine, session: bareOf(made) };
       const envelope = CommandResultEnvelopeSchema.safeParse(await bridge().invoke(name, lowered.value as never, target));
       if (!envelope.success) {
         const message = `malformed result for ${name}: ${z.prettifyError(envelope.error)}`;

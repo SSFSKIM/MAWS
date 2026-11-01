@@ -58,6 +58,7 @@ import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
+import { createSpawnAttempts } from './remote-spawn';
 import { uploadInParts } from './remote-upload';
 
 export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming {
@@ -69,6 +70,8 @@ export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTi
   sendQueueMax: number;
   /** P5 O7 M4: a spawn answers by then from the moment it went out (after the sheet): the machine's own bound on it and a margin. */
   spawnPendingMs: number;
+  /** M4c fix wave 2: how long a spawn's outcome no caller waited for is kept for the tab that asked (remote-spawn.ts). */
+  spawnKeptMs: number;
 }
 
 export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
@@ -83,6 +86,8 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   // the machine's own bound on a spawn (`session.spawn`'s command budget, 200 s: the configure gate, a git call, the
   // launch watchdog and a margin; src/services/command-budgets.ts) and ten seconds for the round trip
   spawnPendingMs: 210_000,
+  // a day: a tombstone is a few bytes, and one let go too soon could let the tab's next Send start a second session
+  spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
 };
 
@@ -120,6 +125,8 @@ export interface RemoteLaneB {
   replay(machine: MachineRef, app: string): void;
   /** Every subscription closed: before the links, in the shutdown order. */
   stop(): void;
+  /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
+  spawnsKept(): Array<{ key: string; state: 'out' | 'said' }>;
 }
 
 /** The engine-host acts §L offers for lane B, each sealed for the session's live launch. */
@@ -186,8 +193,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   });
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
-  /** The spawns answered `timeout` whose outcome no caller has had, by machine and input: the next ask awaits the same act. */
-  const unansweredSpawns = new Map<string, ActHandle>();
+  /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
+  const spawns = createSpawnAttempts({ now, log: deps.log, pendingMs: timing.spawnPendingMs, tombstoneMs: timing.spawnKeptMs, bounded: (handle, deadline) => bounded(handle, deadline) });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -256,6 +263,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     close,
   });
   const offRemote = deps.onRemote(() => {
+    spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
     for (const [machine, { link, lanes }] of [...machines]) {
       if (deps.remote(machine) === link) continue;
       for (const [app, lane] of lanes) end(machine, app, lane, 'closed');
@@ -298,40 +306,6 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const result = await settle(link, name, handle, deadline, String(fields.appSessionId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
     return result;
-  }
-
-  /**
-   * `session.spawn` (P5 O7 M4): a `machine` act on the machine itself, always stepped up, so the person sees its full text
-   * at the sheet and confirms with Touch ID before it is sent. It is answered at its outcome, within `spawnPendingMs` of
-   * the moment it went out: the time at the sheet is the person's, not the machine's.
-   */
-  async function spawn(link: RemoteLink, fields: Fields): Promise<CommandResult<CommandName>> {
-    // M4c fix wave 1 (the architect's ruling): a spawn asked again with the same input after it answered `timeout` is
-    // the same act, its opId still queried (RL4's opQuery), never a second session; it is held until its outcome reaches
-    // a caller, and a refused or failed outcome said once lets the next try be a new act.
-    const key = `${link.machine}\n${JSON.stringify(Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))}`;
-    let handle = unansweredSpawns.get(key);
-    if (handle === undefined) {
-      const fresh = link.act({ action: 'session.spawn', args: fields, executor: 'machine', stepUp: 'required' });
-      await new Promise<void>((resolve) => {
-        if (fresh.progress() !== 'waiting') return resolve();
-        const off = fresh.onProgress((progress) => {
-          if (progress === 'waiting') return;
-          off();
-          resolve();
-        });
-        void fresh.outcome.then(() => (off(), resolve()));
-      });
-      handle = fresh;
-    }
-    const outcome = await bounded(handle, now() + timing.spawnPendingMs);
-    if (outcome === 'pending') {
-      if (!unansweredSpawns.has(key)) deps.log(`lane B: session.spawn on ${link.name}/${String(fields.checkout ?? '')} (${handle.opId}) unconfirmed at the pending bound; held for the next ask`);
-      unansweredSpawns.set(key, handle);
-      return pendingResult('session.spawn', link.name);
-    }
-    if (unansweredSpawns.get(key) === handle) unansweredSpawns.delete(key);
-    return outcomeAsResult('session.spawn', link.name, outcome);
   }
 
   /** `files.upload` in parts, after any upload to the same session before it (P5 O7 M4, "Uploads in parts"). */
@@ -447,7 +421,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const deadline = now() + timing.sendPendingMs;
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
     if (name === 'files.upload') return upload(link, fields);
-    if (name === 'session.spawn') return spawn(link, fields);
+    if (name === 'session.spawn') return spawns.spawn(link, fields, ctx.session); // the tab it is made from (the envelope's session)
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
     if (name === 'session.events') {
@@ -478,6 +452,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       }
     },
     refresh: () => interest.refresh(),
+    spawnsKept: () => spawns.kept(),
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
@@ -486,6 +461,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       interest.stop();
       offRemote();
       checkout.stop();
+      spawns.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
     },

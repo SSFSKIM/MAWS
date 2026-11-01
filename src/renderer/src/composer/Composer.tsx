@@ -319,7 +319,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
           if (spawned.started) return true;
           // a start the machine took but hasn't confirmed: the try checks on it (the same act), it never starts another
-          warn(spawned.words, retry, undefined, spawned.checkAgain ? SPAWN_WORDS.checkAgain : 'Retry');
+          warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
           return false;
         } finally {
           setStarting(appSessionId, false);

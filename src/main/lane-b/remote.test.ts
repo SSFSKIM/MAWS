@@ -64,6 +64,8 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
     base,
     route,
     cmd: (name: string, input: unknown, machine: MachineRef = MINI) => route(machine, name as CommandName, input, ctx),
+    // M4c fix wave 2: a command made from a tab (the envelope's session: a spawn's New chat tab)
+    cmdFrom: (name: string, input: unknown, from: string, machine: MachineRef = MINI) => route(machine, name as CommandName, input, { ...ctx, session: from as AppSessionId }),
     setTabs(...apps: string[]) {
       tabs = tabsOf(...apps);
       for (const listener of layoutListeners) listener('main.tabs');
@@ -494,50 +496,84 @@ describe('the checkout and the spawn (M4)', () => {
     expect(answer).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
   });
 
-  // M4c fix wave 1 (the architect's ruling): a spawn asked again after its timeout is the same act, its opId still
-  // queried, never a second session; once its outcome reaches a caller, the same input is a new spawn.
-  it('answers a spawn asked again after its timeout from the same act, and starts one session', async () => {
-    const l = lab({ tabs: [] });
-    l.link.onAct = (a) => a.move('sent');
+  // M4c fix wave 2 (the architect's rulings): a New chat tab's spawn is one attempt, kept by the tab it is made from (the
+  // envelope's session), whatever input its next ask carries; a terminal unknown is said, never a pending start; an
+  // outcome nobody waited for is kept as its answer alone.
+  describe('a spawn’s attempt, by the tab it is made from', () => {
+    const TAB = 'new-1';
     const spawn = { checkout: '/work/repo', permission_mode: 'default', brief: 'go' };
-    const first = l.cmd('session.spawn', spawn);
-    await vi.advanceTimersByTimeAsync(210_000);
-    expect(await first).toMatchObject({ ok: false, error: { code: 'timeout' } });
-    let answer: unknown = null;
-    void l.cmd('session.spawn', { brief: 'go', permission_mode: 'default', checkout: '/work/repo' }).then((r) => (answer = r)); // the same input, its keys in another order
-    await vi.advanceTimersByTimeAsync(0);
-    expect(l.link.acts).toHaveLength(1); // no new act: no second sheet, no second session
-    l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(answer).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
-    // answered: the same input again is a new spawn
-    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-two' } });
-    expect(await l.cmd('session.spawn', spawn)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-two' } });
-    expect(l.link.acts).toHaveLength(2);
-  });
+    const timedOut = async (l: ReturnType<typeof lab>, from = TAB, input: unknown = spawn) => {
+      const asked = l.cmdFrom('session.spawn', input, from);
+      await vi.advanceTimersByTimeAsync(210_000);
+      expect(await asked).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    };
 
-  it('keeps a timed-out spawn’s late outcome for the next ask: a late refusal is said once, and the try after it is a new act', async () => {
-    const l = lab({ tabs: [] });
-    l.link.onAct = (a) => a.move('sent');
-    const spawn = { checkout: '/work/repo', permission_mode: 'default' };
-    const first = l.cmd('session.spawn', spawn);
-    await vi.advanceTimersByTimeAsync(210_000);
-    await first;
-    l.link.acts[0].settle({ state: 'done', result: { status: 'refused', reason: 'untrusted' } });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await l.cmd('session.spawn', spawn)).toEqual({ ok: true, value: { status: 'refused', reason: 'untrusted' } });
-    expect(l.link.acts).toHaveLength(1);
-    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
-    expect(await l.cmd('session.spawn', spawn)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
-    expect(l.link.acts).toHaveLength(2);
-    // a different input is never answered from another spawn's act
-    l.link.onAct = (a) => a.move('sent');
-    const other = l.cmd('session.spawn', { ...spawn, brief: 'one' });
-    await vi.advanceTimersByTimeAsync(210_000);
-    await other;
-    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-three' } });
-    expect(await l.cmd('session.spawn', { ...spawn, brief: 'two' })).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-three' } });
-    expect(l.link.acts).toHaveLength(4);
+    it('answers the tab’s next ask from the same act, whatever its input, and starts one session', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      let answer: unknown = null;
+      void l.cmdFrom('session.spawn', { ...spawn, brief: 'go, and test it' }, TAB).then((r) => (answer = r)); // edited since
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.link.acts).toHaveLength(1); // no new act: no second sheet, no second session
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(answer).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } });
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    it('says a terminal unknown as such, never as a pending start, and only the tab’s next Send after it is a new act', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      l.link.acts[0].settle({ state: 'unknown', reason: 'expired' }); // nobody waiting
+      await vi.advanceTimersByTimeAsync(0);
+      const unknown = { ok: false, error: { code: 'internal', message: 'Couldn’t confirm whether it started on mini; check mini’s sessions before starting again', issues: { refusal: 'unknown' } } };
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // Check again: the attempt's answer
+      expect(l.link.acts).toHaveLength(1);
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-new' } }); // a deliberate Send
+      expect(l.link.acts).toHaveLength(2);
+      // an unknown said to a waiting caller is said once too
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-2')).toMatchObject(unknown);
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
+
+    it('keeps two tabs’ attempts apart, however alike their input', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l, 'new-1');
+      await timedOut(l, 'new-2');
+      expect(l.link.acts).toHaveLength(2);
+      l.link.acts[0].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-one' } });
+      l.link.acts[1].settle({ state: 'done', result: { status: 'ok', appSessionId: 'app-two' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-2')).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-two' } });
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-1')).toEqual({ ok: true, value: { status: 'ok', appSessionId: 'app-one' } });
+      expect(l.link.acts).toHaveLength(2);
+    });
+
+    it('lets the act go once it settles unasked, keeping its answer for the tab until it reads it or the bound passes', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'out' }]);
+      l.link.acts[0].settle({ state: 'done', result: { status: 'refused', reason: 'untrusted' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\n${TAB}`, state: 'said' }]); // the answer alone
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-9')).toMatchObject({ ok: true }); // any ask sweeps
+      expect(l.adapter.spawnsKept()).toEqual([]);
+      // the machine's link replaced: an act out ends unknown, kept as its answer; the adapter stopped, nothing is kept
+      l.link.onAct = (a) => a.move('sent');
+      await timedOut(l, 'new-3');
+      l.setLinks(new Map([[MINI, new FakeLink()]]));
+      expect(l.adapter.spawnsKept()).toEqual([{ key: `${MINI}\nnew-3`, state: 'said' }]);
+      l.adapter.stop();
+      expect(l.adapter.spawnsKept()).toEqual([]);
+    });
   });
 
   it('reads `session.events` within the byte budget only from a machine whose endpoint listed `rl2.events-budget`', async () => {
