@@ -166,6 +166,7 @@
   "session.applyFlagSettings",
   "session.archive",
   "session.bash",
+  "session.capabilities",
   "session.catalog",
   "session.delete",
   "session.deletions.keep",

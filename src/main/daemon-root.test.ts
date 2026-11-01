@@ -9,7 +9,7 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
-  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, streaming: () => false, onStreaming: (owner: string) => (streamingOwners.push(owner), () => {}) /* P5 O4 M2: the app's connectors follow the machine host */ };
+  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */, streaming: () => false, onStreaming: (owner: string) => (streamingOwners.push(owner), () => {}) /* P5 O4 M2: the app's connectors follow the machine host */ };
   const streamingOwners: string[] = [];
   const appPath = `/tmp/maws-lifecycle-test-app-${process.pid}`;
   const app = {
@@ -62,7 +62,7 @@ vi.mock('./sessions/daemon-spine', () => ({
 }));
 vi.mock('./client/machine-settings-mirror', () => ({ createMachineSettingsMirror: (options: unknown) => (mirrors.settings.push(options), { state: () => ({}), update: vi.fn(), onChange: () => () => {}, stop: vi.fn() }) }));
 vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
-vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
+vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */, cua: { relay: vi.fn() } /* P5 O5 M5: the daemon's relay pass */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side

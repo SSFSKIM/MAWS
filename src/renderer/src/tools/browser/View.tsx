@@ -3,11 +3,13 @@
 // on mount (Decision Log 44 (a)). A main tab whose tab main no longer knows shows the session's browser with no tab,
 // headed "That tab was closed" (Decision Log 21; X14's restore rule). P5 O7 M3: in the panel, a forwarded link whose
 // forward was refused shows that in place of the pane while the session's selected tab is the one it was over (the pane's
-// unmount gives the page's view back, so the page drawn here is not under it).
+// unmount gives the page's view back, so the page drawn here is not under it). P5 O5 M5: under the chrome, why the
+// session's agent has no browser on its machine, while it has none (agent/capability.tsx).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
+import { AgentBrowserNotice } from './agent/capability'; // P5 O5 M5
 import { Chrome } from './chrome/Chrome';
 import { useForwards } from './forward';
 import { ForwardFailedPage } from './pages/ForwardFailed';
@@ -36,6 +38,7 @@ export function BrowserView({ appSessionId, surface, browserTabId }: BrowserView
   return (
     <div data-browser-view={surface} className="flex h-full min-h-0 flex-col bg-bg">
       <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} />
+      <AgentBrowserNotice appSessionId={appSessionId} />
       <div className="min-h-0 flex-1">
         {failure ? (
           <div className="relative h-full w-full overflow-hidden bg-bg">

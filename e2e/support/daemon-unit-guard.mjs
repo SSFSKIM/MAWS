@@ -42,9 +42,11 @@ export function homeInstanceRefusal(env, ownerUnitLoaded) {
   return null;
 }
 
-// run as the package script's step (`node e2e/support/daemon-unit-guard.mjs`), not when imported
+// run as the package script's step (`node e2e/support/daemon-unit-guard.mjs`), not when imported; the mini's home
+// instance by its runner's name too (P5 O5 M6), before the script's next step: the owner's loaded unit, which needs
+// launchd, is the spec's and the unit install's refusal (homeInstanceRefusal's second rule)
 if (basename(process.argv[1] ?? '') === 'daemon-unit-guard.mjs') {
-  const refusal = ciRefusal(process.env);
+  const refusal = ciRefusal(process.env) ?? homeInstanceRefusal(process.env, false);
   if (refusal !== null) {
     process.stderr.write(`${refusal}\n`);
     process.exit(1);

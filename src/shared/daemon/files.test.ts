@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { daemonHostFiles, daemonPaths } from './files';
+import { cuaSocketDir, daemonHostFiles, daemonPaths, socketFallbackDir } from './files';
 import { defaultProfileDir } from './profile';
 
 describe('defaultProfileDir', () => {
@@ -43,5 +43,24 @@ describe('daemonPaths', () => {
   it('gives a client one lock and one token for every socket', () => {
     const paths = daemonPaths('/tmp/p');
     expect(daemonHostFiles(paths, 'pty-host')).toEqual({ dir: '/tmp/p/mawsd', lock: 'mawsd.lock', token: 'mawsd.token', socket: '/tmp/p/mawsd/pty-host.sock', log: 'mawsd.log' });
+  });
+});
+
+// P5 O5 M5 (Interfaces §H): the daemon's per-session cua sockets, `<dir>/cua/<appSessionId>.sock`, in the daemon's
+// directory when such a path fits sun_path and in the fallback directory otherwise, chosen by the cua path's own length
+// (about 45 bytes longer than the daemon's own sockets)
+describe('cuaSocketDir', () => {
+  const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
+  it('is <profile>/mawsd/cua when <dir>/cua/<uuid>.sock fits', () => {
+    expect(cuaSocketDir('/tmp/p', '/var/tmp')).toBe('/tmp/p/mawsd/cua');
+  });
+
+  it('falls back by its own length: a profile whose daemon sockets fit but whose cua paths would not', () => {
+    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/cua/${UUID}.sock`.length)}`;
+    expect(Buffer.byteLength(join(fits, 'mawsd', 'cua', `${UUID}.sock`))).toBe(103);
+    expect(cuaSocketDir(fits, '/var/tmp')).toBe(join(fits, 'mawsd', 'cua'));
+    const longer = `${fits}y`;
+    expect(daemonPaths(longer, '/var/tmp').socketDir).toBe(join(longer, 'mawsd')); // the daemon's own sockets still fit
+    expect(cuaSocketDir(longer, '/var/tmp')).toBe(join(socketFallbackDir(longer, '/var/tmp'), 'cua'));
   });
 });

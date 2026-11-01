@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>U3 text page</title>
+<style>
+  body { font: 16px/1.55 Georgia, 'Noto Serif', serif; margin: 40px 320px 40px 60px; color: #222; background: #fff; }
+  h1 { font: 600 28px/1.2 system-ui, sans-serif; }
+  #clock { position: fixed; top: 16px; right: 20px; font: 13px/1 ui-monospace, monospace; color: #555; }
+  #target { position: fixed; top: 60px; right: 20px; width: 240px; height: 160px; background: #dde3ee; display: grid; place-items: center; font: 15px system-ui, sans-serif; }
+  #target.on { background: #c8473a; color: #fff; }
+</style>
+</head>
+<body>
+<div id="clock">--</div>
+<div id="target">click me</div>
+<h1>A text page for the screencast</h1>
+<article id="article"></article>
+<script>
+  // The spike's page (O5 M7): a long article of plain text (what an agent's tab mostly shows), a clock that the `tick`
+  // mode redraws every 100 ms (a 10 fps text page), a `scroll` mode that moves the whole viewport every 16 ms (the worst
+  // case for a text page), and a click target whose colour flips on each click (the click-to-paint round trip).
+  const words = 'the agent opens a page on the machine and reads what the server answers while a person watches from another machine through a stream of frames that carries every pixel of the tab and none of its state so the view must be cheap enough to keep open and quick enough that a click lands where the person meant it'.split(' ');
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const paragraph = () => Array.from({ length: 60 + Math.floor(rand() * 60) }, () => words[Math.floor(rand() * words.length)]).join(' ') + '.';
+  const article = document.getElementById('article');
+  for (let i = 0; i < 80; i += 1) {
+    const p = document.createElement(i % 9 === 0 ? 'h2' : 'p');
+    p.textContent = i % 9 === 0 ? `Section ${i / 9 + 1}` : paragraph();
+    article.appendChild(p);
+  }
+  const target = document.getElementById('target');
+  const clock = document.getElementById('clock');
+  window.__clicks = [];
+  window.__ticks = 0;
+  target.addEventListener('click', (event) => {
+    target.classList.toggle('on');
+    window.__clicks.push({ at: performance.timeOrigin + performance.now(), x: event.clientX, y: event.clientY, trusted: event.isTrusted });
+    target.textContent = `clicks ${window.__clicks.length}`;
+  });
+  let timer = null;
+  window.setMode = (mode) => {
+    clearInterval(timer);
+    timer = null;
+    if (mode === 'tick') timer = setInterval(() => { window.__ticks += 1; clock.textContent = new Date().toISOString(); }, 100);
+    if (mode === 'scroll') timer = setInterval(() => { window.__ticks += 1; window.scrollBy(0, 4); if (window.scrollY + window.innerHeight >= document.body.scrollHeight - 2) window.scrollTo(0, 0); }, 16);
+    if (mode === 'static') window.scrollTo(0, 0);
+    return mode;
+  };
+</script>
+</body>
+</html>

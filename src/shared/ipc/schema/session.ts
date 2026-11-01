@@ -57,6 +57,7 @@ import type { CommandSpec } from './common';
 import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
 import { PromptHistoryEventSchema } from '../../graph/events';
+import { SessionCapabilitiesSchema } from './session-capabilities'; // P5 O5 M5
 // P2-C end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
 // R2 start
@@ -718,6 +719,14 @@ const o3dCommands = {
 const o3dEvents = {
   'session.visibleChanged': z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), // one session's change of the union
 } as const satisfies Record<`session.${string}`, z.ZodType>;
+// P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §I): what the session's agent can do on its
+// machine, per tool name (./session-capabilities.ts): answered by `mawsd`'s front cold, by main's embedded root in process
+const o5Commands = {
+  'session.capabilities': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: SessionCapabilitiesSchema, owner: 'machine' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const o5Events = {
+  'session.capabilitiesChanged': z.strictObject({ appSessionId: AppSessionIdSchema, capabilities: SessionCapabilitiesSchema }), // one session's, at each flip
+} as const satisfies Record<`session.${string}`, z.ZodType>;
 
 // P5 O7 M4 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O; O10's "lane B spawn"): a lane
 // B session started on this machine at another's request, composed by the spine from what the renderer does for a New
@@ -761,6 +770,7 @@ export const commands = {
   ...p5o2Commands, // P5 O2 M2
   ...o10Commands, // P5 O10 M8
   ...o3dCommands, // P5 O3-D
+  ...o5Commands, // P5 O5 M5
   ...o7Commands, // P5 O7 M4
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
@@ -771,4 +781,5 @@ export const events = {
   ...c7Events, // C7
   ...c10Events, // C10
   ...o3dEvents, // P5 O3-D
+  ...o5Events, // P5 O5 M5
 } as const satisfies Record<`session.${string}`, z.ZodType>;

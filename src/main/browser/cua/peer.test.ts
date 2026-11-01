@@ -8,6 +8,7 @@ import {
   ANCESTRY_LIMIT,
   authorizePeer,
   descends,
+  judgePeer,
   loadPeerAddon,
   PEER_AUTH_VERSION,
   peerAddonPath,
@@ -227,5 +228,61 @@ describe('the policy (doubles)', () => {
     const lookup = (pid: number) => ({ 0: { ppid: 0, start: 1 }, 1: { ppid: 0, start: 2 }, 5: { ppid: 1, start: 3 } })[pid] ?? null;
     expect(descends(5, [{ pid: 1, start: 2 }], lookup)).toBe(false);
     expect(descends(5, [{ pid: 0, start: 1 }], lookup)).toBe(false);
+  });
+});
+
+// P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape `mawsd` checks the
+// engine's peer and relays the connection from its own process, so the app's socket sees the daemon as its peer. It is
+// admitted by its exact instance (pid and kernel start), never as an ancestry root: every engine on the machine descends
+// from the daemon (it spawns the engine host, which spawns the engines).
+describe('the relay peer (doubles)', () => {
+  const ACCEPT = 6;
+  // the daemon (20) under launchd, its engine host (30), two sessions' engines (40, 50) and A's connector (41)
+  const table = { 20: { ppid: 1, start: 220 }, 30: { ppid: 20, start: 230 }, 40: { ppid: 30, start: 240 }, 41: { ppid: 40, start: 241 }, 50: { ppid: 30, start: 250 } };
+  const relay: ProcessRoot = { pid: 20, start: 220 };
+  const engineA: ProcessRoot = { pid: 40, start: 240 };
+  const engineB: ProcessRoot = { pid: 50, start: 250 };
+
+  it('admits the daemon\'s exact instance, with or without a live root for the session', () => {
+    expect(authorizePeer(7, [], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay })).toBeNull();
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay })).toBeNull();
+  });
+
+  it('refuses the daemon\'s pid with another start (a process that took its pid), and the daemon with no relay named', () => {
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay: { pid: 20, start: 219 } })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay: { pid: 20, start: 219 } })).toEqual({ reason: 'no_root', pid: 20 });
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay: null })).toEqual({ reason: 'not_descendant', pid: 20 });
+  });
+
+  it('refuses a descendant of the daemon that is not the daemon: the engine host, another session\'s engine and its connector', () => {
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [30]), now: ACCEPT, uid, relay })).toEqual({ reason: 'not_descendant', pid: 30 });
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [40]), now: ACCEPT, uid, relay })).toEqual({ reason: 'not_descendant', pid: 40 });
+    expect(authorizePeer(7, [engineB], { addon: fakeAddon(table, [41]), now: ACCEPT, uid, relay })).toEqual({ reason: 'not_descendant', pid: 41 });
+    expect(authorizePeer(7, [engineA], { addon: fakeAddon(table, [41]), now: ACCEPT, uid, relay })).toBeNull(); // its own session's engine tree, as before
+  });
+
+  it('refuses the relay\'s pid when the descriptor moved during the check, and another user at the daemon\'s pid', () => {
+    expect(authorizePeer(7, [], { addon: fakeAddon(table, [20, 41]), now: ACCEPT, uid, relay })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [], { addon: fakeAddon(table, [20], uid + 1), now: ACCEPT, uid, relay })).toEqual({ reason: 'uid_mismatch', pid: 20 });
+  });
+
+  // a socket accepted before the daemon started was another process's, whose pid the daemon now holds: its buffered
+  // requests are not the daemon's (panel scalpel-1#3)
+  it('refuses the daemon\'s exact instance when it started after the socket was accepted', () => {
+    const later = { ...table, 20: { ppid: 1, start: ACCEPT * 1000 + 1 } };
+    const reborn: ProcessRoot = { pid: 20, start: ACCEPT * 1000 + 1 };
+    expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [engineA], { addon: fakeAddon(later, [20]), now: ACCEPT, uid, relay: reborn })).toEqual({ reason: 'not_descendant', pid: 20 });
+    expect(authorizePeer(7, [], { addon: fakeAddon(later, [20]), now: ACCEPT + 1, uid, relay: reborn })).toBeNull(); // accepted after it started
+  });
+
+  // the admission carries what let the peer in, so a caller never walks the tree again for it
+  it('names what admitted the peer: the relay, or the nearest root it descends from (the object passed)', () => {
+    const daemonAsRoot: ProcessRoot = { pid: 20, start: 220 };
+    expect(judgePeer(7, [], { addon: fakeAddon(table, [20]), now: ACCEPT, uid, relay })).toEqual({ via: 'relay' });
+    const admitted = judgePeer(7, [daemonAsRoot, engineA], { addon: fakeAddon(table, [41]), now: ACCEPT, uid });
+    expect(admitted).toEqual({ via: 'root', root: engineA });
+    expect('root' in admitted && admitted.root).toBe(engineA);
+    expect(judgePeer(7, [engineB], { addon: fakeAddon(table, [41]), now: ACCEPT, uid })).toEqual({ reason: 'not_descendant', pid: 41 });
   });
 });

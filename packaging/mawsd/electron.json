@@ -1,0 +1,8 @@
+{
+  "$comment": "The render runtime on Linux (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M6, Interfaces §J): the pinned Electron's Linux build the render host runs under, outside mawsd's releases in a content-addressed cache (src/mawsd/render-runtime.ts). The version is package.json's electron pin, moved together (render-runtime.test.ts holds them equal). sha256 of electron-v<version>-linux-<arch>.zip from https://github.com/electron/electron/releases/download/v44.4.5/SHASUMS256.txt, fetched 2026-10-31. `mawsd render install` and `pnpm mawsd:pack --render` check the download against it before it is unpacked.",
+  "version": "44.4.5",
+  "sha256": {
+    "linux-x64": "04586a0ec46c3283fbdaef85530f561f71f0b5e136ad0cb9ef63683615609780",
+    "linux-arm64": "3bf0acab49c4ea3c9283cdb86bf3dd7204bd52a6fba6c8ae51101bdba2adae0e"
+  }
+}
