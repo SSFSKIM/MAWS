@@ -109,7 +109,7 @@ export function createHosts(
   const engineHandover = daemon ? watchEngineHandover() : null; // P5 O16 M3c fix wave 2: mawsd's report, on machine.sock
   const supervisor = createHostSupervisor({
     hosts: daemon
-      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover?.waiting() ?? false)
+      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover?.drainingAt() ?? null)
       : {
           'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },

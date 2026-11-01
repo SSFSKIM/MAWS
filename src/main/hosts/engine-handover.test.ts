@@ -34,20 +34,23 @@ describe('watchEngineHandover', () => {
     const off = watch.bind(h.hosts as never);
     const changes = vi.fn();
     watch.onChange(changes);
-    expect(watch.waiting()).toBe(false);
+    expect(watch.drainingAt()).toBeNull();
     expect(watch.reason()).toBeNull();
     h.heard({ state: 'waiting', inFlight: 2, tool: 'artifact_list' });
-    expect(watch.waiting()).toBe(false); // the old build serves meanwhile: nothing held
+    expect(watch.drainingAt()).toBeNull(); // the old build serves meanwhile: nothing held
     expect(watch.reason()).toEqual({ inFlight: 2, tool: 'artifact_list' });
     h.heard({ state: 'draining', inFlight: 1 });
-    expect(watch.waiting()).toBe(true);
+    expect(watch.drainingAt()).toBe(Date.now());
     expect(watch.reason()).toEqual({ inFlight: 1 });
     expect(changes).toHaveBeenCalledTimes(2);
     h.heard({ state: 'draining', inFlight: 0 });
-    expect(watch.waiting()).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    expect(watch.drainingAt()).toBe(Date.now()); // still draining: now
     expect(watch.reason()).toBeNull(); // nothing to wait for: no reason to show
     h.heard({ state: 'none', inFlight: 0 });
-    expect(watch.waiting()).toBe(false);
+    const ended = Date.now();
+    vi.advanceTimersByTime(7_000);
+    expect(watch.drainingAt()).toBe(ended); // the drain's end, however long ago it was read
     off();
     expect(h.events.size + h.states.size).toBe(0);
   });
@@ -60,12 +63,15 @@ describe('watchEngineHandover', () => {
     watch.onChange(changes);
     h.heard({ state: 'draining', inFlight: 1, tool: 'show_pane' });
     vi.advanceTimersByTime(ENGINE_HANDOVER_FRESH_MS - 1);
-    expect(watch.waiting()).toBe(true);
+    expect(watch.drainingAt()).toBe(Date.now());
     h.heard({ state: 'draining', inFlight: 1, tool: 'show_pane' }); // mawsd's resend renews it
+    const resent = Date.now();
     vi.advanceTimersByTime(ENGINE_HANDOVER_FRESH_MS - 1);
-    expect(watch.waiting()).toBe(true);
+    expect(watch.drainingAt()).toBe(Date.now());
     vi.advanceTimersByTime(1);
-    expect(watch.waiting()).toBe(false);
+    expect(watch.drainingAt()).toBe(resent + ENGINE_HANDOVER_FRESH_MS); // ended when it went stale
+    vi.advanceTimersByTime(5_000);
+    expect(watch.drainingAt()).toBe(resent + ENGINE_HANDOVER_FRESH_MS);
     expect(watch.reason()).toBeNull();
     expect(changes).toHaveBeenCalledTimes(3); // heard, heard again (renewed), stale
   });
@@ -74,13 +80,33 @@ describe('watchEngineHandover', () => {
     const h = harness();
     const watch = watchEngineHandover();
     watch.bind(h.hosts as never);
-    expect(watch.waiting()).toBe(false);
+    expect(watch.drainingAt()).toBeNull();
     h.machine('ready');
     h.heard({ state: 'draining', inFlight: 1 });
-    expect(watch.waiting()).toBe(true);
+    expect(watch.drainingAt()).toBe(Date.now());
+    vi.advanceTimersByTime(2_000);
     h.machine('restarting');
-    expect(watch.waiting()).toBe(false);
+    const down = Date.now();
+    vi.advanceTimersByTime(2_000);
+    expect(watch.drainingAt()).toBe(down);
     expect(watch.reason()).toBeNull();
+  });
+
+  // P5 O16 M3c fix wave 3 (the re-review's P1): the drain's end is kept, so main's transport gives the successor a whole
+  // start budget from it, however late it reads it (a held hello it was waiting on ends after the drain did)
+  it('keeps the moment the drain ended, whatever ended it: a report that is not draining, then none at all', () => {
+    const h = harness();
+    const watch = watchEngineHandover();
+    watch.bind(h.hosts as never);
+    h.heard({ state: 'draining', inFlight: 1 });
+    vi.advanceTimersByTime(3_000);
+    h.heard({ state: 'waiting', inFlight: 1 }); // a failed ask's recycle: the host serves again
+    const ended = Date.now();
+    vi.advanceTimersByTime(3_000);
+    expect(watch.drainingAt()).toBe(ended);
+    h.heard({ state: 'none', inFlight: 0 });
+    vi.advanceTimersByTime(3_000);
+    expect(watch.drainingAt()).toBe(ended); // a later end of something that was not a drain moves nothing
   });
 
   it('learns it from the event alone: it dispatches nothing, so a parked engine host is never woken', () => {
@@ -89,6 +115,6 @@ describe('watchEngineHandover', () => {
     watch.bind(h.hosts as never);
     expect(Object.keys(h.hosts)).toEqual(['onEvent', 'onState']); // no dispatch reaches it: no daemon.status, no wake
     vi.advanceTimersByTime(ENGINE_HANDOVER_FRESH_MS * 4);
-    expect(watch.waiting()).toBe(false); // a parked host with a held hello: no report, today's bound, no spawn held off
+    expect(watch.drainingAt()).toBeNull(); // a parked host with a held hello: no report, today's bound, no spawn held off
   });
 });

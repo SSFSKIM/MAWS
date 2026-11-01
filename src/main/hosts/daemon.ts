@@ -296,10 +296,10 @@ const SERVICE: Record<DaemonSocket, string> = { 'engine-host': 'maws-engine-host
 // environment), and a hello a relay refuses on a seam would never reach the host at all.
 // `machineBudgetsMs`: the spine's commands that run past a request's default deadline, with their own (the services
 // entry's COMMAND_BUDGETS_MS, which main's root hands over; the panel's sweep#3)
-// `engineWaitingOn` (P5 O16 M3c fix wave 2; D63): the engine host's transport holds its start budget while it is true,
-// `mawsd`'s fresh report that its engine host drains for a handover (engine-handover.ts), during which the relay holds
-// main's hello
-export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, modules: DaemonModules, env: NodeJS.ProcessEnv, machineBudgetsMs?: HostSpec['requestBudgetsMs'], engineWaitingOn?: () => boolean): Partial<Record<HostOwner, HostSpec>> {
+// `engineHandingOverAt` (P5 O16 M3c fix wave 2; D63): the engine host's transport runs its start budget whole from it,
+// now while `mawsd`'s fresh report says its engine host drains for a handover (engine-handover.ts), during which the
+// relay holds main's hello, and from the drain's end after it (fix wave 3)
+export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, modules: DaemonModules, env: NodeJS.ProcessEnv, machineBudgetsMs?: HostSpec['requestBudgetsMs'], engineHandingOverAt?: () => number | null): Partial<Record<HostOwner, HostSpec>> {
   const spec = (socket: DaemonSocket, modulePath: string): HostSpec => {
     const detached: Partial<Omit<DetachedTransportOptions, 'modulePath'>> = {
       files: daemonHostFiles(paths, socket),
@@ -308,7 +308,7 @@ export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, module
       relayed: true,
       timing: { helloTimeoutMs: START_TIMEOUT_MS },
       identity: appIdentity(modulePath, env, 'utility'),
-      ...(socket === 'engine-host' && engineWaitingOn && { waitingOn: engineWaitingOn }),
+      ...(socket === 'engine-host' && engineHandingOverAt && { handingOverAt: engineHandingOverAt }),
     };
     return { modulePath, serviceName: SERVICE[socket], transport: 'detached', detached };
   };

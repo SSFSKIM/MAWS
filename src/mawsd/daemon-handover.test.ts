@@ -32,8 +32,7 @@ describe('daemon.restartEngineHost', () => {
     scene.engineSpawn = {
       answers: {
         'host.handover': () => {
-          const old = scene.lastEngine();
-          setImmediate(() => void old.supervisor.die()); // the exit order, after the answer
+          scene.lastEngine().handOver(); // the exit order, after the answer
           return { state: 'detaching' };
         },
         // the successor's start: adopting until its second status
@@ -68,11 +67,40 @@ describe('daemon.restartEngineHost', () => {
     await until(() => old.supervisor.exits.includes('idle'));
     await until(() => old.named('host.handover').length >= 2); // asked again while it defers
     drain.inFlight = 0;
-    await old.supervisor.die(); // its drain settled: it exits
+    old.handOver(); // its drain settled: it exits
     await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready');
     expect(daemon.hosts.snapshot('engine-host').pid).toBe(scene.lastEngine().pid);
+    expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]); // planned: no crash
     expect(daemon.hosts.parked('engine-host')).toBe(false);
     expect(scene.spawn).toHaveBeenCalledTimes(2); // the wake's, then the successor's
+  });
+
+  // fix wave 3 (the re-review's P2): a mawsd that restarted while its engine host, of another build, deferred a handover
+  // meets that host with its drain armed and its rows frozen; at the host's first status (its client's ready line) it
+  // takes it back into the handover: not ready (main's link closed, its hello held), told as draining, never the
+  // unfrozen wait, and the host's exit once its drain settles starts the successor with no crash
+  it('a mawsd that meets its engine host already draining takes it back into the handover: not ready, told as draining, the successor at its exit', { timeout: 30_000 }, async () => {
+    const drain = { inFlight: 1 };
+    const draining = { ...holder(1), holder: { ...holder(1).holder, handover: 'draining', inFlight: 1, tool: 'artifact_list' } };
+    const old = await scene.engine({
+      buildId: 'an-older-build', counts: { liveSessions: 1, rows: 1 },
+      answers: { 'host.handover': () => (drain.inFlight > 0 ? { state: 'deferred', inFlight: drain.inFlight, tool: 'artifact_list' } : (old.handOver(), { state: 'detaching' })) },
+    });
+    const told: unknown[] = [];
+    const daemon = await scene.start();
+    daemon.hosts.onHandover('engine-host', (state) => void told.push(state));
+    const main = scene.appHosts({}, { machine: true });
+    void main.start();
+    await until(() => main.snapshot('engine-host').state === 'ready' && main.streaming('engine-host'), 10_000, 'main served by the frozen host');
+    await until(() => old.emitRaw('host.supervisorStatus', { ...draining, pid: old.pid }), 5_000, 'a client ready'); // the host's status at its client's ready line
+    await until(() => old.named('host.handover').length >= 1, 5_000, 'asked again');
+    expect(daemon.hosts.snapshot('engine-host').state).toBe('restarting');
+    await until(() => main.snapshot('engine-host').state !== 'ready', 5_000, 'main’s link closed by mawsd');
+    expect(daemon.hosts.handoverState('engine-host')).toEqual({ state: 'draining', inFlight: 1, tool: 'artifact_list' });
+    expect(told.some((state) => (state as { state?: string } | null)?.state === 'waiting')).toBe(false);
+    drain.inFlight = 0;
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 15_000, 'the successor, at the next ask');
+    expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]);
   });
 
   it('refuses a parked engine host, and one that does not hand over, without touching it', async () => {
@@ -114,8 +142,7 @@ describe('the handover and the park', () => {
         ...status,
         'engine.ping': () => sleep(300).then(() => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` })),
         'host.handover': () => {
-          const old = scene.lastEngine();
-          setImmediate(() => void old.supervisor.die());
+          scene.lastEngine().handOver();
           return { state: 'detaching' };
         },
       },
@@ -151,7 +178,7 @@ describe('the handover and the park', () => {
     expect(old.supervisor.exits).toEqual([]);
     drain.inFlight = 0;
     const drained = Date.now();
-    await old.supervisor.die(); // its drain settled: it exits
+    old.handOver(); // its drain settled: it exits
     expect(await ping).toMatchObject({ ok: true, value: { hostVersion: `pid ${scene.lastEngine().supervisor.pid}` } });
     expect(Date.now() - drained).toBeLessThan(2_000); // no exit bound waited (EXIT_SETTLE_MS, 5 s)
     expect(old.named('engine.ping')).toEqual([]);
@@ -167,8 +194,7 @@ describe('the handover and the park', () => {
   it('a park asked of a host that stays (it holds rows), then the handover: one successor, no park, nothing taken back; a request waiting on the park goes to the successor', async () => {
     scene.engineSpawn = {
       answers: { ...status, 'engine.ping': () => ({ ...PING, hostVersion: `pid ${scene.lastEngine().supervisor.pid}` }), 'host.handover': () => {
-        const old = scene.lastEngine();
-        setTimeout(() => void old.supervisor.die(), 100);
+        scene.lastEngine().handOver(100);
         return { state: 'detaching' };
       } },
     };
@@ -207,8 +233,7 @@ describe('the handover and the park', () => {
         },
         'host.handover': () => {
           if (drain.inFlight > 0) return { state: 'deferred', inFlight: drain.inFlight };
-          const old = scene.lastEngine();
-          setImmediate(() => void old.supervisor.die());
+          scene.lastEngine().handOver();
           return { state: 'detaching' };
         },
       },
@@ -250,6 +275,7 @@ describe('the handover and the park', () => {
     expect(scene.spawn).toHaveBeenCalledTimes(2);
     expect(daemon.hosts.parked('engine-host')).toBe(false);
     expect(daemon.hosts.snapshot('engine-host').state).toBe('ready');
+    expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]); // the idle exit asked: no crash (fix wave 3)
   });
 });
 
@@ -283,8 +309,7 @@ describe('the completions of the old host’s calls', () => {
         },
         'host.handover': () => {
           if (drain.inFlight > 0) return { state: 'deferred', inFlight: drain.inFlight };
-          const old = scene.lastEngine();
-          setImmediate(() => void old.supervisor.die());
+          scene.lastEngine().handOver();
           return { state: 'detaching' };
         },
       },
@@ -377,6 +402,7 @@ describe('a deliberate stop during the drain', () => {
     await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
     expect(daemon.hosts.parked('engine-host')).toBe(false);
     expect(scene.spawn).toHaveBeenCalledTimes(2);
+    expect([daemon.hosts.snapshot('engine-host').restarts, daemon.hosts.facts('engine-host').lastExit]).toEqual([0, null]); // the stop ended it: no crash (fix wave 3)
   });
 
   it('the quit’s stop-all reaches the old host; its close starts the successor', async () => {

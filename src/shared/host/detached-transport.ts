@@ -34,8 +34,8 @@
 // replacement (so its close, now or after a deferral, spawns the successor and never parks an on-demand host) and asks
 // `host.handover`; deferred, it is asked again every WAIT_RETRY_MS, nothing ever killed. M3c fix wave 2 (D63): of another
 // build with sessions live, it is served as it is and reported `updatePending`, never asked to exit when idle; the host
-// supervisor asks it to hand over at its first quiet status. `waitingOn` holds an attempt's budget while a relay reports
-// its host handing over. A close after `exit idle` waits for the pid's death (bounded by `exitWaitMs`)
+// supervisor asks it to hand over at its first quiet status. `handingOverAt` holds an attempt's budget while a relay
+// reports its host handing over, and from its end. A close after `exit idle` waits for the pid's death (bounded by `exitWaitMs`)
 // before it reads as a quiet close, which a slow exit used to (#413).
 // It also gains `recycle` (a draining close, then a fresh attempt at once) and `adopt` (one connect, no start). Every
 // local path is checked before it is used (private-path.ts, RL §5.11): the directory before the token is read, the
@@ -158,10 +158,12 @@ export interface DetachedTransportOptions {
   // process's build (its bundle was replaced), so nothing is spawned and the attempt ends in `notLaunched`
   beforeSpawn?(): string | null;
   // P5 O16 M3c fix wave 2 (D63; concern 1): the host behind this socket is handing over and its relay holds hellos
-  // meanwhile (`mawsd`'s fresh report, main's daemon shape): while true, the attempt's start budget does not run out, so
-  // no candidate is stopped and nothing fails `held_lock`; the attempt retries every pidPollMs, and gets a whole budget
-  // again once it is false
-  waitingOn?(): boolean;
+  // meanwhile (`mawsd`'s fresh report, main's daemon shape). Fix wave 3: the last moment it was reported so: now while a
+  // report says it, the moment the report ended after (`none`, stale, its link down), null when none was heard. The
+  // attempt's start budget runs whole from that moment, so while it lasts no candidate is stopped and nothing fails
+  // `held_lock` (the attempt retries every pidPollMs), and the successor gets a whole budget from the drain's end
+  // whichever hello it falls in (one held hello can spend a whole budget: main's daemon shape waits 15 s for each)
+  handingOverAt?(): number | null;
 }
 
 // A served connection as the host supervisor sees it: C1's envelope both ways. P3-A M5 (socket protocol 2): and the
@@ -183,9 +185,12 @@ export interface ExitInfo {
 // How a served connection ended, beyond `disconnected`: `quiet` (the welcomed pid lives on: backpressure, a socket
 // error; reconnect without a crash count), `deliberate` (main asked the supervisor to exit; a fresh start once it is
 // gone), `replaced` (another client took the supervisor; terminal), or a crash (the welcomed pid is dead). P5 O16 M3b:
-// `replace`, the close of a host asked to hand over: its successor is spawned at once (the next launch waits for the
-// pid's death), whether a request waits or not.
-export type DetachedLoss = 'quiet' | 'deliberate' | 'replaced' | 'replace' | { crash: ExitInfo };
+// `replace`, the close of a host asked to hand over: its successor is spawned (the next launch waits for the pid's
+// death), whether a request waits or not. M3c fix wave 3: the ask is no evidence the host handed over, so the close
+// carries how the process exited (known for one this run started, looked at one poll later as a crash's is) and whether
+// it was asked to exit when idle (an exit asked for, as any armed close reads), for the host supervisor, which alone
+// hears whether the host said its rows detached.
+export type DetachedLoss = 'quiet' | 'deliberate' | 'replaced' | { replace: ExitInfo; idleAsked: boolean } | { crash: ExitInfo };
 
 // P5 O16 M3b: `host.handover`'s answer as the transport read it; `failed` when none came or it was an error.
 export type HandoverAnswer = { state: 'detaching' } | { state: 'deferred'; inFlight: number; tool?: string /* M3c fix wave 2 */ } | { state: 'failed'; why: string };
@@ -359,11 +364,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     const current = () => gen === generation && !stopped;
     let deadline = Date.now() + timing.startTimeoutMs;
     const pastBudget = () => {
-      // P5 O16 M3c fix wave 2: a handover the relay reports under way holds the budget (above)
-      if (options.waitingOn?.()) {
-        deadline = Math.max(deadline, Date.now() + timing.startTimeoutMs);
-        return false;
-      }
+      // P5 O16 M3c fix wave 2, fix wave 3: a handover the relay reports holds the budget, whole from its end (above)
+      const handingOverAt = options.handingOverAt?.() ?? null;
+      if (handingOverAt !== null) deadline = Math.max(deadline, handingOverAt + timing.startTimeoutMs);
       return Date.now() >= deadline;
     };
     const step = (ms: number, run: () => void) => after(ms, () => current() && run());
@@ -805,11 +808,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       awaitDeath = connection.proc;
       return events.lost('deliberate');
     }
-    // P5 O16 M3b (D40): a host asked to hand over: its successor is spawned once it is gone, never parked
+    // P5 O16 M3b (D40): a host asked to hand over: its successor is spawned once it is gone, never parked. Fix wave 3:
+    // whether it handed over or crashed mid-drain is the host supervisor's to read (above)
     if (connection.exitAsked === 'replace') {
-      log(`supervisor pid ${connection.proc.pid} closed its connection after handing over; starting its successor`);
+      log(`supervisor pid ${connection.proc.pid}, asked to hand over, closed its connection; starting its successor`);
       awaitDeath = connection.proc;
-      return events.lost('replace');
+      const idleAsked = idleArmed !== null && idleArmed.pid === connection.proc.pid && idleArmed.procStart === connection.proc.procStart;
+      return after(timing.pidPollMs, () => events.lost({ replace: spawned.get(connection.proc.pid) ?? { code: null, signal: null }, idleAsked }));
     }
     unserved = connection.proc;
     events.disconnected();
