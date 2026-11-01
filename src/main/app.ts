@@ -630,10 +630,10 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   cuaSockets = browser.cua; // E13
   // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
   // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
-  // socket admits that relay by the attached daemon's exact instance: the machine welcome's pid, its start read through
-  // the addon now and at each reconnect (none while the machine link is down)
+  // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read
+  // through the addon now and at each change of the link (none while it is down), never a pid remembered from a welcome
   if (launch.mode === 'daemon') {
-    const tellRelay = () => browser.cua.relay(hosts.snapshot('machine').state === 'ready' ? (hosts.welcome('machine')?.pid ?? null) : null);
+    const tellRelay = () => browser.cua.relay(hosts.snapshot('machine').state === 'ready' ? hosts.servedFd('machine') : null);
     tellRelay();
     shutdown.add('cua relay', hosts.onState('machine', tellRelay));
   }

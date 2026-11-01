@@ -11,8 +11,10 @@
 //
 // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
 // `mawsd`'s socket for the session, which checks the engine's peer itself and relays the connection here from its own
-// process. That relay is admitted by the attached daemon's exact instance (`relay`: the machine welcome's pid, its start
-// read now), at once and never as a root, since every engine on the machine descends from the daemon.
+// process. That relay is admitted by the attached daemon's exact instance (`relay`: the peer of the app's live
+// machine.sock connection, its pid and start read through the addon now), at once and never as a root, since every engine
+// on the machine descends from the daemon. A connection admitted as one daemon's relay ends when the machine link loses
+// that daemon or reaches another: what it relayed was that daemon's.
 //
 // Each connection is one cua host in its own process (connection.ts); what crosses connections, which tabs are reserved
 // or leased to whom, is `TabClaims`. The store's hooks reach every connection: a tab gone (`tabs.removed`), a tab changed
@@ -75,9 +77,10 @@ export interface CuaBackend extends LeaseHolds {
   closeSession(appSessionId: AppSessionId): void;
   // The session's engine process, from each of its statuses: the root its socket's peers must descend from (null: none).
   engineProcess(appSessionId: AppSessionId, pid: number | null): void;
-  // P5 O5 M5: the attached daemon's pid (the machine.sock welcome's), its instance read now through the addon, whose
-  // relayed connections every session's socket admits; null with no daemon attached. Read again at each reconnect.
-  relay(pid: number | null): void;
+  // P5 O5 M5: the descriptor of the app's live machine.sock connection, whose peer (the daemon actually connected, its pid
+  // and start read now through the addon) every session's socket admits as its relay; null while the link is down. Read
+  // again at each change of the link; a changed or cleared identity ends the connections the old one relayed.
+  relay(machineFd: number | null): void;
   // The e2e seam's reading: whether the peer check's addon loaded; per listening session, its connections, held commands,
   // leased tabs and refused peers.
   inspect(): { peerModule: 'loaded' | 'unavailable'; sessions: Record<string, CuaSessionInspection> };
@@ -130,6 +133,17 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   };
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
   let relayRoot: ProcessRoot | null = null; // P5 O5 M5
+  const relayedBy = new Map<CuaConnection, ProcessRoot>(); // P5 O5 M5: each connection admitted as a relay, by whose
+  // The daemon the machine link is connected to: its socket's peer, this user's, as a live instance
+  const connectedDaemon = (fd: number): ProcessRoot | null => {
+    if (addon === null) return null;
+    try {
+      const peer = addon.peer(fd);
+      return peer.uid === uid ? rootOf(peer.pid, addon) : null;
+    } catch {
+      return null; // the descriptor is gone: no daemon
+    }
+  };
   // The accepted socket's peer is the daemon's relay by pid (its start is the verdict's to check): nothing to wait for.
   const fromRelay = (socket: Socket) => {
     if (addon === null || relayRoot === null) return false;
@@ -148,15 +162,21 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
-    const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay: relayRoot });
+    const relay = relayRoot;
+    const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay });
     if (refusal) {
       listening.refused += 1;
       log(refusalLine(appSessionId, refusal));
       socket.destroy(); // last: the peer can see the close from here on
       return;
     }
-    const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed));
+    const viaRelay = relay !== null && fromRelay(socket); // let in as the daemon (authorizePeer checked its start)
+    const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => {
+      listening.connections.delete(closed);
+      relayedBy.delete(closed);
+    });
     listening.connections.add(connection);
+    if (viaRelay) relayedBy.set(connection, relay);
     connection.greet();
     socket.resume();
   };
@@ -251,8 +271,14 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
         decide(appSessionId, listening, socket, acceptedAt);
       }
     },
-    relay(pid) {
-      relayRoot = pid === null || !addon ? null : rootOf(pid, addon);
+    relay(machineFd) {
+      const next = machineFd === null ? null : connectedDaemon(machineFd);
+      relayRoot = next;
+      for (const [connection, root] of [...relayedBy]) {
+        if (next !== null && next.pid === root.pid && next.start === root.start) continue;
+        relayedBy.delete(connection);
+        connection.disconnect('the daemon that relayed it is no longer attached');
+      }
       // a relayed socket accepted before the daemon was known waits no longer
       for (const [appSessionId, listening] of sessions) {
         for (const [socket, { acceptedAt, timer }] of [...listening.pending]) {
