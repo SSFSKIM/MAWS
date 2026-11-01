@@ -25,3 +25,17 @@ export function toolHoldFor(env: NodeJS.ProcessEnv, deps: ToolHoldDeps = SYSTEM)
     while (deps.exists(hold) && deps.now() < until) await deps.sleep(HOLD_POLL_MS);
   };
 }
+
+// P5 O16 M3c fix wave 2 (case (f)'s short deferral by an update, D63): the inverse of the hold. Under `MAWS_E2E=1` with
+// `MAWS_E2E_CALL_GATE` naming a file, a call of any tool but `ask` waits, before it is dispatched and so before it counts
+// in flight, until that file exists (read every 100 ms, at most TOOL_HOLD_MAX_MS): the engine has sent it, the host is
+// still quiet, and the scene starts it when it chooses (between an update's quiet report and its freeze, which the
+// engine host's race seam holds open: ../e2e-handover-race.ts). Outside MAWS_E2E, or with no file named, no gate.
+export function callGateFor(env: NodeJS.ProcessEnv, deps: ToolHoldDeps = SYSTEM): (() => Promise<void>) | undefined {
+  const gate = env.MAWS_E2E === '1' ? env.MAWS_E2E_CALL_GATE : undefined;
+  if (!gate) return undefined;
+  return async () => {
+    const until = deps.now() + TOOL_HOLD_MAX_MS;
+    while (!deps.exists(gate) && deps.now() < until) await deps.sleep(HOLD_POLL_MS);
+  };
+}

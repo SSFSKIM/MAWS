@@ -857,9 +857,7 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
   });
 });
 
-// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`); and the
-// turn's start, which the engine says just before its call (toolCallJournal)
-const isTurnStarted = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'started';
+// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
 const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
 const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
 const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating the engine host (1 call running).'; // ENGINE_HOST_UPDATE.waiting(1, 'artifact_list')
@@ -965,9 +963,10 @@ test('(f) P5 O16 M3: mawsd restart --engine-host while a tool call runs: it defe
 });
 
 // P5 O16 M3c fix wave 2 (D63 (5); M3c's concern 1): the short deferral an update can still meet. The kept host is quiet
-// when the update's `mawsd` meets it (A's turn open, its tool call held back by the stub's gate), so the handover is
-// asked at once; the e2e's race (src/engine-host/e2e-handover-race.ts) holds the freeze until the scene lets the call
-// start, so it is in flight at the freeze and held there (the tool hold) about 25 s, past the app's 15 s welcome bound.
+// when the update's `mawsd` meets it (A's turn open, its tool call sent and held back by the engine host's e2e gate,
+// src/engine-host/tool-server/e2e-hold.ts `callGateFor`, so not yet in flight), so the handover is asked at once; the
+// e2e's race (src/engine-host/e2e-handover-race.ts) holds the freeze until the scene opens the gate, so the call is in
+// flight at the freeze and held there (the tool hold) about 25 s, past the app's 15 s welcome bound.
 // Meanwhile `mawsd`'s relay holds the app's hello, and its `daemon.engineHandover` report keeps the app from stopping it
 // or failing `held_lock`; the waiting copy shows. Once the call finishes, the successor adopts; no crash, no toast.
 test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the freeze holds the handover past the app’s welcome bound; the app waits, says why, and the successor adopts', async () => {
@@ -976,16 +975,15 @@ test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the fr
     const gate = join(s.root, 'call-gate');
     const hold = join(s.root, 'tool-hold');
     writeFileSync(hold, '');
-    s.useStub({ gate });
+    s.useStub();
     const fixture = toolCallJournal(s.root, 'tool-call', 'artifact_list');
-    const reachedGate = async (_page: Page, at: AppSessionId) => void (await expect.poll(() => s.journal(at).some(isTurnStarted), { timeout: 30_000, message: 'the engine started the turn and stands at its call (the gate)' }).toBe(true));
-    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: reachedGate });
-    expect(s.journal(id).some(isToolCall), 'no call yet: the host is quiet').toBe(false);
+    const sent = async (_page: Page, at: AppSessionId) => void (await expect.poll(() => s.journal(at).some(isToolCall), { timeout: 30_000, message: 'the engine sent the call, gated (not yet in flight)' }).toBe(true));
+    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_CALL_GATE: gate, MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: sent });
 
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
     await expect.poll(() => s.log().includes('e2e: the handover waits for a call to start before its freeze'), { timeout: 60_000, message: 'host.log: the update asked at the quiet report' }).toBe(true);
     writeFileSync(gate, ''); // the call starts between the quiet report and the freeze
-    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: `host.log: frozen with the call in flight; the journal's tail: ${JSON.stringify(s.journal(id).slice(-4).map((r) => [r.direction, r.frame.type, r.frame.subtype ?? r.frame.state ?? null]))}; the stub: ${s.stderrOf(id).slice(-5).join(' | ')}` }).toBe(true);
+    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: 'host.log: frozen with the call in flight' }).toBe(true);
     const frozenAt = Date.now();
     const daemon = s.daemonLock()!.pid; // the update's mawsd, holding the app's hello
     await expect.poll(() => s.log().includes('the handover defers: 1 calls in flight'), { timeout: 30_000, message: 'host.log: the handover defers' }).toBe(true);

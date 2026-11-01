@@ -351,6 +351,28 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     expect(server.inFlightThroughDelivery()).toBe(0);
   });
 
+  // P5 O16 M3c fix wave 2: the e2e's gate (./e2e-hold.ts `callGateFor`) keeps a call out of flight until it opens
+  it('gates a call before it is counted in flight; ask is never gated', async () => {
+    let open: () => void = () => {};
+    const ran: string[] = [];
+    const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
+    const server = new MawsToolServer({
+      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      respond: async () => {},
+      gate: () => new Promise<void>((resolve) => (open = resolve)),
+    });
+    const call = (request_id: string, name: string, id: number) =>
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } } } } as ControlRequestFrame);
+    call('req-ask', 'ask', 1);
+    call('req-pane', 'show_pane', 2);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    expect(server.inFlightThroughDelivery()).toBe(0); // gated: not yet in flight
+    open();
+    await flush();
+    expect(ran).toEqual(['ask', 'show_pane']);
+  });
+
   it("counts an unknown tool's answer until its write settles", async () => {
     const { server, writes, call } = gated([]);
     call('echo_file', 5);

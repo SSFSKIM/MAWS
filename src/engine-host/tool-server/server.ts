@@ -79,6 +79,7 @@ export interface MawsToolServerDeps {
   onChange?: () => void; // the calls in flight changed (the session's status counts them)
   fromSubagent?: (toolUseId: ToolUseId | null) => boolean; // P2-C3: the normaliser's reading of the frames before the call
   hold?: () => Promise<void>; // P5 O16 M3c: the e2e's hold (./e2e-hold.ts), awaited before any tool but `ask` runs
+  gate?: () => Promise<void>; // P5 O16 M3c fix wave 2: the e2e's gate (./e2e-hold.ts), awaited before any call but `ask` is dispatched
 }
 
 export class MawsToolServer {
@@ -151,7 +152,9 @@ export class MawsToolServer {
         void this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta !== undefined && { _meta }) })) });
         return;
       case 'tools/call':
-        void this.call(requestId, id, params);
+        // fix wave 2: the e2e's gate keeps a call out of flight until it opens (under MAWS_E2E alone)
+        if (this.deps.gate && toolCallOf(params).name !== 'ask') void this.deps.gate().then(() => this.call(requestId, id, params));
+        else void this.call(requestId, id, params);
         return;
       default:
         this.error(requestId, id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${message.method}`);
