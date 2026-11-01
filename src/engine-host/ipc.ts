@@ -300,13 +300,14 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
     holder: deps.holder, // P5 O16 M2
-    wire: (session, plan, spec) => {
+    wire: (session, plan, spec, historyThrough) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
         emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
         retired: (requestId) => session.requestRetired(requestId), // E11
+        historyThrough, // P5 O16 M3c
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));

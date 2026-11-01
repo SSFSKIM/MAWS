@@ -568,8 +568,8 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
 // The session's own checks after an adoption, then its turn played out: live with the same engine pid and adopted, its
 // request's card once (one request event, one pending item), the answer written once and the turn ended, the prompt
 // written once and no event twice. `requestId`: the request raised before the engine host changed.
-// The successor's stream starts at the adoption (its fold tells nothing, D24), so the request it restored is a pending
-// item, not an event again: the engine asked once (one `in` row) and the successor raised no second request event.
+// The successor tells nothing its fold read (D24); the launch's events before the adoption are answered from its
+// journal: the engine asked once (one `in` row), and the launch holds one request event.
 async function adoptedThenCompleted(s: Scratch, page: Page, id: AppSessionId, engine: number, requestId: string): Promise<void> {
   await expect.poll(async () => (await statusOf(page, id)).holder?.adopted, { timeout: 30_000, message: 'the session adopted' }).toBe(true);
   // its re-initialize first (`starting`, then ready), the turn restored with it
@@ -579,7 +579,7 @@ async function adoptedThenCompleted(s: Scratch, page: Page, id: AppSessionId, en
   await expect.poll(async () => (await pendingPermissions(page, id)).map((i) => i.request.requestId), { message: 'the card shows once' }).toEqual([requestId]);
   const asked = s.journal(id).filter((r) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"can_use_tool"'));
   expect(asked, 'the engine asked once').toHaveLength(1);
-  expect((await eventsOf(page, id)).filter((e) => e.kind === 'permission.requested').length, 'no second request event').toBeLessThanOrEqual(1);
+  expect((await eventsOf(page, id)).filter((e) => e.kind === 'permission.requested'), 'one request event across the adoption').toHaveLength(1);
   value(await invoke(page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
   await expect.poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn completes' }).toBe(true);
   const out = s.journal(id).filter((r) => r.direction === 'out');

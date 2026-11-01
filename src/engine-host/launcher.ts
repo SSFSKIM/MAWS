@@ -57,7 +57,9 @@ export interface LauncherDeps {
   spawn: (plan: LaunchPlan) => EngineTransport;
   appVersion: string;
   log: (message: string) => void;
-  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
+  // attaches the session's listeners before it starts; P5 O16 M3c: `historyThrough`, an adopted launch's last journaled
+  // seq, which its stream answers from the journal
+  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number) => void;
   appAttached?: () => boolean; // E10: handed to each session's bridges (P5 O3-D M3: the app's presence)
   rendersAnswered?: () => boolean; // P5 O5 M4: the capture and export bridges' gate (the attachment's answersRenders)
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
@@ -276,7 +278,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
         holder: { pid: entry.pid, holderId: launchId, binary: entry.binary },
         adopted: { fence, frontier: checkpoint.frontier, owedInterrupt, observerSeen: observerLaunch === launchId },
       });
-      deps.wire(session, plan, spec);
+      deps.wire(session, plan, spec, journal.lastSeq); // P5 O16 M3c: the launch's events before the adoption, from its journal
       return session;
       }, { adoption: true });
     } catch (error) {

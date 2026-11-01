@@ -105,6 +105,20 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(await stream.snapshot(events.at(-1)!.seq!, null)).toEqual({ events: [], lastSeq: events.at(-1)!.seq, complete: true });
   });
 
+  // P5 O16 M3c: an adopted launch's stream starts at the adoption (the successor's fold tells nothing), so what the
+  // launch journaled before it is the journal's to answer, as an evicted range is
+  it('an adopted launch answers what was journaled before its stream from the journal, and what came after from the ring', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const split = Math.floor(events.length / 2);
+    const through = events[split - 1]!.seq!;
+    const after = events.filter((e) => e.seq! > through);
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, historyThrough: through });
+    stream.events(after);
+    stream.flush();
+    expect(await stream.snapshot(null, null), 'the whole launch').toEqual({ events, lastSeq: events.at(-1)!.seq, complete: true });
+    expect((await stream.snapshot(through, null)).events, 'after the adoption: the ring').toEqual(after);
+  });
+
   it('a limit never splits one row\'s events and marks the answer incomplete; lastSeq is the cursor for the next page', async () => {
     const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
     const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit });

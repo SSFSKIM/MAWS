@@ -108,6 +108,20 @@ describe('the launcher’s adoption', () => {
     await session.exited;
   });
 
+  // P5 O16 M3c: the stream begins at the adoption; what the launch journaled before it is the journal's to answer
+  it('wires the adopted session with its journal’s last seq, through which its stream answers from the journal', async () => {
+    const { entry } = launched();
+    let through: number | undefined;
+    const a = await adopter({ deps: { wire: (_session, _plan, _spec, historyThrough) => void (through = historyThrough) } });
+    const adopting = a.adopt(entry);
+    await until(() => a.transports.length === 1 && a.table.get(ID) !== undefined, 'the reservation');
+    expect(through, 'the spawn row, the initialize and its answer').toBe(3);
+    caughtUp(a.transports[0]!);
+    await adopting;
+    a.transports[0]!.exit(0);
+    await a.table.get(ID)!.exited;
+  });
+
   it('a failure after the reservation is the adoption’s, counted by adoptAll', async () => {
     const { entry } = launched();
     const a = await adopter({ responder: { initialize: () => ({ error: 'no session to resume' }) } });

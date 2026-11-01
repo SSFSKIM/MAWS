@@ -53,6 +53,9 @@ export interface SessionStreamOptions {
   hasClient?: () => boolean;
   // E11: whether the broker has retired this request id; a re-delivered request it ignores keeps no event (absent: none)
   retired?: (requestId: string) => boolean;
+  // P5 O16 M3c: an adopted launch's last journaled seq before this stream began (the successor's fold tells nothing):
+  // that range is answered from the journal, as an evicted one is (absent: the stream began with the launch)
+  historyThrough?: number;
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -103,6 +106,7 @@ export class SessionStream {
     this.ringSize = opts.ringSize ?? RING_SIZE;
     this.batchMs = opts.batchMs ?? BATCH_MS;
     this.exitedRingSize = opts.exitedRingSize ?? EXITED_RING; // C12
+    if (opts.historyThrough !== undefined && opts.historyThrough > 0) this.evictedThrough = opts.historyThrough; // P5 O16 M3c
   }
 
   events(batch: SessionEvent[]): void {
