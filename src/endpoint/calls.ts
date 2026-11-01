@@ -22,12 +22,15 @@
 //     only when the caller holds the grade on every placement the call saw of it, `session.get`'s answer and each one a
 //     `session.changed` gave while the call was out, since neither is known to be the newer (the index publishes its
 //     changes on a coalescing tick, so its live read can be ahead of what was heard). A caller below the floor learns
-//     nothing of another session. A session the spine can't place answers `unavailable`.
+//     nothing of another session. A session the spine can't place answers `unavailable`. `session.search` answers at most
+//     SESSION_SEARCH_LIMIT hits, so its input names the sessions the caller views (`sessions`, from `session.list`'s
+//     records), applied by the store before its limit; a full page the cut still took hits from says `incomplete`.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
-import { gradeOf } from '@shared/ipc/grades';
+import { gradeOf, type SessionRank } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
+import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
 import { holdsToSchema, type SessionRanks } from './authorize';
 import type { RemoteChannel } from './channels';
 import { isSessionRank, rankAtLeast, sessionRank } from './grades';
@@ -113,15 +116,24 @@ const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSes
 /**
  * P5 O7 M6: each `each-session` row's answer, by the sessions it names: `attention.list`'s items, `session.search`'s
  * hits, each by its `appSessionId`; `keep` answers it with only what `kept` holds (a part naming no session is dropped).
+ * `narrow`: the input naming the sessions the caller views, for a read that answers at most a limit of them, so the
+ * limit is spent on those (milestone fix: `session.search`'s 50 hits); the cut stays the authorization.
  */
-const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(output: unknown, kept: (id: string | null) => boolean): unknown }> = {
+const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(output: unknown, kept: (id: string | null) => boolean): unknown; narrow?(input: Fields, sessions: string[]): Fields }> = {
   'attention.list': {
     sessions: (output) => (Array.isArray(output) ? output.map(sessionOf).filter((id) => id !== null) : []),
     keep: (output, kept) => (Array.isArray(output) ? output.filter((item) => kept(sessionOf(item))) : []),
   },
   'session.search': {
     sessions: (output) => (isObject(output) && Array.isArray(output.hits) ? output.hits.map(sessionOf).filter((id) => id !== null) : []),
-    keep: (output, kept) => (isObject(output) ? { ...output, hits: Array.isArray(output.hits) ? output.hits.filter((hit) => kept(sessionOf(hit))) : [] } : output),
+    // A full page the cut took hits from may have left matches of the caller's own unsearched: said `incomplete`.
+    keep: (output, kept) => {
+      if (!isObject(output)) return output;
+      const hits = Array.isArray(output.hits) ? output.hits : [];
+      const shown = hits.filter((hit) => kept(sessionOf(hit)));
+      return { ...output, hits: shown, incomplete: output.incomplete === true || (hits.length >= SESSION_SEARCH_LIMIT && shown.length < hits.length) };
+    },
+    narrow: (input, sessions) => ({ ...input, sessions }),
   },
 };
 
@@ -182,18 +194,30 @@ export class Calls {
     const grade = gradeOf(m.name);
     if (filter === undefined || typeof grade !== 'string' || !isSessionRank(grade)) return { ok: false, code: 'unavailable' };
     if (!holdsToSchema(m.name, m.input)) return { ok: false, code: 'malformed' };
-    const response = await dispatch('machine', m.name, m.input === null ? undefined : m.input);
-    if (!response.ok) return { ok: false, code: response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code };
+    const unavailable = (code: string) => ({ ok: false as const, code: code === 'host_unavailable' || code === 'timeout' ? 'unavailable' : code });
+    let ranks: SessionRanks;
+    let input = m.input === null ? undefined : m.input;
+    try {
+      ranks = await this.ctx.ranks(member);
+      if (filter.narrow !== undefined && isObject(input)) {
+        const viewed = await this.#viewed(dispatch, ranks, grade);
+        if (viewed === null) return { ok: false, code: 'unavailable' };
+        if (viewed.length <= SESSION_SEARCH_SESSIONS_MAX) input = filter.narrow(input, viewed);
+      }
+    } catch (error) {
+      this.ctx.log(`endpoint: a \`${m.name}\` call could not be narrowed: ${(error as Error).message}`);
+      return { ok: false, code: 'unavailable' };
+    }
+    const response = await dispatch('machine', m.name, input);
+    if (!response.ok) return unavailable(response.error.code);
     const output = response.value ?? null;
     const sessions = [...new Set(filter.sessions(output))];
     // Every record heard from here on is one more placement the caller must hold the grade on, beside `session.get`'s.
     const heard = new Map<string, Placement[]>();
     this.#heard.add(heard);
     let placed: Map<string, Placement>;
-    let ranks: SessionRanks;
     try {
       placed = new Map(await Promise.all(sessions.map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
-      ranks = await this.ctx.ranks(member);
     } catch (error) {
       this.#heard.delete(heard);
       this.ctx.log(`endpoint: a \`${m.name}\` answer could not be cut: ${(error as Error).message}`);
@@ -205,6 +229,20 @@ export class Calls {
       const holds = (id: string): boolean => [placed.get(id) ?? null, ...(heard.get(id) ?? [])].every((placement) => ranks.holds(placement, grade));
       return { ok: true, output: filter.keep(output, (id) => id !== null && holds(id)) };
     };
+  }
+
+  /**
+   * The machine's sessions (`session.list`, the archived left out as search leaves them) the caller holds `grade` on by
+   * their records: which rows a narrowed read searches, never who may see them (the cut decides that). Null when the
+   * spine can't answer.
+   */
+  async #viewed(dispatch: EndpointServices['dispatch'], ranks: SessionRanks, grade: SessionRank): Promise<string[] | null> {
+    const listed = await dispatch('machine', 'session.list', {});
+    if (!listed.ok || !isObject(listed.value) || !Array.isArray(listed.value.sessions)) return null;
+    return listed.value.sessions.flatMap((record: unknown) => {
+      const id = isObject(record) ? record.appId : undefined;
+      return isText(id, 512) && ranks.holds(recordedPlacement(id, record), grade) ? [id] : [];
+    });
   }
 
   /** `mawsd`'s status as a remote caller sees it: no file paths (P5 O2). */

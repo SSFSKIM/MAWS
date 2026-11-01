@@ -19,6 +19,9 @@ import { gradeOf } from '@shared/ipc/grades';
 import { OFFERS } from '../../src/endpoint/offers';
 import type { AllowlistRecord } from '../../src/services/files/allowlist';
 import { registerFilesHandlers } from '../../src/services/files/register';
+import { Index } from '../../src/services/index/index';
+import { registerIndexHandlers } from '../../src/services/index/register';
+import { summary } from '../support/index-fixture';
 import { iso } from './org-fixtures';
 import { evs, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
@@ -556,7 +559,11 @@ describe('the each-session calls', () => {
     expect(await call(a, 'attention.list', null)).toMatchObject({ ok: true, output: [att('app-1', 'r1'), att('app-2', 'r2')] });
     expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [hits[0]], indexing: false, incomplete: true } });
     expect(await call(a, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { hits: [hits[0], hits[1]], indexing: false, incomplete: true } });
-    expect(searched).toEqual([{ query: 'word' }, { query: 'word' }]);
+    // Each search names the sessions its caller views (milestone fix), never one the caller can't.
+    expect(searched).toEqual([
+      { query: 'word', sessions: ['app-1'] },
+      { query: 'word', sessions: ['app-1', 'app-2'] },
+    ]);
 
     // A share withdrawn: the next answer leaves the session out.
     shared(f, 'app-1', null);
@@ -570,6 +577,63 @@ describe('the each-session calls', () => {
     expect(searched).toHaveLength(3);
     expect(await call(c, 'attention.list', null)).toMatchObject({ ok: false, error: { code: 'class' } });
     expect(engineReads(f)).toBe(engine);
+  });
+
+  // Milestone fix: the store answers at most 50 hits, title matches first; a caller's search names the sessions it views,
+  // so 50 title matches of sessions it can't see don't spend the limit before its own transcript's match.
+  it('session.search: finds the caller’s transcript match behind 50 title matches of sessions it can’t view', async () => {
+    const f = await startEndpoint(org, started);
+    const dir = scratch();
+    const index = new Index(join(dir, 'index.sqlite'));
+    try {
+      registerIndexHandlers(index, f.spine.bus as never);
+      const record = (over: Parameters<typeof summary>[0], access: 'view' | 'private') => {
+        const r = index.sessions.upsertFromSummary(summary(over)).record;
+        f.spine.set(r.appId, r.engineSessionId, { appId: r.appId });
+        f.records.set({ lane: 'B', session: r.engineSessionId!, owners: ['@machine'], ...(access === 'view' ? { shares: [{ member: org.B, grade: 'view' as const }] } : { access: 'private' as const }) }, r.appId);
+        return r;
+      };
+      const mine = record({ customTitle: 'Shared notes' }, 'view');
+      index.sessionSearch.replace(mine.appId, mine.engineSessionId!, 100, 1000, 'a needle inside the shared conversation');
+      for (let n = 0; n < 50; n++) record({ customTitle: `needle private ${n}` }, 'private');
+      const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+      const answer = await call(b, 'session.search', { query: 'needle' });
+      expect(answer).toMatchObject({ ok: true, output: { hits: [{ appSessionId: mine.appId }], incomplete: false } });
+      expect((answer.output as { hits: Array<{ snippet: string }> }).hits[0].snippet).toContain('needle inside the shared conversation');
+      // The owner views all 51: the store's limit stands, title matches first.
+      const owner = await call(a, 'session.search', { query: 'needle' });
+      expect((owner.output as { hits: unknown[] }).hits).toHaveLength(50);
+    } finally {
+      index.close();
+    }
+  });
+
+  it('session.search: says `incomplete` when the cut took hits from a full page', async () => {
+    const f = await startEndpoint(org, started);
+    const ids = Array.from({ length: 50 }, (_, n) => `app-s${n}`);
+    for (const id of ids) shared(f, id, 'view');
+    const asked: unknown[] = [];
+    f.spine.handle('session.search', (input) => (asked.push(input), { hits: ids.map((appSessionId) => ({ appSessionId, snippet: null })), indexing: false, incomplete: false }));
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'session.search', { query: 'word' })).toMatchObject({ ok: true, output: { incomplete: false } });
+    expect(asked[0]).toEqual({ query: 'word', sessions: ids });
+    // One session moves to an engine session B can't view while the call is out: the cut takes its hit from a full page.
+    f.records.set({ lane: 'B', session: 'eng-gone', owners: ['@machine'], access: 'private' }, 'app-s7');
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const dispatch = f.spine.dispatch.bind(f.spine);
+    f.spine.dispatch = async (name, input, client) => {
+      if (name === 'session.get') await held;
+      return dispatch(name, input, client);
+    };
+    const reads = f.host.calls.filter((c) => c.name === 'session.get').length;
+    const answer = call(b, 'session.search', { query: 'word' });
+    await until(() => f.host.calls.filter((c) => c.name === 'session.get').length > reads, 'the placement reads');
+    f.host.emitMachine('session.changed', { record: { ...f.spine.records.get('app-s7')!, engineSessionId: 'eng-gone' }, cause: 'update', revision: 2 });
+    release();
+    const output = (await answer).output as { hits: Array<{ appSessionId: string }>; incomplete: boolean };
+    expect(output.hits).toHaveLength(49);
+    expect(output.incomplete).toBe(true);
   });
 
   // Fix wave 2: the index's live read can be ahead of the record changes it published (they wait for its coalescing
