@@ -303,11 +303,13 @@ async function typeInTerminal(page: Page, id: string, line: string): Promise<voi
   await page.keyboard.type(line);
   await page.keyboard.press('Enter');
 }
-// What the Terminal tool says now: its status lines and the terminal's last rows, for a failure.
+// What the Terminal tool says now: its status lines and the terminal's last written rows (its screen's foot may be
+// blank), for a failure.
 async function terminalSaid(page: Page, id: string | null): Promise<string> {
   const statuses = await surface(page, 'terminal').getByRole('status').allTextContents().catch(() => []);
   const rows = id === null ? [] : await terminalRows(page, id).catch(() => []);
-  return `the Terminal tool's statuses: ${statuses.join(' | ') || 'none'}\nthe terminal's last rows:\n${rows.slice(-15).join('\n')}`;
+  const written = rows.filter((row) => row.trim() !== '');
+  return `the Terminal tool's statuses: ${statuses.join(' | ') || 'none'}\nthe terminal's ${rows.length} rows, its last 40 written:\n${written.slice(-40).join('\n')}`;
 }
 
 test('A reaches B’s mawsd over RL2, through the hub and then directly, and drives B’s lane B session from its listed row: history, a streamed reply, a permission, an image', async () => {
@@ -617,7 +619,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         })
         .toBe(true)
         .catch(async (error: unknown) => {
-          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await terminalSaid(page, id)}`);
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await terminalSaid(page, id)}\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`);
         });
       expect(await listening(devPort), 'B’s loopback reaches it').toBe(true);
 
