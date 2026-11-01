@@ -117,7 +117,8 @@ describe('the offer rows (§L, M3)', () => {
     expect(await act(a, a.device.reseal(spawn))).toBe('ok');
     expect(f.pty.runs).toEqual(['pty.spawn']);
     const op = f.pty.calls.find((c) => c.name === 'pty.op')!.input as Record<string, unknown>;
-    expect(op).toMatchObject({ opId: spawn.opId, name: 'pty.spawn', claim: { member: org.A, device: 'a1' }, action: { opId: spawn.opId } });
+    expect(op).toMatchObject({ opId: spawn.opId, name: 'pty.spawn', claim: { member: org.A, device: 'a1' } });
+    expect(op).not.toHaveProperty('action');
 
     const b = await openRemote(f, org.b1, org.B);
     const theirs = b.device.action({ machine: f.ref, action: 'pty.spawn', args: { appSessionId: 'app-1', label: 't2', cwd: '/work', cols: 80, rows: 24 } });
