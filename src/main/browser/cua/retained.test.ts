@@ -213,8 +213,8 @@ describe.skipIf(process.platform !== 'darwin')("the vendor's screenshot is a scr
     await t.send('Page.stopScreencast');
     await settle();
     expect(h.activities().map((a) => a.activity).filter((a) => a.kind === 'screenshot')).toHaveLength(2);
-    // the frames reached the host as any event does
-    expect(t.host.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.screencastFrame')).toHaveLength(4);
+    // the frames of the lease's own screencasts reached the host; the late one after a stop did not (P5 O17 M2)
+    expect(t.host.notifications.filter((n) => n.method === 'debugger.event' && n.params.method === 'Page.screencastFrame').map((n) => (n.params.params as { sessionId: number }).sessionId)).toEqual([1, 2, 4]);
   });
 });
 

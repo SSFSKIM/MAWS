@@ -410,6 +410,9 @@ describe.skipIf(process.platform !== 'darwin')('targets, events and closing', ()
     const id = await h.idOf(a, tab);
     await a.request('debugger.attach', { tabId: id });
     const cdp = h.cdp(tab);
+    // the lease is told what its commands asked for (P5 O17 M2, event-scope.test.ts): the page's events, and its children
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Page.enable', params: {} });
+    await a.request('debugger.sendCommand', { debuggee: { tabId: id }, method: 'Target.setAutoAttach', params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
     cdp.event('Page.frameNavigated', { frame: { id: cdp.frameId } });
     await a.waitFor('debugger.event', (p) => p.method === 'Page.frameNavigated');
     expect(a.notifications.at(-1)!.params).toEqual({ debuggee: { tabId: id }, method: 'Page.frameNavigated', params: { frame: { id: cdp.frameId } } });

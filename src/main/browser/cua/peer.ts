@@ -9,8 +9,12 @@
 // attached `mawsd`, which checks the engine's peer at its own socket and relays the connection from its own process. It
 // is admitted by its exact instance (pid and kernel start), never as a root: every engine on the machine descends from
 // the daemon, so its descendants are walked as any peer's. `mawsd` loads this module too, for its own sockets' check.
+//
+// P5 O17 M2 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md §H; condition 5 of O5's M7 verdict): where no addon
+// exists for the platform (Linux), the uid is the boundary (O2's rule), `judgeUidPeer`: never a stand-in addon.
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
+import { assertPrivateSocket } from '@shared/host/private-path';
 
 // Pins the addon's exported `version`; an addon reporting another is refused at load (fail closed).
 export const PEER_AUTH_VERSION = 1;
@@ -18,8 +22,8 @@ export const ANCESTRY_LIMIT = 64; // parents walked up from the peer at most
 export const PEER_ROOT_WAIT_MS = 3000; // how long an accepted socket waits for its session's root (M2)
 
 export type ProcessRoot = { pid: number; start: number };
-export type PeerRefusalReason = 'module_unavailable' | 'peer_unavailable' | 'uid_mismatch' | 'no_root' | 'not_descendant';
-export type PeerRefusal = { reason: PeerRefusalReason; pid: number | null };
+export type PeerRefusalReason = 'module_unavailable' | 'peer_unavailable' | 'uid_mismatch' | 'no_root' | 'not_descendant' | 'not_private';
+export type PeerRefusal = { reason: PeerRefusalReason; pid: number | null; detail?: string }; // detail: what was not private
 export type ProcessLookup = (pid: number) => { ppid: number; start: number } | null;
 
 // The addon's exports. `start` is microseconds since the epoch; `process` is null for a gone or unreadable pid; `peer`
@@ -86,7 +90,8 @@ export const descends = (pid: number, roots: readonly ProcessRoot[], lookup: Pro
 
 // What let an accepted peer in, as the check saw it (never looked up again: the tree can change right after): the relay's
 // exact instance, or the root it descends from (the object passed in `roots`).
-export type PeerAdmission = { via: 'relay' } | { via: 'root'; root: ProcessRoot };
+// `uid`: the uid boundary's (P5 O17 M2), any process of this user that reached the socket.
+export type PeerAdmission = { via: 'relay' } | { via: 'root'; root: ProcessRoot } | { via: 'uid' };
 
 type PeerCheck = { addon: PeerAddon | null; now: number; uid: number; relay?: ProcessRoot | null };
 
@@ -132,4 +137,27 @@ export function judgePeer(
   // LOCAL_PEERPID names the peer socket's last operator: a descriptor handed to another process during the walk shows here.
   if (read()?.pid !== pid) return { reason: 'not_descendant', pid };
   return { via: 'root', root };
+}
+
+// The uid boundary (P5 O17 M2), where no addon exists for the platform (Linux): the socket is 0600 in a 0700 directory
+// this uid owns, read by lstat at each accept (never through a symlink, no other owner, no wider mode), and the peer runs
+// as this uid where the platform reports it (an addon that reads the peer). It bounds the user, not the session: any
+// process of this uid that can reach the path is let in, which is what the policy states.
+export function judgeUidPeer(fd: number | null | undefined, socketPath: string, { addon, uid }: { addon: PeerAddon | null; uid: number }): PeerRefusal | PeerAdmission {
+  try {
+    assertPrivateSocket(socketPath, { uid });
+  } catch (error) {
+    return { reason: 'not_private', pid: null, detail: error instanceof Error ? error.message : String(error) };
+  }
+  if (!addon) return { via: 'uid' };
+  const read = (): { pid: number; uid: number } | null => {
+    try {
+      return typeof fd === 'number' ? addon.peer(fd) : null;
+    } catch {
+      return null;
+    }
+  };
+  const peer = read();
+  if (!peer) return { reason: 'peer_unavailable', pid: null };
+  return peer.uid === uid ? { via: 'uid' } : { reason: 'uid_mismatch', pid: peer.pid };
 }

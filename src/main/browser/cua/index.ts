@@ -24,11 +24,18 @@
 // or leased to whom, is `TabClaims`. The store's hooks reach every connection: a tab gone (`tabs.removed`), a tab changed
 // (`tabs.updated`), and a leased page's `window.open` adopted as a tab (`tabs.adopted`).
 //
+// P5 O17 M2 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md §H; condition 5 of O5's M7 verdict): the policy follows
+// the platform, as `mawsd`'s own sockets' does (its `uidBoundary`). On darwin, the process tree through the addon, and no
+// addon refuses every peer. Elsewhere (Linux, where no addon exists) the uid is the boundary, stated as such: the socket
+// is owner-only in a private directory, checked at each accept, and the peer runs as this user where the platform
+// reports it; any process of the user is let in, never told apart by session. On every platform the directory is
+// refused, and nothing listens, when it is a symlink or another user's.
+//
 // M3 (what the person sees and keeps): with `presence`, control follows the lease and the takeover gate holds acting
 // commands while the person has the tab (presence.ts); with `emit`, what the agent did reaches the windows
 // (`browser.agent.activity`, activity.ts); `downloads` is the agent's route for E4a's downloads (downloads.ts), and
 // `dialogs` the `-run-dialog` wrap's held route for a leased tab (dialogs.ts).
-import { chmodSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
@@ -39,13 +46,14 @@ import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
 import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
 import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket';
+import { assertPrivateDirectory } from '@shared/host/private-path';
 import { ActivityFeed } from './activity';
 import { TabClaims } from './claims';
 import { CuaConnection } from './connection';
 import { HeldDialogs } from './dialogs';
 import { agentDownloads, type AgentDownloads } from './downloads';
 import { AgentPresence, type PresenceDeps } from './presence';
-import { judgePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
+import { judgePeer, judgeUidPeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
 
 export interface CuaBackendDeps {
   store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update' | 'setControl' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
@@ -61,9 +69,11 @@ export interface CuaBackendDeps {
   // M3: an agent's finished download to the session's engine host (`maws.download.recorded`), which records it once
   recordDownload?(download: MawsDownloadRecorded): Promise<unknown>;
   now?(): number;
-  // The peer check: the loaded addon (null, or the option absent: every peer refused) and, under MAWS_E2E only, the roots
-  // trusted beside every session's engine (the e2e seam's `trustRoot` adds to the set).
-  peer?: { addon: PeerAddon | null; trustedRoots?: Set<ProcessRoot> };
+  // The peer check: the loaded addon (null, or the option absent: every peer refused on darwin) and, under MAWS_E2E only,
+  // the roots trusted beside every session's engine (the e2e seam's `trustRoot` adds to the set). P5 O17 M2: `platform`
+  // (this process's when absent) chooses the policy: darwin's process tree, else the uid boundary; `uid` is this process's
+  // user (a test stands in another to see a directory another user owns).
+  peer?: { addon: PeerAddon | null; trustedRoots?: Set<ProcessRoot>; platform?: NodeJS.Platform; uid?: number };
 }
 
 export interface CuaSessionInspection {
@@ -115,8 +125,22 @@ interface Listening {
   refused: number;
 }
 
-const refusalLine = (appSessionId: AppSessionId, { reason, pid }: PeerRefusal) =>
-  `cua socket of ${appSessionId}: refused peer${pid === null ? '' : ` pid ${pid}`} (${reason}${reason === 'module_unavailable' ? '; run scripts/build-peer-auth.sh' : ''})`;
+const refusalLine = (appSessionId: AppSessionId, { reason, pid, detail }: PeerRefusal) =>
+  `cua socket of ${appSessionId}: refused peer${pid === null ? '' : ` pid ${pid}`} (${reason}${detail === undefined ? '' : `: ${detail}`}${reason === 'module_unavailable' ? '; run scripts/build-peer-auth.sh' : ''})`;
+
+// P5 O17 M2: the socket directory made 0700 when missing, an older run's wider mode narrowed; null when it is private,
+// else why it is refused (a symlink, not a directory, another user's)
+function privateDirectory(dir: string, uid: number): string | null {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(dir);
+    if (stat.isDirectory() && stat.uid === uid) chmodSync(dir, 0o700); // only a real directory of this user (chmod follows a symlink)
+    assertPrivateDirectory(dir, { uid });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
 
 // The machine link as the relay's admission reads it: `confirm` resolves true once mawsd answered a request sent on this
 // same connection after the call (false: it failed, or the link is no longer the one told)
@@ -127,10 +151,14 @@ export interface RelayLink {
 
 export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const log = deps.log ?? ((line: string) => console.warn(`[browser] ${line}`));
+  const uid = deps.peer?.uid ?? process.getuid?.() ?? -1;
+  // P5 O17 M2: the uid boundary where the platform has no addon; with no peer option at all, darwin's (fail closed)
+  const platform = deps.peer ? (deps.peer.platform ?? process.platform) : 'darwin';
+  const uidBoundary = platform !== 'darwin';
   const dir = join(deps.userData, ...CUA_SOCKET_DIR);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700); // a directory an older run made otherwise
-  for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
+  const dirRefused = privateDirectory(dir, uid);
+  if (dirRefused !== null) log(`the cua socket directory ${dir} is refused (${dirRefused}): no session's browser is reachable`);
+  else for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
 
   const claims = new TabClaims<CuaConnection>();
   const sessions = new Map<AppSessionId, Listening>();
@@ -146,8 +174,8 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const addon = deps.peer?.addon ?? null;
   const trustedRoots = deps.peer?.trustedRoots ?? new Set<ProcessRoot>();
   const engineRoots = new Map<AppSessionId, ProcessRoot>();
-  const uid = process.getuid?.() ?? -1;
-  if (!addon) log('the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)');
+  if (uidBoundary) log(`${addon ? `the peer's uid checked on ${platform}` : `no peer identity check on ${platform}`}: the uid is the cua sockets' boundary (an owner-only socket in a private directory)`);
+  else if (!addon) log('the peer identity addon did not load: every cua connection will be refused (run scripts/build-peer-auth.sh)');
   const rootsOf = (appSessionId: AppSessionId): ProcessRoot[] => {
     const engine = engineRoots.get(appSessionId);
     return engine ? [engine, ...trustedRoots] : [...trustedRoots];
@@ -191,7 +219,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
     const relay = generation === relayAsk ? relayRoot : null;
-    const verdict = judgePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay });
+    const verdict = uidBoundary
+      ? judgeUidPeer(socketFd(socket), listening.path, { addon, uid })
+      : judgePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay });
     if ('reason' in verdict) {
       listening.refused += 1;
       log(refusalLine(appSessionId, verdict));
@@ -219,7 +249,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     socket.on('error', () => {}); // a socket destroyed while it waits reports nothing
     // the daemon's relay waits too while its confirmation is under way, so it is let in once it comes
     const daemon = fromRelay(socket, confirming) ? confirming : null;
-    if (addon && ((!hasLiveRoot(appSessionId) && !fromRelay(socket)) || daemon)) {
+    if (!uidBoundary && addon && ((!hasLiveRoot(appSessionId) && !fromRelay(socket)) || daemon)) {
       const generation = relayAsk;
       const timer = setTimeout(() => decide(appSessionId, listening, socket, acceptedAt, generation), PEER_ROOT_WAIT_MS);
       listening.pending.set(socket, { acceptedAt, timer, generation, daemon });
@@ -316,6 +346,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     socketPathFor(appSessionId) {
       const existing = sessions.get(appSessionId);
       if (existing) return existing.path;
+      if (dirRefused !== null) return null; // logged at start
       const path = cuaSocketPath(dir, appSessionId);
       if (path === null) {
         if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, `${appSessionId}.sock`))} bytes): cua cannot reach this session's browser`);

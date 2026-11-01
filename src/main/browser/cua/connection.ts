@@ -24,6 +24,11 @@
 //   badge (its group's title, else "agent") until the connection lets it go; the agent's downloads are reported to the
 //   host as Chrome's would be.
 //
+// - (P5 O17 M2) A lease is told only the CDP events its own commands asked for (event-scope.ts): each command is scoped
+//   as it is sent and settled at its answer; each event is read against the scope before it is told. What the
+//   connection keeps for itself (the children, the navigations and screenshots it tells the windows of, the targets'
+//   detaches) reads every event; the scope ends with the lease, a child's with its detach.
+//
 // Secrets: params, page content and typed text never reach a log line; errors name methods and tab ids only.
 import type { Socket } from 'node:net';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -33,6 +38,7 @@ import { personHolds } from '../agent/control';
 import type { DebuggerLease, TabDebugger } from '../debugger';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
+import { createEventScope, type CuaEventScope } from './event-scope';
 import { agentCapture, clickLabel, commandActivity, LABEL_LOOKUP_MS, navigatedUrl, within, type ActivityFeed } from './activity';
 import { commandClass, noteToggle, noToggles, methodNotAllowed, readsViewSize, routeCommand, undoCommands, type AgentToggles } from './filter';
 import { createPeer, frameDecoder, type Peer, type RpcHandler } from './framing';
@@ -93,6 +99,7 @@ interface Leased {
   awaitingFrame: boolean; // the agent's screencast started on the page, its first frame (the screenshot's row) not yet seen
   acted: boolean; // an acting command arrived through this lease: the windows were told `browser.agent.acting`
   released: Promise<void> | null; // the letting go under way, which a new attach waits for
+  scope: CuaEventScope; // P5 O17 M2: the events this lease's commands asked for
 }
 
 interface Held {
@@ -335,7 +342,7 @@ export class CuaConnection {
       this.refuseHeld(entry);
       fail(ERRORS.notLoaded(debuggee.tabId));
     }
-    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, acted: false, released: null };
+    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, acted: false, released: null, scope: createEventScope() };
     leased.stops.push(
       dbg!.on('*', (params, sessionId, method) => this.forward(leased, params, sessionId, method)),
       dbg!.onDetach(() => {
@@ -397,8 +404,21 @@ export class CuaConnection {
       }
       if (session === '') noteToggle(leased.toggles, method, commandParams);
       this.observe(leased, method, commandParams, session);
-      return leased.dbg.send(method, sent, session || undefined);
+      return this.scoped(leased, session, method, commandParams, () => leased.dbg.send(method, sent, session || undefined));
     });
+  }
+
+  // P5 O17 M2: the command as the lease's scope sees it, scoped before it goes (an enable can emit before it answers) and
+  // settled at its answer.
+  private scoped(leased: Leased, session: string, method: string, params: Record<string, unknown>, send: () => Promise<unknown>): Promise<unknown> {
+    const child = session || null;
+    leased.scope.willSend(child, method, params);
+    const reply = send();
+    reply.then(
+      () => leased.scope.answered(child, method, true),
+      () => leased.scope.answered(child, method, false),
+    );
+    return reply;
   }
 
   // What a command the agent sends on the page's own session did, for the windows: a press is told once its node is
@@ -557,13 +577,17 @@ export class CuaConnection {
       leased.awaitingFrame = false;
       this.tell(leased.entry, { kind: 'screenshot' });
     }
-    const tabId = this.idOf(leased.entry.tab.tabId);
-    this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
-    const child = sessionId ? leased.children.get(sessionId) : undefined;
-    if (child && leased.byTarget.has(child.targetId)) this.notify('debugger.event', { debuggee: { targetId: child.targetId }, method, params });
+    // P5 O17 M2: told only when the lease asked for it; everything above and below reads it all the same
+    if (leased.scope.admits(sessionId || null, method)) {
+      const tabId = this.idOf(leased.entry.tab.tabId);
+      this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
+      const child = sessionId ? leased.children.get(sessionId) : undefined;
+      if (child && leased.byTarget.has(child.targetId)) this.notify('debugger.event', { debuggee: { targetId: child.targetId }, method, params });
+    }
     if (sessionId === '' && method === 'Target.detachedFromTarget' && typeof p.sessionId === 'string') {
       const gone = leased.children.get(p.sessionId);
       leased.children.delete(p.sessionId);
+      leased.scope.detached(p.sessionId);
       if (gone && leased.byTarget.delete(gone.targetId)) this.notify('debugger.detached', { debuggee: { targetId: gone.targetId }, reason: 'target_closed' });
     }
   }
@@ -601,6 +625,7 @@ export class CuaConnection {
   // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `undoing`).
   private async release(leased: Leased, why: string): Promise<void> {
     leased.closing = true;
+    leased.scope.released(); // the agent let go: nothing more is told of the tab, the undo's events included
     const { tabId } = leased.entry.tab;
     this.cancelHeld(tabId, why);
     const commands = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });
@@ -646,6 +671,7 @@ export class CuaConnection {
     const tabId = leased.entry.tab.tabId;
     if (this.leases.get(tabId) !== leased) return;
     this.leases.delete(tabId);
+    leased.scope.released();
     for (const stop of leased.stops.splice(0)) stop();
     this.ctx.claims.unlease(tabId, this);
   }
