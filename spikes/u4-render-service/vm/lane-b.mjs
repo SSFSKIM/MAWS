@@ -5,7 +5,8 @@
 // machine's render host. Written from O10's acceptance-2 lane B (apps/desk-hub/deploy/vm/lane-b.mjs), whose link it
 // copies.
 //
-//   node lane-b.mjs scripted <directory>   the scripted engine: E2's recorded `maws` session
+//   node lane-b.mjs scripted <directory> [both|screenshot|export]
+//                                          the scripted engine: E2's recorded `maws` session
 //                                          (spikes/protocol-probe/fixtures/pass3/p1-maws-artifacts.jsonl) replayed by
 //                                          the engine host (C3's replay transport; the unit's mawsd needs
 //                                          MAWS_ENGINE_REPLAY=1 and a working directory holding
@@ -39,13 +40,18 @@ const RECORDING = join(REPO, 'spikes', 'protocol-probe', 'fixtures', 'pass3', 'p
 const PAGE = '<!doctype html><html><head><meta charset="utf-8"><title>O5 acceptance</title></head><body style="font-family:sans-serif;background:#f4f1ea"><h1>Rendered with no app</h1><p>한국어 · 日本語 · emoji 🎨</p></body></html>';
 const DOCUMENT = '# O5 acceptance\n\nThis document was exported to PDF by the render host of a machine with no app open. ^p1';
 // The calls the scripted engine makes, in the order of the recording's five `maws` tool uses
-const CALLS = [
-  { name: 'artifact_create', input: { kind: 'html', title: 'O5 acceptance page', handle: 'o5page', content: PAGE } },
-  { name: 'artifact_screenshot', input: { id: 'o5page' } },
-  { name: 'artifact_create', input: { kind: 'document', title: 'O5 acceptance document', handle: 'o5doc', content: DOCUMENT } },
-  { name: 'artifact_export', input: { artifact: 'o5doc', format: 'pdf' } },
-  { name: 'artifact_list', input: {} },
-];
+const CREATE_PAGE = { name: 'artifact_create', input: { kind: 'html', title: 'O5 acceptance page', handle: 'o5page', content: PAGE } };
+const SCREENSHOT = { name: 'artifact_screenshot', input: { id: 'o5page' } };
+const CREATE_DOCUMENT = { name: 'artifact_create', input: { kind: 'document', title: 'O5 acceptance document', handle: 'o5doc', content: DOCUMENT } };
+const EXPORT = { name: 'artifact_export', input: { artifact: 'o5doc', format: 'pdf' } };
+const LIST = { name: 'artifact_list', input: {} };
+// One session making both calls, or one per call (so `mawsd status` can be read between them, the first render host
+// ended after its quiet period): five calls each, the recording's count, a list filling the rest
+const CALLS = {
+  both: [CREATE_PAGE, SCREENSHOT, CREATE_DOCUMENT, EXPORT, LIST],
+  screenshot: [CREATE_PAGE, SCREENSHOT, LIST, LIST, LIST],
+  export: [CREATE_DOCUMENT, LIST, LIST, EXPORT, LIST],
+};
 
 /** A link to machine.sock: `request(name, input)` answers the response's value, or throws its error. */
 async function reach(dir, { helloMs = 5000 } = {}) {
@@ -229,14 +235,18 @@ function checked(profile, calls) {
   };
 }
 
-const passed = (result) => result.screenshot?.status === 'captured' && result.screenshot.image?.mimeType === 'image/png' && result.export?.status === 'exported' && result.export.underStore && result.export.pdf;
+const shotPassed = (result) => result.screenshot?.status === 'captured' && result.screenshot.image?.mimeType === 'image/png';
+const exportPassed = (result) => result.export?.status === 'exported' && result.export.underStore && result.export.pdf;
+const passed = (result, part) => (part === 'export' || shotPassed(result)) && (part === 'screenshot' || exportPassed(result));
 
 // --- the two runs ---------------------------------------------------------------------------------------------------
 
-async function scripted(link, profile, directory) {
+async function scripted(link, profile, directory, part) {
   mkdirSync(directory, { recursive: true });
-  const rows = scriptedFixture(RECORDING, CALLS);
-  const fixture = join(directory, 'o5-render-replay.jsonl');
+  const calls = CALLS[part];
+  if (calls === undefined) throw new Error(`no part ${part}: both, screenshot or export`);
+  const rows = scriptedFixture(RECORDING, calls);
+  const fixture = join(directory, `o5-render-replay-${part}.jsonl`);
   writeFileSync(fixture, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
   const { appSessionId: app } = await link.request('session.create', { projectId: null, location: { kind: 'directory', path: directory } });
   const spec = {
@@ -249,7 +259,7 @@ async function scripted(link, profile, directory) {
   await link.request('session.send', { appSessionId: app, content: firstPrompt(rows) }, 30_000);
   const status = await until(
     () => link.request('session.status', { appSessionId: app }),
-    (s) => s?.turn === null && mawsCalls(journalOf(profile, app)).filter((c) => c.result !== null).length >= CALLS.length,
+    (s) => s?.turn === null && mawsCalls(journalOf(profile, app)).filter((c) => c.result !== null).length >= calls.length,
     `the replayed session ${app}'s five maws calls answered`,
     240_000,
   );
@@ -307,17 +317,18 @@ function engineVersionOf(rows) {
   return null;
 }
 
-async function main([verb, directory]) {
-  if ((verb !== 'scripted' && verb !== 'live') || !directory) throw new Error('lane-b.mjs scripted <directory> | live <directory>');
+async function main([verb, directory, part = 'both']) {
+  if ((verb !== 'scripted' && verb !== 'live') || !directory) throw new Error('lane-b.mjs scripted <directory> [both|screenshot|export] | live <directory>');
   const profile = process.env.MAWS_USER_DATA || join(homedir(), '.config', 'MAWS');
   const link = await reach(join(profile, 'mawsd'));
   try {
     const before = (await link.request('daemon.status', undefined)).render ?? null; // also wakes the parked engine host
-    const run = verb === 'scripted' ? await scripted(link, profile, resolve(directory)) : await live(link, profile, resolve(directory));
+    const run = verb === 'scripted' ? await scripted(link, profile, resolve(directory), part) : await live(link, profile, resolve(directory));
     const result = checked(profile, mawsCalls(journalOf(profile, run.app)));
     const after = (await link.request('daemon.status', undefined)).render ?? null;
-    console.log(JSON.stringify({ verb, ...run, renderBefore: before, renderAfter: after, ...result, passed: passed(result) }));
-    if (!passed(result)) process.exitCode = 1;
+    const ok = passed(result, verb === 'live' ? 'both' : part);
+    console.log(JSON.stringify({ verb, part: verb === 'live' ? 'both' : part, ...run, renderBefore: before, renderAfter: after, ...result, passed: ok }));
+    if (!ok) process.exitCode = 1;
   } finally {
     link.close();
   }
