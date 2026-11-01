@@ -170,7 +170,7 @@
 "commands.session.intent.resolveWorktree.input":[".appSessionId AppSessionId"],
 "commands.session.intent.resolveWorktree.output":[".intent.appSessionId AppSessionId",".intent.lineage.parentAppSessionId AppSessionId",".intent.progress.bootstrap.appSessionId AppSessionId",".intent.projectId ProjectId",".intent.source.appSessionId AppSessionId"],
 "commands.session.interrupt.input":[".appSessionId AppSessionId"],
-"commands.session.launch.input":[".artifactScope[] AppSessionId",".spec.appSessionId AppSessionId",".spec.inheritGrantsFrom AppSessionId"],
+"commands.session.launch.input":[".artifactScope[] AppSessionId",".spec.appSessionId AppSessionId",".spec.inheritGrantsFrom AppSessionId",".spec.launchedBy.appSessionId AppSessionId"],
 "commands.session.launch.output":["<status=launching>.session.appSessionId AppSessionId"],
 "commands.session.list.output":[".sessions[].appId AppSessionId",".sessions[].lineage.parentAppSessionId AppSessionId",".sessions[].projectId ProjectId"],
 "commands.session.listModels.input":[".appSessionId AppSessionId"],

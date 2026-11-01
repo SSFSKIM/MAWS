@@ -233,6 +233,14 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
     expect(OlderLaunchSpecSchema.parse(file.launchSpec)).toEqual(spec);
     expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).toEqual(spec);
   });
+
+  // P5 O12 M11: nor the spawner, which each launch takes from the session's record
+  it('saveLaunchSpec writes no launchedBy either', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveLaunchSpec(ID, { ...spec, launchedBy: { appSessionId: ID, member: 'mem-a', device: 'dev-1', opId: 'op-0123456789abcdef', proofFile: '/p/app.json' } });
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
+    expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify(spec)));
+  });
 });
 // P2-C end
 

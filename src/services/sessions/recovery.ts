@@ -85,6 +85,7 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveR
   }
 
   s.sessions.remove(appSessionId);
+  await s.spawnerProofs.remove(appSessionId); // P5 O12 M11: with the record; the next start writes it again
   const resources: SetupResources = { worktree: retainedWorktree(intent), record: 'removed', transcript: 'none' };
   const next: SetupIntent = { ...intent, updatedAt: s.now(), progress: { ...intent.progress, lastFailure: { at: s.now(), phase: 'launching', message: 'MAWS quit before the session started', resources } } };
   await s.intents.put(next);
