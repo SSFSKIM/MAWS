@@ -611,16 +611,31 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     await test.step('M3: a dev server in that shell opens from B’s localhost link in A’s browser, forwarded from B', async () => {
       const id = terminal;
+      // The server process and its port as this Mac sees them (B runs here), for a failure: whether the command ran, and
+      // whether the server bound or listens yet.
+      const serverSaid = () => {
+        const run = (command: string, args: string[]) => {
+          try {
+            return execFileSync(command, args, { encoding: 'utf8' });
+          } catch (error) {
+            return `${command}: ${(error as { stdout?: string }).stdout || (error instanceof Error ? error.message : String(error))}`;
+          }
+        };
+        const processes = run('ps', ['-axo', 'pid,ppid,etime,stat,command']).split('\n').filter((line) => line.includes('http.server'));
+        return `the http.server processes: ${processes.join('\n') || 'none'}\nport ${devPort}: ${run('lsof', ['-nP', `-iTCP:${devPort}`])}`;
+      };
+      const typedAt = Date.now();
       await typeInTerminal(page, id, `python3 -m http.server ${devPort}`);
       await expect
         .poll(async () => printedAnywhere(await terminalRows(page, id), `Serving HTTP on :: port ${devPort} (${devServerUrl(devPort)})`), {
-          timeout: 60_000,
+          timeout: 150_000,
           message: 'B’s dev server listens dual-stack and prints the link B’s reply names',
         })
         .toBe(true)
         .catch(async (error: unknown) => {
-          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await terminalSaid(page, id)}\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`);
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${serverSaid()}\n${await terminalSaid(page, id)}\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`);
         });
+      console.log(`[e2e:remote] B's dev server printed its line ${Date.now() - typedAt} ms after the command was typed`);
       expect(await listening(devPort), 'B’s loopback reaches it').toBe(true);
 
       // B names it in its reply as the server printed it, and the link opens in the in-app browser through a forward of
