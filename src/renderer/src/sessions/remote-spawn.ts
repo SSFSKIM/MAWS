@@ -14,6 +14,8 @@
 //   any remote draft), the tab moves, and the new session's composer sends it once it is open, through the remote send
 //   path (its files go up first, then one `session.send` names their paths there; a failed upload keeps the text with
 //   Send again on the session that started).
+// - A spawn answered `timeout` (the machine took it, no outcome yet) is asked again, by Retry or Send, with the same input,
+//   whatever the text became: main's adapter answers it from the act it still queries, so it starts one session.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
@@ -39,11 +41,14 @@ export interface SpawnTarget {
 
 export interface RemoteSpawnStore {
   chosen: ReadonlyMap<AppSessionId, SpawnTarget>; // by New chat tab; absent: this Mac
-  spawning: ReadonlyMap<AppSessionId, string>; // the tabs whose spawn is on its way, with the machine's name
+  spawning: ReadonlyMap<AppSessionId, string>; // the tabs whose spawn is on its way, with the words that say so
   choose(tab: AppSessionId, target: SpawnTarget | null): void;
 }
 
 const firstSends = new Set<AppSessionId>(); // the spawned sessions whose composer sends the handed document once
+// A spawn the machine took but hadn't confirmed (`timeout`), by New chat tab: its next spawn sends the same input, which
+// main's adapter answers from the same act (one opId, queried), never a second session.
+const unconfirmed = new Map<AppSessionId, { machine: MachineRef; input: SessionSpawnInput }>();
 
 export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
   chosen: new Map(),
@@ -60,6 +65,7 @@ export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
 
 export function resetRemoteSpawn(): void {
   firstSends.clear();
+  unconfirmed.clear();
   useRemoteSpawn.setState({ chosen: new Map(), spawning: new Map() });
 }
 
@@ -71,6 +77,8 @@ const targetFor = (chosen: ReadonlyMap<AppSessionId, SpawnTarget>, tab: AppSessi
 export const spawnTargetOf = (tab: AppSessionId, key: string | null): SpawnTarget | null => targetFor(useRemoteSpawn.getState().chosen, tab, key);
 export const useSpawnTarget = (tab: AppSessionId, key: string | null): SpawnTarget | null => useRemoteSpawn((s) => targetFor(s.chosen, tab, key));
 export const useSpawning = (tab: AppSessionId): string | null => useRemoteSpawn((s) => s.spawning.get(tab) ?? null);
+/** Whether the tab's last spawn was taken but not confirmed: its next try checks on that start. */
+export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.has(tab);
 
 /** The spawned session's composer sends the document it was handed (its remote draft) once it opens. */
 export function queueFirstSend(appSessionId: AppSessionId): void {
@@ -102,6 +110,10 @@ export async function readCandidates(key: string, client: MawsBridge = ipc): Pro
 
 export const SPAWN_WORDS = {
   starting: (machine: string) => `Starting on ${machine}…`,
+  checking: (machine: string, edited = false) => `Checking on the start on ${machine}…${edited ? ' Your edit is sent only once this start is settled' : ''}`,
+  unconfirmed: (machine: string, edited = false) => `Still starting on ${machine}: it took the request but hasn’t confirmed it yet${edited ? '. Your edit is sent only once this start is settled' : ''}`,
+  checkAgain: 'Check again',
+  editKept: (machine: string) => `Started on ${machine} with your first message; your edit is in the message box, not sent`,
   untrusted: (machine: string) => `This project isn’t trusted on ${machine} yet; open it there and trust it first`,
   unknownCheckout: (machine: string) => `${machine} no longer has this project’s checkout; choose the machine again`,
   worktreeExists: (machine: string) => `${machine} already has a worktree of that name; turn Worktree off and on for a new name`,
@@ -150,20 +162,30 @@ export interface SpawnRequest {
   mode: string; // the composer's permission mode
 }
 
-const setSpawning = (tab: AppSessionId, machine: string | null) =>
+const setSpawning = (tab: AppSessionId, words: string | null) =>
   useRemoteSpawn.setState((s) => {
     const spawning = new Map(s.spawning);
-    if (machine === null) spawning.delete(tab);
-    else spawning.set(tab, machine);
+    if (words === null) spawning.delete(tab);
+    else spawning.set(tab, words);
     return { spawning };
   });
 
-/** Starts the session on the target's machine and moves the tab there; null once it did, else the words why not. */
-export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge = ipc): Promise<string | null> {
+/** A spawn's outcome: started (the tab moved, with a note to say), or not, in words, with whether a try checks on it. */
+export type SpawnOutcome = { started: true; note?: string } | { started: false; words: string; checkAgain: boolean };
+
+/** Starts the session on the target's machine and moves the tab there. */
+export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge = ipc): Promise<SpawnOutcome> {
   const { from, target, s, doc, intent, mode } = request;
-  const handed = attachmentsOf(doc).length > 0; // the first message goes from the new session's composer
-  const brief = !handed && s.text.trim() !== '' ? s.text : null;
-  const input: SessionSpawnInput = {
+  const asked = unconfirmed.get(from);
+  const again = asked?.machine === target.machine ? asked.input : null; // a check on the start the machine took
+  const attached = attachmentsOf(doc).length > 0;
+  const text = s.text.trim() !== '' ? s.text : null;
+  // The first message goes from the new session's composer when the spawn carries no brief (attachments go up first);
+  // a check on a start that carried one leaves an edit since in the message box, unsent.
+  const handed = again === null ? attached : again.brief === undefined;
+  const editKept = again?.brief !== undefined && (attached || text !== again.brief);
+  const brief = !handed ? text : null;
+  const input: SessionSpawnInput = again ?? {
     checkout: target.checkout,
     permission_mode: mode,
     ...(intent.model !== null && { model: intent.model }),
@@ -171,24 +193,25 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
     ...(intent.location?.kind === 'newWorktree' && { worktree: intent.location.name }),
     ...(brief !== null && { brief }),
   };
-  setSpawning(from, target.name);
+  setSpawning(from, again === null ? SPAWN_WORDS.starting(target.name) : SPAWN_WORDS.checking(target.name, editKept));
   let spawned: AppSessionId;
   try {
     const result = await client.invoke('session.spawn', input, { machine: target.machine });
-    if (!result.ok) return spawnErrorWords(result.error, target.name);
-    if (result.value.status !== 'ok') return refusedWords(result.value.reason, target.name);
+    if (!result.ok && result.error.code === 'timeout') unconfirmed.set(from, { machine: target.machine, input });
+    else unconfirmed.delete(from);
+    if (!result.ok && result.error.code === 'timeout') return { started: false, words: SPAWN_WORDS.unconfirmed(target.name, editKept), checkAgain: true };
+    if (!result.ok) return { started: false, words: spawnErrorWords(result.error, target.name), checkAgain: false };
+    if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name), checkAgain: false };
     spawned = result.value.appSessionId;
   } finally {
     setSpawning(from, null);
   }
-  if (handed) {
-    rememberRemoteDraft(spawned, doc);
-    queueFirstSend(spawned);
-  }
+  if (handed || editKept) rememberRemoteDraft(spawned, doc);
+  if (handed) queueFirstSend(spawned);
   useLayout.getState().retargetTab(tabId({ kind: 'session', appSessionId: from }), { kind: 'session', appSessionId: spawned });
   useRemoteSpawn.getState().choose(from, null);
   void client.invoke('session.intent.discard', { appSessionId: from }).then((result) => {
     if (!result.ok) console.warn('[sessions] the New chat tab’s intent was not discarded after its spawn', result.error);
   });
-  return null;
+  return editKept ? { started: true, note: SPAWN_WORDS.editKept(target.name) } : { started: true };
 }

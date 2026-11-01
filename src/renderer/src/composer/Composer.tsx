@@ -308,9 +308,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         try {
           const doc = handle.current?.doc() ?? emptyDoc();
           if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
-          const error = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default' }, client);
-          if (error === null) return true;
-          warn(error, retry);
+          const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default' }, client);
+          if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
+          if (spawned.started) return true;
+          // a start the machine took but hasn't confirmed: the try checks on it (the same act), it never starts another
+          warn(spawned.words, retry, undefined, spawned.checkAgain ? SPAWN_WORDS.checkAgain : 'Retry');
           return false;
         } finally {
           setStarting(appSessionId, false);
@@ -442,7 +444,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {/* P5 O7 M4: a New chat tab's session starting on another machine (the sheet and Touch ID come first) */}
       {spawning !== null && (
         <p role="status" aria-label="Starting" className="m-0 text-ui-sm text-fg-muted">
-          {SPAWN_WORDS.starting(spawning)}
+          {spawning}
         </p>
       )}
       {/* P5 O7 M2: a send on its way to a session on another machine */}

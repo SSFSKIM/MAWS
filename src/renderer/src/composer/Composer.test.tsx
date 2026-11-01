@@ -24,7 +24,7 @@ import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-sess
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
-import { queueFirstSend, resetRemoteSpawn, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { queueFirstSend, resetRemoteSpawn, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -879,6 +879,28 @@ describe('a New chat tab started on another machine', () => {
     expect(editorOf().editor.getText()).toBe('build it');
     expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull();
     expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('after a timeout offers Check again, which asks after the same start rather than starting another', async () => {
+    stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    await act(() => fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((x) => x.label)])).toEqual([[SPAWN_WORDS.unconfirmed('mini'), ['Check again']]]));
+    await type(' and test it');
+    act(() => useNotices.getState().notices[0].actions[0].run());
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe(SPAWN_WORDS.checking('mini', true));
+    expect(invoked('session.spawn')).toEqual([
+      { checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' },
+      { checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it' },
+    ]);
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' })); // settled: the next try starts afresh
+    await waitFor(() => expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull());
+    expect(editorOf().editor.getText()).toBe('build it and test it'); // the edit stayed
   });
 
   it('takes a file for the chosen machine, and back on this Mac refuses to start without it', async () => {

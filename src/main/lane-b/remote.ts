@@ -186,6 +186,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   });
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
+  /** The spawns answered `timeout` whose outcome no caller has had, by machine and input: the next ask awaits the same act. */
+  const unansweredSpawns = new Map<string, ActHandle>();
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -304,17 +306,32 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    * the moment it went out: the time at the sheet is the person's, not the machine's.
    */
   async function spawn(link: RemoteLink, fields: Fields): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: 'session.spawn', args: fields, executor: 'machine', stepUp: 'required' });
-    await new Promise<void>((resolve) => {
-      if (handle.progress() !== 'waiting') return resolve();
-      const off = handle.onProgress((progress) => {
-        if (progress === 'waiting') return;
-        off();
-        resolve();
+    // M4c fix wave 1 (the architect's ruling): a spawn asked again with the same input after it answered `timeout` is
+    // the same act, its opId still queried (RL4's opQuery), never a second session; it is held until its outcome reaches
+    // a caller, and a refused or failed outcome said once lets the next try be a new act.
+    const key = `${link.machine}\n${JSON.stringify(Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))}`;
+    let handle = unansweredSpawns.get(key);
+    if (handle === undefined) {
+      const fresh = link.act({ action: 'session.spawn', args: fields, executor: 'machine', stepUp: 'required' });
+      await new Promise<void>((resolve) => {
+        if (fresh.progress() !== 'waiting') return resolve();
+        const off = fresh.onProgress((progress) => {
+          if (progress === 'waiting') return;
+          off();
+          resolve();
+        });
+        void fresh.outcome.then(() => (off(), resolve()));
       });
-      void handle.outcome.then(() => (off(), resolve()));
-    });
-    return settle(link, 'session.spawn', handle, now() + timing.spawnPendingMs, String(fields.checkout ?? ''));
+      handle = fresh;
+    }
+    const outcome = await bounded(handle, now() + timing.spawnPendingMs);
+    if (outcome === 'pending') {
+      if (!unansweredSpawns.has(key)) deps.log(`lane B: session.spawn on ${link.name}/${String(fields.checkout ?? '')} (${handle.opId}) unconfirmed at the pending bound; held for the next ask`);
+      unansweredSpawns.set(key, handle);
+      return pendingResult('session.spawn', link.name);
+    }
+    if (unansweredSpawns.get(key) === handle) unansweredSpawns.delete(key);
+    return outcomeAsResult('session.spawn', link.name, outcome);
   }
 
   /** `files.upload` in parts, after any upload to the same session before it (P5 O7 M4, "Uploads in parts"). */

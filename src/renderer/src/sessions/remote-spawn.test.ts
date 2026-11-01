@@ -19,7 +19,7 @@ import { serializeDraft } from '../composer/editor/serialize';
 import { rememberingRemoteDrafts, resetRemoteDrafts } from '../composer/editor/drafts';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
-import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, spawnTargetOf, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
+import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 
 const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const LOCAL_TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
@@ -95,7 +95,7 @@ describe('a spawn on another machine', () => {
 
   it('sends the text as the brief with the composer’s mode and model, to the machine, then moves the tab there and drops the local intent', async () => {
     const { fake, run } = spawnOf();
-    await expect(run).resolves.toBeNull();
+    await expect(run).resolves.toEqual({ started: true });
     expect(fake.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'acceptEdits', model: 'opus', effort: 'high', brief: 'fix the build' }]);
     expect(fake.machines('session.spawn')).toEqual([OTHER_MACHINE]);
     expect(tabOpen(NEW)).toBe(true);
@@ -114,7 +114,7 @@ describe('a spawn on another machine', () => {
     const pdf: Attachment = { id: 'a1', kind: 'document', name: 'spec.pdf', mediaType: 'application/pdf', bytes: 3, data: 'JVBE', persisted: true };
     const doc = docOf([paragraph(textNode('read this'))], [pdf]);
     const { fake, run } = spawnOf(doc);
-    await expect(run).resolves.toBeNull();
+    await expect(run).resolves.toEqual({ started: true });
     expect(fake.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'acceptEdits', model: 'opus', effort: 'high' }]);
     expect(tabOpen(NEW)).toBe(true);
     const handed = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: () => {} }, NEW, () => true).load();
@@ -133,7 +133,7 @@ describe('a spawn on another machine', () => {
     for (const [value, words] of answers) {
       const fake = fakeClient({ 'session.spawn': value });
       const doc = docOf([paragraph(textNode('go'))]);
-      await expect(spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client), words).resolves.toBe(words);
+      await expect(spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client), words).resolves.toEqual({ started: false, words, checkAgain: false });
       expect(tabOpen(LOCAL_TAB)).toBe(true);
       expect(fake.invoked('session.intent.discard')).toEqual([]);
     }
@@ -142,8 +142,57 @@ describe('a spawn on another machine', () => {
     const run = spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
     await Promise.resolve();
     await fake.fail('session.spawn', 'Not sent: mini is offline', 'host_unavailable');
-    await expect(run).resolves.toBe('Not sent: mini is offline'); // main's own words pass through
+    await expect(run).resolves.toEqual({ started: false, words: 'Not sent: mini is offline', checkAgain: false }); // main's own words pass through
     expect(tabOpen(LOCAL_TAB)).toBe(true);
+  });
+
+  it('after a timeout checks on the same start, its input as first sent whatever the text became, and starts one session', async () => {
+    const fake = fakeClient();
+    const first = docOf([paragraph(textNode('fix the build'))]);
+    const ask = (doc: ReturnType<typeof docOf>) => spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    const run = ask(first);
+    await Promise.resolve();
+    expect(useRemoteSpawn.getState().spawning.get(LOCAL_TAB)).toBe(SPAWN_WORDS.starting('mini'));
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await expect(run).resolves.toEqual({ started: false, words: SPAWN_WORDS.unconfirmed('mini'), checkAgain: true });
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+
+    const edited = docOf([paragraph(textNode('fix the build and the tests'))]);
+    const again = ask(edited);
+    await Promise.resolve();
+    expect(useRemoteSpawn.getState().spawning.get(LOCAL_TAB)).toBe(SPAWN_WORDS.checking('mini', true));
+    await fake.reply('session.spawn', ok);
+    await expect(again).resolves.toEqual({ started: true, note: SPAWN_WORDS.editKept('mini') });
+    expect(fake.invoked('session.spawn')).toEqual([
+      { checkout: '/srv/app', permission_mode: 'default', brief: 'fix the build' },
+      { checkout: '/srv/app', permission_mode: 'default', brief: 'fix the build' }, // the same input: main answers it from the same act
+    ]);
+    expect(tabOpen(NEW)).toBe(true);
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+    expect(takeFirstSend(NEW)).toBe(false); // the edit is kept, not sent
+    const kept = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: () => {} }, NEW, () => true).load();
+    expect(JSON.stringify(kept?.doc)).toContain('fix the build and the tests');
+  });
+
+  it('after a timeout and then a refusal, the next start is a new one', async () => {
+    const fake = fakeClient();
+    const ask = (text: string) => {
+      const d = docOf([paragraph(textNode(text))]);
+      return spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    };
+    const run = ask('go');
+    await Promise.resolve();
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await run;
+    const again = ask('go');
+    await Promise.resolve();
+    await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
+    await expect(again).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), checkAgain: false });
+    const fresh = ask('go now');
+    await Promise.resolve();
+    await fake.reply('session.spawn', ok);
+    await fresh;
+    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'default', brief: 'go now' });
   });
 
   it('words the machine’s and the link’s refusals', () => {
