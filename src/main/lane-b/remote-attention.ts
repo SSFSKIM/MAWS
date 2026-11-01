@@ -25,6 +25,9 @@
 //   whose feed ended is said by its sessions' streams' items (`streamItems`), greyed at `down` and live again at `up`,
 //   never by the ended feed's emptied cache (fix wave 3). A change or a snapshot the channel couldn't carry (`omitted`)
 //   ends the feed on that channel the same way.
+// - Fix wave 5: who speaks is one predicate, `fed` (the feed's snapshot came on its current opening): while it holds, the
+//   feed alone speaks for the machine's sessions (the renderer, a page's replay, the badge, the notifier); before it, and
+//   whenever no feed follows, their streams do, a feed that is opening (or reopening after a channel had none) included.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -58,7 +61,13 @@ export interface RemoteAttention {
    * stream says none of its own: the feed's items are the machine's whole list, the stream's the broker's alone.
    */
   follows(machine: MachineRef): boolean;
-  /** Fix wave 1: a session's items said again from the feed (a page's `session.get`), while the feed follows. */
+  /**
+   * Fix wave 5: the one predicate for who speaks for the machine's sessions: its feed once its snapshot came on the
+   * current opening (true), else their streams (false). The streams' `attention.changed` is suppressed, a page's replay
+   * told, the badge and the notifier counted, and `sayAgain` said, all by it.
+   */
+  fed(machine: MachineRef): boolean;
+  /** Fix wave 1: a session's items said again from the feed (a page's `session.get`), while it is fed (fix wave 5). */
   replay(machine: MachineRef, app: string): void;
   /** Fix wave 4: a session's stream's items changed (its parts, or its lane let go): heard while they are the machine's. */
   streamsChanged(machine: MachineRef, app: string): void;
@@ -332,9 +341,13 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
       const feed = feeds.get(machine);
       return !stopped && feed !== undefined && following(feed);
     },
+    fed(machine) {
+      const feed = feeds.get(machine);
+      return !stopped && feed !== undefined && feed.fed;
+    },
     replay(machine, app) {
       const feed = feeds.get(machine);
-      if (stopped || feed === undefined || !following(feed)) return; // the stream says its own
+      if (stopped || feed === undefined || !feed.fed) return; // the stream says its own (fix wave 5: by the same predicate)
       deps.emit(machine, 'attention.changed', { appSessionId: app as AppSessionId, items: effective(machine, feed).get(app) ?? [] });
     },
     streamsChanged(machine, app) {

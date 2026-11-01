@@ -799,9 +799,9 @@ describe('the attention feed beside a session’s stream', () => {
     l.setLinks(new Map([[MINI, l.link]]));
     const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
-    expect(attentionOf(l)).toHaveLength(1); // the feed is opening: it speaks now
+    expect(attentionOf(l)).toHaveLength(2); // fix wave 5: the feed is opening, not fed: the stream still speaks
     feed.sink.ended('not-offered'); // an endpoint older than M6
-    expect(attentionOf(l)).toEqual([['att-req-1'], ['att-req-1']]);
+    expect(attentionOf(l)).toEqual([['att-req-1'], ['att-req-1'], ['att-req-1']]);
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
     expect(attentionOf(l).at(-1)).toEqual([]);
   });
@@ -863,6 +863,79 @@ describe('the attention feed beside a session’s stream', () => {
       expect(raised).toHaveLength(2); // the error, new; the permission seen before
     } finally {
       stop();
+    }
+  });
+
+  // fix wave 5: one predicate (`fed`) for who speaks, so what the renderer is told and what the dock counts agree
+  /** The renderer's partition for the machine, as the store applies what main says: `remote.attention` replaces it whole, `attention.changed` one session. */
+  function shown(l: ReturnType<typeof lab>) {
+    let at = 0;
+    const sessions = new Map<string, Array<{ id: string }>>();
+    return () => {
+      for (const e of l.emitted.slice(at)) {
+        if (e.name === 'remote.attention') {
+          sessions.clear();
+          for (const i of e.payload.items as Array<{ id: string; appSessionId: string }>) sessions.set(i.appSessionId, [...(sessions.get(i.appSessionId) ?? []), i]);
+        }
+        if (e.name === 'attention.changed') sessions.set(e.payload.appSessionId as string, e.payload.items as Array<{ id: string }>);
+      }
+      at = l.emitted.length;
+      return [...sessions.values()].flat().map((i) => i.id);
+    };
+  }
+  function badgeOf(l: ReturnType<typeof lab>) {
+    const badges: number[] = [];
+    const stop = startNotifier(fakeSpineView(), {
+      port: { notify: () => ({ close: () => {} }), badge: (_c, count) => void badges.push(count), focus: () => ({}) as never },
+      isFocused: () => false, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: () => true, emitFrom: () => true,
+      remote: l.adapter.attention,
+    });
+    return { badge: () => badges.at(-1), stop };
+  }
+
+  it('agrees with the dock before a feed’s first snapshot: the stream’s permission is shown and counted', async () => {
+    const l = lab();
+    const view = shown(l);
+    const dock = badgeOf(l);
+    try {
+      l.link.peers = ['rl2.executor.machine', 'rl2.feeds'];
+      l.setLinks(new Map([[MINI, l.link]])); // the feed opens; its snapshot is held
+      const sub = await live(l);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      l.adapter.attention.sayAgain();
+      expect(dock.badge()).toBe(1);
+      expect(view()).toEqual(['att-req-1']);
+      // its snapshot takes the partition; from then on the feed alone speaks
+      const feed = l.link.open().find((s) => s.request.feed === 'attention')!;
+      feed.sink.subbed('snapshot', { epoch: 'attention:boot', seq: 0 });
+      feed.sink.snapshot({ epoch: 'attention:boot', seq: 0 }, [error]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      expect(view()).toEqual(['att-err']);
+      expect(dock.badge()).toBe(1);
+    } finally {
+      dock.stop();
+    }
+  });
+
+  it('agrees with the dock when a feed returns on a new channel with the link staying up and the stream clears before its snapshot', async () => {
+    const l = lab();
+    const view = shown(l);
+    const dock = badgeOf(l);
+    try {
+      const sub = await live(l);
+      const feed = fed(l, [asked]);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
+      feed.sink.ended('not-offered');
+      expect(view()).toEqual(['att-req-1']);
+      expect(dock.badge()).toBe(1);
+      l.link.peers = ['rl2.executor.machine', 'rl2.feeds']; // a reconnect within the grace: a new h2 list, the state still up
+      l.link.setCaps({ ...l.link.caps()! });
+      expect(l.link.open().filter((s) => s.request.feed === 'attention')).toHaveLength(1);
+      sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([]));
+      expect(dock.badge()).toBe(0);
+      expect(view()).toEqual([]);
+    } finally {
+      dock.stop();
     }
   });
 

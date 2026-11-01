@@ -214,7 +214,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const machines = new Map<MachineRef, { link: RemoteLink; lanes: Map<string, Lane> }>();
   let revision = 0;
   const sessionOf = (machine: MachineRef, app: string) => machines.get(machine)?.lanes.get(app)?.session;
-  // P5 O7 M6: one machine-wide attention feed per link; while it follows, the sessions' streams say no attention of
+  // P5 O7 M6: one machine-wide attention feed per link; once it is fed (fix wave 5), the sessions' streams say no attention of
   // their own, and when it stops (no feed on the channel) they say theirs again (fix wave 1)
   const attention = createRemoteAttention({
     remote: deps.remote,
@@ -271,7 +271,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
-        attentionFed: () => attention.follows(machine), // fix wave 1: the feed's items are the session's attention
+        attentionFed: () => attention.fed(machine), // fix waves 1, 5: the feed's items are the session's attention once fed
         attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         log: deps.log,
       });
@@ -527,7 +527,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
-      attention.replay(machine, app); // fix wave 1: the feed's items, which the stream's replay leaves out while it follows
+      attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
     },
     stop() {
       interest.stop();
