@@ -47,13 +47,15 @@ export interface RemoteSpawnStore {
 }
 
 const firstSends = new Set<AppSessionId>(); // the spawned sessions whose composer sends the handed document once
-// A spawn the machine took but hasn't confirmed (`timeout`, or `unknown`), by New chat tab, in the window's session storage
-// (it outlives a reload of the page, as main's attempt does): the tab's next ask is a check on it, under the same attempt
-// key. Main answers it from that attempt (one act, its op queried; never a second session). The record restores the
-// machine the tab was starting on after a reload, and keeps the input it sent, to say whether the text changed since.
-// `attempt`: the key's number (0: the tab's own id; n: `<tab>~n`, after the person chose to start anew).
+// A New chat tab's spawn attempt, in the window's session storage (it outlives a reload of the page, as main's attempt
+// does), written before the spawn is asked: the machine it starts on (restored on a reload, so the tab's next Send goes
+// there, never to this Mac), the input sent, and the attempt key's number (0: the tab's own id; n: `<tab>~n`, after the
+// person chose "Start a new session"), kept until the tab moves to its new session or the person chooses another machine,
+// never because a request failed. `open`: main may hold the attempt (out, or answered `timeout` or `unknown`), so the
+// tab's next ask is a check on it under the same key, with the input first sent; a definitive refusal closes it, and the
+// next Send is a new start under the same key. `unknown`: its last answer was unknown (main keeps it unresolved).
 const UNCONFIRMED = 'maws.spawn.unconfirmed:';
-type Unconfirmed = { target: SpawnTarget; input: SessionSpawnInput; attempt: number; unknown: boolean };
+type Unconfirmed = { target: SpawnTarget; input: SessionSpawnInput; attempt: number; open: boolean; unknown: boolean };
 const unconfirmed = {
   get(tab: AppSessionId): Unconfirmed | null {
     const kept = sessionStorage.getItem(UNCONFIRMED + tab);
@@ -82,6 +84,9 @@ export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
   chosen: heldTargets(),
   spawning: new Map(),
   choose(tab, target) {
+    // another machine chosen (or this Mac): the held attempt is the person's to leave
+    const held = unconfirmed.get(tab);
+    if (held !== null && held.target.machine !== target?.machine) unconfirmed.delete(tab);
     set((s) => {
       const chosen = new Map(s.chosen);
       if (target === null) chosen.delete(tab);
@@ -111,7 +116,7 @@ export const spawnTargetOf = (tab: AppSessionId, key: string | null): SpawnTarge
 export const useSpawnTarget = (tab: AppSessionId, key: string | null): SpawnTarget | null => useRemoteSpawn((s) => targetFor(s.chosen, tab, key));
 export const useSpawning = (tab: AppSessionId): string | null => useRemoteSpawn((s) => s.spawning.get(tab) ?? null);
 /** Whether the tab's last spawn was taken but not confirmed: its next try checks on that start. */
-export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.get(tab) !== null;
+export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.get(tab)?.open === true;
 
 /** The spawned session's composer sends the document it was handed (its remote draft) once it opens. */
 export function queueFirstSend(appSessionId: AppSessionId): void {
@@ -222,7 +227,8 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   const asked = held?.target.machine === target.machine ? held : null;
   // a check on the start the machine took, under its attempt key; "Start a new session": the next key, a new start
   const attempt = request.fresh === true ? (held?.attempt ?? 0) + 1 : (asked?.attempt ?? 0);
-  const again = request.fresh === true ? null : (asked?.input ?? null);
+  const again = request.fresh === true || asked?.open !== true ? null : asked.input;
+  const wasUnknown = request.fresh !== true && asked?.unknown === true;
   const key = attempt === 0 ? from : addressOf(machineOf(from), `${bareOf(from)}~${attempt}` as AppSessionId); // an attempt key only
   const attached = attachmentsOf(doc).length > 0;
   const text = s.text.trim() !== '' ? s.text : null;
@@ -240,16 +246,19 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
     ...(brief !== null && { brief }),
   };
   setSpawning(from, again === null ? SPAWN_WORDS.starting(target.name) : SPAWN_WORDS.checking(target.name, editKept));
+  unconfirmed.set(from, { target, input, attempt, open: true, unknown: wasUnknown }); // before it is asked: a reload meanwhile keeps it
   let spawned: AppSessionId;
   try {
     const result = await client.invoke('session.spawn', input, { machine: target.machine, from: key }); // main keeps the attempt by its key
     const unknown = !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'unknown';
-    if (!result.ok && (result.error.code === 'timeout' || unknown)) unconfirmed.set(from, { target, input, attempt, unknown });
-    else unconfirmed.delete(from);
+    const timedOut = !result.ok && result.error.code === 'timeout';
+    // started: the tab moves on (below); otherwise the attempt stays the tab's, open while main may hold it
+    if (result.ok && result.value.status === 'ok') unconfirmed.delete(from);
+    else unconfirmed.set(from, { target, input, attempt, open: unknown || timedOut, unknown: unknown || (timedOut && wasUnknown) });
     if (!result.ok && result.error.code === 'timeout') return { started: false, words: SPAWN_WORDS.unconfirmed(target.name, editKept), again: 'check' };
     // An unknown is asked again at the next ask (main queries the same op), never started anew silently: asked again and
     // still unknown, the person may choose to start a new session.
-    if (unknown && asked?.unknown === true) return { started: false, words: SPAWN_WORDS.stillUnknown(target.name), again: 'check', startNew: true };
+    if (unknown && wasUnknown) return { started: false, words: SPAWN_WORDS.stillUnknown(target.name), again: 'check', startNew: true };
     if (unknown) return { started: false, words: SPAWN_WORDS.unknown(target.name), again: 'check' };
     if (!result.ok) return { started: false, words: spawnErrorWords(result.error, target.name), again: 'retry' };
     if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name), again: 'retry' };

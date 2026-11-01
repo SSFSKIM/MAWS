@@ -926,6 +926,27 @@ describe('a New chat tab started on another machine', () => {
     await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
   });
 
+  // the milestone re-review: the target is kept before the first spawn is asked, so a reload while it is out keeps it
+  it('after a reload during the first start, sends to that machine again and never starts on this Mac', async () => {
+    const stub = stubIntent({ permissionMode: 'acceptEdits' }, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    cleanup(); // the page reloads before mini answers
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(2));
+    expect(invoked('session.spawn')).toHaveLength(2);
+    expect(stub.start).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
+  });
+
   // M4c fix wave 1 (review finding 2): this Mac's files are not offered, and a mention of one never goes to the machine
   it('offers none of this Mac’s files once another machine is chosen, and refuses to start with a mention of one', async () => {
     const stub = stubIntent({}, {}, chosen);

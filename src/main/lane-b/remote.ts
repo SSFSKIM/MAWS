@@ -127,7 +127,7 @@ export interface RemoteLaneB {
   /** Every subscription closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
-  spawnsKept(): Array<{ key: string; state: 'out' | 'said' }>;
+  spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
 }
 
 /** The engine-host acts §L offers for lane B, each sealed for the session's live launch. */

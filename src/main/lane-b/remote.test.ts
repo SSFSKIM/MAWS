@@ -16,6 +16,7 @@ import { record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
+import { UNRESOLVED_MAX } from './remote-spawn';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -581,6 +582,35 @@ describe('the checkout and the spawn (M4)', () => {
       // the attempt key is a key only: never the act's session or context, never in a log line
       for (const act of l.link.acts) expect(act.request).toEqual({ action: 'session.spawn', args: spawn, executor: 'machine', stepUp: 'required' });
       expect(l.logs.filter((line) => line.includes(TAB))).toEqual([]);
+    });
+
+    // the milestone re-review: an unknown never becomes a new act under its key, however long ago it was
+    it('keeps an unknown past its tombstone as unresolved: the key’s Send and Check again answer unknown and make no act', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000 + 1);
+      expect(await l.cmdFrom('session.spawn', spawn, 'new-9')).toMatchObject(unknown); // another key's own act; the sweep runs
+      expect(l.adapter.spawnsKept()).toContainEqual({ key: `${MINI}\n${TAB}`, state: 'unresolved' }); // no op, no input
+      const acts = l.link.acts.length;
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // a Send
+      expect(await l.cmdFrom('session.spawn', spawn, TAB)).toMatchObject(unknown); // Check again
+      expect(l.link.acts).toHaveLength(acts);
+      expect(l.link.requeries).toHaveLength(0); // past the horizon nothing is asked
+      l.link.onAct = settleWith({ state: 'done', result: { status: 'ok', appSessionId: 'app-new' } });
+      expect(await l.cmdFrom('session.spawn', spawn, `${TAB}~1`)).toMatchObject({ ok: true }); // only the explicit new key
+      expect(l.link.acts).toHaveLength(acts + 1);
+    });
+
+    it('keeps at most UNRESOLVED_MAX unresolved keys, the oldest let go first', async () => {
+      const l = lab({ tabs: [] });
+      l.link.onAct = settleWith({ state: 'unknown', reason: 'closed' });
+      for (let i = 0; i <= UNRESOLVED_MAX; i++) await l.cmdFrom('session.spawn', spawn, `tab-${i}`);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000 + 1);
+      await l.cmdFrom('session.spawn', spawn, 'tab-last'); // the sweep
+      const unresolved = l.adapter.spawnsKept().filter((k) => k.state === 'unresolved').map((k) => k.key);
+      expect(unresolved).toHaveLength(UNRESOLVED_MAX);
+      expect(unresolved).not.toContain(`${MINI}\ntab-0`);
     });
 
     it('keeps an outcome for the tab when the page waiting on it went: a reload during Check again starts one session', async () => {

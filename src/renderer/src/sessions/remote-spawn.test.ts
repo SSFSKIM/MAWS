@@ -218,6 +218,74 @@ describe('a spawn on another machine', () => {
     expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
   });
 
+  // the milestone re-review: the attempt is the tab's from before it is asked, until the tab moves on or another machine
+  // is chosen, never lost because a request failed
+  describe('the attempt kept before it is asked', () => {
+    const reload = () => {
+      useRemoteSpawn.setState({ chosen: new Map() });
+      restoreHeldAttempts();
+    };
+    const asker = (fake: ReturnType<typeof fakeClient>) => (text: string, fresh = false) => {
+      const d = docOf([paragraph(textNode(text))]);
+      return spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default', fresh }, fake.client);
+    };
+    const unknownAnswer = (fake: ReturnType<typeof fakeClient>) => fake.fail('session.spawn', 'Couldn’t confirm whether it started on mini; check again, or check mini’s sessions', 'internal', { refusal: 'unknown' });
+    const TAB1 = addressOf(TEST_MACHINE, 'new-1~1' as AppSessionId);
+
+    it('keeps the first spawn’s machine across a reload made while it is asked, and the next Send checks on it', async () => {
+      const fake = fakeClient();
+      void asker(fake)('go');
+      await Promise.resolve();
+      reload(); // while the first spawn is out
+      expect(spawnTargetOf(LOCAL_TAB, KEY)).toEqual(target);
+      void asker(fake)('go, typed again');
+      await Promise.resolve();
+      expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB, LOCAL_TAB]);
+      expect(fake.invoked('session.spawn')).toEqual([
+        { checkout: '/srv/app', permission_mode: 'default', brief: 'go' },
+        { checkout: '/srv/app', permission_mode: 'default', brief: 'go' }, // a check on the first, as main keeps it
+      ]);
+    });
+
+    it('keeps the new attempt’s key across a reload, and after its refusal', async () => {
+      const fake = fakeClient();
+      const ask = asker(fake);
+      for (const text of ['go', 'go']) {
+        const run = ask(text);
+        await Promise.resolve();
+        await unknownAnswer(fake);
+        await run;
+      }
+      void ask('go anew', true); // "Start a new session on mini"
+      await Promise.resolve();
+      reload(); // while attempt 1 is asked
+      const check = ask('go anew');
+      await Promise.resolve();
+      expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB, LOCAL_TAB, TAB1, TAB1]);
+      await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
+      await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
+      await check;
+      const next = ask('go once more');
+      await Promise.resolve();
+      expect(fake.sessions('session.spawn').at(-1)).toBe(TAB1); // still attempt 1, never back to the tab's own key
+      expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'default', brief: 'go once more' }); // a new start
+      await fake.reply('session.spawn', ok);
+      await next;
+      expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+    });
+
+    it('lets the attempt go when the person chooses another machine or this Mac', async () => {
+      const fake = fakeClient();
+      const run = asker(fake)('go');
+      await Promise.resolve();
+      await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+      await run;
+      useRemoteSpawn.getState().choose(LOCAL_TAB, null);
+      reload();
+      expect(spawnTargetOf(LOCAL_TAB, KEY)).toBeNull();
+    });
+  });
+
   it('chooses the held attempt’s machine again on a reload, so the tab’s next Send checks on that start', async () => {
     const fake = fakeClient();
     useRemoteSpawn.getState().choose(LOCAL_TAB, target);

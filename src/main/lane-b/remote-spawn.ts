@@ -15,6 +15,9 @@
 //   never the end of the attempt: the machine's ledger may record the outcome later (an engine host adopted across a
 //   restart), so each ask under the key queries the same op again (`RemoteLink.requery`), answered the real outcome once
 //   there is one. Only a new key (the person's explicit "Start a new session") makes a new act.
+// - An unknown's tombstone, at its bound, becomes an `unresolved` marker for its key (no op, no input, no answer: only
+//   that it is unresolved; at most UNRESOLVED_MAX are kept, the oldest let go first): the key's next ask answers unknown
+//   again and makes no act, so only the person's explicit new key starts anew, as the renderer's held record says too.
 // - The machine's link replaced: an attempt out on the old link is kept `unknown` with its op (asked again on the next
 //   link). The adapter stopped: nothing is kept.
 import type { Executor } from 'org-protocol';
@@ -35,7 +38,11 @@ const EXECUTOR: Executor = 'machine';
 
 type Out = { machine: MachineRef; name: string; link: RemoteLink; state: 'out'; handle: ActHandle; op: Op; waiting: number };
 type Said = { machine: MachineRef; state: 'said'; result: CommandResult<CommandName>; until: number; of: ActHandle; op: Op | null }; // `op`: an unknown's, asked again
-type Attempt = Out | Said;
+type Unresolved = { machine: MachineRef; state: 'unresolved' }; // an unknown past its tombstone: never a new act under its key
+type Attempt = Out | Said | Unresolved;
+
+/** How many unresolved keys are kept, the oldest let go first. */
+export const UNRESOLVED_MAX = 256;
 
 export interface SpawnAttemptsDeps {
   now(): number;
@@ -52,7 +59,7 @@ export interface SpawnAttempts {
   linksChanged(current: (machine: MachineRef) => RemoteLink | null): void;
   stop(): void;
   /** What is kept, by key (tests): an act out, or a tombstone. */
-  kept(): Array<{ key: string; state: 'out' | 'said' }>;
+  kept(): Array<{ key: string; state: Attempt['state'] }>;
 }
 
 const unknownResult = (machine: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('internal', SPAWN_UNKNOWN_WORDS(machine), { refusal: 'unknown' }) });
@@ -77,7 +84,13 @@ export function createSpawnAttempts(deps: SpawnAttemptsDeps): SpawnAttempts {
 
   const sweep = () => {
     const now = deps.now();
-    for (const [key, attempt] of attempts) if (attempt.state === 'said' && attempt.until <= now) attempts.delete(key);
+    for (const [key, attempt] of [...attempts]) {
+      if (attempt.state !== 'said' || attempt.until > now) continue;
+      attempts.delete(key);
+      if (attempt.op !== null) attempts.set(key, { machine: attempt.machine, state: 'unresolved' }); // an unknown stays unresolved
+    }
+    const unresolved = [...attempts].filter(([, attempt]) => attempt.state === 'unresolved');
+    for (const [key] of unresolved.slice(0, Math.max(0, unresolved.length - UNRESOLVED_MAX))) attempts.delete(key);
   };
 
   /** Its act out, until the person's confirmation sends it (the sheet and Touch ID are theirs, not the machine's). */
@@ -140,6 +153,7 @@ export function createSpawnAttempts(deps: SpawnAttemptsDeps): SpawnAttempts {
       }
       const key = `${link.machine}\n${from}`;
       const kept = attempts.get(key);
+      if (kept?.state === 'unresolved') return unknownResult(link.name); // only a new key starts anew
       if (kept?.state === 'out') return answer(link, key, kept, client);
       // an unknown: its op asked again (the ledger may have recorded the outcome since), never a new act
       if (kept?.state === 'said' && kept.op !== null) return answer(link, key, track(key, link, link.requery(kept.op), kept.op, 0), client);
