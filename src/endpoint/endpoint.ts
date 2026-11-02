@@ -506,6 +506,10 @@ export class Endpoint implements EndpointModule {
     const org = new EndpointOrg(state, { log, now: this.deps.now });
     org.onAdopted((change) => this.#adopted(change));
     org.onCertificates(() => {
+      // P5 O7 M5b: a certificate set moves every decision taken under the one before (the machine's owners read through it),
+      // so the streams are held and authorized again at once, as at a `caps` refresh, the artifact placements dropped first.
+      this.artifactRanks.clear();
+      this.streams.recheck();
       void this.#judge();
       void this.rl10.adopted();
     });

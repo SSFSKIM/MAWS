@@ -41,11 +41,6 @@ export type ReadOpening = {
   decide<R>(publish: (access: ReadAccess) => R): Promise<{ ok: true; value: R } | { ok: false; reason: StreamRefusal }>;
   install(stream: Stream): void;
   refuse(reason: StreamRefusal): void;
-  /**
-   * The stream found its decision no longer standing before a forward (stream-document.ts asks before each): it is held
-   * and authorized again, as a re-check does, and ends `removed` once refused.
-   */
-  recheck(stream: Stream): void;
   log(line: string): void;
 };
 /** A read open's kind's plane (P5 O7 M5b). */
@@ -59,6 +54,11 @@ export abstract class Stream implements StreamSource {
   opened = false;
   /** P5 O7 M5b: a read open's authorization, asked again at its re-checks; null for one opened under an act. */
   read: ReadAccess | null = null;
+  /**
+   * P5 O7 M5b: how a read stream whose decision moved is held and authorized again (streams.ts' re-check, set as the
+   * stream is installed).
+   */
+  recheck: ((stream: Stream) => void) | null = null;
   #ended = false;
   #credit: number;
   readonly #queue: Queued[] = [];
@@ -180,7 +180,7 @@ export abstract class Stream implements StreamSource {
       this.#finish();
       return { message, bytes: 64 };
     }
-    if (this.#credit <= 0) return null;
+    if (this.#credit <= 0 || !this.stands()) return null;
     const n = Math.min(head.bytes.byteLength, STREAM_CHUNK_BYTES, this.#credit);
     const chunk = head.bytes.subarray(0, n);
     const offset = head.offset;
@@ -191,6 +191,18 @@ export abstract class Stream implements StreamSource {
     this.drained();
     const data = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString('base64url');
     return { message: { t: 'streamData', id: this.id, offset, data } as EndpointMessage, bytes: data.length + 96 };
+  }
+
+  /**
+   * P5 O7 M5b: whether a read stream may let its bytes go now, asked in the step they go (its data to the device here, a
+   * document's frames to the host in stream-document.ts): the decision that admitted it, or its latest re-check's, still
+   * stands. One that moved is held and authorized again (`recheck`), so nothing goes until a current decision grants it
+   * and nothing is dropped meanwhile; a refusal ends it `removed`. A stream opened under an act has none to ask.
+   */
+  protected stands(): boolean {
+    if (this.read === null || this.read.stands()) return true;
+    if (!this.#held) this.recheck?.(this);
+    return false;
   }
 
   /** The stream ends now with `reason`, told to the device unless `reason` is null (the device closed it, or its channel). */

@@ -595,9 +595,12 @@ export class Streams {
           const decided = await this.#decideRead(request, who, decision, since, publish);
           return decided.ok ? decided : { ok: false, reason: readRefusal(decided.reason) };
         },
-        install,
+        // The stream asks its decision before it lets bytes go (stream-base.ts' `stands`); one that moved is re-checked.
+        install: (stream) => {
+          stream.recheck = (moved) => this.#recheckStream(moved);
+          install(stream);
+        },
         refuse,
-        recheck: (stream) => this.#recheckStream(stream),
         log: this.#ctx.log,
       };
       await plane(opening);

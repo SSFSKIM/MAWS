@@ -26,7 +26,7 @@
 // The ends. The channel's end (`documents.onClosed`) closes the stream with its word (`host`, `reset`, `upstream`) after
 // the frames before it; the stream's end closes the channel (the device's close, its channel's loss, a re-check's
 // `removed`, which drops what the stream holds). Before each forward either way the decision is asked whether it still
-// stands; one that moved holds the stream and is authorized again (`ReadOpening.recheck`).
+// stands; one that moved holds the stream and is authorized again (stream-base.ts' `stands`).
 import { decodeFrame, encodeFrame, MSG_PROVISIONAL } from '@artifacts/provider/frames';
 import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
 import { DOC_HIGH_WATER } from '@shared/host/doc-channels';
@@ -119,7 +119,6 @@ class DocumentStream extends Stream {
   #dropped = { frames: 0, bytes: 0 };
   /** The channel is open on the host's side. */
   #upstream = true;
-  readonly #recheck: (stream: Stream) => void;
   readonly #log: (line: string) => void;
 
   constructor(
@@ -131,15 +130,7 @@ class DocumentStream extends Stream {
   ) {
     super(opening.id, opening.channel, opening.act, opening.binding, opening.credit, opening.window, opening.over);
     this.read = access;
-    this.#recheck = opening.recheck;
     this.#log = opening.log;
-  }
-
-  /** Whether the decision still stands; one that moved holds the stream and is authorized again. */
-  #stands(): boolean {
-    if (this.read!.stands()) return true;
-    if (!this.held) this.#recheck(this);
-    return false;
   }
 
   /** A frame of the host's, length-prefixed, queued for the device's credit. */
@@ -159,12 +150,6 @@ class DocumentStream extends Stream {
     if (this.ended) return;
     this.#upstream = false;
     this.closeAfter(reason);
-  }
-
-  /** The window's turn: nothing goes on a decision that moved. */
-  override next(): ReturnType<Stream['next']> {
-    if (!this.ended && !this.held && !this.#stands()) return null;
-    return super.next();
   }
 
   protected override queued(): void {
@@ -201,7 +186,7 @@ class DocumentStream extends Stream {
 
   /** The device's chunks taken in order, each frame they complete forwarded and their bytes refunded, unless held. */
   #drain(): void {
-    if (this.#inbox.length === 0 || this.ended || this.held || !this.#stands()) return;
+    if (this.#inbox.length === 0 || this.ended || this.held || !this.stands()) return;
     while (this.#inbox.length > 0 && !this.ended) {
       const chunk = this.#inbox.shift()!;
       const frames = this.#frames.push(chunk);

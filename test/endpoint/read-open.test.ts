@@ -8,15 +8,15 @@
 // at the record change and the relink that withdraw it; and the act open beside it, unchanged, with `browser.screencast`
 // reserved.
 import { randomBytes, randomUUID } from 'node:crypto';
-import { WITHHELD_SESSION } from 'org-protocol';
+import { generateSigningKey, signRecord, SIGNING_DOMAINS, WITHHELD_SESSION } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame } from '../../src/artifacts/provider/frames';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
 import { STREAM_INPUT_CREDIT } from '../../src/endpoint/stream-base';
-import { fakeDocuments, fakeServices, scratchArtifacts } from './fake-services';
+import { fakeDocuments, fakeServices, mintRef, scratchArtifacts } from './fake-services';
 import { FakePtyHost } from './fake-pty-host';
-import { act, done, makeOrg, openRemote, sleep, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { act, done, makeOrg, openRemote, ORG, sleep, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -75,6 +75,34 @@ function body(r: Remote, id: string): Buffer {
   return Buffer.concat(parts);
 }
 const closeOf = (r: Remote, id: string) => ofStream(r, id).find((m) => m.t === 'streamClose')?.reason;
+
+/** A certificate set the hub serves under the same head, changed (a certificate of another machine added). */
+async function certificatesChanged(f: Fixture): Promise<void> {
+  const key = await generateSigningKey();
+  const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: mintRef(), name: 'vm-other', pub: key.pub, delegation: 'd-other', use: 1, issued: new Date().toISOString() }, key.privateKey, key.pub);
+  const view = { head: f.chain.at(-1)!, chain: [], transitions: [], certificates: { certs: [cert], retirements: [] }, more: false };
+  expect((await f.endpoint.parts!.org.sync(() => Promise.resolve(view))).refused).toBeUndefined();
+}
+/** The authorizer made to wait until `release`: a re-check begun meanwhile stays pending. */
+function gated(f: Fixture): { release(): void; streams: () => number } {
+  const authorizer = f.endpoint.authorizer;
+  const authorize = authorizer.authorize.bind(authorizer);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let streams = 0;
+  authorizer.authorize = async (request, who, now) => {
+    if (request.kind === 'stream') streams++;
+    await gate;
+    return authorize(request, who, now);
+  };
+  return { release, streams: () => streams };
+}
+/** A body the suite feeds a chunk at a time (`null` ends it). */
+function fedBody(): { body: ReadableStream<Uint8Array>; feed(chunk: Uint8Array | null): void } {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start: (c) => void (controller = c) }, { highWaterMark: 0 });
+  return { body, feed: (chunk) => (chunk === null ? controller.close() : controller.enqueue(chunk)) };
+}
 const closedChannel = (r: Remote) => new Promise<string>((resolve) => r.channel.onClose(resolve));
 
 describe('the stream rows (§L, M5b)', () => {
@@ -587,6 +615,49 @@ describe('a read stream authorized again', () => {
     expect(answer).toMatchObject({ t: 'streamRefused', reason: 'grade' });
     await sleep(30);
     expect(ofStream(b, id).map((m) => m.t)).toEqual(['streamRefused']);
+  });
+
+  it('sends no body on a decision that moved: a certificate change no trigger reported holds the next chunk until a current decision grants it', async () => {
+    const { f } = await start();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const fed = fedBody();
+    f.services.artifacts.fetch = async () => ({ status: 200, headers: { 'content-length': '2048' }, body: fed.body });
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openHttp(a, { url: url(x, 'data.bin') });
+    fed.feed(new Uint8Array(1024).fill(1));
+    await until(() => body(a, id).byteLength === 1024 || undefined, 'the first chunk');
+    // The triggers, missed: only the stream's own ask before it sends stands between the change and the bytes.
+    f.endpoint.streams.recheck = () => {};
+    f.endpoint.streams.accessMoved = () => {};
+    const gate = gated(f);
+    await certificatesChanged(f);
+    fed.feed(new Uint8Array(1024).fill(2));
+    fed.feed(null);
+    await sleep(60);
+    expect(body(a, id).byteLength).toBe(1024);
+    expect(gate.streams()).toBeGreaterThan(0);
+    gate.release();
+    await until(() => closeOf(a, id), 'the close');
+    expect([body(a, id).byteLength, closeOf(a, id)]).toEqual([2048, 'closed']);
+  });
+
+  it('holds every open stream at a certificate change under the same head and authorizes it again at once, as a `caps` refresh does', async () => {
+    const { f } = await start();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const fed = fedBody();
+    f.services.artifacts.fetch = async () => ({ status: 200, headers: {}, body: fed.body });
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openHttp(a, { url: url(x, 'data.bin') });
+    const gate = gated(f);
+    await certificatesChanged(f);
+    expect(gate.streams()).toBe(1);
+    fed.feed(new Uint8Array(512));
+    await sleep(40);
+    expect(body(a, id).byteLength).toBe(0);
+    gate.release();
+    await until(() => body(a, id).byteLength === 512 || undefined, 'the chunk, once granted');
   });
 
   it('follows a relink: an open refused before the link is admitted after it, and the stream closes `removed` at the unlink', async () => {
