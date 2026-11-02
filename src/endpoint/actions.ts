@@ -260,8 +260,8 @@ export class Actions {
         if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
         else if (answer.error.code === ARTIFACT_OP.predates) this.ctx.log(`endpoint: the engine host predates \`${ARTIFACT_OP.name}\`: \`${action.action}\` refused unavailable until it is replaced`);
         const outcome = answer.ok ? answered(answer.value) : answer.error.code === ARTIFACT_OP.predates ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        const send = await this.#sessionSafe(who.member, action.action, outcome, dispatch);
-        if (!channel.closed) channel.send(doneMessage(channel, action.opId, send()));
+        const told = (await this.#sessionSafe(who.member, action.action, outcome, dispatch))(); // taken, sent or not
+        if (!channel.closed) channel.send(doneMessage(channel, action.opId, told));
       } finally {
         release();
       }

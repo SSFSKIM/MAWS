@@ -12,10 +12,11 @@
 // and the `artifacts` feed show the member anyway), its project, its order in a listing.
 //
 // A session is hidden unless the member holds `view` on it at every placement the answer's reads saw of it (M6's rule:
-// no placement widens a caller's rights); a session the spine has no record of is hidden. A machine owner views every
-// session, so their answer goes whole. `SessionSafe.prepare` makes every read first (the member's ranks, each named
-// session's placement) and returns the step that projects, taken as the answer is sent, against the records as they
-// stand then.
+// no placement widens a caller's rights); a session the spine has no record of is hidden. The machine's owners are held
+// to it as anyone is (fix wave 2): owning the machine gives them every artifact, not a member's private session, which
+// they can't view. `SessionSafe.prepare` makes every read first (the member's ranks, each named session's placement)
+// and returns the step that projects, taken as the answer is sent, against the records as they stand then. Every
+// prepared step is taken, the answer sent or dropped: until it is, it watches the spine's index (`event`).
 //
 // Known limits, the architect's (2026-11-01): an artifact's bytes (`artifacts.attributions`' map, `artifacts.versionState`'s
 // document, the document stream) keep the sessions' ids their provenance carries, opaque but comparable across artifacts;
@@ -137,12 +138,11 @@ export class SessionSafe {
     this.#heard.add(heard);
     try {
       const ranks = await this.ctx.ranks(member);
-      const placed = ranks.ownsMachine() ? new Map<string, Placement>() : new Map(await Promise.all(namedSessions(name, output).map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
+      const placed = new Map(await Promise.all(namedSessions(name, output).map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
       const seen = (id: string): Placement[] => [placed.get(id) ?? null, ...(heard.get(id) ?? [])];
       return () => {
         this.#heard.delete(heard);
         if (!ranks.current()) return { ok: false, code: 'unavailable' };
-        if (ranks.ownsMachine()) return { ok: true, output };
         return { ok: true, output: projectSessions(name, output, (id) => placed.has(id) && seen(id).every((placement) => ranks.holds(placement, 'view'))) };
       };
     } catch (error) {

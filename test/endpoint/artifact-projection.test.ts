@@ -3,17 +3,17 @@
 // last editor (linked to it or not), the sessions that touched it, a version's author. Every metadata-bearing answer of
 // the artifact rows goes through one projection as it is sent: a hidden session in an actor field becomes the one
 // withheld session (WITHHELD_SESSION, the same for every hidden session, so none can be counted or told apart, and never
-// the human), and leaves every list of sessions with nothing in its place, its title with it. A machine owner's answer goes
-// whole. What the member may view widens and narrows as their rights move. The scene: S1 (`visible`), B's own; S2
+// the human), and leaves every list of sessions with nothing in its place, its title with it. The machine's owners are held to
+// it too: they hold every artifact, not a member's private session. What the member may view widens and narrows as their rights move. The scene: S1 (`visible`), B's own; S2
 // (`private`), the machine's, the creator and last editor; B holds `view` on an artifact linked to both.
 import { randomUUID } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod';
 import { WITHHELD_SESSION } from 'org-protocol';
 import { commands } from '@shared/ipc/schema';
 import { OFFERS } from '../../src/endpoint/offers';
 import { SESSION_NAMING } from '../../src/endpoint/session-safe';
-import { act, done, makeOrg, openRemote, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { act, done, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -21,7 +21,10 @@ const started: Fixture[] = [];
 beforeAll(async () => {
   org = await makeOrg();
 });
-afterEach(() => stopAll(started));
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await stopAll(started);
+});
 afterAll(() => stopAll(started));
 
 async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
@@ -89,7 +92,7 @@ describe('an artifact answer to a member who can’t view all its sessions', () 
   it('withholds a hidden creator in `artifacts.get` and `artifacts.list`', async () => {
     const { id, b, a } = await scene();
     expect(await outputOf(b, 'artifacts.get', { artifactId: id })).toMatchObject({ artifact: { id, createdBy: WITHHELD } });
-    expect(await outputOf(a, 'artifacts.get', { artifactId: id })).toMatchObject({ artifact: { createdBy: session('private') } }); // an owner: whole
+    expect(await outputOf(a, 'artifacts.get', { artifactId: id })).toMatchObject({ artifact: { createdBy: session('private') } }); // an owner, who views the machine's sessions
   });
 
   it('cuts a library row to the sessions the member views, the hidden last editor withheld with no title', async () => {
@@ -100,7 +103,8 @@ describe('an artifact answer to a member who can’t view all its sessions', () 
     expect(row).not.toHaveProperty('lastEditorTitle');
     expect(JSON.stringify(row)).not.toContain('Secret acquisition');
     expect(JSON.stringify(row)).not.toContain('private');
-    expect((await outputOf(a, 'library.get', { artifactId: id })).row).toEqual(libraryRow());
+    // The machine's owner views the machine's sessions (`private`), not B's own (`visible`), whose part goes.
+    expect((await outputOf(a, 'library.get', { artifactId: id })).row).toEqual({ ...libraryRow(), sessions: [libraryRow().sessions[0]] });
   });
 
   it('does the same to every row of `library.list`', async () => {
@@ -165,6 +169,58 @@ describe('an artifact answer to a member who can’t view all its sessions', () 
     f.host.emitHost('artifacts.changed', { artifactId: id, kind: 'document', revision: 2, change: 'updated' });
     const ev = await waitFor(b, (m) => m.t === 'ev' && m.sub === 'art', 'the change');
     expect(ev.body).toEqual({ name: 'artifacts.changed', payload: { artifactId: id, kind: 'document', revision: 2, change: 'updated' } });
+  });
+});
+
+describe('an artifact answer to the machine’s owner', () => {
+  it('tells them nothing of a member’s private session they can’t view, though they hold every artifact', async () => {
+    const { f, a } = await scene();
+    const id = randomUUID();
+    // B's private session (`visible`) created the artifact and last edited it.
+    const row = f.host.artifact(id, ['visible'], { createdBy: session('visible') });
+    const libraryRow = { ...row, lastEditor: session('visible'), lastEditedAt: 1, lastEditorTitle: 'B private launch', sessions: [{ appSessionId: 'visible', title: 'B private launch', roles: ['created'], lastAt: 1 }] };
+    f.spine.handle('library.get', () => ({ row: libraryRow }));
+    f.spine.handle('library.list', (input) => ((input as { filter?: { appSessionId?: string } }).filter?.appSessionId === 'visible' || (input as { filter?: unknown }).filter === undefined ? { rows: [libraryRow], counts: { document: 1 } } : { rows: [], counts: { document: 0 } }));
+    expect((await call(a, 'session.get', { appSessionId: 'visible' })).error).toEqual({ code: 'grade' });
+    expect(await outputOf(a, 'artifacts.get', { artifactId: id })).toMatchObject({ artifact: { createdBy: WITHHELD } });
+    const got = (await outputOf(a, 'library.get', { artifactId: id })).row;
+    expect(got).toMatchObject({ createdBy: WITHHELD, lastEditor: WITHHELD, sessions: [] });
+    expect(JSON.stringify(got)).not.toMatch(/visible|B private launch/);
+    // Their listing keeps the artifact (they hold it), with nothing of the session; one by the session lists nothing.
+    const listed = await outputOf(a, 'library.list', {});
+    expect(listed).toMatchObject({ rows: [{ id, createdBy: WITHHELD, lastEditor: WITHHELD, sessions: [] }] });
+    expect(JSON.stringify(listed)).not.toMatch(/visible|B private launch/);
+    for (const appSessionId of ['visible', randomUUID()]) expect([appSessionId, await outputOf(a, 'library.list', { filter: { appSessionId } })]).toEqual([appSessionId, { rows: [], counts: { document: 0 } }]);
+  });
+});
+
+describe('an answer being told', () => {
+  it('lets go of what it watched once its act ends, its channel closed before the result could go', async () => {
+    const { f, id, b } = await scene();
+    const safe = f.endpoint.sessionSafe!;
+    let watched = 0;
+    const event = { name: 'session.changed', payload: { record: { appId: 'sample', get engineSessionId() { watched++; return 'eng-sample'; } } } };
+    const prepare = safe.prepare.bind(safe);
+    let channel: { closed: boolean } | null = null;
+    const execute = f.endpoint.actions.execute.bind(f.endpoint.actions);
+    vi.spyOn(f.endpoint.actions, 'execute').mockImplementation((c, m, d) => ((channel = c), execute(c, m, d)));
+    let prepared = false;
+    let acked!: () => void;
+    const ackedHere = new Promise<void>((resolve) => (acked = resolve));
+    vi.spyOn(safe, 'prepare').mockImplementation(async (...args) => {
+      const told = await prepare(...args);
+      prepared = true;
+      await ackedHere;
+      b.channel.close('closed'); // the result is ready; the device goes before it is sent
+      await until(() => channel?.closed === true, 'the close');
+      return told;
+    });
+    expect(await act(b, b.device.action({ machine: f.ref, action: 'artifacts.update', args: { artifactId: id, title: 'renamed' } }))).toBe('ok');
+    acked();
+    await until(() => prepared, 'the result prepared');
+    await f.endpoint.actions.stop(); // the act ran to its end
+    safe.event('machine', event);
+    expect(watched).toBe(0);
   });
 });
 

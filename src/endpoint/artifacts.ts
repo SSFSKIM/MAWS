@@ -2,8 +2,9 @@
 // M5 "The `artifact` target rule"; the owner's A12, answered as recommended on 2026-11-01).
 //
 // Who stands on an artifact. A member who is one of the machine's owners holds `manage` on every artifact of the machine,
-// read before any link is resolved (the machine's own app shows anyone at the machine everything, and a listing then
-// costs no placement per row). Any other member holds the highest rank they hold on any of the artifact's linked
+// read before any link is resolved (the machine's own app shows anyone at the machine everything). Holding the artifact
+// is not viewing its sessions: what an answer says of a member's private session is withheld from the owners too
+// (session-safe.ts). Any other member holds the highest rank they hold on any of the artifact's linked
 // sessions (a member who may view a session the artifact is linked to may view the artifact: that session's transcript
 // already shows it); an artifact with no link (`orphan`: the person's own create or duplicate, an import with no links, a
 // seeded design system) is the machine owners' alone, as a session owned by `@machine` is. `holdsArtifact` is that one

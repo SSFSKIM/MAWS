@@ -29,14 +29,14 @@
 //     the index's view of the artifact's links) are what it names, and a row is kept when the caller holds `view` on its
 //     artifact by the `artifact` rule's predicate (artifacts.ts' `holdsArtifact`): on any one of its sessions, at every
 //     placement the call saw of that session; a row with no session is the machine owners' alone. A machine owner holds
-//     every artifact, so their listing goes whole, with no placement read (the common case), checked again as it goes. A
-//     caller who isn't one is asked for the listing without its `kind`, so the counts per kind it is answered are those of
-//     the rows it keeps, never of the machine's. The artifact rule's reads (`artifacts.get` and its kin) are answered as
+//     every artifact, so keeps every row. The listing is asked without its `kind`, so the counts per kind a caller is
+//     answered are those of the rows it keeps, never of the machine's. The artifact rule's reads (`artifacts.get` and its kin) are answered as
 //     their executor answers, their decision having placed the artifact.
 //   - P5 O7 M5a2 fix wave 1: what an artifact answer says of sessions the caller doesn't view is withheld as it goes
 //     (session-safe.ts): the reads that name sessions (SESSION_NAMING) through `SessionSafe`, `library.list`'s kept rows
 //     through the same projection over its own placements; a listing filtered by a session the caller doesn't view
-//     lists nothing, as one by a session nobody minted does (an id is never a capability).
+//     lists nothing, as one by a session nobody minted does (an id is never a capability). Fix wave 2: the machine's
+//     owners too, whose rows are kept whole but told nothing of a member's private session.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -136,15 +136,13 @@ const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSes
  * hits, each by its `appSessionId`; `keep` answers it with only what `kept` holds (a part naming no session is dropped).
  * `narrow`: the input naming the sessions the caller views, for a read that answers at most a limit of them, so the
  * limit is spent on those (milestone fix: `session.search`'s 50 hits); the cut stays the authorization.
- * P5 O7 M5a: `owned`, a read whose every part a machine owner holds (the `artifact` rule's short cut): their answer goes
- * whole, unplaced; `ask`, the input asked for a caller who isn't one; `keep` is told whether the caller owns the machine,
- * and what they asked.
+ * P5 O7 M5a: `ask`, the input the machine is asked for; `keep` is told whether the caller owns the machine (the `artifact`
+ * rule's short cut, which holds every row for them), and what they asked.
  */
 type EachSession = {
   sessions(output: unknown, input: unknown): string[];
   keep(output: unknown, kept: (id: string | null) => boolean, ownsMachine: boolean, input: unknown): unknown;
   narrow?(input: Fields, sessions: string[]): Fields;
-  owned?: true;
   ask?(input: unknown): unknown;
 };
 const rowsOf = (output: unknown): Fields[] => (isObject(output) && Array.isArray(output.rows) ? output.rows.filter(isObject) : []);
@@ -185,17 +183,16 @@ const EACH_SESSION: Record<string, EachSession> = {
     sessions: (output, input) => [...namedSessions('library.list', output), ...(filteredBy(input) === null ? [] : [filteredBy(input)!])],
     keep: (output, kept, ownsMachine, input) => {
       if (!isObject(output)) return output;
-      // A listing by a session the caller doesn't view lists nothing, as one by a session nobody minted: an id is no
-      // way to learn what a hidden session touched.
+      // A listing by a session the caller doesn't view lists nothing, as one by a session nobody minted, whoever asks:
+      // an id is no way to learn what a hidden session touched.
       const by = filteredBy(input);
-      const listed = ownsMachine || by === null || kept(by) ? rowsOf(output) : [];
+      const listed = by === null || kept(by) ? rowsOf(output) : [];
+      // A machine owner holds every artifact, so keeps every row; what any row says of a session the caller doesn't
+      // view is withheld, theirs too (session-safe.ts).
       const rows = listed.filter((row) => holdsArtifact({ sessions: rowSessions(row), orphan: rowSessions(row).length === 0 }, ownsMachine, (id) => kept(id)));
-      if (ownsMachine) return { ...output, rows };
-      // What the kept rows say of sessions the caller doesn't view is withheld (session-safe.ts).
       const projected = projectSessions('library.list', { ...output, rows }, (id) => kept(id));
       return isObject(projected) ? keptByKind(projected, input) : projected;
     },
-    owned: true,
     ask: (input) => {
       if (!isObject(input) || !isObject(input.filter) || input.filter.kind === undefined) return input;
       const filter: Fields = { ...input.filter };
@@ -286,17 +283,6 @@ export class Calls {
     let listed = new Map<string, Placement>();
     try {
       ranks = await this.ctx.ranks(member);
-      // P5 O7 M5a: a machine owner holds every part of an `owned` read: their answer goes whole, no placement read, if
-      // they still own the machine as it goes.
-      if (filter.owned === true && ranks.ownsMachine()) {
-        const response = await dispatch('machine', m.name, input).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
-        if (!response.ok) return done(unavailable(response.error.code));
-        const output = response.value ?? null;
-        return () => {
-          this.#heard.delete(heard);
-          return ranks.ownsMachine() ? { ok: true, output: filter.keep(output, () => true, true, asked) } : { ok: false, code: 'unavailable' };
-        };
-      }
       if (filter.ask !== undefined) input = filter.ask(input);
       if (filter.narrow !== undefined && isObject(input)) {
         const read = await this.#listed(dispatch);
@@ -324,7 +310,7 @@ export class Calls {
       this.#heard.delete(heard);
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
       const seen = (id: string): Placement[] => [...(listed.has(id) ? [listed.get(id)!] : []), placed.get(id) ?? null, ...(heard.get(id) ?? [])];
-      return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade)), false, asked) };
+      return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade)), ranks.ownsMachine(), asked) };
     };
   }
 

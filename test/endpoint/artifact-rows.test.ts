@@ -5,7 +5,7 @@
 // anything runs. A write goes to the engine host's ledger as `host.artifactOp`, claimed once, its claim naming the
 // artifact; an engine host built before that command answers it as a name outside its registry, read as `refused
 // unavailable`. Bytes cross in json-bytes' tagged form for a device that listed `rl2.bytes`, and never for one that didn't.
-// The library's listing is cut per row to the artifacts the member views, whole for a machine owner.
+// The library's listing is cut per row to the artifacts the member views, every row for a machine owner.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -260,7 +260,7 @@ describe('library.list', () => {
   /** A row of the library as the index answers it: its artifact and its linked sessions (`LibraryRowSchema.sessions`). */
   const row = (id: string, kind: string, sessions: string[]) => ({ id, kind, title: id.slice(0, 4), sessions: sessions.map((appSessionId) => ({ appSessionId, title: '', roles: ['created'], lastAt: 1 })) });
 
-  it('answers a member the rows of the artifacts they view, with their counts, and a machine owner every row, unplaced', async () => {
+  it('answers a member the rows of the artifacts they view, with their counts, and a machine owner every row', async () => {
     const { f, a, b } = await setup();
     session(f, 'app-shared', ['@machine'], { shares: [{ member: org.B, grade: 'view' }] });
     const [mine, sharedDoc, both, hidden, orphan] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
@@ -280,12 +280,10 @@ describe('library.list', () => {
     expect(ids(documents)).toEqual([mine, both]);
     expect((documents.output as { counts: unknown }).counts).toEqual({ document: 2, html: 1 });
     expect(asked.at(-1)).toEqual({ filter: {} });
-    // The owner: whole, as the machine answered, with no placement read.
-    const from = f.host.calls.length;
+    // The owner: every row, and the machine's counts (what each row says of sessions is projected: artifact-projection.test.ts).
     const whole = await call(a, 'library.list', { filter: { kind: 'html' } });
     expect(ids(whole)).toEqual([sharedDoc, orphan]);
     expect((whole.output as { counts: unknown }).counts).toEqual({ document: 3, html: 2 });
-    expect(f.host.calls.slice(from).filter((c) => c.name === 'session.get')).toEqual([]);
     expect(codeOf(await call(b, 'library.list', { filter: { kind: 'exe' } }))).toBe('malformed');
   });
 

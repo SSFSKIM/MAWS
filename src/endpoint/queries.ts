@@ -93,8 +93,13 @@ export class Queries {
     // P5 O7 M5a2 fix wave 1: an artifact op's result tells the asker nothing of a session they don't view (session-safe.ts):
     // its reads made before the decision, so the decision and the projection are taken in the step the answer goes.
     const told = artifact === undefined ? () => answer.outcome : await this.#sessionSafe(who.member, answer.binding.name, answer.outcome, dispatchAs(this.ctx.dispatch, channel.client));
-    const decision = await this.ctx.authorize({ kind: 'query', name: answer.binding.name, input }, who, this.ctx.now());
-    const outcome = told();
+    let decision: Decision;
+    let outcome: unknown;
+    try {
+      decision = await this.ctx.authorize({ kind: 'query', name: answer.binding.name, input }, who, this.ctx.now());
+    } finally {
+      outcome = told(); // taken whatever the decision, or its failure
+    }
     if (!decision.ok) return artifact !== undefined && decision.reason === 'unavailable' ? queried({ state: 'unavailable' }) : queried({ state: 'refused', reason: decision.reason });
     if (outcome === null) return queried({ state: 'unavailable' });
     return queried({ state: answer.state as QueriedMessage['state'], ...(outcome === undefined ? {} : { outcome: writeOutcome(channel, outcome) }) });
