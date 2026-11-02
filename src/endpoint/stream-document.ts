@@ -28,6 +28,7 @@
 // `removed`, which drops what the stream holds). Before each forward either way the decision is asked whether it still
 // stands; one that moved holds the stream and is authorized again (stream-base.ts' `stands`).
 import { decodeFrame, encodeFrame, MSG_PROVISIONAL } from '@artifacts/provider/frames';
+import { LengthPrefixed, lengthPrefixed } from '@artifacts/provider/frame-stream';
 import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
 import { DOC_HIGH_WATER } from '@shared/host/doc-channels';
 import { WITHHELD_SESSION, type StreamDataMessage, type StreamDocumentOpen } from 'org-protocol';
@@ -141,9 +142,7 @@ class DocumentStream extends Stream {
     if (this.ended || !this.#upstream) return;
     const frame = withheld(bytes);
     if (frame === null) return this.#log(`endpoint: a document's provisional frame was not read, and not sent (${bytes.byteLength} bytes)`);
-    const out = new Uint8Array(4 + frame.byteLength);
-    new DataView(out.buffer).setUint32(0, frame.byteLength);
-    out.set(frame, 4);
+    const out = lengthPrefixed(frame);
     this.push(this.#out, out);
     this.#out += out.byteLength;
   }
@@ -249,56 +248,5 @@ function withheld(bytes: Uint8Array): Uint8Array | null {
     return encodeFrame({ type: 'provisional', json: JSON.stringify({ ...layer, appSessionId: WITHHELD_SESSION }) });
   } catch {
     return null;
-  }
-}
-
-/** Frames out of a byte flow where each is prefixed by its u32be length, assembled across the chunks it comes in. */
-class LengthPrefixed {
-  readonly #parts: Uint8Array[] = [];
-  #size = 0;
-  /** The frame being assembled's length, once its prefix is read. */
-  #length: number | null = null;
-
-  constructor(private readonly max: number) {}
-
-  /** The frames `chunk` completes, in order; null once a length is 0 or past the most a frame may be. */
-  push(chunk: Uint8Array): Uint8Array[] | null {
-    this.#parts.push(chunk);
-    this.#size += chunk.byteLength;
-    const frames: Uint8Array[] = [];
-    for (;;) {
-      if (this.#length === null) {
-        if (this.#size < 4) return frames;
-        const prefix = this.#read(4);
-        const length = new DataView(prefix.buffer, prefix.byteOffset, 4).getUint32(0);
-        if (length === 0 || length > this.max) return null;
-        this.#length = length;
-      }
-      if (this.#size < this.#length) return frames;
-      frames.push(this.#read(this.#length));
-      this.#length = null;
-    }
-  }
-
-  clear(): void {
-    this.#parts.length = 0;
-    this.#size = 0;
-    this.#length = null;
-  }
-
-  /** The next `n` bytes, taken off the parts (each byte copied once). */
-  #read(n: number): Uint8Array {
-    const out = new Uint8Array(n);
-    let at = 0;
-    while (at < n) {
-      const head = this.#parts[0];
-      const take = Math.min(head.byteLength, n - at);
-      out.set(head.subarray(0, take), at);
-      at += take;
-      if (take === head.byteLength) this.#parts.shift();
-      else this.#parts[0] = head.subarray(take);
-    }
-    this.#size -= n;
-    return out;
   }
 }
