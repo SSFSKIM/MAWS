@@ -13,7 +13,7 @@ import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-
 import type { Availability } from '@shared/ipc/schema/session'; // P2-A
 import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
-export type SubmitState = 'send' | 'stop' | 'resume';
+export type SubmitState = 'send' | 'stop' | 'resume' | 'end' /* P5 O16 M3b fix wave 1: session.stop, ending the session */;
 
 // P5 O9 M5: the controls port's `Capability`, spelled here so this module stays free of the port's imports (it is in the
 // node project's program, through side/copy.ts)
@@ -32,6 +32,8 @@ export interface SubmitInput {
   // P5 O9 M5: a session another process holds and the session's controls port drives (lane A): its turn as that process
   // reports it, and whether Send and Stop may go now, each with its reason. Absent or null: C3's status decides.
   driven?: { running: boolean; send: DrivenCapability; stop: DrivenCapability } | null;
+  // P5 O16 M3b fix wave 2: a lane B session on another machine, whose link carries no session.stop
+  remote?: boolean;
 }
 
 export interface SubmitDecision {
@@ -44,6 +46,14 @@ export interface SubmitDecision {
 }
 
 export const STARTING = 'Session is starting…';
+// P5 O16 M3b: a session a successor engine host adopted, waiting for its engine's re-initialize (as long as the step the
+// handover found it in may take)
+export const REATTACHING = 'Re-attaching to the engine after the update…';
+export const reattaching = (status: EngineSessionStatus | null): boolean => status?.process === 'initializing' && status.holder?.adopted === true;
+// Fix wave 1: what the re-attaching state's Stop does (an empty editor: no turn to interrupt, the engine not answering)
+export const ENDS_REATTACHING = 'Ends the session; its engine has not answered since the update';
+// Fix wave 2: on another machine that Stop is not offered (session.stop is not an act its link carries, O7's surface)
+export const REATTACHING_STOP_REMOTE = 'Stopping a re-attaching session on another machine is not available yet';
 export const MESSAGE_HELD = 'Your first message is with the setup above';
 export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
@@ -67,6 +77,9 @@ export const JOINS_PAUSED_QUEUE = 'Joins the paused queue; Resume sends it';
 export const SENDS_AT_TURN_END = 'Sends when this turn ends'; // a waiting steer's Hold
 export const SEND_NOW_DETAIL = 'Stops the running turn, then sends this'; // a row's Send now while busy
 export const SENDS_NOW = 'Sends this now'; // a held row's Send now with no turn running (a paused queue at idle)
+
+// Fix wave 1: the re-attaching session's Stop with an empty editor; fix wave 2: disabled on another machine
+const endReattaching = (remote: boolean | undefined): SubmitDecision => (remote ? decide('end', 'Stop', false, REATTACHING_STOP_REMOTE) : decide('end', 'Stop', true, null, ENDS_REATTACHING));
 
 const decide = (primary: SubmitState, label: string, enabled: boolean, reason: string | null = null, detail: string | null = null, steer = false): SubmitDecision => ({
   primary,
@@ -102,13 +115,15 @@ export function submitState(i: SubmitInput): SubmitDecision {
     const label = mode === 'bash' ? 'Run' : mode === 'memory' ? 'Save to memory' : 'Send';
     if (i.availability === 'archived') return decide('send', label, false, ARCHIVED);
     if (i.availability === 'foreign_held') return decide('send', label, false, `Held by ${i.heldBy ?? 'another process'}`);
-    if (i.availability === 'starting') return decide('send', 'Starting…', !empty, null, SENDS_WHEN_STARTED);
+    if (i.availability === 'starting' && reattaching(status) && empty) return endReattaching(i.remote); // fix wave 1
+    if (i.availability === 'starting') return decide('send', reattaching(status) ? 'Re-attaching…' : 'Starting…', !empty, null, SENDS_WHEN_STARTED);
     return decide('send', label, !empty, null, STARTS);
   }
   // P2-A end
   if (status === null || status.process !== 'ready') {
     const starting = status !== null && (status.process === 'starting' || status.process === 'initializing');
-    return decide('send', 'Send', false, starting ? STARTING : ENDED);
+    if (reattaching(status) && empty) return endReattaching(i.remote); // fix wave 1
+    return decide('send', 'Send', false, reattaching(status) ? REATTACHING : starting ? STARTING : ENDED);
   }
   const busy = isBusy(status, queue.entries);
   if (mode === 'bash') return decide('send', 'Run', !empty, null, busy ? RUNS_NOW : null);

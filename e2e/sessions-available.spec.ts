@@ -40,6 +40,7 @@ function journal(maws: MawsLaunch, id: string): JournalRow[] {
   const dir = journalDir(maws, id);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
+    .filter((file) => file.endsWith('.jsonl')) // P5 O16: a hosted launch's host map (`<launchId>.hseq`) sits beside its journal
     .sort()
     .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow));
 }

@@ -18,7 +18,7 @@ import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/run
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
 import { appIdentity } from '@shared/host/identity';
-import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import type { HostDoc } from '@shared/ipc/host-protocol';
 import type { WireRegistry } from '@shared/ipc/registry';
 import { WIRE_MINOR } from '@shared/ipc/wire';
@@ -38,11 +38,11 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 // What the stand-in engine host serves: every command it is sent, read as received (z.unknown), so a test sees the
 // relay's inputs exactly; one event, `probe.event`, whose payload is anything (keys no registry names included).
 const ANY = { input: z.unknown(), output: z.unknown(), owner: 'engine-host' as const };
-export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */, 'artifacts.content' /* P5 O5 M2: the artifact endpoint's lookup */, 'maws.artifact.captured', 'maws.artifact.exported' /* P5 O5 M4: the render seam's answers */, 'artifacts.get' /* P5 O5 M4: a render host's snapshot read */] as const;
+export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'host.handover' /* P5 O16 M3b */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */, 'artifacts.content' /* P5 O5 M2: the artifact endpoint's lookup */, 'maws.artifact.captured', 'maws.artifact.exported' /* P5 O5 M4: the render seam's answers */, 'artifacts.get' /* P5 O5 M4: a render host's snapshot read */, 'maws.pane.answer', 'maws.artifact.datasetRefreshed', 'artifacts.datasetRefreshRequest' /* P5 O16 M3b fix wave 2: the completions a drain waits for */] as const;
 const ENGINE_REGISTRY = {
   commands: Object.fromEntries(ENGINE_COMMANDS.map((name) => [name, ANY])),
-  events: { 'probe.event': z.unknown(), 'maws.artifact.capture': z.unknown(), 'maws.artifact.export': z.unknown() /* P5 O5 M4: the bridges' requests */, 'session.status': z.unknown() /* P5 O5 M5: the cua socket's peer check reads it raw */ },
-  hostEvents: ['probe.event', 'maws.artifact.capture', 'maws.artifact.export', 'session.status'],
+  events: { 'probe.event': z.unknown(), 'maws.artifact.capture': z.unknown(), 'maws.artifact.export': z.unknown() /* P5 O5 M4: the bridges' requests */, 'session.status': z.unknown() /* P5 O5 M5: the cua socket's peer check reads it raw */, 'maws.pane.show': z.unknown() /* P5 O16 M3b fix wave 2 */, 'host.supervisorStatus': z.unknown() /* M3c fix wave 3: handOver's */ },
+  hostEvents: ['probe.event', 'maws.artifact.capture', 'maws.artifact.export', 'session.status', 'maws.pane.show', 'host.supervisorStatus'],
   ptyHostEvents: [],
   machineEvents: [],
   mainOnly: new Set<string>(),
@@ -144,6 +144,14 @@ export class StandIn {
   named(name: string): unknown[] {
     return this.calls.filter((call) => call.name === name).map((call) => call.input);
   }
+
+  // P5 O16 M3c fix wave 3: the engine host's exit once its handover's drain settled, as Supervision makes it: its status
+  // says every row detached, then the exit order runs (after `delay` ms), so its client reads that close as planned
+  handOver(delay = 0): void {
+    const status = { mode: 'detached', pid: this.pid, startedAt: this.supervisor.startedAt, buildId: 'b', protocol: 3, wire: 'w', liveSessions: 0, rows: 0, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 0, detached: true } };
+    this.emitRaw('host.supervisorStatus', status); // dropped when no client said ready, as the runtime drops any event
+    setTimeout(() => void this.supervisor.die(), delay);
+  }
 }
 
 class FakeChild extends EventEmitter {
@@ -210,7 +218,7 @@ export class MawsdScene {
   async engine(options: StandInOptions = {}): Promise<StandIn> {
     const host = new StandIn('engine-host', options.answers);
     this.engines.push(host);
-    host.supervisor = await this.serve(this.profile, { ...options, runtime: host.runtime() });
+    host.supervisor = await this.serve(this.profile, { capabilities: [...PEER_CAPABILITIES.engineHost], ...options, runtime: host.runtime() }); // it answers its status, as a holder's welcome asks
     return host;
   }
 
@@ -282,8 +290,9 @@ export class MawsdScene {
     return app;
   }
 
-  // Main's own host supervisor reaching mawsd's engine-host.sock over the relayed detached transport (M7's daemon shape)
-  appHosts(options: Partial<HostSupervisorOptions> = {}): HostSupervisor {
+  // Main's own host supervisor reaching mawsd's engine-host.sock over the relayed detached transport (M7's daemon shape);
+  // P5 O16 M3b fix wave 2: `machine`, and its machine.sock too, as an app that reads the engine host's requests there
+  appHosts(options: Partial<HostSupervisorOptions> = {}, shape: { machine?: boolean } = {}): HostSupervisor {
     const real = (pid: number) => pid === process.pid;
     const hosts = createHostSupervisor({
       hosts: {
@@ -293,6 +302,14 @@ export class MawsdScene {
           transport: 'detached',
           detached: { files: daemonHostFiles(this.paths, 'engine-host'), start: { kind: 'none' }, relayed: true },
         },
+        ...(shape.machine && {
+          machine: {
+            modulePath: this.self,
+            serviceName: 'mawsd',
+            transport: 'detached',
+            detached: { files: daemonHostFiles(this.paths, 'machine'), start: { kind: 'none' }, relayed: true, buildPolicy: 'serve', identity: appIdentity(this.self, {}, 'detached', PEER_CAPABILITIES.app) },
+          },
+        }),
       } as never,
       emit: () => true,
       restartBackoffMs: [30, 60, 90],

@@ -19,6 +19,7 @@ export const SUPERVISOR_FILES = {
   log: 'host.log',
   live: 'live.json',
   ops: 'ops.jsonl', // P5 O10 M7: lane B's operation ledger (ops.ts, @shared/host/op-ledger)
+  stopRequest: 'host.stop', // P5 O16 panel fix (scalpel-4#3): the quit's stop request, below
 } as const;
 
 // Exit codes of a detached engine host: 0 clean, 1 fatal, START_EXIT_HELD when another supervisor holds the lock.
@@ -76,6 +77,43 @@ export function isSameProcess(record: { pid: number; procStart: string }, deps: 
   if (record.procStart === '') return true;
   const current = deps.procStartOf(record.pid);
   return current === null || current === record.procStart;
+}
+
+// P5 O16 panel fix (scalpel-4#3): an engine host that lists `host.holder` detaches its hosted sessions at a SIGTERM, so the
+// one signal that means stop (main's quit, its stop-all with nothing served after a quiet close: detached-transport.ts
+// `stopUnserved`) names that process first in `host.stop` (0600, written whole by a rename, before the signal). The
+// host takes it at its exit order: it stops every row when the request names its own pid and start, and removes a
+// request naming any other process as stale. A build before O16 never reads it and stops at a SIGTERM anyway.
+const StopRequestSchema = z.looseObject({ pid: z.number().int().positive(), procStart: z.string() });
+
+export function requestStop(dir: string, proc: { pid: number; procStart: string }, fs: Pick<typeof nodeFs, 'writeFileSync' | 'renameSync'> = nodeFs): void {
+  const temporary = join(dir, `${SUPERVISOR_FILES.stopRequest}.${randomUUID()}`);
+  fs.writeFileSync(temporary, JSON.stringify({ pid: proc.pid, procStart: proc.procStart }), { mode: 0o600 });
+  fs.renameSync(temporary, join(dir, SUPERVISOR_FILES.stopRequest));
+}
+
+// Whether a stop request names `self`; any request found is removed, its own or a stale one
+export function takeStopRequest(dir: string, self: { pid: number; procStart: string }, fs: Pick<typeof nodeFs, 'readFileSync' | 'unlinkSync'> = nodeFs): boolean {
+  const path = join(dir, SUPERVISOR_FILES.stopRequest);
+  let text: string;
+  try {
+    text = fs.readFileSync(path, 'utf8');
+  } catch {
+    return false; // none
+  }
+  try {
+    fs.unlinkSync(path);
+  } catch {
+    // removed meanwhile
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const request = StopRequestSchema.safeParse(parsed);
+  return request.success && request.data.pid === self.pid && request.data.procStart === self.procStart;
 }
 
 // The lock's and its break file's names inside the directory (P5 O2 M4: another host's, the pty host's or `mawsd`'s).

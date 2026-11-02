@@ -102,10 +102,11 @@ import { serveSocketClients, type SocketClients, type SupervisorIdentity } from 
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
+import { HostCommandError } from '@shared/host/runtime';
 import type { HostResponse } from '@shared/ipc/host-protocol';
-import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
+import { MAX_IDLE_EXIT_MS, type SupervisorStatus } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
-import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
@@ -121,6 +122,7 @@ import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
+import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
 import { readRenderRuntime, renderCacheRoot, watchRenderCache } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
@@ -147,6 +149,13 @@ export const SINGLETON_LOCK_SIGNAL_DEFAULT = true;
 export const SPINE_LOCK_FILE = 'spine.lock'; // src/services/settings/spine-lock.ts's SPINE_LOCK, which mawsd's eager graph cannot import
 export const SINGLETON_LOCK_FILE = 'SingletonLock'; // Electron's single-instance lock in the profile (src/main/files/profile-lock.ts)
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
+// P5 O16 M3b: `restart --engine-host`'s waits. The host's own grace for its drain before it answers `deferred`; then the
+// successor's welcome (the detach's writes, the exit order and a spawn, well inside it); then the successor's
+// adoptions (ADOPT_MS, 60 s, bounds each, in parallel), asked every ADOPTIONS_POLL_MS. The CLI waits for all three.
+export const HANDOVER_GRACE_MS = 10_000;
+export const SUCCESSOR_READY_MS = 30_000;
+export const ADOPTIONS_WAIT_MS = 60_000;
+const ADOPTIONS_POLL_MS = 250;
 const MAX_INTEREST = 10_000; // host.interest's bound
 
 export interface DaemonOptions {
@@ -601,13 +610,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (recycling === 0 && hosts.snapshot('engine-host').state !== 'ready') engineRelay.dropApp(`the engine host is ${hosts.snapshot('engine-host').state} after its recycle`);
     });
   };
-  // A stop-all's close is deliberate (the host parks until the next attach or request). It is marked on the link the
-  // request is written to, so one sent just after an attach waits for that attach's recycle.
+  // A stop-all's close is deliberate (the host parks until the next attach or request). The supervisor marks the link
+  // the request is written to (P5 O16 M3b fix wave 2: at the write, so one held for a successor marks the successor's,
+  // and one written to a host that still owns a handover's drain leaves that link's close the successor's start), so one
+  // sent just after an attach waits for that attach's recycle.
   const stopAll = (request: { input: unknown; client?: string }): Promise<HostResponse> =>
-    recycled.then(() => {
-      hosts.expectExit('engine-host');
-      return hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) });
-    });
+    recycled.then(() => hosts.forward('engine-host', { name: 'host.stopAll', input: request.input, ...(request.client && { client: request.client }) }));
   // host.exitWhenIdle, forwarded and tracked: the link that answers it is marked armed (its exit once idle is
   // deliberate and parks the host) or disarmed. Sent after an attach's recycle, as a stop-all is.
   const exitWhenIdle = (request: { input: unknown; client?: string }): Promise<HostResponse> =>
@@ -842,6 +850,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const asked = hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
     const answered = await Promise.race([asked, new Promise<null>((resolve) => setTimeout(() => resolve(null), STATUS_BOUND_MS).unref())]);
     const live = answered?.ok ? (answered.value as { liveSessions: number }).liveSessions : null;
+    const holder = answered?.ok ? (answered.value as SupervisorStatus).holder : undefined; // P5 O16 M2: its session hosts
     return {
       pid: process.pid,
       startedAt,
@@ -857,9 +866,63 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       logPath: paths.log,
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
       spine: spine.status(),
+      ...(holder && { sessionHosts: { hosts: holder.hosts, adopted: holder.adopted, failed: holder.failed } }), // P5 O16 M2
       artifacts: artifacts.status(), // P5 O5 M2
       render: render.status(), // P5 O5 M4
     };
+  }
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40): `mawsd restart --engine-host`. The
+  // served engine host leaves ready and is asked to hand over (host-supervisor's `handover`); deferred, answered at
+  // once (its close after the drain starts the successor, D40); detaching, answered once a successor is ready and its
+  // start's adoptions have ended, each bounded (past either, without what it would have told).
+  async function restartEngineHost(): Promise<CommandOutput<'daemon.restartEngineHost'>> {
+    const before = hosts.snapshot('engine-host').pid;
+    const asked = await hosts.handover('engine-host', HANDOVER_GRACE_MS);
+    if (!asked.ok) throw new HostCommandError(asked.error);
+    if (asked.value.state === 'deferred') {
+      log(`restart --engine-host: pid ${before} defers its handover (${asked.value.inFlight} calls in flight); its successor follows the drain`);
+      return { state: 'deferred', inFlight: asked.value.inFlight };
+    }
+    log(`restart --engine-host: pid ${before} hands its sessions over`);
+    const ready = await successorReady(before, SUCCESSOR_READY_MS);
+    if (ready === null) return { state: 'detaching', inFlight: 0 };
+    const { pid, adopted } = await adoptionsEnded(ready, ADOPTIONS_WAIT_MS);
+    log(`restart --engine-host: pid ${before} → ${pid}${adopted === null ? '' : `, ${adopted} sessions adopted`}`);
+    return { state: 'detaching', inFlight: 0, pid, ...(adopted !== null && { adopted }) };
+  }
+  // the engine host ready under another pid than `before`; null past `ms`, or once it crashed
+  function successorReady(before: number | null, ms: number): Promise<number | null> {
+    return new Promise((resolve) => {
+      const done = (pid: number | null) => {
+        clearTimeout(timer);
+        off();
+        resolve(pid);
+      };
+      const timer = setTimeout(() => done(null), ms);
+      timer.unref?.();
+      const off = hosts.onState('engine-host', (state) => {
+        if (state.state === 'ready' && state.pid !== null && state.pid !== before) done(state.pid);
+        else if (state.state === 'crashed') done(null);
+      });
+    });
+  }
+  // the successor's supervisor status once its start's adoptions have ended (`holder.adopting` false or absent): how many
+  // sessions it adopted, null past `ms`. Each answer names the host that gave it: a successor replaced while it adopted
+  // (a crash, the ladder's restart) is followed to the newest, whose pid the count is reported with (O16 panel 1)
+  async function adoptionsEnded(successor: number, ms: number): Promise<{ pid: number; adopted: number | null }> {
+    const until = Date.now() + ms;
+    let pid = successor;
+    for (;;) {
+      const answered = await hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
+      const status = answered.ok ? (answered.value as SupervisorStatus) : null;
+      if (status && status.pid !== pid) {
+        log(`restart --engine-host: successor pid ${pid} replaced by ${status.pid} before its adoptions ended`);
+        pid = status.pid;
+      }
+      if (status && status.holder?.adopting !== true) return { pid, adopted: status.holder?.adopted ?? 0 };
+      if (Date.now() >= until) return { pid, adopted: null };
+      await new Promise((resolve) => setTimeout(resolve, ADOPTIONS_POLL_MS).unref());
+    }
   }
   // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
   // never from a request (daemon.e2eSeam, ./e2e-seam.ts)
@@ -872,6 +935,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log('restart asked');
         setImmediate(() => void stop('restart', EXIT_RESTART)); // after the answer is written
         return undefined;
+      case 'daemon.restartEngineHost':
+        return restartEngineHost(); // P5 O16 M3b
       case 'daemon.e2eSeam':
         return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.e2eRender':
@@ -1067,6 +1132,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   front.events((name, payload) => {
     if (name === 'session.removed') sessionRemoved((payload as { appSessionId: AppSessionId }).appSessionId);
   });
+  // P5 O16 M3c fix wave 2 (D63): the engine host's update under way, told to machine.sock's clients (engine-handover-event.ts)
+  const engineHandover = tellEngineHandover({ hosts, emit: (payload) => front.bus.emit('daemon.engineHandover', payload) });
 
   // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
   const artifacts = createArtifactsEndpoint({
@@ -1311,6 +1378,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       cua?.close(); // P5 O5 M5: every session's socket, its relayed connections with it
       cacheWatchEnded = true; // P5 O5 M6
       syncCacheWatch();
+      engineHandover.stop(); // P5 O16 M3c fix wave 2
       front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
@@ -1446,10 +1514,11 @@ function runCommand(command: string, args: string[]): { status: number | null; s
   }
 }
 
-// A host's start, as its lock recorded it, when the lock names `pid`; now otherwise.
-function lockStartedAt(dir: string, pid: number): string {
+// A host's start, as its lock recorded it, when the lock names `pid`; otherwise its process's start as `ps` reads it, the
+// same at each welcome (a client keys the process by pid and start), now only when `ps` knows no such process.
+export function lockStartedAt(dir: string, pid: number): string {
   const lock = readLock(dir);
-  return lock?.pid === pid ? lock.startedAt : new Date().toISOString();
+  return lock?.pid === pid ? lock.startedAt : (procStartOf(pid) ?? new Date().toISOString());
 }
 
 function safely(read: () => unknown, log: (line: string) => void): unknown {

@@ -3,7 +3,7 @@
 // fields, because the raw frame is always reachable through `seq` in the journal (X8), so nothing is lost by strictness.
 // Normalisation from frames to events is C3's (live) and C4's (disk); the derivation rules are pinned in the execution document.
 import * as z from 'zod';
-import { COMMAND_LIFECYCLE_STATES, DenialKindSchema, PermissionModeSchema, PLAN_OUTCOMES, SafeguardVerdictSchema, SESSION_STATES } from './enums';
+import { COMMAND_LIFECYCLE_STATES, DenialKindSchema, ExitCauseSchema, PermissionModeSchema, PLAN_OUTCOMES, SafeguardVerdictSchema, SESSION_STATES } from './enums';
 import {
   AgentIdSchema,
   ApiMessageIdSchema,
@@ -67,6 +67,9 @@ export const EventBaseSchema = z.strictObject({
   seq: z.number().int().nullable(), // journal row the event derives from (X8); null for app-synthesised events
   agentId: AgentIdSchema.nullable(), // the child agent this belongs to, when known
   parentToolUseId: ParentToolUseIdSchema.nullable(), // non-null for child-agent traffic; the parent conversation is never joined
+  // P5 O16 M3 (holder design §3.3): rebuilt from the engine's transcript after a session host's ring lost the output it
+  // derives from (the journal's `meta transcript_reseed`); absent on every other event
+  reseeded: z.literal(true).optional(),
 });
 export type EventBase = z.infer<typeof EventBaseSchema>;
 
@@ -268,6 +271,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('process.exited', {
     code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */, 'idle' /* E10 */]), lostAttentionCount: z.number(), lostAskCount: z.number().optional() /* E1 */,
     budget: z.strictObject({ limitKiB: z.number(), totalKiB: z.number() }).nullable(), // C12
+    cause: ExitCauseSchema.optional(), // P5 O16 M3b (D58a): its own cause beside the reason (enums.ts)
   }),
   // R1: `plugin` is the engine's registry name for the plugin; `text` is plain text. A toast's `timeoutMs` is the
   // plugin's, else the engine's default (4000). A status replaces the plugin's one pinned line; '' removes it (the

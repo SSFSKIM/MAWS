@@ -287,6 +287,87 @@ describe('a front client’s session streams', () => {
     expect(ids(batches)).toEqual(ids([...old, ...fresh]));
   });
 
+  // P5 O16 M4 (the VM's holder run, "Stream redelivery"): a follower relinks across a `mawsd` restart (the engine host
+  // kept) and an engine-host update whose successor serves before its adoption reserved the session's row; the
+  // successor answers the stream's reads once the row is there (ProcessTable.adoptionSettled), the launch unchanged.
+  // Each follow names the cursor of the last event the client holds. Before the fix the update's follow answered `live`
+  // with no launch, and the adopted launch's status then resent the launch from its first event.
+  it('replays from its cursor, sending nothing twice, a follow opened while the engine host still adopts the session', async () => {
+    const host = new FakeEngineHost();
+    const s = host.add('s1');
+    const seen = new Map<string, number>();
+    let cursor: ReturnType<typeof cursorOf> | null = null;
+    let last: SessionEvent | null = null;
+    let leave = () => {};
+    const follow = async () => {
+      leave(); // the old link closed, its mawsd gone
+      const front = createServicesFront({ spine: { ensure: async () => ({}) as never }, hosts: host.hosts, intercept: () => null, daemon: async () => undefined, identity: () => IDENTITY, isApp: () => false, log: () => {} });
+      fronts.push(front);
+      const end = connection();
+      const runtime = front.runtimeFor({ appPid: 1, capabilities: [] });
+      runtime.serve(end.port);
+      end.ready();
+      leave = () => (end.close(), runtime.detach(), front.close());
+      const take = end.port.postMessage;
+      end.port.postMessage = (message: unknown) => {
+        const line = message as Line & { name?: string; payload?: { appSessionId?: string; events?: SessionEvent[] } };
+        if (line.t === 'evt' && line.name === 'session.eventBatch' && line.payload?.appSessionId === 's1')
+          for (const event of line.payload.events ?? []) {
+            seen.set(event.id, (seen.get(event.id) ?? 0) + 1);
+            last = event;
+          }
+        return take(message);
+      };
+      const answer = await end.request('session.follow', { sessions: [{ appSessionId: 's1', cursor }], live: false });
+      return (answer.value as { streams: { mode: string; launchId: string | null }[] }).streams[0];
+    };
+    const twice = () => [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+    expect(await follow()).toMatchObject({ mode: 'live' });
+    const before = [...host.row('s1', 3), ...host.row('s1', 4), ...host.row('s1', 2)];
+    await vi.waitFor(() => expect(seen.size).toBe(before.length));
+    cursor = cursorOf(last!);
+
+    // 1. mawsd restarts, the engine host kept: a new front, the same host
+    expect(await follow()).toEqual({ appSessionId: 's1', mode: 'replay', launchId: s.launchId });
+    const during = host.row('s1', 1); // the session goes on
+    await vi.waitFor(() => expect(seen.has(during[0].id)).toBe(true));
+    expect(twice()).toEqual([]);
+    cursor = cursorOf(last!);
+
+    // 2. an update: the successor's link streams while it still adopts the session, and the follow opens then
+    const adoption = host.adopting('s1');
+    host.drop();
+    host.reconnect();
+    const following = follow();
+    await new Promise((resolve) => setTimeout(resolve, 20)); // the opening's reads wait on the adoption
+    adoption.adopted(); // the row reserved: the same launch
+    expect(await following).toEqual({ appSessionId: 's1', mode: 'replay', launchId: s.launchId });
+    const after = host.row('s1', 1); // the adopted launch's reconnect row
+    await vi.waitFor(() => expect(seen.has(after[0].id)).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20)); // anything sent twice has landed
+    expect(twice()).toEqual([]);
+    expect(seen.size).toBe(before.length + during.length + after.length);
+  });
+
+  // P5 O16 M4 ("Stream redelivery"): the same window for a stream kept across the engine host's replacement (`mawsd
+  // restart --engine-host`, a crash's successor): the link's streaming catches the stream up while the successor still
+  // adopts the session. Before the fix the catch-up's read failed and the stream took no live event until the next relink.
+  it('goes on with a kept stream whose catch-up opened while the engine host still adopted the session', async () => {
+    const { host, client } = lab();
+    host.add('s1');
+    const c = client();
+    await c.request('session.follow', { sessions: [{ appSessionId: 's1', cursor: null }], live: false });
+    const before = host.row('s1', 2);
+    await vi.waitFor(() => expect(c.batched('s1')).toHaveLength(2));
+    const adoption = host.adopting('s1');
+    host.drop();
+    host.reconnect(); // the successor's link streams: the stream catches up from its cursor
+    await new Promise((resolve) => setTimeout(resolve, 20)); // its reads wait on the adoption
+    adoption.adopted();
+    const after = host.row('s1', 1);
+    await vi.waitFor(() => expect(ids(c.batched('s1'))).toEqual(ids([...before, ...after])));
+  });
+
   it('does not wake a parked engine host: a stream of it waits, and opens from its launch’s first event at the link’s next streaming', async () => {
     const { host, client } = lab();
     host.add('s1');

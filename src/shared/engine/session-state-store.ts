@@ -137,4 +137,12 @@ export interface SessionStateStore {
   // record stays missing across a restart until a save succeeds)
   loadCronRecord(appSessionId: AppSessionId): Promise<CronRecord | null>;
   saveCronRecord(appSessionId: AppSessionId, record: CronRecord): Promise<void>;
+  // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, D37): the launch on whose process an observer bridge was
+  // last seen on the gate, so an engine host that adopts that process restores its observer as seen; null when never
+  loadObserverSeen(appSessionId: AppSessionId): Promise<string | null>;
+  saveObserverSeen(appSessionId: AppSessionId, launchId: string): Promise<void>;
+  // P5 O16 M2 (D12): an interrupt written to a hosted process and not yet answered (set before the write, cleared at the
+  // answer or a failed write), which an adopter sends first; false when never set
+  loadOwedInterrupt(appSessionId: AppSessionId): Promise<boolean>;
+  saveOwedInterrupt(appSessionId: AppSessionId, owed: boolean): Promise<void>;
 }

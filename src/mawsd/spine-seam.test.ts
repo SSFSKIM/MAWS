@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { HostDispatch } from '@shared/host/host-supervisor';
+import type { EngineHandoverState, HostDispatch } from '@shared/host/host-supervisor';
 import type { CommandResult, HostState } from '@shared/ipc/schema';
 import type { SpineView, SpineViewEvents } from '@shared/spine/view';
 import { status as statusOf } from '../../test/support/builders';
@@ -31,6 +31,7 @@ class FakeLink {
   private readonly streams = new Set<() => void>();
   private live = false;
   state: HostState = { state: 'ready', pid: 4242, restarts: 0, revision: 1 };
+  handover: EngineHandoverState | null = null; // the supervisor's handover under way (O16)
 
   onEvent = ((name: string, listener: (payload: unknown) => void) => {
     if (!this.events.has(name)) this.events.set(name, new Set());
@@ -41,6 +42,7 @@ class FakeLink {
   onStreaming = (_owner: string, listener: () => void) => (this.streams.add(listener), () => void this.streams.delete(listener));
   streaming = () => this.live;
   snapshot = () => this.state;
+  handoverState = () => this.handover;
   dispatch: HostDispatch = async (_owner, name, input) => {
     this.calls.push({ name, input });
     await this.gates.get(name);
@@ -371,6 +373,16 @@ describe('the hold and the barrier', () => {
     expect(await root.hosts.dispatch('engine-host', 'host.stopAll', { graceMs: 1 })).toEqual({ ok: true, value: undefined });
     expect(intercepted).toEqual(['host.stopAll']);
     expect(link.calls.map((call) => call.name)).not.toContain('host.stopAll');
+  });
+
+  // O16 panel 1 (scalpel-2#1): the loaded root reads the daemon's handover through its hosts, which its attention service
+  // takes as `handingOver` (spine-root.test.ts)
+  it('the loaded root reads the daemon’s handover under way through its hosts', async () => {
+    const spine = seam();
+    const root = (await spine.ensure('command')) as FakeRoot;
+    expect(root.hosts.handoverState?.('engine-host')).toBeNull();
+    link.handover = { state: 'draining', inFlight: 1 };
+    expect(root.hosts.handoverState?.('engine-host')).toEqual({ state: 'draining', inFlight: 1 });
   });
 
   // The supervisor holds a request for an engine host that is not ready and launches a parked one for it (the race over

@@ -513,7 +513,7 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     clocks.engineHost(4242);
     const services = l.f.services;
     const dispatch = services.dispatch.bind(services);
-    const requests = engineRequests({ hosts: { forward: (owner, { name, input }) => dispatch(owner, name, input), onState: () => () => {}, parked: () => parks.length > 0 }, clocks, log: () => {} });
+    const requests = engineRequests({ hosts: { forward: (owner, { name, input }) => dispatch(owner, name, input), onState: () => () => {}, parked: () => parks.length > 0, completionGone: () => false /* P5 O16 M3b */ }, clocks, log: () => {} });
     services.dispatch = (owner, name, input, client) => (owner === 'engine-host' ? requests.forward(owner, { name, input }) : dispatch(owner, name, input, client));
     const views = new Map<string, readonly string[]>();
     const seam = services.interest;

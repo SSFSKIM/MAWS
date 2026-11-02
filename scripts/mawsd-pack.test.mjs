@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -46,10 +46,17 @@ beforeEach(() => {
   pkg('node_modules/vitest', { name: 'vitest' });
   write(join(root, 'packaging/mawsd/electron.json'), JSON.stringify({ version: '44.4.5', sha256: { 'linux-x64': '0'.repeat(64) } })); // P5 O5 M6
   write(join(root, 'node_modules/.bin/vitest'), '#!/bin/sh\n');
+  // P5 O16: each prebuild a script answering `--version` as the binary does, with the version the engine host expects
+  write(join(root, 'src/engine-host/holder/protocol.ts'), "export const SESSION_HOST_PROTOCOL = 1;\nexport const SESSION_HOST_VERSION = '1.0.0'; // a comment\n");
+  write(join(root, 'native/session-host/prebuilds/darwin-arm64/maws-session-host'), hostScript('darwin host'), 0o644);
+  write(join(root, 'native/session-host/prebuilds/linux-x64/maws-session-host'), hostScript('linux host'), 0o644);
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const quiet = { log: () => {} };
+function hostScript(which, version = 'maws-session-host 1.0.0 protocol 1') {
+  return `#!/bin/sh\n# ${which}\n[ "$1" = --version ] && echo '${version}'\n`;
+}
 const listing = (at) => readdirSync(at, { recursive: true }).map(String).sort();
 const packs = (out) => readdirSync(out).filter((name) => name !== '.downloads');
 
@@ -78,6 +85,8 @@ test('the pack holds out/main, the closure and a package.json naming its release
   assert.ok(!existsSync(join(at, 'out/preload')));
   assert.ok(existsSync(join(at, 'node_modules/node-pty/build/Release/pty.node')));
   assert.equal(JSON.parse(readFileSync(join(at, 'node_modules/ajv/node_modules/fast-deep-equal/package.json'), 'utf8')).version, '3.0.0');
+  assert.equal(readFileSync(join(at, 'bin/maws-session-host'), 'utf8'), hostScript('darwin host')); // P5 O16 M1
+  assert.equal(statSync(join(at, 'bin/maws-session-host')).mode & 0o777, 0o755);
   for (const absent of ['node_modules/react', 'node_modules/vitest', 'node_modules/.bin', 'node_modules/fast-deep-equal', 'runtime']) assert.ok(!existsSync(join(at, absent)), absent);
   assert.equal(readFileSync(join(at, 'packaging/mawsd/electron.json'), 'utf8'), readFileSync(join(root, 'packaging/mawsd/electron.json'), 'utf8')); // P5 O5 M6: the render runtime's pin
   assert.deepEqual(JSON.parse(readFileSync(join(at, 'package.json'), 'utf8')), {
@@ -178,6 +187,7 @@ test('a runtime matching its sha256 is unpacked as runtime/bin/node and passes t
   const options = { root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), download, ...quiet };
   const at = await pack(options);
   assert.deepEqual(listing(join(at, 'runtime')), ['LICENSE', 'bin', 'bin/node']); // npm, the headers and the docs left out
+  assert.equal(readFileSync(join(at, 'bin/maws-session-host'), 'utf8'), hostScript('linux host')); // P5 O16 M1
   assert.equal(JSON.parse(readFileSync(join(at, 'package.json'), 'utf8')).mawsd.node, '24.21.0');
   await pack(options);
   assert.equal(downloads, 1);
@@ -206,6 +216,29 @@ test('the pinned runtime is Electron 44.4.5’s Node, 24.21.0, with a sha256 per
   assert.equal(pinned.version, '24.21.0');
   assert.deepEqual(Object.keys(pinned.sha256).sort(), ['linux-arm64', 'linux-x64']);
   for (const sum of Object.values(pinned.sha256)) assert.match(sum, /^[0-9a-f]{64}$/);
+});
+
+test('a Linux pack without a session host prebuild for its architecture is refused, and no pack is left (P5 O16 M1)', async () => {
+  rmSync(join(root, 'native/session-host/prebuilds/linux-x64'), { recursive: true });
+  const archive = fixtureArchive('24.21.0', GOOD_NODE);
+  const out = join(dir, 'dist');
+  await assert.rejects(
+    pack({ root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), download: async (_url, to) => cpSync(archive, to), ...quiet }),
+    /no session host prebuild for linux-x64/,
+  );
+  assert.deepEqual(packs(out), []);
+});
+
+test('the session host is put through a smoke check: `--version` must print the version the engine host expects (P5 O16 M4)', async () => {
+  const archive = fixtureArchive('24.21.0', GOOD_NODE);
+  const options = { root, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), download: async (_url, to) => cpSync(archive, to), ...quiet };
+  write(join(root, 'native/session-host/prebuilds/linux-x64/maws-session-host'), hostScript('linux host', 'maws-session-host 0.9.0 protocol 1'));
+  const out = join(dir, 'dist');
+  await assert.rejects(pack({ ...options, out }), /smoke check session host printed "maws-session-host 0\.9\.0 protocol 1", not "maws-session-host 1\.0\.0 protocol 1"/);
+  assert.deepEqual(packs(out), []);
+  write(join(root, 'native/session-host/prebuilds/linux-x64/maws-session-host'), '#!/bin/sh\nexit 3\n');
+  await assert.rejects(pack({ ...options, out }), /smoke check session host failed \(3\)/);
+  assert.deepEqual(packs(out), []);
 });
 
 // ---- the render runtime beside the pack (P5 O5 M6, --render) ------------------------------------------------------------

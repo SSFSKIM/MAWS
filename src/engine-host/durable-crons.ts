@@ -96,6 +96,11 @@ export class DurableCronSource {
     if (unsaved) this.opts.saveLineage([...this.lineage]);
   }
 
+  // O16 M5: every id the process has carried, the stored ones included (the gate keys an observer's hello against it)
+  ids(): ReadonlySet<string> {
+    return this.lineage;
+  }
+
   // An engine session id one of the process's frames carried.
   note(engineSessionId: string | null): void {
     if (engineSessionId === null || this.lineage.has(engineSessionId)) return;

@@ -301,7 +301,7 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     const withExit = replayEngine([row(1, 'stderr', { text: 'warning line' }), row(2, 'meta', { event: 'exit', code: 1, signal: null })], { prelude });
     const errs: string[] = [];
     const reading = (async () => {
-      for await (const line of withExit.stderr) errs.push(line);
+      for await (const { text } of withExit.stderr) errs.push(text);
     })();
     expect(await take(withExit.frames, 5)).toEqual([]);
     await reading;

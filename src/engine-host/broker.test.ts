@@ -365,3 +365,35 @@ describe('permission answers on the wire', () => {
     expect(responses.map((r) => r.response)).toEqual([recorded.response.response, { behavior: 'cancelled' }]);
   });
 });
+
+// P5 O16 M3 (Interfaces §D; D24, D49): an adopter folds the launch's journal into a fresh broker before it consumes
+// anything. The requests the human had not answered are pending again, an answer the journal holds delivered its item,
+// the engine's own cancellation and the turn's result retire as live, and nothing is published or journaled: the
+// adopter publishes the list once, and the engine's redelivery of a pending request is ignored by its id.
+describe('a broker restored from a journal', () => {
+  const at = (n: number) => `2026-10-31T10:00:0${n}.000Z`;
+  const inRow = (n: number, frame: unknown) => ({ direction: 'in', at: at(n), frame });
+  const outAnswer = (n: number, id: string) => ({ direction: 'out', at: at(n), frame: { type: 'control_response', response: { subtype: 'success', request_id: id, response: { behavior: 'allow' } } } });
+
+  it('restores pending and delivered items with the journal\'s times, silently, and dedups the redelivery by id', () => {
+    const { broker, lists, meta } = setup();
+    for (const row of [
+      inRow(1, canUseTool('r1')),
+      inRow(2, canUseTool('r2')),
+      outAnswer(3, 'r2'),
+      inRow(4, dialog('d1', 'not_declared_kind')),
+      inRow(5, canUseTool('r3')),
+      inRow(6, { type: 'control_cancel_request', request_id: 'r3' }),
+    ]) broker.restore(row);
+    expect(lists).toEqual([]);
+    expect(meta).toEqual([]);
+    expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'pending', createdAt: at(1) } });
+    expect(broker.item(rid('r2'))).toMatchObject({ attention: { state: 'delivered' }, deliveredAt: at(3) });
+    expect(broker.item(rid('d1'))?.attention.state).toBe('pending');
+    expect(broker.item(rid('r3'))).toBeUndefined();
+    expect(broker.retiredReason(rid('r3'))).toBe('abort');
+
+    broker.accept(canUseTool('r1')); // the engine's redelivery after the re-initialize
+    expect(broker.snapshot().map((i) => [i.id, i.state])).toEqual([['app-b:r1', 'pending'], ['app-b:r2', 'delivered'], ['app-b:d1', 'pending']]);
+  });
+});

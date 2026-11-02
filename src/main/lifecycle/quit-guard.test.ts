@@ -35,7 +35,7 @@ vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: 
 
 const { SessionReadModel } = await import('../../services/sessions/read-model');
 const { fakeSpineView } = await import('../../../test/support/fake-spine-view');
-const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
+const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, killEngines, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
 const { hostEventSource } = await import('../../services/sessions'); // C12
 const { SAVE_ALL_BOUND_MS, trackUnsavedFiles } = await import('./quit-guard'); // E5
 const { engineQuitDeps } = await import('./engine-quit'); // P2-F L113
@@ -624,6 +624,35 @@ describe('past the bound, main sends the ladder\'s SIGKILL rung', () => {
     await settle();
     expect(electron.app.quits).toBe(1);
     expect(kill).not.toHaveBeenCalled();
+  });
+});
+
+// O16 panel 1 (scalpel-4#4): a hosted engine's parent is its session host, not the engine host. The SIGKILL rung finds it
+// under the session host its own status names, whatever that host's parent (the engine host that launched it, or ppid 1
+// once a predecessor that launched it handed it over), and never under a pid that is not a session host.
+describe('the SIGKILL rung reaches hosted engines', () => {
+  const HOST = 500;
+  const BIN = '/Applications/MAWS Dev.app/Contents/Resources/bin/maws-session-host';
+  const hosted = (id: string, pid: number, holderPid: number) => ({ ...status(id as AppSessionId, { process: 'ready' }), pid, holder: { pid: holderPid, holderId: `L-${id}`, adopted: false } });
+  const PS = [
+    `${HOST} 1 /Applications/MAWS Dev.app/Contents/MacOS/MAWS Dev`,
+    `300 ${HOST} ${BIN}`, // launched here: the session host is the engine host's child
+    `301 300 /usr/local/bin/claude`,
+    `310 1 ${BIN}`, // adopted: launched by a predecessor, reparented to launchd
+    `311 310 /usr/local/bin/claude`,
+    `320 ${HOST} /bin/zsh`, // not a session host
+    `321 320 /usr/local/bin/claude`,
+    `330 1 ${BIN}`,
+    `331 330 /usr/local/bin/claude`, // its status names another session host
+    `102 ${HOST} /usr/local/bin/claude`, // unhosted (an engine host's direct child), as before
+  ].join('\n');
+  const deps = (kill: (pid: number) => void) => ({ hostPid: () => HOST, ps: async () => PS, kill });
+
+  it('kills a launched hosted engine, an adopted one and an unhosted one; never one under a pid that is not its session host', async () => {
+    const killed: number[] = [];
+    const statuses = [hosted('a', 301, 300), hosted('b', 311, 310), hosted('c', 321, 320), hosted('d', 331, 310), { ...status('e', { process: 'ready' }), pid: 102 }];
+    expect(await killEngines(statuses, deps((pid) => void killed.push(pid)))).toEqual([301, 311, 102]);
+    expect(killed).toEqual([301, 311, 102]);
   });
 });
 

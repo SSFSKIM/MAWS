@@ -209,3 +209,177 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     expect(logs).toEqual(['mcp_message r1 not answered: no engine process']);
   });
 });
+
+// P5 O16 M3b (D9, D34, D41): the handover's drain counts a call from its dispatch until its answer's write settles (the
+// host's `applied`), until its tool settles when the engine withdrew it, or until its write fails; `ask` never counts.
+describe('the calls in flight through delivery (the handover drain)', () => {
+  function gated(tools: McpToolDefinition[]) {
+    const writes: { requestId: RequestId; settle(ok: boolean): void }[] = [];
+    let changes = 0;
+    const server = new MawsToolServer({
+      tools, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {}, onChange: () => changes++,
+      respond: (requestId) => new Promise<void>((resolve, reject) => writes.push({ requestId, settle: (ok) => (ok ? resolve() : reject(new Error('the host refused the write'))) })),
+    });
+    let n = 0;
+    const call = (name: string, id: number): RequestId => {
+      const request_id = `req-${++n}`;
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } } } } as ControlRequestFrame);
+      return request_id as RequestId;
+    };
+    const cancel = (rpcId: number) => {
+      const request_id = `req-${++n}`;
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: rpcId } } } } as ControlRequestFrame);
+    };
+    return { server, writes, call, cancel, changes: () => changes };
+  }
+  const blocking = (name: 'show_pane' | 'ask' | 'send_file') => {
+    let finish: () => void = () => {};
+    const tool = defineMawsTool(name, () => new Promise((resolve) => (finish = () => resolve(toolText({ ok: true })))));
+    return { tool, finish: () => finish() };
+  };
+
+  it("counts a call until its answer's write settles, not until its tool returns", async () => {
+    const pane = blocking('show_pane');
+    const { server, writes, call } = gated([pane.tool]);
+    const id = call('show_pane', 3);
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(1);
+    pane.finish();
+    await flush();
+    expect(server.inFlight).toBe(0); // the tool server's own calls map has let it go
+    expect(writes.map((w) => w.requestId)).toEqual([id]);
+    expect(server.inFlightThroughDelivery()).toBe(1); // the answer is still being written
+    const before = server.inFlightThroughDelivery();
+    writes[0]!.settle(true);
+    await flush();
+    expect(before - server.inFlightThroughDelivery()).toBe(1);
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
+  it('retires a call whose write failed, and tells the change at the retirement', async () => {
+    const pane = blocking('show_pane');
+    const { server, writes, call, changes } = gated([pane.tool]);
+    call('show_pane', 3);
+    await flush();
+    pane.finish();
+    await flush();
+    const told = changes();
+    writes[0]!.settle(false);
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(0);
+    expect(changes()).toBeGreaterThan(told);
+  });
+
+  it('retires a withdrawn call when its tool settles, since no answer is written', async () => {
+    const pane = blocking('show_pane');
+    const { server, writes, call, cancel } = gated([pane.tool]);
+    call('show_pane', 3);
+    await flush();
+    cancel(3);
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(1); // aborted, its tool still running
+    pane.finish();
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(0);
+    expect(writes.filter((w) => w.requestId !== 'req-2')).toHaveLength(0); // only the notification's answer was written
+  });
+
+  it('never counts ask, which waits on a human and is carried across by re-raise', async () => {
+    const ask = blocking('ask');
+    const { server, call } = gated([ask.tool]);
+    call('ask', 4);
+    await flush();
+    expect(server.inFlight).toBe(1);
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
+  // P5 O16 M3c: the e2e's hold (./e2e-hold.ts) keeps a call in flight before its tool runs, so a scene's handover defers
+  it('holds a call before its tool runs, counted in flight through the hold; ask is never held', async () => {
+    let release: () => void = () => {};
+    const ran: string[] = [];
+    const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
+    const writes: RequestId[] = [];
+    const server = new MawsToolServer({
+      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      respond: async (requestId) => void writes.push(requestId),
+      hold: () => new Promise<void>((resolve) => (release = resolve)),
+    });
+    const call = (request_id: string, name: string, id: number) =>
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } } } } as ControlRequestFrame);
+    call('req-ask', 'ask', 1);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    call('req-pane', 'show_pane', 2);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    expect(server.inFlightThroughDelivery()).toBe(1);
+    release();
+    await flush();
+    expect(ran).toEqual(['ask', 'show_pane']);
+    expect(writes).toContain('req-pane');
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
+  // P5 O16 M3c fix wave 2 (D63): the engine host's status names what an update waits for
+  it('names the first call in flight through delivery, and tells each change, the start of a call included', async () => {
+    const pane = blocking('show_pane');
+    const file = blocking('send_file');
+    const ask = blocking('ask');
+    const { server, writes, call, changes } = gated([pane.tool, file.tool, ask.tool]);
+    expect(server.deliveringTool()).toBeNull();
+    call('ask', 1);
+    await flush();
+    expect(server.deliveringTool()).toBeNull(); // an ask is never what an update waits for
+    let told = changes();
+    call('show_pane', 2);
+    expect(changes()).toBeGreaterThan(told);
+    call('send_file', 3);
+    await flush();
+    expect(server.deliveringTool()).toBe('show_pane');
+    pane.finish();
+    await flush();
+    told = changes();
+    writes.find((w) => w.requestId === 'req-2')!.settle(true);
+    await flush();
+    expect(changes()).toBeGreaterThan(told);
+    expect(server.deliveringTool()).toBe('send_file');
+    file.finish();
+    await flush();
+    writes.find((w) => w.requestId === 'req-3')!.settle(true);
+    await flush();
+    expect(server.deliveringTool()).toBeNull();
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+
+  // P5 O16 M3c fix wave 2: the e2e race's gate (../e2e-handover-race.ts) keeps a call out of flight until it opens
+  it('gates a call before it is counted in flight; ask is never gated', async () => {
+    let open: () => void = () => {};
+    const ran: string[] = [];
+    const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
+    const server = new MawsToolServer({
+      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      respond: async () => {},
+      gate: () => new Promise<void>((resolve) => (open = resolve)),
+    });
+    const call = (request_id: string, name: string, id: number) =>
+      server.accept({ type: 'control_request', request_id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } } } } as ControlRequestFrame);
+    call('req-ask', 'ask', 1);
+    call('req-pane', 'show_pane', 2);
+    await flush();
+    expect(ran).toEqual(['ask']);
+    expect(server.inFlightThroughDelivery()).toBe(0); // gated: not yet in flight
+    open();
+    await flush();
+    expect(ran).toEqual(['ask', 'show_pane']);
+  });
+
+  it("counts an unknown tool's answer until its write settles", async () => {
+    const { server, writes, call } = gated([]);
+    call('echo_file', 5);
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(1);
+    writes[0]!.settle(true);
+    await flush();
+    expect(server.inFlightThroughDelivery()).toBe(0);
+  });
+});

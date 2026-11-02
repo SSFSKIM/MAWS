@@ -203,6 +203,40 @@ describe('the dataset refresh requests', () => {
   });
 });
 
+// P5 O16 M3b fix wave 4 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): at a handover a refresh in flight
+// fails `handedOver` (its connector leg cannot run while the host drains), and so does every later ask. The bound
+// operation is left running, since a cancel would write to a frozen engine, and anything it brings back publishes
+// nothing. A publication already admitted still answers with its commit.
+describe('the handover', () => {
+  it('ends every pending request handedOver, the claimed one not withdrawn; a later ask is answered so at once, announcing nothing', async () => {
+    const requests = registry();
+    const cancels: string[] = [];
+    const unclaimed = requests.ask(ASK, new AbortController().signal);
+    const claimed = requests.ask({ ...ASK, opId: 'app-1/toolu_2' }, new AbortController().signal);
+    const scope = requests.claim(announced[1]!, startOf(announced[1]!), () => cancels.push('claimed'))!;
+    requests.handOver();
+    expect(await unclaimed).toEqual({ kind: 'handedOver' });
+    expect(await claimed).toEqual({ kind: 'handedOver' });
+    expect(cancels).toEqual([]);
+    expect(scope.admit()).toBe(false); // what the running operation brings back publishes nothing
+    expect(requests.claim(announced[0]!, startOf(announced[0]!), () => {})).toBeNull(); // nor does a start that comes late
+    expect(requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'routeFailed' })).toBe('not_pending');
+    expect(await requests.ask(ASK, new AbortController().signal)).toEqual({ kind: 'handedOver' });
+    expect(announced).toHaveLength(2);
+  });
+
+  it('a publication admitted before it answers with its commit', async () => {
+    const requests = registry();
+    const asked = requests.ask(ASK, new AbortController().signal);
+    const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => {})!;
+    expect(scope.admit()).toBe(true);
+    requests.handOver();
+    expect(await settled(asked)).toBe(false);
+    scope.ended!({ published: ANSWER });
+    expect(await asked).toEqual({ kind: 'published', answer: ANSWER });
+  });
+});
+
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 3, Interfaces §D, D10): the registry as the
 // host's entry composes it, over the runtime's connectors presence. A served `mawsd` that listed `host.connectors` runs
 // the refresh with no app attached; one that listed `host.attachment` alone (a pre-O4 daemon, its engine host kept across

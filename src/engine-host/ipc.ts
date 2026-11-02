@@ -20,10 +20,13 @@ import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schem
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
 import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
-import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
+import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
-import { createLauncher } from './launcher';
+import { createAdopter, createLauncher, type LauncherDeps } from './launcher';
+import type { RosterEntry } from './holder/roster'; // P5 O16 M3
+import type { Gate } from './holder/gate'; // O16 M5
+import { stopUnresolved, UNRESOLVED_STOP } from './holder/stop-held'; // P5 O16 wave 1 verification
 import { registerOps } from './ops'; // P5 O10 M7
 import { pendingCounts } from './pending-counts'; // P5 O10
 import { SUPERVISOR_FILES } from './supervisor-files'; // P5 O10 M7
@@ -140,7 +143,7 @@ type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
 // `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision. P5 O3-D:
 // `host.attachment` sets the app's presence at once (declared at M1, served from M3)
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.artifactOp': 'bounded' /* P5 O7 M5a */, 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.artifactOp': 'bounded' /* P5 O7 M5a */, 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */, 'host.handover': 'bounded' /* P5 O16 M3b: its graceMs */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -189,6 +192,8 @@ export interface EngineIpcDeps {
   // absent, it finds none and refuses every write `unavailable`
   artifactWrite?: (name: string) => ((input: unknown, ctx: HandlerContext) => Promise<unknown>) | undefined;
   datasetRefresh?: DatasetRefreshRequests; // E3: the host's registry of agents' dataset refreshes (absent: none is ever pending)
+  gate?: Gate; // O16 M5: the engine host's gate, the table's rows' observers (absent: none is ever seen)
+  holder?: LauncherDeps['holder']; // P5 O16 M2: the session hosts of the detached and daemon shapes (index.ts); absent, the direct spawn
 }
 
 export interface EngineIpc {
@@ -196,10 +201,25 @@ export interface EngineIpc {
   plugins: PluginsRunner; // E8
   // E10: engine.shutdown's body (every live row's ladder, and the plugin runner stopped), shared with the detached
   // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
-  shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>;
+  // P5 O16 M3b: `detach` detaches the rows under a session host instead (the detached exit order's, but a stop-all's)
+  shutdown(graceMs: number, mode?: 'stop' | 'detach'): Promise<{ stopped: number; forced: number }>;
+  adopt(entry: RosterEntry): Promise<AppSessionId | null>; // P5 O16 M3: the launcher's adoption of a running session host; null: released, it held no engine
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
+
+// P5 O16 M4 ("Stream redelivery"): the longest a stream's read of a session held for adoption waits for its row
+// (ProcessTable.adoptionSettled). The hold becomes the row after the adopter's spec read, its environment capture and
+// the session host's attach (launcher.ts `createAdopter`), never after the re-initialize. The capture is the host's
+// one login-shell capture (@shared/host/shell-env), which may take SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS
+// (5.25 s) before its fallback; the adoption cannot do without it (the launch's values were never recorded, only their
+// keys, so the plan is rebuilt from this host's capture), nor reserve before it (the row's session is built from that
+// plan and the attached transport). So the bound covers that capture with 2.75 s for the rest, and stays 2 s under the
+// forwarded request's deadline (REQUEST_TIMEOUT_MS, 10 s, @shared/host/host-supervisor) for the rest of a stream's
+// opening, its parts and first page. A reserve later than the bound (a slow capture and a slow attach together) gets
+// the answer it got before the wait (`unknown session`), which is safe: it is the answer every reader already handles,
+// and holding the read longer would only turn it into the caller's own timeout, which says less.
+export const ADOPTION_READ_WAIT_MS = 8_000;
 
 // A bounded handler: the host's own deadline reaches the renderer as `timeout`, never as the router's; so does a
 // `#` append refused because its budget ran out before the write (M5 review).
@@ -223,7 +243,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     hostOn(name, handler);
   };
   const log = deps.log ?? ((message: string) => console.warn(`[engine-host] ${message}`));
-  const table = deps.table ?? new ProcessTable();
+  const table = deps.table ?? new ProcessTable({ gate: deps.gate }); // O16 M5: the gate
   const store = deps.store ?? new FileSessionStateStore(deps.userData);
   const streams = new Map<AppSessionId, SessionStream>();
   const specs = new Map<AppSessionId, LaunchSpec>();
@@ -277,7 +297,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P2-A (X17): the observed facts, written by each launch's recorder and recovered from the journal on a read
   const observed = new ObservedFactsService({ store: deps.observedStore ?? new FileObservedFactsStore(deps.userData), journalRoot: join(deps.userData, 'engine-host', 'journal'), log });
 
-  const launch = createLauncher({
+  const launcherDeps: LauncherDeps = {
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
     replayRowMs: deps.replayRowMs, // E10
@@ -296,13 +316,16 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
-    wire: (session, plan, spec) => {
+    holder: deps.holder, // P5 O16 M2
+    wire: (session, plan, spec, historyThrough) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
       const stream = new SessionStream({
         appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
         emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
         retired: (requestId) => session.requestRetired(requestId), // E11
+        historyThrough, // P5 O16 M3c
+        restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
       });
       streams.set(spec.appSessionId, stream);
       session.on('events', (events) => stream.events(events));
@@ -316,12 +339,20 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request)); // E2: the capture requests main answers
       session.on('artifactExport', (request) => emit('maws.artifact.export', request)); // P3-A M7: main's export service answers
     },
-  });
+  };
+  const launch = createLauncher(launcherDeps);
+  const adopt = createAdopter(launcherDeps); // P5 O16 M3: the same wiring for an adopted row
 
   // Registration with the input's appSessionId narrowed to the branded id the host's maps use.
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
   const sessionOf = (id: string): EngineSession => table.get(id as AppSessionId) ?? throwing(unknownSession(id));
   const streamOf = (id: string): SessionStream => streams.get(id as AppSessionId) ?? throwing(unknownSession(id));
+  // P5 O16 M4: a stream's reads of a session held for adoption are answered once its row is reserved or its adoption
+  // ended (ADOPTION_READ_WAIT_MS above); any other session's as before, with nothing to wait for
+  const adopted = async (id: string): Promise<void> => {
+    const settling = table.adoptionSettled(id as AppSessionId, ADOPTION_READ_WAIT_MS);
+    if (settling !== null) await settling;
+  };
   const ready = (id: string): { session: EngineSession; client: ControlClient } => {
     const session = sessionOf(id);
     if (session.lifecycle !== 'ready' || !session.control) throw new Error(`session ${id} is not ready (${session.lifecycle})`);
@@ -331,13 +362,17 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     bounded(() => ready(input.appSessionId).client.request(subtype, {} as controls.OutboundRequest<S>));
 
   // -- engine.* ------------------------------------------------------------------------------------------------------
-  handle('engine.binaryInfo', async () => binaryProbe()); // W13: resolved and probed per call, the version cached by file
+  handle('engine.binaryInfo', async () => binaryInfoOf(await binaryProbe())); // W13: resolved and probed per call, the version cached by file
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
-  const shutdown = async (graceMs: number) => {
-    const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */]);
+  // P5 O16 M3b: `detach`, a detached host's exit order but a stop-all's: the hosted rows are detached, the rest stopped
+  // P5 O16 M3c: and the host.op runs in flight keep their results on this host before it exits (registerOps below,
+  // bound late); the caller's bound (socket-host's SHUTDOWN_BOUND_MS) leaves a run that outlasts it open
+  const ops: { settled?: () => Promise<void> } = {};
+  const shutdown = async (graceMs: number, mode: 'stop' | 'detach' = 'stop') => {
+    const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */, ops.settled?.()]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };
@@ -367,14 +402,15 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     } catch (error) {
       throw new HostCommandError({ code: 'invalid_input', message: error instanceof Error ? error.message : String(error) });
     }
-    return binaryProbe();
+    return binaryInfoOf(await binaryProbe());
   });
   // C11 end
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
-  handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
+  handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
   handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
+    await adopted(appSessionId); // P5 O16 M4
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
@@ -426,9 +462,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     }
     return result;
   });
-  handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
-  handle('session.catalog', async ({ appSessionId }) => sessionOf(appSessionId).catalog());
-  on('session.pendingItems', async ({ appSessionId }) => ({ items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
+  handle('session.pendingRequest', async ({ appSessionId, requestId }) => (await adopted(appSessionId), { event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
+  handle('session.catalog', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).catalog()));
+  on('session.pendingItems', async ({ appSessionId }) => (await adopted(appSessionId), { items: sessionOf(appSessionId).brokerItems() })); // P5 O10 M8
   // P5 O10: every row's count of items waiting on an answer, for the endpoint's lane B counts (pending-counts.ts)
   on('engine.pendingItems', async () => pendingCounts(table.list()));
 
@@ -440,6 +476,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.steer', async ({ appSessionId, content, priority }) => sessionOf(appSessionId).steer(content, { priority: priority ?? 'now' }));
   handle('session.queue.list', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it may read a state file named after it
+    await adopted(appSessionId); // P5 O16 M4: the adopted row's recovered queue, not the store's
     const session = table.get(appSessionId as AppSessionId);
     if (session?.queue.recovered) return session.queue.state;
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with
@@ -687,6 +724,16 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
+    // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, and
+    // its adopter reads the stored spec and resumes the journal meanwhile; it is live, as a launch's refusal reads it
+    if (table.isAdopting(id)) throw new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' });
+    // follow-up (the architect's ruling): an unattached session host of the session (no row, its engine running) is
+    // stopped first, then the session forgotten, its `session.forgotten` clearing what it left
+    // wave 1 verification: a stop not done keeps the record; the forget is refused, erasing nothing
+    for (const { holderId, outcome } of await table.stopUnattached(id)) {
+      log(`${id}: its unattached session host ${holderId} ${stopUnresolved(outcome) ? 'not stopped' : 'stopped'} before the forget (${outcome})`);
+      if (outcome === 'incomplete' || outcome === 'unverified') throw new HostCommandError({ code: 'internal', message: `already_live: ${UNRESOLVED_STOP[outcome]}` });
+    }
     // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
     // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
     if (session) await session.exited;
@@ -932,8 +979,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
 
   // P5 O10 M7: lane B's operation ledger, compacted at the host's start, and the endpoint's two commands over the
   // handlers registered above (registered on the host's own `on`: host.op never runs itself)
-  registerOps(hostOn, {
-    ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log }),
+  ops.settled = registerOps(hostOn, {
+    // P5 O16 M3c: `orphanAtOpen` (O7 M4's option): a claim the last engine host left without a result (killed, or a run
+    // that outlasted its exit order's bound across a handover) answers `expired`, and a replay runs nothing
+    ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log, orphanAtOpen: true }),
     handler: (name) => own.get(name),
     artifactWrite: deps.artifactWrite ?? (() => undefined), // P5 O7 M5a
     status: (id) => {
@@ -942,9 +991,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     },
     pending: (id, requestId) => streams.get(id as AppSessionId)?.pendingRequest(requestId as RequestId) ?? null,
     log,
-  });
+  }).settled;
 
-  return { table, plugins, shutdown };
+  return { table, plugins, shutdown, adopt };
 }
 
 function throwing(error: Error): never {

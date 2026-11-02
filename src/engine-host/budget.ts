@@ -56,8 +56,9 @@ export function hardReasons(s: EngineSessionStatus, stateful: ReadonlySet<string
 
 // P5 O2 M2: the work beyond the task list (work-state.ts): a cron the last Stop listed, or work the host cannot read now,
 // which counts as work (P5 §2's strict release). Folded into `background_tasks`, since a new HardReason member would be a
-// breaking change to an engine-host output; the status's `work` carries the detail.
-const holdsWork = (s: EngineSessionStatus): boolean => s.work !== undefined && (s.work.unknown !== null || s.work.crons.length > 0);
+// breaking change to an engine-host output; the status's `work` carries the detail. O16 M5: and a process under the
+// engine that is its work (holder/descendants.ts; null, unreadable, is also `unknown`).
+const holdsWork = (s: EngineSessionStatus): boolean => s.work !== undefined && (s.work.unknown !== null || s.work.crons.length > 0 || (s.work.descendants ?? 0) !== 0);
 
 // A process whose tree is in the sum: launched and not already in its termination ladder (a tree in its ladder, up
 // to 7 s, is never counted twice).

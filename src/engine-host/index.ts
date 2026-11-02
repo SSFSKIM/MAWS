@@ -8,10 +8,11 @@ import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os'; // P5 O16 M2
 import { registerEngineIpc, type EngineIpc } from './ipc';
 import type { ProcessTable } from './process-table'; // W7
-import { scheduleJournalPruning } from './journal';
+import { JOURNAL_MAX_AGE_DAYS, scheduleJournalPruning } from './journal';
 import { replayRowDelayMs } from './replay-transport'; // E10
 import { replayTranscriptProjects } from './replay-transcript'; // P3-F L242
 // C3 end
@@ -23,8 +24,17 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
+import { E2E_HANDOVER_RACE } from './e2e-handover-race'; // P5 O16 M3c fix wave 2
 import { readMachineRole } from './role'; // P5 O2 M2
-import { buildIdOf } from './supervisor-files';
+import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
+import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: LiveRow
+import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
+import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
+import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
+import { adoptAll, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records
+import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
+import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
+import { readFileSync } from 'node:fs'; // P5 O16 M3
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
 // P3-A start
@@ -53,6 +63,7 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
+import { Gate } from './holder/gate'; // O16 M5
 import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
 const HOST_VERSION = __MAWS_VERSION__;
@@ -77,6 +88,12 @@ let ipc: EngineIpc | null = null; // the detached entry reaches the table throug
 let supervision: Supervision | null = null; // the host.* commands and the supervisor's clocks
 // E10 end
 let documents: Documents | null = null; // P3-A: the artifact store (M4's IPC and document ports; M5 and M6 serve it too)
+let startJournalPruning: ((alsoKeep: () => readonly string[]) => void) | null = null; // P5 O16 M3: set by the register
+
+// P5 O16 M2: what every session host of this engine host is started and reached with
+const sessionHostDeps = (dir: string) => ({ hostsDir: hostsDirOf(dir), binary: sessionHostBinary(entryFile), userData: userData!, tmpdir: tmpdir(), log: (line: string) => console.log(`[session-host] ${line}`), child: { isAlive, procStartOf, signal: signalOrphan } });
+// P5 O16 M3: a session host's token, written beside it by the launch that started it
+const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionHostPaths(hostsDirOf(dir), holderId, { userData: userData!, tmpdir: tmpdir() }).token, 'utf8').trim();
 
 const register: HostRegister = (untimedOn, emit, client) => {
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
@@ -116,6 +133,16 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
+  // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E): the gate, OX10's server, on both
+  // shapes (no observer connects on a replay); every hosted launch's environment names it (MAWS_HOLDER_SOCKET). A gate
+  // that cannot listen leaves every observer absent (logged), and the releases then follow owner Q1's rule.
+  const gatePath = supervisorDir === undefined ? gateSocketPath(join(userData, 'supervisor'), userData, tmpdir()) : gateSocketPath(supervisorDir, dirname(supervisorDir), tmpdir());
+  const gate = new Gate({ log: (line) => console.log(`[supervisor] ${line}`) });
+  let gateFailed = false; // the status names the path from the start, and null once its listen failed
+  gate.listen(gatePath).catch((error: unknown) => {
+    gateFailed = true;
+    console.warn(`[supervisor] the gate could not listen at ${gatePath}: ${error instanceof Error ? error.message : String(error)}`);
+  });
   const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
@@ -128,6 +155,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
       dashboards.close(); // P3-E
       designs.close(); // P3-E
       googleFaces.close(); // P4-B2
+      void gate.close(); // O16 M5: once no session is left to release
       documents?.close(); // P3-A
     },
     duringShutdown: async () => {
@@ -144,6 +172,23 @@ const register: HostRegister = (untimedOn, emit, client) => {
     artifactWrite: writes.handler, // P5 O7 M5a: host.artifactOp's lookup
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
+    gate, // O16 M5
+    // P5 O16 M2 (D8): on the detached and daemon shapes every live launch runs under a session host, this build's binary
+    // (Decision Log 161), its child signalled by the orphan sweep's own rule if the host is lost; every hosted launch's
+    // MAWS_HOLDER_SOCKET names the gate (O16 M5: the one path both milestones compute, holder/files.ts)
+    holder:
+      supervisorDir === undefined
+        ? undefined
+        : {
+            start: (launchId) => startSessionHost(launchId, sessionHostDeps(supervisorDir)),
+            gateSocket: gatePath,
+            // P5 O16 M3: the token the launch that started the host wrote beside it
+            adopt: async (entry, checkpoint, startMs) => {
+              const { transport, fence } = await adoptHosted({ ...entry, appSessionId: entry.appSessionId ?? '' }, { ...sessionHostDeps(supervisorDir), startMs, token: tokenOf(supervisorDir, entry.holderId), checkpoint, maxLineChars: MAX_LINE_CHARS });
+              return { transport, fence };
+            },
+            release: (entry, startMs) => releaseHost(entry, { log: (line) => console.log(`[session-host] ${line}`), startMs, token: tokenOf(supervisorDir, entry.holderId) }),
+          },
   });
   ({ table } = ipc);
   table.startSampling();
@@ -156,11 +201,16 @@ const register: HostRegister = (untimedOn, emit, client) => {
   connectors = registerConnectors(on, emit, client.connectorsPresence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
+  // P5 O16 M3 (D25): a detached host's starts once its adoptions have ended (`adoptAtStart`), keeping every launch a
+  // roster entry names as well, adopted or not, so a hosted launch older than the age limit is never pruned under its host
   const rows = table;
-  scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
-    keep: () => new Set(rows.list().map((session) => session.status().launchId)),
-    log: (line) => console.warn(`[engine-host] ${line}`),
-  });
+  startJournalPruning = (alsoKeep) => {
+    scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
+      keep: () => new Set([...rows.list().map((session) => session.status().launchId), ...alsoKeep()]),
+      log: (line) => console.warn(`[engine-host] ${line}`),
+    });
+  };
+  if (supervisorDir === undefined) startJournalPruning(() => []);
   // E10: registered after the engine ipc, so the status ends the connect burst
   supervision = new Supervision({
     mode,
@@ -171,6 +221,9 @@ const register: HostRegister = (untimedOn, emit, client) => {
     log: (line) => console.log(`[supervisor] ${line}`),
     collector: idle,
     startup: designSystems.ready, // the register's gate: no collection lands mid-seed
+    gate: { path: () => (gateFailed ? null : gatePath), counts: () => rows.gateCounts() }, // O16 M5
+    handingOver: () => datasetRefresh.handOver(), // P5 O16 M3b fix wave 4: a refresh in flight fails, retryable
+    e2eRace: E2E_HANDOVER_RACE?.race, // P5 O16 M3c fix wave 2: under MAWS_E2E alone
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run
@@ -195,13 +248,13 @@ if (mode === 'utility') {
       const { liveSessions, rows } = served().supervision.status(); // the status's live-row rule, in one place
       return { liveSessions, rows };
     },
-    shutdown: async (graceMs) => {
-      await served().ipc.shutdown(graceMs); // engine.shutdown's body
+    shutdown: async (graceMs, mode) => {
+      await served().ipc.shutdown(graceMs, mode); // engine.shutdown's body; P5 O16 M3b: detaching the hosted rows but at a stop-all
     },
     life: {
       started: (identity, exit) => served().supervision.started(identity, exit),
       clientChanged: (connected) => served().supervision.clientChanged(connected),
-      exitWhenIdle: () => served().supervision.armExitWhenIdle(true),
+      exitAsked: (when, from) => served().supervision.exitAsked(when, from), // P5 O16 M3b
       // Task 2.5: the sweep ended; the table records this supervisor's own ledger from now on, and the status the count
       orphansSwept: (killed, recordLive) => {
         const { ipc, supervision } = served();
@@ -209,6 +262,45 @@ if (mode === 'utility') {
         supervision.orphansSwept(killed);
       },
     },
+    adopt: () => adoptAtStart(dir),
   });
+}
+
+// P5 O16 M3 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D10, D25, D46): the start's adoption, run in the
+// detached entry's `listening` step. Synchronously: the roster read; the session host logs no entry names pruned once
+// past the journals' age (D46); each dead host's files removed and its live child handed to the sweep; a row held for
+// each live host adopted. Then the adoptions, in the background; once they have ended, the holds of the failed ones
+// released, the failures counted in the status and journal pruning scheduled.
+function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] } {
+  const engine = ipc!; // the register ran before the listen (the detached entry's order)
+  const life = supervision!;
+  const hostsDir = hostsDirOf(dir);
+  const log = (line: string) => console.log(`[supervisor] ${line}`);
+  const roster = readRoster(hostsDir, log);
+  const prunedLogs = pruneHostLogs(hostsDir, new Set(roster.map((entry) => entry.holderId)), { maxAgeDays: JOURNAL_MAX_AGE_DAYS });
+  if (prunedLogs > 0) log(`${prunedLogs} session host log(s) past ${JOURNAL_MAX_AGE_DAYS} days pruned`);
+  const { live, dead } = liveHosts(roster, { isAlive, procStartOf });
+  const deadHostChildren: LiveRow[] = dead.flatMap((entry) => (entry.child !== null && entry.exit === null ? [{ appSessionId: entry.appSessionId ?? '', pid: entry.child.pid, procStart: entry.child.procStart, launchId: entry.holderId, holderId: entry.holderId }] : []));
+  for (const entry of dead) {
+    log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
+    removeHostFiles(hostsDir, entry);
+  }
+  // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
+  // adoption reserves its row stops it through its session host (scalpel-1#1)
+  const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
+  const heldHosts = { stop: (entry: RosterEntry) => stopHeldHost(entry, stopDeps), child: (entry: RosterEntry) => heldChild(entry, hostsDir) };
+  const held = recordStart(engine.table, live, heldHosts);
+  void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
+    // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
+    // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
+    // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed
+    // adoption whose row was reserved is that row's
+    recordFailed(engine.table, outcome.failed, heldHosts);
+    for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
+    if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
+    life.adoptionsEnded(outcome.failed.length);
+    startJournalPruning?.(() => readRoster(hostsDir, () => {}).map((entry) => entry.holderId));
+  });
+  return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
 }
 // E10 end

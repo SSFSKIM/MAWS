@@ -118,6 +118,35 @@ describe('transport frames and journals', () => {
     });
   });
 
+  // P5 O16 (Interfaces §C): an adopter continues the launch's journal where the last writer left it
+  describe('JournalWriter.resume', () => {
+    it('continues seq and the rotation index from the latest file, truncating a torn last row first', async () => {
+      const dir = join(root, 'app-1');
+      const first = new JournalWriter(dir, 'L', { maxBytes: 200 });
+      first.row('meta', { event: 'spawn', pad: 'x'.repeat(120) });
+      first.row('in', { type: 'system', pad: 'x'.repeat(120) });
+      await first.close();
+      writeFileSync(join(dir, 'L.1.jsonl'), readFileSync(join(dir, 'L.1.jsonl'), 'utf8') + '{"seq":3,"dire'); // a crash mid-row
+      const resumed = JournalWriter.resume(dir, 'L', { maxBytes: 200 });
+      expect(resumed.lastSeq).toBe(2);
+      expect(resumed.currentPath).toBe(join(dir, 'L.1.jsonl'));
+      expect(resumed.path).toBe(join(dir, 'L.jsonl'));
+      resumed.row('meta', { event: 'host_attach', pad: 'x'.repeat(120) }); // the file's bytes count: this one rotates on
+      await resumed.close();
+      expect(readRows(join(dir, 'L.1.jsonl')).map((r) => r.seq)).toEqual([2]);
+      expect(readRows(join(dir, 'L.2.jsonl')).map((r) => r.seq)).toEqual([3]);
+      expect(statSync(join(dir, 'L.1.jsonl')).mode & 0o777).toBe(0o600);
+    });
+
+    it('resumes an empty or missing launch from seq 0', async () => {
+      const resumed = JournalWriter.resume(join(root, 'app-2'), 'M', { maxBytes: 200 });
+      expect(resumed.lastSeq).toBe(0);
+      resumed.row('meta', { event: 'host_attach' });
+      await resumed.close();
+      expect(readRows(join(root, 'app-2', 'M.jsonl')).map((r) => r.seq)).toEqual([1]);
+    });
+  });
+
   describe('JournalReader', () => {
     it('streams parsed rows back and lists a session\'s launch files in launch order with their rotations', async () => {
       const dir = join(root, 'app-1');
@@ -161,6 +190,17 @@ describe('transport frames and journals', () => {
       expect(existsSync(sessionC)).toBe(false); // an emptied session directory goes too
       expect(existsSync(join(root, 'README.txt'))).toBe(true);
       expect(await pruneJournals(join(root, 'nope'), { keepPerSession: 20, maxAgeDays: 30, now })).toEqual({ removed: 0 });
+    });
+
+    // P5 O16 M2 (Interfaces §C): a hosted launch's host map goes with its journal files, rotations included
+    it('removes a pruned launch\'s host map files with its journal files', async () => {
+      const now = new Date('2026-09-28T12:00:00Z');
+      const session = join(root, 'app-a');
+      seedLaunch(session, 'held', new Date(now.getTime() - 40 * 86_400_000));
+      seedLaunch(session, 'stale', new Date(now.getTime() - 40 * 86_400_000));
+      for (const name of ['held.hseq', 'stale.hseq', 'stale.1.hseq', 'stalex.hseq']) writeFileSync(join(session, name), '1 1\n');
+      expect(await pruneJournals(root, { keepPerSession: 20, maxAgeDays: 30, now, keep: new Set(['held']) })).toEqual({ removed: 1 });
+      expect(readdirSync(session).sort()).toEqual(['held.hseq', 'held.jsonl', 'stalex.hseq']);
     });
 
     // E10: a supervisor outlives the app by days, so pruning also runs while launches are held; a launch the host still

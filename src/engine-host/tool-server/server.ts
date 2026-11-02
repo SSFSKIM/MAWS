@@ -60,6 +60,10 @@ export function defineMawsTool(name: MawsToolName, call: McpToolDefinition['call
   return { ...entry, call };
 }
 
+// P5 O16 M3 (holder design §3.3; Interfaces §D): the answer to a `maws` tool call the old manager left running when its
+// engine host stopped. Never a retryable error: the call's effect may have completed.
+export const ORPHANED_CALL_TEXT = "MAWS's engine host restarted while this tool ran. Its result is unknown and its effect may have completed; check before retrying.";
+
 export const JSONRPC_INVALID_REQUEST = -32600;
 export const JSONRPC_METHOD_NOT_FOUND = -32601;
 const FALLBACK_PROTOCOL_VERSION = '2025-11-25'; // what 2.1.290 offers (E0a seq 5), for a client that names none
@@ -74,11 +78,15 @@ export interface MawsToolServerDeps {
   log: (message: string) => void;
   onChange?: () => void; // the calls in flight changed (the session's status counts them)
   fromSubagent?: (toolUseId: ToolUseId | null) => boolean; // P2-C3: the normaliser's reading of the frames before the call
+  hold?: () => Promise<void>; // P5 O16 M3c: the e2e's hold (./e2e-hold.ts), awaited before any tool but `ask` runs
+  gate?: () => Promise<void>; // P5 O16 M3c fix wave 2: the e2e's race's gate (../e2e-handover-race.ts), awaited before any call but `ask` is dispatched
 }
 
 export class MawsToolServer {
   private readonly tools: Map<string, McpToolDefinition>;
   private readonly calls = new Map<RequestId, { id: RpcId; controller: AbortController; answered: boolean }>();
+  // P5 O16 M3b: the calls the handover's drain waits for; M3c fix wave 2 (D63): each with its tool's name, in call order
+  private readonly delivering = new Map<RequestId, string>();
   private callsStarted = 0;
 
   constructor(private readonly deps: MawsToolServerDeps) {
@@ -92,6 +100,21 @@ export class MawsToolServer {
 
   get inFlight(): number {
     return this.calls.size;
+  }
+
+  // P5 O16 M3b (D9, D34, D41): the calls the handover's drain waits for, every tool's but `ask` (which waits on a human
+  // and is carried across by its re-raise): each from its dispatch until its answer's write settles (the host's
+  // `applied`, or the write's failure), or, for a call the engine withdrew, which writes no answer, until its tool
+  // settles. Not `inFlight`, which `call()` clears before it queues the answer.
+  inFlightThroughDelivery(): number {
+    return this.delivering.size;
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first call `inFlightThroughDelivery` counts (what an update waits for,
+  // in the engine host's status); null when none is
+  deliveringTool(): string | null {
+    for (const tool of this.delivering.values()) return tool;
+    return null;
   }
 
   // Every `mcp_message` the engine sends, read as the normaliser reads it (src/shared/maws/rpc.ts); answered through
@@ -109,7 +132,7 @@ export class MawsToolServer {
       return;
     }
     if (message.kind === 'notification') {
-      this.write(requestId, { jsonrpc: '2.0', result: {}, id: 0 }); // a notification: the official SDK's answer (E0a seq 11)
+      void this.write(requestId, { jsonrpc: '2.0', result: {}, id: 0 }); // a notification: the official SDK's answer (E0a seq 11)
       const abandoned = cancelledCallOf(message);
       if (abandoned !== null) this.abandoned(abandoned);
       return;
@@ -119,21 +142,34 @@ export class MawsToolServer {
       case 'initialize': {
         const protocolVersion = typeof params.protocolVersion === 'string' ? params.protocolVersion : FALLBACK_PROTOCOL_VERSION;
         // P4-B4 (route (b), its Decision Log 1): the always-on link paragraph, which the engine renders to the model
-        this.result(requestId, id, { protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: mawsServerInfo(this.deps.version), instructions: MAWS_SERVER_INSTRUCTIONS });
+        void this.result(requestId, id, { protocolVersion, capabilities: { tools: { listChanged: true } }, serverInfo: mawsServerInfo(this.deps.version), instructions: MAWS_SERVER_INSTRUCTIONS });
         return;
       }
       case 'ping':
-        this.result(requestId, id, {});
+        void this.result(requestId, id, {});
         return;
       case 'tools/list':
-        this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta !== undefined && { _meta }) })) });
+        void this.result(requestId, id, { tools: [...this.tools.values()].map(({ name, title, description, inputSchema, annotations, _meta }) => ({ name, title, description, inputSchema, annotations, ...(_meta !== undefined && { _meta }) })) });
         return;
       case 'tools/call':
-        void this.call(requestId, id, params);
+        // fix wave 2: the e2e's race keeps a call out of flight until a handover is asked (under MAWS_E2E alone)
+        if (this.deps.gate && toolCallOf(params).name !== 'ask') {
+          this.deps.log(`e2e: ${requestId} waits for the call gate`);
+          void this.deps.gate().then(() => (this.deps.log(`e2e: ${requestId} passed the call gate`), this.call(requestId, id, params)));
+        }
+        else void this.call(requestId, id, params);
         return;
       default:
         this.error(requestId, id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${message.method}`);
     }
+  }
+
+  // P5 O16 M3: a `tools/call` an earlier engine host dispatched and never answered (its result unknown): answered with
+  // ORPHANED_CALL_TEXT as a tool error, never run again.
+  orphaned(req: ControlRequestFrame): void {
+    const message = readMcpMessage(req.request);
+    if (message.kind !== 'request') return this.accept(req); // not a call: answered as any request (D36)
+    void this.result(req.request_id as RequestId, message.id, toolError(ORPHANED_CALL_TEXT));
   }
 
   // The engine withdrew the request (`control_cancel_request`): the call's signal aborts and nothing is answered.
@@ -172,9 +208,13 @@ export class MawsToolServer {
 
   private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>): Promise<void> {
     const { name, args, toolUseId } = toolCallOf(params);
+    if (name !== 'ask') {
+      this.delivering.set(requestId, String(name)); // P5 O16 M3b
+      this.deps.onChange?.(); // M3c fix wave 2: an update waiting for quiet hears the call start
+    }
     const tool = typeof name === 'string' ? this.tools.get(name) : undefined;
     if (!tool) {
-      this.result(requestId, id, toolError(TOOL_ERRORS.unknownTool(String(name))));
+      void this.result(requestId, id, toolError(TOOL_ERRORS.unknownTool(String(name)))).then(() => this.retire(requestId));
       return;
     }
     const controller = new AbortController();
@@ -184,6 +224,7 @@ export class MawsToolServer {
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
+      if (name !== 'ask' && this.deps.hold) await this.deps.hold();
       result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal, fromSubagent: this.deps.fromSubagent?.(toolUseId) ?? false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -193,19 +234,26 @@ export class MawsToolServer {
       this.calls.delete(requestId);
       this.deps.onChange?.();
     }
-    if (controller.signal.aborted || call.answered) return;
-    this.result(requestId, id, result);
+    if (controller.signal.aborted || call.answered) return this.retire(requestId);
+    await this.result(requestId, id, result);
+    this.retire(requestId);
   }
 
-  private result(requestId: RequestId, id: RpcId, result: unknown): void {
-    this.write(requestId, { jsonrpc: '2.0', id, result }); // the key order the engine echoes back (E0a seqs 6 and 9)
+  // P5 O16 M3b: a call's delivery is over (its answer's write settled, or its withdrawn tool did)
+  private retire(requestId: RequestId): void {
+    if (this.delivering.delete(requestId)) this.deps.onChange?.();
+  }
+
+  private result(requestId: RequestId, id: RpcId, result: unknown): Promise<void> {
+    return this.write(requestId, { jsonrpc: '2.0', id, result }); // the key order the engine echoes back (E0a seqs 6 and 9)
   }
 
   private error(requestId: RequestId, id: RpcId | null, code: number, message: string): void {
-    this.write(requestId, { jsonrpc: '2.0', id, error: { code, message } });
+    void this.write(requestId, { jsonrpc: '2.0', id, error: { code, message } });
   }
 
-  private write(requestId: RequestId, rpc: Record<string, unknown>): void {
-    this.deps.respond(requestId, { mcp_response: rpc }).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
+  // Settles once the write did, either way: a refused write is logged, never thrown.
+  private write(requestId: RequestId, rpc: Record<string, unknown>): Promise<void> {
+    return this.deps.respond(requestId, { mcp_response: rpc }).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
   }
 }

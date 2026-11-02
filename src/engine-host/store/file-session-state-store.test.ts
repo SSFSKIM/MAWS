@@ -281,6 +281,17 @@ describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2
   });
 });
 
+// O16 M5 (D37): the launch whose process an observer bridge was seen on, beside the keep mark, kept across the other writes
+describe('FileSessionStateStore: observerSeenLaunch (O16 M5)', () => {
+  it('reads null until saved, then the launch saved, through the launch spec’s and queue’s writes and a new store', async () => {
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadObserverSeen(ID)).toBeNull();
+    await store.saveObserverSeen(ID, 'launch-1');
+    await Promise.all([store.saveLaunchSpec(ID, spec), store.saveQueue(ID, { entries: [entry()], paused: false })]);
+    expect(await new FileSessionStateStore(userData).loadObserverSeen(ID)).toBe('launch-1');
+  });
+});
+
 describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)', () => {
   const record = { sessionCrons: [{ id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' }], toolSinceStop: false };
   it('round-trips through a new instance; never written, it is null', async () => {
@@ -311,7 +322,7 @@ describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)'
 
   it('a clean record makes a resume over a new store known and empty (the control for the next test)', async () => {
     await new FileSessionStateStore(userData).saveCronRecord(ID, { sessionCrons: [], toolSinceStop: false });
-    expect(await resumedWork(new FileSessionStateStore(userData))).toEqual({ crons: [], unknown: null });
+    expect(await resumedWork(new FileSessionStateStore(userData))).toEqual({ crons: [], unknown: null, descendants: 0 }); // O16 M5: nothing under its engine
   });
 
   it('after a rejected save (ENOSPC) a new store reads no record, so the older clean one cannot make the resume known and empty; a later save is read again', async () => {
@@ -323,7 +334,7 @@ describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)'
     expect(await before.loadCronRecord(ID)).toBeNull();
     const after = new FileSessionStateStore(userData); // the engine host restarted
     expect(await after.loadCronRecord(ID)).toBeNull();
-    expect(await resumedWork(after)).toEqual({ crons: [], unknown: 'resumed' });
+    expect(await resumedWork(after)).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     disk.writeFails = null; // storage recovers
     await after.saveCronRecord(ID, record);
     expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toEqual(record);
@@ -370,5 +381,23 @@ describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)'
     await store.saveCronRecord(ID, record);
     await store.forget(ID);
     expect(await new FileSessionStateStore(userData).loadCronRecord(ID)).toBeNull();
+  });
+});
+
+// P5 O16 M2 (D12): the owed interrupt, a mark set before an interrupt is written and cleared at its answer, which an
+// adopter reads to send the interrupt first
+describe('FileSessionStateStore: the owed interrupt (P5 O16 M2)', () => {
+  it('round-trips through a new instance beside the other saves, and reads false from a file without it', async () => {
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null }));
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadOwedInterrupt(ID)).toBe(false);
+    await Promise.all([store.saveOwedInterrupt(ID, true), store.saveKeep(ID, true)]);
+    const after = new FileSessionStateStore(userData);
+    expect(await after.loadOwedInterrupt(ID)).toBe(true);
+    expect(await after.loadKeep(ID)).toBe(true);
+    await after.saveOwedInterrupt(ID, false);
+    expect(await new FileSessionStateStore(userData).loadOwedInterrupt(ID)).toBe(false);
   });
 });
