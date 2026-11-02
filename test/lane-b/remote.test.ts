@@ -60,6 +60,17 @@ import type { NotificationHandle, NotifyRequest } from '@shared/client/port';
 import { startNotifier } from '../../src/main/attention/notifier';
 import { DaemonClocks } from '../../src/mawsd/clocks';
 import { engineRequests } from '../../src/mawsd/engine-requests';
+import { EventEmitter } from 'node:events';
+import { decodeFrame } from '@artifacts/provider/frames';
+import { PortProvider } from '@artifacts/provider/port';
+import { newDoc, type Doc } from '@artifacts/yjs';
+import { MemoryDocumentHost } from '@artifacts/document/editor/memory-host';
+import { DOC_PORT_CHANNEL } from '@shared/ipc/doc-port';
+import { startArtifacts, type ArtifactsDeps } from '../../src/main/artifacts';
+import { clientOf } from '../../src/main/ipc/clients';
+import { BRIDGE_SCRIPT } from '../../src/services/artifacts/scheme/bridge-script';
+import { fakeDocuments, fakeServices, scratchArtifacts, type FakeServices } from '../endpoint/fake-services';
+import { End } from './port-pair';
 
 // The endpoint's `h2` list, the build's own by default, which a case narrows to an endpoint of an earlier build (before the
 // `machine` executor, before M4's byte budget); each case starts from the whole list again.
@@ -70,6 +81,14 @@ vi.mock('../../src/endpoint/capabilities', async (importOriginal) => {
   endpointCaps.list.splice(0, Infinity, ...endpointCaps.full);
   return { ENDPOINT_CAPABILITIES: endpointCaps.list };
 });
+// P5 O7 M5b: main's scheme chain as `startArtifacts` installs it on the window's session (src/main/artifacts/index.ts):
+// the handler it hands the default session's `protocol.handle`, which a case calls with `Request`s as Chromium would.
+const schemes = vi.hoisted(() => ({ handlers: [] as Array<(request: Request) => Promise<Response>> }));
+vi.mock('electron', () => {
+  const session = (kept: boolean) => ({ protocol: { handle: (_scheme: string, handler: (request: Request) => Promise<Response>) => void (kept && schemes.handlers.push(handler)) } });
+  return { protocol: {}, MessageChannelMain: class {}, systemPreferences: {}, session: { defaultSession: session(true), fromPartition: () => session(false) } };
+});
+
 /** This case's endpoint lists none of `dropped`. */
 function endpointWithout(...dropped: string[]): void {
   endpointCaps.list.splice(0, Infinity, ...endpointCaps.full.filter((c) => !dropped.includes(c)));
@@ -243,7 +262,7 @@ type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgStat
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
 type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B'; budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */ };
 /** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
-type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions'>; ring?: number };
+type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions' | 'services' /* P5 O7 M5b: the machine's document host */>; ring?: number };
 
 /** The endpoint with the suite's engine host and a pty host, and device `mac1` of its owner (A) up on it. */
 async function lab(options: LabOptions = {}): Promise<Lab> {
@@ -337,6 +356,11 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
     },
     timing: { idleRetryMs: [50, 400], recordRetryMs: [50, 100], ...options.adapter },
     log: (line) => void logs.push(line),
+    // P5 O7 M5b: the document bridge's channel, in memory (main mints a MessageChannelMain)
+    docChannel: () => {
+      const [port1, port2] = End.pair();
+      return { port1, port2 } as never;
+    },
   });
   cleanups.push(() => adapter.stop());
   // The manager's path, as the RL2 link's `dispatch` takes it: the session a path-class read was made from as `call.session`
@@ -1695,5 +1719,275 @@ describe('artifacts across machines (P5 O7 M5a)', { timeout: 30_000 }, () => {
     expect(await l.a.route('artifacts.uploadAsset', { artifactId: ID, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(randomBytes(64 * 1024)) })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
     expect(l.host.calls.filter((c) => c.name === 'artifacts.versionState' || c.name === 'host.artifactOp')).toEqual([]);
     expect(l.host.artifactRuns).toEqual([]);
+  });
+});
+
+// ---- P5 O7 M5b: pages and documents across machines ----------------------------------------------------------------------
+
+// M5b's "Proves" for this file: a remote session's page fetched through the real endpoint, over a scratch store under the
+// fake services (the artifact endpoint's own library: its headers, its ranges, the bridge script), and served to a
+// `Request` through main's real chain; a document behind the endpoint's document channels (a real Yjs host speaking A's
+// frames) edited from two devices, across a forced drop, and opened read-only by a member who holds `view` until the share
+// is withdrawn. Each device's document bridge is main's own (src/main/artifacts/remote-open.ts), its window's replica the
+// real port provider on the port the bridge posts, reopened as the ArtifactHost reopens it.
+const PAGE_ID = '3c4d5e6f-7a8b-4c9d-8eaf-b1c2d3e4f506';
+const DOC_ID = '4d5e6f7a-8b9c-4dae-9fb0-c2d3e4f50617';
+const PAGE = '<!doctype html><html><head><title>Report</title></head><body><h1>Report from the mini</h1></body></html>';
+const pageUrl = (id: string, path = 'index.html') => `maws-artifact://${id}/live/${path}`;
+const text = (doc: Doc) => doc.get('root').toString();
+
+/**
+ * Main's chain as `startArtifacts` installs it, the device's remote responder in it (as app.ts passes it); `local` is
+ * each read of this Mac's engine host, which has no artifact of the machine's.
+ */
+function mainChain(d: Device): { fetch(request: Request): Promise<Response>; local: string[] } {
+  const local: string[] = [];
+  const root = mkdtempSync(join(tmpdir(), 'maws-o7-scheme-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const hosts = {
+    dispatch: async (_owner: string, name: string, input: { artifactId?: string }) => (local.push(`${name} ${input?.artifactId}`), { ok: false, error: { code: 'invalid_input', message: 'no such artifact' } }),
+    postDocPort: () => false,
+    closeDocPorts: () => {},
+    onState: () => () => {},
+    onStreaming: () => () => {},
+    onEvent: () => () => {},
+    peer: () => null,
+  };
+  const noop = (() => {}) as never;
+  const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: noop, registerMachine: noop, emit: noop, env: {}, openWindow: noop, root, artifactsSocket: null, remote: d.adapter.artifacts.scheme });
+  cleanups.push(() => started.stop());
+  const handler = schemes.handlers.at(-1)!;
+  return { fetch: (request) => handler(request), local };
+}
+
+/**
+ * The machine's document host behind the endpoint's document channels (as `mawsd` relays them to the engine host): one
+ * in-memory host per artifact (src/artifacts/document/editor/memory-host.ts: step 1 at the attach, step 2 answered, each
+ * content frame applied, acked and sent to the other connections, awareness relayed), each endpoint channel a connection
+ * of it, over the fake host port (`fakeDocuments`), which keeps each channel's open, the frames the endpoint wrote and its
+ * end. Installed before the endpoint starts.
+ */
+function documentHost(services: FakeServices) {
+  const port = fakeDocuments(services);
+  const hosts = new Map<string, MemoryDocumentHost>();
+  const connections = new Map<number, MessagePort>();
+  const hostOf = (artifactId: string) => {
+    if (!hosts.has(artifactId)) hosts.set(artifactId, new MemoryDocumentHost());
+    return hosts.get(artifactId)!;
+  };
+  const { open, close, frame } = services.documents;
+  services.documents = {
+    ...services.documents,
+    open(message) {
+      if (!open(message)) return false;
+      const connection = hostOf(message.artifactId).connect();
+      connections.set(message.channel, connection);
+      connection.onmessage = (event: MessageEvent) => port.send(message.channel, event.data as Uint8Array);
+      return true;
+    },
+    close(channel) {
+      close(channel);
+      connections.get(channel)?.close();
+      connections.delete(channel);
+    },
+    frame(channel, bytes) {
+      if (!frame(channel, bytes)) return false;
+      connections.get(channel)?.postMessage(bytes.slice());
+      return true;
+    },
+  };
+  cleanups.push(() => {
+    for (const connection of connections.values()) connection.close();
+    for (const host of hosts.values()) host.destroy();
+  });
+  return {
+    port,
+    /** The machine's document, as its store holds it. */
+    doc: (artifactId: string) => hostOf(artifactId).doc,
+    /** A write made on the machine. */
+    write: (artifactId: string, value: string) => hostOf(artifactId).write((doc) => doc.get('root').insert(0, value)),
+    /** The frame types the endpoint wrote to a channel (what reached the host from the device). */
+    heard: (channel: number) => port.channels.get(channel)!.received.map((bytes) => decodeFrame(bytes).type),
+  };
+}
+
+/** The machine's endpoint with a document host behind it, a session of its owners' and a document linked to it. */
+async function documentLab(options: LabOptions = {}) {
+  const services = fakeServices();
+  const docs = documentHost(services);
+  const l = await lab({ ...options, endpoint: { ...options.endpoint, services } });
+  l.host.add('app-1');
+  l.place('app-1');
+  l.host.artifact(DOC_ID, ['app-1']); // a document
+  return { l, docs };
+}
+
+// A window's webContents as the bridge reaches it through its ClientRef (src/main/ipc/clients.ts).
+let windows = 1;
+const fakeWindow = () => Object.assign(new EventEmitter(), { id: windows++, postMessage: vi.fn(), isDestroyed: () => false });
+
+/** A window's replica of a document: the real port provider, on the ports main posts that window. */
+function replica() {
+  const doc = newDoc();
+  const provider = new PortProvider(doc, { log: () => {} });
+  cleanups.push(() => provider.destroy());
+  const window = fakeWindow();
+  return { doc, provider, window, client: clientOf(window as never) };
+}
+type Replica = ReturnType<typeof replica>;
+
+/**
+ * `artifacts.open` from the replica's window, as the ArtifactHost asks it (its first open and every reopen), the port main
+ * posts for the answer's channel connected to the replica's provider, and the replica synced with the machine.
+ */
+async function openOn(d: Device, r: Replica, artifactId = DOC_ID): Promise<{ readOnly: boolean; port: End }> {
+  const answer = await d.route('artifacts.open', { artifactId }, { client: r.client });
+  if (!answer.ok) throw new Error(`artifacts.open: ${answer.error.code} ${answer.error.message}`);
+  const { channel, readOnly } = answer.value as { channel: number; readOnly?: true };
+  const posted = r.window.postMessage.mock.calls.find((call) => call[0] === DOC_PORT_CHANNEL && (call[1] as { channel: number }).channel === channel);
+  expect(posted?.[1]).toEqual({ channel, artifactId });
+  const port = (posted![2] as End[])[0]!;
+  r.provider.connect(port);
+  await until(() => r.provider.state.phase === 'live' && r.provider.state.synced, `${d.id}'s replica synced`);
+  return { readOnly: readOnly === true, port };
+}
+
+describe('pages and documents across machines (P5 O7 M5b)', { timeout: 30_000 }, () => {
+  it('serves a remote session’s page to a Request through main’s chain, from the machine’s store over the real endpoint as the machine’s scheme answers it, and its asset by range', async () => {
+    const l = await lab();
+    const store = scratchArtifacts(l.f.services);
+    l.host.add('app-1');
+    l.place('app-1');
+    const row = l.host.artifact(PAGE_ID, ['app-1'], { kind: 'html', title: 'Report' });
+    l.host.reads.set('artifacts.list', () => ({ artifacts: [row] }));
+    store.put(PAGE_ID, 'index.html', PAGE);
+    const clip = new Uint8Array(randomBytes(300 * 1024));
+    store.put(PAGE_ID, 'assets/clip.mp4', clip);
+    const chain = mainChain(l.a);
+    expect(await l.a.cmd('artifacts.list', { filter: { appSessionId: 'app-1' } })).toEqual({ artifacts: [row] }); // the pane's list: the artifact is the mini's
+
+    const page = await chain.fetch(new Request(pageUrl(PAGE_ID)));
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toMatch(/^text\/html/);
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(page.headers.get('content-security-policy')).toBeTruthy(); // the frame's, as the machine's scheme sets it
+    expect(await page.text()).toBe(PAGE.replace('<head>', `<head><script data-maws-bridge>${BRIDGE_SCRIPT}</script>`)); // bridged on the machine
+
+    const range = await chain.fetch(new Request(pageUrl(PAGE_ID, 'assets/clip.mp4'), { headers: { range: 'bytes=1000-1999' } }));
+    expect(range.status).toBe(206);
+    expect(range.headers.get('content-range')).toBe(`bytes 1000-1999/${clip.byteLength}`);
+    expect(Buffer.from(await range.arrayBuffer()).equals(Buffer.from(clip.subarray(1000, 2000)))).toBe(true);
+    expect(store.fetches()).toBe(2); // both from the machine's store
+    expect(chain.local).toEqual([]); // never this Mac's
+  });
+
+  it('lets a paused media body give its slot to a later load once it has idled 2 s, the page then served whole, the media resumed by range', async () => {
+    const l = await lab();
+    const store = scratchArtifacts(l.f.services);
+    l.host.add('app-1');
+    l.place('app-1');
+    const row = l.host.artifact(PAGE_ID, ['app-1'], { kind: 'html', title: 'Report' });
+    l.host.reads.set('artifacts.list', () => ({ artifacts: [row] }));
+    store.put(PAGE_ID, 'index.html', PAGE);
+    const clip = new Uint8Array(randomBytes(3 * MiB));
+    store.put(PAGE_ID, 'assets/clip.mp4', clip);
+    const chain = mainChain(l.a);
+    await l.a.cmd('artifacts.list', { filter: { appSessionId: 'app-1' } });
+
+    // eight media panes paused after their answer: every slot of the link held by a body nobody reads
+    const paused = await Promise.all(Array.from({ length: 8 }, () => chain.fetch(new Request(pageUrl(PAGE_ID, 'assets/clip.mp4')))));
+    expect(paused.map((r) => r.status)).toEqual(Array(8).fill(200));
+    const asked = Date.now();
+    const page = await chain.fetch(new Request(pageUrl(PAGE_ID)));
+    expect(Date.now() - asked).toBeGreaterThanOrEqual(1_500); // it waited for one to idle 2 s, not for the 30 s bound
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Report from the mini');
+
+    // one gave way, ending normally with what had come; the others kept theirs and read on whole
+    const bodies = await Promise.all(paused.map(async (r) => Buffer.from(await r.arrayBuffer())));
+    const cut = bodies.filter((body) => body.byteLength < clip.byteLength);
+    expect(cut).toHaveLength(1);
+    expect(cut[0]!.equals(Buffer.from(clip.subarray(0, cut[0]!.byteLength)))).toBe(true);
+    for (const body of bodies.filter((b) => b !== cut[0])) expect(body.equals(Buffer.from(clip))).toBe(true);
+    // played on, the element asks from where it stopped
+    const resumed = await chain.fetch(new Request(pageUrl(PAGE_ID, 'assets/clip.mp4'), { headers: { range: `bytes=${cut[0]!.byteLength}-` } }));
+    expect(resumed.status).toBe(206);
+    expect(Buffer.from(await resumed.arrayBuffer()).equals(Buffer.from(clip.subarray(cut[0]!.byteLength)))).toBe(true);
+  });
+
+  it('converges a document edited from two devices: each one’s typing in the machine’s store and in the other’s replica, every edit acked', async () => {
+    const { l, docs } = await documentLab();
+    docs.write(DOC_ID, 'base');
+    const other = await l.device('mac2');
+    const [one, two] = [replica(), replica()];
+    expect((await openOn(l.a, one)).readOnly).toBe(false);
+    expect((await openOn(other, two)).readOnly).toBe(false);
+    expect([text(one.doc), text(two.doc)]).toEqual(['base', 'base']);
+    expect([...docs.port.channels.values()].map((c) => c.open)).toEqual([expect.objectContaining({ artifactId: DOC_ID, actor: { kind: 'human' } }), expect.objectContaining({ artifactId: DOC_ID, actor: { kind: 'human' } })]);
+
+    one.doc.get('root').insert(4, ' from mac1');
+    two.doc.get('root').insert(0, 'mac2: ');
+    await until(() => one.provider.state.unsaved === 0 && two.provider.state.unsaved === 0 && text(one.doc) === text(docs.doc(DOC_ID)) && text(two.doc) === text(docs.doc(DOC_ID)), 'both devices and the store converged', 10_000);
+    expect(text(docs.doc(DOC_ID))).toBe('mac2: base from mac1');
+  });
+
+  it('lands an edit made across a forced drop: one in flight when the carrier goes (its ack lost) and one typed while the link is down, each in the store once after the reopen', async () => {
+    const { l, docs } = await documentLab({ link: { UP_GRACE_MS: 100, BACKOFF_MS: [0, 100, 100] } });
+    docs.write(DOC_ID, 'base');
+    const r = replica();
+    const first = await openOn(l.a, r);
+    const { carrier, tap } = l.a.carriers.at(-1)!;
+    tap.mute = true; // what the machine says from now on is lost, the edit's ack among it
+    r.doc.get('root').insert(4, ' typed');
+    await until(() => text(docs.doc(DOC_ID)) === 'base typed', 'the edit in the machine’s store');
+    await sleep(50);
+    expect(r.provider.state.unsaved).toBe(1); // never acked
+
+    l.a.direct.dead = true;
+    carrier.close('dropped');
+    await until(() => first.port.closed, 'the window’s port closed with its stream');
+    expect(r.provider.state).toMatchObject({ phase: 'off', unsaved: 1 });
+    await until(() => l.a.link.state() === 'down', 'the link down');
+    r.doc.get('root').insert(10, ' offline'); // typed while the machine can't hear it
+    expect(await l.a.route('artifacts.open', { artifactId: DOC_ID }, { client: r.client })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'mini is offline' } });
+
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    await until(() => l.a.link.state() === 'up', 'the link up again', 10_000);
+    await openOn(l.a, r); // the ArtifactHost's reopen: a fresh port and stream, the same provider
+    await until(() => r.provider.state.unsaved === 0, 'every edit acked', 10_000);
+    expect(text(docs.doc(DOC_ID))).toBe('base typed offline'); // each once
+    expect(text(r.doc)).toBe('base typed offline');
+  });
+
+  it('opens a document read-only for a member who holds `view`, whose writes never reach the store while presence does, and closes it `removed` when the share is withdrawn mid-stream', async () => {
+    const { l, docs } = await documentLab();
+    l.f.records.set({ lane: 'B', session: 'eng-app-1', owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, 'app-1');
+    docs.write(DOC_ID, 'shared text');
+    const owner = replica();
+    await openOn(l.a, owner);
+    const b = await l.device('mac-b', { member: 'B' });
+    const member = replica();
+    const opened = await openOn(b, member);
+    expect(opened.readOnly).toBe(true); // `edit` refused `grade`, `view` admitted
+    expect(text(member.doc)).toBe('shared text');
+    const channel = docs.port.last().channel;
+    expect(docs.port.last().open).toMatchObject({ artifactId: DOC_ID, actor: { kind: 'human' } });
+
+    member.doc.get('root').insert(0, 'B wrote ');
+    member.provider.awareness.setLocalStateField('user', { name: 'B' }); // after the write, on the same stream
+    await until(() => owner.provider.awareness.getStates().get(member.doc.clientID) !== undefined, 'B’s presence at the owner’s replica');
+    expect(text(docs.doc(DOC_ID))).toBe('shared text');
+    expect(text(owner.doc)).toBe('shared text');
+    expect(new Set(docs.heard(channel))).toEqual(new Set(['step1', 'awareness'])); // nothing else reached the host
+
+    l.f.records.set({ lane: 'B', session: 'eng-app-1', owners: ['@machine'] }, 'app-1'); // withdrawn, no `caps` refresh
+    await until(() => opened.port.closed, 'B’s port closed with its stream');
+    await until(() => b.logs.some((line) => line.startsWith(`documents: ${DOC_ID} on mini ended (removed)`)), 'the stream closed `removed`');
+    expect(docs.port.channels.get(channel)!.ended).toBe('endpoint');
+    expect(await b.route('artifacts.open', { artifactId: DOC_ID }, { client: member.client })).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'notFound' } } }); // for good
+
+    owner.doc.get('root').insert(11, ', still the owner’s'); // the owner's stream untouched
+    await until(() => owner.provider.state.unsaved === 0 && text(docs.doc(DOC_ID)) === 'shared text, still the owner’s', 'the owner’s edit landed');
   });
 });
