@@ -26,7 +26,8 @@
 //   request waits for a slot, a stream whose frame hasn't taken a byte for IDLE_MS (and isn't waiting on the machine for
 //   more) gives its slot up, the oldest first, a finished body the frame hasn't read out as well. Its body ends normally
 //   where the frame stopped (what it held unread let go), and its stream closes; the media element asks again with a Range
-//   when it plays on. An idle stream keeps its slot while nothing waits.
+//   when it plays on. An idle stream keeps its slot while nothing waits. Only a frame's load (`respond`) gives way: a body
+//   read through `fetch` (an asset's download, whose reader resumes nothing) is never cut (M5b's milestone review).
 // - Every request ends: `503` "<machine> is offline" while the link is down (at the request, or before the answer came),
 //   `504` when nothing opened within OPEN_TIMEOUT_MS of the request, a refusal as the HTTP status it means (REFUSAL_STATUS),
 //   and the app's stop ends whatever is still in flight. A stream lost with its channel before its answer is opened again
@@ -92,7 +93,7 @@ export interface RemoteSchemeDeps {
 export interface RemoteScheme {
   /** The scheme's responder for another machine's artifacts at a stage of the chain: its answer, or null for a request that isn't one. */
   respond: RemoteResponder;
-  /** `request` answered by `machine`'s artifact endpoint over its link (an asset's download). */
+  /** `request` answered by `machine`'s artifact endpoint over its link (an asset's download); its body never gives way. */
   fetch(machine: MachineRef, request: Request): Promise<Response>;
   /** Ends every request in flight (the app's shutdown). */
   stop(): void;
@@ -164,7 +165,8 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
     held.waiting.shift()?.();
   }
 
-  function fetchOver(link: RemoteLink, request: Request): Promise<Response> {
+  /** `resumable`: a frame's load, which asks again by Range, so its body may give way; never a `fetch`'s. */
+  function fetchOver(link: RemoteLink, request: Request, resumable: boolean): Promise<Response> {
     const name = link.name;
     if (link.state() === 'down' || link.ended() !== null) return Promise.resolve(plain(503, offline(name)));
     const method = request.method;
@@ -242,7 +244,7 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
           return fail(502, `${name} answered what this app can’t read (${status})`);
         }
         answer(response);
-        if (body !== null) {
+        if (body !== null && resumable) {
           const held = body;
           holder = {
             idleSince: () => held.idleSince(),
@@ -281,9 +283,9 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
     });
   }
 
-  async function fetch(machine: MachineRef, request: Request): Promise<Response> {
+  async function fetchFrom(machine: MachineRef, request: Request, resumable: boolean): Promise<Response> {
     const link = deps.remote(machine);
-    return link === null ? plain(503, offline(machine)) : fetchOver(link, request);
+    return link === null ? plain(503, offline(machine)) : fetchOver(link, request, resumable);
   }
 
   return {
@@ -291,13 +293,13 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
       const artifactId = artifactIdOfUrl(request.url);
       if (artifactId === null) return null;
       const placed = deps.machines.machineOf(artifactId);
-      if (stage === 'placed') return placed === null ? null : fetch(placed, request);
+      if (stage === 'placed') return placed === null ? null : fetchFrom(placed, request, true);
       if (placed !== null) return null; // asked of its machine at the first stage
       const from = artifactIdOfUrl(request.referrer);
       const machine = from === null ? null : deps.machines.machineOf(from);
-      return machine === null ? null : fetch(machine, request);
+      return machine === null ? null : fetchFrom(machine, request, true);
     },
-    fetch,
+    fetch: (machine, request) => fetchFrom(machine, request, false),
     stop() {
       for (const abort of [...inFlight]) abort();
     },

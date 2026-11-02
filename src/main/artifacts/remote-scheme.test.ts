@@ -477,6 +477,32 @@ describe('the cap and the bounds', () => {
     expect(await responses[0]!.text()).toBe(''); // a normal end; the media element asks again by its Range
   });
 
+  // M5b's milestone review: only a frame's load resumes by Range; a body read through `fetch` (an asset's download) is
+  // never cut, however long its reader holds back, so it is never saved short.
+  it('never cuts a body read through `fetch` (a download), however long it is unread while requests wait', async () => {
+    const s = scene({ idleMs: 60 });
+    const download = s.scheme.fetch(MINI, new Request(url(PAGE, 'assets/data.csv')));
+    const downloadId = await s.opened(0);
+    s.link.answer(downloadId, 200, { 'content-length': '6' }, ['abc'], ''); // half came; its writer holds back
+    const reader = (await download).body!.getReader();
+    expect(Buffer.from((await reader.read()).value!).toString()).toBe('abc');
+    const media = Array.from({ length: HTTP_STREAMS_PER_LINK - 1 }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.mp4`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    for (let n = 1; n < HTTP_STREAMS_PER_LINK; n += 1) s.link.answer(s.link.opens()[n]!.id, 200, {}, ['0123'], '');
+    await Promise.all(media);
+    await new Promise((resolve) => setTimeout(resolve, 100)); // the download idle longest
+    const next = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    expect(s.link.of('streamClose', downloadId)).toEqual([]); // a media stream gave way, never the download
+    expect(s.link.of('streamClose')).toHaveLength(1);
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await next).text()).toBe('png');
+    s.link.hear({ t: 'streamData', id: downloadId, offset: 3, data: b64('def') });
+    s.link.hear({ t: 'streamClose', id: downloadId, reason: 'closed' });
+    expect(Buffer.from((await reader.read()).value!).toString()).toBe('def');
+    expect((await reader.read()).done).toBe(true);
+  });
+
   it('ends every request in flight when stopped', async () => {
     const s = scene();
     const waiting = s.handler(new Request(url(PAGE)));
