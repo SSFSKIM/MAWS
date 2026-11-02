@@ -12,6 +12,7 @@ import type { ArtifactExportFonts, ArtifactExportFormat } from '@shared/maws/too
 import type { DeckShown } from '@artifacts/slides/editor/session';
 import { ipc } from '../../ipc/client';
 import { toastFailure } from '../../library/dialogs';
+import { ownFileFor } from '../../library/export';
 import type { EditorHostExport } from '../../panel/editor-host';
 import { toast } from '../../stores/notices';
 import { VIEWERS_COPY } from '../artifacts/viewers/copy';
@@ -38,7 +39,7 @@ export async function exportDeck(artifactId: string, entry: DeckExport, shown: D
   if (shown === 'compare') return; // two versions compared: nothing is exported
   // P4 (W1, L302): a file of its own (`ownFile`), saved by its id, so an export of the same revision and format between
   // the two (the agent's `artifact_export`, another option) never swaps the file saved
-  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }), ownFile: true });
+  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }), ...ownFileFor(artifactId) }); // P5 O7 M5a: no own file on another machine
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   const { revision, exportId } = exported.value;
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: entry.format, ...(exportId !== undefined && { exportId }) } } });

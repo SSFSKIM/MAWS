@@ -4,9 +4,11 @@
 // row shows. A capsule opens the Question sheet (M4's X5 tool) with the ask's id and the capsule's own data (residue 14):
 // the sheet answers a pending ask it holds and shows any other read-only from that data; until a build registers the
 // sheet, opening does nothing.
+// P5 O7 M5a (A10): a lane B session on another machine's delivered file opens as a copy here (lane-b/open-copy.ts).
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../ipc/client';
+import { openSessionFile } from '../../lane-b/open-copy';
 import { panelHost, usePanelHost } from '../../panel/host';
 import type { AskRowData, TranscriptActions } from '../../transcript';
 import { VIEWER_COPY } from '../code/copy';
@@ -26,7 +28,7 @@ export function mawsTranscriptActionsOver(client: MawsBridge): Pick<TranscriptAc
       panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId: ask.askId, historical: ask }, activate: true });
     },
     async openDelivered(appSessionId, path) {
-      const result = await client.invoke('files.openExternal', { appSessionId, path });
+      const result = await openSessionFile(appSessionId, path, client);
       if (!result.ok) return VIEWER_COPY.refused(result.error.message);
       return result.value.opened ? null : VIEWER_COPY.notOpened(result.value.message ?? '');
     },

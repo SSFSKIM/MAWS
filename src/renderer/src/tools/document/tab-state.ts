@@ -35,6 +35,7 @@ import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { CloseAsk } from '../../panel/editor-host'; // P4-B3
+import { ownFileFor } from '../../library/export'; // P5 O7 M5a
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
 import type { DocumentExportFormat, ExportStatus } from './header';
@@ -299,7 +300,7 @@ export class DocumentTabState {
     try {
       // P4 (W1, L302): a file of its own, saved by its id, so Letter and A4 or the agent's export of the same revision and
       // format between the two never swaps the file saved
-      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize, ownFile: true });
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize, ...ownFileFor(this.artifactId) }); // P5 O7 M5a: no own file on another machine
       if (!exported.ok) throw new Error(exported.error.message);
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });

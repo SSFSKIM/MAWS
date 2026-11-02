@@ -66,9 +66,9 @@ describe('the delivery row’s file names', () => {
 });
 
 // P5 O7 M4: on a lane B session on another machine, Open externally and Reveal in Finder would act on that machine's
-// desktop: they stay greyed, saying where the file is, until M5 routes them.
+// desktop. P5 O7 M5a (A10): Open externally opens a copy here; Reveal stays greyed, saying where the file is.
 describe('a delivery on another machine’s session', () => {
-  it('greys Open externally and Reveal in Finder with “on <machine>”, and asks nothing', () => {
+  it('opens a copy through Open externally, and greys Reveal in Finder with “on <machine>”', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     useMachines.getState().applyRoster([
       { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
@@ -78,12 +78,13 @@ describe('a delivery on another machine’s session', () => {
     const { actions } = renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
     const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf' });
     const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf' });
-    expect([open.disabled, reveal.disabled]).toEqual([true, true]);
+    expect([open.disabled, reveal.disabled]).toEqual([false, true]);
+    expect(open.title).toBe('Opens a copy of this file from mini on this Mac');
     expect(reveal.title).toBe('This file is on mini, not on this Mac');
     expect(screen.getByText('on mini')).toBeTruthy();
     fireEvent.click(open);
     fireEvent.click(reveal);
-    expect(actions.openDelivered).not.toHaveBeenCalled();
+    expect(actions.openDelivered).toHaveBeenCalledExactlyOnceWith(REMOTE, '/repo/report.pdf');
     expect(actions.revealDelivered).not.toHaveBeenCalled();
   });
 });
