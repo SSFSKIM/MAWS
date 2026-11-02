@@ -295,8 +295,7 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
   const heldHosts = { stop: (entry: RosterEntry) => stopHeldHost(entry, stopDeps), child: (entry: RosterEntry) => heldChild(entry, hostsDir) };
   const held = recordStart(engine.table, live, heldHosts);
-  const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD'); // P5 O17 M8's scene 6: the e2e's hold on the adoptions
-  void (e2eHold?.() ?? Promise.resolve()).then(() => adoptAll(live, { adopt: (entry) => engine.adopt(entry), log })).then((outcome) => {
+  const ended = (outcome: Awaited<ReturnType<typeof adoptAll>>) => {
     // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
     // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
     // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed
@@ -306,7 +305,12 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
     if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
     life.adoptionsEnded(outcome.failed.length);
     startJournalPruning?.(() => readRoster(hostsDir, () => {}).map((entry) => entry.holderId));
-  });
+  };
+  // P5 O17 M8's scene 6: the e2e's hold on the adoptions, armed only under MAWS_E2E=1 with its own variable; unarmed,
+  // the adoptions run as before
+  const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD');
+  if (e2eHold === undefined) void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended);
+  else void e2eHold().then(() => adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended));
   return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
 }
 // E10 end

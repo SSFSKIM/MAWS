@@ -28,10 +28,11 @@ const MAIN = { capabilities: [PTY_FRAMES_CAPABILITY] }; // main's direct link, o
 const id = (name: string) => name as AppSessionId;
 
 // A port the runtime serves: requests through its own path (envelope, input, handler, answer), what it posted kept
-function fakePort() {
+function fakePort(refuses: (message: Record<string, unknown>) => boolean = () => false) {
   const listeners: ((event: { data: unknown }) => void)[] = [];
   const posted: Record<string, unknown>[] = [];
-  const port: HostPort = { on: (_event, listener) => void listeners.push(listener), postMessage: (message) => void posted.push(message as Record<string, unknown>), start: () => {} };
+  // a write `refuses` names writes nothing (`false`), as a port that is closing does; the runtime then ends its client
+  const port: HostPort = { on: (_event, listener) => void listeners.push(listener), postMessage: (message) => (refuses(message as Record<string, unknown>) ? false : void posted.push(message as Record<string, unknown>)), start: () => {} };
   let next = 0;
   return {
     port,
@@ -49,11 +50,16 @@ function fakePort() {
 }
 
 // The engine host's composition: the table, and browser work registered over it in the real runtime
-function host(opts: Parameters<typeof registerBrowserWork>[4] = {}) {
+// `statuses`: each row's status emitted to the client as ipc.ts's session stream emits it, so a publication can find the
+// client gone
+function host(opts: Parameters<typeof registerBrowserWork>[4] = {}, statuses = false) {
   const table = new ProcessTable({ ps: async () => '', log: () => {} });
-  const runtime: HostRuntime = createHostRuntime((on, emit, client) => registerBrowserWork(on, emit, client, table, opts));
-  const link = (peer = DECLARING) => {
-    const fake = fakePort();
+  const runtime: HostRuntime = createHostRuntime((on, emit, client) => {
+    registerBrowserWork(on, emit, client, table, opts);
+    if (statuses) table.onChange((status) => void emit('session.status', { appSessionId: status.appSessionId, status }));
+  });
+  const link = (peer = DECLARING, refuses?: (message: Record<string, unknown>) => boolean) => {
+    const fake = fakePort(refuses);
     runtime.serve(fake.port, peer);
     runtime.setReady();
     return fake;
@@ -156,6 +162,81 @@ describe('host.browserWork (P5 O17 M7)', () => {
   });
 });
 
+// P5 O17 M7 fix 1: the link's end while a snapshot is applied, the verdict before a link's first snapshot, one transition
+// for an end heard twice, and the empty set's paths
+describe('host.browserWork: the link lost while a snapshot applies, and what a link has not yet told (P5 O17 M7 fix 1)', () => {
+  const holdOf = (message: Record<string, unknown>) => ((message.payload as { status?: EngineSessionStatus } | undefined)?.status?.work?.holds?.browser ?? null);
+  const statusOf = (name: string) => (message: Record<string, unknown>) => message.t === 'evt' && message.name === 'session.status' && (message.payload as { appSessionId?: string }).appSessionId === name;
+
+  it('a publication that finds the client gone ends the link: every row the snapshot would hold reads unknown or stays as the end left it, none held on the dead link', async () => {
+    const h = host({}, true);
+    const [a, b, c] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902), await launch(h.table, 'c', 903)];
+    b.session.setBrowserHold('unknown'); // as an earlier link's end left it
+    const mawsd = h.link(DECLARING, (message) => statusOf('a')(message) && holdOf(message) === 'held'); // a's held status writes nothing
+    const answer = await mawsd.request('host.browserWork', { held: ['a', 'b', 'c'] });
+    expect(answer).toMatchObject({ ok: true });
+    expect([browser(a), browser(b), browser(c)]).toEqual(['unknown', 'unknown', null]);
+    const fresh = h.link();
+    await fresh.request('host.browserWork', { held: ['b'] });
+    expect([browser(a), browser(b), browser(c)]).toEqual([null, 'held', null]);
+  });
+
+  it('a row reserved while a declaring link is up and has applied no snapshot reads unknown, launched or adopted; with no such link a launch starts clear', async () => {
+    const h = host();
+    expect(browser(await launch(h.table, 'none', 900))).toBeNull(); // no link: main's own shape, nothing to wait for
+    h.link(MAIN);
+    expect(browser(await launch(h.table, 'main', 901))).toBeNull(); // a client that never tells browser work
+    const mawsd = h.link();
+    const early = await launch(h.table, 'early', 902);
+    expect(browser(early)).toBe('unknown');
+    await mawsd.request('host.browserWork', { held: [] });
+    expect(browser(early)).toBeNull();
+    expect(browser(await launch(h.table, 'later', 903))).toBeNull(); // the kept set's verdict
+  });
+
+  it('the link\'s end heard twice (the runtime\'s gone hook and the connection\'s own end) is one held-to-unknown transition', async () => {
+    const h = host();
+    const a = await launch(h.table, 'a');
+    await h.link().request('host.browserWork', { held: ['a'] });
+    const published: (string | null)[] = [];
+    h.table.onChange((status) => void published.push(status.work?.holds?.browser ?? null));
+    h.runtime.detach(); // a ready client: both are told
+    expect(published).toEqual(['unknown']);
+    expect(browser(a)).toBe('unknown');
+    await h.link().request('host.browserWork', { held: ['a'] });
+    expect(published).toEqual(['unknown', 'held']);
+  });
+
+  it('always empty: nothing is published, a launch and an adoption on the link start clear, and the link\'s end changes no row', async () => {
+    const h = host();
+    const a = await launch(h.table, 'a');
+    const published: string[] = [];
+    h.table.onChange((status) => void published.push(status.appSessionId));
+    const mawsd = h.link();
+    for (let n = 0; n < 3; n++) expect(await mawsd.request('host.browserWork', { held: [] })).toMatchObject({ ok: true });
+    expect(browser(await launch(h.table, 'b', 902))).toBeNull();
+    expect(published.filter((name) => name === 'a')).toEqual([]);
+    h.runtime.detach();
+    expect(browser(a)).toBeNull();
+    expect(published.filter((name) => name === 'a')).toEqual([]);
+  });
+
+  it('held, then empty: the row clears, a later launch of it starts clear, and the link\'s end turns nothing unknown', async () => {
+    const h = host();
+    const a = await launch(h.table, 'a');
+    const mawsd = h.link();
+    await mawsd.request('host.browserWork', { held: ['a'] });
+    expect(browser(a)).toBe('held');
+    await mawsd.request('host.browserWork', { held: [] });
+    expect(browser(a)).toBeNull();
+    a.transport.exit(0);
+    await a.session.exited;
+    expect(browser(await launch(h.table, 'a', 902))).toBeNull();
+    h.runtime.detach();
+    expect(h.table.list().map((session) => session.status().work?.holds?.browser ?? null)).toEqual([null]);
+  });
+});
+
 // M8's scene 6 at e2e (adoption, then the snapshot): the e2e's hold on the snapshot's application, and the line a scene
 // reads to know the link's first snapshot applied (the other order)
 describe('the link\'s first snapshot, logged, and the e2e\'s hold on it (P5 O17 M8 scene 6)', () => {
@@ -181,6 +262,15 @@ describe('the link\'s first snapshot, logged, and the e2e\'s hold on it (P5 O17 
     expect(browser(a)).toBeNull();
     release();
     expect(await answer).toMatchObject({ ok: true });
+    expect(browser(a)).toBe('held');
+  });
+
+  it('unarmed, the holds are nothing: undefined, their dependencies never touched, the snapshot applied as without them', async () => {
+    const untouched = { exists: () => { throw new Error('read'); }, sleep: () => { throw new Error('slept'); }, now: () => { throw new Error('timed'); } }; // prettier-ignore
+    for (const env of [{}, { MAWS_E2E: '1' }, { MAWS_E2E: '0', MAWS_E2E_ADOPTION_HOLD: '/x' }, { MAWS_E2E: '1', MAWS_E2E_ADOPTION_HOLD: '' }]) expect(e2eHoldFor(env, 'MAWS_E2E_ADOPTION_HOLD', untouched)).toBeUndefined();
+    const h = host({ hold: e2eHoldFor({}, 'MAWS_E2E_BROWSER_WORK_HOLD') });
+    const a = await launch(h.table, 'a');
+    await h.link().request('host.browserWork', { held: ['a'] });
     expect(browser(a)).toBe('held');
   });
 
