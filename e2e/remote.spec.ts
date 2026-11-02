@@ -1094,7 +1094,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
           const lines = readFileSync(join(b.userData, name), 'utf8').split('\n').filter((line) => /connector|observ|mcp|deliver|locat|status cache/i.test(line));
           return `${name}:\n${lines.slice(-30).map((line) => line.slice(0, 400)).join('\n')}`;
         });
-        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
+        const servers = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }, { server: ROWS_SERVER, tool: ROWS_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
+        const configHome = readdirSync(b.claudeConfigDir).join(', ');
+        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers for the dashboard: ${servers}\nB's config home holds: ${configHome}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
       };
       expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
