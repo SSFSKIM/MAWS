@@ -85,6 +85,7 @@ export class DeckTabState {
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
   private disposed = false;
+  private readonly opening = new AbortController(); // review fix 2 (M5b4): the replica's open, owned by this tab until it syncs
   private closing = false;
   private holders = 0; // M7: what still writes into the replica (`hold`)
   private wasShown = false;
@@ -131,7 +132,7 @@ export class DeckTabState {
     if (this.deps.ipc) await this.readViewed(this.deps.ipc);
     let handle: DocumentHandle;
     try {
-      handle = await this.deps.host.open(this.artifactId);
+      handle = await this.deps.host.open(this.artifactId, { signal: this.opening.signal });
     } catch (error) {
       if (!this.disposed) this.set({ failed: messageOf(error) });
       return;
@@ -260,6 +261,7 @@ export class DeckTabState {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.opening.abort();
     open.delete(this);
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();

@@ -176,7 +176,8 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
       onPending(false);
       void refresh();
     };
-    void host.open(artifactId, { doc: 'suggestions' }).then((opened) => {
+    const owner = new AbortController(); // P5 O7 M5b review fix 2: no retries once this effect is gone
+    void host.open(artifactId, { doc: 'suggestions', signal: owner.signal }).then((opened) => {
       if (closed) return opened.close();
       handle = opened;
       leaveHold = hold?.join(opened) ?? null;
@@ -186,6 +187,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     }).catch((cause: unknown) => { if (!closed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => {
       closed = true;
+      owner.abort();
       switchTab.current = null;
       clearTimeout(waiting);
       leaveHold?.();

@@ -210,6 +210,18 @@ describe('a document tab’s state', () => {
     expect(state.snapshot().failed).toBe(words);
   });
 
+  // Review fix 2 (M5b4): the tab is the open's owner: disposed before the replica synced, it cancels the open's retries
+  it('cancels its replica’s open when disposed before it synced', async () => {
+    const w = world();
+    const signals: AbortSignal[] = [];
+    w.host.open = ((_id: string, options?: { signal?: AbortSignal }) => (signals.push(options!.signal!), new Promise(() => {}))) as ArtifactHost['open'];
+    const state = w.open();
+    await until(() => signals.length === 1, 'the open');
+    expect(signals[0]!.aborted).toBe(false);
+    state.dispose();
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
   it('toggles the rail the header asks for and counts Save version requests', async () => {
     const state = world().open();
     state.toggleRail('history');

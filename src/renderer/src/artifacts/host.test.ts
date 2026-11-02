@@ -510,6 +510,29 @@ describe('an artifact on another machine (M5b)', () => {
     handle.close();
   });
 
+  // Review fix 2: a first open that keeps failing retries only while it has an owner
+  it('an open its owner cancels before its first sync stops retrying and rejects', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const h = harness();
+    h.setHostUp(false); // the link is up, and the machine answers every open `unavailable`
+    const owner = new AbortController();
+    const opening = h.artifacts.open(ARTIFACT, { signal: owner.signal });
+    const failed = expect(opening).rejects.toThrow();
+    await settle(RECONNECT_BACKOFF_MS[0] + RECONNECT_BACKOFF_MS[1]);
+    const opens = () => h.calls.filter((c) => c.name === 'artifacts.open').length;
+    expect(opens()).toBe(3);
+    owner.abort(); // the tab closed
+    await failed;
+    await settle(60_000);
+    expect(opens()).toBe(3);
+    // an owner gone before the open even started asks nothing
+    const gone = new AbortController();
+    gone.abort();
+    await expect(h.artifacts.open(ARTIFACT, { signal: gone.signal })).rejects.toThrow();
+    expect(opens()).toBe(3);
+  });
+
   it('stops on a refusal for good: the first open rejects with main’s words; after a sync the editor is told, and nothing is asked again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);

@@ -171,6 +171,13 @@ export interface ArtifactDocOption {
   doc?: 'suggestions';
 }
 
+// How an open is asked (P5 O7 M5b review fix 2): which document, and its owner's signal. An open that hasn't synced keeps
+// trying (the one reopen path); aborted before it syncs, it stops and rejects, so a tab closed during a failing open
+// leaves nothing retrying. Once it resolves, its handle's `close` is the owner's.
+export interface ArtifactOpenOptions extends ArtifactDocOption {
+  signal?: AbortSignal;
+}
+
 // P3-H H4: an artifact page's connector calls (the X9 amendment's bridge; docs/doperpowers/plans/2026-10-12-p3-co-work.md,
 // P3-H and Decision Log 24, 80 and 84; P3-E's XE8). One surface per page load: main holds its lease, which starts hidden
 // and ends with `close`, the page's window going, or the app quitting. A declaration grants nothing; only the owner's
@@ -205,7 +212,7 @@ export interface ConnectorSurface {
 }
 
 export interface ArtifactHost {
-  open(artifactId: string, options?: ArtifactDocOption): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
+  open(artifactId: string, options?: ArtifactOpenOptions): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   // P3-D (the P3 spec's Decision Log 59): `revision` names a retained revision (a design-system pin's `versionSeq`), at
   // which the store serves a deleted system's assets while a version pins it (Decision Log 46); omitted, the live one.
   assetUrl(artifactId: string, ref: string, revision?: number): string;

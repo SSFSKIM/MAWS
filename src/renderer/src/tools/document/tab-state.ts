@@ -113,6 +113,7 @@ export class DocumentTabState {
   /** P4-B3 M6: the comment card host's id, the same for every body over this state, so a move keeps its draft. */
   readonly commentHostId = `document:tab-${++commentHosts}`;
   private disposed = false;
+  private readonly opening = new AbortController(); // review fix 2 (M5b4): the replica's open, owned by this tab until it syncs
   private handleClosed = false;
   private closing = false; // disposed, waiting for the host to acknowledge what the replica holds
   private rowTimer: ReturnType<typeof setTimeout> | null = null;
@@ -194,7 +195,7 @@ export class DocumentTabState {
   }
 
   private async open(): Promise<void> {
-    const [opened] = await Promise.allSettled([this.deps.host.open(this.artifactId), this.readRow()]);
+    const [opened] = await Promise.allSettled([this.deps.host.open(this.artifactId, { signal: this.opening.signal }), this.readRow()]);
     if (opened.status === 'rejected') {
       if (!this.disposed) this.set({ failed: messageOf(opened.reason) });
       return;
@@ -384,6 +385,7 @@ export class DocumentTabState {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.opening.abort();
     if (this.rowTimer !== null) clearTimeout(this.rowTimer);
     this.rowTimer = null;
     for (const stop of this.stops.splice(0)) stop();

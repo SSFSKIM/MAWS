@@ -318,10 +318,19 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
   return {
     async open(artifactId, options) {
+      const signal = options?.signal;
+      if (signal?.aborted) throw new Error(`the open of ${artifactId} was cancelled`);
       const replica = new Replica(artifactId, options?.doc);
       replicas.add(replica);
+      // review fix 2: an owner gone before the first sync ends the attempts (`close` rejects the open)
+      const cancel = () => replica.close();
+      signal?.addEventListener('abort', cancel, { once: true });
       void replica.connect();
-      await replica.first;
+      try {
+        await replica.first;
+      } finally {
+        signal?.removeEventListener('abort', cancel);
+      }
       return replica;
     },
     assetUrl: (artifactId, ref, revision) => artifactUrl(artifactId, revision ?? 'live', ref), // P3-D: `revision` (Decision Log 59)

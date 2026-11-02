@@ -118,6 +118,17 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     state.dispose();
   });
 
+  // Review fix 2 (M5b4): the tab is the open's owner: disposed before the replica synced, it cancels the open's retries
+  it('cancels its replica’s open when disposed before it synced', async () => {
+    const signals: AbortSignal[] = [];
+    const host = { open: vi.fn((_id: string, options?: { signal?: AbortSignal }) => (signals.push(options!.signal!), new Promise(() => {}))), identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
+    const state = new DeckTabState({ artifactId: 'deck-1', kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard: vi.fn(async () => false), saveWaitMs: 30, savingShownMs: 10 });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0]!.aborted).toBe(false);
+    state.dispose();
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
   it('a restore it did not witness clears its undo stack', async () => {
     const { handle, state } = await opened();
     const session = state.snapshot().session!;

@@ -55,8 +55,9 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
   useEffect(() => {
     let live = true;
     let held: DocumentHandle | null = null;
+    const owner = new AbortController(); // P5 O7 M5b review fix 2: no retries once the route is gone
     artifactHost()
-      .open(artifactId)
+      .open(artifactId, { signal: owner.signal })
       .then(
         (handle) => {
           if (!live) return handle.close();
@@ -67,6 +68,7 @@ function Show({ params, close }: { params: PresentParams; close: () => void }) {
       );
     return () => {
       live = false;
+      owner.abort();
       held?.close();
     };
   }, [artifactId]);
