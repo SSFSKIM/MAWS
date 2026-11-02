@@ -45,8 +45,6 @@ import { notAnswered, notOffered, offline, OPEN_TIMEOUT_MS } from './remote-sche
 
 /** What the machine may send of the document's frames ahead of this side taking them. */
 export const DOCUMENT_STREAM_CREDIT = 1024 * 1024;
-/** The largest frame either way, the endpoint's own bound (the engine host's socket resets a channel queued past it). */
-export const DOCUMENT_FRAME_MAX = DOC_HIGH_WATER;
 /**
  * Milestone review item 4: the window's frames waiting here for the machine's credit, at most, as the engine host's own
  * socket bounds its queue (src/shared/host/doc-channels.ts' `write`): a frame that comes while more than this waits closes
@@ -160,7 +158,7 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
     endedBy: string | null = null;
     #received = 0; // the machine's next byte offset
     #dropped = 0; // frames a `view` port wrote, not carried
-    readonly #frames = new LengthPrefixed(DOCUMENT_FRAME_MAX);
+    readonly #frames = new LengthPrefixed(); // frame-stream's DOCUMENT_FRAME_MAX, the host's own frame cap
     readonly #offGone: () => void;
     /** Settles the attempt in flight: its stream opened, or the word it ended with. */
     #settle: ((outcome: string) => void) | null = null;

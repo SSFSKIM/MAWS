@@ -110,7 +110,7 @@ class Machine {
 }
 
 class Channel {
-  readonly #frames = new LengthPrefixed(8 * 1024 * 1024);
+  readonly #frames = new LengthPrefixed(); // the frame maximum both ends share
   #in = 0; // the device's next offset
   #out = 0; // this side's next offset
   #taken = 0; // content frames received on this channel
