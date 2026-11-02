@@ -19,7 +19,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
+import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS } from './ipc';
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
@@ -1803,6 +1803,83 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     other.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
     expect(other.calls.filter((call) => call.name === 'engine.sessions').map((call) => call.machine), 'B’s table, read on B').toEqual([OTHER_MACHINE]);
     useTranscriptStore.getState().detach(bSource.key!);
+  });
+
+  // O16 panel 1 (sweep#4): another machine's successor also comes ready before its start's adoptions end. Its status is
+  // not main's to tell (host.status is this machine's), so that machine's engine host is asked for its supervisor status
+  // until its adoptions end, and the table read again: no crash row for a session it adopts.
+  describe('on another machine', () => {
+    const onB = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    const rowsB = () => useTranscriptStore.getState().rows(onB);
+    const dividerB = () => rowsB().find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider')!;
+    const exitRowsB = () => rowsB().filter((row) => row.kind === 'error' && row.scope === 'exit');
+    const unanswered = (fake: ReturnType<typeof fakeClient>, name: string) => fake.calls.filter((call) => call.name === name && !call.answered);
+    const answer = (fake: ReturnType<typeof fakeClient>, name: string, value: unknown) => {
+      const call = unanswered(fake, name)[0]!;
+      call.answered = true;
+      call.answer({ ok: true, value } as never);
+      return call;
+    };
+    const supervisor = (adopting: boolean) => ({ pid: 6262, holder: { hosts: 1, adopted: adopting ? 0 : 1, failed: 0, gate: null, handover: 'none', adopting } });
+    const poll = () => new Promise((resolve) => setTimeout(resolve, REMOTE_ADOPTIONS_POLL_MS + 50));
+
+    async function remote() {
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, onB);
+      const attached = useTranscriptStore.getState().attach(source.key!, source);
+      const events = midTurn().map((event) => ({ ...event, id: (event.id as string).replace(MAIN_APP, 'app-b') as EventId }));
+      fake.calls[0].answer({ ok: true, value: { events, lastSeq: events.length, complete: true } } as never);
+      await attached;
+      fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+      fake.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+      answer(fake, 'engine.sessions', []); // not adopted yet
+      await flush();
+      return { fake, source };
+    }
+
+    it('a successor still adopting is asked on its machine until its adoptions end: a session it adopted keeps working', async () => {
+      const { fake, source } = await remote();
+      expect(answer(fake, 'host.supervisorStatus', supervisor(true)).machine, 'B’s engine host, asked on B').toEqual(OTHER_MACHINE);
+      await flush();
+      expect(dividerB().state, 'nothing told while it adopts').toBe('working');
+      await poll();
+      answer(fake, 'host.supervisorStatus', supervisor(false));
+      await flush();
+      expect(answer(fake, 'engine.sessions', [{ appSessionId: onB }]).machine).toEqual(OTHER_MACHINE);
+      await flush();
+      expect(dividerB().state).toBe('working');
+      expect(exitRowsB()).toEqual([]);
+      useTranscriptStore.getState().detach(source.key!);
+    });
+
+    it('a session it did not adopt is closed once its adoptions end; a host without session hosts is read once, as before', async () => {
+      const { fake, source } = await remote();
+      answer(fake, 'host.supervisorStatus', supervisor(false));
+      await flush();
+      answer(fake, 'engine.sessions', []); // the adoption failed
+      await flush();
+      expect(dividerB().state).toBe('stopped');
+      expect(exitRowsB()).toHaveLength(1);
+      useTranscriptStore.getState().detach(source.key!);
+
+      const second = await remote();
+      answer(second.fake, 'host.supervisorStatus', { pid: 6263 }); // a build before the holder: no session hosts
+      await flush();
+      expect(unanswered(second.fake, 'engine.sessions')).toEqual([]);
+      expect(dividerB().state).toBe('stopped');
+      useTranscriptStore.getState().detach(second.source.key!);
+    });
+
+    it('a departure heard on its machine while the successor adopts ends the wait and tells nothing', async () => {
+      const { fake, source } = await remote();
+      answer(fake, 'host.supervisorStatus', supervisor(true));
+      await flush(); // its next ask waits
+      fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+      await poll();
+      expect(unanswered(fake, 'host.supervisorStatus'), 'no further ask').toEqual([]);
+      expect(dividerB().state).toBe('working');
+      useTranscriptStore.getState().detach(source.key!);
+    });
   });
 
   it('a table read asked before a later departure says nothing; the next ready asks again', async () => {
