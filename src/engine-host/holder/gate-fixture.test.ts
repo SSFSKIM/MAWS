@@ -4,7 +4,7 @@
 // in the order it happened, with the moments that are not frames marked as events (the host's signal, a silence, the
 // server's restart). This test compares a run with the committed file, frame for frame; `MAWS_RECORD_GATE_FIXTURE=1`
 // rewrites the file from the run instead. Timings are shortened for the test (the header names them); every frame is
-// as the engine host writes it. D69's cases: a silence healed by a heartbeat on the same connection, an arm met by a
+// as the engine host writes it. D70's cases: a silence healed by a heartbeat on the same connection, an arm met by a
 // turn in either order of its late `armed`, and an idle reap's SIGTERM under the lease (the renewal answered; withheld;
 // re-armed, where an answer to the older arm confirms nothing) through a stand-in of the session's signal path.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -65,7 +65,7 @@ const IDLE = EngineSessionStatusSchema.parse({
 });
 
 // One case's scene: the row's channel and reap on the gate, the recording, and what the reap signalled.
-// `signal`: the session's signal path, by default marked as one moment; D69's cases stand in its idle reap's steps.
+// `signal`: the session's signal path, by default marked as one moment; D70's cases stand in its idle reap's steps.
 function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promise(() => {}), descendants: () => number = () => 0, signal?: (mark: (event: string, detail?: string) => void, mayTerm: () => Promise<boolean>) => Promise<'exited' | 'ignored' | 'withheld'>) {
   const rows: Row[] = [];
   const sink = { push: (row: Exchanged) => rows.push({ case: name, ...row }) };
@@ -95,7 +95,7 @@ function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promis
   return { rows, mark, channel, reap, reaped, connect, hello };
 }
 
-// session.ts `reap('idle')` in brief: end_session, its grace, then the SIGTERM only under a confirmed lease (D69).
+// session.ts `reap('idle')` in brief: end_session, its grace, then the SIGTERM only under a confirmed lease (D70).
 function idleSignal(exit: Promise<'exited'>, sigterms: { n: number }) {
   return async (mark: (event: string, detail?: string) => void, mayTerm: () => Promise<boolean>): Promise<'exited' | 'withheld'> => {
     mark('end_session', 'the engine host sends end_session');
@@ -236,7 +236,7 @@ async function cases(): Promise<Row[]> {
   }
 
   { // a heartbeat lost while the fence is armed cancels the reap; the row is held until it is heard again, here by a
-    // heartbeat on the same connection (D69: no second hello), which re-arms nothing
+    // heartbeat on the same connection (D70: no second hello), which re-arms nothing
     const s = scene('heartbeat-loss');
     const o = await s.connect();
     await s.hello(o);
@@ -261,7 +261,7 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows);
   }
 
-  { // D69: an arm that meets a turn already under way; the observer still answers the arm, here before the host's answer
+  { // D70: an arm that meets a turn already under way; the observer still answers the arm, here before the host's answer
     // to the turn: the turn cancels the reap (proceed, disarm) and the late armed changes nothing
     const s = scene('turn-armed-proceed');
     const o = await s.connect();
@@ -282,7 +282,7 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows);
   }
 
-  { // D69: the same, its armed sent after the host's proceed and disarm
+  { // D70: the same, its armed sent after the host's proceed and disarm
     const s = scene('turn-proceed-armed');
     const o = await s.connect();
     await s.hello(o);
@@ -302,7 +302,7 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows);
   }
 
-  { // D69: the lease renewed while signalled and its renewal answered: the SIGTERM goes in at its due time, no re-arm
+  { // D70: the lease renewed while signalled and its renewal answered: the SIGTERM goes in at its due time, no re-arm
     let exit!: (outcome: 'exited') => void;
     const sigterms = { n: 0 };
     const s = scene('sigterm-confirmed', undefined, undefined, idleSignal(new Promise((resolve) => (exit = resolve)), sigterms));
@@ -328,7 +328,7 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
   }
 
-  { // D69: the renewal unanswered: at the SIGTERM's due time the host re-arms, and with no armed within the lease less
+  { // D70: the renewal unanswered: at the SIGTERM's due time the host re-arms, and with no armed within the lease less
     // its margin it sends no SIGTERM; the reap ends and the fence is disarmed
     const sigterms = { n: 0 };
     const s = scene('sigterm-withheld', undefined, undefined, idleSignal(new Promise(() => {}), sigterms));
@@ -353,7 +353,7 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
   }
 
-  { // D69: re-armed at the SIGTERM's due time with the renewal unanswered; the observer then answers both arms in order:
+  { // D70: re-armed at the SIGTERM's due time with the renewal unanswered; the observer then answers both arms in order:
     // the first answer is the renewal's and confirms nothing, the second is the re-arm's and the SIGTERM goes in
     let exit!: (outcome: 'exited') => void;
     const sigterms = { n: 0 };

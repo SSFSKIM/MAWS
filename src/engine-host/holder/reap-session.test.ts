@@ -3,7 +3,7 @@
 // never closes stdin and never sends SIGKILL, so a session whose engine ignored both stays usable and an explicit stop
 // afterwards runs the ladder whole; a `budget` reap keeps the ladder. And what the reap reads off the session: its
 // status's `reap` and `work.descendants`, the observer's state as unknown work, its lineage for the gate's hello, the
-// stdio MCP servers' command lines from `mcp_status`, and the observer seen on this launch kept in the state file. D69:
+// stdio MCP servers' command lines from `mcp_status`, and the observer seen on this launch kept in the state file. D70:
 // with an observer, no SIGTERM goes in without a confirmed live lease at its instant; the reap re-arms for one when it
 // holds none, and withholds the SIGTERM when no armed confirms it.
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -175,24 +175,27 @@ describe('what the reap reads off the session', () => {
     expect(s.session.engineSessionIds().has('after-clear')).toBe(true);
   });
 
-  it('the stdio MCP servers’ command lines, from one mcp_status read (concurrent asks share it; a failure is asked again later)', async () => {
+  it('the stdio MCP servers from mcp_status: their command lines and the connected and pending counts (concurrent asks share one answer; a failure is null)', async () => {
     const servers = [
       { name: 'a', status: 'connected', config: { type: 'stdio', command: '/usr/bin/node', args: ['/tmp/a.mjs', 'user'] } },
       { name: 'b', status: 'pending', config: { type: 'stdio', command: 'uvx', args: [] } },
       { name: 'c', status: 'connected', config: { type: 'http', url: 'https://x' } },
-      { name: 'maws', status: 'connected', config: { type: 'sdk' } },
+      { name: 'maws', status: 'connected', transport: 'sdk' },
+      { name: 'd', status: 'failed', config: { type: 'stdio', command: '/x/d', args: [] } },
     ];
     let fail = true;
     const s = await ready({ responder: handshakeResponder({ mcp_status: () => (fail ? { error: 'not now' } : { response: { mcpServers: servers } }) }) });
     expect(s.session.mcpCommands()).toBeNull();
-    await s.session.readMcpCommands();
+    expect(await s.session.stdioServers()).toBeNull();
     expect(s.session.mcpCommands()).toBeNull();
     fail = false;
-    await Promise.all([s.session.readMcpCommands(), s.session.readMcpCommands()]);
+    const [one, two] = await Promise.all([s.session.stdioServers(), s.session.stdioServers()]);
     expect(s.transport.requestsOf('mcp_status')).toHaveLength(2);
-    expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx']]);
-    await s.session.readMcpCommands();
-    expect(s.transport.requestsOf('mcp_status')).toHaveLength(2); // once read, never again for the launch
+    expect(one).toEqual({ connected: 1, pending: 1 });
+    expect(two).toBe(one);
+    expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx'], ['/x/d']]);
+    servers[1]!.status = 'connected';
+    expect(await s.session.stdioServers()).toEqual({ connected: 2, pending: 0 }); // asked afresh each time
   });
 
   it('D52: a `#!` server is registered as the kernel runs it, resolved through the launch’s PATH, never the host’s', async () => {
@@ -209,7 +212,7 @@ describe('what the reap reads off the session', () => {
         { name: 'b', status: 'connected', config: { type: 'stdio', command: 'o16-host-only', args: [] } },
       ];
       const s = await ready({ responder: handshakeResponder({ mcp_status: () => ({ response: { mcpServers: servers } }) }) });
-      await s.session.readMcpCommands();
+      await s.session.stdioServers();
       expect(s.session.mcpCommands()).toEqual([['node', join(dir, 'o16-script'), '--stdio'], ['o16-host-only']]);
     } finally {
       process.env.PATH = hostPath;
@@ -226,12 +229,12 @@ describe('what the reap reads off the session', () => {
   });
 });
 
-// D69, on fake timers over the real gate socket, at production timings: the session's idle reap and its row's Reap wired
+// D70, on fake timers over the real gate socket, at production timings: the session's idle reap and its row's Reap wired
 // as the process table wires them. The observer answers the first arm late (7 s, inside the lease less its margin), so
 // the step signals at 7 s, the renewal is due at 9 s (the arm's lease less its margin) and the SIGTERM at 10 s (the
 // end_session grace). Date, performance and the timers are faked; setImmediate and process.hrtime stay real, so the
 // socket's I/O runs between the steps of `pass`.
-describe('the SIGTERM under the lease (D69)', () => {
+describe('the SIGTERM under the lease (D70)', () => {
   const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] };
   const settle = async (check: () => boolean, what: string, ms = 2_000) => {
     const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
@@ -339,7 +342,7 @@ describe('the SIGTERM under the lease (D69)', () => {
     expect(await w.verdict).toBe('exited');
   });
 
-  // D69: a lease proves the observer listening, not that no turn runs: the host's own turn state is the SIGTERM's last read
+  // D70: a lease proves the observer listening, not that no turn runs: the host's own turn state is the SIGTERM's last read
   it('a turn admitted while the lease had lapsed, the re-arm then answered: the host’s own status shows the turn and the SIGTERM is withheld', async () => {
     const w = await wired(); // the renewal unanswered: by the observer's clock its lease may run out
     await pass(LADDER_MS.endSession - 2_000); // 10 s: re-armed

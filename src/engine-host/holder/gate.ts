@@ -1,5 +1,5 @@
 // O16 M5: the gate, OX10's server (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E; D13, D14,
-// D27, D29, D37, D69). The engine host serves `<profile>/supervisor/gate.sock`, where sminos's observer bridge inside a lane B
+// D27, D29, D37, D70). The engine host serves `<profile>/supervisor/gate.sock`, where sminos's observer bridge inside a lane B
 // process connects: newline-delimited JSON, many clients, no token (the uid boundary: the socket reveals no session data
 // and takes no control). A server of its own over `node:net` with @shared/host/private-listen's checks, since
 // @shared/host/socket-server speaks the token-authenticated host protocol in both its modes.
@@ -11,7 +11,7 @@
 // welcomed and its `childPid` registered as infrastructure for the descendant veto; a later hello for the same session
 // (its reconnect, whenever its connection closed) replaces the older connection.
 //
-// Health (D29, D69): an observer is healthy while its last hello or heartbeat is under OBSERVER_SILENCE_MS old by a
+// Health (D29, D70): an observer is healthy while its last hello or heartbeat is under OBSERVER_SILENCE_MS old by a
 // monotonic clock (a sleeping machine is no silence: the observer sleeps too); once seen on the process, a silence past
 // that or a closed connection makes it unhealthy. A later heartbeat on the same unbroken connection heals a silence,
 // re-arming nothing; a closed connection is healed only by a reconnect's hello. A row whose process never had one is
@@ -20,7 +20,7 @@
 //
 // The reap (reap.ts) drives the fence through its row's channel (`arm`, `disarm`) and answers the observer's `armed` and
 // `turn` through its listener; a turn on a row with no listener is answered `proceed`. An `armed` names its fence alone,
-// so it answers the oldest unanswered arm of that fence written on its connection (the stream is ordered; D69): each arm
+// so it answers the oldest unanswered arm of that fence written on its connection (the stream is ordered; D70): each arm
 // has an id, and an answer counts (`acknowledged`) only while its connection is still the observer's, so a reconnect's
 // observer (a new bridge child, say) holds no lease an older one confirmed. Each row's channel lives from the launch's
 // reservation to its exit (`close`).
@@ -167,7 +167,7 @@ class Row implements GateChannel {
 
   // A heartbeat (or the hello): healthy for another silence window. A heartbeat reaches a row only on its observer's
   // present connection (a closed one is gone with it, and a new one starts with its hello), so one heard while unhealthy
-  // ends a silence on that connection and heals the row (D69). A silence the clock shows that its timer has not yet run
+  // ends a silence on that connection and heals the row (D70). A silence the clock shows that its timer has not yet run
   // is told first, so the reap sees the span unhealthy and cancels what it armed; healing re-arms nothing.
   heard(hello: boolean): void {
     if (!hello && this.healthy && this.stale()) this.unhealthy(); // its timer not yet run: the silence came first
@@ -202,7 +202,7 @@ export class Gate {
   private readonly silenceMs: number;
   private readonly helloWindowMs: number;
 
-  // `now`: a monotonic clock in milliseconds (D69: a sleep advances the wall clock and not this one), the silence's only
+  // `now`: a monotonic clock in milliseconds (D70: a sleep advances the wall clock and not this one), the silence's only
   // reader; performance.now() unless a test gives one.
   constructor(private readonly opts: { log(line: string): void; silenceMs?: number; helloWindowMs?: number; now?: () => number }) {
     this.silenceMs = opts.silenceMs ?? OBSERVER_SILENCE_MS;

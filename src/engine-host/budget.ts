@@ -71,7 +71,7 @@ const LIVE: ReadonlySet<EngineSessionStatus['process']> = new Set(['starting', '
 // after its background tasks end moves `lastEventSeq` first and then opens a turn.
 const ENGINE_ACTIVE: ReadonlySet<EngineSessionStatus['engineState']> = new Set(['running', 'requires_action']);
 
-// P5 O16 D69: a turn under way by the host's own status: one open, the session busy, or the engine working or waiting.
+// P5 O16 D70: a turn under way by the host's own status: one open, the session busy, or the engine working or waiting.
 // The idle row's test below and an idle reap's last read before its SIGTERM (holder/reap.ts) are this one predicate.
 export function turnUnderWay(s: EngineSessionStatus): boolean {
   return s.turn !== null || s.busy || ENGINE_ACTIVE.has(s.engineState);

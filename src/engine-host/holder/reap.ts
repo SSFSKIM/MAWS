@@ -1,5 +1,5 @@
 // O16 M5: the reap, the release of an idle session as a state machine over the gate (docs/doperpowers/plans/
-// 2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; holder design §3.2; D15, D17, D29, D69). One per row, made by the
+// 2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; holder design §3.2; D15, D17, D29, D70). One per row, made by the
 // process table at the reservation. The idle release (`idle`, the role's clock: idle-release.ts) and the memory budget's
 // (`budget`: process-table.ts) both end a process through it, so neither signals into a turn.
 //
@@ -24,7 +24,7 @@
 // `LEASE_MARGIN_MS` of it, renewing the arm (the same fence, a fresh `armed` awaited) when the step comes later, and it
 // renews the lease while the signal runs, so a turn the engine starts before it exits still meets the fence.
 //
-// D69: no signal goes into a fenced process, the step's end_session nor an idle reap's SIGTERM after its grace, without a
+// D70: no signal goes into a fenced process, the step's end_session nor an idle reap's SIGTERM after its grace, without a
 // confirmed live lease at that instant: the latest arm for the fence (first or renewal) answered by its own `armed` on
 // the observer's present connection (gate.ts pairs answers to arms), and both of the host's clocks inside its send time
 // plus the lease less the margin (the larger elapsed reading counts: a sleep jumps the wall clock forward, a step back
@@ -53,7 +53,7 @@ export interface ReapDeps {
   stateful(): ReadonlySet<string>;
   interest(): boolean; // for `idle`: a client's interest holds the row, or the release is off
   descendants(): number | 'unreadable'; // a fresh read of the work under the engine
-  // The session's signal path; `mayTerm`, an idle reap's, is the SIGTERM's gate (D69): true when it may go in now, false
+  // The session's signal path; `mayTerm`, an idle reap's, is the SIGTERM's gate (D70): true when it may go in now, false
   // when it may not (`withheld`: the reap has ended and no SIGTERM was sent).
   reap(reason: ReapReason, mayTerm: () => Promise<boolean>): Promise<'exited' | 'ignored' | 'withheld'>;
   now(): number; // the wall clock
@@ -167,7 +167,7 @@ export class Reap {
     return this.leaseMs - this.marginMs - Math.max(this.deps.now() - this.armSentAt, this.monotonic() - this.armSentMono);
   }
 
-  // A confirmed live lease (D69).
+  // A confirmed live lease (D70).
   private confirmed(): boolean {
     return this.latestArm !== null && this.deps.gate.acknowledged(this.latestArm) && this.leaseLeft() > 0;
   }
@@ -210,7 +210,7 @@ export class Reap {
   }
 
   // O16 panel wave 1 (sweep#2): each renewal is due at the lease in force less the margin, the first against the arm
-  // the step signalled under, not a whole lease from the signal, so the fence never lapses while it runs. D69: a
+  // the step signalled under, not a whole lease from the signal, so the fence never lapses while it runs. D70: a
   // renewal is confirmed only by its own `armed`; one the SIGTERM awaits that has none by then withholds the SIGTERM.
   private renewLater(): void {
     this.renewTimer = setTimeout(() => {
@@ -222,7 +222,7 @@ export class Reap {
     (this.renewTimer as { unref?: () => void }).unref?.();
   }
 
-  // The SIGTERM's gate (D69), at its instant: a fenced row's confirmed live lease (`confirm`), then the host's own turn
+  // The SIGTERM's gate (D70), at its instant: a fenced row's confirmed live lease (`confirm`), then the host's own turn
   // state, read last. Its answer reaches the session's kill within the same task, so no frame lands between.
   private mayTerm(): Promise<boolean> {
     const lease = this.fenced ? this.confirm() : Promise.resolve(!this.disposed && this.current === 'signalled');

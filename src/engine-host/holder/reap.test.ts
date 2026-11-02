@@ -4,7 +4,7 @@
 // margin, re-checking everything in the step that signals; a turn before the signal cancels (`proceed`, disarmed), one
 // after it is told `stop`; an observer that was seen and went silent or away blocks the release (a silence heals at a
 // later heartbeat on the same connection, re-arming nothing); a row on which none was ever seen is released on
-// verified-empty alone (owner Q1); the lease is live only while both the wall and the monotonic clock say so (D69).
+// verified-empty alone (owner Q1); the lease is live only while both the wall and the monotonic clock say so (D70).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -428,10 +428,10 @@ describe('the signal’s outcome', () => {
   });
 });
 
-// D69, on fake timers over the real sockets: Date, performance and the timers are faked (the gate judges silence on
+// D70, on fake timers over the real sockets: Date, performance and the timers are faked (the gate judges silence on
 // performance.now(), the lease reads both it and Date.now()); setImmediate and process.hrtime stay real, so socket I/O
 // runs and `settle` waits on it. Production timings throughout.
-describe('the clocks (D69)', () => {
+describe('the clocks (D70)', () => {
   const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] };
   const settle = async (check: () => boolean, what: string, ms = 2_000) => {
     const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;

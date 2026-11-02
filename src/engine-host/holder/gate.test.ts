@@ -1,5 +1,5 @@
 // O16 M5: the gate's server (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E; D13, D27, D29,
-// D37, D69): OX10 on `gate.sock` over a real Unix socket, a fake observer on the other end. An observer is keyed by the
+// D37, D70): OX10 on `gate.sock` over a real Unix socket, a fake observer on the other end. An observer is keyed by the
 // engine session id its hello carries against each row's lineage, pid a cross-check; a hello no row matches is closed;
 // an observer is healthy while its last heartbeat is recent on a monotonic clock, unhealthy once silent or gone after it
 // was seen (a later heartbeat on the same connection heals a silence; a closed connection needs a reconnect's hello),
@@ -142,7 +142,7 @@ describe('health', () => {
     o.stopHeartbeat();
     await until(() => r.health.includes('unhealthy'), 'silence, told'); // the getter reads the clock first
     expect(r.health).toEqual(['healthy', 'unhealthy']);
-    o.hb(); // D69: the connection never broke, so its next heartbeat is heard
+    o.hb(); // D70: the connection never broke, so its next heartbeat is heard
     await until(() => r.channel.observer === 'healthy', 'the heal');
     expect(r.health).toEqual(['healthy', 'unhealthy', 'healthy']);
     expect(r.seen).toHaveLength(1); // seen once per process: a heartbeat is no sighting
@@ -161,7 +161,7 @@ describe('health', () => {
     expect(r.health).toEqual(['healthy', 'unhealthy', 'healthy']); // the span is told, so the reap cancels what it armed
   });
 
-  // D69: silence is judged on a monotonic clock, which a sleeping Mac does not advance (nor the observer's, asleep too)
+  // D70: silence is judged on a monotonic clock, which a sleeping Mac does not advance (nor the observer's, asleep too)
   it('sleep is not silence: a 20 s wall-clock jump with no monotonic time passed leaves the observer healthy', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
     const slept = new Gate({ log: () => {} }); // the production window and the default clock
@@ -247,7 +247,7 @@ describe('frames', () => {
     expect(channel.acknowledged(arm!)).toBe(false); // a disarmed fence holds no lease
   });
 
-  // D69: `armed` names its fence alone, so it answers the oldest unanswered arm of that fence on the connection it came
+  // D70: `armed` names its fence alone, so it answers the oldest unanswered arm of that fence on the connection it came
   // on (the stream is ordered); a later arm stays unconfirmed until its own answer
   it('with two renewals in flight and only the first answered, the second stays unconfirmed until its own armed', async () => {
     const armed: [number, number][] = [];
