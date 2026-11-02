@@ -187,6 +187,32 @@ describe('the gate and the reset', () => {
     expect(l.named().filter((name) => name === 'connectors.declare')).toHaveLength(1);
   });
 
+  // the review's finding 1: a command that waited for the window report across a channel's end doesn't go on the next
+  it('refuses a lease command whose window report was out when its channel ended, sending nothing on the next channel', async () => {
+    const l = await ready();
+    l.link.answers.set('client.windowShown', () => new Promise(() => {}));
+    const a = l.page('page-a', true);
+    const answer = l.cmd('connectors.open', { artifactId: ART }, a);
+    await until(() => l.reports().length === 1, 'the report out');
+    l.link.lose();
+    l.link.relink();
+    expect(await answer).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(l.named().filter((name) => name === 'connectors.open')).toEqual([]);
+    await until(() => l.resets().length === 2, 'the reset');
+    expect(l.adapter.handles('connectors.open')).toBe(true);
+  });
+
+  // the review's finding 2: a lease act out at its channel's loss answers at once, saying it may have run
+  it('answers a lease act out at its channel’s loss `host_unavailable`, unknown whether it ran', async () => {
+    const l = await ready();
+    const ran = l.cmd('connectors.refresh', { leaseId: LEASE });
+    await until(() => l.link.acts.length > 0, 'the act out');
+    l.link.lose();
+    const answered = await ran;
+    expect(answered).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect((answered as { error: { message: string } }).error.message).toContain('unknown whether it ran');
+  });
+
   it('makes no lease act on a channel that ended before its reset', async () => {
     const l = await ready();
     l.link.lose();
@@ -224,6 +250,38 @@ describe('the window report per machine', () => {
     await l.cmd('connectors.close', { leaseId: LEASE_2 }, a);
     await until(() => l.reports().length === 4, 'a without a lease');
     expect(l.reports()).toEqual([true, false, true, false]);
+  });
+
+  // the review's finding 3: a page's end closes its leases on the channel that opened them, and an open answered after it
+  it('closes a page’s leases when it ends, and a lease whose open answered after the page ended, on their own channel alone', async () => {
+    const l = await ready();
+    const a = l.page('page-a', true);
+    await l.cmd('connectors.open', { artifactId: ART }, a);
+    a.end();
+    await flush();
+    expect(l.link.calls.filter((c) => c.name === 'connectors.close').map((c) => c.input)).toEqual([{ leaseId: LEASE }]);
+
+    let answer!: () => void;
+    l.link.answers.set('connectors.open', () => new Promise((resolve) => (answer = () => resolve({ ok: true, output: { leaseId: LEASE_2 } }))));
+    const b = l.page('page-b', true);
+    const opening = l.cmd('connectors.open', { artifactId: ART }, b);
+    await until(() => l.named().filter((name) => name === 'connectors.open').length === 2, 'the second open out');
+    b.end();
+    answer();
+    await opening;
+    await flush();
+    expect(l.link.calls.filter((c) => c.name === 'connectors.close').map((c) => c.input)).toEqual([{ leaseId: LEASE }, { leaseId: LEASE_2 }]);
+
+    // a lease of a channel that ended is the machine's to have closed: nothing goes on the next channel for it
+    const c = l.page('page-c', true);
+    l.link.answers.set('connectors.open', () => ({ ok: true, output: { leaseId: LEASE } }));
+    await l.cmd('connectors.open', { artifactId: ART }, c);
+    l.link.lose();
+    l.link.relink();
+    await until(() => l.resets().length === 2, 'the reset');
+    c.end();
+    await flush();
+    expect(l.link.calls.filter((call) => call.name === 'connectors.close')).toHaveLength(2);
   });
 
   it('reports to each machine on its own: a page shown with a lease on one is nothing to the other', async () => {

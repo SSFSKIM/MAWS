@@ -56,8 +56,8 @@ export interface ActRequest {
   requires?: string;
   /**
    * P5 O7 M5c: an act that names what only one channel holds (a page's lease) goes only on the channel current when it was
-   * made: refused `offline` with none current, or once that channel ends before a copy went out; a copy that went out on
-   * it is asked about on the next one (queried), never resealed there.
+   * made: refused `offline` with none current, or once that channel ends before a copy went out; one a copy of which went
+   * out settles `unknown` (`channel-lost`) at that channel's end, never resealed or asked about on the next one.
    */
   oneChannel?: true;
 }
@@ -322,6 +322,12 @@ export class ActTable {
       entry.querying = false;
       this.#clearTimers(entry);
       if (entry.oneChannel) entry.strayed = true;
+      // P5 O7 M5c (the review's finding 2): a copy of a channel-bound act went out on the channel that ended: its caller
+      // hears at once that it may have run, and nothing of it goes to, or is asked of, the next channel
+      if (entry.oneChannel && entry.outstanding) {
+        this.#settle(entry, { state: 'unknown', reason: 'channel-lost' });
+        continue;
+      }
       if (entry.outstanding) {
         entry.ambiguous = true;
         this.#progress(entry, 'unknown');

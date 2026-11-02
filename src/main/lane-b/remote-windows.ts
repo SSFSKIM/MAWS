@@ -17,6 +17,10 @@
 // - A lease command waits for its machine to hold the latest report, at most two reports' worth: then it is refused here
 //   (`false`), never sent under an older one. An endpoint that offers no `client.windowShown` (`not-offered`) predates
 //   leases over RL2, and its refusal of the lease command is the answer: the command goes.
+// - A command's window bookkeeping is its channel's (a `WindowTicket`): a wait that saw its channel end answers false; a
+//   lease is recorded only while the channel it was opened on is current, with that channel.
+// - A page's end closes every lease it holds, on the channel that opened it (a lease of a channel that ended was closed by
+//   the machine with its ref); an open answered after its page ended is closed at once.
 import type { ClientRef } from '@shared/ipc/client';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ClientWindowShown } from '../client/window-shown';
@@ -30,15 +34,20 @@ export interface RemoteWindowsDeps {
   windowShown(client: ClientRef): ClientWindowShown | null;
   /** `client.windowShown {shown}` on the link's current channel. */
   report(link: RemoteLink, shown: boolean): Promise<WindowReport>;
+  /** `connectors.close {leaseId}` on the link's current channel, answered to no one. */
+  close(link: RemoteLink, leaseId: string): void;
   recheckMs?: number;
   log(line: string): void;
 }
 
 export interface RemoteWindows {
-  /** Before a lease command of `client` on `link`'s machine: whether the machine holds the latest report. */
-  before(link: RemoteLink, client: ClientRef, name: string): Promise<boolean>;
+  /**
+   * Before a lease command of `client` on `link`'s machine, made on channel `on`: whether the machine holds the latest
+   * report there (false once `on` ended), and the command's ticket for `after`.
+   */
+  before(link: RemoteLink, client: ClientRef, name: string, on: readonly string[]): Promise<{ ok: boolean; ticket: WindowTicket }>;
   /** After it, on every path: a lease opened (`leaseId`, from the open's answer) or closed (the close's input). */
-  after(link: RemoteLink, client: ClientRef, name: string, leaseId: string | null): void;
+  after(ticket: WindowTicket, name: string, leaseId: string | null): void;
   /** The machine's channel changed: its pages hold no lease there. Resolves once the new channel holds the latest report, or can't. */
   relinked(link: RemoteLink): Promise<boolean>;
   /** The machine left the roster. */
@@ -48,7 +57,11 @@ export interface RemoteWindows {
   stop(): void;
 }
 
-type Page = { client: ClientRef; window: ClientWindowShown | null; leases: Set<string>; opening: number; unfollow(): void };
+/** A page's leases there, each with the channel (its peer list) that opened it; `ended` once the page did. */
+type Page = { client: ClientRef; window: ClientWindowShown | null; leases: Map<string, readonly string[]>; opening: number; ended: boolean; unfollow(): void };
+/** A lease command's own: its machine, its page (null: gone before it was followed) and the channel it was made on. */
+export type WindowTicket = { readonly m: unknown; readonly page: unknown; readonly on: readonly string[] };
+type Ticket = { m: Machine; page: Page | null; on: readonly string[] };
 type Machine = {
   link: RemoteLink;
   pages: Map<string, Page>;
@@ -112,11 +125,12 @@ export function createRemoteWindows(deps: RemoteWindowsDeps): RemoteWindows {
     if (live(m) && !current(m)) send(m);
   }
 
-  /** Until the machine holds the latest report on its current channel, at most two reports' worth. */
-  async function reported(m: Machine): Promise<boolean> {
+  /** Until the machine holds the latest report on its current channel, at most two reports' worth; false once `on` ended. */
+  async function reported(m: Machine, on?: readonly string[]): Promise<boolean> {
     let sent = 0;
+    const moved = () => on !== undefined && m.link.peerCapabilities() !== on;
     while (live(m) && !current(m)) {
-      if (m.link.peerCapabilities() === null) return false;
+      if (m.link.peerCapabilities() === null || moved()) return false;
       if (m.out === null) {
         if (sent >= 2) break;
         sent += 1;
@@ -124,6 +138,7 @@ export function createRemoteWindows(deps: RemoteWindowsDeps): RemoteWindows {
       }
       await m.out;
     }
+    if (moved()) return false;
     if (current(m)) return true;
     if (live(m)) deps.log(`lane B: ${m.link.name} has not taken this device’s window report; its lease commands are refused until it does`);
     return false;
@@ -137,6 +152,10 @@ export function createRemoteWindows(deps: RemoteWindowsDeps): RemoteWindows {
     const offGone = client.onGone(() => {
       gone = true;
       if (page === null || m.pages.get(client.id) !== page) return;
+      page.ended = true;
+      const on = m.link.peerCapabilities();
+      for (const [leaseId, openedOn] of page.leases) if (openedOn === on) deps.close(m.link, leaseId);
+      page.leases.clear();
       unfollow(m, page);
       changed(m);
     });
@@ -148,8 +167,9 @@ export function createRemoteWindows(deps: RemoteWindowsDeps): RemoteWindows {
     const own: Page = {
       client,
       window,
-      leases: new Set(),
+      leases: new Map(),
       opening: 0,
+      ended: false,
       unfollow: () => {
         clearInterval(recheck);
         offChange?.();
@@ -171,21 +191,26 @@ export function createRemoteWindows(deps: RemoteWindowsDeps): RemoteWindows {
   }
 
   return {
-    async before(link, client, name) {
-      if (stopped) return false;
+    async before(link, client, name, on) {
       const m = machineOf(link);
-      const page = follow(m, client);
+      const page = stopped ? null : follow(m, client);
       if (page !== null && name === 'connectors.open') page.opening += 1;
-      return reported(m);
+      const ticket: Ticket = { m, page, on };
+      return { ok: !stopped && (await reported(m, on)), ticket };
     },
-    after(link, client, name, leaseId) {
-      const m = machines.get(link.machine);
-      const page = m?.link === link ? m.pages.get(client.id) : undefined;
-      if (m === undefined || page === undefined) return; // let go meanwhile (a relink, the page's end)
+    after(given, name, leaseId) {
+      const { m, page, on } = given as Ticket;
+      const here = m.link.peerCapabilities() === on; // the command's channel is still current
+      if (page === null || page.ended) {
+        // the page ended before its open answered: the lease it was given is closed at once, on its own channel
+        if (name === 'connectors.open' && leaseId !== null && here && !stopped) deps.close(m.link, leaseId);
+        return;
+      }
       if (name === 'connectors.open') {
         page.opening = Math.max(0, page.opening - 1);
-        if (leaseId !== null) page.leases.add(leaseId);
+        if (leaseId !== null && here && m.pages.get(page.client.id) === page) page.leases.set(leaseId, on);
       } else if (name === 'connectors.close' && leaseId !== null) page.leases.delete(leaseId);
+      if (m.pages.get(page.client.id) !== page) return; // let go meanwhile (a relink)
       if (page.leases.size === 0 && page.opening === 0) unfollow(m, page);
       changed(m);
     },

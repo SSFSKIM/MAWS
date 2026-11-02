@@ -20,7 +20,9 @@
 //   F-connectors 8); an action is acknowledged at once and runs under its own controller (its deadline, the host's
 //   loss and main's stop abort the provider's flow and the host's discoveries).
 //   Its end, and its start, are `connectors.serversChanged {artifactId}` for each artifact some client read rows of
-//   (P5 O4 D9: to every client; a sheet reads again only for its own artifact).
+//   (P5 O4 D9: to every client; a sheet reads again only for its own artifact). P5 O7 M5c: its end is also said once
+//   for its own artifact, read or not, as `{artifactId, ended: {sourceHandle}}`, whatever ended it; a remote asker's
+//   device ends that action's callback listener on it.
 // - Disconnect takes a saved connection's id alone (no current source, no decryption). A retirement the host has not
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
 //   provider's, separate from `saved`), whether the owner's Disconnect or (P3-F F-connectors 7) a Reconnect's
@@ -72,6 +74,7 @@ export interface ConnectorOwnerDeps {
   grants(artifactId: string): Promise<ConnectorGrant[]>; // the artifact's durable grants
   relayed: Pick<RelayedCallbacks, 'arm'>; // P5 O7 M5c: a remote asker's consent callbacks, by its ClientRef and its port
   serversChanged(artifactId: string): void; // P5 O4 M2: `connectors.serversChanged`, to every client
+  actionEnded(artifactId: string, sourceHandle: string): void; // P5 O7 M5c: `connectors.serversChanged`'s `ended`, to every client
   track?<T>(action: Promise<T>): Promise<T>; // P5 O4 D17: an action in flight, counted until it ends
   log?: (line: string) => void;
 }
@@ -407,7 +410,9 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         controller.signal.removeEventListener('abort', release);
         release();
         receiver?.release(); // P5 O7 M5c: this action's registration alone
-        if (!stopped) changed();
+        if (stopped) return;
+        changed();
+        deps.actionEnded(artifactId, sourceHandle);
       }));
     return { accepted: true };
   }

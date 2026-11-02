@@ -89,6 +89,11 @@ export interface RemoteLink extends MachineLink {
    */
   onClient(listener: (request: ClientRequest, answer: (answer: unknown) => void) => void): () => void;
   /**
+   * P5 O7 M5c: each channel's own life as it happens: `current` when one becomes current, `lost` when it ends (a loss, the
+   * relay-to-direct swap, a refusal or `close()`), which `onState` doesn't say through the grace's `up`.
+   */
+  onChannel(listener: (event: 'current' | 'lost') => void): () => void;
+  /**
    * P5 O7 M3: the link's end, heard on `onState`: `closed` once `close()` ran (for good), `removed` while a sealed
    * `removed` holds it refused (until the session changes or a person acts on the machine); null while it lives.
    */
@@ -251,6 +256,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   const stateListeners = new Set<(state: LinkState) => void>();
   const capsListeners = new Set<(caps: DeviceCaps) => void>();
   const clientListeners = new Set<(request: ClientRequest, answer: (answer: unknown) => void) => void>();
+  const channelListeners = new Set<(event: 'current' | 'lost') => void>();
+  const channelSaid = (event: 'current' | 'lost'): void => {
+    for (const listener of [...channelListeners]) listener(event);
+  };
   let skippedRecord: string | null = null;
 
   const isCurrent = () => current !== null && (state === 'up' || state === 'reconnecting');
@@ -461,6 +470,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     subs.onCurrent();
     streams.onCurrent();
     flushCalls();
+    channelSaid('current'); // P5 O7 M5c
     if (result.carrier === 'direct') closeRelay();
     else armRecheck();
     notify();
@@ -517,9 +527,13 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     }
   }
 
-  /** P5 O7 M5c: a client-port request, answered once and only on the channel that asked. */
+  /**
+   * P5 O7 M5c: a client-port request, answered once and only on the channel that asked, and only from a peer that listed
+   * `rl2.client-port` (a request of any other is not this device's to answer: it is left unread).
+   */
   function clientAsked(message: Extract<EndpointMessage, { t: 'client' }>): void {
     const on = current;
+    if (on === null || !on.channel.peer.capabilities.includes('rl2.client-port')) return;
     let answered = false;
     const answer = (value: unknown): void => {
       if (answered) return;
@@ -545,6 +559,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     const was = current;
     current = null;
     dropOneChannelCalls();
+    channelSaid('lost');
     silenceTimer = clear(silenceTimer);
     probeTimer = clear(probeTimer);
     recheckTimer = clear(recheckTimer);
@@ -668,6 +683,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         current = null;
         dropOneChannelCalls();
         acts.onLost();
+        channelSaid('lost');
         streams.onLost(); // a stream is its channel's: the old channel's end at the endpoint ends them there too
         log('the direct carrier answers again: switching from the relay');
         adopt(result);
@@ -808,6 +824,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       clientListeners.add(listener);
       return () => void clientListeners.delete(listener);
     },
+    onChannel(listener) {
+      channelListeners.add(listener);
+      return () => void channelListeners.delete(listener);
+    },
     // The caller is the channel's member and device (RL §5.5): its ClientRef is not sent. P5 O7 M4: the session a
     // path-class read is made from goes as the call's `session`.
     dispatch(commandName: CommandName, input: unknown, _client: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
@@ -862,6 +882,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       clearExpiry = null;
       const was = current;
       current = null;
+      if (was !== null) channelSaid('lost');
       subs.close('closed');
       streams.close('closed');
       acts.close('closed');

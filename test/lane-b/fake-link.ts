@@ -138,13 +138,26 @@ export class FakeLink implements RemoteLink {
     this.#channel = false;
     for (const fail of [...this.#oneChannel]) fail();
     this.#oneChannel.clear();
+    // as the act table: a channel-bound act not yet sent is refused, one sent ends unknown (it may have run)
+    for (const act of this.acts) {
+      if (act.request.oneChannel !== true || act.settled !== null) continue;
+      act.settle(act.progress() === 'waiting' ? { state: 'refused', reason: 'offline' } : { state: 'unknown', reason: 'channel-lost' });
+    }
+    for (const listener of [...this.#channelListeners]) listener('lost');
   }
 
   /** P5 O7 M5c: the next channel: a new peer list (its identity is the channel's, as the real link's is) and its `caps`. */
   relink(peers: string[] = [...this.peers]): void {
     this.peers = peers;
     this.#channel = true;
+    for (const listener of [...this.#channelListeners]) listener('current');
     this.setCaps(this.#caps!);
+  }
+
+  readonly #channelListeners = new Set<(event: 'current' | 'lost') => void>();
+  onChannel(listener: (event: 'current' | 'lost') => void): () => void {
+    this.#channelListeners.add(listener);
+    return () => void this.#channelListeners.delete(listener);
   }
 
   readonly #oneChannel = new Set<() => void>();

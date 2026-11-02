@@ -695,6 +695,7 @@ describe('calls', () => {
 describe('the client port', () => {
   it('hands the listener a `client` request and sends its answer once, on the channel that asked', async () => {
     const h = await harness();
+    h.peer.capabilities = ['rl2.client-port'];
     await settle();
     const asked: Array<{ kind: string; request: unknown }> = [];
     h.link.onClient((request, answer) => {
@@ -709,6 +710,7 @@ describe('the client port', () => {
 
   it('sends nothing for an answer given after its channel ended, and answers `noClient` with no listener', async () => {
     const h = await harness();
+    h.peer.capabilities = ['rl2.client-port'];
     await settle();
     const later: Array<(answer: unknown) => void> = [];
     const off = h.link.onClient((_request, answer) => void later.push(answer));
@@ -723,6 +725,36 @@ describe('the client port', () => {
     off();
     h.last().deliver({ t: 'client', id: 'p2', kind: 'reveal', request: '/x' });
     expect(h.last().of('clientAnswer')).toEqual([{ t: 'clientAnswer', id: 'p2', answer: { noClient: true } }]);
+  });
+
+  // the review's finding 4: the port across the channel is behind its capability, on the channel that asked
+  it('takes no `client` request from a channel whose peer listed no `rl2.client-port`, with a listener or without', async () => {
+    const h = await harness();
+    await settle();
+    const asked: string[] = [];
+    const off = h.link.onClient((request, answer) => (asked.push(request.id), answer({ opened: true })));
+    h.last().deliver({ t: 'client', id: 'p1', kind: 'openExternal', request: { url: 'https://auth.example/consent' } });
+    off();
+    h.last().deliver({ t: 'client', id: 'p2', kind: 'reveal', request: '/x' });
+    expect(asked).toEqual([]);
+    expect(h.last().of('clientAnswer')).toEqual([]);
+  });
+});
+
+describe('the channel’s own life', () => {
+  // the review's minor finding: a channel's end and the next channel are said as they happen, though `onState` holds `up`
+  // through the grace
+  it('says each channel’s loss and the next channel, through a reconnect within the grace', async () => {
+    const h = await harness();
+    const heard: string[] = [];
+    h.link.onChannel((event) => void heard.push(event));
+    await settle();
+    expect(heard).toEqual(['current']);
+    h.last().end('carrier');
+    expect(heard).toEqual(['current', 'lost']);
+    await settle();
+    expect(h.states).toEqual(['up']);
+    expect(heard).toEqual(['current', 'lost', 'current']);
   });
 });
 
@@ -755,7 +787,9 @@ describe('what only one channel holds', () => {
     expect(h.last().of('call')).toEqual([]);
   });
 
-  it('refuses a `oneChannel` act made while no channel is current, and asks the next channel about one sent on the lost one, never resealing it', async () => {
+  // the review's finding 2: a lease act a copy of which went out on the lost channel ends its caller's wait at the loss,
+  // unknown whether it ran, never carried to (or asked about on) the next channel under the old lease
+  it('refuses a `oneChannel` act made while no channel is current, and ends one sent on the lost channel at the loss, unknown whether it ran', async () => {
     const h = await harness();
     h.peer.capabilities = ['rl2.executor.machine'];
     await settle();
@@ -765,17 +799,16 @@ describe('what only one channel holds', () => {
     const plain = h.link.act({ action: 'session.acquire', args: { appSessionId: 'a', reason: 'send' }, executor: 'machine' });
     expect(before.of('act')).toHaveLength(2);
     before.end('carrier');
+    expect(await sent.outcome).toEqual({ state: 'unknown', reason: 'channel-lost' });
     // made in the reconnect, with no channel current: refused at once
     const stray = h.link.act({ action: 'connectors.refresh', args: { leaseId: 'lease-1' }, executor: 'machine', oneChannel: true });
     expect(await stray.outcome).toEqual({ state: 'refused', reason: 'offline' });
     await settle();
     expect(h.channels).toHaveLength(2);
     const next = h.last();
-    // the plain act resealed, the lease act only asked about
+    // the plain act resealed; nothing of the lease act on the next channel
     expect((next.of('act') as unknown as Array<{ action: { opId: string } }>).map((m) => m.action.opId)).toEqual([plain.opId]);
-    expect((next.of('query') as unknown as Array<{ opId: string }>).map((m) => m.opId)).toEqual([sent.opId]);
-    next.deliver({ t: 'queried', opId: sent.opId, state: 'not-received' });
-    expect(await sent.outcome).toEqual({ state: 'not-sent' });
+    expect(next.of('query')).toEqual([]);
   });
 });
 

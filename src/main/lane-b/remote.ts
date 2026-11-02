@@ -77,7 +77,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import { DOCUMENT_OPEN_MS } from '../artifacts/remote-open';
 import { createRemoteArtifacts, type RemoteArtifacts } from './remote-artifacts';
 import { createRemoteAttention, type RemoteAttention } from './remote-attention';
-import { createRemoteConnectors, MACHINE_CALLS, reportWindow, type MachineActOptions } from './remote-connectors';
+import { closeLease, createRemoteConnectors, MACHINE_CALLS, reportWindow, type MachineActOptions } from './remote-connectors';
 import { createRemotePort, type CallbackServer, type CallbackHandler, type RemotePortTiming } from './remote-port';
 import { createRemoteWindows } from './remote-windows';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
@@ -306,7 +306,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     timing: { consentConnectMs: timing.consentConnectMs, consentSignInMs: timing.consentSignInMs, consentActMs: timing.sendPendingMs },
     log: deps.log,
   });
-  const windows = createRemoteWindows({ windowShown: deps.windowShown ?? (() => null), report: reportWindow, log: deps.log });
+  const windows = createRemoteWindows({ windowShown: deps.windowShown ?? (() => null), report: reportWindow, close: (link, leaseId) => closeLease(link, leaseId, deps.log), log: deps.log });
   const connectors = createRemoteConnectors({
     remote: deps.remote,
     onRemote: deps.onRemote,

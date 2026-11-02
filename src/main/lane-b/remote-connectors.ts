@@ -61,6 +61,13 @@ export interface RemoteConnectors {
   stop(): void;
 }
 
+/** P5 O7 M5c (the review's finding 3): a lease let go here (its page ended) closed on the current channel. */
+export function closeLease(link: RemoteLink, leaseId: string, log: (line: string) => void): void {
+  void callOverLink(link, 'connectors.close', { leaseId }, { oneChannel: true }).then((closed) => {
+    if (!closed.ok) log(`lane B: the lease ${leaseId} on ${link.name} of a page that ended was not closed: ${closed.error.code}`);
+  });
+}
+
 /** `client.windowShown` on the current channel, as the windows read its answer. */
 export async function reportWindow(link: RemoteLink, shown: boolean): Promise<WindowReport> {
   const answered = await link.call('client.windowShown', { shown }, { oneChannel: true });
@@ -130,17 +137,19 @@ export function createRemoteConnectors(deps: RemoteConnectorsDeps): RemoteConnec
     const gate = gateOf(link);
     if (!isOpen(gate)) return failure('host_unavailable', rebuilding(name, link.name));
     let leaseId: string | null = name === 'connectors.close' && typeof fields.leaseId === 'string' ? fields.leaseId : null;
+    const on = gate.openOn!; // the channel the command is made on: it goes on this one or not at all
+    const { ok: reported, ticket } = await deps.windows.before(link, client, name, on);
     try {
-      const reported = await deps.windows.before(link, client, name);
-      // decided again after the wait: the channel may have ended meanwhile, and the command goes in this same step
-      if (!isOpen(gate)) return failure('host_unavailable', rebuilding(name, link.name));
+      // decided again after the wait: the channel may have ended (or been replaced) meanwhile, and the command goes in
+      // this same step
+      if (!isOpen(gate) || gate.openOn !== on) return failure('host_unavailable', rebuilding(name, link.name));
       if (!reported) return failure('host_unavailable', `${name}: ${link.name} has not taken this window’s report`);
       const result = MACHINE_CALLS.has(name) ? await callOverLink(link, name, fields, { oneChannel: true }) : await deps.act(link, name, fields, { oneChannel: true, ...answerMs(link, name) });
       const opened: unknown = result.ok ? result.value : null;
       if (name === 'connectors.open' && isObject(opened) && typeof opened.leaseId === 'string') leaseId = opened.leaseId;
       return result;
     } finally {
-      deps.windows.after(link, client, name, leaseId);
+      deps.windows.after(ticket, name, leaseId);
     }
   }
 

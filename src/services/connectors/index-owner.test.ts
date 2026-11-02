@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
-import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import { composeConnectors, type ConnectorsComposition } from '.';
 import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
@@ -211,6 +211,21 @@ describe('MAWS’s own OAuth beside route D', () => {
     expect(asked).toEqual({ ok: true, value: { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }, body: 'flow /callback?code=c&state=st' } });
     expect(await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c&state=st' }, endableClientRef('remote:other'))).toEqual({ ok: true, value: { status: 404, body: '' } });
     expect(await bus.invoke('connectors.callback', { port: 61_234, method: 'GET', url: '/callback' }, me)).toMatchObject({ ok: false }); // main's alone
+  });
+
+  // P5 O7 M5c: an action's end goes to every client with its handle, read or not, so a remote asker's listener ends
+  it('says a Connect’s end as serversChanged with its handle, a payload of the wire', async () => {
+    start();
+    const rows = (await invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] })) as { servers: { handle: string }[] };
+    const sourceHandle = rows.servers[0]!.handle;
+    (provider.state as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'needsConnect' });
+    (provider.connect as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('the flow failed'));
+    expect(await invoke('connectors.connect', { artifactId: ART, sourceHandle })).toEqual({ accepted: true });
+    const ends = () => bus.emittedOf('connectors.serversChanged').filter((payload) => 'ended' in (payload as object));
+    for (let i = 0; i < 20 && ends().length === 0; i++) await vi.advanceTimersByTimeAsync(0);
+    expect(ends()).toEqual([{ artifactId: ART, ended: { sourceHandle } }]);
+    expect(validateEventPayload('connectors.serversChanged', ends()[0]).ok).toBe(true);
+    expect(bus.emittedOf('connectors.serversChanged')).toContainEqual({ artifactId: ART }); // the rows' invalidation stays
   });
 
   it('without route D (H’s engine-only service) neither OAuth nor the owner’s server commands exist', () => {

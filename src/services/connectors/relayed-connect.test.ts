@@ -107,6 +107,7 @@ beforeEach(() => {
     relayed,
     grants: async () => [],
     serversChanged: () => {},
+    actionEnded: () => {},
     track: (action) => {
       actions.push(action);
       return action;

@@ -2,6 +2,7 @@
 // "Consent and the client port"): the port's answers per kind, and a consent's callback listener on this Mac's loopback,
 // its life on each ending path, its relays and their bounds. The listener is a real one on 127.0.0.1; the link is the
 // suites' fake, its acts and its `connectors.callback` answered by each test.
+import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
@@ -113,7 +114,7 @@ describe('the callback listener', () => {
     expect(relayed).toEqual([{ port: c.port, method: 'GET', url: '/callback?code=abc&state=s1&iss=https%3A%2F%2Fauth.example' }]);
   });
 
-  it('keeps listening through a request no flow takes (404) and one the flow refuses without settling (405)', async () => {
+  it('keeps listening through a request no flow takes (404), one the flow refuses (405), and one it takes', async () => {
     const l = lab();
     const answers = [{ status: 404, body: '' }, { status: 405, body: 'Not a MAWS sign-in request.' }, { status: 200, body: 'connected' }];
     l.link.answers.set('connectors.callback', () => ({ ok: true, output: answers.shift()! }));
@@ -121,18 +122,45 @@ describe('the callback listener', () => {
     c.act.move('accepted');
     c.act.settle({ state: 'done', result: { accepted: true } });
     expect(await get(c.port, '/favicon.ico')).toMatchObject({ status: 404, body: '' });
-    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART }); // another row's action, or this one's start
     expect(await get(c.port, '/callback?state=s1', 'POST')).toMatchObject({ status: 405 });
-    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART });
-    expect(l.alive()).toEqual([c.port]);
     expect(await get(c.port, '/callback?code=c&state=s1')).toMatchObject({ status: 200, body: 'connected' });
     expect(l.alive()).toEqual([c.port]); // an answered request never ends it
-    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: '22222222-2222-4222-8222-222222222222' });
+    expect(await c.answer).toEqual({ ok: true, value: { accepted: true } });
+  });
+
+  // the review's finding 5: the flow's own end, named by the machine (`ended`), whatever ended it and whenever it is heard
+  it('ends a Connect’s at its own action’s end on the machine, with or without a callback, and at no other row’s', async () => {
+    const l = lab();
+    const c = await l.consent('connectors.connect', CONNECT);
+    c.act.move('accepted');
+    c.act.settle({ state: 'done', result: { accepted: true } });
+    await c.answer;
+    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART }); // an action's start, or another's broadcast
+    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART, ended: { sourceHandle: '44444444-4444-4444-8444-444444444444' } }); // another row
+    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: '22222222-2222-4222-8222-222222222222', ended: { sourceHandle: CONNECT.sourceHandle } });
     expect(l.alive()).toEqual([c.port]);
-    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART }); // the flow's end, its callback settled
+    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART, ended: { sourceHandle: CONNECT.sourceHandle } }); // already connected: no callback ever
     expect(l.alive()).toEqual([]);
     expect(await refused(c.port)).toBe(true);
-    expect(await c.answer).toEqual({ ok: true, value: { accepted: true } });
+  });
+
+  it('ends at its action’s end heard before the act’s acknowledgment, and while a relay is out', async () => {
+    const l = lab();
+    const early = await l.consent('connectors.reconnect', CONNECT);
+    l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART, ended: { sourceHandle: CONNECT.sourceHandle } }); // the act went; its ack not yet
+    expect(l.alive()).toEqual([]);
+    early.act.settle({ state: 'done', result: { accepted: true } });
+    await early.answer;
+    expect(l.alive()).toEqual([]);
+
+    const during = await l.consent('connectors.connect', CONNECT);
+    during.act.move('accepted');
+    l.link.answers.set('connectors.callback', () => {
+      l.port.heard(MINI, 'connectors.serversChanged', { artifactId: ART, ended: { sourceHandle: CONNECT.sourceHandle } });
+      return { ok: true, output: { status: 400, body: 'The sign-in was not completed.' } };
+    });
+    await get(during.port, '/callback?state=s&error=access_denied').catch(() => null);
+    expect(l.alive()).toEqual([]);
   });
 
   it('ends at the act’s refusal: the machine’s `busy`, and an act that never ran', async () => {
@@ -193,9 +221,9 @@ describe('the callback listener', () => {
     l.link.relink(); // a channel before the act's acceptance is no matter: the act goes on the next
     expect(l.alive()).toEqual([relinked.port]);
     relinked.act.move('accepted');
-    l.link.lose();
-    l.link.relink();
+    l.link.lose(); // its end, said as it happens (the link's `up` holds through the grace)
     expect(l.alive()).toEqual([]);
+    l.link.relink();
     expect(await refused(relinked.port)).toBe(true);
 
     const closed = await l.consent('connectors.connect', CONNECT);
@@ -262,6 +290,45 @@ describe('the relays’ bounds', () => {
     const answered = await Promise.all(out);
     expect(answered.every((page) => page.status !== 200)).toBe(true);
     expect(l.link.calls.filter((call) => call.name === 'connectors.callback')).toHaveLength(RELAYS_PER_LISTENER);
+    expect(refusedHere).toEqual([503]); // the one past the bound, answered here
+  });
+
+  // the review's finding 6: a relay is out until its call answers, whether or not its browser is still there
+  it('counts a relay out until the machine answers it, though its browser went away', async () => {
+    let handler!: (request: unknown, response: unknown) => void;
+    const l = lab({ listen: async (handle) => ((handler = handle as never), { port: 41_001, close: () => {} }) });
+    l.link.answers.set('connectors.callback', () => new Promise(() => {}));
+    await l.consent('connectors.connect', CONNECT);
+    const response = () => {
+      const r = Object.assign(new EventEmitter(), { headersSent: false, writableEnded: false, destroyed: false, statusCode: 0, writeHead: (status: number) => ((r.statusCode = status), (r.headersSent = true)), end: () => void (r.writableEnded = true) });
+      return r;
+    };
+    const refusedHere: number[] = [];
+    for (let n = 0; n < RELAYS_PER_LISTENER + 1; n++) {
+      const r = response();
+      handler({ resume: () => {}, method: 'GET', url: `/callback?n=${n}` }, r);
+      r.destroyed = true;
+      r.emit('close'); // the browser went away
+      if (r.statusCode !== 0) refusedHere.push(r.statusCode);
+    }
+    expect(l.link.calls.filter((call) => call.name === 'connectors.callback')).toHaveLength(RELAYS_PER_LISTENER);
+  });
+
+  // the review's finding 7: a header the machine sends that Node won't write is the machine's answer unread
+  it('answers a header value it won’t write 502, with nothing unhandled', async () => {
+    const l = lab();
+    const answers = [
+      { status: 200, headers: { 'content-type': 'text/plain\r\nset-cookie: x=1' }, body: 'ok' },
+      { status: 200, headers: { 'content-type': 'text/plain\u0000' }, body: 'ok' },
+      { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: 'ok' },
+    ];
+    l.link.answers.set('connectors.callback', () => ({ ok: true, output: answers.shift()! }));
+    const c = await l.consent('connectors.connect', CONNECT);
+    expect(await get(c.port, '/callback?state=s')).toMatchObject({ status: 502 });
+    expect(await get(c.port, '/callback?state=s')).toMatchObject({ status: 502 });
+    const fine = await get(c.port, '/callback?state=s');
+    expect(fine).toMatchObject({ status: 200, body: 'ok' });
+    expect(fine.headers.get('set-cookie')).toBeNull();
   });
 
   it('answers a machine it can’t reach, or an answer it can’t read, 502', async () => {

@@ -55,6 +55,7 @@ let provider: ConnectorOAuthProvider & { [K in 'connect' | 'reconnect' | 'discon
 let owner: ConnectorOwner;
 let viewer: EndableClientRef;
 let sent: { artifactId: string }[]; // the owner's `connectors.serversChanged`, in order
+let ended: { artifactId: string; sourceHandle: string }[]; // P5 O7 M5c: each action's end, its `serversChanged`'s `ended`
 
 const key = (server: string, tool?: string) => `${server}/${tool ?? ''}`;
 const ok = (source: DirectSource, tool?: typeof known): Resolved => ({ ok: true, source, ...(tool && { tool }) });
@@ -76,6 +77,7 @@ beforeEach(() => {
   unattributed = false;
   viewer = viewerOf(1);
   sent = [];
+  ended = [];
   provider = {
     state: vi.fn(async (identity: { requestUrl: string; server: string }) => states.get(identity.server) ?? { state: 'disconnected' }),
     saved: vi.fn(async () => saved),
@@ -110,6 +112,7 @@ beforeEach(() => {
     relayed: createRelayedCallbacks(), // P5 O7 M5c
     grants: async () => grants,
     serversChanged: (artifactId) => void sent.push({ artifactId }),
+    actionEnded: (artifactId, sourceHandle) => void ended.push({ artifactId, sourceHandle }),
     log: () => {},
   });
 });
@@ -387,6 +390,62 @@ describe('the owner’s Connect', () => {
     expect(signals[1]!.aborted).toBe(true);
     expect(owner.connect(ART, handle, null)).toEqual({ accepted: false, why: 'stopped' });
     expect(owner.disconnect(CONN)).toEqual({ accepted: false, why: 'stopped' });
+  });
+});
+
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md): a remote asker's callback listener ends on its
+// action's end, so every end is said, once, with the action's handle, whether or not a client read the rows
+describe('the owner’s action ends, said with its handle', () => {
+  const PORT = 49_152;
+  type Case = { name: string; arrange: () => void; act: (handle: string, asker: EndableClientRef) => Promise<void> | void };
+  const pending = () => new Promise<never>(() => {});
+  const cases: Case[] = [
+    { name: 'a callback (the provider’s flow completes)', arrange: () => {
+      let signedIn = false;
+      discoveries.set(SRC_A, async () => (signedIn ? listed(1) : { ok: false, failure: 'unavailable', reason: 'unauthorized' }));
+      provider.connect.mockImplementation(async () => {
+        signedIn = true;
+        return { ok: true, connectionId: CONN, reused: false };
+      });
+    }, act: () => {} },
+    { name: 'already connected (a usable saved sign-in)', arrange: () => void states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true }), act: () => {} },
+    { name: 'an open discovery', arrange: () => {}, act: () => {} },
+    { name: 'an early failure', arrange: () => void discoveries.set(SRC_A, async () => { throw new Error('the host went away'); }), act: () => {} },
+    { name: 'a cancel (the asker’s end)', arrange: () => void discoveries.set(SRC_A, pending), act: (_handle, asker) => asker.end() },
+    { name: 'a cancel (a newer Disconnect)', arrange: () => {
+      states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
+      discoveries.set(SRC_A, pending);
+    }, act: () => void owner.disconnect(CONN) },
+    { name: 'its deadline', arrange: () => void discoveries.set(SRC_A, pending), act: () => vi.advanceTimersByTimeAsync(OWNER_ACTION_DEADLINE_MS) },
+  ];
+  for (const { name, arrange, act } of cases) {
+    it(`${name}: one end, the action’s artifact and handle, read by no client`, async () => {
+      selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+      arrange();
+      const reader = viewerOf(8);
+      const handle = handleOf(await rows(ART, [{ server: 'notes', tool: 'search' }], reader), 'notes');
+      reader.end(); // no client holds the artifact's rows now
+      const asker = viewerOf(9); // a remote asker, its callbacks relayed
+      expect(owner.connect(ART, handle, asker, { port: PORT })).toEqual({ accepted: true });
+      expect(ended).toEqual([]); // not at the start
+      await settle();
+      await act(handle, asker);
+      await settle();
+      expect(ended).toEqual([{ artifactId: ART, sourceHandle: handle }]);
+      expect(sent).toEqual([]); // the rows' invalidation goes only to an artifact some client read
+      await vi.advanceTimersByTimeAsync(OWNER_ACTION_DEADLINE_MS);
+      expect(ended).toHaveLength(1);
+    });
+  }
+
+  it('a Reconnect’s end is said the same way; a refused action says nothing', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    const handle = handleOf(await rows(), 'notes');
+    expect(owner.reconnect(ART, handle, null)).toEqual({ accepted: true });
+    expect(owner.connect(ART, handle, null)).toEqual({ accepted: false, why: 'busy' });
+    expect(owner.connect(OTHER_ART, handle, null)).toEqual({ accepted: false, why: 'stale' });
+    await settle();
+    expect(ended).toEqual([{ artifactId: ART, sourceHandle: handle }]);
   });
 });
 

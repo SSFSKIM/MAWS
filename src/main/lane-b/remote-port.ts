@@ -14,20 +14,23 @@
 //   `{status, headers?, body}` is written to the browser. A request the machine routes to no flow (a favicon, an old tab)
 //   comes back 404 and the listener keeps listening: an answered request never ends it.
 // - A listener's life, ended by the first of: the act refused (any outcome but `done`, or a Connect's `{accepted: false}`,
-//   `busy` among them); the flow's end on the machine, heard on the `artifacts` feed (`heard`): a sign-in's terminal
-//   `connectors.signInChanged` naming its operation, or, for a Connect, a `connectors.serversChanged` naming its artifact
-//   once a relayed request has settled the flow (the event says only that some row of the artifact moved: its start, and
-//   another row's action, say it too); its time (the machine's own bound on the flow, from the act's acceptance, and before
-//   that the act's own window); the channel that accepted the act ending (the machine ends a flow whose asker ended: no
-//   callback can reach it under the next channel's ref); the link's close, its leaving the roster, or `stop`. One listener
-//   per flow; its port is held until it ends, never rebound meanwhile.
+//   `busy` among them); the flow's end on the machine, heard on the `artifacts` feed (`heard`) any time after the act went
+//   out: a sign-in's terminal `connectors.signInChanged` naming its operation, a Connect's `connectors.serversChanged`
+//   naming its artifact and its row (`ended.sourceHandle`, said once at the owner action's end however it ended: its
+//   callback, already connected, an open server, a failure, a cancel); its time (the machine's own bound on the flow, from
+//   the act's acceptance, and before that the act's own window; a machine that predates `ended` is ended by its time); the
+//   channel that accepted the act ending (`onChannel`: the machine ends a flow whose asker ended, so no callback can reach
+//   it under the next channel's ref); the link's close, its leaving the roster, or `stop`. One listener per flow; its port
+//   is held until it ends, never rebound meanwhile.
 // - Bounds: at most LISTENERS_PER_MACHINE listeners per machine (the machine's own bound on owner actions running at once),
-//   RELAYS_PER_LISTENER relays in flight per listener (more are answered 503 here), each relay within the link's call
-//   deadline; a URL past the relayed request's 4 KiB is answered 414 here. A listener's end answers every relay still out
-//   (503) and closes its connections.
+//   RELAYS_PER_LISTENER relays in flight per listener, counted until the machine answers each whether or not its browser
+//   stayed (more are answered 503 here), each within the link's call deadline; a URL past the relayed request's 4 KiB is
+//   answered 414 here. A listener's end answers every browser still waiting (503), lets go of the relays out (their
+//   answers are written nowhere) and closes its connections.
 // - Only the headers a callback page needs are written (`content-type`, `cache-control`): 127.0.0.1's cookies are every
-//   loopback port's, so a machine's answer sets none of them here.
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+//   loopback port's, so a machine's answer sets none of them here; a value Node won't write is the answer unread (502).
+//   Every failure of a relay or its write is answered 502 at this boundary, never left to reject.
+import { createServer, validateHeaderName, validateHeaderValue, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { NO_CLIENT, type OpenAnswer } from '@shared/client/port';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -124,6 +127,10 @@ type Listener = {
   readonly link: RemoteLink;
   readonly name: CommandName;
   readonly artifactId: string | null;
+  /** A Connect's row (its `sourceHandle`), which its action's end names. */
+  readonly sourceHandle: string | null;
+  /** A copy of the act went out: an end heard from now on is this flow's. */
+  sent: boolean;
   server: CallbackServer | null;
   port: number;
   /** The act was accepted (its ack, or its outcome): the flow runs on the machine. */
@@ -132,8 +139,9 @@ type Listener = {
   channel: readonly string[] | null;
   /** A sign-in's operation, from its receipt. */
   opId: string | null;
-  /** A Connect's flow took a relayed request as its callback (an answer neither 404 nor 405). */
-  called: boolean;
+  /** Relays whose call to the machine is out, whether or not their browser stayed. */
+  calls: number;
+  /** The browsers waiting on a relay. */
   readonly relays: Set<ServerResponse>;
   readonly timers: Set<ReturnType<typeof setTimeout>>;
   readonly offs: Array<() => void>;
@@ -245,15 +253,40 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
 
   function watch(listener: Listener, handle: ActHandle): void {
     if (listener.ended) return;
-    listener.offs.push(handle.onProgress((progress) => progress === 'accepted' && accepted(listener)));
-    if (handle.progress() === 'accepted') accepted(listener);
+    const moved = (progress: string) => {
+      if (progress !== 'waiting') listener.sent = true;
+      if (progress === 'accepted') accepted(listener);
+    };
+    listener.offs.push(handle.onProgress(moved));
+    moved(handle.progress());
     void handle.outcome.then((outcome) => settled(listener, outcome));
   }
 
   function reply(response: ServerResponse, status: number, body: string, headers: Record<string, string> = TEXT): void {
     if (response.headersSent || response.writableEnded || response.destroyed) return;
-    response.writeHead(status, { ...headers, 'content-length': String(Buffer.byteLength(body)), connection: 'close' });
-    response.end(body);
+    try {
+      response.writeHead(status, { ...headers, 'content-length': String(Buffer.byteLength(body)), connection: 'close' });
+      response.end(body);
+    } catch (error) {
+      deps.log(`lane B: a sign-in page could not be written: ${(error as Error).message}`);
+      response.destroy();
+    }
+  }
+
+  /** The headers a callback page is written with, or null when one is a header Node won't write. */
+  function writable(headers: Record<string, string> | undefined): Record<string, string> | null {
+    const written: Record<string, string> = {};
+    for (const [header, value] of Object.entries(headers ?? {})) {
+      if (!WRITTEN_HEADERS.has(header.toLowerCase())) continue;
+      try {
+        validateHeaderName(header);
+        validateHeaderValue(header, value);
+      } catch {
+        return null;
+      }
+      written[header] = value;
+    }
+    return written;
   }
 
   /** One request the listener received, relayed to the flow on the machine; its answer written to the browser. */
@@ -264,21 +297,33 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
     if (listener.ended || listener.server === null) return reply(response, 503, 'This MAWS sign-in is no longer waiting here.');
     if (url.length > CALLBACK_URL_MAX) return reply(response, 414, 'Not a MAWS sign-in address.');
     if (method.length > METHOD_MAX) return reply(response, 405, 'Not a MAWS sign-in request.');
-    if (listener.relays.size >= RELAYS_PER_LISTENER) return reply(response, 503, 'MAWS is busy with this sign-in; try again.');
+    if (listener.calls >= RELAYS_PER_LISTENER) return reply(response, 503, 'MAWS is busy with this sign-in; try again.');
+    listener.calls += 1;
     listener.relays.add(response);
     response.once('close', () => listener.relays.delete(response));
     const { link } = listener;
-    const timeoutMs = budgetedMs(link.budgets, 'connectors.callback');
-    const answered = await link.call('connectors.callback', { port: listener.port, method, url }, timeoutMs === undefined ? undefined : { timeoutMs });
-    listener.relays.delete(response);
-    if (listener.ended) return; // its end answered it
+    let answered: Awaited<ReturnType<RemoteLink['call']>>;
+    try {
+      const timeoutMs = budgetedMs(link.budgets, 'connectors.callback');
+      answered = await link.call('connectors.callback', { port: listener.port, method, url }, timeoutMs === undefined ? undefined : { timeoutMs });
+    } finally {
+      listener.calls -= 1;
+      listener.relays.delete(response);
+    }
+    if (listener.ended) return; // its end answered the browser
     if (!answered.ok) return reply(response, 502, `MAWS could not reach ${link.name} for this sign-in.`);
     const read = ConnectorCallbackAnswerSchema.safeParse(answered.output);
-    if (!read.success || read.data.status < 200) return reply(response, 502, `${link.name} answered this sign-in in a way MAWS can’t read.`);
-    const { status, headers, body } = read.data;
-    if (listener.name !== 'connectors.signIn' && status !== 404 && status !== 405) listener.called = true;
-    const written = Object.fromEntries(Object.entries(headers ?? {}).filter(([header]) => WRITTEN_HEADERS.has(header.toLowerCase())));
-    reply(response, status, body, written);
+    const headers = read.success ? writable(read.data.headers) : null;
+    if (!read.success || read.data.status < 200 || headers === null) return reply(response, 502, `${link.name} answered this sign-in in a way MAWS can’t read.`);
+    reply(response, read.data.status, read.data.body, headers);
+  }
+
+  /** A relay's every failure answered 502 here. */
+  function relayed(listener: Listener, request: IncomingMessage, response: ServerResponse): void {
+    relay(listener, request, response).catch((error: unknown) => {
+      deps.log(`lane B: a request to the ${listener.name} listener on port ${listener.port} failed: ${(error as Error).message}`);
+      reply(response, 502, 'MAWS could not answer this sign-in.');
+    });
   }
 
   return {
@@ -292,12 +337,14 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
         link,
         name,
         artifactId: typeof fields.artifactId === 'string' ? fields.artifactId : null,
+        sourceHandle: typeof fields.sourceHandle === 'string' ? fields.sourceHandle : null,
+        sent: false,
         server: null,
         port: 0,
         accepted: false,
         channel: null,
         opId: null,
-        called: false,
+        calls: 0,
         relays: new Set(),
         timers: new Set(),
         offs: [],
@@ -306,7 +353,7 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
       listeners.add(listener); // counted while it binds, so the bound holds across binds at once
       let server: CallbackServer;
       try {
-        server = await listen((request, response) => void relay(listener, request, response));
+        server = await listen((request, response) => relayed(listener, request, response));
       } catch (error) {
         end(listener, 'it could not bind');
         return failure('internal', `${name}: this Mac could not listen for the sign-in’s answer: ${(error as Error).message}`);
@@ -321,6 +368,7 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
       listener.offs.push(
         link.onState(() => checkLink(listener)),
         link.onCaps(() => checkLink(listener)),
+        link.onChannel((event) => event === 'lost' && listener.accepted && end(listener, 'the channel that took the act ended')),
       );
       after(listener, deps.timing.consentActMs + Math.max(deps.timing.consentConnectMs, deps.timing.consentSignInMs), 'its time passed');
       checkLink(listener);
@@ -343,9 +391,11 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
         for (const listener of [...listeners]) if (listener.machine === machine && listener.opId === payload.opId) end(listener, 'the sign-in ended');
         return;
       }
-      if (name === 'connectors.serversChanged' && typeof payload.artifactId === 'string') {
+      // a Connect's own action's end, named by its row: any time after the act went out, its ack heard or not
+      const ended = isObject(payload.ended) && typeof payload.ended.sourceHandle === 'string' ? payload.ended.sourceHandle : null;
+      if (name === 'connectors.serversChanged' && typeof payload.artifactId === 'string' && ended !== null) {
         for (const listener of [...listeners]) {
-          if (listener.machine === machine && listener.name !== 'connectors.signIn' && listener.artifactId === payload.artifactId && listener.accepted && listener.called) end(listener, 'the flow ended');
+          if (listener.machine === machine && listener.name !== 'connectors.signIn' && listener.sent && listener.artifactId === payload.artifactId && listener.sourceHandle === ended) end(listener, 'the flow ended');
         }
       }
     },

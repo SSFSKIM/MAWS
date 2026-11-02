@@ -512,8 +512,13 @@ export const events = {
   // P3-HD: the engine host's: a direct operation ended (its answer waits for `connectors.directTake`)
   'connectors.directOperation': z.strictObject({ operationId: OperationId }),
   // P3-HD M3c2: the machine's (P5 O4 M2), to every client: the rows of an artifact some client read changed (read them
-  // again); nothing else
-  'connectors.serversChanged': z.strictObject({ artifactId: ArtifactId }),
+  // again). P5 O7 M5c: `ended`, once per owner action (Connect or Reconnect) at its end, whatever ended it (a callback,
+  // already connected, an open discovery, an early failure, a cancel, its deadline), whether or not a client read the
+  // rows: the device's callback listener for that action ends on it
+  'connectors.serversChanged': z.strictObject({
+    artifactId: ArtifactId,
+    ended: z.strictObject({ sourceHandle: SourceHandle }).optional(),
+  }),
   // P4-AGG M4: the machine's (P5 O4 M2), to every client: a sign-in operation moved
   'connectors.signInChanged': ConnectorSignInChangedSchema,
   // P5 O4 M2 (D28): main's, to its windows, at each streaming of the machine host after the launch's first: `mawsd`'s

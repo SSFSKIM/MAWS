@@ -65,6 +65,8 @@ export function outcomeAsResult(name: CommandName, machine: string, outcome: Act
     case 'not-sent':
       return failure('host_unavailable', `Not sent: ${machine} never received it`);
     case 'unknown':
+      // P5 O7 M5c: a channel-bound act (a page's lease) whose channel ended with a copy out: it may have run
+      if (outcome.reason === 'channel-lost') return failure('host_unavailable', `${name}: the connection to ${machine} ended before it answered; it is unknown whether it ran`);
       return failure('timeout', isMessage(name) ? `${machine} took the message but its answer was lost; check the transcript` : `${machine} took the request but its answer was lost`);
   }
 }

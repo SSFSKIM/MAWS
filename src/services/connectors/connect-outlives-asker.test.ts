@@ -112,6 +112,7 @@ beforeEach(() => {
     relayed: createRelayedCallbacks(), // P5 O7 M5c
     grants: async () => [],
     serversChanged: (artifactId) => void sent.push(artifactId),
+    actionEnded: () => {},
     track: (action) => {
       actions.push(action);
       return action;

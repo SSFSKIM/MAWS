@@ -179,7 +179,7 @@ export function composeConnectors({ hosts, bus, view, realpath = canonical, port
   register('artifacts.grantConnectorTool', ({ artifactId, tool }) => broker.grantTool(artifactId, tool));
   register('artifacts.revokeConnectorTool', async ({ artifactId, server, tool }) => ({ revoked: await broker.revokeTool(artifactId, { server, tool }) }));
   // P3-HD M3c2: the owner's per-server rows and actions (./owner.ts), where route D exists; trusted, never a page's
-  const owner = direct ? createConnectorOwner({ direct, oauth, relayed, grants: grants.list, log, serversChanged: (artifactId) => void bus.emit('connectors.serversChanged', { artifactId }), track: (action) => working.track(action) }) : null;
+  const owner = direct ? createConnectorOwner({ direct, oauth, relayed, grants: grants.list, log, serversChanged: (artifactId) => void bus.emit('connectors.serversChanged', { artifactId }), actionEnded: (artifactId, sourceHandle) => void bus.emit('connectors.serversChanged', { artifactId, ended: { sourceHandle } }), track: (action) => working.track(action) }) : null;
   if (owner) {
     register('connectors.servers', ({ artifactId, tools }, { client }) => owner.servers(artifactId, tools, client));
     register('connectors.connect', ({ artifactId, sourceHandle, callback }, { client }) => owner.connect(artifactId, sourceHandle, client, callback));

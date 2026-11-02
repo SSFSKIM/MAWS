@@ -579,4 +579,20 @@ describe('M5c’s rows', () => {
     expect(names(b)).toEqual([{ name: 'delivery.receipt', payload: receipt(held) }, { name: 'library.changed', payload: { revision: 2 } }]);
     expect(names(a).map((e) => e.name)).toEqual(['delivery.receipt', 'delivery.receipt', 'connectors.serversChanged', 'connectors.signInChanged', 'library.changed']);
   });
+
+  // the device ends a Connect's callback listener on its action's end, said with the row's handle
+  it('carry an owner action’s end on the `artifacts` feed whole, its `ended` handle with it, to `machine-admin` alone', async () => {
+    const { f, held, a, b } = await scene();
+    for (const r of [a, b]) {
+      await r.channel.send({ t: 'sub', sub: 'art', feed: 'artifacts', cursor: null, credit: 4 * 1024 * 1024 });
+      await waitFor(r, (m) => m.sub === 'art' && m.t === 'subbed', 'the artifacts feed');
+    }
+    const ended = { artifactId: held, ended: { sourceHandle: '99999999-9999-4999-8999-999999999999' } };
+    f.host.emitMachine('connectors.serversChanged', ended);
+    f.host.emitMachine('library.changed', { revision: 2 });
+    const heard = (r: Remote) => evs(r, 'art').map((e) => e.body as { name: string; payload: unknown });
+    await until(() => heard(a).length === 2 && heard(b).length === 1, 'every event heard');
+    expect(heard(a)).toEqual([{ name: 'connectors.serversChanged', payload: ended }, { name: 'library.changed', payload: { revision: 2 } }]);
+    expect(heard(b)).toEqual([{ name: 'library.changed', payload: { revision: 2 } }]);
+  });
 });
