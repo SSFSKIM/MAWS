@@ -339,3 +339,23 @@ describe('an adopted process seeded from its records', () => {
     expect(work.snapshot().unknown).toBe('resumed');
   });
 });
+
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): the browser hold, told by `mawsd`, not
+// read: in the snapshot only while set, so a row without one reads as before; no Stop, turn, task or gap touches it.
+describe('the browser hold (P5 O17 M7)', () => {
+  it('is in the snapshot only while set, whatever else happens', () => {
+    const work = state('adopted');
+    expect(work.snapshot()).not.toHaveProperty('holds');
+    work.holds.browser = 'unknown';
+    expect(work.snapshot()).toMatchObject({ holds: { browser: 'unknown' } });
+    turn(work, (w) => w.stopped([], []));
+    work.tasksChanged();
+    work.gap();
+    expect(work.snapshot().holds).toEqual({ browser: 'unknown' });
+    work.holds.browser = 'held';
+    const taken = work.snapshot();
+    work.holds.browser = undefined;
+    expect(taken.holds).toEqual({ browser: 'held' }); // a copy
+    expect(work.snapshot()).not.toHaveProperty('holds');
+  });
+});

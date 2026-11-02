@@ -31,7 +31,7 @@ import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize,
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { ENGINE_COMPAT_NOTICE_KEY, EngineCompatWatch } from './engine-compat'; // W13
 import { HostHookRegistry, isStopCallbackId, registerStopHook } from './host-hooks';
-import type { LaunchKind } from './work-state'; // P5 O2 M2
+import type { BrowserHold, LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: BrowserHold
 import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2 M2
 import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { expectedArgv } from './holder/descendants'; // O16 M5, D52
@@ -728,6 +728,13 @@ export class EngineSession {
     this.descendants = read === 'unreadable' ? null : read;
     this.tracker.descendantsRead(read !== 'unreadable');
     this.touch();
+  }
+
+  // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): the session's headless-tab hold as
+  // `mawsd`'s browser work tells it (browser-work.ts), published as other work changes are. `publish` false at the row's
+  // reservation, whose first status follows its start (as noteReap's first).
+  setBrowserHold(hold: BrowserHold | null, publish = true): void {
+    if (this.tracker.browserHold(hold) && publish) this.touch();
   }
 
   // Every engine session id the process has carried (the gate keys an observer's hello against them).

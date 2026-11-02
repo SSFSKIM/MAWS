@@ -19,10 +19,20 @@
 // none was ever seen on the process), re-reading this rule (`held`) in the step that signals. A reap that ends without
 // a signal, or whose signal the engine ignored, restarts the row's clock (`restart`). The verdict is the reap's; the
 // idle times are unchanged.
+//
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the idle exception for a headless
+// tab's hold. The hold is work to every other reader (budget.ts `holdsWork`), so the due check and the reap still refuse
+// a held row; the clock alone reads `isIdleRowIgnoringBrowser`, so a session idle in every way but its hold starts its
+// clock. At its due time such a row is neither dropped (which would restart its clock at the next `track`) nor handed to
+// its reap: it waits, keeping its `since`, and the release asks once (`browserIdleDue`, which `mawsd` answers by closing
+// the session's headless tabs). A waiting row that has asked is out of `dueOf`, so no timer runs for it. The status change
+// that clears the hold ends the wait at once and the next `fire` hands the row to its reap as any due row; a turn, interest
+// or a Keep mark ends it as well and restarts or stops the clock as before. A fresh `mawsd` link's first snapshot
+// (`browserSnapshotApplied`) has every waiting row ask again. Closed (a handover's freeze, the exit order), it asks nothing.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientRef } from '@shared/ipc/client';
-import { isIdleRow } from './budget';
+import { isIdleRow, isIdleRowIgnoringBrowser } from './budget'; // P5 O17 M7: isIdleRowIgnoringBrowser
 import type { EngineSession } from './session';
 
 export const RECHECK_MS = 60_000;
@@ -37,9 +47,11 @@ export interface IdleReleaseDeps {
   log(line: string): void;
   interestChanged?(): void; // a holder's set replaced or ended (the supervisor's quiet reads `interested`)
   release(session: EngineSession): void; // O16 M5: the row's reap, due as `idle`
+  browserIdleDue?(appSessionId: AppSessionId): void; // P5 O17 M7: a due row held by its headless tab alone, once per wait
 }
 
-interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null }
+// P5 O17 M7: `waiting`, due and held by its headless tab alone; `asked`, its `browserIdleDue` told for this wait
+interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null; waiting: boolean; asked: boolean }
 
 export class IdleRelease {
   private policy: { idleMs: number | null; activeSince: number | null; ignoreInterest: boolean } = { idleMs: null, activeSince: null, ignoreInterest: false };
@@ -77,15 +89,20 @@ export class IdleRelease {
     }
     const prev = this.rows.get(session);
     const now = Date.now();
-    const eligible = isIdleRow(status, this.deps.stateful());
+    const eligible = isIdleRowIgnoringBrowser(status, this.deps.stateful()); // P5 O17 M7: the clock sets the hold aside
     const kept = status.kept === true;
+    // P5 O17 M7: a wait lasts while the row is held by its hold alone; checked before the equality return, since the
+    // hold's clearing changes none of the clock's other fields
+    const waiting = prev?.waiting === true && eligible && !kept && !isIdleRow(status, this.deps.stateful());
     const next: RowClock = {
       appSessionId: status.appSessionId,
       since: eligible ? (prev?.since ?? now) : null,
       kept,
       keptClearedAt: prev?.kept === true && !kept ? now : (prev?.keptClearedAt ?? null),
+      waiting,
+      asked: waiting && prev?.asked === true,
     };
-    if (prev && prev.since === next.since && prev.kept === next.kept && prev.keptClearedAt === next.keptClearedAt) return;
+    if (prev && prev.since === next.since && prev.kept === next.kept && prev.keptClearedAt === next.keptClearedAt && prev.waiting === next.waiting && prev.asked === next.asked) return;
     this.rows.set(session, next);
     this.schedule();
   }
@@ -112,8 +129,14 @@ export class IdleRelease {
   restart(session: EngineSession): void {
     const status = this.deps.current(session);
     if (status === null || status.process === 'exited' || this.closed) return;
-    const eligible = isIdleRow(status, this.deps.stateful());
-    this.rows.set(session, { appSessionId: status.appSessionId, since: eligible ? Date.now() : null, kept: status.kept === true, keptClearedAt: null });
+    const eligible = isIdleRowIgnoringBrowser(status, this.deps.stateful()); // P5 O17 M7: the clock's own read
+    this.rows.set(session, { appSessionId: status.appSessionId, since: eligible ? Date.now() : null, kept: status.kept === true, keptClearedAt: null, waiting: false, asked: false });
+    this.schedule();
+  }
+
+  // P5 O17 M7: a fresh `mawsd` link applied its first snapshot: every row still waiting asks again, at the next check
+  browserSnapshotApplied(): void {
+    for (const [session, clock] of this.rows) if (clock.waiting && clock.asked) this.rows.set(session, { ...clock, asked: false });
     this.schedule();
   }
 
@@ -130,6 +153,8 @@ export class IdleRelease {
     const after = this.union();
     const now = Date.now();
     for (const id of before) if (!after.has(id)) this.interestEnded.set(id, now);
+    // P5 O17 M7: interest ends a row's wait (unless exit-when-idle ignores it); its end restarts the clock as before
+    if (!this.policy.ignoreInterest) for (const [session, clock] of this.rows) if (clock.waiting && after.has(clock.appSessionId)) this.rows.set(session, { ...clock, waiting: false, asked: false });
     this.schedule();
     this.deps.interestChanged?.();
   }
@@ -145,6 +170,7 @@ export class IdleRelease {
   private dueOf(clock: RowClock, union: ReadonlySet<AppSessionId>): number | null {
     const { idleMs, activeSince, ignoreInterest } = this.policy;
     if (idleMs === null || activeSince === null || clock.since === null || clock.kept) return null;
+    if (clock.waiting && clock.asked) return null; // P5 O17 M7: it waits for its hold to clear, with no timer
     if (!ignoreInterest && union.has(clock.appSessionId)) return null;
     return Math.max(clock.since, this.interestEnded.get(clock.appSessionId) ?? -Infinity, clock.keptClearedAt ?? -Infinity, activeSince) + idleMs;
   }
@@ -171,6 +197,15 @@ export class IdleRelease {
       const due = this.dueOf(clock, union);
       if (due === null || now < due) continue;
       const status = this.deps.current(session);
+      // P5 O17 M7: held by its headless tab alone: it waits, its clock kept, and asks once for this wait
+      if (status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful())) {
+        this.rows.set(session, { ...clock, waiting: true, asked: true });
+        if (!clock.asked) {
+          this.deps.log(`idle release of ${status.appSessionId}: due, held by its headless browser work alone; its tabs are asked to close`);
+          this.deps.browserIdleDue?.(status.appSessionId);
+        }
+        continue;
+      }
       if (status === null || !isIdleRow(status, this.deps.stateful()) || status.kept === true) {
         this.rows.delete(session);
         continue;

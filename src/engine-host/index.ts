@@ -63,6 +63,7 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
+import { registerBrowserWork } from './browser-work'; // P5 O17 M7
 import { Gate } from './holder/gate'; // O16 M5
 import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
@@ -191,6 +192,10 @@ const register: HostRegister = (untimedOn, emit, client) => {
           },
   });
   ({ table } = ipc);
+  // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): browser work beside the attachment,
+  // from the same declaring client; here, once the table exists, so its kept snapshot gives every row created after it
+  // its verdict (a launch, an adoption), and the idle release's ask becomes host.browserIdle
+  registerBrowserWork(on, emit, client, table);
   table.startSampling();
   // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
   const interested = table;

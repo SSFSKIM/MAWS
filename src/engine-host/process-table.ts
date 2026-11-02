@@ -182,8 +182,34 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
-    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */ }); // P5 O2 M2
+    this.idle = new IdleRelease({
+      current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */,
+      browserIdleDue: (appSessionId) => { for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId)); }, // P5 O17 M7
+    }); // P5 O2 M2
   }
+
+  // P5 O17 M7 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the idle release's bridge to
+  // browser work (browser-work.ts). Outward, a due row held by its headless tab alone, told once per wait (which becomes
+  // `host.browserIdle`); inward, a fresh `mawsd` link applied its first snapshot, so every row still waiting asks again.
+  private readonly browserIdleListeners = new Set<(appSessionId: AppSessionId) => void>();
+
+  onBrowserIdleDue(listener: (appSessionId: AppSessionId) => void): () => void {
+    this.browserIdleListeners.add(listener);
+    return () => this.browserIdleListeners.delete(listener);
+  }
+
+  browserSnapshotApplied(): void {
+    this.idle.browserSnapshotApplied();
+  }
+
+  private safely(what: string, run: () => void): void {
+    try {
+      run();
+    } catch (error) {
+      this.log(`${what} listener failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  // P5 O17 M7 end
 
   private readonly log: (message: string) => void;
 

@@ -89,6 +89,11 @@ export const EngineSessionStatusSchema = z.strictObject({
     // `descendants_unreadable`). O16's unknowns beside O2's: 'observer_unhealthy', 'reap_term_ignored',
     // 'descendants_unreadable'. Optional for an older host.
     descendants: z.number().int().nullable().optional(),
+    // P5 O17 M7 (additive; docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): holds the engine host is
+    // told of rather than reads. `browser`: the session holds a headless tab in `mawsd`'s render host (`held`, from
+    // `mawsd`'s last `host.browserWork` snapshot), or may hold one the engine host cannot read now (`unknown`: `mawsd`'s
+    // link ended, or an adoption before the link's first snapshot); absent, none. Optional for an older host.
+    holds: z.strictObject({ browser: z.enum(['held', 'unknown']).optional() }).optional(),
   }).optional(),
   kept: z.boolean().optional(),
   // P5 O2 M2 end
