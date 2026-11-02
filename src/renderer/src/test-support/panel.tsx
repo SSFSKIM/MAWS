@@ -15,6 +15,7 @@ import { record } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetPanelHost, shownSession } from '../panel/host';
 import { resetEditorHosts } from '../panel/editor-host'; // P3-G
+import { resetArtifactMachines } from '../artifacts/machines';
 import { PanelHost } from '../panel/PanelHost';
 import type { PanelHostProps } from '../panel/host-slot';
 import type { PanelTool, PanelToolInit } from '../panel/tool';
@@ -150,6 +151,7 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
   useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   resetPanelHost();
   resetEditorHosts(); // P3-G
+  resetArtifactMachines(); // P5 O7 M5a: the page's artifact table
   onChangeCalls.splice(0);
   useLayout.setState({
     ...ORIGINAL,
