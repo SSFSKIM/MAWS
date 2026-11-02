@@ -730,7 +730,7 @@ describe('the document stream', () => {
     expect(framesOf(a, id)[0].equals(largest)).toBe(true);
   });
 
-  it('carries a host frame past the 8 MiB high-water mark (a 20 MiB first sync, within the host’s 64 MiB) and the frames after it, never `behind`; a queue behind the frame being sent past 8 MiB closes `behind`', async () => {
+  it('carries a host frame past the 8 MiB high-water mark (a 20 MiB first sync, within the host’s 64 MiB) and the frames after it, never `behind`; frames held past 8 MiB, none oversized, close `behind`', async () => {
     const { f, docs } = await startDocuments();
     const x = randomUUID();
     f.host.artifact(x);
@@ -760,11 +760,11 @@ describe('the document stream', () => {
     expect(closeOf(a, id)).toBeUndefined();
     expect(framesOf(a, id).map((frame) => frame.byteLength)).toEqual([first.byteLength, ack.byteLength]);
 
-    // The threshold is the queue behind the frame being sent: a device that takes nothing is closed past 8 MiB of it.
+    // The threshold is the frames the stream holds, each whole: a device that takes nothing is closed past 8 MiB of them.
     const slow = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
     const mebibyte = randomBytes(1024 * 1024);
     mebibyte[0] = 0;
-    for (let i = 0; i < 9; i++) docs.send(docs.last().channel, mebibyte);
+    for (let i = 0; i < 8; i++) docs.send(docs.last().channel, mebibyte);
     await sleep(30);
     expect(closeOf(a, slow.id)).toBeUndefined();
     docs.send(docs.last().channel, mebibyte);
@@ -863,6 +863,30 @@ describe('the document stream', () => {
     await until(() => closeOf(a, third.id), 'the close');
     expect(closeOf(a, third.id)).toBe('behind');
     expect([closeOf(a, tail.id), closeOf(a, second.id)]).toEqual([undefined, undefined]);
+  });
+
+  it('exempts one oversized frame wherever it sits in the queue: a step 1 still queued, then a 60 MiB step 2, then an ack, all go', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    // One byte of credit: the step 1 stays queued at the head.
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 1);
+    const channel = docs.last().channel;
+    docs.send(channel, step1);
+    const big = randomBytes(60 * 1024 * 1024);
+    big[0] = 0;
+    docs.send(channel, big);
+    const ack = encodeFrame({ type: 'ack', frames: 1, revision: 2 });
+    docs.send(channel, ack);
+    await sleep(60);
+    expect(closeOf(a, id)).toBeUndefined();
+    await a.channel.send({ t: 'streamCredit', id, bytes: 4 * 1024 * 1024 });
+    await until(() => body(a, id).byteLength === 4 * 1024 * 1024 + 1 || closeOf(a, id) !== undefined || undefined, 'the credit taken');
+    docs.send(channel, awareness);
+    await sleep(60);
+    expect(closeOf(a, id)).toBeUndefined();
+    expect(framesOf(a, id)[0].equals(Buffer.from(step1))).toBe(true);
   });
 
   it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {

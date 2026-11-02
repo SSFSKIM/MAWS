@@ -13,7 +13,7 @@
 // The frames. Each direction carries the document frames (src/artifacts/provider/frames.ts), each prefixed by its u32be
 // length, as one byte flow cut into `streamData` chunks under the other side's credit. The host's come from `onFrame`'s
 // `{owner: 'engine-host', channel, bytes}` and are held past the device's credit (the host can't be paused): a frame that
-// finds more than DOCUMENT_BACKLOG_BYTES queued behind the one being sent closes the stream `behind`, and the device
+// finds more than DOCUMENT_BACKLOG_BYTES queued (one oversized frame left out) closes the stream `behind`, and the device
 // reopens and resyncs. A provisional frame's
 // session is withheld (nothing a stream sends names a session the member may not view; the CRDT bytes keep the opaque ids
 // their provenance carries, M5a's known limit). The device's go to the host through `documents.frame` as each completes
@@ -42,10 +42,11 @@ import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './str
 const CHANNEL_BASE = 2 ** 31;
 const CHANNEL_SPAN = 2 ** 31;
 /**
- * The host's frames queued for the device behind the one being sent, at most (their prefixes counted), as the host's socket
- * admits a frame while what is queued before it is within its high-water mark (doc-channels.ts): a host frame that finds
- * more closes the stream `behind`. The frame being sent is not counted, so one frame of any size up to DOCUMENT_FRAME_MAX
- * (frame-stream.ts) goes, and the frames after it are measured against what waits behind it, never against it.
+ * The host's frames a stream holds for the device, at most (each whole until its last byte is sent, its prefix counted), as
+ * the host's socket admits a frame while what is queued before it is within its high-water mark (doc-channels.ts): a host
+ * frame that finds more closes the stream `behind`. The new frame is not counted, so one frame of any size up to
+ * DOCUMENT_FRAME_MAX (frame-stream.ts) goes; once admitted, that one oversized frame is left out of the stream's own count
+ * wherever it sits in the queue until it is sent, so the frames around it are measured without it, never against it.
  */
 export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
 /**
@@ -54,9 +55,9 @@ export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
  * but its tail still holds the frame), and the frame it is assembling from the device (its storage). Checked as the host checks
  * its socket's queue (doc-channels.ts), before a stream's next frame is admitted and never against the frame in flight:
  * a host frame, or a device chunk, that finds the rest of the link holding more closes its stream `behind`, its bytes
- * given back. "The rest" leaves out the stream's own frame being sent and its own frame being assembled, so a single
- * frame of up to DOCUMENT_FRAME_MAX always goes on a stream that holds nothing else, however busy the link: a link holds
- * at most this, plus the frame each admission lets through past it.
+ * given back. "The rest" leaves out the stream's own oversized frame (DOCUMENT_BACKLOG_BYTES) and its own frame being
+ * assembled, never the link's others', so a frame of up to DOCUMENT_FRAME_MAX is not counted against the stream that holds
+ * it: a link holds at most this, plus the frame each admission lets through past it.
  */
 export const DOCUMENT_LINK_BUDGET = 64 * 1024 * 1024;
 /** A `view` open's device frames dropped, at most: past it the stream closes `read-only`. */
@@ -161,6 +162,11 @@ class DocumentStream extends Stream {
   readonly #ends: number[] = [];
   #head = 0;
   #headStart = 0;
+  /**
+   * Where the one admitted frame past DOCUMENT_BACKLOG_BYTES lies in `#out`'s count, wherever it sits in the queue, until
+   * its last byte is sent: the stream's own checks leave it out (the link's others count it whole).
+   */
+  #oversized: { start: number; end: number } | null = null;
   readonly #log: (line: string) => void;
 
   constructor(
@@ -182,11 +188,13 @@ class DocumentStream extends Stream {
     if (this.ended || !this.#upstream) return;
     const frame = withheld(bytes);
     if (frame === null) return this.#log(`endpoint: a document's provisional frame was not read, and not sent (${bytes.byteLength} bytes)`);
-    if (this.#queuedBehindHead() > DOCUMENT_BACKLOG_BYTES || this.#restOfLink() > DOCUMENT_LINK_BUDGET) return this.end('behind');
+    if (this.#queued() > DOCUMENT_BACKLOG_BYTES || this.#restOfLink() > DOCUMENT_LINK_BUDGET) return this.end('behind');
     const out = lengthPrefixed(frame);
-    this.push(this.#out, out);
+    const start = this.#out;
+    this.push(start, out);
     this.#out += out.byteLength;
     this.#ends.push(this.#out);
+    if (this.#oversized === null && out.byteLength > DOCUMENT_BACKLOG_BYTES) this.#oversized = { start, end: this.#out };
   }
 
   /** What this stream retains: its frames queued for the device, each whole until its last byte goes, and the frame it is assembling. */
@@ -195,24 +203,29 @@ class DocumentStream extends Stream {
     return this.#out - this.#headStart + this.#frames.held;
   }
 
-  /** What its link retains but for this stream's own frames in flight (the one being sent, whole, and the one being assembled). */
+  /** What its link retains but for this stream's own frames in flight (its oversized frame, whole, and the one being assembled). */
   #restOfLink(): number {
     let rest = 0;
     for (const peer of this.peers) rest += peer.retained;
-    const sending = this.#head < this.#ends.length ? this.#ends[this.#head] - this.#headStart : 0;
-    return rest - sending - this.#frames.held;
+    return rest - this.#oversizedBytes() - this.#frames.held;
   }
 
-  /** The bytes queued behind the frame being sent (none when it is the only one, or nothing is queued). */
-  #queuedBehindHead(): number {
+  /** The frames this stream holds for the device, each whole, but for its oversized frame. */
+  #queued(): number {
     this.#settle();
-    return this.#head < this.#ends.length ? this.#out - this.#ends[this.#head] : 0;
+    return this.#out - this.#headStart - this.#oversizedBytes();
   }
 
-  /** Moves `#head` past the frames wholly sent. */
+  #oversizedBytes(): number {
+    this.#settle();
+    return this.#oversized === null ? 0 : this.#oversized.end - this.#oversized.start;
+  }
+
+  /** Moves `#head` past the frames wholly sent, and lets the oversized frame go once it is. */
   #settle(): void {
     const sent = this.#out - this.backlog;
     while (this.#head < this.#ends.length && this.#ends[this.#head] <= sent) this.#headStart = this.#ends[this.#head++];
+    if (this.#oversized !== null && this.#oversized.end <= sent) this.#oversized = null;
     if (this.#head === this.#ends.length) {
       this.#ends.length = 0;
       this.#head = 0;
