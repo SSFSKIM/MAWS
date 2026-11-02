@@ -212,6 +212,20 @@ describe('main ipc router', () => {
     });
   });
 
+    // P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): Save As of another machine's artifact saves here, and a
+    // copy of another machine's file opens here, each by main's handler with that machine as ctx.target
+    it('answers library.saveAs and remote.openCopy for another machine here with that machine as ctx.target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
+      await load(DEV_URL, undefined, remote);
+      const targets: string[] = [];
+      router.registerMainHandler('library.saveAs', (_input, context) => (targets.push(context.target), { saved: false }));
+      router.registerMainHandler('remote.openCopy', (_input, context) => (targets.push(context.target), { opened: true, message: null }));
+      await expect(invoke(appWindow(), 'library.saveAs', { artifactId: '11111111-1111-4111-8111-111111111111', source: { export: { revision: 3, format: 'pdf' } } }, OTHER)).resolves.toEqual({ ok: true, value: { saved: false } });
+      await expect(invoke(appWindow(), 'remote.openCopy', { machine: OTHER, source: { appSessionId: 'app-1', path: '/w/a.pdf' } }, OTHER)).resolves.toEqual({ ok: true, value: { opened: true, message: null } });
+      expect(targets).toEqual([OTHER, OTHER]);
+      expect(remote).not.toHaveBeenCalled();
+    });
+
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check
   describe('dispatchLocal', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];

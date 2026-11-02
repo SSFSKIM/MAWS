@@ -14,6 +14,10 @@
 // `host.opQuery` does. A local client's own acts (the app's, through its router) run unclaimed, as the engine host's
 // local acts run beside `host.op` (D17). P5 O7 M4: the ledger opens with `orphanAtOpen`: a claim the last process left with
 // no result answers `expired` (its outcome unknown, never run again) until an outcome read back replaces it (`LateOutcome`).
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): the claim's `target`, the artifact
+// the endpoint resolved an artifact-targeted act to, is the binding's (else the session its input names, or none), and the
+// input's bytes crossed in json-bytes' tagged form: a decoded copy is validated and run, the claim and action kept as sent.
+import { fromWire } from '@shared/host/json-bytes';
 import { thrownError } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext, HandlerOp } from '@shared/ipc/client';
@@ -48,12 +52,13 @@ export function machineOps(deps: MachineOpsDeps): { op(input: OpInput, context: 
   const refused = (reason: string): OpOutput => ({ state: 'refused', reason });
 
   async function op(input: OpInput, context: HandlerContext): Promise<OpOutput> {
-    const { opId, opCreated, claim, name } = input;
+    const { opId, opCreated, name } = input;
+    const { target: claimed, ...claim } = input.claim;
     if (!claimable(name)) return refused('unavailable');
-    const checked = validateCommandInput(name, input.input);
+    const checked = validateCommandInput(name, fromWire(input.input)); // P5 O7 M5a: a decoded copy
     if (!checked.ok) return refused('malformed');
     const appSessionId = (checked.value as { appSessionId?: unknown } | undefined)?.appSessionId;
-    const target = typeof appSessionId === 'string' ? appSessionId : null;
+    const target = claimed ?? (typeof appSessionId === 'string' ? appSessionId : null);
 
     // P5 O7 M4: the sealed action, when the endpoint sent it, is kept with the claim (a query never says it) and handed to
     // the handler with the claim, so a handler can record who asked and keep the proof (`session.spawn`'s `launchedBy`)

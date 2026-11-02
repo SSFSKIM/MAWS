@@ -18,6 +18,10 @@ export const DEVICE_CAPABILITIES = [
   'rl2.executor.pty-host',
   // M3: the stream kinds (§N), a terminal's bytes and a forwarded port's connections, opened under their acts.
   'rl2.streams',
+  // M5a: a `sub` may name the machine's `artifacts` feed (artifact and library changes, no session).
+  'rl2.artifacts',
+  // M5a: a call's `input` and `output` and an act's `args` and `result` may carry bytes in json-bytes' tagged form.
+  'rl2.bytes',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 

@@ -5,10 +5,15 @@
 // written under the store's directory) and then saved where the owner chooses (`library.saveAs` of that export, the
 // native dialog at Downloads); a File artifact's "Save a copy…" saves its stored file the same way. The outcome is a
 // toast; a cancelled dialog says nothing.
+// P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): another machine's artifact exports on its machine (the
+// client sends every artifact-keyed command there, artifacts/machines.ts) with no own file, so the export stays a row of
+// that machine's library as its own Export leaves one (the wire carries no remove for an own file), and its Save As is
+// answered here, main paging the export or the stored file from the machine before the dialog.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
+import { artifactMachineOf } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
@@ -59,11 +64,14 @@ export function resetExportFormats(): void {
 
 const savedToast = (path: string, commentAuthorName?: string) => void toast({ level: 'info', text: VIEWERS_COPY.saved(path, commentAuthorName), actions: [], dismissible: true });
 
+/** An export's own file (P4, W1, L302), for this Mac's artifacts alone (P5 O7 M5a). Every editor's export spreads it. */
+export const ownFileFor = (artifactId: string): { ownFile?: true } => (artifactMachineOf(artifactId) === null ? { ownFile: true } : {});
+
 // The artifact's live revision (or the version `versionId`) exported as `format`, then saved where the owner chooses.
 // The save dialog names the file by the artifact's title, which main reads itself. P4 (W1, L302): the export is a file
 // of its own (`ownFile`), saved by its id, so another export of the same revision and format meanwhile never swaps it.
 export async function exportArtifact(artifactId: string, format: ArtifactExportFormat, versionId?: number, client: MawsBridge = ipc): Promise<void> {
-  const exported = await client.invoke('artifacts.export', { artifactId, format, ...(versionId !== undefined && { versionId }), ownFile: true });
+  const exported = await client.invoke('artifacts.export', { artifactId, format, ...(versionId !== undefined && { versionId }), ...ownFileFor(artifactId) });
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   const { revision, exportId } = exported.value;
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) /* P3-E (Decision Log 33) */ } } });

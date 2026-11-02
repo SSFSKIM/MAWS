@@ -9,6 +9,11 @@
 // The link sends it only to a peer that listed `rl2.call-session`; without it such a read is the endpoint's `no-target`
 // (a current endpoint) or `not-offered` (an older one, which offers no checkout row).
 //
+// P5 O7 M5a ("The link gives each call its command's budget"): a command the link's budget table names (the services'
+// `COMMAND_BUDGETS_MS`, injected) is waited for its budget and a round trip (`RTT_MARGIN_MS`), every other for the link's
+// default, so a cold machine's `artifacts.export` (a render host's start, then the export) is answered rather than given
+// up on at 10 s while the machine finishes it. The endpoint times no call, so this side's deadline is the one that matters.
+//
 // A refusal keeps the IPC error codes as they are, since an added code is breaking (O1): `offline` and `unavailable` are
 // `host_unavailable`, `timeout` is `timeout`, an `IPC_ERROR_CODES` member passes through, and anything else is `internal`
 // with the machine's word in `issues.refusal`.
@@ -17,6 +22,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { gradeOf } from '@shared/ipc/grades';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
+import { budgetedMs, type CommandBudgets } from '../budgets';
 import { LINK_REGISTRY, onLink } from '../link-surface';
 import type { CallOptions, CallResult } from './link';
 
@@ -42,7 +48,7 @@ function voidAsUndefined(name: CommandName, output: unknown): unknown {
   return !schema.safeParse(null).success && schema.safeParse(undefined).success ? undefined : output;
 }
 
-type Caller = { readonly name: string; call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> };
+type Caller = { readonly name: string; readonly budgets?: CommandBudgets; call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> };
 
 /** A result, and whether the link sent the input for a peer lacking a capability (`lacking`, fix wave 2). */
 export type LinkResult = CommandResult<CommandName> & { fellBack?: true };
@@ -52,7 +58,8 @@ export async function dispatchOverLink(link: Caller, name: CommandName, input: u
   const grade = gradeOf(name);
   if (grade !== 'list' && grade !== 'view') return { ok: false, error: ipcError('internal', `${name}: refused act-required by machine ${link.name}`, { refusal: 'act-required' }) };
   // A remote session's checkout is lane B's: lane A's roots are sminos's, which no `checkout` row reads.
-  const options: CallOptions = { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }) };
+  const timeoutMs = budgetedMs(link.budgets, name);
+  const options: CallOptions = { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }), ...(timeoutMs !== undefined && { timeoutMs }) };
   const result = await (Object.keys(options).length === 0 ? link.call(name, input) : link.call(name, input, options));
   const fellBack = result.fellBack === true ? { fellBack: true as const } : {};
   if (!result.ok) return { ...refusalError(name, link.name, result.error), ...fellBack };

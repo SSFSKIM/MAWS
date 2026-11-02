@@ -24,12 +24,18 @@
 // the host hands back to the tab restored at the next launch, so the tab shows the same record, pinned or a session's.
 // P5 O6 M2 (OX2): a record names its artifact's machine too (`{target, machine}`), as a main artifact tab does; a record
 // persisted before O6 holds none and is the local machine's.
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Which machine an artifact is on"): the machine a
+// record shows its artifact on is the page's table's (artifacts/machines.ts): an open that names one (a restored tab, a
+// move) tells the table, one that names none (a row of the list) takes the table's, and a remote session's transcript
+// opens its artifacts on the session's machine.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { AppSessionId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
+import { artifactMachineOf, recordArtifactMachine } from '../../artifacts/machines';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { ipc } from '../../ipc/client';
@@ -77,7 +83,11 @@ const restoredParams = (stored: unknown): ArtifactsParams | undefined => {
 // only the pins: the artifact opens in a pinned Artifacts tab when there is one, and nothing pins one for it.
 export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt, location?: ArtifactLocation): void {
   if (!canShowArtifactInPanel(appSessionId)) return;
-  const params: ArtifactsParams = { target: artifactId, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
+  // P5 O7 M5a: a session's artifacts are on its machine
+  const remote = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine ? machineOf(appSessionId) : null;
+  const machine = remote ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
+  recordArtifactMachine(artifactId, machine, ipc.localMachine);
+  const params: ArtifactsParams = { target: artifactId, machine, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }
 
@@ -188,7 +198,8 @@ export class ArtifactsHandle {
     const serial = params?.carried ? null : requestArtifactOpen(target, params?.at ?? 'latest', this.editorScope.surface, params?.location);
     if (serial === null) withdrawVersionRequest(target, this.editorScope.surface);
     const { view } = this.state;
-    const machine = params?.machine ?? ipc.localMachine;
+    if (params?.machine !== undefined) recordArtifactMachine(target, params.machine, ipc.localMachine);
+    const machine = artifactMachineOf(target) ?? ipc.localMachine;
     if (view.kind === 'record' && view.artifactId === target && view.machine === machine) return this.withdraw();
     this.leaveThen({ kind: 'record', artifactId: target, machine }, () => serial !== null && cancelOpenRequest(serial));
   };

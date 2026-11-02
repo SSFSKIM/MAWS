@@ -21,7 +21,10 @@ export const grades = {
   'artifacts.acceptSuggestion': 'manage',
   'artifacts.rejectSuggestion': 'manage',
   'artifacts.uploadAsset': 'manage',
-  'artifacts.copyAsset': 'manage',
+  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule"): it names two
+  // artifacts and no `artifactId`: `manage` on `to` (the write, its target), and `view` on `from` by the endpoint's
+  // BY_EFFECT rule, which runs only for a by-effect declaration
+  'artifacts.copyAsset': { floor: 'manage', byEffect: true },
   'artifacts.readDataset': 'view',
   'artifacts.datasetFiles': 'view',
   'artifacts.rereadDatasetFile': 'manage', // an explicit human write, captured as a version

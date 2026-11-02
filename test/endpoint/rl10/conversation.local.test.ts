@@ -286,7 +286,8 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       if (name === undefined) Object.assign(action, { opId: 'cmVmdXNlZC1vcC1pZC0wMDAx', opCreated: action.created });
       if (step.member !== undefined) {
         const decision = await decide(action as unknown as Action, step.member as string, step.shares);
-        expect(decision).toEqual(step.refused === undefined ? { ok: true, target: { lane: 'A', session: step.session } } : { ok: false, reason: step.refused });
+        // An admitted act's decision also carries `stands` (authorize.ts), which this table doesn't read.
+        expect(decision).toMatchObject(step.refused === undefined ? { ok: true, target: { lane: 'A', session: step.session } } : { ok: false, reason: step.refused });
         return;
       }
       const sent = endpoint.rl10.rpc(action as never, { member: A, device: 'a1' }, (bindings[`fingerprint:${name}`] as string | undefined) ?? 'none');

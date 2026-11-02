@@ -4,8 +4,8 @@
 //
 // `host.op {opId, opCreated, member, device, fingerprint, name, input, context, requestDigest?}`:
 //   - runs only an engine-host command on a session (`appSessionId` in its input) that this host has a handler for, never
-//     a `host.*` one (`unavailable`); a main-owned one waits for O3; its input must hold to the command's schema
-//     (`malformed`);
+//     a `host.*` one (`unavailable`); a main-owned one waits for O3; its input, a decoded copy of json-bytes' tagged form
+//     (`fromWire`; P5 O7 M5a), must hold to the command's schema (`malformed`);
 //   - a known opId answers what the ledger holds and runs nothing (`op-ledger.ts`: its result, `in-progress` while
 //     claimed, `op-conflict` under another fingerprint or member, `tombstoned`); one past the horizon is `expired`;
 //   - else, in the same turn as the claim: the action's context against the session now (`context`: an action sealed
@@ -13,12 +13,20 @@
 //     broker's pending item (`digest-mismatch`, a missing digest included);
 //   - the claim is fsynced, the command runs through the host's own handler, and its answer (`{ok, value}` or
 //     `{ok: false, error}`, a throw included: it was tried) is kept and returned.
-// `host.opQuery {opId, opCreated, tombstoneIfAbsent}`: RL4's states with the stored binding; an absent id tombstoned
-// first when asked, under the same synchronous turn as every claim.
+// `host.artifactOp {opId, opCreated, member, device, fingerprint, target, name, input}` (P5 O7 M5a;
+// docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with no session"):
+// an act on no session, an artifact write, under the same ledger: only a command of ARTIFACT_OP_COMMANDS (else
+// `unavailable`: a session's command, whatever key or depth names its session, runs only through `host.op`), its input
+// decoded and validated as `host.op`'s, with no context and no status to check; `target` (`artifact:<id>`, or `artifact:` for the orphan form) is the artifact the
+// endpoint resolved, kept as the binding's target. A new command rather than `host.op` with its `context` optional,
+// which OX1 classes as breaking; an engine host from before it answers `unknown_command`.
+// `host.opQuery {opId, opCreated, tombstoneIfAbsent}`: RL4's states with the stored binding, for an op of either command;
+// an absent id tombstoned first when asked, under the same synchronous turn as every claim.
 // While the ledger is closed every answer says so (`ledger`: op-ledger.ts's word), `done` included (a run that ended
 // after another op's claim closed it, or whose own result could not be kept), so its absence means the ledger answers:
 // the route by which the endpoint in `mawsd` shows this process's ledger in its status. A restart of the engine host
 // reopens it.
+import { fromWire } from '@shared/host/json-bytes';
 import { thrownError, type HostOn } from '@shared/host/runtime';
 import type { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf, type RequestDigest } from '@shared/host/request-digest';
@@ -26,11 +34,13 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { commands, type CommandInput, type CommandOutput } from '@shared/ipc/schema';
+import { ARTIFACT_OP_COMMANDS } from '@shared/ipc/schema/host';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 
 type Handler = (input: unknown, ctx: HandlerContext) => Promise<unknown>;
 type OpInput = CommandInput<'host.op'>;
 type OpOutput = CommandOutput<'host.op'>;
+type ArtifactOpInput = CommandInput<'host.artifactOp'>;
 type OpQueryInput = CommandInput<'host.opQuery'>;
 type OpQueryOutput = CommandOutput<'host.opQuery'>;
 
@@ -38,6 +48,9 @@ export type OpsDeps = {
   ledger: OpLedger;
   /** The handler this host registered for `name`, if any. */
   handler(name: string): Handler | undefined;
+  /** P5 O7 M5a: the host's handler for an artifact write (ARTIFACT_OP_COMMANDS), wherever the host registered it
+   * (keepArtifactWrites; the engine ipc always passes it). Absent, `handler`: a stand-in host's one table. */
+  artifactWrite?(name: string): Handler | undefined;
   /** The session's launch and engine session now; null for a session this host holds no row for. */
   status(appSessionId: string): { launchId: string; engineSessionId: string | null } | null;
   /** The originating event of a pending request (the broker's item), or null. */
@@ -49,17 +62,31 @@ const refused = (reason: string): OpOutput => ({ state: 'refused', reason });
 const sameDigest = (a: RequestDigest | undefined, b: RequestDigest | null) =>
   a !== undefined && b !== null && a.session === b.session && a.request === b.request && a.tool === b.tool && a.input_sha256 === b.input_sha256;
 
-export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>; opQuery(input: OpQueryInput): OpQueryOutput; settled(): Promise<void> } {
+const ARTIFACT_OPS: ReadonlySet<string> = new Set(ARTIFACT_OP_COMMANDS);
+
+export function opCommands(deps: OpsDeps): {
+  op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>;
+  artifactOp(input: ArtifactOpInput, ctx: HandlerContext): Promise<OpOutput>;
+  opQuery(input: OpQueryInput): OpQueryOutput;
+  settled(): Promise<void>;
+} {
   const { ledger } = deps;
   const running = new Set<Promise<unknown>>(); // P5 O16 M3c: the runs claimed and not yet kept
 
+  /** The command's handler and its input checked, or the refusal: an engine-host command this host handles, never a
+   * `host.*` one, its input a decoded copy of json-bytes' tagged form (P5 O7 M5a) that holds to its schema. */
+  function admit(name: string, input: unknown, lookup: (name: string) => Handler | undefined): { handler: Handler; value: unknown } | { refused: OpOutput } {
+    const spec = Object.hasOwn(commands, name) ? commands[name as keyof typeof commands] : undefined;
+    const handler = spec?.owner === 'engine-host' && !name.startsWith('host.') ? lookup(name) : undefined;
+    if (handler === undefined) return { refused: refused('unavailable') };
+    const checked = validateCommandInput(name as keyof typeof commands, fromWire(input));
+    return checked.ok ? { handler, value: checked.value } : { refused: refused('malformed') };
+  }
+
   async function op(input: OpInput, ctx: HandlerContext): Promise<OpOutput> {
     const { opId, opCreated, member, device, fingerprint, name, context, requestDigest } = input;
-    const spec = Object.hasOwn(commands, name) ? commands[name as keyof typeof commands] : undefined;
-    const handler = spec?.owner === 'engine-host' && !name.startsWith('host.') ? deps.handler(name) : undefined;
-    if (handler === undefined) return refused('unavailable');
-    const checked = validateCommandInput(name as keyof typeof commands, input.input);
-    if (!checked.ok) return refused('malformed');
+    const checked = admit(name, input.input, deps.handler);
+    if ('refused' in checked) return checked.refused;
     const appSessionId = (checked.value as { appSessionId?: unknown } | undefined)?.appSessionId;
     if (typeof appSessionId !== 'string') return refused('unavailable');
 
@@ -74,12 +101,26 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
       return null;
     });
     if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
+    return closedSaid(await run(opId, name, checked.handler, checked.value, ctx));
+  }
 
-    const run = (async () => {
+  // P5 O7 M5a: an act on no session, claimed in the same turn as its checks, with no status to read
+  async function artifactOp(input: ArtifactOpInput, ctx: HandlerContext): Promise<OpOutput> {
+    const { opId, opCreated, member, device, fingerprint, target, name } = input;
+    if (!ARTIFACT_OPS.has(name)) return refused('unavailable'); // fail closed: an artifact write, and nothing else
+    const admitted = admit(name, input.input, deps.artifactWrite ?? deps.handler);
+    if ('refused' in admitted) return admitted.refused;
+    const begun = ledger.begin(opId, opCreated, { member, device, fingerprint, target, name }, () => null);
+    if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
+    return closedSaid(await run(opId, name, admitted.handler, admitted.value, ctx));
+  }
+
+  /** The claimed op run through the host's own handler, its answer (a throw included: it was tried) kept. */
+  async function run(opId: string, name: string, handler: Handler, value: unknown, ctx: HandlerContext): Promise<OpOutput> {
+    const kept = (async () => {
       let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
       try {
-        const value = await handler(checked.value, ctx);
-        const output = validateCommandOutput(name as keyof typeof commands, value);
+        const output = validateCommandOutput(name as keyof typeof commands, await handler(value, ctx));
         result = output.ok ? { ok: true, value: output.value } : { ok: false, error: ipcError('internal', output.error.message) };
       } catch (error) {
         result = { ok: false, error: thrownError(error) };
@@ -87,16 +128,17 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
       ledger.finish(opId, result);
       return result;
     })();
-    running.add(run);
+    running.add(kept);
     try {
-      return closedSaid({ state: 'done', result: await run });
+      return { state: 'done', result: await kept };
     } finally {
-      running.delete(run);
+      running.delete(kept);
     }
   }
 
-  // P5 O16 M3c: settles once every run claimed so far has kept its result, so an exit that waits for it (ipc.ts's
-  // shutdown, within the exit order's bound) never ends this process between a run's claim and its result
+  // P5 O16 M3c: settles once every run claimed so far (host.op's and host.artifactOp's) has kept its result, so an exit
+  // that waits for it (ipc.ts's shutdown, within the exit order's bound) never ends this process between a run's claim
+  // and its result
   async function settled(): Promise<void> {
     await Promise.all([...running]);
   }
@@ -110,13 +152,31 @@ export function opCommands(deps: OpsDeps): { op(input: OpInput, ctx: HandlerCont
     return ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
   }
 
-  return { op, opQuery, settled };
+  return { op, artifactOp, opQuery, settled };
 }
 
-/** Registers `host.op` and `host.opQuery` over `deps`; answers when the runs claimed so far have kept their results. */
+/**
+ * P5 O7 M5a: a host `on` that keeps, as it registers them, the handlers of the artifact writes (ARTIFACT_OP_COMMANDS),
+ * which the artifacts surface registers before and beside the engine ipc: `host.artifactOp`'s lookup. The engine host
+ * registers everything through it (src/engine-host/index.ts); `host.op`'s lookup stays the engine ipc's own table.
+ */
+export function keepArtifactWrites(on: HostOn): { on: HostOn; handler(name: string): Handler | undefined } {
+  const kept = new Map<string, Handler>();
+  return {
+    on: (name, handler) => {
+      if (ARTIFACT_OPS.has(name)) kept.set(name, handler as Handler);
+      on(name, handler);
+    },
+    handler: (name) => kept.get(name),
+  };
+}
+
+/** Registers `host.op`, `host.artifactOp` and `host.opQuery` over `deps`; answers when the runs claimed so far have
+ * kept their results. */
 export function registerOps(on: HostOn, deps: OpsDeps): { settled(): Promise<void> } {
-  const { op, opQuery, settled } = opCommands(deps);
+  const { op, artifactOp, opQuery, settled } = opCommands(deps);
   on('host.op', async (input, ctx) => op(input, ctx));
+  on('host.artifactOp', async (input, ctx) => artifactOp(input, ctx)); // P5 O7 M5a
   on('host.opQuery', async (input) => opQuery(input));
   return { settled };
 }

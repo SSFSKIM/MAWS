@@ -10,14 +10,21 @@
 // - Each read takes a ticket: an answer lands only when no newer read of the same key started after it.
 // - A read nobody watches keeps its last answer, shown at once (and read again) when a surface watches it again, so
 //   switching back to a view does not flash empty; past UNWATCHED_KEPT such reads the oldest is forgotten.
+// - P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5, "Which machine an artifact is on"; it lifts
+//   O6 M4's refusal of another machine's list): each read is one machine's. A list is read on the machine its filter's
+//   session or project names, else the machine asked (the library's machine menu, a remote session's All), else this
+//   Mac; the Spaces of the machine asked; a row on its artifact's machine (`artifacts/machines.ts`, which the rows a list
+//   answers fill). A machine's `library.changed`, and the `artifacts.resync` its artifacts feed says at each opening (a
+//   re-read of what the feed may have missed), read again that machine's reads alone.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { CommandName, CommandResult, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryCounts, LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
+import { isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactMachineOf } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
-import { machineOf } from '@shared/machine/address';
-import { LIBRARY_COPY } from './copy';
 
 export const UNWATCHED_KEPT = 16;
 
@@ -50,15 +57,25 @@ function normalize(filter: LibraryFilter | undefined): LibraryFilter {
   return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b))) as LibraryFilter;
 }
 
-export const listKey = (filter?: LibraryFilter): string => `list:${JSON.stringify(normalize(filter))}`;
+// The machine a list is read on: the one its filter's session or project names, else the one asked, else this Mac.
+function listMachine(filter: LibraryFilter, asked: MachineRef | undefined): MachineRef {
+  const named = [filter.appSessionId, filter.projectId].find((id) => id !== undefined && isAddress(id));
+  return named !== undefined ? machineOf(named) : (asked ?? ipc.localMachine);
+}
+
+export const listKey = (filter?: LibraryFilter, machine?: MachineRef): string => {
+  const normalized = normalize(filter);
+  return `list:${listMachine(normalized, machine)}:${JSON.stringify(normalized)}`;
+};
 export const rowKey = (artifactId: string): string => `row:${artifactId}`;
-export const SPACES_KEY = 'spaces';
+export const spacesKey = (machine: MachineRef = ipc.localMachine): string => `spaces:${machine}`;
 
 // ---- reads -------------------------------------------------------------------------------------------------------------
 
 type Reader = (client: MawsBridge) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
 
 const readers = new Map<string, Reader>(); // every key read, how to read it again
+const machineOfKey = new Map<string, () => MachineRef>(); // the machine each key is read on (a row's: its artifact's, as now known)
 const watchers = new Map<string, number>();
 const unwatched: string[] = []; // keys nobody watches, oldest first
 const tickets = new Map<string, number>();
@@ -82,6 +99,7 @@ function read(key: string, client: MawsBridge): void {
 
 function forget(key: string): void {
   readers.delete(key);
+  machineOfKey.delete(key);
   tickets.delete(key);
   library.setState((s) => {
     const reads = new Map(s.reads);
@@ -91,13 +109,14 @@ function forget(key: string): void {
 }
 
 // Watches `key` until the returned function is called: read now when no one else watches it, then at every change.
-function watch(key: string, reader: Reader, client: MawsBridge): () => void {
+function watch(key: string, reader: Reader, on: () => MachineRef, client: MawsBridge): () => void {
   const count = watchers.get(key) ?? 0;
   watchers.set(key, count + 1);
   const kept = unwatched.indexOf(key);
   if (kept !== -1) unwatched.splice(kept, 1);
   if (count === 0) {
     readers.set(key, reader);
+    machineOfKey.set(key, on);
     read(key, client);
   }
   let watching = true;
@@ -120,47 +139,49 @@ const ask =
   (client) =>
     client.invoke(name, input as never, ...opts) as Promise<CommandResult<N>>;
 
-// P5 O6 M4: the library is this machine's while an artifact id names no machine (O7 gives artifacts one). A filter naming
-// another machine's session or project would be routed there by its address, and its rows would then open as this
-// machine's artifacts of the same ids, so such a list is not read: it answers that it is not shown here yet.
-const OTHER_MACHINE_LIST: Reader = async () => ({ ok: false, error: { message: LIBRARY_COPY.otherMachine } });
-const namesAnotherMachine = (filter: LibraryFilter, local: MawsBridge['localMachine']) =>
-  [filter.appSessionId, filter.projectId].some((id) => id !== undefined && machineOf(id) !== local);
-
-export const watchLibraryList = (filter?: LibraryFilter, client: MawsBridge = ipc): (() => void) => {
+// `machine`: the machine asked, when the filter names none (the library's machine menu, a remote session's All).
+export const watchLibraryList = (filter?: LibraryFilter, client: MawsBridge = ipc, machine?: MachineRef): (() => void) => {
   const normalized = normalize(filter);
-  return watch(listKey(normalized), namesAnotherMachine(normalized, client.localMachine) ? OTHER_MACHINE_LIST : ask('library.list', { filter: normalized }), client);
+  const on = listMachine(normalized, machine);
+  return watch(listKey(normalized, machine), ask('library.list', { filter: normalized }, { machine: on }), () => on, client);
 };
 export const watchLibraryRow = (artifactId: string, client: MawsBridge = ipc): (() => void) =>
   watch(rowKey(artifactId), async (c) => {
-    const result = await c.invoke('library.get', { artifactId });
+    const result = await c.invoke('library.get', { artifactId }); // on its artifact's machine (the client asks the table)
     return result.ok ? { ok: true, value: result.value.row } : result;
-  }, client);
-export const watchLibrarySpaces = (client: MawsBridge = ipc): (() => void) =>
-  watch(SPACES_KEY, async (c) => {
-    const result = await c.invoke('library.spaces', undefined);
+  }, () => artifactMachineOf(artifactId) ?? client.localMachine, client);
+export const watchLibrarySpaces = (client: MawsBridge = ipc, machine: MachineRef = client.localMachine): (() => void) =>
+  watch(spacesKey(machine), async (c) => {
+    const result = await c.invoke('library.spaces', undefined, { machine });
     return result.ok ? { ok: true, value: result.value.spaces } : result;
-  }, client);
+  }, () => machine, client);
 
-// Every watched read, read again (a change in main's index, or a Retry).
-export function refreshLibrary(client: MawsBridge = ipc): void {
-  for (const key of watchers.keys()) read(key, client);
+// Every watched read, or (`machine`) every one of that machine, read again (a change in its index, or a Retry).
+export function refreshLibrary(client: MawsBridge = ipc, machine?: MachineRef): void {
+  for (const key of watchers.keys()) if (machine === undefined || machineOfKey.get(key)?.() === machine) read(key, client);
 }
 
-// App.tsx's P3-L block: main's announcements of a committed index change.
+// App.tsx's P3-L block: a machine's announcements of a committed index change, and (P5 O7 M5a) the re-read its artifacts
+// feed asks at each opening; each reads again that machine's reads.
 export function connectLibrary(client: MawsBridge = ipc): () => void {
-  return client.on('library.changed', () => refreshLibrary(client));
+  const offChanged = client.on('library.changed', (_change, from) => refreshLibrary(client, from.machine));
+  const offResync = client.on('artifacts.resync', (_resync, from) => refreshLibrary(client, from.machine));
+  return () => {
+    offChanged();
+    offResync();
+  };
 }
 
 // ---- selectors and hooks -----------------------------------------------------------------------------------------------
 
-export const libraryList = (s: LibraryState, filter?: LibraryFilter) => (s.reads.get(listKey(filter)) ?? IDLE) as LibraryRead<LibraryList>;
+export const libraryList = (s: LibraryState, filter?: LibraryFilter, machine?: MachineRef) => (s.reads.get(listKey(filter, machine)) ?? IDLE) as LibraryRead<LibraryList>;
 export const libraryRow = (s: LibraryState, artifactId: string) => (s.reads.get(rowKey(artifactId)) ?? IDLE) as LibraryRead<LibraryRow | null>; // null: not in the library
-export const librarySpaces = (s: LibraryState) => (s.reads.get(SPACES_KEY) ?? IDLE) as LibraryRead<LibrarySpace[]>;
+export const librarySpaces = (s: LibraryState, machine?: MachineRef) => (s.reads.get(spacesKey(machine)) ?? IDLE) as LibraryRead<LibrarySpace[]>;
 
-export function useLibraryList(filter?: LibraryFilter): LibraryRead<LibraryList> {
-  const key = listKey(filter);
-  useEffect(() => watchLibraryList(JSON.parse(key.slice('list:'.length)) as LibraryFilter), [key]);
+export function useLibraryList(filter?: LibraryFilter, machine?: MachineRef): LibraryRead<LibraryList> {
+  const key = listKey(filter, machine);
+  const asked = JSON.stringify(normalize(filter));
+  useEffect(() => watchLibraryList(JSON.parse(asked) as LibraryFilter, ipc, machine), [asked, machine]);
   return useLibrary((s) => (s.reads.get(key) ?? IDLE) as LibraryRead<LibraryList>);
 }
 
@@ -169,9 +190,9 @@ export function useLibraryRow(artifactId: string | null): LibraryRead<LibraryRow
   return useLibrary((s) => (artifactId === null ? IDLE : libraryRow(s, artifactId)));
 }
 
-export function useLibrarySpaces(): LibraryRead<LibrarySpace[]> {
-  useEffect(() => watchLibrarySpaces(), []);
-  return useLibrary(librarySpaces);
+export function useLibrarySpaces(machine?: MachineRef): LibraryRead<LibrarySpace[]> {
+  useEffect(() => watchLibrarySpaces(ipc, machine), [machine]);
+  return useLibrary((s) => librarySpaces(s, machine));
 }
 
 // An `artifact` tab's title for the strip and the toolbar: its row's, null until known (or when it is not in the library).
@@ -180,6 +201,7 @@ export const useArtifactTitle = (artifactId: string | null): string | null => us
 // Tests.
 export function resetLibrary(): void {
   readers.clear();
+  machineOfKey.clear();
   watchers.clear();
   unwatched.length = 0;
   tickets.clear();

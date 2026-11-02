@@ -14,6 +14,7 @@ async function search(oldHeldAfterSearch: boolean): Promise<{ answer: Answer; na
   const ranks = {
     current: () => true,
     holds: (placement: Placement) => placement !== null && (placement.target.session === 'new' || (placement.target.session === 'old' && oldHeld)),
+    ownsMachine: () => false,
   };
   let narrowed: unknown;
   const dispatch = async (_owner: string, name: string, input: unknown) => {
@@ -29,7 +30,7 @@ async function search(oldHeldAfterSearch: boolean): Promise<{ answer: Answer; na
   let finish!: (answer: Answer) => void;
   const answered = new Promise<Answer>((resolve) => (finish = resolve));
   const calls = new Calls({ ranks: async () => ranks, log: () => {}, dispatch } as unknown as ConstructorParameters<typeof Calls>[0]);
-  calls.execute({ closed: false, member: 'm', client: {}, send: finish } as unknown as Parameters<Calls['execute']>[0], { t: 'call', id: 'q', name: 'session.search', input: { query: 'needle' } });
+  calls.execute({ closed: false, member: 'm', client: {}, capabilities: [], send: finish } as unknown as Parameters<Calls['execute']>[0], { t: 'call', id: 'q', name: 'session.search', input: { query: 'needle' } });
   return { answer: await answered, narrowed };
 }
 

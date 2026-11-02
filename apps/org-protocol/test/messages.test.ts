@@ -52,6 +52,14 @@ describe('call.session and sub.feed', () => {
     expect(readMessage('device', sub({ feed: 'attention' })).kind).toBe('message');
   });
 
+  // P5 O7 M5a (`rl2.artifacts`, RL2 1.4): the machine's `artifacts` feed names no session, as `attention`
+  it('reads an artifacts feed with no session, and refuses one with a session or a view', () => {
+    expect(readMessage('device', sub({ feed: 'artifacts' })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'artifacts', cursor: { epoch: 'artifacts:boot', seq: 3 } })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'artifacts', session: B })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'artifacts', view: 'full' })).kind).toBe('malformed');
+  });
+
   it('refuses a feed it does not name, a checkout feed with no session, an attention feed with one, a feed with a view or an idx', () => {
     expect(readMessage('device', sub({ feed: 'git', session: B })).kind).toBe('malformed');
     expect(readMessage('device', sub({ feed: 'checkout' })).kind).toBe('malformed');
@@ -128,7 +136,7 @@ describe('streams', () => {
     expect(read('device', { t: 'streamOpened', id: ID, credit: 1 })).toBe('unknown');
   });
 
-  it('is at minor 3 of major 1', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 3 });
+  it('is at minor 4 of major 1 (P5 O7 M5a: `rl2.artifacts`, `rl2.bytes`)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 4 });
   });
 });

@@ -13,6 +13,9 @@
 // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The checkout rule and its boundary"): a command
 // made from a session (`opts.session`, a panel tool's) is sent with that session, bare, beside its machine
 // (`InvokeTarget`), which main sends on as the call's session to a machine that bounds a path read by it.
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Which machine an artifact is on"): an artifact id
+// is no address, so a command naming an artifact and no machine goes to the artifact's machine as the page's one table
+// says it (`artifacts/machines.ts`), and every answer that names artifacts as rows tells the table which machine they are on.
 import { CommandResultEnvelopeSchema, ipcError } from '@shared/ipc/errors';
 import { REGISTRY } from '@shared/ipc/registry';
 import { routeOf } from '@shared/ipc/routes';
@@ -21,6 +24,7 @@ import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validat
 import { addressingOf, bareOf, isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import * as z from 'zod';
+import { artifactRouteOf, heardArtifacts } from '../artifacts/machines';
 
 // E10: main's own refusals, heard app-wide by what must react to one wherever it was asked (a launch refused while an
 // incompatible supervisor is waited for shows its banner again, `app/supervisor-notices.ts`).
@@ -60,7 +64,8 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
       }
       // M4: a `path` command whose input holds no address names its machine explicitly; a path is no machine's by itself.
       if (named.length === 0 && explicit === undefined && routeOf(name) === 'path') return refused(`${name}: its input names no machine`) as CommandResult<typeof name>;
-      const machine = named[0] ?? explicit ?? bridge().localMachine;
+      const local = bridge().localMachine;
+      const machine = named[0] ?? explicit ?? artifactRouteOf(name, input) ?? local;
       // P5 O7 M4: the session the command is made from goes bare beside its machine, and must be that machine's session.
       const session = opts?.session;
       if (session !== undefined && (!isAddress(session) || machineOf(session) !== machine)) {
@@ -92,6 +97,7 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
       }
       const output = validateCommandOutput(name, envelope.data.value);
       if (!output.ok) return output;
+      heardArtifacts(name, output.value, machine, local);
       try {
         return { ok: true, value: addressing.output(name).lift(output.value, machine) };
       } catch (error) {

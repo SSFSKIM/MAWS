@@ -13,6 +13,12 @@
 //
 // What an editor shows (P3-G's header maps it): the provider's SaveState, and `readOnly` when the store is (a newer app
 // wrote it), asked at each connect. A renderer replica throttles its cursor awareness to one frame per 50 ms.
+//
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5): one host serves every machine's artifacts,
+// each command going to its artifact's machine (the client asks the page's table, ./machines.ts). Editing an artifact on
+// another machine arrives with M5b: main refuses its `artifacts.open` with the words to show, which end the attempts as
+// a refusal that names the document does. A dataset hold is its artifact's machine's, invalidated by that machine's
+// `artifacts.resync` alone (another machine's feed says it at each of its openings).
 import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
 import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
@@ -21,8 +27,10 @@ import type { ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
+import type { MachineRef } from '@shared/machine/ref';
 import { ArtifactCommandError } from './command-error';
 import { createConnectorHost } from './connectors';
+import { artifactMachineOf } from './machines';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
@@ -56,13 +64,17 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     return result.value;
   };
 
-  // E3: the window's dataset holds the host's restart takes away (holdDatasets below)
-  let resyncs = 0;
-  const lostOnResync = new Set<() => void>();
-  ipc.on('artifacts.resync', () => {
-    resyncs += 1;
-    for (const invalidate of [...lostOnResync]) invalidate();
-    lostOnResync.clear();
+  // E3: the window's dataset holds the host's restart takes away (holdDatasets below); P5 O7 M5a: per machine
+  const resyncs = new Map<MachineRef, number>();
+  const lostOnResync = new Map<() => void, MachineRef>(); // each hold's invalidation, by its artifact's machine
+  const machineOf = (artifactId: string): MachineRef => artifactMachineOf(artifactId) ?? ipc.localMachine;
+  ipc.on('artifacts.resync', (_resync, from) => {
+    resyncs.set(from.machine, (resyncs.get(from.machine) ?? 0) + 1);
+    for (const [invalidate, machine] of [...lostOnResync]) {
+      if (machine !== from.machine) continue;
+      lostOnResync.delete(invalidate);
+      invalidate();
+    }
   });
 
   // P5 O6: the documents are this machine's (O7 spans artifacts across machines), and `engine.hostState` crosses machine
@@ -149,6 +161,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       } catch (error) {
         const refusal = error instanceof ArtifactCommandError ? artifactRefusalOf(error.error) : null;
         if (refusal && (refusal.reason === 'notFound' || refusal.reason === 'invalid')) return this.fail(error);
+        if (error instanceof ArtifactCommandError && artifactMachineOf(this.artifactId) !== null) return this.fail(error); // P5 O7 M5a: M5b's to edit
         log(`could not open ${this.artifactId}: ${error instanceof Error ? error.message : String(error)}`);
         if (!stale()) this.retry();
       } finally {
@@ -254,12 +267,13 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // gone (main's `artifacts.resync`, each time the host's connection streams again); a resync while it was being asked
     // for invalidates it as soon as it is answered (the generation is read before asking), and a release stops listening.
     holdDatasets: async (artifactId, refs) => {
-      const asked = resyncs;
+      const machine = machineOf(artifactId);
+      const asked = resyncs.get(machine) ?? 0;
       const { holdId } = await call('artifacts.holdDatasets', { artifactId, refs: [...refs] });
       let invalidate!: () => void;
       const invalidated = new Promise<void>((resolve) => (invalidate = resolve));
-      if (resyncs !== asked) invalidate();
-      else lostOnResync.add(invalidate);
+      if ((resyncs.get(machine) ?? 0) !== asked) invalidate();
+      else lostOnResync.set(invalidate, machine);
       let released = false;
       return {
         invalidated,

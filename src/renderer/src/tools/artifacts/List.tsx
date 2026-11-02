@@ -8,17 +8,23 @@
 // are drawn through the shell's virtualiser, as the Artifacts tab's are (library/Rows.tsx), so a library of thousands
 // mounts only what is near the view. Every row stays its own tab stop in the list's order, and a row holding the
 // keyboard stays mounted while the list scrolls away from it; the heading of the group at the top stays pinned there.
+// P5 O7 M5a: the lists are the session's machine's: This session by the session's address, All that machine's library,
+// and Open library opens the library on that machine.
 import { defaultRangeExtractor, measureElement, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../../app/use-now';
 import { KIND_PLURAL_LABELS, LIBRARY_COPY } from '../../library/copy';
 import { KindIcon } from '../../library/icons';
 import { refreshLibrary, useLibraryList } from '../../library/store';
+import { setLibraryView } from '../../library/view';
+import { ipc } from '../../ipc/client';
 import { openArtifacts } from '../../main/artifacts';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 
@@ -47,6 +53,11 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
     if (scroller.current) scroller.current.scrollTop = restore.top;
   }, [restore]);
   const filter: LibraryFilter | null = scope === 'all' ? {} : appSessionId === null ? null : { appSessionId, lineage: true };
+  const machine = appSessionId !== null && isAddress(appSessionId) ? machineOf(appSessionId) : undefined;
+  const openLibrary = () => {
+    setLibraryView({ machine: machine === undefined || machine === ipc.localMachine ? null : machine, spaceId: null });
+    openArtifacts();
+  };
   return (
     <div data-artifacts-list="" ref={scroller} onScroll={(e) => onScroll(e.currentTarget.scrollTop)} className="relative flex h-full min-h-0 flex-col overflow-auto">
       <div className="m-3 mb-1 flex shrink-0 items-center gap-2">
@@ -58,11 +69,11 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
           ))}
         </div>
         <span className="flex-1" />
-        <button type="button" onClick={openArtifacts} className="shrink-0 rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+        <button type="button" onClick={openLibrary} className="shrink-0 rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           {ARTIFACTS_TOOL_COPY.openLibrary}
         </button>
       </div>
-      {filter === null ? <Quiet>{ARTIFACTS_TOOL_COPY.noSession}</Quiet> : <Groups filter={filter} scope={scope} initialOffset={restore.top} onOpen={onOpen} />}
+      {filter === null ? <Quiet>{ARTIFACTS_TOOL_COPY.noSession}</Quiet> : <Groups filter={filter} machine={machine} scope={scope} initialOffset={restore.top} onOpen={onOpen} />}
     </div>
   );
 }
@@ -92,8 +103,8 @@ const sizeKey = (line: Line): SizeKey => (line.kind === 'row' ? (line.last ? 'la
 // the last one was, so the kept scroll offset lands on the same row. A hidden list measures 0, which is not kept.
 const measured: Partial<Record<SizeKey, number>> = {};
 
-function Groups({ filter, scope, initialOffset, onOpen }: { filter: LibraryFilter; scope: ArtifactsScope; initialOffset: number; onOpen(artifactId: string): void }) {
-  const read = useLibraryList(filter);
+function Groups({ filter, machine, scope, initialOffset, onOpen }: { filter: LibraryFilter; machine: MachineRef | undefined; scope: ArtifactsScope; initialOffset: number; onOpen(artifactId: string): void }) {
+  const read = useLibraryList(filter, machine);
   const error = read.status === 'error' ? (read.error ?? '') : null;
   if (read.value === undefined) {
     return error === null ? <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;

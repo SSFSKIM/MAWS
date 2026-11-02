@@ -3,7 +3,10 @@
 // saved where the owner chooses (`library.saveAs` of that export); a File artifact's copy is its stored file saved the
 // same way; the outcome is a toast, a cancelled dialog says nothing.
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
 import { useNotices } from '../stores/notices';
 import { fail, installFakeMain, ok } from '../test-support/code';
 import { exportArtifact, resetExportFormats, saveArtifactCopy, useExportFormats } from './export';
@@ -12,6 +15,7 @@ const A = '00000000-0000-4000-8000-000000000001';
 const E = '00000000-0000-4000-8000-0000000000e1'; // an export's own id, as main mints it
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
 
+afterEach(() => resetArtifactMachines());
 beforeEach(() => {
   resetExportFormats();
   useNotices.setState({ notices: [] });
@@ -83,5 +87,29 @@ describe('exporting', () => {
       ['info', 'Saved to /Users/me/Downloads/budget.csv'],
       ['info', 'Saved to /Users/me/Downloads/budget.csv'],
     ]);
+  });
+});
+
+// P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): another machine's artifact exports on its machine, as a row
+// of that machine's library (no own file: the wire carries no remove for one), and its Save As pages it here.
+describe('another machine’s artifact', () => {
+  it('exports on its machine without an own file, then saves that export here', async () => {
+    recordArtifactMachine(A, OTHER_MACHINE, TEST_MACHINE);
+    const sentTo: [string, MachineRef | undefined][] = [];
+    const main = installFakeMain((name, _input, machine) => {
+      sentTo.push([name, machine]);
+      return name === 'artifacts.export' ? ok({ path: '/studio/x.pdf', revision: 4 }) : ok({ saved: true, path: '/Downloads/Deck.pdf' });
+    });
+    await act(() => exportArtifact(A, 'pdf'));
+    expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: A, format: 'pdf' }]);
+    expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: A, source: { export: { revision: 4, format: 'pdf' } } }]);
+    expect(sentTo).toEqual([['artifacts.export', OTHER_MACHINE], ['library.saveAs', OTHER_MACHINE]]);
+    expect(toasts()).toEqual([['info', 'Saved to /Downloads/Deck.pdf']]);
+  });
+
+  it('this Mac’s artifact still exports to an own file', async () => {
+    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/x.pdf', revision: 4, exportId: E }) : ok({ saved: false })));
+    await act(() => exportArtifact(A, 'pdf'));
+    expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: A, format: 'pdf', ownFile: true }]);
   });
 });

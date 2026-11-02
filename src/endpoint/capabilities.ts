@@ -17,4 +17,9 @@ export const ENDPOINT_CAPABILITIES = [
   'rl2.executor.pty-host',
   // M3: the stream kinds (`streamOpen` … `streamClose`, §N): a terminal's bytes and a forwarded port's connections.
   'rl2.streams',
+  // M5a: a `sub` may name the machine's `artifacts` feed (§R): its artifact and library changes, cut by the artifact rule.
+  'rl2.artifacts',
+  // M5a: a call's `input` and `output` and an act's `args` and `result` carry bytes in json-bytes' tagged form
+  // (`{"$bytes": "<base64>"}`, `$plain` escaped): decoded and encoded here only for a device that listed it (bytes.ts).
+  'rl2.bytes',
 ] as const;

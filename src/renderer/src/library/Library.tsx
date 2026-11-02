@@ -4,12 +4,15 @@
 // and new artifacts are then made in it); search over titles and text and a type filter whose counts follow both;
 // "Make something new" above the list when nothing is being searched; the rows and their actions; the Spaces'
 // management. Registered into P3-G's `artifactsLibrary` slot (App.tsx).
+// P5 O7 M5a: one machine's library at a time (the header's machine menu): its rows and Spaces read of it; Make something
+// new, which makes an artifact on this Mac, is not offered over another machine's.
 //
 // While the next answer is read (a new search, another view), the last answer stays on screen rather than the list
 // emptying; a failed read keeps it too, with the failure and a Try again above it.
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
+import type { MachineRef } from '@shared/machine/ref';
 import { ChevronLeftIcon } from '../app/IconButton';
 import { useNow } from '../app/use-now';
 import { LIBRARY_PAGE as P } from './copy';
@@ -22,18 +25,20 @@ import { DeleteSpaceSheet, NewSpaceSheet, RenameSpaceSheet, SpaceMenu } from './
 import { refreshLibrary, useLibraryList, useLibrarySpaces, type LibraryList, type LibraryRead } from './store';
 import { currentSpaceOf, filterOf, setLibraryView, useLibraryView, type LibraryViewState } from './view';
 
-// The read's answer, or while it has none yet the last answer shown.
-function useKeptList(read: LibraryRead<LibraryList>): LibraryList | undefined {
-  const [kept, setKept] = useState(read.value);
-  if (read.value !== undefined && read.value !== kept) setKept(read.value);
-  return read.value ?? kept;
+// The read's answer, or while it has none yet the last answer shown of the same machine's library (P5 O7 M5a fix wave 1:
+// another machine's rows are never shown, or acted on, as this one's while its own list is read or refused).
+function useKeptList(read: LibraryRead<LibraryList>, machine: MachineRef | null): LibraryList | undefined {
+  const [kept, setKept] = useState({ machine, list: read.value });
+  if (kept.machine !== machine) setKept({ machine, list: read.value });
+  else if (read.value !== undefined && read.value !== kept.list) setKept({ machine, list: read.value });
+  return read.value ?? (kept.machine === machine ? kept.list : undefined);
 }
 
 function linesOf(view: LibraryViewState, read: LibraryRead<LibraryList>, list: LibraryList | undefined, spaces: LibrarySpace[] | undefined, now: number): Line[] {
   const lines: Line[] = [];
   const searching = view.query.trim() !== '';
   const narrowed = view.view === 'bySpace' && view.spaceId !== null;
-  if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
+  if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching && view.machine === null) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
   if (read.status === 'error') lines.push({ kind: 'note', key: 'error', text: P.readFailed(read.error ?? ''), retry: () => refreshLibrary(), tone: 'warning' });
   if (list === undefined) {
     if (read.status !== 'error') lines.push({ kind: 'note', key: 'reading', text: P.reading });
@@ -129,9 +134,10 @@ function focusSearch(event: KeyboardEvent<HTMLDivElement>): void {
 
 export function Library() {
   const view = useLibraryView(useShallow((s) => s));
-  const read = useLibraryList(filterOf(view));
-  const list = useKeptList(read);
-  const spacesRead = useLibrarySpaces();
+  const machine = view.machine ?? undefined;
+  const read = useLibraryList(filterOf(view), machine);
+  const list = useKeptList(read, view.machine);
+  const spacesRead = useLibrarySpaces(machine);
   const spaces = spacesRead.value;
   const now = useNow();
 

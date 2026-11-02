@@ -64,6 +64,7 @@ import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
 import { Gate } from './holder/gate'; // O16 M5
+import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -96,7 +97,9 @@ const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionH
 
 const register: HostRegister = (untimedOn, emit, client) => {
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
-  const on: HostOn = (name, handler) => untimedOn(name, (input, ctx) => timed('request', () => handler(input, ctx), () => name));
+  // P5 O7 M5a: every registration keeps its artifact writes for host.artifactOp, wherever the host registers them
+  const writes = keepArtifactWrites((name, handler) => untimedOn(name, (input, ctx) => timed('request', () => handler(input, ctx), () => name)));
+  const on: HostOn = writes.on;
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
@@ -166,6 +169,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
     appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     rendersAnswered: attachment.answersRenders, // P5 O5 M4: the capture and export bridges ask a client that renders, app or no app
+    artifactWrite: writes.handler, // P5 O7 M5a: host.artifactOp's lookup
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
     gate, // O16 M5

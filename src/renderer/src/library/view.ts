@@ -1,7 +1,9 @@
 // What the Artifacts tab shows (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M4): the view (All, Pinned, By
 // Space), the search, the type filter and, in By Space, the one Space the owner narrowed it to. Kept for the app run, so
 // leaving the tab and coming back finds the library as it was left (the plugin library's choices are kept the same way).
+// P5 O7 M5a: and the machine whose library it lists (the machine menu, MachineMenu.tsx); none, this Mac's.
 import { create } from 'zustand';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { LibraryFilter } from '@shared/ipc/schema/library';
 
@@ -12,9 +14,10 @@ export interface LibraryViewState {
   query: string;
   kind: ArtifactKind | null; // null: every type
   spaceId: string | null; // By Space narrowed to one Space; null: every Space
+  machine: MachineRef | null; // another machine's library; null: this Mac's
 }
 
-const INITIAL: LibraryViewState = { view: 'all', query: '', kind: null, spaceId: null };
+const INITIAL: LibraryViewState = { view: 'all', query: '', kind: null, spaceId: null, machine: null };
 
 export const useLibraryView = create<LibraryViewState>()(() => INITIAL);
 

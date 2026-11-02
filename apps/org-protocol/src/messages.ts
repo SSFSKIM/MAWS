@@ -39,15 +39,23 @@ export type QueryMessage = { t: 'query'; opId: string; opCreated: string; execut
  * A feed (P5 O7 M4 and M6, behind `rl2.feeds`): a subscription to a machine's events that carry no session cursor, every
  * opening a `snapshot`. `checkout` names its session; `attention` names none. A `sub` with a `feed` goes only to an
  * endpoint that listed `rl2.feeds`: an older one would read a `checkout` feed as the session's own stream, and close the
- * channel on an `attention` one.
+ * channel on an `attention` one. P5 O7 M5a: `artifacts`, the machine's artifact and library changes, names none either,
+ * and goes only to an endpoint that listed `rl2.artifacts` (an older one reads the value `malformed` and closes).
  */
-export type Feed = 'checkout' | 'attention';
-const FEEDS: readonly string[] = ['checkout', 'attention'] satisfies readonly Feed[];
+export type Feed = 'checkout' | MachineFeed;
+/** The feeds that name no session: the machine's own (M6's `attention`, M5a's `artifacts`). */
+export type MachineFeed = 'attention' | 'artifacts';
+const MACHINE_FEEDS: readonly string[] = ['attention', 'artifacts'] satisfies readonly MachineFeed[];
+const FEEDS: readonly string[] = ['checkout', ...MACHINE_FEEDS];
+/** Whether `feed` is one of the machine's own feeds, which name no session. */
+export const isMachineFeed = (feed: unknown): feed is MachineFeed => MACHINE_FEEDS.includes(feed as string);
 /** A session's stream (no `feed`), or its `checkout` feed. */
 export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: 'checkout'; cursor: Cursor | null; credit: number };
-/** The machine's `attention` feed (M6), which names no session. */
-export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: 'attention'; cursor: Cursor | null; credit: number };
+/** One of the machine's own feeds (M6's `attention`, M5a's `artifacts`), which name no session. */
+export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: MachineFeed; cursor: Cursor | null; credit: number };
 export type SubMessage = SessionSubMessage | MachineFeedSubMessage;
+/** Whether `m` subscribes to one of the machine's own feeds (no session). */
+export const isMachineFeedSub = (m: SubMessage): m is MachineFeedSubMessage => isMachineFeed(m.feed);
 export type CreditMessage = { t: 'credit'; sub: string; bytes: number };
 export type UnsubMessage = { t: 'unsub'; sub: string };
 
@@ -187,8 +195,8 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
     isPositive(m.credit, SUB_CREDIT_MAX) &&
     (m.feed === undefined
       ? isSessionRef(m.session) && optional(m.view, (v) => v === 'full' || v === 'cards') && isCursor(m.cursor, m.session.lane)
-      : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view. `checkout` names its session, `attention` none.
-        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (m.feed === 'attention' ? m.session === undefined : isSessionRef(m.session))),
+      : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view. `checkout` names its session, the machine's none.
+        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (isMachineFeed(m.feed) ? m.session === undefined : isSessionRef(m.session))),
   credit: (m) => isText(m.sub, 128) && isPositive(m.bytes, SUB_CREDIT_MAX),
   unsub: (m) => isText(m.sub, 128),
   ...STREAM_EITHER,

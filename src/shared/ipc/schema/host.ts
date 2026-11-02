@@ -103,6 +103,11 @@ export type HostStatus = z.infer<typeof HostStatusSchema>;
 export const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
 export const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
 export const OpRequestDigestSchema = z.strictObject({ session: z.string(), request: z.string(), tool: z.string(), input_sha256: z.string().regex(/^[0-9a-f]{64}$/) });
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule", Interfaces §O):
+// the artifact the endpoint resolved an artifact-targeted act to, `artifact:<id>`, or `artifact:` alone for the orphan
+// form (`artifacts.create`, which names none yet). Kept beside the claim and answered by the ledger's query as the
+// binding's `target` in place of a session id, so a query re-places the artifact through the endpoint's rule.
+export const OpTargetSchema = z.string().regex(/^artifact:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$/);
 export const HostOpInputSchema = z.strictObject({
   opId: OpIdSchema,
   opCreated: z.string(),
@@ -111,6 +116,36 @@ export const HostOpInputSchema = z.strictObject({
   input: JsonValueSchema, // the action's args, which crossed the channel as JSON: never undefined, so no JSON copy drops it
   context: z.strictObject({ launchId: z.string().min(1), engineSessionId: z.string().min(1) }),
   requestDigest: OpRequestDigestSchema.optional(),
+});
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with no
+// session"): an act on no session (an artifact write) under the same ledger: `host.op`'s claim with no `context` and no
+// `requestDigest`, and the artifact the endpoint resolved as `target`. A command of its own, since OX1 classes a required
+// property made optional (`host.op`'s `context`) as breaking; `host.opQuery` answers its ops as `host.op`'s.
+// The commands `host.artifactOp` runs, and nothing else (fail closed): the artifact writes of the spec's §L M5a act row,
+// each keyed by artifact and naming no session. The endpoint's offer rows with the `artifact` target and kind `act` are
+// exactly these (test/endpoint/artifact-rows.test.ts holds the two together). A read is a call, never an act.
+export const ARTIFACT_OP_COMMANDS = [
+  'artifacts.update',
+  'artifacts.delete',
+  'artifacts.duplicate',
+  'artifacts.saveVersion',
+  'artifacts.nameVersion',
+  'artifacts.restore',
+  'artifacts.pruneVersions',
+  'artifacts.acceptSuggestion',
+  'artifacts.rejectSuggestion',
+  'artifacts.uploadAsset',
+  'artifacts.copyAsset',
+  'artifacts.rereadDatasetFile',
+  'artifacts.create',
+] as const;
+export const HostArtifactOpInputSchema = z.strictObject({
+  opId: OpIdSchema,
+  opCreated: z.string(),
+  ...OpBindingShape,
+  target: OpTargetSchema,
+  name: z.string().min(1),
+  input: JsonValueSchema, // may hold bytes in json-bytes' tagged form, which the ledger decodes for the run
 });
 // `result` is the command's own answer as the ledger keeps it: `{ok: true, value}` (no `value` for a command that answers
 // nothing, as a JSON copy of an undefined one reads) or `{ok: false, error}`.
@@ -126,7 +161,7 @@ export const HostOpQueryOutputSchema = z.strictObject({
   member: z.string().optional(),
   device: z.string().optional(),
   fingerprint: z.string().optional(),
-  target: z.string().nullable().optional(), // the appSessionId the op acts on
+  target: z.string().nullable().optional(), // the appSessionId the op acts on; P5 O7 M5a: a host.artifactOp's `artifact:` target
   name: z.string().optional(), // the command it ran
   ledger: z.string().optional(), // on any state: why the ledger is closed (op-ledger.ts's word)
 });
@@ -149,6 +184,7 @@ export const commands = {
   // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
   'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.op': host(HostOpInputSchema, HostOpOutputSchema), // P5 O10 M7: the endpoint's only
+  'host.artifactOp': host(HostArtifactOpInputSchema, HostOpOutputSchema), // P5 O7 M5a: the endpoint's only
   'host.opQuery': host(z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), HostOpQueryOutputSchema), // P5 O10 M7
   // P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D; O3X5): whether an app is attached, told
   // by a client that listed the capability `host.attachment` (ATTACHMENT_CAPABILITY), which only `mawsd` does; the engine

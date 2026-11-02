@@ -105,6 +105,7 @@
 "commands.pty.spawn.input":[".appSessionId AppSessionId"],
 "commands.pty.spawn.output":[".ptyId PtyId"],
 "commands.pty.write.input":[".ptyId PtyId"],
+"commands.remote.openCopy.input":[".source.appSessionId AppSessionId"],
 "commands.scm.commit.input":[".appSessionId AppSessionId"],
 "commands.scm.discard.input":[".appSessionId AppSessionId"],
 "commands.scm.pr.create.input":[".appSessionId AppSessionId"],
