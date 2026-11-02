@@ -1056,7 +1056,16 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const dashboard = (await b.request<{ artifact: { id: string } }>('artifacts.create', { kind: 'html', title: DASHBOARD.title, spaceId: space.id, content: { bytes: new TextEncoder().encode(DASHBOARD.html), name: 'index.html' } })).artifact.id;
 
       // B's connectors observe its servers once: the observer session's turn, then one read of its live sessions' reports
-      // (Send to's status read on B), which the observer answers from its recording; then it stops, its observation kept
+      // (Send to's status read on B), which the observer answers from its recording; then it stops, its observation kept.
+      // Every status read asks each live session of B, and a replay answers a read its fixture never recorded with an
+      // empty success: an `mcp_status` with no `mcpServers` fails its schema and the cache fails that launch context
+      // closed until main reattaches (src/engine-host/connectors/provenance.ts), which B's first session (the same
+      // checkout and config home) would do. Its journal has played to its end by now, so it stops first, and the observer
+      // stops once read, before any other status read reaches it.
+      type Live = { appSessionId: string; process: string };
+      const liveOnB = async () => (await b.request<Live[]>('engine.sessions')).filter((s) => s.process === 'ready').map((s) => s.appSessionId);
+      await b.request('session.stop', { appSessionId: app, reason: 'stop' });
+      await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s first session stopped before the observation' }).toEqual([]);
       const observerApp = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
       await b.request('session.intent.patch', { appSessionId: observerApp, patch: { gateway: 'direct' } });
       const begun = await b.request<{ status: string }>('session.start', { appSessionId: observerApp, message: { content: OBSERVE_ASK, display: OBSERVE_ASK }, options: {} });
@@ -1070,10 +1079,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         .toBe(true);
       type NotionStatus = { state: string; source?: { server: string } };
       const observed = await b.request<NotionStatus>('delivery.status', { target: 'notion', artifactId: plan.id });
-      expect(observed, `B's connectors observed its servers from the observer's report\nB's log:\n${bLines(/replay|connector|mcp|deliver/i)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
+      expect(observed, `B's connectors observed its servers from the observer's report\nlive on B: ${(await liveOnB()).join(', ')}\nB's log:\n${bLines(/replay|connector|mcp|deliver/i)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
-      type Live = { appSessionId: string; process: string };
-      await expect.poll(async () => (await b.request<Live[]>('engine.sessions')).some((s) => s.appSessionId === observerApp && s.process === 'ready'), { timeout: 30_000, message: 'B’s observer stopped' }).toBe(false);
+      await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s observer stopped' }).toEqual([]);
 
       // (a) The dashboard in A, opened from B's library: its watch reads B's rows server once A allows the tool, through
       // MAWS's own instance of it on B, and draws each answer at the watch's interval
