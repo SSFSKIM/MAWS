@@ -2,7 +2,7 @@
 // same run's local numbers and its own round trip, the misses named, and the run's validity (the local bench's per case,
 // the pings, Rule B on the load).
 import { describe, expect, it } from 'vitest';
-import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, loadVerdict, remoteLine, rttStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
+import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, remoteLine, rttStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
 
 const stats = (p50: number, p95 = p50, n = 600) => ({ p50, p95, n });
 const LOCAL: Measures = { deltaToFrame: stats(24.5, 37.5), roundTrip: stats(0.9, 1.3, 200), openToFirstRowMs: 180, resumeMs: null, engineStartMs: 420 };
@@ -115,10 +115,31 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
 
   it('judges a cross-clock delta at its interval’s worst edge: pass, miss beyond its best edge, else inconclusive, and inconclusive when wider than the allowance', () => {
     const clock = liveClock([exchange(0, 1, 1)], [exchange(10, 1, 1)])!; // [998, 1002]: θ = remote − here
-    // raw = this Mac's frame − the machine's write = true − θ: a true 30 ms reads −970
-    expect(deltaVerdict(-970, clock, 33, 12)).toEqual({ verdict: 'pass', p50IntervalMs: [28, 32], wide: false });
-    expect(deltaVerdict(-970, clock, 30, 12).verdict).toBe('inconclusive');
-    expect(deltaVerdict(-970, clock, 27, 12).verdict).toBe('miss');
+    // raw = this Mac's frame − the machine's write = true − θ: a true 30 ms reads −970; the two stamps' millisecond widens it
+    expect(deltaVerdict(-970, clock, 33, 12)).toEqual({ verdict: 'pass', p50IntervalMs: [27, 33], wide: false });
+    expect(deltaVerdict(-970, clock, 32, 12).verdict).toBe('inconclusive');
+    expect(deltaVerdict(-970, clock, 27, 12).verdict).toBe('inconclusive');
+    expect(deltaVerdict(-970, clock, 26, 12).verdict).toBe('miss');
     expect(deltaVerdict(-970, clock, 33, 3)).toMatchObject({ verdict: 'inconclusive', wide: true });
+  });
+
+  it('judges a live carrier: its delta across the clocks by the interval, its round trip and open on this Mac’s clock alone, and the clock’s void first', () => {
+    const fifty = (offset: number, up = 1, down = 1) => Array.from({ length: 50 }, (_, i) => exchange(i * 10, up, down, offset));
+    const rtt = stats(2);
+    const clock = liveClock(fifty(1000), fifty(1000))!; // [998, 1002]
+    const base = { roundTrip: stats(20), openToFirstRowMs: 400, rtt, clock };
+    // the bound: local 24.5 + rtt 2 + 10 = 36.5 ms; a true 30 ms reads −970, its p50 in [27, 33]
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970) })).toMatchObject({ void: null, delta: { verdict: 'pass', p50IntervalMs: [27, 33], wide: false }, misses: [], inconclusive: [], bounds: { deltaToFrameP50Ms: 36.5, roundTripP50Ms: 24 } });
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-966) }).inconclusive).toEqual(['direct: delta-to-frame p50 in [31, 37] ms across the clocks, which straddles its bound 36.5 ms']);
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-960), roundTrip: stats(25), openToFirstRowMs: 1600 }).misses).toEqual([
+      'direct: delta-to-frame p50 in [37, 43] ms across the clocks, over its bound 36.5 ms',
+      'direct: round trip p50 25 ms over its bound 24 ms',
+      'direct: open to first row 1600 ms over its bound 1500 ms',
+    ]);
+    // a clock interval wider than the allowance (10 ms and the round trip) is never decided, even where it would pass
+    const slow = liveClock(fifty(1000, 30, 30), fifty(1000, 30, 30))!; // [969, 1031]
+    expect(liveJudgement('relay', LOCAL, { ...base, rtt: stats(20), clock: slow, rawDelta: stats(-970) })).toMatchObject({ delta: { verdict: 'inconclusive', wide: true }, misses: [], inconclusive: ['relay: delta-to-frame p50 in [-2, 62] ms across the clocks, its clock’s interval 62 ms wider than its allowance 30 ms (10 ms and the round trip)'] });
+    const spread = liveJudgement('direct', LOCAL, { ...base, clock: liveClock(fifty(1000), fifty(1007)), rawDelta: stats(-970) });
+    expect(spread).toMatchObject({ void: 'direct: the clock’s spread 7 ms is over 5 ms', delta: null, inconclusive: [] });
   });
 });

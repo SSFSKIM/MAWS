@@ -22,7 +22,10 @@
 // launch's `--session-id`, the recorded cwd the process's, and every other recorded identity (frame uuids, the message
 // id, the request id) a fresh one per turn, as the replay transport maps ids (src/engine-host/replay-transport.ts). Just
 // before each delta is written it reads `performance.timeOrigin + performance.now()`, and appends `{turn, k, writtenAt}`
-// to the samples file once the delta is on its way.
+// to the samples file once the delta is on its way. P5 O7 M7: also `wallAt`, the wall clock's millisecond read with it
+// (Date.now), the clock the endpoint stamps its pongs with, so the live remote bench reads a write on the machine's own
+// clock (test/support/remote-latency.ts's live clock) rather than this process's monotonic one, which a slewing
+// wall clock leaves behind.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -119,7 +122,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, m
 // from the samples file's last, so a marker is never written twice in one bench run
 const writtenTurns = () => {
   try {
-    return Math.max(0, ...readFileSync(samplesPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line).turn));
+    return Math.max(0, ...readFileSync(samplesPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line).turn).filter(Number.isInteger));
   } catch {
     return 0;
   }
@@ -156,8 +159,9 @@ async function playTurn(user) {
     await sleep(start + (k - 1) * PACE_MS - performance.now());
     const delta = finish({ ...deltaTemplate, uuid: randomUUID(), event: { ...deltaTemplate.event, delta: { type: 'text_delta', text: marker(turn, k) } } });
     const writtenAt = now();
+    const wallAt = Date.now();
     write(delta);
-    appendFileSync(samplesPath, `${JSON.stringify({ turn, k, writtenAt })}\n`);
+    appendFileSync(samplesPath, `${JSON.stringify({ turn, k, writtenAt, wallAt })}\n`);
   }
   for (const frame of after) write(finish(frame));
 }

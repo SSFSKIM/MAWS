@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import { FakeLink, MINI } from '../../../../test/lane-b/fake-link';
-import { installRemoteBenchSeam, remoteBenchSeam } from './bench-seam';
+import { installRemoteBenchSeam, relayOnlyDial, remoteBenchSeam } from './bench-seam';
 import type { PongStamps } from './link';
 
 afterEach(() => void delete globalThis.__maws_remote_bench);
@@ -49,5 +49,15 @@ describe('the remote bench seam (P5 O7 M7)', () => {
     seam.probe(MINI, 'network');
     expect(probes).toEqual(['network']);
     await expect(seam.ping('GoneMachine0000000000' as MachineRef, 1)).rejects.toThrow(/no RL2 link/);
+  });
+});
+
+describe('the live bench’s relay case (P5 O7 M7)', () => {
+  it('refuses every direct dial only under MAWS_E2E=1 and MAWS_E2E_REMOTE_CARRIER=relay in an unpackaged build', async () => {
+    const on = { MAWS_E2E: '1', MAWS_E2E_REMOTE_CARRIER: 'relay' };
+    expect(relayOnlyDial({ MAWS_E2E_REMOTE_CARRIER: 'relay' }, false)).toBeNull();
+    expect(relayOnlyDial(on, true)).toBeNull();
+    expect(relayOnlyDial({ MAWS_E2E: '1', MAWS_E2E_REMOTE_CARRIER: 'direct' }, false)).toBeNull();
+    await expect(relayOnlyDial(on, false)!('ws://100.64.1.2:47830', 1000)).rejects.toThrow(/direct carrier is off/);
   });
 });

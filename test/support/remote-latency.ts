@@ -154,9 +154,11 @@ export function remoteLine(name: 'local' | Carrier, m: Measures & { rtt?: Stats 
 // their intervals' union is the run's, and the distance between their estimates its spread, which voids the run past 5 ms
 // (the clocks moved apart, or a route changed, during it).
 //
-// A delta read across the two clocks (this Mac's frame less the machine's write) is the true delta less θ, so the true p50
-// lies in [raw p50 + low, raw p50 + high]: a bound holds when that interval's worst edge holds, is missed when its best
-// edge misses, and is otherwise inconclusive, as it is whenever the interval is wider than the bound's own allowance.
+// A delta read across the two clocks (this Mac's frame less the machine's write, each the wall clock's whole millisecond,
+// Date.now, the clock both ends stamp pongs with) is the true delta less θ, so the true p50 lies in [raw p50 + low − 1,
+// raw p50 + high + 1], the 1 the two stamps' own resolution: a bound holds when that interval's worst edge holds, is
+// missed when its best edge misses, and is otherwise inconclusive, as it is whenever the clock's interval is wider than
+// the bound's own allowance.
 
 export const LIVE_BENCH = { clockExchanges: 50, spreadVoidMs: 5, stampResolutionMs: 1 } as const;
 export type Verdict = 'pass' | 'miss' | 'inconclusive';
@@ -216,11 +218,57 @@ export function clockVoid(clock: LiveClock | null): string | null {
 
 /**
  * A cross-clock delta's verdict against `bound`: `rawP50` read as this Mac's frame less the machine's write, the true p50
- * in [rawP50 + low, rawP50 + high]. `allowance` is the bound's own (10 ms plus the round trip).
+ * in [rawP50 + low − 1, rawP50 + high + 1]. `allowance` is the bound's own (10 ms plus the round trip).
  */
 export function deltaVerdict(rawP50: number, clock: LiveClock, bound: number, allowance: number): { verdict: Verdict; p50IntervalMs: [number, number]; wide: boolean } {
-  const p50IntervalMs: [number, number] = [rawP50 + clock.intervalMs[0], rawP50 + clock.intervalMs[1]];
+  const q = LIVE_BENCH.stampResolutionMs;
+  const p50IntervalMs: [number, number] = [rawP50 + clock.intervalMs[0] - q, rawP50 + clock.intervalMs[1] + q];
   const wide = clock.intervalMs[1] - clock.intervalMs[0] > allowance;
   const verdict: Verdict = p50IntervalMs[1] <= bound ? 'pass' : p50IntervalMs[0] > bound ? 'miss' : 'inconclusive';
   return { verdict: wide ? 'inconclusive' : verdict, p50IntervalMs, wide };
+}
+
+/** A live carrier's measures: its delta read across the two clocks (this Mac's frame less the machine's write), the rest on this Mac's. */
+export interface LiveMeasures {
+  rawDelta: Stats;
+  roundTrip: Stats;
+  openToFirstRowMs: number;
+  rtt: Stats;
+  clock: LiveClock | null;
+}
+export interface LiveJudgement {
+  bounds: Bounds;
+  /** why the carrier's clock voids its run, naming it; null when it stands */
+  void: string | null;
+  delta: ReturnType<typeof deltaVerdict> | null;
+  misses: string[];
+  inconclusive: string[];
+}
+
+/**
+ * A live carrier against acceptance 3's bounds from the same run's local numbers: its delta by its interval across the
+ * clocks (unjudged when the clock voids the run), its round trip and open to first row as the measured group holds them.
+ * Resume is the measured group's and the sitting's (P5 acceptance 7's app half), not the live bench's.
+ */
+export function liveJudgement(carrier: Carrier, local: Measures, live: LiveMeasures): LiveJudgement {
+  const bounds = boundsOf(local, live.rtt);
+  const misses: string[] = [];
+  const inconclusive: string[] = [];
+  const voided = clockVoid(live.clock);
+  let delta: LiveJudgement['delta'] = null;
+  if (voided === null) {
+    const allowance = bounds.deltaToFrameP50Ms - local.deltaToFrame.p50;
+    delta = deltaVerdict(live.rawDelta.p50, live.clock!, bounds.deltaToFrameP50Ms, allowance);
+    const said = `${carrier}: delta-to-frame p50 in [${ms(delta.p50IntervalMs[0])}, ${ms(delta.p50IntervalMs[1])}] ms across the clocks`;
+    const width = live.clock!.intervalMs[1] - live.clock!.intervalMs[0];
+    if (delta.wide) inconclusive.push(`${said}, its clock’s interval ${ms(width)} ms wider than its allowance ${ms(allowance)} ms (10 ms and the round trip)`);
+    else if (delta.verdict === 'inconclusive') inconclusive.push(`${said}, which straddles its bound ${ms(bounds.deltaToFrameP50Ms)} ms`);
+    else if (delta.verdict === 'miss') misses.push(`${said}, over its bound ${ms(bounds.deltaToFrameP50Ms)} ms`);
+  }
+  const over = (label: string, value: number, bound: number) => {
+    if (value > bound) misses.push(`${carrier}: ${label} ${ms(value)} ms over its bound ${ms(bound)} ms`);
+  };
+  over('round trip p50', live.roundTrip.p50, bounds.roundTripP50Ms);
+  over('open to first row', live.openToFirstRowMs, bounds.openToFirstRowMs);
+  return { bounds, void: voided === null ? null : `${carrier}: ${voided}`, delta, misses, inconclusive };
 }
