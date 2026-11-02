@@ -294,6 +294,22 @@ describe('with an observer', () => {
     await until(() => s.reaped.length === 1, 'the signal after the renewal');
   });
 
+  // O16 panel wave 1 (sweep#2): the lease the observer holds runs from the arm, not from the signal, so its first
+  // renewal is due at the arm's lease less the margin, however late in the lease the step signalled
+  it('the first renewal while the signal runs is due against the arm\'s lease, not a whole lease from the signal', async () => {
+    const s = scene();
+    const o = await observer();
+    s.reap.due('idle');
+    await o.next('arm');
+    const armedAt = Date.now(); // after the host sent it: the lease ran from before this
+    await sleep(LEASE - MARGIN - 100); // armed late, still within the lease less its margin
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => s.reaped.length === 1, 'the signal');
+    expect(await o.next('arm', LEASE)).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE });
+    expect(Date.now() - armedAt).toBeLessThan(LEASE); // renewed before the arm's lease ended
+    s.settle!('exited');
+  });
+
   it('a later reap takes a new fence', async () => {
     const s = scene();
     const o = await observer();
