@@ -23,9 +23,17 @@ function walk(dir: string): string[] {
   });
 }
 
-/** The scratch daemon as machine.sock answers it, the stub writing its first turn's 300 samples when the session starts. */
-function fakeDeps(written: string[] = []) {
+/**
+ * The scratch daemon as machine.sock answers it, the stub writing its first turn's 300 samples when the session starts.
+ * `hold`: a request whose answer waits for `release()`; `stubborn`: how many signals the stub outlives.
+ */
+function fakeDeps(written: string[] = [], options: { hold?: string; stubborn?: number } = {}) {
   const requests: { name: string; input: unknown }[] = [];
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let stubs = 0;
+  let outlives = options.stubborn ?? 0;
+  const signals: string[] = [];
   const out: object[] = [];
   const sent: object[] = [];
   const ended: string[] = [];
@@ -35,6 +43,7 @@ function fakeDeps(written: string[] = []) {
   const machine: MachineClient = {
     async request<T>(name: string, input?: unknown) {
       requests.push({ name, input });
+      if (name === options.hold) await held;
       const answers: Record<string, unknown> = {
         'machine.identity': { ref: 'ref-mini-bench' },
         'session.projects.add': { id: 'project-1' },
@@ -46,6 +55,7 @@ function fakeDeps(written: string[] = []) {
       if (name === 'session.start') {
         for (let k = 1; k <= 300; k += 1) written.push(JSON.stringify({ turn: 1, k, writtenAt: k, wallAt: k }));
         ready = true;
+        stubs = 1;
       }
       if (name === 'session.stop') events.push('session stopped');
       return answers[name] as T;
@@ -64,7 +74,13 @@ function fakeDeps(written: string[] = []) {
       throw new Error(`the agent read ${path}`);
     },
     out: (message) => void out.push(message),
-    endStubs: (samples) => void ended.push(samples),
+    endStubs: (samples, signal = 'SIGTERM') => {
+      ended.push(samples);
+      signals.push(signal);
+      if (outlives > 0) outlives -= 1;
+      else stubs = 0;
+    },
+    stubsLeft: () => stubs,
     sleep: async () => undefined,
     tail: () => {
       tailing = true;
@@ -74,7 +90,7 @@ function fakeDeps(written: string[] = []) {
       };
     },
   };
-  return { deps, requests, out, sent, ended, events, tailing: () => tailing };
+  return { deps, requests, out, sent, ended, events, signals, release, tailing: () => tailing };
 }
 
 describe('the live bench’s agent (P5 O7 M7)', () => {
@@ -193,5 +209,67 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
       server.close();
     }
     await expect(openSminos({ socket: join(root, 'none.sock'), token: 't' })).rejects.toThrow(/ENOENT/);
+  });
+
+  // a start cut short at each of its steps: the end waits for it, and stops the session once it was created
+  for (const [stage, created] of [['session.list', false], ['machine.identity', false], ['session.projects.add', false], ['session.create', true], ['session.intent.patch', true], ['session.start', true], ['session.status', true]] as const) {
+    it(`an EOF during its start at ${stage}: the start cancelled and waited for, then ${created ? 'the session it created stopped' : 'nothing to stop'}, the stubs ended`, async () => {
+      const fake = fakeDeps([], { hold: stage });
+      const agent = new BenchAgent(ARGS, fake.deps);
+      const stdin = new EventEmitter();
+      const exits: number[] = [];
+      bindLifetime(agent, { stdin, parent: () => 4242, every: () => () => undefined, exit: (code) => void exits.push(code), error: () => undefined });
+      const starting = agent.start();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fake.requests.at(-1)!.name).toBe(stage);
+      stdin.emit('end');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(exits).toEqual([]); // the end waits for the start in hand
+      expect(fake.events).toEqual([]);
+      fake.release();
+      await expect(starting).rejects.toThrow(/its start is cancelled/);
+      await expect.poll(() => exits).toEqual([0]);
+      expect(fake.requests.some((r) => r.name === 'session.stop')).toBe(created);
+      if (created) expect(fake.requests.find((r) => r.name === 'session.stop')!.input).toEqual({ appSessionId: 'app-1', reason: 'stop' });
+      expect(fake.requests.map((r) => r.name).indexOf(stage)).toBe(fake.requests.length - 1 - (created ? 1 : 0)); // nothing after the cancelled step but the stop
+      expect(fake.ended).toEqual(['/p/mini-bench/bench/samples.jsonl']);
+      expect(fake.out).toEqual([]);
+    });
+  }
+
+  it('waits for a list in hand before it withdraws it, and refuses input once ending', async () => {
+    const fake = fakeDeps([], { hold: 'engine.sessions' });
+    const agent = new BenchAgent(ARGS, fake.deps);
+    await agent.start();
+    const listing = agent.input(JSON.stringify({ list: { owners: ['member-1'], title: 't' } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const ending = agent.end();
+    await expect(agent.input(JSON.stringify({ turn: { content: 'late' } }))).rejects.toThrow(/is ending/);
+    fake.release();
+    await listing;
+    await ending;
+    expect(fake.sent.map((f) => (f as { t: string; gone?: boolean }).gone === true ? 'gone' : (f as { t: string }).t)).toEqual(['session', 'hello', 'member', 'gone']);
+  });
+
+  it('sends a turn the bench names (the live resume’s, written while the app’s link is held down)', async () => {
+    const fake = fakeDeps();
+    const agent = new BenchAgent(ARGS, fake.deps);
+    await expect(agent.input(JSON.stringify({ turn: { content: 'latency bench turn 5' } }))).rejects.toThrow(/not started/);
+    await agent.start();
+    await agent.input(JSON.stringify({ turn: { content: 'latency bench turn 5' } }));
+    expect(fake.requests.at(-1)).toEqual({ name: 'session.send', input: { appSessionId: 'app-1', content: 'latency bench turn 5' } });
+    expect(fake.out.at(-1)).toEqual({ sent: { app: 'app-1' } });
+  });
+
+  it('kills a stub that outlives its end, checks again, and fails the end when one still runs', async () => {
+    const once = fakeDeps([], { stubborn: 1 });
+    const agent = new BenchAgent(ARGS, once.deps);
+    await agent.start();
+    await agent.end();
+    expect(once.signals).toEqual(['SIGTERM', 'SIGKILL']);
+    const always = fakeDeps([], { stubborn: 2 });
+    const stuck = new BenchAgent(ARGS, always.deps);
+    await stuck.start();
+    await expect(stuck.end()).rejects.toThrow(/1 stub of the bench still run after SIGKILL/);
   });
 });

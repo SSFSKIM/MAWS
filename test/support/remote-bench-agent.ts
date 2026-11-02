@@ -11,15 +11,18 @@
 //   serve    the stub's session started over the scratch daemon's machine.sock (one turn, the history the open shows),
 //            `{ready}` printed; on a `{list}` line from stdin, the harness's fake sminos on the scratch RL10 socket
 //            (`<profile>/mawsd/endpoint/rl10.json`, never SMINOS_RL10, never a real sminos) lists it for the owners
-//            named, `{listed}` printed; every delta the stub writes printed as `{sample}`. It ends when its transport
-//            does: stdin's end or its parent's loss stops the session, closes the fake sminos and ends any stub of this
-//            bench still running, then exits.
+//            named, `{listed}` printed; on a `{turn}` line, the session sent that turn (the live resume's turn, written
+//            while the app's link is held down), `{sent}` printed; every delta the stub writes printed as `{sample}`. It
+//            ends when its transport does: stdin's end or its parent's loss cancels a start still running, waits for it
+//            and for any input in hand, stops the session (recorded once it is created, so a start cut short at any step
+//            still stops it), closes the fake sminos and ends any stub of this bench still running (killed when it
+//            outlives that, then checked), then exits.
 //
 // Every path it writes or opens is under the scratch profile (`agentPaths`), except the head checkout's stub, which it
 // names for the wrapper and never opens, and the node runtime it runs on. It starts no `claude` (the daemon runs under
 // MAWS_E2E, whose engine is MAWS_E2E_ENGINE_BIN and nothing else) and no sminos.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, fstatSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, fstatSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { daemonPaths } from '@shared/daemon/files';
 import { connect } from 'node:net';
@@ -77,6 +80,8 @@ const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
 export function prepare(a: AgentArgs, node: string, electron: boolean): void {
   const p = agentPaths(a);
   for (const dir of [a.bench, p.checkout, p.claudeConfig, p.home, p.tmp, p.sminosHome, p.shellHome, p.claudeUsage]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // the runner checked the profile's path before it wrote; what this writes goes through no symlink either
+  for (const dir of [a.profile, a.bench, p.claudeConfig, p.shellHome]) if (realpathSync(dir) !== dir) throw new Error(`${dir} goes through a symlink (it is ${realpathSync(dir)}): nothing is written`);
   writeFileSync(p.engine, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 MAWS_LATENCY_STUB_VERSION=${quote(a.engineVersion)} exec ${quote(node)}${electron ? ' --disable-sigusr1' : ''} ${quote(p.stub)} ${quote(p.samples)} "$@"\n`, { mode: 0o755 });
   writeFileSync(`${p.claudeConfig}/.claude.json`, `${JSON.stringify({ projects: { [p.checkout]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
   writeFileSync(`${p.claudeConfig}/settings.json`, `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
@@ -101,8 +106,10 @@ export interface ServeDeps {
   readFile(path: string): string;
   /** One line to the bench, on stdout. */
   out(message: object): void;
-  /** Ends every stub of this bench still running (its samples path in its arguments). */
-  endStubs(samples: string): void;
+  /** Ends every stub of this bench still running (its samples path in its arguments), by SIGTERM or SIGKILL. */
+  endStubs(samples: string, signal?: 'SIGTERM' | 'SIGKILL'): void;
+  /** How many stubs of this bench still run. */
+  stubsLeft(samples: string): number;
   sleep(ms: number): Promise<void>;
   /** Calls `onLine` with each complete line appended to `path` from its start, until the returned stop. */
   tail(path: string, onLine: (line: string) => void): () => void;
@@ -117,7 +124,11 @@ export class BenchAgent {
   #machine: MachineClient | null = null;
   #sminos: SminosLine | null = null;
   #stopTail: (() => void) | null = null;
-  #session: { app: string; engine: string } | null = null;
+  /** recorded as soon as the session is created, its engine id once the first turn names it */
+  #session: { app: string; engine: string | null } | null = null;
+  #starting: Promise<void> | null = null;
+  readonly #inputs = new Set<Promise<void>>();
+  #cancelled = false;
   #ended: Promise<void> | null = null;
 
   constructor(a: AgentArgs, deps: ServeDeps) {
@@ -125,34 +136,53 @@ export class BenchAgent {
     this.#deps = deps;
   }
 
-  /** The stub's session started over machine.sock and its first turn over; `{ready}` printed; the samples tailed. */
-  async start(): Promise<void> {
+  /** The stub's session started over machine.sock and its first turn over; `{ready}` printed; the samples tailed. Once. */
+  start(): Promise<void> {
+    this.#starting ??= this.#start();
+    return this.#starting;
+  }
+
+  /** Throws once the agent is ending: a start still running stops at its next step. */
+  #live(): void {
+    if (this.#cancelled) throw new Error('the bench agent is ending: its start is cancelled');
+  }
+
+  async #start(): Promise<void> {
     const p = agentPaths(this.#a);
+    this.#live();
     const machine = (this.#machine = await this.#deps.machine());
+    this.#live();
     await machine.request('session.list', {}, 120_000); // loads the spine and wakes the engine host
+    this.#live();
     const { ref } = await machine.request<{ ref: string }>('machine.identity');
+    this.#live();
     await machine.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    this.#live();
     const project = await machine.request<{ id: string }>('session.projects.add', { directory: p.checkout });
+    this.#live();
     const { appSessionId: app } = await machine.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null });
+    const session: { app: string; engine: string | null } = { app, engine: null };
+    this.#session = session; // before anything else can fail: the end stops it from here on
+    this.#live();
     await machine.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    this.#live();
     const before = this.#written().length;
     const at = Date.now();
     const started = await machine.request<{ status: string }>('session.start', { appSessionId: app, message: { content: FIRST_PROMPT, display: FIRST_PROMPT }, options: {} });
     if (started.status === 'needs_trust') throw new Error('the scratch engine store does not trust the bench checkout (run prepare first)');
     let engineStartMs: number | null = null;
-    let engine: string | null;
     for (const deadline = Date.now() + TURN_MS; ; ) {
+      this.#live();
       const status = await machine.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+      if (status?.engineSessionId) session.engine = status.engineSessionId;
       if (status?.process === 'ready') engineStartMs ??= Date.now() - at;
-      if (status?.process === 'ready' && status.turn === null && this.#written().length >= before + MARKERS_PER_TURN) {
-        engine = status.engineSessionId;
-        break;
-      }
+      if (status?.process === 'ready' && status.turn === null && this.#written().length >= before + MARKERS_PER_TURN) break;
       if (Date.now() > deadline) throw new Error('the bench session’s first turn did not end within 60 s');
       await this.#deps.sleep(25);
     }
+    this.#live();
+    const engine = session.engine;
     if (engine === null) throw new Error('the bench session has no engine session id');
-    this.#session = { app, engine };
     this.#deps.out({ ready: { ref, app, engine, engineStartMs } });
     this.#stopTail = this.#deps.tail(p.samples, (line) => {
       try {
@@ -171,12 +201,30 @@ export class BenchAgent {
     }
   }
 
-  /** One line from the bench: `{list: {owners, title}}` lists the session through the fake sminos. */
-  async input(line: string): Promise<void> {
-    const message = JSON.parse(line) as { list?: { owners: string[]; title: string } };
-    if (message.list === undefined) return;
+  /**
+   * One line from the bench: `{list: {owners, title}}` lists the session through the fake sminos; `{turn: {content}}`
+   * sends the session that turn. Each is waited for by the end.
+   */
+  input(line: string): Promise<void> {
+    const handled = this.#input(line);
+    this.#inputs.add(handled);
+    void handled.finally(() => this.#inputs.delete(handled)).catch(() => undefined);
+    return handled;
+  }
+
+  async #input(line: string): Promise<void> {
+    if (this.#cancelled) throw new Error('the bench agent is ending');
+    const message = JSON.parse(line) as { list?: { owners: string[]; title: string }; turn?: { content: string } };
     const session = this.#session;
-    if (session === null || this.#machine === null) throw new Error('the bench session is not started');
+    if (message.turn !== undefined) {
+      if (session?.engine == null || this.#machine === null) throw new Error('the bench session is not started');
+      await this.#machine.request('session.send', { appSessionId: session.app, content: message.turn.content });
+      this.#deps.out({ sent: { app: session.app } });
+      return;
+    }
+    if (message.list === undefined) return;
+    if (session?.engine == null || this.#machine === null) throw new Error('the bench session is not started');
+    const engine = session.engine;
     const p = agentPaths(this.#a);
     const info = JSON.parse(this.#deps.readFile(p.rl10)) as { socket: string; token: string };
     if (!info.socket.startsWith(`${this.#a.profile}/`) && !info.socket.startsWith(`${agentPaths(this.#a).tmp}/`)) throw new Error('the RL10 socket is not the scratch profile’s');
@@ -184,26 +232,40 @@ export class BenchAgent {
     for (const frame of projectFrames(BENCH_PROJECT, this.#a.name, [p.checkout])) sminos.send(frame);
     for (const deadline = Date.now() + 30_000; ; ) {
       const live = await this.#machine.request<{ appSessionId: string; engineSessionId: string | null }[]>('engine.sessions');
-      if (live.some((s) => s.appSessionId === session.app && s.engineSessionId === session.engine)) break;
+      if (live.some((s) => s.appSessionId === session.app && s.engineSessionId === engine)) break;
       if (Date.now() > deadline) throw new Error('the engine host does not run the bench session');
       await this.#deps.sleep(100);
     }
-    sminos.send(memberFrame(BENCH_PROJECT, { engine: session.engine, alias: session.app, title: message.list.title, cwd: p.checkout, owners: message.list.owners }));
+    sminos.send(memberFrame(BENCH_PROJECT, { engine, alias: session.app, title: message.list.title, cwd: p.checkout, owners: message.list.owners }));
     this.#deps.out({ listed: { app: session.app } });
   }
 
-  /** The agent's end, once whatever asks: the tail stopped, the listing withdrawn, the session stopped, every stub ended. */
+  /**
+   * The agent's end, once whatever asks: a start still running cancelled and waited for, with every input in hand; the
+   * tail stopped, the listing withdrawn, the session stopped (whatever step its start reached once it was created), every
+   * stub ended, killed if one outlives that, and checked. Throws when a stub is left even then.
+   */
   end(): Promise<void> {
     this.#ended ??= (async () => {
+      this.#cancelled = true;
+      await Promise.allSettled([this.#starting, ...this.#inputs]);
       this.#stopTail?.();
       const session = this.#session;
       if (this.#sminos !== null) {
-        if (session !== null) this.#sminos.send(goneFrame(session.engine));
+        if (session?.engine != null) this.#sminos.send(goneFrame(session.engine));
         this.#sminos.close();
       }
       if (session !== null && this.#machine !== null) await this.#machine.request('session.stop', { appSessionId: session.app, reason: 'stop' }, 10_000).catch(() => undefined);
-      this.#deps.endStubs(agentPaths(this.#a).samples);
+      const samples = agentPaths(this.#a).samples;
+      this.#deps.endStubs(samples);
       this.#machine?.close();
+      for (let i = 0; i < 10 && this.#deps.stubsLeft(samples) > 0; i += 1) await this.#deps.sleep(200);
+      if (this.#deps.stubsLeft(samples) > 0) {
+        this.#deps.endStubs(samples, 'SIGKILL');
+        await this.#deps.sleep(200);
+        const left = this.#deps.stubsLeft(samples);
+        if (left > 0) throw new Error(`${left} stub${left === 1 ? '' : 's'} of the bench still run after SIGKILL`);
+      }
     })();
     return this.#ended;
   }
@@ -225,7 +287,13 @@ export function bindLifetime(agent: { end(): Promise<void>; input(line: string):
     if (finished) return;
     finished = true;
     stopWatch();
-    void agent.end().finally(() => io.exit(code));
+    agent.end().then(
+      () => io.exit(code),
+      (error: unknown) => {
+        io.error(`end failed: ${(error as Error).message}`);
+        io.exit(1);
+      },
+    );
   };
   io.stdin.on('data', (chunk: Buffer | string) => {
     buffer += chunk.toString();
@@ -331,7 +399,13 @@ export async function main(argv: readonly string[]): Promise<void> {
     sminos: openSminos,
     readFile: (path) => readFileSync(path, 'utf8'),
     out,
-    endStubs: (samples) => void spawnSync('pkill', ['-f', '--', escapeRegex(samples)], { stdio: 'ignore' }),
+    endStubs: (samples, signal = 'SIGTERM') => void spawnSync('pkill', [signal === 'SIGKILL' ? '-KILL' : '-TERM', '-f', '--', escapeRegex(samples)], { stdio: 'ignore' }),
+    stubsLeft: (samples) => {
+      // pgrep's exit 1 is no match; anything else is no answer, counted as one left so the end does not pass it
+      const found = spawnSync('pgrep', ['-f', '--', escapeRegex(samples)], { encoding: 'utf8' });
+      if (found.status === 1) return 0;
+      return found.status === 0 ? found.stdout.split('\n').filter((line) => /^\d+$/.test(line.trim())).length : 1;
+    },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     tail: tailFile,
   });
@@ -350,7 +424,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   } catch (error) {
     process.stderr.write(`[bench-agent] ${(error as Error).message}\n`);
     out({ failed: { message: (error as Error).message } });
-    await agent.end();
+    await agent.end().catch((ended: unknown) => void process.stderr.write(`[bench-agent] end failed: ${(ended as Error).message}\n`));
     process.exit(1);
   }
 }
