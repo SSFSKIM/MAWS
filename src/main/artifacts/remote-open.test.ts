@@ -397,6 +397,37 @@ describe('every path ends', () => {
     expect(s.window.postMessage).not.toHaveBeenCalled();
   });
 
+  // Review fix 4: one bound from the open's start, over the preflight and both stream attempts
+  it('a slow preflight and an unanswered stream still end at the open’s one bound', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const s = scene({ openTimeoutMs: 100 });
+      s.link.answers.set('artifacts.get', () => new Promise((resolve) => setTimeout(() => resolve({ ok: true, output: { artifact: row() } }), 60)));
+      let answered: CommandResult<'artifacts.open'> | null = null;
+      void s.open().then((result) => (answered = result));
+      await vi.advanceTimersByTimeAsync(60);
+      expect(s.link.opens()).toHaveLength(1); // the preflight answered; the stream went, and the machine says nothing
+      await vi.advanceTimersByTimeAsync(39);
+      expect(answered).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answered).toMatchObject({ ok: false, error: { code: 'timeout' } });
+      expect(s.link.closes(s.link.opens()[0]!.id)).toEqual(['closed']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a preflight that outlasts the bound is answered `timeout` at the bound, and no stream goes when it comes', async () => {
+    const s = scene({ openTimeoutMs: 40 });
+    let answer!: (result: { ok: true; output: unknown }) => void;
+    s.link.answers.set('artifacts.get', () => new Promise((resolve) => (answer = resolve)));
+    expect(await s.open()).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    answer({ ok: true, output: { artifact: row() } });
+    await flush();
+    await flush();
+    expect(s.link.opens()).toEqual([]);
+  });
+
   it('a stream the machine broke (a length of 0) closes `malformed` and closes the window’s port', async () => {
     const s = scene();
     const opening = s.open();

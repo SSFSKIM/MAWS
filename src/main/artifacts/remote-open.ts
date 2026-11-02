@@ -22,7 +22,9 @@
 // - Every open ends: `host_unavailable` at once while the link is down, `timeout` when no stream opened within
 //   DOCUMENT_OPEN_MS, a refusal for good (`notFound`: viewable in neither mode; `invalid`: not a document, a malformed
 //   open, or a machine that offers no read open) that the ArtifactHost stops on, the machine's other words as a
-//   transient refusal it retries. Every bridge ends with its stream, its port, its window and the app.
+//   transient refusal it retries. Every bridge ends with its stream, its port, its window and the app (review fixes 1, 3
+//   and 4: no port is posted for a stream already ended; the app's stop answers an open still in its preflight; the
+//   bound runs from the open's start).
 import type { MessageChannelMain, MessagePortMain } from 'electron';
 import { LengthPrefixed, lengthPrefixed } from '@artifacts/provider/frame-stream';
 import { decodeFrame } from '@artifacts/provider/frames';
@@ -44,7 +46,7 @@ import { notAnswered, notOffered, offline, OPEN_TIMEOUT_MS } from './remote-sche
 export const DOCUMENT_STREAM_CREDIT = 1024 * 1024;
 /** The largest frame either way, the endpoint's own bound (the engine host's socket resets a channel queued past it). */
 export const DOCUMENT_FRAME_MAX = DOC_HIGH_WATER;
-/** An open whose stream hasn't opened (or been refused) by then is answered `timeout`: a page's bound. */
+/** An open not answered by then, from its start (the preflight and both stream attempts in it), is answered `timeout`: a page's bound. */
 export const DOCUMENT_OPEN_MS = OPEN_TIMEOUT_MS;
 
 export const cannotView = (machine: string) => `you can’t view this document on ${machine}`;
@@ -124,13 +126,17 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
   let stopped = false;
   const onStop = new Set<() => void>();
 
-  /** `work`'s value, or 'stopped' as soon as the app stops. */
-  function untilStopped<T>(work: Promise<T>): Promise<T | 'stopped'> {
+  /** `work`'s value, or 'stopped' as soon as the app stops, or (review fix 4) 'timeout' at `deadline`. */
+  function within<T>(work: Promise<T>, deadline: number): Promise<T | 'stopped' | 'timeout'> {
     if (stopped) return Promise.resolve('stopped');
-    return new Promise<T | 'stopped'>((resolve, reject) => {
+    return new Promise<T | 'stopped' | 'timeout'>((resolve, reject) => {
       const stop = () => resolve('stopped');
+      const timer = setTimeout(() => resolve('timeout'), Math.max(0, deadline - Date.now()));
       onStop.add(stop);
-      work.then(resolve, reject).finally(() => onStop.delete(stop));
+      work.then(resolve, reject).finally(() => {
+        onStop.delete(stop);
+        clearTimeout(timer);
+      });
     });
   }
 
@@ -233,10 +239,11 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
 
   return {
     async open(link, artifactId, client, doc) {
+      const deadline = Date.now() + openMs; // review fix 4: one bound from here, over the preflight and both attempts
       if (stopped) throw failureOf('stopped', link.name);
       if (link.state() === 'down') throw new CommandFailure(ipcError('host_unavailable', offline(link.name)));
-      const found = await untilStopped(dispatchOverLink(link, 'artifacts.get', { artifactId }));
-      if (found === 'stopped') throw failureOf('stopped', link.name);
+      const found = await within(dispatchOverLink(link, 'artifacts.get', { artifactId }), deadline);
+      if (found === 'stopped' || found === 'timeout') throw failureOf(found, link.name);
       if (!found.ok) throw preflightFailure(found.error, link.name);
       const { artifact } = found.value as CommandOutput<'artifacts.get'>;
       if (!artifact) throw refusal('notFound', `no artifact ${artifactId} on ${link.name}`);
@@ -244,7 +251,6 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
       if (!pageOf(client) || pageOf(client)!.isDestroyed()) throw failureOf('gone', link.name);
       const { port1, port2 } = deps.channel();
       const bridge = new Bridge(link, artifactId, port1, client);
-      const deadline = Date.now() + openMs;
       let outcome = await bridge.attempt('edit', doc, deadline);
       if (outcome === 'grade' || outcome === 'read-only') outcome = await bridge.attempt('view', doc, deadline);
       // Review fix 1: a stream opened and already ended (a `host` close in the turn it opened) is no open: no port goes
