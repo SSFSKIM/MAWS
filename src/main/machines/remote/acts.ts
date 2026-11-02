@@ -54,6 +54,12 @@ export interface ActRequest {
   sendBy?: number;
   /** P5 O7 M5a: a capability the peer must list for the act to go (an artifact write's `rl2.artifacts`); `not-offered` else. */
   requires?: string;
+  /**
+   * P5 O7 M5c: an act that names what only one channel holds (a page's lease) goes only on the channel current when it was
+   * made: refused `offline` with none current, or once that channel ends before a copy went out; a copy that went out on
+   * it is asked about on the next one (queried), never resealed there.
+   */
+  oneChannel?: true;
 }
 /** waiting: not yet on a channel; unknown: lost track, querying. */
 export type ActProgress = 'waiting' | 'sent' | 'accepted' | 'unknown';
@@ -93,6 +99,9 @@ type Entry = {
   executor: Executor;
   /** P5 O7 M5a: what the peer must list beyond the executor's capability: `requires`, and `rl2.bytes` for tagged args. */
   needs: string[];
+  /** P5 O7 M5c: `ActRequest.oneChannel`; `strayed` once the channel it was made on ended. */
+  oneChannel: boolean;
+  strayed: boolean;
   mode: 'required' | 'if-asked' | 'never';
   /** The act as built, or as signed; a send stamps `created` (and a reseal a fresh nonce) on an unsigned one. */
   action: Action;
@@ -178,6 +187,8 @@ export class ActTable {
       opCreated,
       executor: request.executor ?? executorOf(request.action),
       needs: [...(request.requires === undefined ? [] : [request.requires]), ...(tagged ? [BYTES_CAPABILITY] : [])],
+      oneChannel: request.oneChannel === true,
+      strayed: request.oneChannel === true && !this.#deps.current(),
       mode: request.stepUp ?? 'if-asked',
       action,
       signed: false,
@@ -242,6 +253,8 @@ export class ActTable {
       opCreated: op.opCreated,
       executor: op.executor,
       needs: [],
+      oneChannel: false,
+      strayed: false,
       mode: 'never',
       action: null as unknown as Action, // never sent: `signed`, `outstanding` and `acked` keep every path to a query
       signed: true,
@@ -297,7 +310,7 @@ export class ActTable {
     for (const entry of [...this.#entries.values()]) {
       if (entry.settled || entry.signing) continue;
       if (!entry.outstanding) this.#trySend(entry);
-      else if (entry.ambiguous && !entry.acked && !entry.signed && this.#inWindow(entry)) this.#transmit(entry, true);
+      else if (entry.ambiguous && !entry.acked && !entry.signed && !entry.oneChannel && this.#inWindow(entry)) this.#transmit(entry, true);
       else this.#query(entry);
     }
   }
@@ -308,10 +321,12 @@ export class ActTable {
       if (entry.settled) continue;
       entry.querying = false;
       this.#clearTimers(entry);
+      if (entry.oneChannel) entry.strayed = true;
       if (entry.outstanding) {
         entry.ambiguous = true;
         this.#progress(entry, 'unknown');
-      } else if (!entry.signing) this.#armWindow(entry);
+      } else if (entry.oneChannel && !entry.signing) this.#settle(entry, { state: 'refused', reason: 'offline' });
+      else if (!entry.signing) this.#armWindow(entry);
     }
   }
 
@@ -415,7 +430,7 @@ export class ActTable {
 
   /** An act with no copy out: sent now if a channel is current, else held for the rest of its window. */
   #trySend(entry: Entry): void {
-    if (!this.#inWindow(entry)) return this.#settle(entry, { state: 'refused', reason: 'offline' });
+    if (!this.#inWindow(entry) || entry.strayed) return this.#settle(entry, { state: 'refused', reason: 'offline' });
     if (this.#deps.current()) return this.#transmit(entry, false);
     this.#progress(entry, 'waiting');
     this.#armWindow(entry);

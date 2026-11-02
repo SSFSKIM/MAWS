@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
 import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import type { CommandName, HostState } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { daemonStatus } from '../../../test/support/builders';
 import { watchDaemon } from '../hosts/daemon';
 import type { BeforeHook } from '../ipc/router';
@@ -18,6 +19,9 @@ import { startAppConnectors, type AppConnectors } from '.';
 vi.mock('electron', () => ({ app: {}, safeStorage: {} })); // legacy-custody's production sealer, never used here
 
 const ART = '11111111-1111-4111-8111-111111111111';
+const LOCAL = 'LocalMachineRef0000000' as MachineRef;
+// P5 O7 M5c: every reset names its machine, this Mac's for the machine host's
+const RESET = ['connectors.reset', { machine: LOCAL }];
 
 let hook: BeforeHook | null;
 let invoked: { name: CommandName; input: unknown; client: string }[];
@@ -30,6 +34,7 @@ let connectors: AppConnectors;
 
 function start(machine: boolean) {
   connectors = startAppConnectors({
+    local: LOCAL,
     machine: machine
       ? {
           streaming: () => streams,
@@ -98,7 +103,7 @@ describe('the app’s connectors on the daemon shape', () => {
     stream(); // mawsd restarted
     stream();
     expect(adopt).toHaveBeenCalledOnce();
-    expect(emitted).toEqual([['connectors.reset', {}], ['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET, RESET]);
   });
 
   it('adopts at once when the machine host already streams, and resets at its next streaming', () => {
@@ -106,7 +111,7 @@ describe('the app’s connectors on the daemon shape', () => {
     start(true);
     expect(adopt).toHaveBeenCalledOnce();
     stream();
-    expect(emitted).toEqual([['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET]);
   });
 
   it('marks every page unreported at a reset, so a rebuilt lease’s first command reports its window first', async () => {
@@ -116,7 +121,7 @@ describe('the app’s connectors on the daemon shape', () => {
     await lease();
     expect(reports()).toHaveLength(1);
     stream(); // mawsd restarted: it holds no report
-    expect(emitted).toEqual([['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET]);
     await lease(); // the rebuilt lease's first command
     await lease();
     expect(reports()).toHaveLength(2);
@@ -138,12 +143,12 @@ describe('the app’s connectors on the daemon shape', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(adopt).toHaveBeenCalledOnce();
     stream(); // the O4 mawsd the build check restarted it into
-    expect(emitted).toEqual([['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET]);
     expect(adopt).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(0);
     stream(); // the pass settled: a later restart only resets
     expect(adopt).toHaveBeenCalledTimes(2);
-    expect(emitted).toEqual([['connectors.reset', {}], ['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET, RESET]);
   });
 
   it('never adopts again after a pass the sealer stopped, or one that failed', async () => {
@@ -173,7 +178,7 @@ describe('the app’s connectors on the daemon shape', () => {
     stream();
     stream(); // restarted while the first pass waits (on the Keychain's prompt, say)
     expect(adopt).toHaveBeenCalledOnce(); // never two passes at once
-    expect(emitted).toEqual([['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET]);
     finish({ retry: true });
     await vi.advanceTimersByTimeAsync(0);
     expect(adopt).toHaveBeenCalledTimes(2);
@@ -273,6 +278,7 @@ describe('the updated app over a pre-O4 mawsd', () => {
     };
     const watch = watchDaemon({ hosts: hosts as never, buildId: THIS, unitRunsThisApp: () => true, onChange: () => {}, log: (line) => void logged.push(line) });
     connectors = startAppConnectors({
+      local: LOCAL,
       machine: { streaming: () => streams, onStreaming: (listener) => (streamingListeners.add(listener), () => void streamingListeners.delete(listener)) },
       windowShown: () => null,
       invoke: route,
@@ -287,7 +293,7 @@ describe('the updated app over a pre-O4 mawsd', () => {
     await restartedOnce;
     await vi.waitFor(() => expect(readFileSync(file, 'utf8').startsWith(`${SEALED_FORMAT_V2}\n`)).toBe(true));
     expect(answered).toEqual(['older00000000000', THIS]);
-    expect(emitted).toEqual([['connectors.reset', {}]]);
+    expect(emitted).toEqual([RESET]);
     expect(sealer.available).toHaveBeenCalledTimes(2); // one pass per streaming; the real sealer's key is in hand by then
     expect(logged).toContain('[connectors] adopted 0 of 1 legacy grants; left: unknown_command 1');
     expect(logged).toContain('[connectors] adopted 1 of 1 legacy grants');

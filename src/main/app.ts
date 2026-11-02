@@ -59,7 +59,7 @@ import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
 import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
-import { registerOpenExternal } from './open-external';
+import { openForMachine, registerOpenExternal } from './open-external'; // P5 O7 M5c: openForMachine
 import { electronClientPort } from './client/electron-port'; // P5 O1 M3
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
@@ -104,7 +104,7 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4
+import { MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4; P5 O7 M5c: delivery
 // E11 end
 // E4a start
 import { startBrowser, type Browser } from './browser';
@@ -384,6 +384,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // The org rows (made below, over the spine's view) say which of a machine's sessions are lane A: O9's, never placed here.
   let laneOfRow: (machine: MachineRef, session: string) => 'A' | 'B' | null = () => null;
   const artifactMachines = new ArtifactMachines(); // P5 O7 M5a (src/main/artifacts/machines.ts)
+  // P5 O4 M2: the window that shows a page, for the connectors' window veto (P5 O7 M5c: per RL2 machine too)
+  const windowShownOf = (client: ClientRef) => {
+    const page = pageOf(client);
+    const win = page && BrowserWindow.fromWebContents(page);
+    return win ? electronWindowShown(win) : null;
+  };
   const remoteLaneB = createRemoteLaneB({
     local,
     layout,
@@ -395,6 +401,11 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     openPath: (path) => shell.openPath(path), // P5 O7 M5a: an open copy of another machine's file (A10)
     env: process.env, // P5 O7 M5a: MAWS_E2E_OPEN_LOG, the open seam
     docChannel: () => new MessageChannelMain(), // P5 O7 M5b: a remote document's port, bridged to a `document` stream
+    // P5 O7 M5c: a machine's `connectors.reset` is main's own word to the windows; the window report per machine; a
+    // consent page a machine's services asked this device to open
+    emitOwn: (name, payload) => void emit(name, payload),
+    windowShown: windowShownOf,
+    openUrl: (url, machine) => openForMachine(url, machine),
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
@@ -433,7 +444,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     const peer = hosts.peer('machine');
     return peer === null || peer.capabilities.includes(MACHINE_RENDER_CAPABILITY);
   };
-  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: data === null ? { kind: 'host', daemonRenders } : { kind: 'embedded' } });
+  // P5 O7 M5c: delivery.send the same way, by machine.delivery: main's shim (./delivery/send.ts) for an older daemon
+  const daemonDelivers = () => {
+    const peer = hosts.peer('machine');
+    return peer === null || peer.capabilities.includes(MACHINE_DELIVERY_CAPABILITY);
+  };
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: data === null ? { kind: 'host', daemonRenders, daemonDelivers } : { kind: 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -519,12 +535,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // launch (at the machine host's first streaming on the daemon shape, now on the embedded one), and at each later
   // streaming of the machine host tells its windows `connectors.reset`, on which they rebuild their leases.
   const appConnectors = startAppConnectors({
+    local, // P5 O7 M5c: the machine host's reset names this Mac's machine
     machine: data === null ? { streaming: () => hosts.streaming('machine'), onStreaming: (listener) => hosts.onStreaming('machine', listener) } : null,
-    windowShown: (client) => {
-      const page = pageOf(client);
-      const win = page && BrowserWindow.fromWebContents(page);
-      return win ? electronWindowShown(win) : null;
-    },
+    windowShown: windowShownOf,
     invoke: bus.invoke,
     before: beforeCommand,
     emit: (name, payload) => void emit(name, payload),
@@ -761,28 +774,30 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
   // grants, rows and sign-ins, the engine's MCP sign-in and the owner's Send to are the machine's, composed with the spine
-  // (mawsd's on the daemon shape, startSpine's above on the embedded one). Main keeps the export step of Send to
-  // (Interfaces §G; D14, D15, D38): `delivery.send` reads the machine's status, exports as the library exports (`artifacts.export`), and hands
-  // the file to the machine's `delivery.deliver`; a cancel in its export phase is answered here.
-  shutdown.add(
-    'delivery send',
-    registerDeliverySend({
-      // P5 O7 M5c: `delivery.send` is `machine`-owned from the contracts on; until main reads the daemon's
-      // `machine.delivery` (the shim kept behind it), main answers it here first, as before
-      register: (name, handler) => void interceptCommand(name, handler),
-      before: beforeCommand,
-      // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the
-      // embedded shape (and on an older daemon), mawsd's render seam on the daemon shape; the e2e's hold around it
-      // (./delivery/e2e-hold.ts)
-      exportArtifact: exportHeldFor(async (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => {
-        const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
-        if (!exported.ok) throw new Error(exported.error.message);
-        return exported.value as CommandOutput<'artifacts.export'>;
-      }, process.env),
-      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-      invoke: bus.invoke,
-    }),
-  );
+  // (mawsd's on the daemon shape, startSpine's above on the embedded one). P5 O7 M5c
+  // (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on the
+  // machine"): `delivery.send` is the machine's too, its export and its delivery both, on either shape; main's own send
+  // (./delivery/send.ts: the export here, the file handed to the machine's `delivery.deliver`, a cancel in its export phase
+  // answered here) is kept as the shim for a daemon whose welcome lists no `machine.delivery`, which the router answers
+  // here alone (`daemonDelivers`). The embedded shape's spine serves `delivery.send` itself.
+  if (data === null) {
+    shutdown.add(
+      'delivery send',
+      registerDeliverySend({
+        register: (name, handler) => registerMachineHandler(name, handler),
+        before: beforeCommand,
+        // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: mawsd's render seam, or this
+        // root's handler on an older daemon; the e2e's hold around it (./delivery/e2e-hold.ts)
+        exportArtifact: exportHeldFor(async (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => {
+          const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
+          if (!exported.ok) throw new Error(exported.error.message);
+          return exported.value as CommandOutput<'artifacts.export'>;
+        }, process.env),
+        call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+        invoke: bus.invoke,
+      }),
+    );
+  }
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
   // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
   // cwd. P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D16): those reads and the watch of the engine's

@@ -58,9 +58,19 @@ export async function dispatchOverLink(link: Caller, name: CommandName, input: u
   const grade = gradeOf(name);
   if (grade !== 'list' && grade !== 'view') return { ok: false, error: ipcError('internal', `${name}: refused act-required by machine ${link.name}`, { refusal: 'act-required' }) };
   // A remote session's checkout is lane B's: lane A's roots are sminos's, which no `checkout` row reads.
+  return callOverLink(link, name, input, { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }) });
+}
+
+/**
+ * P5 O7 M5c ("O4's surfaces: the grade"): `name` as a call whatever its grade, its output read as `dispatchOverLink` reads
+ * one. Only the adapter's `MACHINE_CALLS` come here directly (a page's lease reads, graded by effect on the artifact, which
+ * the endpoint offers as calls); every other command takes `dispatchOverLink`, which keeps the grade check.
+ */
+export async function callOverLink(link: Caller, name: CommandName, input: unknown, options: Omit<CallOptions, 'timeoutMs'> = {}): Promise<LinkResult> {
+  if (!onLink(name)) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${link.name} cannot answer it: ${name} does not cross a machine link`) };
   const timeoutMs = budgetedMs(link.budgets, name);
-  const options: CallOptions = { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }), ...(timeoutMs !== undefined && { timeoutMs }) };
-  const result = await (Object.keys(options).length === 0 ? link.call(name, input) : link.call(name, input, options));
+  const withBudget: CallOptions = { ...options, ...(timeoutMs !== undefined && { timeoutMs }) };
+  const result = await (Object.keys(withBudget).length === 0 ? link.call(name, input) : link.call(name, input, withBudget));
   const fellBack = result.fellBack === true ? { fellBack: true as const } : {};
   if (!result.ok) return { ...refusalError(name, link.name, result.error), ...fellBack };
   const output = codec.readCommandOutput(name, voidAsUndefined(name, result.output));

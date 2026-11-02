@@ -5,7 +5,7 @@ import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
-import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
+import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, ClientRequest, DeviceCaps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
 export const MINI = 'MiniMachineRef00000000' as MachineRef;
 
@@ -66,7 +66,11 @@ export class FakeLink implements RemoteLink {
   readonly subs: FakeSub[] = [];
   readonly #stateListeners = new Set<(state: LinkState) => void>();
   readonly #capsListeners = new Set<(caps: DeviceCaps) => void>();
+  readonly #clientListeners = new Set<(request: ClientRequest, answer: (answer: unknown) => void) => void>();
   #subN = 0;
+  #clientN = 0;
+  /** P5 O7 M5c: false between a channel's loss (`lose`) and the next one (`relink`), while the link may still read `up`. */
+  #channel = true;
 
   constructor(machine: MachineRef = MINI) {
     this.machine = machine;
@@ -94,7 +98,7 @@ export class FakeLink implements RemoteLink {
     return this.#caps;
   }
   peerCapabilities() {
-    return this.#state === 'up' ? this.peers : null;
+    return this.#state === 'up' && this.#channel ? this.peers : null;
   }
   onState(listener: (state: LinkState) => void): () => void {
     this.#stateListeners.add(listener);
@@ -126,8 +130,67 @@ export class FakeLink implements RemoteLink {
     for (const listener of [...this.#capsListeners]) listener(caps);
   }
 
+  /**
+   * P5 O7 M5c: the channel lost within the grace, as the real link has it: still `up`, no channel current (no peers), and
+   * nothing said on `onState`; every `oneChannel` call made on it fails `offline` (`relink` brings the next channel).
+   */
+  lose(): void {
+    this.#channel = false;
+    for (const fail of [...this.#oneChannel]) fail();
+    this.#oneChannel.clear();
+  }
+
+  /** P5 O7 M5c: the next channel: a new peer list (its identity is the channel's, as the real link's is) and its `caps`. */
+  relink(peers: string[] = [...this.peers]): void {
+    this.peers = peers;
+    this.#channel = true;
+    this.setCaps(this.#caps!);
+  }
+
+  readonly #oneChannel = new Set<() => void>();
+
+  onClient(listener: (request: ClientRequest, answer: (answer: unknown) => void) => void): () => void {
+    this.#clientListeners.add(listener);
+    return () => void this.#clientListeners.delete(listener);
+  }
+
+  /** P5 O7 M5c: the endpoint's `client` request, and the device's answer (`{noClient: true}` with no listener, as the real link's). */
+  ask(kind: string, request: unknown): Promise<unknown> {
+    return new Promise((resolve) => {
+      const id = `client-${++this.#clientN}`;
+      let answered = false;
+      const answer = (value: unknown) => {
+        if (answered) return;
+        answered = true;
+        resolve(value);
+      };
+      if (this.#clientListeners.size === 0) return answer({ noClient: true });
+      for (const listener of [...this.#clientListeners]) listener({ id, kind, request }, answer);
+    });
+  }
+
   /** As the RL2 link: `lacking`'s input to a peer without its capability, said `fellBack` (null peers: no channel, the input). */
   async call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> {
+    // P5 O7 M5c: as the real link, a `oneChannel` call goes only on the channel current when made, and fails at its end
+    if (options?.oneChannel === true) {
+      if (this.peerCapabilities() === null) return { ok: false, error: { code: 'offline' } };
+      return this.#oneChannelCall(name, input, options);
+    }
+    return this.#call(name, input, options);
+  }
+
+  #oneChannelCall(name: string, input: unknown, options: CallOptions): Promise<CallResult> {
+    return new Promise((resolve) => {
+      const fail = () => resolve({ ok: false, error: { code: 'offline' } });
+      this.#oneChannel.add(fail);
+      void this.#call(name, input, options).then((result) => {
+        this.#oneChannel.delete(fail);
+        resolve(result);
+      });
+    });
+  }
+
+  async #call(name: string, input: unknown, options?: CallOptions): Promise<CallResult> {
     const fellBack = options?.lacking !== undefined && this.peerCapabilities() !== null && !this.peers.includes(options.lacking.capability);
     const sent = fellBack ? options!.lacking!.input : input;
     this.calls.push({ name, input: sent, ...(options?.session !== undefined && { session: options.session }) });
@@ -139,6 +202,12 @@ export class FakeLink implements RemoteLink {
 
   act(request: ActRequest): ActHandle {
     const act = new FakeAct(request);
+    // P5 O7 M5c: as the act table, a `oneChannel` act with no channel current is refused `offline` and never goes
+    if (request.oneChannel === true && this.peerCapabilities() === null) {
+      this.acts.push(act);
+      act.settle({ state: 'refused', reason: 'offline' });
+      return act;
+    }
     this.acts.push(act);
     this.onAct(act);
     // As the link holds it: one never put on a channel by its `sendBy` is refused `offline` then.

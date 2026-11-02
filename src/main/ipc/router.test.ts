@@ -318,6 +318,36 @@ describe('main ipc router', () => {
     });
   });
 
+  // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on
+  // the machine"): delivery.send is the machine's on a daemon whose welcome lists machine.delivery, and main's shim (the
+  // root's registration) answers it on an older one, O5's machine.render pattern; the export's selection stands apart
+  describe('delivery.send’s shim on an older daemon', () => {
+    const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
+    const send = { runId: '3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a', target: 'drive', artifactId: ARTIFACT, format: 'docx', destination: { kind: 'default' } } as const;
+
+    it('answers it in main while the daemon lists no machine.delivery, forwards it once it does, and leaves the export to its own capability', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async (_owner, name) => ({ ok: true, value: name === 'delivery.send' ? { ok: false, why: 'cancelled' } : { path: '/p/x.pdf', revision: 4 } }));
+      let delivers = false;
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host', daemonRenders: () => true, daemonDelivers: () => delivers } });
+      const shim = vi.fn(() => ({ ok: false, why: 'busy' as const }));
+      router.registerMachineHandler('delivery.send', shim);
+      const { mainClient } = await import('./clients');
+      const ctx = { client: mainClient, target: LOCAL };
+      await expect(router.invokeOwn('delivery.send', send, ctx)).resolves.toEqual({ ok: true, value: { ok: false, why: 'busy' } });
+      expect(shim).toHaveBeenCalledWith(send, ctx);
+      await expect(router.invokeOwn('artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, ctx)).resolves.toEqual({ ok: true, value: { path: '/p/x.pdf', revision: 4 } });
+      expect(dispatchToHost).toHaveBeenCalledWith('machine', 'artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, mainClient);
+
+      delivers = true;
+      await expect(router.invokeOwn('delivery.send', send, ctx)).resolves.toEqual({ ok: true, value: { ok: false, why: 'cancelled' } });
+      expect(dispatchToHost).toHaveBeenLastCalledWith('machine', 'delivery.send', send, mainClient);
+      expect(shim).toHaveBeenCalledOnce();
+    });
+  });
+
   it('hands a handler the asking page instance’s ClientRef: the same one per page, a new one after a reload', async () => {
     const { pageOf } = await import('./clients');
     const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);

@@ -50,8 +50,12 @@
 //   on no session (the third act shape), the id-to-machine table, the `session.capabilities` substitute, the machine's
 //   `artifacts` feed, and `remote.openCopy` and Save As's bytes, which main's handlers bring here (`artifacts`). P5 O7 M5b:
 //   a document's `artifacts.open`, bridged to the window that asked (`ctx.client`) over a `document` stream.
+// - P5 O7 M5c: O4's surfaces (./remote-connectors.ts): a page's leases, on the channel whose reset was said and under the
+//   device's window report per machine (./remote-windows.ts); Connect and Sign in with a listener for their consent's
+//   redirect, and the client port's answers (./remote-port.ts); Send to on the machine.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
+import type { OpenAnswer } from '@shared/client/port';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -68,9 +72,14 @@ import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
+import type { ClientWindowShown } from '../client/window-shown';
+import type { ClientRef } from '@shared/ipc/client';
 import { DOCUMENT_OPEN_MS } from '../artifacts/remote-open';
 import { createRemoteArtifacts, type RemoteArtifacts } from './remote-artifacts';
 import { createRemoteAttention, type RemoteAttention } from './remote-attention';
+import { createRemoteConnectors, MACHINE_CALLS, reportWindow, type MachineActOptions } from './remote-connectors';
+import { createRemotePort, type CallbackServer, type CallbackHandler, type RemotePortTiming } from './remote-port';
+import { createRemoteWindows } from './remote-windows';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
@@ -82,7 +91,7 @@ import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type
 import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
 
-export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming, RemotePtyTiming, RemoteForwardsTiming {
+export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTiming, RemotePtyTiming, RemoteForwardsTiming, Omit<RemotePortTiming, 'consentActMs'> {
   /** A closed tab's subscription outlives it this long. */
   unsubscribeLingerMs: number;
   /** An act answers the renderer by then: its outcome, or `timeout` with the pending words while it goes on querying. */
@@ -113,6 +122,12 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
   documentOpenMs: DOCUMENT_OPEN_MS, // P5 O7 M5b: a page's bound
+  // P5 O7 M5c: a consent's listener from its act's acceptance, the machine's own bound on the flow and a round trip: a
+  // Connect's owner action (OWNER_ACTION_DEADLINE_MS, 330 s, src/services/connectors/owner.ts: discovery, then the 120 s
+  // callback wait from the flow's bind, which this side can't see), a sign-in's config and callback waits (CONFIG_MS and
+  // CALLBACK_MS, 10 s and 5 min, src/services/connectors/sign-in.ts); remote-port.test.ts pins both against the services
+  consentConnectMs: 330_000 + 1_000,
+  consentSignInMs: 10_000 + 300_000 + 1_000,
   ...REMOTE_PTY_TIMING, // P5 O7 M3
   ...REMOTE_FORWARDS_TIMING,
 };
@@ -145,6 +160,14 @@ export interface RemoteLaneBDeps {
   env?: NodeJS.ProcessEnv;
   /** P5 O7 M5b: `new MessageChannelMain()`, a remote document's port pair (none opens without it). */
   docChannel?(): Pick<MessageChannelMain, 'port1' | 'port2'>;
+  /** P5 O7 M5c: main's own `emit` (to every window, as main's word), which `connectors.reset {machine}` goes through. */
+  emitOwn?(name: 'connectors.reset', payload: EventPayload<'connectors.reset'>): void;
+  /** P5 O7 M5c: the window that shows a page (electronWindowShown), for the window report per machine; none shows any without it. */
+  windowShown?(client: ClientRef): ClientWindowShown | null;
+  /** P5 O7 M5c: a URL a machine's services asked this device to open (../open-external.ts's `openForMachine`); none opens without it. */
+  openUrl?(url: string, machine: MachineRef): OpenAnswer;
+  /** P5 O7 M5c: a consent's callback listener (./remote-port.ts's `listenCallback` by default). */
+  listenCallback?(handle: CallbackHandler): Promise<CallbackServer>;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -193,7 +216,15 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   // P5 O7 M4: the checkout's writes, an upload's parts and the spawn
   'files.write', 'files.upload', 'scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel',
   'session.spawn',
+  // P5 O7 M5c: a page's two lease commands that run the owner's connector tools (`converse` by effect on the artifact);
+  // Send to's send and cancel (`manage`); the owner's connections, sign-ins and grants (`machine-admin`, a step-up each)
+  'connectors.call', 'connectors.refresh',
+  'delivery.send', 'delivery.cancel',
+  'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel',
+  'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
 ]);
+// P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
+export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
 /** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
@@ -266,6 +297,25 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
   const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
+  // P5 O7 M5c: the client port's answers and the consents' listeners; the window report per machine; the leases' gate
+  const port = createRemotePort({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    openUrl: deps.openUrl ?? (() => ({ opened: false, reason: 'opening a URL is not wired in this process' })),
+    ...(deps.listenCallback !== undefined && { listen: deps.listenCallback }),
+    timing: { consentConnectMs: timing.consentConnectMs, consentSignInMs: timing.consentSignInMs, consentActMs: timing.sendPendingMs },
+    log: deps.log,
+  });
+  const windows = createRemoteWindows({ windowShown: deps.windowShown ?? (() => null), report: reportWindow, log: deps.log });
+  const connectors = createRemoteConnectors({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    emitOwn: deps.emitOwn ?? (() => {}),
+    windows,
+    port,
+    act: (link, name, fields, options) => machineAct(link, name, fields, now() + timing.sendPendingMs, options),
+    log: deps.log,
+  });
   // P5 O7 M5a: artifacts
   const artifacts = createRemoteArtifacts({
     remote: deps.remote,
@@ -277,6 +327,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     feedRetryMs: timing.feedRetryMs,
     ...(deps.docChannel !== undefined && { docChannel: deps.docChannel }),
     documentOpenMs: timing.documentOpenMs,
+    heard: (machine, name, payload) => port.heard(machine, name, payload), // P5 O7 M5c: a consent's flow's end
     openPath: deps.openPath ?? (async () => 'opening a copy is not wired in this process'),
     ...(deps.tempDir !== undefined && { tempDir: deps.tempDir }),
     env: deps.env ?? {},
@@ -394,10 +445,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     return pendingResult(name, link.name);
   }
 
-  /** A `machine` act: placed by its args, no session, no context. A ready resume subscribes an idle session at once. */
-  async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline });
-    const result = await settle(link, name, handle, deadline, String(fields.appSessionId ?? ''));
+  /**
+   * A `machine` act: placed by its args, no session, no context. A ready resume subscribes an idle session at once. P5 O7
+   * M5c: one that names what only its channel holds goes `oneChannel`; one whose work outlasts the pending bound is answered
+   * up to `answerMs` past it (its command's budget on the machine).
+   */
+  async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number, options: MachineActOptions = {}): Promise<CommandResult<CommandName>> {
+    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline, ...(options.oneChannel === true ? { oneChannel: true as const } : {}) });
+    options.onHandle?.(handle);
+    const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
     return result;
   }
@@ -532,6 +588,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         log: deps.log,
       });
     }
+    if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
     if (lane === undefined || !lane.open) return failure('internal', `${name}: ${NOT_OPEN}`, { refusal: 'not-open' });
@@ -540,7 +597,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -580,6 +637,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       ptys.stop();
       forwards.stop();
       artifacts.stop();
+      connectors.stop(); // P5 O7 M5c
+      windows.stop();
+      port.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
     },
