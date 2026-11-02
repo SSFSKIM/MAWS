@@ -140,13 +140,23 @@ export class HostAdoptFailed extends Error {
 // above it the journal already holds are skipped and counted, the rest handed on as any launch's are, and the replay's
 // end is the `host_caught_up` item, the session's barrier. A host with no engine to adopt (a launch that never
 // committed, a spawn that failed) is refused here.
+// P5 O16 panel fix wave 1 (sweep#3): a host whose launch committed and whose fork has not recorded its outcome (the
+// engine host that committed it was lost mid-fork, and the host forks all the same) is asked again until its child
+// shows, as a reconnect's `recoverSpawn` does, within the bound; a spawn that failed leaves it `committed` with no
+// child until it exits by itself (HOST_NO_CHILD_MS), and the adoption then fails, counted.
 export async function adoptHosted(
   entry: { holderId: string; pid: number; procStart: string; socket: string; appSessionId: string },
   deps: SessionHostDeps & { token: string; checkpoint: { frontier: number; above: readonly number[] }; maxLineChars: number },
 ): Promise<{ transport: EngineTransport; hello: Hello; fence: number }> {
   const deadline = Date.now() + (deps.startMs ?? HOST_START_MS);
   const hostGone = (): string | null => (isAlive(entry.pid) ? null : 'its process is gone');
-  const { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: hostGone, log: deps.log });
+  let { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: hostGone, log: deps.log });
+  while (hello.holderId === entry.holderId && hello.child === null && hello.state === 'committed') {
+    connection.close();
+    if (Date.now() >= deadline) throw new HostAdoptFailed('its committed spawn showed no child in time');
+    await new Promise((resolve) => setTimeout(resolve, SPAWN_POLL_MS));
+    ({ connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: hostGone, log: deps.log }));
+  }
   try {
     if (hello.holderId !== entry.holderId) throw new HostAdoptFailed(`the socket answered as ${hello.holderId}, not ${entry.holderId}`);
     if (hello.child === null) throw new HostAdoptFailed(`it holds no engine (${hello.state})`);
@@ -168,6 +178,9 @@ export async function adoptHosted(
 
 // P5 O16 M3: a session host an adopter finds holding no engine (its launch never committed, or its spawn failed): taken
 // as writer and released, so it exits and removes its files, as the launch that started it would have.
+// P5 O16 panel fix wave 1 (sweep#3): settled by the host's answer. It refuses a release with `error` while it holds a
+// child that has not exited or forks one, and exits on one it accepts, closing the connection: a refusal throws, so a
+// host found holding an engine after all is counted, never left running as if released.
 export async function releaseHost(entry: { holderId: string; pid: number; socket: string }, deps: Pick<SessionHostDeps, 'log' | 'startMs'> & { token: string }): Promise<void> {
   const deadline = Date.now() + (deps.startMs ?? HOST_START_MS);
   const { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: () => (isAlive(entry.pid) ? null : 'its process is gone'), log: deps.log });
@@ -175,10 +188,16 @@ export async function releaseHost(entry: { holderId: string; pid: number; socket
     connection.send({ t: 'attach', role: 'writer', fence: hello.fence + 1 });
     await connection.expect('attached', deadline);
     connection.send({ t: 'release' });
-    connection.end();
-  } catch (error) {
+    const refusal = await connection.expect('error', deadline).then(
+      (answer) => answer.message,
+      (error: unknown) => {
+        if (connection.closed) return null; // the host exited: released
+        throw error;
+      },
+    );
+    if (refusal !== null) throw new HostAdoptFailed(`the session host refused its release: ${refusal}; left running`);
+  } finally {
     connection.close();
-    throw error;
   }
 }
 

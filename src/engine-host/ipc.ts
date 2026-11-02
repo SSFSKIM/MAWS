@@ -199,7 +199,7 @@ export interface EngineIpc {
   // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
   // P5 O16 M3b: `detach` detaches the rows under a session host instead (the detached exit order's, but a stop-all's)
   shutdown(graceMs: number, mode?: 'stop' | 'detach'): Promise<{ stopped: number; forced: number }>;
-  adopt(entry: RosterEntry): Promise<AppSessionId>; // P5 O16 M3: the launcher's adoption of a running session host
+  adopt(entry: RosterEntry): Promise<AppSessionId | null>; // P5 O16 M3: the launcher's adoption of a running session host; null: released, it held no engine
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });

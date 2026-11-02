@@ -3,9 +3,19 @@
 // ADOPT_MS. A host of another protocol major is not adopted: logged, counted as failed and left running with its child
 // (that major's migration owns the rest). Two live hosts naming one session (a launch's host left behind by a crash, and
 // its successor's) cannot both be its row: the newest is adopted and the other left running, counted.
+// P5 O16 panel fix wave 1 (sweep#3): a host's roster entry reads `committed` from before its fork until the child is
+// recorded, and the fork goes on whether or not the engine host that committed it lives; such an entry holds an engine,
+// or is about to, so it is held and adopted as one, never released as empty. An adoption is counted by its outcome, not
+// by what the entry said at the start: one that ends in the host's accepted release (`null`) is no failure, and every
+// other end that adopts nothing is counted, so no host is left running unaccounted.
 import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_HOST_PROTOCOL } from './protocol';
 import type { RosterEntry } from './roster';
+
+// Whether the entry's host holds an engine, or is forking one, for a session: what the start holds a row for.
+export function holdsEngine(entry: RosterEntry): boolean {
+  return entry.appSessionId !== null && (entry.child !== null || entry.state === 'committed');
+}
 
 export interface AdoptionOutcome {
   adopted: AppSessionId[];
@@ -23,7 +33,7 @@ export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[
       leave.push({ entry, reason: `it speaks session host protocol ${entry.protocol}, not ${SESSION_HOST_PROTOCOL}; left running` });
       continue;
     }
-    if (entry.appSessionId === null || entry.child === null) {
+    if (!holdsEngine(entry) || entry.appSessionId === null) {
       take.push(entry); // holds no engine: the adoption releases it
       continue;
     }
@@ -36,18 +46,19 @@ export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[
   return { take: [...take, ...newest.values()], leave };
 }
 
-export async function adoptAll(entries: readonly RosterEntry[], deps: { adopt(entry: RosterEntry): Promise<AppSessionId>; log(line: string): void }): Promise<AdoptionOutcome> {
+// `adopt` answers the session adopted, or null for a host that held no engine and accepted its release.
+export async function adoptAll(entries: readonly RosterEntry[], deps: { adopt(entry: RosterEntry): Promise<AppSessionId | null>; log(line: string): void }): Promise<AdoptionOutcome> {
   const { take, leave } = adoptable(entries);
   for (const { entry, reason } of leave) deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
   const outcome: AdoptionOutcome = { adopted: [], failed: [...leave] };
   await Promise.all(take.map(async (entry) => {
     try {
-      outcome.adopted.push(await deps.adopt(entry));
+      const adopted = await deps.adopt(entry);
+      if (adopted !== null) outcome.adopted.push(adopted); // null: released, nothing was there to adopt
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
-      // a host released for holding no engine is no failure: nothing was there to adopt
-      if (entry.appSessionId !== null && entry.child !== null) outcome.failed.push({ entry, reason });
+      outcome.failed.push({ entry, reason });
     }
   }));
   return outcome;

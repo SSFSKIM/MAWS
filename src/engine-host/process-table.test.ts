@@ -256,6 +256,46 @@ describe('process table: change notification, shutdown and reservations', () => 
     await s.session.exited;
   });
 
+  // P5 O16 panel fix wave 1 (scalpel-1#1): a stop-all during the start's adoptions, before they reserve their rows. The
+  // stop-all closes reservation, so a held session never becomes a row the ladder could stop: its engine is stopped
+  // through the hold's own stop (one given up included: a failed adoption leaves its engine running) and counted with the
+  // rows'. An exit that detaches leaves the holds for the successor; a stop-all asked again awaits the same stops.
+  it('a stop-all stops the sessions held for adoption and counts them; a detaching exit leaves them', async () => {
+    const S = 'app-s' as AppSessionId;
+    const T = 'app-t' as AppSessionId;
+    const asked: AppSessionId[] = [];
+    const detaching = new ProcessTable({ ps: async () => '' });
+    detaching.holdForAdoption([S], async (id) => {
+      asked.push(id);
+      return 'stopped';
+    });
+    expect(await detaching.shutdown({ graceMs: 0, mode: 'detach' })).toEqual({ stopped: 0, forced: 0 });
+    expect(asked).toEqual([]);
+
+    let finish!: () => void;
+    const finishing = new Promise<void>((resolve) => (finish = resolve));
+    const table = new ProcessTable({ ps: async () => '' });
+    table.holdForAdoption([S, T], async (id) => {
+      asked.push(id);
+      await finishing;
+      return id === S ? 'stopped' : 'forced';
+    });
+    table.adoptionFailed(T); // given up, its hold kept until every adoption has ended
+    const row = scriptedSession({ spec: { appSessionId: 'app-row' as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) });
+    table.reserve('app-row' as AppSessionId, () => row.session);
+    await row.session.start();
+    const first = table.shutdown({ graceMs: 0 });
+    expect(() => table.reserve(S, () => scriptedSession().session, { adoption: true })).toThrow(/shutting down/); // no row can come
+    const again = table.shutdown({ graceMs: 0 });
+    await until(() => row.transport.requestsOf('end_session').length > 0, 'the row’s ladder');
+    row.transport.exit(0);
+    finish();
+    expect(await first).toEqual({ stopped: 2, forced: 1 });
+    expect(await again).toEqual({ stopped: 2, forced: 1 }); // each stop under way awaited, as a row's ladder is, never asked twice
+    expect(asked).toEqual([S, T]);
+    expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // idempotent once they ended
+  });
+
   // P5 O16 M4 ("Stream redelivery"): a read of a session held for adoption waits for its row, or for its adoption's end
   describe('a read of a session held for adoption (adoptionSettled)', () => {
     const S = 'app-s' as AppSessionId;

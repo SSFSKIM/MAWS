@@ -32,6 +32,7 @@ import { HostAdoptFailed, HostStartFailed, type StartedHost } from './holder/tra
 import { readCheckpoint } from './holder/checkpoint'; // P5 O16 M3
 import { launchRows, spawnRowOf } from './holder/restore'; // P5 O16 M3
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
+import { holdsEngine } from './holder/adopt'; // P5 O16 panel fix wave 1
 import type { SessionId } from '@shared/graph/ids'; // P5 O16 M3
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
@@ -213,22 +214,25 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
 // resumed (a torn tail truncated) and the checkpoint read against its last row; the host attached at its fence + 1 and
 // read from the frontier; then the row, an EngineSession that spawns nothing (`adopted`), reserved and started, and its
 // outcome awaited (fix wave 1: the fold, the catch-up, the queue's restore and the re-initialize, until ready). A host
-// that holds no engine is released instead. Every failure throws and leaves the host running for the next start: one the
-// session gave up before its first write releases its exited row; one past `ADOPT_MS` is counted failed and left as it
-// is, its session still adopting, never killed for it.
+// that holds no engine is released instead (answered null once the host accepted it). Every failure throws and leaves the
+// host running for the next start: one the session gave up before its first write releases its exited row; one past
+// `ADOPT_MS` is counted failed and left as it is, its session still adopting, never killed for it.
+// P5 O16 panel fix wave 1 (sweep#3): a host whose launch committed with no child recorded yet (the engine host that
+// committed it was lost mid-fork) holds an engine, or is about to: adopted once its child shows (adoptHosted), never
+// released as empty.
 export const ADOPT_MS = 60_000;
 
-export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId> {
+export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId | null> {
   // P5 O16 M4: an adoption that gives up wakes the reads waiting on its hold (ProcessTable.adoptionSettled), which then
   // answer `unknown session` at once rather than run out their wait; one past its reservation has no hold to wake. Only
   // a host that holds an engine has the hold (the start's rule, index.ts `adoptAtStart`): a host holding none, which
   // `adoptable` takes beside the newest host of the same session, ends in its release and says nothing of that hold.
   return (entry) =>
     adoptOne(entry).catch((error: unknown) => {
-      if (entry.appSessionId !== null && entry.child !== null) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
+      if (holdsEngine(entry)) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
       throw error;
     });
-  async function adoptOne(entry: RosterEntry): Promise<AppSessionId> {
+  async function adoptOne(entry: RosterEntry): Promise<AppSessionId | null> {
     const deadline = Date.now() + adoptMs;
     const left = () => {
       const ms = deadline - Date.now();
@@ -237,9 +241,10 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
     };
     const hosting = deps.holder;
     if (!hosting?.adopt || !hosting.release) throw new HostAdoptFailed('this engine host runs no session hosts');
-    if (entry.appSessionId === null || entry.child === null) {
-      await hosting.release(entry, left());
-      throw new HostAdoptFailed(`it holds no engine (${entry.state}); released`);
+    if (!holdsEngine(entry)) {
+      await hosting.release(entry, left()); // throws if the host refuses it
+      deps.log(`session host ${entry.holderId} (pid ${entry.pid}) held no engine (${entry.state}); released`);
+      return null;
     }
     const appSessionId = entry.appSessionId as AppSessionId;
     assertSafeAppSessionId(appSessionId);
@@ -295,7 +300,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
       throw error;
     }
     if (outcome.status === 'refused') throw new HostAdoptFailed(`its row was refused: ${outcome.message}`); // never: the row was held
-    deps.log(`${appSessionId}: attached the session host of launch ${launchId} (pid ${entry.pid}, engine pid ${entry.child.pid}) at fence ${fence}, replaying from ${checkpoint.frontier + 1}`);
+    deps.log(`${appSessionId}: attached the session host of launch ${launchId} (pid ${entry.pid}, engine pid ${transport.pid}) at fence ${fence}, replaying from ${checkpoint.frontier + 1}`);
     const session = outcome.session;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

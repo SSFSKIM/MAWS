@@ -31,7 +31,8 @@ import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: Li
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
 import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles } from './holder/roster'; // P5 O16 M3
-import { adoptable, adoptAll } from './holder/adopt'; // P5 O16 M3
+import { adoptable, adoptAll, holdsEngine } from './holder/adopt'; // P5 O16 M3; panel fix wave 1: holdsEngine
+import { stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1
 import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
 import { readFileSync } from 'node:fs'; // P5 O16 M3
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O16 M3
@@ -281,8 +282,11 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
     log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
     removeHostFiles(hostsDir, entry);
   }
-  const held = adoptable(live).take.flatMap((entry) => (entry.appSessionId !== null && entry.child !== null ? [entry.appSessionId as AppSessionId] : []));
-  engine.table.holdForAdoption(held);
+  // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
+  // adoption reserves its row stops it through its session host (scalpel-1#1)
+  const holding = new Map(adoptable(live).take.filter(holdsEngine).map((entry) => [entry.appSessionId as AppSessionId, entry]));
+  const held = [...holding.keys()];
+  engine.table.holdForAdoption(held, (id) => stopHeldHost(holding.get(id)!, { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log }));
   void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
     for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
     if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);

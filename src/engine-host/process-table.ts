@@ -53,6 +53,7 @@ import { procStartOf as psProcStart } from './supervisor-files'; // E10
 import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
+import type { HeldStopOutcome } from './holder/stop-held'; // P5 O16 panel fix wave 1
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -135,6 +136,8 @@ export class ProcessTable {
   private readonly adopting = new Set<AppSessionId>(); // P5 O16 M3: rows held for an adoption under way
   private readonly adoptionReads = new Map<AppSessionId, Set<() => void>>(); // P5 O16 M4: the reads waiting on each hold
   private readonly adoptionsFailed = new Set<AppSessionId>(); // P5 O16 M4: held still, their adoption given up
+  private stopHeld: ((appSessionId: AppSessionId) => Promise<HeldStopOutcome>) | null = null; // P5 O16 panel fix wave 1
+  private readonly heldStops = new Map<AppSessionId, { outcome: Promise<HeldStopOutcome>; ended: boolean }>(); // and each one asked
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -310,7 +313,10 @@ export class ProcessTable {
   // P5 O16 M3 (D10): the rows of the session hosts an engine host found live at its start, held from before its first
   // client is answered until each adoption reserves its row or fails (`adoptionEnded`): each counts as a live session,
   // and a launch of its id is refused.
-  holdForAdoption(appSessionIds: readonly AppSessionId[]): void {
+  // P5 O16 panel fix wave 1 (scalpel-1#1): `stop`, how a stop-all ends a held session's engine (holder/stop-held.ts);
+  // none (a harness) leaves it to its adoption.
+  holdForAdoption(appSessionIds: readonly AppSessionId[], stop?: (appSessionId: AppSessionId) => Promise<HeldStopOutcome>): void {
+    if (stop) this.stopHeld = stop;
     for (const id of appSessionIds) this.adopting.add(id);
     this.rowsChanged();
     this.holdChanged();
@@ -709,6 +715,9 @@ export class ProcessTable {
   // session host instead, leaving it and its engine running for the successor to adopt; it counts in neither. Fix wave 1:
   // `stop` stops every row, one frozen for a handover included (its stop takes it back from the handover: Interfaces §D,
   // a stop-all stays deliberate).
+  // P5 O16 panel fix wave 1 (scalpel-1#1): `stop` stops every session held for adoption too, whose reservation the closed
+  // admission now refuses, through the hold's stop, and counts it as a row's (`gone`, in neither): one under way is
+  // awaited, never asked twice. `detach` leaves the holds, as it leaves the hosted rows, for the successor.
   async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
     this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
@@ -717,8 +726,10 @@ export class ProcessTable {
     // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped
     const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending) : [];
     const stopping = live.filter((session) => !detaching.includes(session));
-    const [results] = await Promise.all([
+    const held = opts.mode === 'detach' ? [] : this.stopHolds(); // P5 O16 panel fix wave 1
+    const [results, heldOutcomes] = await Promise.all([
       Promise.all(stopping.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) }))),
+      Promise.all(held),
       Promise.all(detaching.map((session) => session.detach('exit'))),
     ]);
     let stopped = 0;
@@ -727,6 +738,30 @@ export class ProcessTable {
       if (session.forcedKill) forced += 1;
       else stopped += 1;
     }
+    for (const outcome of heldOutcomes) {
+      if (outcome === 'stopped') stopped += 1;
+      if (outcome === 'forced') forced += 1;
+    }
     return { stopped, forced };
+  }
+
+  // P5 O16 panel fix wave 1 (scalpel-1#1): each held session's stop, started once; one that ended is not asked again.
+  private stopHolds(): Promise<HeldStopOutcome>[] {
+    const stop = this.stopHeld;
+    if (stop === null) return [];
+    return [...this.adopting].flatMap((id) => {
+      let held = this.heldStops.get(id);
+      if (held?.ended) return [];
+      if (held === undefined) {
+        const outcome = stop(id).catch((error: unknown): HeldStopOutcome => {
+          this.log(`${id}: held for adoption, not stopped: ${error instanceof Error ? error.message : String(error)}`);
+          return 'gone';
+        });
+        this.heldStops.set(id, (held = { outcome, ended: false }));
+        const entry = held;
+        void outcome.then(() => void (entry.ended = true));
+      }
+      return [held.outcome];
+    });
   }
 }

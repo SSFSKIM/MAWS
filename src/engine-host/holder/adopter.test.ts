@@ -137,7 +137,7 @@ describe('the launcher’s adoption', () => {
     let woken = false;
     void a.table.adoptionSettled(ID, 8_000)!.then(() => void (woken = true));
     const real = a.adopt(entry);
-    await expect(a.adopt(empty)).rejects.toThrow(/holds no engine/); // released first
+    expect(await a.adopt(empty)).toBeNull(); // released first
     await sleep(20);
     expect(woken).toBe(false);
     expect(a.table.adoptionSettled(ID, 8_000)).not.toBeNull(); // a later read still waits for the real adoption
@@ -148,6 +148,38 @@ describe('the launcher’s adoption', () => {
     expect(await real).toBe(ID);
     a.transports[0]!.exit(0);
     await a.table.get(ID)!.exited;
+  });
+
+  // P5 O16 panel fix wave 1 (sweep#3): the predecessor wrote `committed` before its fork and was lost before the child
+  // showed; the host forks it all the same, so the entry holds an engine (or is about to): adopted, never released
+  it('adopts a host whose launch committed with no child yet, through the host, never releasing it', async () => {
+    const { entry } = launched();
+    const committed: RosterEntry = { ...entry, state: 'committed', child: null };
+    const released: string[] = [];
+    const a = await adopter({ deps: {} });
+    a.deps.holder!.release = async (e) => void released.push(e.holderId);
+    a.table.holdForAdoption([ID]);
+    const adopting = a.adopt(committed);
+    await until(() => a.transports.length === 1 && a.table.get(ID) !== undefined, 'the reservation');
+    caughtUp(a.transports[0]!);
+    expect(await adopting).toBe(ID);
+    expect(released).toEqual([]);
+    expect(a.table.get(ID)!.status().pid).toBe(4101); // the child the host showed
+    a.transports[0]!.exit(0);
+    await a.table.get(ID)!.exited;
+  });
+
+  it('a committed host with no child yet whose adoption fails wakes its held reads', async () => {
+    const { entry } = launched();
+    const a = await adopter();
+    a.deps.holder!.adopt = async () => {
+      throw new Error('its spawn did not resolve in time');
+    };
+    a.table.holdForAdoption([ID]);
+    let woken = false;
+    void a.table.adoptionSettled(ID, 8_000)!.then(() => void (woken = true));
+    await expect(a.adopt({ ...entry, state: 'committed', child: null })).rejects.toThrow(/did not resolve/);
+    await until(() => woken, 'the reads woken at the failure');
   });
 
   it('a failure after the reservation is the adoption’s, counted by adoptAll', async () => {
