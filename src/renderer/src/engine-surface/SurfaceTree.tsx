@@ -9,6 +9,7 @@
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
 import { parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
+import { isAddress, machineOf } from '@shared/machine/address';
 import { Markdown, registeredActions } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
@@ -320,7 +321,8 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
       const { artifactId, at } = link;
       const actions = registeredActions();
       if (event.metaKey && actions.openArtifactTab) {
-        if (at) actions.openArtifactTab(artifactId, at);
+        if (isAddress(site.appSessionId)) actions.openArtifactTab(artifactId, at, machineOf(site.appSessionId)); // P5 O7 M5a: on the session's machine
+        else if (at) actions.openArtifactTab(artifactId, at);
         else actions.openArtifactTab(artifactId);
       } else if (at) actions.openArtifact(site.appSessionId, artifactId, undefined, at);
       else actions.openArtifact(site.appSessionId, artifactId);

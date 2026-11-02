@@ -5,14 +5,17 @@
 // transcript row's Open from a remote session opens the artifact on the session's machine; the library's Open a main tab
 // on the artifact's machine.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
-import { artifactMachineOf, resetArtifactMachines } from '../../artifacts/machines';
+import { artifactMachineOf, recordArtifactMachine, resetArtifactMachines } from '../../artifacts/machines';
+import { TranscriptLink } from '../../transcript/view/markdown/Link';
+import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext } from '../../transcript/view/context';
+import { MarkdownView } from '../code/viewer/MarkdownView';
 import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectArtifactTabMachines } from '../../artifacts/tab-machines';
 import { openArtifactTab } from '../../library/actions';
@@ -154,5 +157,33 @@ describe('opening an artifact of another machine', () => {
     offs.push(connectArtifactTabMachines());
     act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: DECK.id, machine: OTHER_MACHINE }));
     expect(artifactMachineOf(DECK.id)).toBe(OTHER_MACHINE);
+  });
+
+  // fix wave 1 (the task review): a link names only the artifact; its source (the row's session, the Markdown artifact
+  // it is written in) names the machine, so an artifact the page has not listed yet still opens on its machine
+  it('a ⌘-clicked artifact link in a remote session’s transcript opens on the session’s machine before any list', () => {
+    function InRemoteTranscript({ children }: { children: ReactNode }) {
+      return <TranscriptProvider value={{ ...useTranscriptContext(), storeKey: R, actions: { ...NO_ACTIONS, openArtifactTab } }}>{children}</TranscriptProvider>;
+    }
+    render(
+      <InRemoteTranscript>
+        <TranscriptLink href={`maws-artifact:${LOOSE.id}`}>Notes from the studio</TranscriptLink>
+      </InRemoteTranscript>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Notes from the studio' }), { metaKey: true });
+    expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'artifact')).toMatchObject([{ artifactId: LOOSE.id, machine: OTHER_MACHINE }]);
+    expect(artifactMachineOf(LOOSE.id)).toBe(OTHER_MACHINE);
+  });
+
+  it('a link in another machine’s Markdown artifact opens its unlisted target on that machine', () => {
+    recordArtifactMachine(DECK.id, OTHER_MACHINE, TEST_MACHINE);
+    setHostActions({ ...NO_ACTIONS, openArtifactTab });
+    try {
+      render(<MarkdownView entry={{ tabId: 'remote-md', appSessionId: null, artifact: { artifactId: DECK.id, revision: 1 }, text: `[Studio notes](maws-artifact:${LOOSE.id})` } as never} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Studio notes' }));
+    } finally {
+      setHostActions(NO_ACTIONS);
+    }
+    expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'artifact')).toMatchObject([{ artifactId: LOOSE.id, machine: OTHER_MACHINE }]);
   });
 });
