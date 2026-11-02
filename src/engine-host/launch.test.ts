@@ -510,4 +510,11 @@ describe('a launch under a session host (P5 O16 M2)', () => {
     expect(buildLaunch(spec(), captured, { ...OPTS, holder: { gateSocket: '/p/supervisor/gate.sock' } }).env.MAWS_HOLDER_SOCKET).toBe('/p/supervisor/gate.sock');
     expect(buildLaunch(spec(), captured, OPTS).env).not.toHaveProperty('MAWS_HOLDER_SOCKET');
   });
+
+  // P5 O17 M7 fix 4: the engine host takes MAWS_ENGINE_HOST_SPAWNER out of its own environment at start (spawner.ts);
+  // should a capture still hold it, a hosted launch carries none of it
+  it('never carries MAWS_ENGINE_HOST_SPAWNER into a hosted launch, whatever the capture holds', () => {
+    const captured = { ...CAPTURED, MAWS_ENGINE_HOST_SPAWNER: 'mawsd' };
+    expect(buildLaunch(spec(), captured, { ...OPTS, holder: { gateSocket: '/p/supervisor/gate.sock' } }).env).not.toHaveProperty('MAWS_ENGINE_HOST_SPAWNER');
+  });
 });

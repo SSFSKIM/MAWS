@@ -64,6 +64,7 @@ import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
 import { e2eHoldFor, registerBrowserWork } from './browser-work'; // P5 O17 M7; M8's scene 6: e2eHoldFor
+import { takeSpawnedByMawsd } from './spawner'; // P5 O17 M7 fix 4
 import { Gate } from './holder/gate'; // O16 M5
 import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
@@ -75,6 +76,8 @@ const HOST_VERSION = __MAWS_VERSION__;
 const userData = process.env.MAWS_USER_DATA;
 if (!userData) throw new Error('the engine host needs MAWS_USER_DATA (main forwards app.getPath("userData"))');
 // C3 end
+// P5 O17 M7 fix 4: whether `mawsd` spawned this host, taken out of the environment before anything captures or builds one
+const spawnedByMawsd = takeSpawnedByMawsd(process.env);
 
 // E10 start: the mode, decided at load. `process.parentPort` is Electron's, present only in a utility process; under
 // ELECTRON_RUN_AS_NODE it is undefined.
@@ -195,7 +198,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): browser work beside the attachment,
   // from the same declaring client; here, once the table exists, so its kept snapshot gives every row created after it
   // its verdict (a launch, an adoption), and the idle release's ask becomes host.browserIdle
-  registerBrowserWork(on, emit, client, table, { log: (line) => console.log(`[supervisor] ${line}`), hold: e2eHoldFor(process.env, 'MAWS_E2E_BROWSER_WORK_HOLD') });
+  registerBrowserWork(on, emit, client, table, { log: (line) => console.log(`[supervisor] ${line}`), hold: e2eHoldFor(process.env, 'MAWS_E2E_BROWSER_WORK_HOLD'), spawnedByMawsd });
   table.startSampling();
   // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
   const interested = table;

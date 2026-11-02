@@ -590,6 +590,35 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     await row.end();
   });
 
+  // P5 O17 M7 fix 4: the handover corner, closed by the host's own launch (mawsd's spawn names itself)
+  it('in a host mawsd spawned, an adoption is the lost link\'s from its reservation: main\'s direct link arriving first clears nothing and nothing is released past the idle time; a declaring client that tells none still clears', async () => {
+    const h = host({ spawnedByMawsd: true });
+    const row = await adopting(h); // a successor mawsd started, before mawsd reconnects
+    expect(row.reserved).toBe('unknown');
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    h.link(MAIN);
+    expect(row.session.status().work?.holds).toEqual({ browser: 'unknown' });
+    row.transport.push(STOP);
+    await vi.waitFor(() => expect(row.session.status().work?.unknown).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(2 * IDLE_MS);
+    expect(row.transport.requestsOf('end_session')).toEqual([]);
+    h.link(OLDER_MAWSD);
+    expect(row.session.status().work?.holds).toBeUndefined();
+    vi.useRealTimers();
+    await row.end();
+  });
+
+  it('in a host mawsd spawned, an adoption reserved while main\'s link already serves is the lost link\'s too', async () => {
+    const h = host({ spawnedByMawsd: true });
+    h.link(MAIN);
+    const row = await adopting(h);
+    expect(row.reserved).toBe('unknown');
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    await row.end();
+  });
+
   // P5 O17 M7 fix 3: the adoption's cause
   it('the embedded shape: an adoption before any capable client is the adoption\'s unknown; main\'s link clears it, and the row is released when idle', async () => {
     const h = host();

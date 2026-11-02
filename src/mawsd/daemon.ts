@@ -123,6 +123,7 @@ import { settingsPaths } from '@shared/settings/paths'; // P5 O5 M4: the export 
 import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
 import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
+import { ENGINE_HOST_SPAWNER_ENV } from '../engine-host/spawner'; // P5 O17 M7 fix 4
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
@@ -354,7 +355,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const parked = { 'engine-host': true, 'pty-host': true };
   const hosts = createHostSupervisor({
     hosts: {
-      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity } },
+      // P5 O17 M7 fix 4: the engine host's spawn names mawsd as its spawner (engine-host/spawner.ts); the pty host's does not
+      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity, env: () => ({ ...(options.detached?.env?.() ?? env), [ENGINE_HOST_SPAWNER_ENV]: 'mawsd' }) } },
       'pty-host': {
         modulePath: options.modules.ptyHost,
         serviceName: 'maws-pty-host',

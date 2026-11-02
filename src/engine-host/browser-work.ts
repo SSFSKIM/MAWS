@@ -21,10 +21,10 @@
 // lost link's (`unknown:lost`: a held row whose link ended, a row reserved on a telling link before its first snapshot,
 // an adoption once a telling client has been served) only by a declaring client that tells none (a rolled-back `mawsd`;
 // the per-profile lock makes another `mawsd` the only other declaring client): main's direct link while `mawsd` lives
-// says nothing of `mawsd`'s tabs. A telling client's first snapshot settles both. The engine host cannot tell from its
-// own launch whether `mawsd` or main spawned it (both spawn it alike: detached-transport.ts `spawnCandidate`), so an
-// adoption in a successor `mawsd` started reads `unknown:adopted` too, and main reaching that successor first clears it
-// (the residual corner, in the M7 report). Nothing here enters the checkpoint, journal, roster or session hosts (O16's
+// says nothing of `mawsd`'s tabs. A telling client's first snapshot settles both. Fix 4: in a host whose own launch
+// names `mawsd` as its spawner (spawner.ts), every adoption is a lost link's from its reservation, so main reaching a
+// successor `mawsd` started before `mawsd` reconnects clears nothing; a host main spawned (or a `mawsd` from before fix
+// 4, which has no fenced tab) keeps the adoption's. Nothing here enters the checkpoint, journal, roster or session hosts (O16's
 // condition, R4): the entry lives on the session's work state, published as its hold, which budget.ts `holdsWork` reads.
 //
 // The idle release (idle-release.ts) asks, through the table, for a due session held by its headless tab alone; that ask
@@ -49,6 +49,7 @@ export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'on
 export interface BrowserWorkOptions {
   log?: (line: string) => void;
   hold?: () => Promise<void>; // the e2e's hold on a snapshot's application (MAWS_E2E_BROWSER_WORK_HOLD)
+  spawnedByMawsd?: boolean; // fix 4: this host's own launch named `mawsd` as its spawner (spawner.ts)
 }
 
 // The kept set of every link whose snapshot named no session: shared, so an empty snapshot keeps nothing of its own
@@ -62,8 +63,9 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   // The connection whose snapshots are the kept set (null while the current link has applied none), and that set
   let applied: ClientRef | null = null;
   let kept: ReadonlySet<AppSessionId> = NONE;
-  // Fix 3: whether this host process has had a client that tells browser work; from then on an `unknown` is a lost link's
-  let capableSeen = false;
+  // Fix 3: whether this host process has had a client that tells browser work; from then on an `unknown` is a lost link's.
+  // Fix 4: true from the start in a host `mawsd` spawned, whose tabs may be open before its link to this host is
+  let capableSeen = opts.spawnedByMawsd === true;
   const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
 
   // The applying link's end, heard once whichever way it comes (the runtime's gone hook for a ready client, the

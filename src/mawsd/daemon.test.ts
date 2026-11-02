@@ -183,6 +183,16 @@ describe('the upstreams and machine.sock', () => {
     expect(options).toMatchObject({ argv0: 'maws-pty-host', env: expect.objectContaining({ MAWS_USER_DATA: scene.root }) });
   });
 
+  // P5 O17 M7 fix 4: the engine host reads from its own launch that mawsd spawned it (engine-host/spawner.ts)
+  it('spawns the engine host naming itself in MAWS_ENGINE_HOST_SPAWNER; the pty host\'s spawn carries no such variable', async () => {
+    await scene.start();
+    expect((await scene.app('engine-host')).welcomed()).toBe(true);
+    expect((await scene.app('pty-host')).welcomed()).toBe(true);
+    const spawnOf = (modulePath: string) => scene.spawn.mock.calls.find(([, args]) => (args as string[]).includes(modulePath))!;
+    expect(spawnOf(scene.profile.modulePath)[2]).toMatchObject({ argv0: 'maws-supervisor', env: expect.objectContaining({ MAWS_ENGINE_HOST_SPAWNER: 'mawsd', MAWS_USER_DATA: scene.root }) });
+    expect(spawnOf(scene.ptyProfile.modulePath)[2].env).not.toHaveProperty('MAWS_ENGINE_HOST_SPAWNER');
+  });
+
   it('serves daemon.status to several clients at once, with its local-only fields; the read wakes the engine host and never the pty host', async () => {
     const daemon = await scene.start();
     const [a, b] = await Promise.all([scene.app('machine'), scene.app('machine')]);
