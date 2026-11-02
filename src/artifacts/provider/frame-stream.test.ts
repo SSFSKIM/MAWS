@@ -22,4 +22,34 @@ describe('the document frame flow', () => {
     expect(new LengthPrefixed().push(prefix(DOC_FRAME_CAP + 1))).toBeNull();
     expect(new LengthPrefixed().push(prefix(0))).toBeNull();
   });
+
+  it('assembles a frame sent a byte at a time into one buffer: what it holds stays within the frame, and completing it is quick', () => {
+    const frame = randomBytes(256 * 1024);
+    const flow = lengthPrefixed(frame);
+    const assembler = new LengthPrefixed();
+    const started = Date.now();
+    const out: Uint8Array[] = [];
+    let most = 0;
+    for (let i = 0; i < flow.byteLength; i++) {
+      out.push(...assembler.push(flow.subarray(i, i + 1))!);
+      most = Math.max(most, assembler.held);
+    }
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(out).toHaveLength(1);
+    expect(Buffer.from(out[0]).equals(frame)).toBe(true);
+    expect(out[0].byteLength).toBe(frame.byteLength);
+    expect(most).toBeLessThanOrEqual(frame.byteLength);
+    expect(assembler.held).toBe(0);
+  });
+
+  it('gives back frames that start and end anywhere in the chunks, a prefix split across them included', () => {
+    const frames = [randomBytes(10), randomBytes(70_000), randomBytes(1), randomBytes(3)];
+    const flow = Buffer.concat(frames.map((frame) => lengthPrefixed(frame)));
+    for (const cut of [1, 2, 3, 5, 4096, 65_537]) {
+      const assembler = new LengthPrefixed();
+      const out: Uint8Array[] = [];
+      for (let at = 0; at < flow.byteLength; at += cut) out.push(...assembler.push(flow.subarray(at, at + cut))!);
+      expect([cut, out.map((frame) => Buffer.from(frame).toString('hex'))]).toEqual([cut, frames.map((frame) => frame.toString('hex'))]);
+    }
+  });
 });

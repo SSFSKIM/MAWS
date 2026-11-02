@@ -20,53 +20,64 @@ export function lengthPrefixed(frame: Uint8Array): Uint8Array {
   return out;
 }
 
-/** Frames out of a byte flow where each is prefixed by its u32be length, assembled across the chunks it comes in. */
+/** The storage a frame's assembly starts with, at most; it grows by doubling up to the frame's length. */
+const FIRST_STORAGE = 64 * 1024;
+
+/**
+ * Frames out of a byte flow where each is prefixed by its u32be length, assembled across the chunks it comes in. Each frame
+ * is copied into one buffer as its bytes come, grown by doubling up to the length its prefix declared, so however finely
+ * the flow is cut (a peer may send a byte a chunk) it holds one buffer and a 4-byte prefix, never a list of pieces.
+ */
 export class LengthPrefixed {
-  readonly #parts: Uint8Array[] = [];
-  #size = 0;
-  /** The frame being assembled's length, once its prefix is read. */
-  #length: number | null = null;
+  readonly #prefix = new Uint8Array(4);
+  #prefixRead = 0;
+  /** The frame being assembled: its declared length, its storage and how much of it is filled. */
+  #frame: { length: number; bytes: Uint8Array; filled: number } | null = null;
 
   constructor(private readonly max: number = DOCUMENT_FRAME_MAX) {}
 
-  /** The frames `chunk` completes, in order, each an exact-size copy; null once a length is 0 or past the most a frame may be. */
+  /** The bytes held for the frame being assembled (its storage, and a prefix read in part). */
+  get held(): number {
+    return this.#prefixRead + (this.#frame?.bytes.byteLength ?? 0);
+  }
+
+  /** The frames `chunk` completes, in order, each an exact-size buffer; null once a length is 0 or past the most a frame may be. */
   push(chunk: Uint8Array): Uint8Array[] | null {
-    this.#parts.push(chunk);
-    this.#size += chunk.byteLength;
     const frames: Uint8Array[] = [];
-    for (;;) {
-      if (this.#length === null) {
-        if (this.#size < 4) return frames;
-        const prefix = this.#read(4);
-        const length = new DataView(prefix.buffer, prefix.byteOffset, 4).getUint32(0);
+    let at = 0;
+    while (at < chunk.byteLength) {
+      const frame = this.#frame;
+      if (frame === null) {
+        const take = Math.min(4 - this.#prefixRead, chunk.byteLength - at);
+        this.#prefix.set(chunk.subarray(at, at + take), this.#prefixRead);
+        this.#prefixRead += take;
+        at += take;
+        if (this.#prefixRead < 4) break;
+        this.#prefixRead = 0;
+        const length = new DataView(this.#prefix.buffer).getUint32(0);
         if (length === 0 || length > this.max) return null;
-        this.#length = length;
+        this.#frame = { length, bytes: new Uint8Array(Math.min(length, FIRST_STORAGE)), filled: 0 };
+        continue;
       }
-      if (this.#size < this.#length) return frames;
-      frames.push(this.#read(this.#length));
-      this.#length = null;
+      const take = Math.min(frame.length - frame.filled, chunk.byteLength - at);
+      if (frame.filled + take > frame.bytes.byteLength) {
+        const grown = new Uint8Array(Math.min(frame.length, Math.max(frame.filled + take, frame.bytes.byteLength * 2)));
+        grown.set(frame.bytes.subarray(0, frame.filled));
+        frame.bytes = grown;
+      }
+      frame.bytes.set(chunk.subarray(at, at + take), frame.filled);
+      frame.filled += take;
+      at += take;
+      if (frame.filled === frame.length) {
+        frames.push(frame.bytes); // grown no further than the length: exactly the frame
+        this.#frame = null;
+      }
     }
+    return frames;
   }
 
   clear(): void {
-    this.#parts.length = 0;
-    this.#size = 0;
-    this.#length = null;
-  }
-
-  /** The next `n` bytes, taken off the parts (each byte copied once). */
-  #read(n: number): Uint8Array {
-    const out = new Uint8Array(n);
-    let at = 0;
-    while (at < n) {
-      const head = this.#parts[0];
-      const take = Math.min(head.byteLength, n - at);
-      out.set(head.subarray(0, take), at);
-      at += take;
-      if (take === head.byteLength) this.#parts.shift();
-      else this.#parts[0] = head.subarray(take);
-    }
-    this.#size -= n;
-    return out;
+    this.#prefixRead = 0;
+    this.#frame = null;
   }
 }
