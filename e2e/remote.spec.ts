@@ -1214,6 +1214,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(made.map((entry) => entry.tool), 'one notion-create-pages call on B').toEqual([NOTION_TOOL]);
       expect(JSON.stringify(made[0]!.arguments), 'the plan, as B exported it').toContain(TYPED_PLAN);
       console.log(`[e2e:remote] M5c: Send to Notion from A made one ${NOTION_TOOL} call on B`);
+      await sendTo.getByRole('button', { name: 'Done' }).click(); // the sheet is modal: M4's steps after this use the sidebar
+      await expect(sendTo).toHaveCount(0);
     });
 
     // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now:
