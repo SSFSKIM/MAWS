@@ -9,11 +9,11 @@
 //   2. the bench app: a scratch profile (the config's, kept between runs) launched with the mock keychain (MAWS_E2E),
 //      signed in from a pairing code read from its file and the file removed, the owner comparing the fingerprint and
 //      approving at their terminal; already signed in, the code is not needed and its file is removed unread;
-//   3. the machine (test/support/remote-bench.ts): the bench agent prepared, the scratch mawsd staged (on the VM, this
-//      checkout's source by git archive, installed from the registry, packed and started there; on the mini, this checkout's head bundle copied into the profile, then started by mini-ops under the
-//      MAWS binary and waited for), enrolled with the code file on the enroll's stdin
-//      alone and the file removed, the stub's session served and listed for the app's member by the harness's fake
-//      sminos on the scratch RL10 socket;
+//   3. the machine (test/support/remote-bench.ts): the bench agent prepared, the scratch mawsd staged (on the VM, the
+//      pack prepare-vm built there before the sitting, started; on the mini, this checkout's head bundle copied into the
+//      profile, then started by mini-ops under the MAWS binary and waited for), enrolled with the code file on the
+//      enroll's stdin alone and the file removed, the stub's session served and listed for the app's member by the
+//      harness's fake sminos on the scratch RL10 socket;
 //   4. per carrier, a fresh launch of the app over its profile: direct (the tailnet), then relay
 //      (MAWS_E2E_REMOTE_CARRIER=relay refuses the direct dial, so the link comes up through the hub): the clock's start
 //      exchanges, open to first row, 3 turns of 300 deltas sent from the pane (each frame and each write on the wall
@@ -25,11 +25,14 @@
 // main's output out of the test's evidence (e2e/support/process-evidence.mjs's captureAllowed), and Playwright's tracing
 // and screenshots must be off, so the pairing code is in no artifact.
 //
-// Inputs: MAWS_REMOTE_BENCH, the path of a JSON file `{ app: { profile, pairingFile? }, machines: [BenchMachine…] }`
-// (test/support/remote-bench.ts's `BenchMachine`: name, transport, stage, codeFile, profile, label, port, head, commit,
-// node, quietUtc?, runtime?, stageHead?), and MAWS_REMOTE_BENCH_MACHINE, the name of the machine this run benches.
+// Inputs: MAWS_REMOTE_BENCH, the path of a JSON file `{ app: { scratchRoot, profile, pairingFile? }, machines:
+// [BenchMachine…] }` (test/support/remote-bench.ts's `BenchMachine`: name, transport, stage, codeFile, scratchRoot,
+// profile, label, port, head, commit, node, quietUtc?, runtime?, stageHead?), and MAWS_REMOTE_BENCH_MACHINE, the name of
+// the machine this run benches. Two more modes of the same file: MAWS_REMOTE_BENCH_PREPARE=1, prepare-vm before the
+// sitting (this checkout's source at the commit installed and packed on the VM, once per commit), and
+// MAWS_REMOTE_BENCH_REMOVE=1, the machine's scratch profile removed once the bench is done.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { loadavg, tmpdir } from 'node:os';
+import { homedir, loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { build } from 'esbuild';
@@ -38,7 +41,7 @@ import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
-import { BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
+import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
 import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { cleanupAll, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, type Written } from './support/remote-latency-page';
@@ -48,11 +51,13 @@ test.skip(process.env.MAWS_REMOTE_LATENCY_LIVE !== '1', 'the live remote bench r
 test.describe.configure({ timeout: 150 * 60_000 });
 
 const REMOVE = process.env.MAWS_REMOTE_BENCH_REMOVE === '1';
+const PREPARE = process.env.MAWS_REMOTE_BENCH_PREPARE === '1';
 const SIGN_IN_MS = 15 * 60_000; // the owner's browser step and approval
 const say = (line: string) => console.log(line);
 
 interface LiveConfig {
-  app: { profile: string; pairingFile?: string };
+  /** the bench app's profile on this Mac, strictly under its scratch root (launchMaws writes it and empties its claude-config) */
+  app: { scratchRoot: string; profile: string; pairingFile?: string };
   machines: BenchMachine[];
 }
 function benchMachine(): { config: LiveConfig; machine: BenchMachine } {
@@ -192,7 +197,7 @@ async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: Ma
 }
 
 test('remote latency, live: delta to frame across two clocks, round trip and open of a lane B session on a scratch bench machine, per carrier, against the same run’s local numbers (acceptance 3)', async () => {
-  test.skip(REMOVE, 'MAWS_REMOTE_BENCH_REMOVE=1 removes the scratch profile alone');
+  test.skip(REMOVE || PREPARE, 'MAWS_REMOTE_BENCH_REMOVE=1 removes the scratch profile alone, MAWS_REMOTE_BENCH_PREPARE=1 prepares the VM alone');
   const use = test.info().project.use as { trace?: unknown; screenshot?: unknown; video?: unknown };
   for (const what of ['trace', 'screenshot', 'video'] as const) {
     const setting = use[what];
@@ -204,6 +209,8 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
   let terminalLoad: number | undefined;
   const reasons: string[] = [];
+  const appProblems = appProfileProblems(config.app.profile, config.app.scratchRoot, homedir());
+  expect(appProblems, 'the bench app’s profile is a scratch profile').toEqual([]);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rll-')));
   mkdirSync(config.app.profile, { recursive: true });
   const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
@@ -225,13 +232,10 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
 
     // 3. The machine: staged, enrolled, its session served and listed for the app's member.
     await bench.prepare(await bundleAgent(root));
-    // the machine's head from this checkout: the VM's source by git archive of the commit, the mini's head bundle by
-    // default (this checkout's HEAD must be the commit), nothing for a mini whose head mini-ops put there
-    const archive =
-      machine.stage === 'runner' ? await buildSourceArchive(REPO_ROOT, join(root, 'source'), processRunner(), machine.commit)
-      : (machine.stageHead ?? 'copy') === 'copy' ? await buildHeadBundle(REPO_ROOT, join(root, 'head-bundle'), processRunner(), machine.commit)
-      : undefined;
-    await bench.stage(archive);
+    // the machine's head: the VM's prepared before the sitting (MAWS_REMOTE_BENCH_PREPARE=1, below); the mini's head
+    // bundle from this checkout by default (its HEAD must be the commit), nothing for a mini whose head mini-ops put there
+    const copied = machine.stage === 'mini-ops' && (machine.stageHead ?? 'copy') === 'copy';
+    await bench.stage(copied ? await buildHeadBundle(REPO_ROOT, join(root, 'head-bundle'), processRunner(), machine.commit) : undefined);
     await bench.enroll();
     bench.serve((line) => stream.onLine(line));
     await expect.poll(() => stream.failed ?? (stream.ready === null ? null : 'ready'), { timeout: 5 * 60_000, message: 'the bench agent’s session ready' }).toBe('ready');
@@ -303,6 +307,19 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   say(`[bench] ${machine.name}: done; the scratch profile is kept until the bench is done (MAWS_REMOTE_BENCH_REMOVE=1), the app's device and the machine revoked by the owner (${member === undefined ? 'no member read' : 'admin machine drop <name> --revoke'})`);
   expect(all, 'the run is valid').toEqual([]);
   expect(misses, 'every carrier within acceptance 3’s bounds of the same run’s local numbers, or inconclusive').toEqual([]);
+});
+
+test('remote latency, live: prepare-vm, the VM’s head installed and packed at the commit from this checkout’s source, before the sitting', async () => {
+  test.skip(!PREPARE, 'runs under MAWS_REMOTE_BENCH_PREPARE=1, before the sitting');
+  test.setTimeout(75 * 60_000);
+  const { machine } = benchMachine();
+  const out = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rll-prep-')));
+  try {
+    const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
+    await bench.prepareVm(await buildSourceArchive(REPO_ROOT, out, processRunner(), machine.commit));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });
 
 test('remote latency, live: the bench machine’s scratch profile removed once the bench is done, refused while a bench process lives', async () => {
