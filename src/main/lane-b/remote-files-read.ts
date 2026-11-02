@@ -13,6 +13,8 @@
 // - With `hash` (the whole file's, E5: the chunk's bytes are always the hashed file's), every page asks it: pages that
 //   answer different hashes read a file that changed under them, so the read starts again, up to REMOTE_READ_TRIES
 //   times, then answers `internal`. The whole file is hashed on every page (up to 8 MiB each), the price of that check.
+// - P5 O7 M5a: `library.read` (a library item's stored file, or with `export` an export's) answers as `files.read` does,
+//   and is read the same way (`readInPages`): the viewer's read of a File artifact, an open copy's and a Save As's.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
@@ -30,21 +32,28 @@ export const REMOTE_READ_TRIES = 3;
 type Result = CommandResult<CommandName>;
 const tooLarge = (result: Result) => !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'too-large';
 
-export async function readFileInPages(link: RemoteLink, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
-  const whole = await dispatchOverLink(link, 'files.read', input);
+/** The reads answered as `files.read` answers: a chunk of a file, its encoding, size and (asked) hash. */
+export type PagedRead = 'files.read' | 'library.read';
+
+export function readFileInPages(link: RemoteLink, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
+  return readInPages(link, 'files.read', input, log);
+}
+
+export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
+  const whole = await dispatchOverLink(link, name, input);
   if (!tooLarge(whole)) return whole;
-  const said = `lane B: files.read of ${link.name} ${String(input.path)}`;
+  const said = `lane B: ${name} of ${link.name} ${String(input.path ?? input.artifactId)}`;
   log(`${said}: too large for the channel in one answer; read in pages`);
   for (let tries = 1; ; tries++) {
-    const read = await readOnce(link, input);
+    const read = await readOnce(link, name, input);
     if (read !== 'changed') return read;
-    if (tries >= REMOTE_READ_TRIES) return { ok: false, error: ipcError('internal', `files.read: ${String(input.path)} kept changing on machine ${link.name} while it was read`) };
+    if (tries >= REMOTE_READ_TRIES) return { ok: false, error: ipcError('internal', `${name}: ${String(input.path ?? input.artifactId)} kept changing on machine ${link.name} while it was read`) };
     log(`${said}: the file changed between its pages; read again`);
   }
 }
 
 /** The range asked, in pages; `changed` when the pages answered different hashes. */
-async function readOnce(link: RemoteLink, input: Record<string, unknown>): Promise<Result | 'changed'> {
+async function readOnce(link: RemoteLink, name: PagedRead, input: Record<string, unknown>): Promise<Result | 'changed'> {
   const start = typeof input.offset === 'number' ? input.offset : 0;
   const asked = typeof input.length === 'number' ? input.length : FILES_READ_DEFAULT_LENGTH;
   const pages: FilesReadOutput[] = [];
@@ -52,7 +61,7 @@ async function readOnce(link: RemoteLink, input: Record<string, unknown>): Promi
   let size = REMOTE_READ_PAGE_BYTES;
   for (;;) {
     const left = start + asked - at;
-    const read = await dispatchOverLink(link, 'files.read', { ...input, offset: at, length: Math.min(size, left) });
+    const read = await dispatchOverLink(link, name, { ...input, offset: at, length: Math.min(size, left) });
     if (tooLarge(read) && size > REMOTE_READ_PAGE_MIN) {
       size = Math.max(REMOTE_READ_PAGE_MIN, Math.floor(size / 2));
       continue;

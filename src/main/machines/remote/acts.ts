@@ -25,9 +25,15 @@
 //   not list in `h2` (capabilities.ts) is refused `not-offered` while no copy of it went out, and left `unknown
 //   not-offered` once one did (it can't be asked after); and an act whose sealed form would be over the channel's message
 //   limit is refused `too-large`, checked as built (before a person is asked to confirm it) and as signed.
+// - P5 O7 M5a: an act's `args` that carry bytes (./bytes.ts) are sealed in json-bytes' tagged form, and go only to a peer
+//   that lists `rl2.bytes` (else `not-offered`, as an executor it doesn't read); an act may name a capability its peer must
+//   list (`requires`: an artifact write's `rl2.artifacts`), judged the same way at each transmission; and a result from a
+//   peer that lists `rl2.bytes` is read back from the tagged form.
 import { base64urlEncode, isAction, MESSAGE_MAX_BYTES, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
+import { fromWire, toWire } from '@shared/host/json-bytes';
+import { BYTES_CAPABILITY, needsTagging } from './bytes';
 import { peerTakesExecutor } from './capabilities';
 import type { RemoteTiming } from './timing';
 
@@ -46,6 +52,8 @@ export interface ActRequest {
   executor?: Executor;
   /** Epoch ms past which no copy goes out or is resealed, inside ACT_FRESH_MS (P5 O7 M2: the caller's bound). */
   sendBy?: number;
+  /** P5 O7 M5a: a capability the peer must list for the act to go (an artifact write's `rl2.artifacts`); `not-offered` else. */
+  requires?: string;
 }
 /** waiting: not yet on a channel; unknown: lost track, querying. */
 export type ActProgress = 'waiting' | 'sent' | 'accepted' | 'unknown';
@@ -83,6 +91,8 @@ type Entry = {
   opId: string;
   opCreated: string;
   executor: Executor;
+  /** P5 O7 M5a: what the peer must list beyond the executor's capability: `requires`, and `rl2.bytes` for tagged args. */
+  needs: string[];
   mode: 'required' | 'if-asked' | 'never';
   /** The act as built, or as signed; a send stamps `created` (and a reseal a fresh nonce) on an unsigned one. */
   action: Action;
@@ -147,6 +157,7 @@ export class ActTable {
     const createdAt = now();
     const opCreated = new Date(createdAt).toISOString();
     const signedIn = this.#deps.signedIn();
+    const tagged = needsTagging(request.args);
     const action = {
       v: 1,
       org: signedIn?.identity.org ?? '',
@@ -157,7 +168,7 @@ export class ActTable {
       action: request.action,
       ...(request.session === undefined ? {} : { session: request.session }),
       ...(request.context === undefined ? {} : { context: request.context }),
-      args: request.args,
+      args: tagged ? toWire(request.args) : request.args,
       ...(request.requestDigest === undefined ? {} : { requestDigest: request.requestDigest }),
       nonce: random(NONCE_BYTES),
       created: opCreated,
@@ -166,6 +177,7 @@ export class ActTable {
       opId,
       opCreated,
       executor: request.executor ?? executorOf(request.action),
+      needs: [...(request.requires === undefined ? [] : [request.requires]), ...(tagged ? [BYTES_CAPABILITY] : [])],
       mode: request.stepUp ?? 'if-asked',
       action,
       signed: false,
@@ -229,6 +241,7 @@ export class ActTable {
       opId: op.opId,
       opCreated: op.opCreated,
       executor: op.executor,
+      needs: [],
       mode: 'never',
       action: null as unknown as Action, // never sent: `signed`, `outstanding` and `acked` keep every path to a query
       signed: true,
@@ -313,8 +326,14 @@ export class ActTable {
     const entry = this.#entries.get(message.opId);
     if (entry === undefined || entry.settled) return;
     if (message.t === 'ack') return this.#ack(entry, message.state === 'accepted' ? null : message.reason);
-    if (message.t === 'done') return this.#done(entry, message.outcome);
-    this.#queried(entry, message.state, message.outcome, message.reason);
+    if (message.t === 'done') return this.#done(entry, this.#read(message.outcome));
+    this.#queried(entry, message.state, this.#read(message.outcome), message.reason);
+  }
+
+  /** P5 O7 M5a: an outcome's `result` as the executing side meant it: read back from the tagged form when the peer tags. */
+  #read(outcome: unknown): unknown {
+    if (!isObject(outcome) || !('result' in outcome) || this.#deps.peerCapabilities()?.includes(BYTES_CAPABILITY) !== true) return outcome;
+    return { ...outcome, result: fromWire(outcome.result) };
   }
 
   #ack(entry: Entry, refusal: string | null): void {
@@ -421,7 +440,7 @@ export class ActTable {
   /** Whether the current channel's peer reads `entry`'s executor; when it doesn't, the act settles (see the header). */
   #offered(entry: Entry): boolean {
     const capabilities = this.#deps.peerCapabilities();
-    if (capabilities === null || peerTakesExecutor(entry.executor, capabilities)) return true;
+    if (capabilities === null || (peerTakesExecutor(entry.executor, capabilities) && entry.needs.every((needed) => capabilities.includes(needed)))) return true;
     this.#settle(entry, entry.outstanding ? { state: 'unknown', reason: 'not-offered' } : { state: 'refused', reason: 'not-offered' });
     return false;
   }

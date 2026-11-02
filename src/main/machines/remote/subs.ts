@@ -29,9 +29,9 @@ export interface SessionSubscribeRequest {
   /** P5 O7 M4: the session's `checkout` feed rather than its stream. */
   feed?: 'checkout';
 }
-/** P5 O7 M6: the machine's `attention` feed, which names no session. */
+/** P5 O7 M6: the machine's `attention` feed, which names no session; M5a's `artifacts` feed (behind `rl2.artifacts`) the same. */
 export interface MachineFeedRequest {
-  feed: 'attention';
+  feed: 'attention' | 'artifacts';
   session?: undefined;
   view?: undefined;
   cursor?: undefined;
@@ -209,11 +209,12 @@ export class SubTable {
     const credit = this.#deps.timing.SUB_INITIAL_CREDIT;
     if (request.feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), cursor: entry.cursor, credit });
     // What the peer could not read never goes: the feed ends here, as the endpoint would end a name it does not offer.
-    if (this.#deps.peerCapabilities()?.includes('rl2.feeds') !== true) {
+    const peers = this.#deps.peerCapabilities();
+    if (peers?.includes('rl2.feeds') !== true || (request.feed === 'artifacts' && !peers.includes('rl2.artifacts'))) {
       this.#remove(entry);
       return void queueMicrotask(() => entry.sink.ended('not-offered'));
     }
-    if (request.feed === 'attention') return void this.#deps.send({ t: 'sub', sub: entry.id, feed: 'attention', cursor: null, credit });
+    if (request.session === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, feed: request.feed, cursor: null, credit });
     this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, feed: request.feed, cursor: null, credit });
   }
 

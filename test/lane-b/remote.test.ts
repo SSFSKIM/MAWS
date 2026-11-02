@@ -38,6 +38,9 @@ import { dialDirect } from '../../src/main/machines/remote/carriers';
 import { dispatchOverLink } from '../../src/main/machines/remote/dispatch';
 import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remote/link';
 import type { RemoteTiming } from '../../src/main/machines/remote/timing';
+import type { CommandBudgets } from '../../src/main/machines/budgets';
+import { COMMAND_BUDGETS_MS } from '../../src/services/command-budgets';
+import { validateCommandOutput } from '@shared/ipc/validate';
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { OFFERS } from '../../src/endpoint/offers';
 import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
@@ -238,7 +241,7 @@ type Device = {
 };
 type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
-type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B' };
+type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B'; budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */ };
 /** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
 type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions'>; ring?: number };
 
@@ -309,6 +312,7 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       throw new Error('no hub');
     },
     timing: { DIRECT_BUCKET: OPEN.perSource, ...options.link },
+    ...(options.budgets !== undefined && { budgets: options.budgets }),
     log: () => {},
   });
   cleanups.push(() => link.close());
@@ -1588,3 +1592,108 @@ describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 },
   });
 });
 
+
+// P5 O7 M5a (M5a's "Proves" for this file): a remote session's artifacts through the real channel and the real endpoint
+// over the harness's artifact store: listed and read, written once across a lost answer, exported within its command's
+// budget, its session's capabilities read and followed, and bytes both ways in the tagged form (never a fake dispatch).
+describe('artifacts across machines (P5 O7 M5a)', { timeout: 30_000 }, () => {
+  const ID = '9a1f0c4e-6b2d-4c8a-9e1f-2b3c4d5e6f70';
+  const STATE = Uint8Array.from({ length: 300 }, (_, i) => (i * 7) % 256);
+
+  it('lists a remote session’s artifacts, reads one and its text, and records each on its machine', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    const row = l.host.artifact(ID, ['app-1'], { kind: 'file', title: 'notes' });
+    l.host.reads.set('artifacts.list', () => ({ artifacts: [row] }));
+    l.f.spine.handle('library.read', () => ({ encoding: 'utf8', content: 'remote notes', bytes: 12, offset: 0, length: 12, truncated: false, mime: 'text/plain', hash: null, utf8: null }));
+    expect(await l.a.cmd('artifacts.list', { filter: { appSessionId: 'app-1' } })).toEqual({ artifacts: [row] });
+    expect(await l.a.cmd('artifacts.get', { artifactId: ID })).toEqual({ artifact: row });
+    expect(await l.a.cmd('library.read', { artifactId: ID })).toMatchObject({ encoding: 'utf8', content: 'remote notes' });
+  });
+
+  it('renames an artifact across a forced drop that lost its answer, applied once; the feed’s reopening says the lost change’s re-read', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    const held = l.host.artifact(ID, ['app-1']);
+    l.a.roster(); // the machine's artifacts feed opens on the roster's link, its opening a re-read
+    await until(() => l.a.emitted.some((e) => e.name === 'artifacts.resync'), 'the artifacts feed open');
+    let cut = 0;
+    l.host.handlers.set('artifacts.update', (input) => {
+      const { artifactId, title } = input as { artifactId: string; title: string };
+      const row = l.host.artifacts.get(artifactId)!.row;
+      Object.assign(row, { title, revision: (row.revision as number) + 1 });
+      l.host.emitHost('artifacts.changed', { artifactId, kind: row.kind, revision: row.revision, change: 'updated' });
+      if (cut++ === 0) {
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        setTimeout(() => carrier.close('dropped'), 20);
+      }
+      return { artifact: row };
+    });
+    const answer = (await l.a.cmd('artifacts.update', { artifactId: ID, title: 'Renamed' })) as { artifact: Record<string, unknown> };
+    expect(answer.artifact).toMatchObject({ id: ID, title: 'Renamed' });
+    expect(l.a.carriers.length).toBeGreaterThan(1);
+    expect(l.host.artifactRuns.filter((run) => run.name === 'artifacts.update')).toHaveLength(1);
+    expect(held.title).toBe('Renamed');
+    // the change went out on the channel whose answers were lost: the feed's opening on the next is a re-read
+    await until(() => l.a.emitted.filter((e) => e.name === 'artifacts.resync').length >= 2, 'the re-read said from the machine at the reopening');
+    l.host.emitHost('artifacts.changed', { artifactId: ID, kind: 'document', revision: 9, change: 'updated' });
+    await until(() => l.a.emitted.some((e) => e.name === 'artifacts.changed' && e.payload.revision === 9), 'a later change said from the machine');
+  });
+
+  it('answers an export that takes longer than the link’s default deadline within its command’s budget', async () => {
+    const l = await lab({ link: { CALL_TIMEOUT_MS: 500 }, budgets: COMMAND_BUDGETS_MS });
+    l.host.artifact(ID, ['app-1']);
+    l.f.spine.handle('artifacts.export', async () => (await sleep(1500), { path: `/m/artifacts/${ID}/exports/3-pdf.pdf`, revision: 3 }));
+    expect(await l.a.cmd('artifacts.export', { artifactId: ID, format: 'pdf' })).toEqual({ path: `/m/artifacts/${ID}/exports/3-pdf.pdf`, revision: 3 });
+    // an unbudgeted read held as long is given up on at the default
+    l.f.spine.handle('library.spaces', async () => (await sleep(1500), { spaces: [] }));
+    expect(await l.a.route('library.spaces', undefined)).toMatchObject({ ok: false, error: { code: 'timeout' } });
+  });
+
+  it('reads a remote session’s capabilities and follows their change on its checkout feed', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    l.f.spine.handle('session.capabilities', () => ({ browser: { available: false, reason: 'no tab engine on mini' } }));
+    expect(await l.a.cmd('session.capabilities', { appSessionId: 'app-1' })).toEqual({ browser: { available: false, reason: 'no tab engine on mini' } });
+    await opened(l.a, 'app-1', 'launch-1');
+    await until(() => l.host.calls.length > 0 && l.a.link.state() === 'up', 'the checkout feed');
+    await sleep(100);
+    l.host.emitMachine('session.capabilitiesChanged', { appSessionId: 'app-1', capabilities: { browser: { available: true } } });
+    await until(() => of(l.a, 'session.capabilitiesChanged', 'app-1').length > 0, 'the change on the checkout feed');
+    expect(of(l.a, 'session.capabilitiesChanged', 'app-1')).toEqual([{ appSessionId: 'app-1', capabilities: { browser: { available: true } } }]);
+  });
+
+  it('carries bytes both ways tagged: a version’s state read as a Uint8Array, a 64 KiB asset sealed, verified and written as sent', async () => {
+    const l = await lab();
+    l.host.artifact(ID, ['app-1']);
+    l.host.reads.set('artifacts.versionState', () => ({ bytes: STATE }));
+    const state = (await l.a.cmd('artifacts.versionState', { artifactId: ID, versionId: 1 })) as { bytes: unknown };
+    expect(state.bytes).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(state.bytes as Uint8Array).equals(Buffer.from(STATE))).toBe(true);
+    expect(validateCommandOutput('artifacts.versionState', state)).toMatchObject({ ok: true }); // the renderer's schema reads it
+
+    const asset = new Uint8Array(randomBytes(64 * 1024));
+    l.host.handlers.set('artifacts.uploadAsset', () => ({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' }));
+    expect(await l.a.cmd('artifacts.uploadAsset', { artifactId: ID, name: 'logo.png', mime: 'image/png', bytes: asset })).toEqual({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' });
+    const [run] = l.host.artifactRuns.filter((r) => r.name === 'artifacts.uploadAsset');
+    expect((run!.input as { bytes: unknown }).bytes).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from((run!.input as { bytes: Uint8Array }).bytes).equals(Buffer.from(asset))).toBe(true);
+  });
+
+  it('refuses both locally `not-offered` against an endpoint that lists no `rl2.bytes`, sending neither', async () => {
+    endpointWithout('rl2.bytes');
+    const l = await lab();
+    l.host.artifact(ID, ['app-1']);
+    l.host.reads.set('artifacts.versionState', () => ({ bytes: STATE }));
+    l.host.handlers.set('artifacts.uploadAsset', () => ({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' }));
+    expect(l.a.link.peerCapabilities()).not.toContain('rl2.bytes');
+    expect(await l.a.route('artifacts.versionState', { artifactId: ID, versionId: 1 })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(await l.a.route('artifacts.uploadAsset', { artifactId: ID, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(randomBytes(64 * 1024)) })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(l.host.calls.filter((c) => c.name === 'artifacts.versionState' || c.name === 'host.artifactOp')).toEqual([]);
+    expect(l.host.artifactRuns).toEqual([]);
+  });
+});

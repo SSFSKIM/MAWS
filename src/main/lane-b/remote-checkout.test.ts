@@ -85,6 +85,17 @@ describe('the checkout feed', () => {
   });
 
   // O5's landing audit: the record is how an idle stream learns its session runs again, without a try on the machine.
+  // P5 O7 M5a ("Events that cross"): the session's capabilities follow on its own feed, as locally
+  it('tells its own session’s `session.capabilitiesChanged`, never another’s', () => {
+    const l = lab();
+    l.checkout.open(l.link, APP);
+    l.opened();
+    const at = { epoch: 'checkout:boot', seq: 1 };
+    l.feed().sink.event(at, { name: 'session.capabilitiesChanged', payload: { appSessionId: 'app-2', capabilities: { browser: { available: true } } } });
+    l.feed().sink.event({ ...at, seq: 2 }, { name: 'session.capabilitiesChanged', payload: { appSessionId: APP, capabilities: { browser: { available: false, reason: 'no tab engine' } } } });
+    expect(l.of('session.capabilitiesChanged')).toEqual([{ appSessionId: APP, capabilities: { browser: { available: false, reason: 'no tab engine' } } }]);
+  });
+
   it('hands its session’s record to the session rather than telling it, says each opening, and follows while open', async () => {
     const l = lab();
     expect(l.checkout.follows(MINI, APP)).toBe(false);

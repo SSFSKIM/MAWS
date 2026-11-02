@@ -83,6 +83,7 @@
   "pty.openLink",
   "remote.forward.close",
   "remote.forward.open",
+  "remote.openCopy",
   "voice.cancel",
   "voice.openPrivacySettings",
   "voice.start",

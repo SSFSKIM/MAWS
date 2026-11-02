@@ -45,8 +45,11 @@ import type { RemoteLink, Subscription } from '../machines/remote/link';
 
 /** The watches main keeps for a remote session: a page's call goes on to the machine, and is remembered once it answers. */
 export const WATCH_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>(['git.watch', 'git.unwatch', 'files.watch', 'files.unwatch']);
-/** What a checkout feed carries that is told as the machine's own (§R); its `session.changed` goes to the session. */
-export const FEED_EVENTS: ReadonlySet<string> = new Set(['files.changed', 'scm.remote.output', 'git.changed']);
+/**
+ * What a checkout feed carries that is told as the machine's own (§R); its `session.changed` goes to the session. P5 O7
+ * M5a: the session's `session.capabilitiesChanged` (the Browser tool's reader and the pane's tools hear it as locally).
+ */
+export const FEED_EVENTS: ReadonlySet<string> = new Set(['files.changed', 'scm.remote.output', 'git.changed', 'session.capabilitiesChanged']);
 
 export interface RemoteCheckoutTiming {
   /** A feed ended `unavailable` is opened again after this, doubling to the cap; `behind` at once. */
@@ -241,6 +244,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
           if (!FEED_EVENTS.has(body.name)) return;
           const read = events.readEventPayload(body.name as EventName, body.payload);
           if (!read.ok) return deps.log(`lane B: ${link.name}/${app}: a ${body.name} on the checkout feed doesn't read; left out`);
+          if (body.name === 'session.capabilitiesChanged' && (read.value as { appSessionId: string }).appSessionId !== app) return; // its own session's only
           deps.emit(link.machine, body.name as EventName, read.value as never);
         },
         paused: () => {},

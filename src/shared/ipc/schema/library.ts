@@ -96,7 +96,7 @@ const ContentAt = z.strictObject({ artifactId: Id, revision: Seq.optional() });
 // M5b: what Save as… copies out of MAWS: a file `artifacts.export` wrote (its revision and format name it under the
 // store's directory), or a byte kind's stored file at a revision (a File artifact's "Save a copy…").
 // An export by what names its file (`artifactExportName`): the revision and format, and an own file's `exportId`.
-const ExportAtSchema = z.strictObject({ revision: Seq, format: z.enum(ARTIFACT_EXPORT_FORMATS), exportId: z.uuid().optional() /* P3-E (E1 M5; Decision Log 33): a design export's own file */ });
+export const ExportAtSchema = z.strictObject({ revision: Seq, format: z.enum(ARTIFACT_EXPORT_FORMATS), exportId: z.uuid().optional() /* P3-E (E1 M5; Decision Log 33): a design export's own file */ });
 export const LibrarySaveSourceSchema = z.union([
   z.strictObject({ export: ExportAtSchema }),
   z.strictObject({ content: z.strictObject({ revision: Seq.optional() }) }),
