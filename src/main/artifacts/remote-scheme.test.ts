@@ -96,7 +96,7 @@ const scratch = (prefix: string) => {
  * main's chain as startArtifacts installs it, with the remote responder over the mini's link. `asked`: in order, each
  * engine host read of this Mac (`local:<name> <id>`) and each stream the link sent (`stream <url>`).
  */
-function scene(options: { openTimeoutMs?: number; peers?: string[] } = {}) {
+function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: string[] } = {}) {
   const root = scratch('maws-remote-scheme-');
   const file = join(root, 'page.html');
   writeFileSync(file, '<p>from main</p>');
@@ -112,7 +112,7 @@ function scene(options: { openTimeoutMs?: number; peers?: string[] } = {}) {
     return { ok: false, error: { code: 'invalid_input', message: 'no such artifact' } };
   });
   const logged: string[] = [];
-  const scheme = createRemoteScheme({ machines, remote: (machine) => (machine === MINI ? link : null), ...(options.openTimeoutMs !== undefined && { openTimeoutMs: options.openTimeoutMs }), log: (line) => void logged.push(line) });
+  const scheme = createRemoteScheme({ machines, remote: (machine) => (machine === MINI ? link : null), ...(options.openTimeoutMs !== undefined && { openTimeoutMs: options.openTimeoutMs }), ...(options.idleMs !== undefined && { idleMs: options.idleMs }), log: (line) => void logged.push(line) });
   stops.push(() => scheme.stop());
   sessions.default.protocol.handle.mockClear();
   const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: () => null };
@@ -336,6 +336,88 @@ describe('the cap and the bounds', () => {
     const next = s.handler(new Request(url(PAGE)));
     s.link.answer(await s.opened(1), 200, {}, ['next']);
     expect(await (await next).text()).toBe('next');
+  });
+
+  // The architect's ruling on b3's review (2026-11-02): a paused media pane holds its stream under spent credit; while
+  // another request waits, a stream the frame hasn't read for the idle bound gives its slot up, its body ended normally,
+  // and the media element asks again with a Range when it plays on.
+  it('lets the oldest idle stream give its slot to a waiting request, its body ended normally with what came', async () => {
+    const s = scene({ idleMs: 60 });
+    const media = Array.from({ length: HTTP_STREAMS_PER_LINK }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.mp4`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
+    for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) {
+      s.link.answer(s.link.opens()[n]!.id, 206, { 'content-length': '100', 'content-range': `bytes 0-99/1000` }, ['0123'], '');
+      readers.push((await media[n]!).body!.getReader());
+      await readers[n]!.read(); // each played its first bytes, then paused
+      await new Promise((resolve) => setTimeout(resolve, 5)); // the first paused earliest
+    }
+    const next = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    const first = s.link.opens()[0]!.id;
+    expect(s.link.of('streamClose', first)).toEqual([{ t: 'streamClose', id: first, reason: 'closed' }]); // the oldest gave way
+    expect(s.link.of('streamClose')).toHaveLength(1); // and it alone
+    expect((await readers[0]!.read()).done).toBe(true); // a normal end, not an error
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await next).text()).toBe('png');
+    await new Promise((resolve) => setTimeout(resolve, 150)); // the other seven idle on, with nothing waiting
+    expect(s.link.of('streamClose')).toHaveLength(1);
+  });
+
+  it('never takes the slot of a stream the frame keeps reading, nor of an idle one while nothing waits', async () => {
+    const s = scene({ idleMs: 60 });
+    const pages = Array.from({ length: HTTP_STREAMS_PER_LINK }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.mp4`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
+    const offsets = new Array<number>(HTTP_STREAMS_PER_LINK).fill(0);
+    for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) {
+      s.link.answer(s.link.opens()[n]!.id, 200, {}, [], '');
+      readers.push((await pages[n]!).body!.getReader());
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150)); // idle well past the bound, nothing waiting
+    expect(s.link.of('streamClose')).toEqual([]);
+    const next = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    // every stream keeps flowing: a read waits, the endpoint sends, the frame takes it
+    for (let round = 0; round < 6; round += 1) {
+      for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) {
+        const read = readers[n]!.read();
+        s.link.hear({ t: 'streamData', id: s.link.opens()[n]!.id, offset: offsets[n]!, data: b64('ab') });
+        offsets[n]! += 2;
+        expect((await read).done).toBe(false);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(s.link.of('streamClose')).toEqual([]);
+    expect(s.link.opens()).toHaveLength(HTTP_STREAMS_PER_LINK); // the ninth still waits
+    s.link.answer(s.link.opens()[0]!.id, 200, {}, [], 'closed');
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await next).text()).toBe('png');
+  });
+
+  it('serves the Range the media element asks with when it plays on after giving way', async () => {
+    const s = scene({ idleMs: 60 });
+    const media = Array.from({ length: HTTP_STREAMS_PER_LINK }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.mp4`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
+    for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) {
+      s.link.answer(s.link.opens()[n]!.id, 200, { 'content-length': '10', 'accept-ranges': 'bytes' }, ['0123'], '');
+      readers.push((await media[n]!).body!.getReader());
+    }
+    const image = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    // the element reads what came before the end, then asks for the rest by its offset
+    const got: string[] = [];
+    for (let next = await readers[0]!.read(); !next.done; next = await readers[0]!.read()) got.push(Buffer.from(next.value).toString());
+    expect(got.join('')).toBe('0123');
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await image).text()).toBe('png');
+    const resume = s.handler(new Request(url(PAGE, 'assets/0.mp4'), { headers: { Range: 'bytes=4-' } }));
+    await s.opened(HTTP_STREAMS_PER_LINK + 1);
+    expect(s.link.opens()[HTTP_STREAMS_PER_LINK + 1]!.http).toEqual({ url: url(PAGE, 'assets/0.mp4'), method: 'GET', range: 'bytes=4-' });
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK + 1]!.id, 206, { 'content-range': 'bytes 4-9/10', 'content-length': '6' }, ['456789']);
+    const resumed = await resume;
+    expect([resumed.status, await resumed.text()]).toEqual([206, '456789']);
   });
 
   it('ends every request in flight when stopped', async () => {

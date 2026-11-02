@@ -13,6 +13,10 @@
 //   chunk is refunded as the frame pulls it, so nothing here buffers past the credit.
 // - A body is checked against its `Content-Length`: a stream that ends short of it, runs past it, skips an offset or closes
 //   with any word but `closed` errors the body, which the frame shows as a failed load.
+// - A paused media pane holds its stream under spent credit (the architect's ruling on b3's review, 2026-11-02): while a
+//   request waits for a slot, a stream whose frame hasn't taken a byte for IDLE_MS (and isn't waiting on the machine for
+//   more) gives its slot up, the oldest first. Its body ends normally with what came, and the stream closes; the media
+//   element asks again with a Range when it plays on. An idle stream keeps its slot while nothing waits.
 // - Every request ends: `503` "<machine> is offline" while the link is down (at the request, or before the answer came),
 //   `504` when nothing opened within OPEN_TIMEOUT_MS of the request, a refusal as the HTTP status it means (REFUSAL_STATUS),
 //   and the app's stop ends whatever is still in flight. A stream lost with its channel before its answer is opened again
@@ -30,6 +34,12 @@ export const HTTP_STREAMS_PER_LINK = 8;
 export const HTTP_STREAM_CREDIT = 1024 * 1024;
 /** A request whose answer hasn't come by then is answered 504. */
 export const OPEN_TIMEOUT_MS = 30_000;
+/**
+ * A stream whose frame hasn't read for this long gives its slot to a waiting request. Far inside OPEN_TIMEOUT_MS, so a
+ * queue behind eight paused panes is served in seconds; far past the gaps of a load the frame is reading (it takes each
+ * chunk as it comes), so only a pane that stopped pulling gives way.
+ */
+export const IDLE_MS = 2_000;
 
 export const offline = (machine: string) => `${machine} is offline`;
 export const notAnswered = (machine: string) => `${machine} didn’t answer in time`;
@@ -66,6 +76,7 @@ export interface RemoteSchemeDeps {
   machines: Pick<ArtifactMachines, 'machineOf' | 'record'>;
   remote(machine: MachineRef): RemoteLink | null;
   openTimeoutMs?: number;
+  idleMs?: number;
   log(line: string): void;
 }
 
@@ -79,16 +90,19 @@ export interface RemoteScheme {
 }
 
 /** A link's open `http` streams and the requests waiting for one. */
-type Slots = { open: number; waiting: Array<() => void> };
+type Slots = { open: number; waiting: Array<() => void>; holders: Set<Holder>; sweep: ReturnType<typeof setTimeout> | null };
+/** An answered body holding a slot: since when its frame hasn't read (null while it reads or waits for bytes), and its giving way. */
+type Holder = { idleSince(): number | null; giveWay(): void };
 
 export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
   const openTimeoutMs = deps.openTimeoutMs ?? OPEN_TIMEOUT_MS;
+  const idleMs = deps.idleMs ?? IDLE_MS;
   const slots = new WeakMap<RemoteLink, Slots>();
   const inFlight = new Set<() => void>();
 
   const slotsOf = (link: RemoteLink): Slots => {
     let held = slots.get(link);
-    if (held === undefined) slots.set(link, (held = { open: 0, waiting: [] }));
+    if (held === undefined) slots.set(link, (held = { open: 0, waiting: [], holders: new Set(), sweep: null }));
     return held;
   };
   /** `start` once a slot is free; the cancel of a wait, or null once started. */
@@ -104,7 +118,30 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
       start();
     };
     held.waiting.push(turn);
+    schedule(link, held, 0);
     return () => void held.waiting.splice(held.waiting.indexOf(turn) >>> 0, 1);
+  }
+  function schedule(link: RemoteLink, held: Slots, ms: number): void {
+    if (held.sweep === null) held.sweep = setTimeout(() => sweep(link, held), ms);
+  }
+  /** While a request waits: the oldest idle body gives way, one per waiting request; looked at again when the next could be idle. */
+  function sweep(link: RemoteLink, held: Slots): void {
+    held.sweep = null;
+    let next = idleMs;
+    while (held.waiting.length > 0) {
+      const now = Date.now();
+      let oldest: { holder: Holder; since: number } | null = null;
+      next = idleMs;
+      for (const holder of held.holders) {
+        const since = holder.idleSince();
+        if (since === null) continue;
+        if (now - since < idleMs) next = Math.min(next, since + idleMs - now);
+        else if (oldest === null || since < oldest.since) oldest = { holder, since };
+      }
+      if (oldest === null) break;
+      oldest.holder.giveWay(); // its slot passed to the first waiting
+    }
+    if (held.waiting.length > 0) schedule(link, held, next);
   }
   function release(link: RemoteLink): void {
     const held = slotsOf(link);
@@ -128,6 +165,7 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
       let stream: RemoteStream | null = null;
       let cancelWait: (() => void) | null = null;
       let body: Body | null = null;
+      let holder: Holder | null = null;
 
       /** The request's end: what it holds let go, its slot passed on. */
       const finish = () => {
@@ -138,6 +176,7 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
         inFlight.delete(abort);
         cancelWait?.();
         cancelWait = null;
+        if (holder !== null) slotsOf(link).holders.delete(holder);
         if (slotHeld) {
           slotHeld = false;
           release(link);
@@ -187,6 +226,20 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
           return fail(502, `${name} answered what this app can’t read (${status})`);
         }
         answer(response);
+        if (body !== null) {
+          const held = body;
+          holder = {
+            idleSince: () => held.idleSince(),
+            giveWay: () => {
+              deps.log(`artifacts: a stream of ${name} unread for ${idleMs} ms gave its slot to a waiting request`);
+              held.cut();
+              at?.close('closed');
+              stream = null;
+              finish();
+            },
+          };
+          slotsOf(link).holders.add(holder);
+        }
       };
       const onClosed = (reason: string) => {
         stream = null;
@@ -257,6 +310,8 @@ class Body {
   #received = 0;
   #wanted = false;
   #done = false;
+  /** When the frame last took a chunk (or the answer came). */
+  #moved = Date.now();
   readonly length: number | null;
   readonly refund: (bytes: number) => void;
   /** The body ended short of whole: failed, or cancelled by its reader. */
@@ -305,6 +360,19 @@ class Body {
     this.#controller.close();
   }
 
+  /** Since when the frame hasn't read: null while it waits for bytes (the machine is the slow side) or once ended. */
+  idleSince(): number | null {
+    return this.#done || this.#wanted ? null : this.#moved;
+  }
+
+  /** A normal end here with what came: the stream gave its slot up, and the frame asks for the rest by its Range. */
+  cut(): void {
+    if (this.#done) return;
+    this.#done = true;
+    for (const chunk of this.#chunks.splice(0)) this.#controller.enqueue(chunk);
+    this.#controller.close();
+  }
+
   fail(error: Error): void {
     if (this.#done) return;
     this.#done = true;
@@ -314,6 +382,7 @@ class Body {
   }
 
   #hand(chunk: Uint8Array): void {
+    this.#moved = Date.now();
     this.#controller.enqueue(chunk);
     this.refund(chunk.byteLength);
   }
