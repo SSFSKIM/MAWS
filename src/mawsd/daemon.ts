@@ -1514,10 +1514,11 @@ function runCommand(command: string, args: string[]): { status: number | null; s
   }
 }
 
-// A host's start, as its lock recorded it, when the lock names `pid`; now otherwise.
-function lockStartedAt(dir: string, pid: number): string {
+// A host's start, as its lock recorded it, when the lock names `pid`; otherwise its process's start as `ps` reads it, the
+// same at each welcome (a client keys the process by pid and start), now only when `ps` knows no such process.
+export function lockStartedAt(dir: string, pid: number): string {
   const lock = readLock(dir);
-  return lock?.pid === pid ? lock.startedAt : new Date().toISOString();
+  return lock?.pid === pid ? lock.startedAt : (procStartOf(pid) ?? new Date().toISOString());
 }
 
 function safely(read: () => unknown, log: (line: string) => void): unknown {
