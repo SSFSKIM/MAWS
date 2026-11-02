@@ -43,12 +43,15 @@
 //      main), ⌘⇧J (its menu item) opens it in A's pane, and the answer there clears both; conversation search finds a
 //      word of B's transcript under B; its second turn asks again with its tab closed, and B's daemon stopped greys that
 //      item in Needs you and takes it out of the badge.
-//      M5c (before M4's "+ Session"): O4's surfaces on B from A. B's connectors observe three fixture servers of B's user
-//      settings (a rows server, a Notion-shaped one and an OAuth one) from one recorded report of a short-lived
-//      observer session (B's sessions are replays, so no engine of B's ever runs them); then a dashboard page of B's,
-//      opened from B's library, refreshes in A with the rows B's server answers (once A allows the tool), each later
-//      answer drawn at the watch's interval; Connect on the OAuth server completes through a listener on A's loopback,
-//      the consent opened on A (the fake browser following A's open log) and its redirect relayed to B, where the grant is
+//      M5c (before M4's "+ Session"): O4's surfaces on B from A. B's observer is a real engine (the installed Claude
+//      Code, the replay list's `live` entry), started with no message as connector-scene.ts's owner Start starts one: it
+//      reports three fixture servers of B's user settings (the dashboard-live-data rows server, a Notion-shaped one and
+//      an OAuth one in its open phase), which Send to's status read on B observes; it stops, and only once it is dead
+//      does the OAuth server demand sign-in (P3-HD Decision Log 23). Then the dashboard-live-data fixture's Dashboard,
+//      written on B through the host's agent seam (MAWS_DASHBOARD_E2E), opened in A from B's library, draws B's rows
+//      once A allows the tool and the next rows at its schedule, through MAWS's own instance of B's server; Connect on
+//      the OAuth server, from an HTML page of B's that declares it, completes through a listener on A's loopback, the
+//      consent opened on A (the fake browser following A's open log) and its redirect relayed to B, where the grant is
 //      sealed; and Send to on B's plan makes one `notion-create-pages` call on B.
 // B's spawned sessions and its M6 session run on journals of their own, the next fixtures on B's replay list.
 // No wall-clock bound beyond Playwright's own timeouts: the measured numbers are M7's.
@@ -66,13 +69,18 @@ import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
-import { CONNECTORS_COPY as C, SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
+import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { addedListeners, loopbackPort } from './support/connector-direct-checks';
 import { browserOpens, connectionWords } from './support/connector-direct-oauth';
 import { FIXTURE_SERVER, type CallLogEntry } from './support/connector-engine';
-import { readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
+import { assertOpenPhase, enterOAuthPhase, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
 import { followAuthorization } from './support/connector-oauth-browser';
-import { tcpListeners } from './support/processes';
+import { SERVER as ROWS_SERVER, TOOL as ROWS_TOOL, TOOL_NAME as ROWS_NAME } from './support/connector-scene';
+import { AgentSeam } from './support/dashboards';
+import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet, rows, tableRows, writeBoard } from './support/live-data';
+import { installedEngine } from './support/p1-live';
+import { isAlive, tcpListeners } from './support/processes';
+import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
@@ -153,59 +161,42 @@ const RENAMED = 'B notes, renamed on A';
 const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
 const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
 // M5b: a document B's first session starts at A's ask (an empty one, linked to the session on B), and what A types in it
-// M5c: B's observer session, whose one recorded `mcp_status` answer is what B's connectors observe of its servers; the
-// dashboard page of B's that reads the rows server; the servers, by their names in B's user settings
-const OBSERVER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b6';
-const OBSERVE_ASK = 'Bring your connectors up.';
-const OBSERVED_REPLY = 'They are up on B.';
-const ROWS_SERVER = 'series';
-const ROWS_TOOL = 'read_series';
-const ROWS_NAME = `${ROWS_SERVER} · ${ROWS_TOOL}`;
+// M5c: the servers of B's user settings, by their names there (the rows server's and its tool's are the
+// dashboard-live-data fixture's, connector-scene.ts's SERVER and TOOL); the rows it answers, first and at the schedule
 const OAUTH_SERVER = 'secure';
 const NOTION = 'notion';
 const NOTION_TOOL = 'notion-create-pages';
-const FIRST_ROWS = [{ day: '2026-11-01', signups: 12 }, { day: '2026-11-02', signups: 18 }];
-const NEXT_ROWS = [{ day: '2026-11-01', signups: 12 }, { day: '2026-11-02', signups: 18 }, { day: '2026-11-03', signups: 27 }];
-const WATCH_MS = 30_000; // the shortest watch interval O4 allows
+const FIRST_SIGNUPS = [12, 18];
+const NEXT_SIGNUPS = [12, 18, 27];
+const SCHEDULE_MS = 30_000; // the dashboard-live-data query's schedule (live-data.ts SCHEDULE_S)
 // The OAuth fixture's authorization endpoint as it advertises it: https on a name no resolver answers (RFC 6761
 // `.invalid`), since a consent B asks A to open is never a loopback URL (main's openForMachine) and MAWS's OAuth takes no
 // plain HTTP off 127.0.0.1; only the fake browser follows it, to the fixture's own /authorize
 const AUTHORIZE_AT = 'https://authorize.invalid';
-const DASHBOARD = {
-  title: 'B dashboard',
+// An HTML page of B's that declares the OAuth server's tool, so its Connectors sheet lists that server's row (Connect is
+// a byte viewer's sheet's, never a dashboard's source sheet)
+const CONNECT_PAGE = {
+  title: 'B connectors',
   space: 'B dashboards',
   html: `<!doctype html>
-<html><head><meta charset="utf-8"><title>B dashboard</title></head>
+<html><head><meta charset="utf-8"><title>B connectors</title></head>
 <body>
-<h1>Signups on B</h1>
+<h1>Connectors on B</h1>
 <p id="declared">declaring</p>
-<p id="watch">starting</p>
-<p id="last">none</p>
-<p id="updates">0</p>
 <script>
-const rows = { server: ${JSON.stringify(ROWS_SERVER)}, tool: ${JSON.stringify(ROWS_TOOL)} };
-let updates = 0;
-const show = (o) => {
-  updates += 1;
-  document.getElementById('updates').textContent = String(updates);
-  const read = o.ok && o.result && o.result.structuredContent ? o.result.structuredContent.rows : null;
-  document.getElementById('last').textContent = o.ok ? 'rows=' + JSON.stringify(read) + ' via=' + o.via.route : o.state + ':' + o.reason;
-};
 (async () => {
-  const declared = await mawsConnectors.declare([rows, { server: ${JSON.stringify(OAUTH_SERVER)}, tool: ${JSON.stringify(ROWS_TOOL)} }]);
+  const declared = await mawsConnectors.declare([{ server: ${JSON.stringify(OAUTH_SERVER)}, tool: ${JSON.stringify(ROWS_TOOL)} }]);
   document.getElementById('declared').textContent = declared.ok ? 'declared' : declared.state + ':' + declared.reason;
-  const watch = await mawsConnectors.watch({ ...rows, args: {}, intervalMs: ${WATCH_MS} }, show);
-  document.getElementById('watch').textContent = watch.ok ? 'watching every ' + watch.intervalMs : watch.state + ':' + watch.reason;
 })();
 </script>
 </body></html>
 `,
 };
-/** A fixture server's entry in B's user settings and, the same object, its `config` in the observer's report. */
+/** A fixture server's entry in B's user settings. */
 const stdioEntry = (id: string, log: string, tools: string[], extra: string[] = []) => ({ type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', id, '--log', log, '--tools', JSON.stringify(tools), ...extra] });
 /** The rows server's next answer, written whole (connector-scene.ts's rule: the server reads it at each call). */
-function writeRows(control: string, rows: Record<string, unknown>[]): void {
-  writeFileSync(`${control}.tmp`, JSON.stringify({ reply: 'rows', rows }));
+function writeRows(control: string, signups: number[]): void {
+  writeFileSync(`${control}.tmp`, JSON.stringify({ reply: 'rows', rows: rows(...signups) }));
   renameSync(`${control}.tmp`, control);
 }
 const callsOn = (log: string, server: string) => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as CallLogEntry) : []).filter((entry) => entry.server === server && entry.method === 'tools/call');
@@ -494,31 +485,37 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     waiting.completed(asked);
     waiting.permission(waiting.prompt(), 'Bash', { command: `echo ${WAITING_SECOND}`, description: 'Print a word' }, WAITING_SECOND);
     const waitingFixture = waiting.write(journals, 'b-waiting');
-    // M5c: the fixture servers of B's user settings (the rows server, a Notion-shaped one, the OAuth one, in its OAuth
-    // phase from the start: no engine ever observes it live), and B's observer session, whose one turn is followed by the
-    // one `mcp_status` read it answers with what those servers are, as an engine of B's would report them
+    // M5c: the fixture servers of B's user settings (the dashboard-live-data rows server, a Notion-shaped one, the OAuth
+    // one in its open phase, which the observer's engine reads before it demands sign-in), as connector-scene.ts
+    // configures its own; B's observer is the replay list's `live` entry, the installed engine (MAWS_E2E_ENGINE_BIN)
+    // under a scratch HOME, and B's host runs the dashboard's agent seam (MAWS_DASHBOARD_E2E)
     const mcpLog = join(root, 'b-mcp-calls.jsonl');
     const rowsControl = join(root, 'b-rows-control.json');
-    writeRows(rowsControl, FIRST_ROWS);
-    oauth = await startOAuthFixture({ root, id: OAUTH_SERVER, tools: [ROWS_TOOL], oauthPhase: { advertise: { authorizationEndpoint: `${AUTHORIZE_AT}/authorize` } } });
+    writeRows(rowsControl, FIRST_SIGNUPS);
+    oauth = await startOAuthFixture({ root, id: OAUTH_SERVER, tools: [ROWS_TOOL] });
     const mcpServers: Record<string, Record<string, unknown>> = {
-      [ROWS_SERVER]: stdioEntry(ROWS_SERVER, mcpLog, [ROWS_TOOL], ['--mode', 'rows', '--control', rowsControl]),
+      [ROWS_SERVER]: stdioEntry('series', mcpLog, [ROWS_TOOL], ['--mode', 'rows', '--control', rowsControl]),
       [NOTION]: stdioEntry(NOTION, mcpLog, [NOTION_TOOL], ['--mode', 'notion']),
       [OAUTH_SERVER]: { type: 'http', url: oauth.resourceUrl },
     };
-    const reported = (name: string, tool: string, readOnly: boolean) => ({ name, status: 'connected', serverInfo: { name, version: '0' }, config: mcpServers[name], transport: 'stdio', scope: 'user', source: 'user', tools: [{ name: tool, annotations: readOnly ? { readOnly: true } : {} }] });
-    const observer = new SideJournal(OBSERVER_SESSION, checkout);
-    observer.turn(OBSERVED_REPLY);
-    observer.read({ subtype: 'mcp_status' }, { mcpServers: [reported(ROWS_SERVER, ROWS_TOOL, true), reported(NOTION, NOTION_TOOL, false), { name: OAUTH_SERVER, status: 'needs-auth', config: mcpServers[OAUTH_SERVER], scope: 'user', source: 'user' }] });
-    const observerFixture = observer.write(journals, 'b-observer');
+    const bHome = join(root, 'b-home'); // B's HOME: nothing on B reads the runner's
+    mkdirSync(bHome);
     scene = await startRemoteScene({
       scratch: join(root, 'scene'),
       aUserData,
       b: {
-        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [fixture, observerFixture, spawnedFixture, worktreeFixture, waitingFixture].join(',') }, // M5c: the observer is B's second launch
-        // B's checkout trusted, and the default mode the journal was recorded under (sessions.spec.ts's launchCase)
+        env: {
+          MAWS_ENGINE_REPLAY: '1',
+          MAWS_E2E_REPLAY_FIXTURES: [fixture, 'live', spawnedFixture, worktreeFixture, waitingFixture].join(','), // M5c: the observer is B's second launch
+          MAWS_E2E_ENGINE_BIN: installedEngine().bin, // M5c: the `live` launch's engine (the replays never run a binary)
+          HOME: bHome,
+          MAWS_DASHBOARD_E2E: '1', // M5c: the host's agent seam writes the dashboard
+          DISABLE_AUTOUPDATER: '1',
+        },
+        // B's checkout trusted, onboarding done (the observer is a real engine), and the default mode the journal was
+        // recorded under (sessions.spec.ts's launchCase)
         prepare: ({ claudeConfigDir }) => {
-          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } }, mcpServers })); // M5c: B's user-scope servers
+          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } }, mcpServers })); // M5c: B's user-scope servers
           writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
         },
       },
@@ -1051,41 +1048,41 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const report = linked.find((x) => x.kind === 'html' && x.title === REPORT.title)!;
       const plan = linked.find((x) => x.kind === 'document' && x.title === PLAN.title)!;
 
-      // The dashboard: a page of B's owner's, in a Space linked to B's checkout (its directory for the connectors' routes)
-      const { space } = await b.request<{ space: { id: string } }>('spaces.create', { name: DASHBOARD.space, linkedDir: checkout });
-      const dashboard = (await b.request<{ artifact: { id: string } }>('artifacts.create', { kind: 'html', title: DASHBOARD.title, spaceId: space.id, content: { bytes: new TextEncoder().encode(DASHBOARD.html), name: 'index.html' } })).artifact.id;
+      // The dashboard-live-data fixture's Dashboard, written on B as its agent writes it (the host's agent seam, the `maws`
+      // server's real tools), and an HTML page declaring the OAuth server, both in a Space linked to B's checkout (their
+      // directory for the connectors' routes)
+      const { space } = await b.request<{ space: { id: string } }>('spaces.create', { name: CONNECT_PAGE.space, linkedDir: checkout });
+      const dashboard = await writeBoard(new AgentSeam(join(b.userData, 'dashboard-e2e')));
+      await b.request('artifacts.update', { artifactId: dashboard, spaceId: space.id });
+      const connectPage = (await b.request<{ artifact: { id: string } }>('artifacts.create', { kind: 'html', title: CONNECT_PAGE.title, spaceId: space.id, content: { bytes: new TextEncoder().encode(CONNECT_PAGE.html), name: 'index.html' } })).artifact.id;
 
-      // B's connectors observe its servers once: the observer session's turn, then one read of its live sessions' reports
-      // (Send to's status read on B), which the observer answers from its recording; then it stops, its observation kept.
-      // Every status read asks each live session of B, and a replay answers a read its fixture never recorded with an
-      // empty success: an `mcp_status` with no `mcpServers` fails its schema and the cache fails that launch context
-      // closed until main reattaches (src/engine-host/connectors/provenance.ts), which B's first session (the same
-      // checkout and config home) would do. Its journal has played to its end by now, so it stops first, and the observer
-      // stops once read, before any other status read reaches it.
-      type Live = { appSessionId: string; process: string };
-      const liveOnB = async () => (await b.request<Live[]>('engine.sessions')).filter((s) => s.process === 'ready').map((s) => s.appSessionId);
+      // B's observer: a real engine, started with no message (no model turn), whose report of B's servers Send to's
+      // status read observes. B's first session goes first: it is a replay, whose unrecorded `mcp_status` answers empty,
+      // which fails its schema, and the observation cache fails the launch context closed until main reattaches
+      // (src/engine-host/connectors/provenance.ts); its journal has played to its end by now.
+      type Live = { appSessionId: string; process: string; pid: number | null };
+      const liveOnB = async () => (await b.request<Live[]>('engine.sessions')).filter((s) => s.process === 'ready');
       await b.request('session.stop', { appSessionId: app, reason: 'stop' });
-      await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s first session stopped before the observation' }).toEqual([]);
+      await expect.poll(async () => (await liveOnB()).map((s) => s.appSessionId), { timeout: 30_000, message: 'B’s first session stopped before the observation' }).toEqual([]);
+      assertOpenPhase(oauth!);
       const observerApp = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
       await b.request('session.intent.patch', { appSessionId: observerApp, patch: { gateway: 'direct' } });
-      const begun = await b.request<{ status: string }>('session.start', { appSessionId: observerApp, message: { content: OBSERVE_ASK, display: OBSERVE_ASK }, options: {} });
+      const begun = await b.request<{ status: string }>('session.start', { appSessionId: observerApp, message: null, options: {} });
       expect(begun.status, `B's observer starts: ${JSON.stringify(begun)}`).not.toBe('needs_trust');
-      type Status = { process: string; turn: unknown };
+      let observerPid = 0;
+      await expect
+        .poll(async () => (observerPid = (await liveOnB()).find((s) => s.appSessionId === observerApp)?.pid ?? 0), { timeout: 90_000, message: `B's observer engine is live\n${bLines(/session|spawn|engine|setup/i)}` })
+        .toBeGreaterThan(0);
+      type Report = { mcpServers: { name: string; status: string }[] };
       await expect
         .poll(async () => {
-          const status = await b.request<Status>('session.status', { appSessionId: observerApp }).catch(() => null);
-          return status !== null && status.process === 'ready' && status.turn === null;
-        }, { timeout: 60_000, message: `B's observer ends its turn\n${bLines(/replay|session/i)}` })
-        .toBe(true);
+          const said = await b.request<Report>('session.mcpStatus', { appSessionId: observerApp }).catch(() => null);
+          return Object.fromEntries((said?.mcpServers ?? []).filter((server) => [ROWS_SERVER, NOTION, OAUTH_SERVER].includes(server.name)).map((server) => [server.name, server.status]));
+        }, { timeout: 60_000, message: 'B’s observer engine connected B’s three servers' })
+        .toEqual({ [ROWS_SERVER]: 'connected', [NOTION]: 'connected', [OAUTH_SERVER]: 'connected' });
       type NotionStatus = { state: string; source?: { server: string } };
       const observed = await b.request<NotionStatus>('delivery.status', { target: 'notion', artifactId: plan.id });
-      // what the observer's launch journalled past its turn (each control and its answer, an unrecorded read's meta row)
-      const observerJournal = async () => {
-        const { journalPath } = await b.request<{ journalPath: string }>('session.status', { appSessionId: observerApp });
-        const rows = readFileSync(journalPath, 'utf8').trim().split('\n');
-        return rows.slice(rows.findLastIndex((row) => row.includes('"result"'))).map((row) => row.slice(0, 600)).join('\n');
-      };
-      // and, on a failure, the observer's row, its report read directly, and what B's logs said of connectors
+      // on a failure: the observer's row, B's servers, the host's observation asked directly, and B's logs' connector lines
       const observerSaid = async () => {
         if (observed.state === 'ready') return '';
         const row = (await b.request<Record<string, unknown>[]>('engine.sessions')).find((s) => s.appSessionId === observerApp);
@@ -1093,20 +1090,22 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
           const lines = readFileSync(join(b.userData, name), 'utf8').split('\n').filter((line) => /connector|observ|mcp|deliver|locat|status cache/i.test(line));
           return `${name}:\n${lines.slice(-30).map((line) => line.slice(0, 400)).join('\n')}`;
         });
-        const servers = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }, { server: ROWS_SERVER, tool: ROWS_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
-        const configHome = readdirSync(b.claudeConfigDir).join(', ');
-        // the host's observation asked directly, as Send to's status read asks it, then the servers read again
+        const servers = await b.request('connectors.servers', { artifactId: connectPage, tools: [{ server: NOTION, tool: NOTION_TOOL }, { server: ROWS_SERVER, tool: ROWS_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
         const asked = row ? await b.request('connectors.observe', { appSessionId: observerApp, launchId: row.launchId, cwd: row.cwd }).then((answer) => JSON.stringify(answer), String) : 'no row';
-        const after = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 800), String);
-        const report = await b.request('session.mcpStatus', { appSessionId: observerApp }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
-        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers for the dashboard: ${servers}\nB's config home holds: ${configHome}\nthe host's observe asked directly: ${asked}; the servers then: ${after}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
+        const after = await b.request('connectors.servers', { artifactId: connectPage, tools: [{ server: NOTION, tool: NOTION_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 800), String);
+        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers: ${servers}\nthe host's observe asked directly: ${asked}; the servers then: ${after}\nB's logs:\n${logs.join('\n')}`;
       };
-      expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
+      expect(observed, `Send to's status read on B observed the observer's report: ${JSON.stringify(observed)}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
+      // the observer stopped and confirmed dead; only then does the OAuth server demand sign-in, of MAWS alone, at the
+      // authorization endpoint B asks A to open (never a loopback URL: main's openForMachine)
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
-      await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s observer stopped' }).toEqual([]);
+      await expect.poll(async () => (await liveOnB()).length, { timeout: 30_000, message: 'B’s observer stopped' }).toBe(0);
+      await expect.poll(() => isAlive(observerPid), { timeout: 30_000, message: `B’s observer engine (pid ${observerPid}) gone` }).toBe(false);
+      enterOAuthPhase(oauth!, { enginePids: [observerPid] }, { advertise: { authorizationEndpoint: `${AUTHORIZE_AT}/authorize` } });
 
-      // (a) The dashboard in A, opened from B's library: its watch reads B's rows server once A allows the tool, through
-      // MAWS's own instance of it on B, and draws each answer at the watch's interval
+      // (a) The dashboard in A, opened from B's library: not fetched and not allowed, then B's rows once A allows the
+      // tool on B, read through MAWS's own instance of B's server (no engine is live on B), and the next rows at the
+      // query's schedule
       await sessionTab.click();
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
       await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
@@ -1123,24 +1122,36 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         await quoting(expect(tab, `${title} in a main tab`).toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
         return tab;
       };
-      const dashTab = await openFromLibrary(dashboard, DASHBOARD.title);
-      const frame = dashTab.frameLocator('[data-artifact-frame="html"]');
-      await quoting(expect(frame.locator('#watch'), 'the page watches the rows tool on B').toHaveText(`watching every ${WATCH_MS}`, { timeout: 60_000 }), async () => `declared: ${await frame.locator('#declared').innerText().catch(() => '')}\n${mainSaid(again)}\nB's log:\n${bLines(/connector|lease/i)}`);
-      expect(await frame.locator('#last').innerText(), 'no rows read before A allows the tool').not.toMatch(/^rows=/);
+      const views = liveViews(await openFromLibrary(dashboard, BOARD));
+      await quoting(expect(labelOf(views), 'B’s dashboard, not fetched and not allowed').toHaveText(`${NOT_FETCHED} · ${DATASET_STATES.notAllowed}`, { timeout: 60_000 }), async () => `${mainSaid(again)}\nB's log:\n${bLines(/connector|lease|dataset/i)}`);
+      const sourceSheet = await openSheet(views);
+      const block = liveBlock(sourceSheet);
+      await block.getByRole('button', { name: `Allow ${ROWS_NAME} to read` }).click();
+      await sourceSheet.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(tableRows(views), 'B’s first rows reach A').toHaveCount(FIRST_SIGNUPS.length, { timeout: 60_000 }).catch(() => undefined); // drawsRows says what is drawn
+      await drawsRows(views, FIRST_SIGNUPS, 'B’s rows drawn in A').catch(async (error: unknown) => {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\n${mainSaid(again)}\nB's log:\n${bLines(/connector|direct|lease|dataset|mcp/i)}`);
+      });
+      const firstCalls = callsOn(mcpLog, 'series').length;
+      writeRows(rowsControl, NEXT_SIGNUPS);
+      await expect.poll(() => callsOn(mcpLog, 'series').length, { timeout: SCHEDULE_MS + 60_000, message: 'the schedule’s next call on B’s rows server' }).toBeGreaterThan(firstCalls);
+      await drawsRows(views, NEXT_SIGNUPS, 'B’s next rows drawn at the schedule');
+      console.log(`[e2e:remote] M5c: B's dashboard refreshed in A, ${callsOn(mcpLog, 'series').length} calls on B's rows server`);
+
+      // (c) Connect on B's OAuth server, from the page that declares it: the listener is A's (main's, on A's loopback),
+      // the consent opened on A, the redirect relayed to B, where the code is exchanged and the grant sealed
+      const reopenLibrary = async () => {
+        await sessionTab.click();
+        await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+        await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
+        await tool.getByRole('button', { name: 'Open library', exact: true }).click();
+      };
+      await reopenLibrary();
+      const connectTab = await openFromLibrary(connectPage, CONNECT_PAGE.title);
+      await expect(connectTab.frameLocator('[data-artifact-frame="html"]').locator('#declared'), 'the page declares the OAuth server’s tool on B').toHaveText('declared', { timeout: 60_000 });
       await main(again).getByRole('button', { name: 'Connectors' }).click();
       const sheet = again.locator('[data-connectors-sheet]');
       await expect(sheet).toBeVisible();
-      const rowsTool = sheet.locator(`[data-connector-tool="${ROWS_NAME}"]`);
-      await rowsTool.getByRole('button', { name: C.allowLabel(ROWS_NAME) }).click();
-      await quoting(expect(rowsTool.locator('[data-connector-state]'), 'allowed on B').toContainText(C.allowedRead, { timeout: 30_000 }), async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`);
-      await quoting(expect(frame.locator('#last'), 'B’s rows drawn in A').toHaveText(`rows=${JSON.stringify(FIRST_ROWS)} via=direct`, { timeout: 60_000 }), async () => `${mainSaid(again)}\nB's log:\n${bLines(/connector|direct|lease|mcp/i)}`);
-      writeRows(rowsControl, NEXT_ROWS);
-      await quoting(expect(frame.locator('#last'), 'B’s next answer drawn at the watch’s interval').toHaveText(`rows=${JSON.stringify(NEXT_ROWS)} via=direct`, { timeout: WATCH_MS + 60_000 }), async () => `${mainSaid(again)}\nB's log:\n${bLines(/connector|direct|lease|mcp/i)}`);
-      expect(callsOn(mcpLog, ROWS_SERVER).length, 'each read a call on B’s rows server').toBeGreaterThanOrEqual(2);
-      console.log(`[e2e:remote] M5c: B's dashboard refreshed in A, ${callsOn(mcpLog, ROWS_SERVER).length} calls on B's rows server`);
-
-      // (c) Connect on B's OAuth server: the listener is A's (main's, on A's loopback), the consent opened on A, the
-      // redirect relayed to B, where the code is exchanged and the grant sealed
       await sheet.getByRole('button', { name: `Show the connectors on ${B_NAME}` }).click();
       const secure = sheet.locator(`[data-connector-server="${OAUTH_SERVER}"][data-kind="source"]`);
       await quoting(expect(secure.locator('[data-connector-server-state]'), 'the OAuth server needs MAWS’s own sign-in on B').toContainText(connectionWords('needsConnect'), { timeout: 60_000 }), async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`);
@@ -1169,10 +1180,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sheet).toHaveCount(0);
 
       // (b) Send to Notion from A for B's plan: B exports it and makes one page through MAWS's own instance of B's server
-      await sessionTab.click();
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
-      await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
-      await tool.getByRole('button', { name: 'Open library', exact: true }).click();
+      await reopenLibrary();
       await openFromLibrary(plan.id, PLAN.title);
       const header = main(again).locator('[data-editor-header]');
       await header.getByRole('button', { name: 'Send to…' }).click();

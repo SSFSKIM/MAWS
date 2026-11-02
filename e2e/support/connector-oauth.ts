@@ -20,9 +20,6 @@
 // app's own safeStorage (under the mock keychain the scene has proved, its fixed password), `writeLegacySealed` writes
 // it in the store's format 1 envelope, and `unopenableLegacy` is the negative case's file, a format 1 header over bytes
 // no safeStorage sealed.
-// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, e2e:remote): `oauthPhase` starts a MAWS-mode
-// fixture in the OAuth phase, with its advertisement, for a scene where no live engine ever observes it (the remote
-// machine's replay sessions report it from a recorded answer), so Decision Log 23's gate has no engine to wait for.
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -60,11 +57,10 @@ export interface OAuthFixture extends OAuthFixturePaths {
 
 // The fixture process, in the open phase (engine mode: the OAuth phase); it lives until `close`, so its grants outlast
 // an app relaunch.
-export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[]; mode?: OAuthFixtureMode; oauthPhase?: { advertise?: OAuthAdvertise } }): Promise<OAuthFixture> {
+export async function startOAuthFixture(options: { root: string; id: string; tools?: readonly string[]; mode?: OAuthFixtureMode }): Promise<OAuthFixture> {
   const mode = options.mode ?? 'maws'; // P4-AGG M1
   const paths = oauthFixturePaths(options.root, options.id);
   if (mode === 'engine') writeControl(paths, { ...OPEN_CONTROL, seq: existsSync(paths.control) ? readControl(paths).seq + 1 : 0, phase: 'oauth' }); // P4-AGG M1: the engine signs in, so no gate
-  else if (options.oauthPhase !== undefined) writeControl(paths, { ...OPEN_CONTROL, phase: 'oauth', ...(options.oauthPhase.advertise !== undefined && { advertise: options.oauthPhase.advertise }) }); // P5 O7 M5c: no live engine observes it
   else if (existsSync(paths.control)) enterOpenPhase(paths); // a restart in the same scene opens a new window
   else writeControl(paths, OPEN_CONTROL);
   const child = spawn(process.execPath, [OAUTH_SERVER, '--id', paths.id, '--log', paths.log, '--control', paths.control, '--secrets', paths.secrets, '--tools', JSON.stringify(options.tools ?? ['read_series']), '--mode', mode], { stdio: ['ignore', 'pipe', 'inherit'] });
