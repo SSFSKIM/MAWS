@@ -795,9 +795,16 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const notes = linked.find((x) => x.kind === 'file')!;
       const report = linked.find((x) => x.kind === 'html')!;
 
-      // The session's Artifacts tool lists them from B, and the text artifact reads there
-      await openSurface(again, 'Artifacts');
+      // The page's transcript row (B's host registered it: `maws.delivery.artifact`) opens it in the session's Artifacts
+      // tool, the way to that tool now (it is no longer a surface of its own to launch); Back is the session's list, read
+      // from B, and the text artifact reads there
+      const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
+      await quoting(expect(pageCall, 'the page’s row in B’s transcript, registered').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
+      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
       const tool = surface(again, 'artifacts');
+      const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
+      await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      await pageRecord.getByRole('button', { name: 'Back', exact: true }).click();
       await tool.getByRole('button', { name: 'This session', exact: true }).click();
       const toolRow = (id: string) => tool.locator(`button[data-artifact-row][data-artifact-id="${id}"]`);
       await quoting(expect(toolRow(notes.id), 'the text artifact in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
