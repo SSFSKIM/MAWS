@@ -5,7 +5,8 @@
 // (streams.ts).
 //
 // The open. The artifact is read first (`artifacts.get`, as main's `openDocument` does): a parked host wakes for it, so the
-// channel can open, and an artifact gone or of no document kind opens nothing. The decision is then asked whether it
+// channel can open, and an artifact gone or of no document kind opens nothing. An `edit` open reads the store's status
+// beside it (`artifacts.status`): a read-only store answers it `read-only`. The decision is then asked whether it
 // stands in the step the channel opens and `streamOpened {id, credit}` is sent (`decide`); a host that can take no channel
 // now is `unavailable`.
 //
@@ -75,8 +76,9 @@ export function documentPlane(ctx: { documents: DocumentChannels; dispatch: Endp
   };
 
   const open: ReadPlane = async (opening) => {
-    const { artifactId, doc } = opening.input as StreamDocumentOpen;
-    const found = await dispatchAs(ctx.dispatch, opening.channel.client)('engine-host', 'artifacts.get', { artifactId });
+    const { artifactId, doc, mode } = opening.input as StreamDocumentOpen;
+    const dispatch = dispatchAs(ctx.dispatch, opening.channel.client);
+    const [found, readOnly] = await Promise.all([dispatch('engine-host', 'artifacts.get', { artifactId }), mode === 'edit' ? storeReadOnly(dispatch, opening.log) : false]);
     if (opening.cancelled()) return;
     if (!found.ok) {
       opening.log(`endpoint: a document's artifact could not be read: ${found.error.code}`);
@@ -85,6 +87,9 @@ export function documentPlane(ctx: { documents: DocumentChannels; dispatch: Endp
     const artifact = isObject(found.value) && isObject(found.value.artifact) ? found.value.artifact : null;
     if (artifact === null) return opening.refuse('grade');
     if (!isDocKind(artifact.kind as ArtifactKind)) return opening.refuse('malformed');
+    // A store a newer build wrote is opened read-only, and its host refuses the first changing frame: an `edit` open is
+    // answered as the machine's read-only policy answers one, and the device opens `view`, its editor read-only.
+    if (readOnly) return opening.refuse('read-only');
     const decided = await opening.decide((access) => {
       if (opening.cancelled()) return 'gone' as const;
       const channel = allocate();
@@ -248,6 +253,21 @@ class DocumentStream extends Stream {
   closedByDevice(): void {
     this.end(null);
   }
+}
+
+/**
+ * Whether the machine's artifact store is read-only (`artifacts.status`, as the local editor reads it): one a newer build
+ * wrote. A status that can't be read is taken as writable, logged: the host still refuses a write it can't keep.
+ */
+async function storeReadOnly(dispatch: EndpointServices['dispatch'], log: (line: string) => void): Promise<boolean> {
+  try {
+    const answer = await dispatch('engine-host', 'artifacts.status', undefined);
+    if (answer.ok) return isObject(answer.value) && answer.value.status === 'readOnly';
+    log(`endpoint: the artifact store's status could not be read: ${answer.error.code}`);
+  } catch (error) {
+    log(`endpoint: the artifact store's status could not be read: ${(error as Error).message}`);
+  }
+  return false;
 }
 
 /**

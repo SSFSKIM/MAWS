@@ -598,6 +598,23 @@ describe('the document stream', () => {
     expect(docs.channels.get(channel)!.ended).toBe('endpoint');
   });
 
+  it('refuses an `edit` open `read-only` while the machine’s store is read-only (a newer build wrote it), opening no channel, and admits a `view` one', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const dispatch = f.services.dispatch;
+    let status = 'readOnly';
+    f.services.dispatch = async (owner, name, input, client) =>
+      owner === 'engine-host' && name === 'artifacts.status' ? { t: 'res', id: '0', ok: true, value: { status, reason: 'a newer app wrote the store' } } : dispatch(owner, name, input, client);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    expect((await openDoc(a, { artifactId: x, mode: 'edit' })).answer).toMatchObject({ t: 'streamRefused', reason: 'read-only' });
+    expect(docs.channels.size).toBe(0);
+    expect((await openDoc(a, { artifactId: x, mode: 'view' })).answer).toMatchObject({ t: 'streamOpened' });
+    status = 'ok';
+    expect((await openDoc(a, { artifactId: x, mode: 'edit' })).answer).toMatchObject({ t: 'streamOpened' });
+    expect(a.channel.closed).toBe(false);
+  });
+
   it('opens no channel when the share is withdrawn while the open is read: the decision is asked again in the step the channel would open', async () => {
     const { f, docs } = await startDocuments();
     const engine = session(f, 'app-1', ['@machine'], shared(org.B));
