@@ -13,6 +13,7 @@ import { FakeEngineHost } from '../../test/mawsd/fake-engine-host';
 import { OpLedger } from '@shared/host/op-ledger';
 import { registerMachineOps } from '../services/machine-ops';
 import { createServicesFront, type FrontOptions, type ServicesFront } from './front';
+import { CATCHUP_RESTARTS } from '@shared/host/stream-catchup';
 import { FrontStreams } from './front-streams';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
@@ -285,6 +286,74 @@ describe('a front client’s session streams', () => {
     streams.relinked();
     await vi.waitFor(() => expect(batches).toHaveLength(5));
     expect(ids(batches)).toEqual(ids([...old, ...fresh]));
+  });
+
+  // O3-D's front, shape B 2 (#442's Unresolved Review Findings): a kept stream whose catch-up failed (a successor's read
+  // past its adoption bound, D65(5)) restarts it at a status of the launch it stands in; before the fix it stayed behind
+  // until the link's next streaming or a new launch, and the pane stopped updating.
+  function refusable() {
+    const host = new FakeEngineHost();
+    const session = host.add('s1');
+    const s = { refuse: false, reads: [] as string[], waits: 0 };
+    const streams = new FrontStreams({
+      read: async (name, input) => (s.reads.push(name), s.refuse ? { ok: false } : host.answer(name, input)),
+      liveSessions: async () => [...host.sessions.keys()],
+      log: (line) => void (line.includes('stream waits') && s.waits++),
+    });
+    cleanups.push(() => streams.stop());
+    cleanups.push(host.hosts.onRaw('engine-host', ({ name, payload }) => streams.liveEvent(name, payload)));
+    const batches: SessionEvent[] = [];
+    const follower = streams.follower((name, payload) => void (name === 'session.eventBatch' && batches.push(...(payload as { events: SessionEvent[] }).events)));
+    const status = () => host.emit('session.status', { appSessionId: 's1', status: host.status(session) }); // its own launch's
+    return { host, s, streams, batches, follower, status };
+  }
+
+  it('restarts a failed catch-up at a status of the stream’s own launch, and only after a failure', async () => {
+    const { host, s, streams, batches, follower, status } = refusable();
+    await follower.follow({ sessions: [{ appSessionId: 's1', cursor: null }], live: false });
+    const before = host.row('s1', 2);
+    await vi.waitFor(() => expect(batches).toHaveLength(2));
+    host.drop();
+    const during = host.row('s1', 1); // written while the link was down
+    host.reconnect();
+    s.refuse = true;
+    streams.relinked(); // its catch-up's reads are refused
+    await vi.waitFor(() => expect(s.waits).toBe(1));
+    s.refuse = false;
+    const missed = host.row('s1', 1); // live, while the stream stands failed: the journal's to give
+    status();
+    const after = host.row('s1', 1);
+    await vi.waitFor(() => expect(ids(batches)).toEqual(ids([...before, ...during, ...missed, ...after])));
+    const reads = s.reads.length;
+    status();
+    expect(s.reads.length, 'a stream that did not fail reads nothing at a status').toBe(reads);
+  });
+
+  it('restarts it CATCHUP_RESTARTS times in a row, each at a status, while the reads keep failing; the link’s next streaming still catches it up', async () => {
+    const { host, s, streams, batches, follower, status } = refusable();
+    await follower.follow({ sessions: [{ appSessionId: 's1', cursor: null }], live: false });
+    const before = host.row('s1', 1);
+    await vi.waitFor(() => expect(batches).toHaveLength(1));
+    s.refuse = true;
+    streams.relinked();
+    await vi.waitFor(() => expect(s.waits).toBe(1));
+    for (let i = 1; i <= CATCHUP_RESTARTS; i++) {
+      const reads = s.reads.length;
+      status();
+      await vi.waitFor(() => expect(s.waits).toBe(1 + i));
+      expect(s.reads.length, 'one opening, its status read refused').toBe(reads + 1);
+    }
+    const reads = s.reads.length;
+    status();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(s.reads.length, 'past the bound a status restarts nothing').toBe(reads);
+    expect(s.waits).toBe(1 + CATCHUP_RESTARTS);
+    s.refuse = false;
+    const missed = host.row('s1', 1);
+    streams.relinked();
+    await vi.waitFor(() => expect(ids(batches)).toEqual(ids([...before, ...missed])));
+    const after = host.row('s1', 1); // live once it caught up
+    await vi.waitFor(() => expect(ids(batches)).toEqual(ids([...before, ...missed, ...after])));
   });
 
   // P5 O16 M4 (the VM's holder run, "Stream redelivery"): a follower relinks across a `mawsd` restart (the engine host
