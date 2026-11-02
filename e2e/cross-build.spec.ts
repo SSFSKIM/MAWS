@@ -121,7 +121,8 @@ import { daemonPaths } from '@shared/daemon/files';
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
-import { ENGINE_HOST_BROWSER_WORK, SCREENCAST } from './support/headless-browser'; // P5 O17 M8
+import { answered, ENGINE_HOST_BROWSER_WORK, SCREENCAST, startPages as startHeadlessPages } from './support/headless-browser'; // P5 O17 M8; M7: the pre-O17 app's cell
+import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M7
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { AgentSeam } from './support/dashboards';
 import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
@@ -1210,8 +1211,8 @@ const UNIT_SKIP = process.platform !== 'darwin' ? 'a unit mawsd is a LaunchAgent
 const unitEnv = (userData: string): Record<string, string> => ({ MAWS_E2E: '1', CLAUDE_CONFIG_DIR: join(userData, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop' });
 const RENDER_PAGE = '<!doctype html><html><head><title>Render</title></head><body style="margin:0;background:#2a6"><p>CROSS_BUILD_RENDER</p></body></html>';
 
-async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>): Promise<void> {
-  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: unitEnv(s.userData) });
+async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>, env: Record<string, string> = {} /* P5 O17 M7: the scene's own */): Promise<void> {
+  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: { ...unitEnv(s.userData), ...env } });
   s.daemons.add(unit.pid);
   try {
     await body(unit);
@@ -1275,4 +1276,88 @@ test('(update, render) this build’s app on the peer’s unit mawsd, which list
       record(said);
     });
   });
+});
+
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A's "any app" cell, R5): an app from before
+// O17 (the peer) over this build's `mawsd`. A private `mawsd` of another build would be restarted by the app's build
+// check, so this build's runs as the profile's unit, as in (update, render). The session starts through the ordinary
+// start path on the cua engine stub (test/support/cua-engine.ts), whose connector dials `mawsd`'s socket for it: with the
+// app attached `mawsd` relays it to the app's own socket (O5 M5), the app makes the tab, the render host starts nothing,
+// and the engine host holds no browser work for it (an app's tabs are never browser work: they keep today's release). At
+// the app's quit the session reads this build's headless route. The app's cua sockets (`<profile>/browser/cua`, with no
+// fallback directory) fit sun_path only under a short root, so the scratch is made under /tmp. Run on the crossing the
+// landing's gate stages (the peer at O16's merge, both listing host.holder): the handover crossing calls no `awayOnKept`,
+// so this cell stands on its own rather than in it.
+test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd: the agent’s browser relayed to the app’s own tabs, which hold no browser work; at the app’s quit the session reads this build’s headless route', async () => {
+  const { here, peer } = builds();
+  test.skip(hostsBrowserWork(peer) || !hostsBrowserWork(here) || !appObeysConnectors(peer) || !('commands.machine.client' in peer.manifest.entries), `the peer (wire ${wireOf(peer)}) is not an app from O5 M5 to before O17 that this build's mawsd serves`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  const pages = await startHeadlessPages();
+  const tmp = process.env.TMPDIR;
+  const restore = () => {
+    if (tmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = tmp;
+  };
+  process.env.TMPDIR = '/tmp'; // the scratch's root alone (withScratch makes it first)
+  try {
+    await withScratch('xb-o17-app', async (s) => {
+      restore();
+      const bin = writeCuaEngine(join(s.root, 'cua-engine'), { ready: true, retry: true, control: true, lifeMs: 600_000 });
+      await withUnit(s, here, 'xb-o17-app', async (unit) => {
+        const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+        const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+        await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+        expect(run.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+        // the engine store the unit's engine host reads (unitEnv): the repository trusted, the user's mode `default`
+        const configDir = join(s.userData, 'claude-config');
+        writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ projects: { [s.repo]: { hasTrustDialogAccepted: true } } })}\n`);
+        writeFileSync(join(configDir, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+        const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build-o17-app' });
+        if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+        const link = reached.link;
+        try {
+          const ask = async <T,>(name: string, input?: unknown): Promise<T> => {
+            const answer = await link.request(name, input, 30_000);
+            if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
+            return answer.value as T;
+          };
+          const browserOf = async (id: AppSessionId) => (await ask<{ browser?: unknown }>('session.capabilities', { appSessionId: id })).browser;
+          const holdOf = async (id: AppSessionId) => (await ask<{ work?: { holds?: { browser?: string } } }>('session.status', { appSessionId: id })).work?.holds?.browser;
+          const project = await ask<{ id: string }>('session.projects.add', { directory: s.repo });
+          const { appSessionId: id } = await ask<{ appSessionId: AppSessionId }>('session.create', { projectId: project.id, location: { kind: 'directory', path: s.repo } });
+          expect(await ask('session.start', { appSessionId: id, message: { content: 'o17 pre-O17 app', display: 'o17 pre-O17 app' }, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+          await expect.poll(async () => { const st = await ask<{ process: string; turn: unknown; pid: number | null }>('session.status', { appSessionId: id }).catch(() => null); return st !== null && st.process === 'ready' && st.turn === null && st.pid !== null; }, { timeout: 60_000, message: 'the session’s engine ready, its first turn ended' }).toBe(true); // prettier-ignore
+          await expect.poll(() => browserOf(id), { timeout: 30_000, message: 'relayed to the attached pre-O17 app (O5 M5)' }).toEqual({ available: true, viewed: 'local' });
+
+          let cua: ConnectorControl | null = null;
+          await expect.poll(async () => (cua = await connectorControl(s.repo).catch(() => null)) !== null, { timeout: 30_000, message: 'the session’s connector listens on its control socket' }).toBe(true);
+          const agent = cua!;
+          try {
+            await expect.poll(async () => { const answer = await agent.call('tabs.query'); return answer.ok; }, { timeout: 30_000, message: 'cua served through the relay' }).toBe(true); // prettier-ignore
+            await answered('tabs.create in the app', agent.call('tabs.create', { url: pages.url('/') }));
+            expect(await answered('tabs.query', agent.call<unknown[]>('tabs.query')), 'the app holds the agent’s tab').toHaveLength(1);
+            expect(await holdOf(id), 'an app’s tab is no browser work (R5)').toBeUndefined();
+            expect((await ask<{ render: { starts: number } }>('daemon.status')).render.starts, 'the render host started nothing').toBe(0);
+            expect(s.daemonLog(), 'every snapshot this build’s engine host was told, taken').not.toMatch(/\[browser\] host\.browserWork .* failed/);
+            said.push(`  relayed: ${JSON.stringify(await browserOf(id))}; the app's tab holds no browser work; the render host started nothing`);
+
+            await s.quit(run);
+            await expect.poll(() => browserOf(id), { timeout: 30_000, message: 'with the app gone, this build’s headless route' }).toEqual(SCREENCAST);
+            expect(await holdOf(id), 'nothing held once the app’s tab went with it').toBeUndefined();
+            said.push(`  after the app's quit: ${JSON.stringify(await browserOf(id))}, nothing held`);
+          } finally {
+            agent.close();
+          }
+          expect(await ask('session.stop', { appSessionId: id, reason: 'stop' })).toMatchObject({ exited: true });
+        } finally {
+          link.close();
+        }
+        record(said);
+      }, { MAWS_E2E_ENGINE_BIN: bin });
+    });
+  } finally {
+    restore();
+    await pages.close();
+  }
 });
