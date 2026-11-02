@@ -15,6 +15,12 @@
 // The idle release (idle-release.ts) asks, through the table, for a due session held by its headless tab alone; that ask
 // is `host.browserIdle` to the declaring client, which closes the session's tabs. A fresh link's first snapshot has
 // every session still waiting ask again.
+//
+// The first snapshot on each link is logged with how many sessions it holds. M8's scene 6 stages both arrival orders of an
+// adoption and the snapshot at e2e with two holds read under MAWS_E2E=1 alone (`e2eHoldFor`): one on a snapshot's
+// application (here), one on the start's adoptions (index.ts).
+import { existsSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { AppSessionId } from '@shared/graph/ids';
 import { namesClient } from '@shared/host/client-refs';
 import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
@@ -24,7 +30,12 @@ import type { ProcessTable } from './process-table';
 
 export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'onBrowserIdleDue' | 'browserSnapshotApplied'>;
 
-export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone'>, sessions: BrowserWorkSessions): void {
+export interface BrowserWorkOptions {
+  log?: (line: string) => void;
+  hold?: () => Promise<void>; // the e2e's hold on a snapshot's application (MAWS_E2E_BROWSER_WORK_HOLD)
+}
+
+export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone'>, sessions: BrowserWorkSessions, opts: BrowserWorkOptions = {}): void {
   // The current link's kept set, with the connection that applied it; null while the link has applied none
   let link: { connection: ClientRef; held: ReadonlySet<AppSessionId> } | null = null;
   const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
@@ -46,6 +57,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
 
   on('host.browserWork', async ({ held }, ctx) => {
     if (!client.declaresAttachment() || namesClient(ctx.client)) throw new HostCommandError(ipcError('internal', 'host.browserWork from a client whose hello did not list host.attachment, or for another client: nothing changed'));
+    await opts.hold?.();
     const fresh = link?.connection !== ctx.client;
     link = { connection: ctx.client, held: new Set(held as AppSessionId[]) };
     const kept = link.held;
@@ -54,6 +66,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
       else session.setBrowserHold(kept.has(session.status().appSessionId) ? 'held' : null);
     }
     if (!fresh) return;
+    opts.log?.(`browser work: the first snapshot on this link holds ${kept.size} session(s)`);
     const connection = ctx.client;
     connection.onGone(() => linkEnded(connection)); // its end, ready or not (a link lost before its ready line too)
     sessions.browserSnapshotApplied();
@@ -62,4 +75,16 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   sessions.onBrowserIdleDue((appSessionId) => {
     if (client.declaresAttachment()) emit('host.browserIdle', { appSessionId });
   });
+}
+
+// M8's scene 6 (e2e only): under MAWS_E2E=1 with `key` naming a file, a wait while that file exists (read every 100 ms, at
+// most E2E_HOLD_MAX_MS), as the tool server's hold (tool-server/e2e-hold.ts); outside MAWS_E2E, or with no file, none
+export const E2E_HOLD_MAX_MS = 120_000;
+export function e2eHoldFor(env: NodeJS.ProcessEnv, key: 'MAWS_E2E_BROWSER_WORK_HOLD' | 'MAWS_E2E_ADOPTION_HOLD', deps = { exists: existsSync, sleep: (ms: number): Promise<unknown> => sleep(ms), now: () => Date.now() }): (() => Promise<void>) | undefined {
+  const path = env.MAWS_E2E === '1' ? env[key] : undefined;
+  if (!path) return undefined;
+  return async () => {
+    const until = deps.now() + E2E_HOLD_MAX_MS;
+    while (deps.exists(path) && deps.now() < until) await deps.sleep(100);
+  };
 }

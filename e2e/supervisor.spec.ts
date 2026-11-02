@@ -1684,7 +1684,7 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
           if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
           return answer.value as T;
         };
-        const status = (id: AppSessionId) => ask<{ process: string; pid: number | null; turn: unknown; work?: { holds?: { browser?: string } } }>('session.status', { appSessionId: id });
+        const status = (id: AppSessionId) => ask<{ process: string; pid: number | null; turn: unknown; work?: { holds?: { browser?: string }; descendants?: number | null } }>('session.status', { appSessionId: id });
         const render = async () => (await ask<{ render: { pid: number | null; starts: number; browserTabs?: number } }>('daemon.status')).render;
         const readyAfter = (id: AppSessionId, not: number | null = null) =>
           expect.poll(async () => { const st = await status(id).catch(() => null); return st !== null && st.process === 'ready' && st.turn === null && st.pid !== null && st.pid !== not; }, { timeout: 60_000, message: `${id}'s engine ready, its turn ended` }).toBe(true); // prettier-ignore
@@ -1704,6 +1704,11 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
 
         const quiet = await start(repos[0]!, 'o17 idle session');
         const busy = await start(repos[1]!, 'o17 busy session');
+        // O16's descendant veto (P5 O17 M7): each engine's one child, its connector, counts as work from the memory sample
+        // that first sees it until the next, once the engine's mcp_status has named it; past two samples (10 s each) of the
+        // later start both read none, so both idle clocks run from the quit
+        await sleep(2 * 10_000 + 1_000);
+        for (const id of [quiet, busy]) await expect.poll(async () => (await status(id)).work?.descendants, { timeout: 15_000, message: `${id}'s connector read as registered infrastructure` }).toBe(0);
         await s.quit(run);
         const quitAt = Date.now(); // no app and no interest from here: both sessions' idle clocks run
         const headlessTab = async (id: AppSessionId, repo: string) => {

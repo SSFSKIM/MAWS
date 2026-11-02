@@ -53,6 +53,7 @@ const stopConnector = () => {
 if (process.env.MAWS_CUA_STUB_READY === '1') {
   // the latency engine reads its arguments and stdin, answers end_session, stdin's end and SIGTERM by exiting, and the
   // connector ends with this process
+  process.env.MAWS_LATENCY_STUB_STOP_HOOK = '1'; // each turn's Stop, so an adopted session's work reads known after one
   process.env.MAWS_LATENCY_STUB_MCP_SERVERS = JSON.stringify([{ name: 'cua', status: 'connected', config: { type: 'stdio', command: process.execPath, args: connectorArgs } }]);
   process.on('exit', stopConnector);
   process.argv = [process.argv[0], join(here, 'latency-engine-stub.mjs'), join(process.cwd(), 'cua-engine-turns.jsonl'), ...args];

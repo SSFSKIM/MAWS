@@ -63,7 +63,7 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
-import { registerBrowserWork } from './browser-work'; // P5 O17 M7
+import { e2eHoldFor, registerBrowserWork } from './browser-work'; // P5 O17 M7; M8's scene 6: e2eHoldFor
 import { Gate } from './holder/gate'; // O16 M5
 import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
@@ -195,7 +195,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): browser work beside the attachment,
   // from the same declaring client; here, once the table exists, so its kept snapshot gives every row created after it
   // its verdict (a launch, an adoption), and the idle release's ask becomes host.browserIdle
-  registerBrowserWork(on, emit, client, table);
+  registerBrowserWork(on, emit, client, table, { log: (line) => console.log(`[supervisor] ${line}`), hold: e2eHoldFor(process.env, 'MAWS_E2E_BROWSER_WORK_HOLD') });
   table.startSampling();
   // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
   const interested = table;
@@ -295,7 +295,8 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
   const heldHosts = { stop: (entry: RosterEntry) => stopHeldHost(entry, stopDeps), child: (entry: RosterEntry) => heldChild(entry, hostsDir) };
   const held = recordStart(engine.table, live, heldHosts);
-  void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
+  const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD'); // P5 O17 M8's scene 6: the e2e's hold on the adoptions
+  void (e2eHold?.() ?? Promise.resolve()).then(() => adoptAll(live, { adopt: (entry) => engine.adopt(entry), log })).then((outcome) => {
     // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
     // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
     // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed

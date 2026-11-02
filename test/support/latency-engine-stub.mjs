@@ -26,7 +26,10 @@
 //
 // P5 O17 M7: `mcp_status` is answered only when MAWS_LATENCY_STUB_MCP_SERVERS names the servers (a JSON array of
 // mcp_status entries): the cua engine stub runs this engine in its own process and names its connector there, as the
-// engine names `cua serve`, so O16's descendant veto reads the connector as registered infrastructure.
+// engine names `cua serve`, so O16's descendant veto reads the connector as registered infrastructure. P5 O17 M8's scene
+// 6: with MAWS_LATENCY_STUB_STOP_HOOK=1 each turn calls the host's Stop hook (the callback its initialize registered)
+// before its result, with no crons and no background tasks, as the engine's Stop does, so the host reads the session's
+// work as known after a turn (an adopted session's included).
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -154,15 +157,22 @@ async function playTurn(user) {
     write(delta);
     appendFileSync(samplesPath, `${JSON.stringify({ turn, k, writtenAt })}\n`);
   }
-  for (const frame of after) write(finish(frame));
+  for (const frame of after) {
+    if (frame.type === 'result' && process.env.MAWS_LATENCY_STUB_STOP_HOOK === '1' && stopCallback !== null) {
+      write({ type: 'control_request', request_id: `stub-stop-${turn}`, request: { subtype: 'hook_callback', callback_id: stopCallback, input: { hook_event_name: 'Stop', session_id: sessionId, stop_hook_active: false, last_assistant_message: text, background_tasks: [], session_crons: [] } } });
+    }
+    write(finish(frame));
+  }
 }
 
 // Turns play one after another, in the order their prompts arrived.
 let playing = Promise.resolve();
+let stopCallback = null; // P5 O17 M8: the Stop hook's callback id, from the latest initialize
 function onFrame(frame) {
   if (frame.type === 'control_request') {
     const subtype = frame.request?.subtype;
     if (subtype === 'end_session') process.exit(0);
+    if (subtype === 'initialize') stopCallback = frame.request.hooks?.Stop?.[0]?.hookCallbackIds?.[0] ?? stopCallback;
     const answer = answers.get(subtype);
     if (!answer) {
       process.stderr.write(`latency engine stub: no recorded answer for control_request ${subtype}\n`);

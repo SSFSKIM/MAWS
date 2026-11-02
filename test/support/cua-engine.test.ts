@@ -168,7 +168,7 @@ describe('the cua engine stub (P5 O17 M8)', () => {
       resume: null, sessionId: randomUUID(), trust: null, mcpConfig: null, extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, maxBudgetUsd: null, inheritGrantsFrom: null, replay: null,
     });
     const plan = buildLaunch(spec, { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root }, { relayUrl: RELAY_URL, bin, engineVersion: FIXTURE_ENGINE_VERSION, spawnerPid: process.pid });
-    const session = new EngineSession({ spec, plan, spawn: (p) => spawnEngine(p, { maxLineChars: MAX_LINE_CHARS }), journal: new MemoryJournal(), log: () => {}, sessionStartHookMs: () => Promise.resolve(SESSION_START_HOOK_MS) });
+    const session = new EngineSession({ spec, plan, spawn: (p) => spawnEngine(p, { maxLineChars: MAX_LINE_CHARS }), journal: new MemoryJournal(), log: () => {}, sessionStartHookMs: () => Promise.resolve(SESSION_START_HOOK_MS), launchKind: 'adopted' });
     try {
       await session.start();
       expect(session.lifecycle).toBe('ready');
@@ -187,6 +187,13 @@ describe('the cua engine stub (P5 O17 M8)', () => {
       process.kill(first!.pid, 'SIGKILL');
       const second = await until(() => connectorReport(root), (report) => report !== null && report.pid !== first!.pid && report.hellos === 1);
       expect(parentOf(second!.pid), 'started again by the same engine').toBe(enginePid);
+
+      // P5 O17 M8's scene 6: each turn ends with the Stop hook's callback, its task list and crons empty, so a session
+      // whose work started unknown (here an adopted one's kind) reads known after its next turn
+      expect(session.status().work?.unknown).toBe('adopted');
+      await session.send('a turn');
+      await until(() => session.status(), (status) => status.turn === null && status.work?.unknown === null, 20_000);
+      expect(session.status().work).toMatchObject({ crons: [], unknown: null });
 
       expect(await session.stop('stop')).toMatchObject({ exited: true });
       await until(() => { try { process.kill(second!.pid, 0); return false; } catch { return true; } }, (gone) => gone); // prettier-ignore

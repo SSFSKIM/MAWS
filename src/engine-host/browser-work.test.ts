@@ -12,7 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { createHostRuntime, type HostPort, type HostRuntime } from '@shared/host/runtime';
 import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
-import { registerBrowserWork } from './browser-work';
+import { e2eHoldFor, registerBrowserWork } from './browser-work';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { handshakeResponder, launchSpec, scriptedSession } from './conformance/session-harness';
 import { JournalWriter } from './journal';
@@ -49,9 +49,9 @@ function fakePort() {
 }
 
 // The engine host's composition: the table, and browser work registered over it in the real runtime
-function host() {
+function host(opts: Parameters<typeof registerBrowserWork>[4] = {}) {
   const table = new ProcessTable({ ps: async () => '', log: () => {} });
-  const runtime: HostRuntime = createHostRuntime((on, emit, client) => registerBrowserWork(on, emit, client, table));
+  const runtime: HostRuntime = createHostRuntime((on, emit, client) => registerBrowserWork(on, emit, client, table, opts));
   const link = (peer = DECLARING) => {
     const fake = fakePort();
     runtime.serve(fake.port, peer);
@@ -153,6 +153,45 @@ describe('host.browserWork (P5 O17 M7)', () => {
     expect(browser(await launch(h.table, 'other', 902))).toBeNull();
     h.runtime.detach();
     expect(browser(await launch(h.table, 'after', 903))).toBeNull();
+  });
+});
+
+// M8's scene 6 at e2e (adoption, then the snapshot): the e2e's hold on the snapshot's application, and the line a scene
+// reads to know the link's first snapshot applied (the other order)
+describe('the link\'s first snapshot, logged, and the e2e\'s hold on it (P5 O17 M8 scene 6)', () => {
+  it('logs the first snapshot on each link with how many sessions it holds, not a later one', async () => {
+    const lines: string[] = [];
+    const h = host({ log: (line) => void lines.push(line) });
+    await launch(h.table, 'a');
+    const first = h.link();
+    await first.request('host.browserWork', { held: ['a'] });
+    await first.request('host.browserWork', { held: [] });
+    h.runtime.detach();
+    await h.link().request('host.browserWork', { held: [] });
+    expect(lines).toEqual(['browser work: the first snapshot on this link holds 1 session(s)', 'browser work: the first snapshot on this link holds 0 session(s)']);
+  });
+
+  it('a snapshot waits for the hold before it is applied and answered', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const h = host({ hold: () => held });
+    const a = await launch(h.table, 'a');
+    const answer = h.link().request('host.browserWork', { held: ['a'] });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(browser(a)).toBeNull();
+    release();
+    expect(await answer).toMatchObject({ ok: true });
+    expect(browser(a)).toBe('held');
+  });
+
+  it('the hold is the e2e\'s alone: a file named under MAWS_E2E=1, waited on while it exists', async () => {
+    expect(e2eHoldFor({ MAWS_E2E_BROWSER_WORK_HOLD: '/x' }, 'MAWS_E2E_BROWSER_WORK_HOLD')).toBeUndefined();
+    expect(e2eHoldFor({ MAWS_E2E: '1' }, 'MAWS_E2E_ADOPTION_HOLD')).toBeUndefined();
+    let exists = true;
+    let slept = 0;
+    const wait = e2eHoldFor({ MAWS_E2E: '1', MAWS_E2E_ADOPTION_HOLD: '/x/hold' }, 'MAWS_E2E_ADOPTION_HOLD', { exists: () => exists, sleep: async () => void (++slept === 3 && (exists = false)), now: () => 0 })!;
+    await wait();
+    expect(slept).toBe(3);
   });
 });
 
