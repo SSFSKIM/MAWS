@@ -6,11 +6,11 @@
 // MAWS_USER_DATA outside the scratch daemon's own start; every path a command names is the scratch profile's but the
 // runtime's; the profile is removed only once no bench process is left; and the mini's quiet window refuses every call.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, envLine, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, scratchCheckLine, scratchCheckProblems, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, envLine, guardedLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -37,19 +37,27 @@ const SOURCE: HeadBundle = { tar: '/tmp/bench-local/source.tar', tarBytes: 12 * 
 const DF = (availableKb: number) => `Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 970000000 400000000 ${availableKb} 42% /System/Volumes/Data\n`;
 const at = (iso: string) => Date.parse(iso);
 
-type Call = { argv: readonly string[]; stdinFile?: string; stdin?: string; timeoutMs?: number };
+type Call = { argv: readonly string[]; stdinFile?: string; stdin?: string; timeoutMs?: number; wrapped?: string };
 type Script = (command: string, call: Call) => RunResult | undefined;
 const ok = (stdout = ''): RunResult => ({ code: 0, stdout, stderr: '' });
+/** A command less its guard (`guardedLine`'s prefix). */
+const bare = (line: string) => line.replace(/^for t in .*?; done; done; /s, '');
 
 /** What a sound machine answers to the runner's own checks: the profile's path real, the VM prepared, the daemon's pid its own, no bench process left. */
 function soundMachine(command: string): RunResult | undefined {
-  const profile = /^p=(\S+); while/.exec(command)?.[1];
-  if (profile !== undefined) return ok(`lexical ${profile}\nphysical ${profile}\n`);
   if (/prepared-commit 2>\/dev\/null\)" = /.test(command)) return ok();
   const pid = /^ps -o args= -p "\$\(cat (\S+)\/bench\/mawsd\.pid\)"$/.exec(command);
   if (pid !== null) return ok(`/p/runtime/bin/node /p/out/main/mawsd.js run --private --dir ${pid[1]}/mawsd\n`);
   if (/^pgrep -f -- /.test(command)) return { code: 1, stdout: '', stderr: '' };
   return undefined;
+}
+
+/** The command inside `deadlined`'s `sh -c '…'`. */
+function unwrap(line: string): string {
+  const match = /^(?:timeout -k 5 \d+|perl -e '(?:[^']|'\\'')*' \d+) sh -c ('(?:[^']|'\\'')*'|\S+)$/s.exec(line);
+  if (match === null) throw new Error(`a remote command without its deadline: ${line}`);
+  const word = match[1]!;
+  return word.startsWith("'") ? word.slice(1, -1).replaceAll("'\\''", "'") : word;
 }
 
 /**
@@ -60,8 +68,11 @@ function fakeRunner(script: Script, options: { endless?: boolean } = {}) {
   const calls: Call[] = [];
   const started: { argv: readonly string[]; written: string[]; ended: boolean; killed: boolean }[] = [];
   const runner: CommandRunner = {
-    async run(argv, runOptions = {}) {
-      const call: Call = { argv, ...(runOptions.timeoutMs !== undefined && { timeoutMs: runOptions.timeoutMs }), ...(runOptions.stdinFile !== undefined && { stdinFile: runOptions.stdinFile, stdin: runOptions.stdinFile === BUNDLE.tar || runOptions.stdinFile === SOURCE.tar ? '(an archive)' : readFileSync(runOptions.stdinFile, 'utf8') }) };
+    async run(transport, runOptions = {}) {
+      // the machine's own deadline around each command (`deadlined`): recorded, and the command inside it scripted
+      const wrapped = transport.at(-1)!;
+      const argv = [...transport.slice(0, -1), unwrap(wrapped)];
+      const call: Call = { argv, wrapped, ...(runOptions.timeoutMs !== undefined && { timeoutMs: runOptions.timeoutMs }), ...(runOptions.stdinFile !== undefined && { stdinFile: runOptions.stdinFile, stdin: runOptions.stdinFile === BUNDLE.tar || runOptions.stdinFile === SOURCE.tar ? '(an archive)' : readFileSync(runOptions.stdinFile, 'utf8') }) };
       calls.push(call);
       return script(argv.at(-1)!, call) ?? soundMachine(argv.at(-1)!) ?? ok();
     },
@@ -236,16 +247,16 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const lines = fresh.calls.map((c) => c.argv.at(-1)!);
     const at = (pattern: RegExp) => lines.findIndex((line) => pattern.test(line));
     expect(lines.filter((line) => /\bgit\b/.test(line))).toEqual([]);
-    expect(fresh.calls.find((c) => c.stdinFile === SOURCE.tar)!.argv.at(-1)).toBe(`cat > ${p}/bench/source.tar`);
-    expect(lines[at(/tar -xf/)]).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/source.tar -C ${p}/head && rm -f ${p}/bench/source.tar`);
-    expect(lines[at(/pnpm install/)]).toBe(`cd ${p}/head && ${envLine(profileEnv(VM('/tmp/code')))} pnpm install --frozen-lockfile >&2`);
-    expect(lines[at(/spawn-helper/)]).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
+    expect(fresh.calls.find((c) => c.stdinFile === SOURCE.tar)!.argv.at(-1)).toBe(copyLine(VM('/tmp/code'), `${p}/bench/source.tar`));
+    expect(bare(lines[at(/tar -xf/)]!)).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/source.tar -C ${p}/head && rm -f ${p}/bench/source.tar`);
+    expect(bare(lines[at(/pnpm install/)]!)).toBe(`cd ${p}/head && ${envLine(profileEnv(VM('/tmp/code')))} pnpm install --frozen-lockfile >&2`);
+    expect(bare(lines[at(/spawn-helper/)]!)).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
     expect(lines[at(/mawsd-pack\.mjs/)]).toContain(`pack({ out: "${p}/bench/pack", commit: "aaaaaaaa" })`);
     expect(lines[at(/mawsd-pack\.mjs/)]).toContain(`cd ${p}/head && ${envLine(profileEnv(VM('/tmp/code')))} /usr/bin/node --input-type=module -e `);
-    const order = [at(/^p=/), at(/^mkdir -p /), at(/^rm -f .*prepared-commit/), at(/cat > .*source\.tar/), at(/tar -xf/), at(/pnpm install/), at(/spawn-helper/), at(/mawsd-pack\.mjs/), at(/> \S+\/pack-path$/), at(/> \S+\/prepared-commit$/)];
+    const order = [at(/; done; done; mkdir -p /), at(/; done; done; rm -f .*prepared-commit/), at(/cat > .*source\.tar/), at(/tar -xf/), at(/pnpm install/), at(/spawn-helper/), at(/mawsd-pack\.mjs/), at(/> \S+\/pack-path$/), at(/> \S+\/prepared-commit$/)];
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((x, y) => x - y)).toEqual(order);
-    expect(lines.at(-1)).toBe(`printf '%s\\n' ${COMMIT} > ${p}/bench/prepared-commit`);
+    expect(bare(lines.at(-1)!)).toBe(`printf '%s\\n' ${COMMIT} > ${p}/bench/prepared-commit`);
     expect(fresh.said.at(-1)).toMatch(/prepared at aaaaaaaaa: its head installed and packed in \/home\/dev\/maws-bench\/vm-bench\/bench\/pack\/0\.0\.0-aaaaaaaa-1234$/);
     const again = await prepareRun(VM('/tmp/code'), machineScript({}));
     expect(again.failure).toBeNull();
@@ -328,7 +339,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
         const m = machine(file);
       const { calls, started } = await fullRun(m, machineScript({ listedAfter: 0 }));
       const commands = [...calls.map((c) => c.argv.at(-1)!), ...started.map((s) => s.argv.at(-1)!)];
-      const outside = commands.flatMap(pathsOf).filter((path) => path !== m.profile && !path.startsWith(`${m.profile}/`) && path !== m.node && !(allowed as readonly string[]).includes(path));
+      const outside = commands.flatMap(pathsOf).filter((path) => path !== m.profile && !path.startsWith(`${m.profile}/`) && path !== m.scratchRoot && path !== `${m.scratchRoot}/*` && path !== m.node && !(allowed as readonly string[]).includes(path));
       expect(outside).toEqual([]);
       // the runtime only ever runs: never a redirection's target, a copy's, or a directory made
       for (const command of commands) expect(command).not.toMatch(new RegExp(`(>|cat >|mkdir -p|rm -rf|cp) *'?${m.node.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
@@ -352,7 +363,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       expect(await run.removeProfile()).toBe(true);
       // the profile with all the bench put in it (its head, a tarball left, the pack), and only after the check passed
       const lines = fake.calls.map((c) => c.argv.at(-1)!);
-      expect(lines.at(-1)).toBe(`rm -rf ${machine === VM ? '/home/dev/maws-bench/vm-bench' : '/Users/kimmi/.local/share/maws-bench/mini-bench'}`);
+      expect(bare(lines.at(-1)!)).toBe(`rm -rf ${machine === VM ? '/home/dev/maws-bench/vm-bench' : '/Users/kimmi/.local/share/maws-bench/mini-bench'}`);
       expect(lines.at(-2)).toMatch(/^pgrep -f -- /);
       expect(lines.filter((line) => /rm -rf/.test(line))).toHaveLength(1);
       expect(said.at(-1)).toMatch(/the scratch profile is removed, its head and every bench file in it$/);
@@ -400,9 +411,9 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(lines[at(/process\.versions\.electron/)]).toBe(`${envLine(profileEnv(MINI('/tmp/code')))} /Applications/MAWS.app/Contents/MacOS/MAWS -p process.versions.electron`);
     expect(lines[at(/^df -Pk/)]).toBe(`df -Pk ${p}`);
     const copy = calls.find((c) => c.stdinFile === BUNDLE.tar)!;
-    expect(copy.argv.at(-1)).toBe(`cat > ${p}/bench/head.tar`);
-    expect(lines[at(/tar -xf/)]).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/head.tar -C ${p}/head && rm -f ${p}/bench/head.tar`);
-    expect(lines[at(/spawn-helper/)]).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
+    expect(copy.argv.at(-1)).toBe(copyLine(MINI('/tmp/code'), `${p}/bench/head.tar`));
+    expect(bare(lines[at(/tar -xf/)]!)).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/head.tar -C ${p}/head && rm -f ${p}/bench/head.tar`);
+    expect(bare(lines[at(/spawn-helper/)]!)).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
     expect(at(/tar -xf/)).toBeLessThan(at(/spawn-helper/));
     expect(at(/process\.versions\.electron/)).toBeLessThan(at(/^df -Pk/));
     expect(at(/^df -Pk/)).toBeLessThan(lines.indexOf(copy.argv.at(-1)!));
@@ -537,38 +548,6 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(machineProblems({ ...MINI(file), profile: `${root}/mini*`, head: `${root}/mini*/head` })).toContain(`profile ${root}/mini* holds a quote, a space or a shell character`);
   });
 
-  it('refuses every write when the profile’s path goes through a symlink, or one of its own paths is one; the check itself writes nothing', async () => {
-    const m = MINI('/tmp/code');
-    const line = scratchCheckLine(m);
-    expect(line).not.toMatch(/mkdir|rm |cp |mv |ln |cat >|> *[^&/]/); // its one redirection is 2>/dev/null
-    expect(scratchCheckProblems(m, `lexical /Users/kimmi/.local/share\nphysical /Users/kimmi/.local/share\n`)).toEqual([]);
-    expect(scratchCheckProblems(m, `lexical /Users/kimmi/.local/share/maws-bench\nphysical /Volumes/other/maws-bench\n`)).toEqual([`mini-bench: the profile ${m.profile} goes through a symlink or an unreadable directory: /Users/kimmi/.local/share/maws-bench is /Volumes/other/maws-bench physically`]);
-    expect(scratchCheckProblems(m, `lexical ${m.profile}\nphysical ${m.profile}\nsymlink ${m.profile}/bench\n`)).toEqual([`mini-bench: ${m.profile}/bench is a symlink, which a write would follow out of the profile`]);
-    expect(scratchCheckProblems(m, '')).toHaveLength(1);
-    // a real tree: the line run by sh, over a symlinked ancestor and a symlinked bench directory
-    const base = realpathSync(mkdtempSync(join(tmpdir(), 'bench-link-')));
-    scratch.push(base);
-    mkdirSync(join(base, 'real/root'), { recursive: true });
-    symlinkSync(join(base, 'real'), join(base, 'link'));
-    const through = { ...MINI('/tmp/code'), scratchRoot: `${base}/link/root`, profile: `${base}/link/root/p`, head: `${base}/link/root/p/head` };
-    const ran = spawnSync('sh', ['-c', scratchCheckLine(through)], { encoding: 'utf8' });
-    expect(scratchCheckProblems(through, ran.stdout)).toEqual([`mini-bench: the profile ${through.profile} goes through a symlink or an unreadable directory: ${base}/link/root is ${base}/real/root physically`]);
-    const real = { ...through, scratchRoot: `${base}/real/root`, profile: `${base}/real/root/p`, head: `${base}/real/root/p/head` };
-    mkdirSync(real.profile);
-    symlinkSync('/tmp', `${real.profile}/bench`);
-    expect(scratchCheckProblems(real, spawnSync('sh', ['-c', scratchCheckLine(real)], { encoding: 'utf8' }).stdout)).toEqual([`mini-bench: ${real.profile}/bench is a symlink, which a write would follow out of the profile`]);
-    rmSync(`${real.profile}/bench`);
-    expect(scratchCheckProblems(real, spawnSync('sh', ['-c', scratchCheckLine(real)], { encoding: 'utf8' }).stdout)).toEqual([]);
-    // through the runner: a symlink refuses prepare's first write, and the profile's removal
-    const linked: Script = (command) => (/^p=/.test(command) ? ok(`lexical ${m.profile}\nphysical ${m.profile}\nsymlink ${m.profile}/head\n`) : undefined);
-    const refused = await fullRun(MINI(codeFile()), linked);
-    expect(String(refused.failure)).toMatch(/refused to write under the scratch profile:\nmini-bench: .*\/head is a symlink/);
-    expect(refused.calls.map((c) => c.argv.at(-1)!)).toEqual([scratchCheckLine(MINI('/tmp/code'))]);
-    const fake = fakeRunner(linked);
-    await expect(new BenchRun(VM('/tmp/code'), benchDeps(fake, 0).deps).removeProfile()).rejects.toThrow(/is a symlink/);
-    expect(fake.calls.some((c) => /rm -rf|kill/.test(c.argv.at(-1)!))).toBe(false);
-  });
-
   it('refuses the bench app’s profile outside its scratch root, the production app’s profile, anything inside or above it, and one reached through a symlink', () => {
     const home = '/Users/new';
     const root = `${home}/.local/share/maws-bench`;
@@ -656,9 +635,11 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const failed = await fullRun(VM(codeFile()), (command, call) => (/^pid=\$\(cat /.test(command) ? { code: 5, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)), 0, BUNDLE, { endless: true });
     expect(failed.failure).toBeNull();
     expect(failed.started[0]).toMatchObject({ ended: true, killed: true });
-    expect(String(failed.teardownFailure)).toMatch(/vm-bench: teardown: ending the scratch mawsd failed: vm-bench: stopping the scratch mawsd failed \(exit 5\)/);
+    // the agent's step ran first (last registered) and failed, its cleanup unverified once killed; the daemon's stop still ran
+    expect(String(failed.teardownFailure)).toMatch(/vm-bench: teardown: ending the bench agent failed: vm-bench: the bench agent was killed: its cleanup on the machine is unverified/);
+    expect(failed.said).toContain('[bench] vm-bench: ending the scratch mawsd failed: vm-bench: stopping the scratch mawsd failed (exit 5)');
     expect(failed.said.some((line) => /torn down;/.test(line))).toBe(false);
-    expect(failed.said.at(-1)).toMatch(/not torn down \(1 step failed\)/);
+    expect(failed.said.at(-1)).toMatch(/not torn down \(2 steps failed\)/);
     // a pid that is another process's: refused, said, and teardown fails
     const stranger = await fullRun(VM(codeFile()), (command, call) => (/^pid=\$\(cat /.test(command) ? { code: 4, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
     expect(String(stranger.teardownFailure)).toMatch(/refused to signal the recorded pid/);
@@ -716,5 +697,125 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const vm = benchDeps(fakeRunner(machineScript({})), 0);
     new BenchRun(VM(codeFile()), vm.deps).serve(() => undefined);
     expect(vm.deadlines).toEqual([]);
+  });
+
+  // ---- the re-check's fixes ----------------------------------------------------------------------------------------
+
+  /** A real tree under a fresh directory: the scratch root, a profile in it, and a directory outside it. */
+  function realTree() {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'bench-guard-')));
+    scratch.push(base);
+    const root = `${base}/root`;
+    mkdirSync(`${root}/p/bench`, { recursive: true });
+    mkdirSync(`${base}/outside`);
+    writeFileSync(`${base}/outside/file`, 'the owner’s\n');
+    const m: BenchMachine = { ...VM('/tmp/code'), scratchRoot: root, profile: `${root}/p`, head: `${root}/p/head` };
+    return { base, root, m };
+  }
+  const sh = (line: string, input = '') => spawnSync('sh', ['-c', line], { encoding: 'utf8', input, timeout: 20_000 });
+
+  it('refuses a write through a symlinked component of its target, from the scratch root down, in the same shell step as the write', () => {
+    const { base, m } = realTree();
+    // an intermediate component of the head a symlink out of the profile
+    mkdirSync(`${base}/outside/elsewhere`);
+    symlinkSync(`${base}/outside/elsewhere`, `${m.profile}/inner`);
+    const head = `${m.profile}/inner/head`;
+    const through = guardedLine(m, [head], `mkdir -p ${quote(head)} && printf x > ${quote(`${head}/f`)}`);
+    const ran = sh(through);
+    expect(ran.status).toBe(86);
+    expect(ran.stderr).toContain(`refused: ${m.profile}/inner is a symlink`);
+    expect(existsSync(`${base}/outside/elsewhere/head`)).toBe(false);
+    // a target outside the root is refused whatever it is
+    expect(sh(guardedLine(m, [`${base}/outside/file`], 'true')).status).toBe(86);
+    // a sound target: the command runs
+    expect(sh(guardedLine(m, [`${m.profile}/bench/x`], `printf ok > ${quote(`${m.profile}/bench/x`)}`)).status).toBe(0);
+    expect(readFileSync(`${m.profile}/bench/x`, 'utf8')).toBe('ok');
+  });
+
+  it('copies a file to the machine through a fresh name moved into place, refusing a target that is a symlink, the outside file untouched', () => {
+    const { base, m } = realTree();
+    const target = `${m.profile}/bench/bench-agent.cjs`;
+    symlinkSync(`${base}/outside/file`, target);
+    const ran = sh(copyLine(m, target), '// the bundle\n');
+    expect(ran.status).toBe(86);
+    expect(ran.stderr).toContain(`refused: ${target} is a symlink`);
+    expect(readFileSync(`${base}/outside/file`, 'utf8')).toBe('the owner’s\n');
+    rmSync(target);
+    expect(sh(copyLine(m, target), '// the bundle\n').status).toBe(0);
+    expect(readFileSync(target, 'utf8')).toBe('// the bundle\n');
+    expect(readdirSync(`${m.profile}/bench`).filter((name) => name.startsWith('.bench-copy'))).toEqual([]);
+  });
+
+  it('guards every writing or destructive command the runner sends: each names its targets in the guard before it writes', async () => {
+    for (const machine of [MINI, VM]) {
+      const run = await fullRun(machine(codeFile()), machineScript({ listedAfter: 0 }));
+      const prep = machine === VM ? await prepareRun(VM('/tmp/code'), (command) => (/prepared-commit 2>\/dev\/null\)" = /.test(command) ? { code: 1, stdout: '', stderr: '' } : machineScript({})(command, { argv: [] }))) : null;
+      const fake = fakeRunner(() => undefined);
+      await new BenchRun(machine('/tmp/code'), benchDeps(fake, 0).deps).removeProfile();
+      const lines = [...run.calls, ...(prep?.calls ?? []), ...fake.calls].map((c) => c.argv.at(-1)!);
+      const writing = lines.filter((line) => /(^|[;&|] *)(mkdir|rm|tar|cat >|printf .*>|mv|chmod|find .*chmod)|tmp=\$\(mktemp|pnpm install|mawsd-pack|nohup| enroll /.test(bare(line)));
+      expect(writing.length).toBeGreaterThan(machine === VM ? 10 : 4);
+      for (const line of writing) expect(line, line).toMatch(/^for t in .* do p=\$t; while :; do if \[ -L "\$p" \]/);
+    }
+  });
+
+  it('gives every one-shot remote command its own deadline on the machine: timeout on the VM, a perl alarm on the mini', async () => {
+    for (const machine of [MINI, VM]) {
+      const run = await fullRun(machine(codeFile()), machineScript({ listedAfter: 0 }));
+      expect(run.failure).toBeNull();
+      for (const call of run.calls) {
+        const seconds = Number(/ (\d+) sh -c /.exec(call.wrapped!)![1]);
+        expect(call.wrapped, call.argv.at(-1)).toBe(deadlined(machine('/tmp/code'), seconds, call.argv.at(-1)!));
+        expect(call.timeoutMs).toBe(seconds * 1000 + 15_000); // given up on here only after the machine's own deadline
+        expect(call.wrapped).toMatch(machine === VM ? new RegExp(`^timeout -k 5 ${seconds} sh -c `) : new RegExp(`^perl -e '.*' ${seconds} sh -c `));
+      }
+    }
+    // the mini's perl deadline ends the command's whole group, a child that ignores SIGTERM included, at its second
+    const started = Date.now();
+    const ran = sh(deadlined(MINI('/tmp/code'), 1, `sh -c 'trap "" TERM; sleep 30' & wait`));
+    expect(ran.status).toBe(124);
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(sh(deadlined(MINI('/tmp/code'), 5, 'exit 3')).status).toBe(3);
+  });
+
+  it('resolves a local command as failed at its deadline, a child that ignores SIGTERM killed after the grace', async () => {
+    const runner = processRunner();
+    const started = Date.now();
+    const result = await runner.run([process.execPath, '-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('started\\n')"], { timeoutMs: 1_000 });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(result.code).toBeNull();
+    expect(result.stderr).toMatch(/timed out after 1 s/);
+  });
+
+  it('fails teardown when the agent’s exit does not show its cleanup done: a non-zero exit, or a kill', async () => {
+    const fake = fakeRunner(machineScript({ already: true }));
+    const original = fake.runner.start;
+    fake.runner.start = (argv) => {
+      const handle = original(argv);
+      let exit!: (code: number | null) => void;
+      const exited = new Promise<number | null>((resolve) => (exit = resolve));
+      return { ...handle, end: () => exit(1), exited }; // its own end failed on the machine
+    };
+    const { deps, said } = benchDeps(fake, 0);
+    const run = new BenchRun(VM(codeFile()), deps);
+    await run.stage();
+    run.serve(() => undefined);
+    await expect(run.teardown()).rejects.toThrow(/the bench agent exited 1: its cleanup on the machine is unverified/);
+    expect(fake.calls.at(-1)!.argv.at(-1)).toBe(stopLine(VM('/tmp/code'))); // the daemon's stop still attempted
+    expect(said.some((line) => /torn down;/.test(line))).toBe(false);
+    // killed after outliving its stdin's end: unverified too
+    const late = await fullRun(VM(codeFile()), machineScript({ listedAfter: 0 }), 0, BUNDLE, { endless: true });
+    expect(String(late.teardownFailure)).toMatch(/the bench agent was killed: its cleanup on the machine is unverified/);
+  });
+
+  it('passes serve an absolute deadline before the mini’s window, which the agent keeps itself', async () => {
+    const fake = fakeRunner(machineScript({ already: true }));
+    const { deps } = benchDeps(fake, at('2026-11-03T05:00:00Z'));
+    new BenchRun(MINI(codeFile()), deps).serve(() => undefined);
+    const word = /serve '(\{.*\})'$/.exec(fake.started[0]!.argv.at(-1)!)![1]!;
+    expect(JSON.parse(word).deadline).toBe(at('2026-11-03T06:45:00Z') - QUIET_MARGIN_MS);
+    const vm = fakeRunner(machineScript({}));
+    new BenchRun(VM(codeFile()), benchDeps(vm, 0).deps).serve(() => undefined);
+    expect(JSON.parse(/serve '(\{.*\})'$/.exec(vm.started[0]!.argv.at(-1)!)![1]!).deadline).toBe(SERVE_MAX_MS);
   });
 });

@@ -105,6 +105,14 @@ export const DEFAULT_LABEL = 'dev.maws.mawsd';
 export const MINI_QUIET_UTC = ['06:45', '07:00'] as const;
 /** What a serve may run for, so it starts only when the quiet window is that far off. */
 export const SERVE_SPAN_MS = 45 * 60_000;
+/** The longest a serve runs on a machine with no quiet window ahead (the live test's own timeout). */
+export const SERVE_MAX_MS = 150 * 60_000;
+/** How much later than the machine's own deadline a remote command's local process is given up on. */
+const REMOTE_GRACE_MS = 15_000;
+/** A local command's grace between its deadline's SIGTERM and SIGKILL. */
+const KILL_GRACE_MS = 2_000;
+/** The exit status a guard refuses a write with. */
+export const GUARD_REFUSED = 86;
 /** A remote command's timeout unless it names its own: every one ends, and its end is known before a window. */
 export const REMOTE_CALL_MS = 2 * 60_000;
 /** How long before a quiet window every call has ended and a running serve is ended with its cleanup. */
@@ -167,7 +175,7 @@ export function machineProblems(m: BenchMachine): string[] {
   if (!/^[0-9a-f]{40}$/.test(m.commit)) problems.push(`commit ${m.commit} is not a full sha`);
   if (m.stage === 'runner' && m.transport.kind !== 'devcloud') problems.push('the runner stages only a devcloud VM; the mini is mini-ops’');
   if (Buffer.byteLength(`${m.profile}/${LONGEST_SOCKET}`) > SOCKET_PATH_MAX_BYTES) problems.push(`profile ${m.profile} is too long for its sockets, which would fall back out of it`);
-  for (const [what, path] of [['profile', m.profile], ['head', m.head]] as const) if (SHELL_CHARACTERS.test(path)) problems.push(`${what} ${path} holds a quote, a space or a shell character`);
+  for (const [what, path] of [['scratch root', m.scratchRoot], ['profile', m.profile], ['head', m.head]] as const) if (SHELL_CHARACTERS.test(path)) problems.push(`${what} ${path} holds a quote, a space or a shell character`);
   for (const window of quietWindows(m)) if (!window.every((hm) => /^([01]\d|2[0-3]):[0-5]\d$/.test(hm))) problems.push(`quiet window ${window.join('–')} is not two UTC times HH:MM`);
   return problems;
 }
@@ -245,7 +253,7 @@ const mawsdEntry = (m: BenchMachine) => (m.stage === 'runner' ? `"$(cat ${quote(
 /** A command of the scratch daemon's (status, keys, enroll), in the profile's scratch environment. */
 const mawsd = (m: BenchMachine) => `${scratchEnv(m)} ${mawsdEntry(m)}`;
 /** The bench agent's command, on the machine's runtime. */
-const agent = (m: BenchMachine, command: 'prepare' | 'serve', engineVersion: string) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion))}`;
+const agent = (m: BenchMachine, command: 'prepare' | 'serve', engineVersion: string, deadline?: number) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion, deadline))}`;
 const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quote(m.label)}`;
 
 /**
@@ -313,7 +321,7 @@ const scratchEnv = (m: BenchMachine) => envLine(profileEnv(m));
 export function startLine(m: BenchMachine, entry: string): string {
   const out = `${benchDir(m)}/mawsd.out`;
   const daemon = `${envLine(daemonEnv(m))} nohup ${entry} run --private --dir ${quote(`${m.profile}/mawsd`)} < /dev/null > ${quote(out)} 2>&1`;
-  return `mkdir -p ${scratchDirs(m).map(quote).join(' ')} || exit 1; cd ${quote(benchDir(m))} || exit 1; ( if command -v setsid > /dev/null 2>&1; then exec setsid ${daemon}; else exec ${daemon}; fi ) & echo $! > ${quote(pidPath(m))}`;
+  return `${guardedLine(m, [...scratchDirs(m), out, pidPath(m)], '')}mkdir -p ${scratchDirs(m).map(quote).join(' ')} || exit 1; cd ${quote(benchDir(m))} || exit 1; ( if command -v setsid > /dev/null 2>&1; then exec setsid ${daemon}; else exec ${daemon}; fi ) & echo $! > ${quote(pidPath(m))}`;
 }
 
 /**
@@ -327,25 +335,31 @@ export function stopLine(m: BenchMachine): string {
 }
 
 /**
- * The line that shows whether the profile's existing components are real directories: the deepest existing ancestor of the
- * profile (`lexical`) and its physical path (`physical`, through `pwd -P`), then each of the profile's own paths that is a
- * symlink. Read-only; run before anything is written.
+ * `command` behind a guard, in one shell step: every component of each target, from the target up to the scratch root
+ * inclusive, is checked with `[ -L ]` (a missing one is no symlink), and a symlink, or a target outside the root, refuses
+ * the step with exit GUARD_REFUSED before anything is written; only then does `command` run.
  */
-export function scratchCheckLine(m: BenchMachine): string {
-  const named = [...new Set([m.profile, m.head, ...scratchDirs(m)])].map(quote).join(' ');
-  return `p=${quote(m.profile)}; while [ ! -e "$p" ] && [ ! -L "$p" ]; do p=$(dirname "$p"); done; printf 'lexical %s\\n' "$p"; printf 'physical %s\\n' "$(cd "$p" 2>/dev/null && pwd -P)"; for d in ${named}; do if [ -L "$d" ]; then printf 'symlink %s\\n' "$d"; fi; done`;
+export function guardedLine(m: BenchMachine, targets: readonly string[], command: string): string {
+  const root = quote(m.scratchRoot);
+  return `for t in ${targets.map(quote).join(' ')}; do p=$t; while :; do if [ -L "$p" ]; then printf 'refused: %s is a symlink\n' "$p" >&2; exit ${GUARD_REFUSED}; fi; [ "$p" = ${root} ] && break; case "$p" in ${root}/*) p=$(dirname "$p");; *) printf 'refused: %s is outside %s\n' "$t" ${root} >&2; exit ${GUARD_REFUSED};; esac; done; done; ${command}`;
 }
 
-/** Why the scratch check's answer refuses every write: an ancestor reached through a symlink, or a profile path that is one. */
-export function scratchCheckProblems(m: BenchMachine, stdout: string): string[] {
-  const lines = stdout.split('\n');
-  const field = (name: string) => lines.find((line) => line.startsWith(`${name} `))?.slice(name.length + 1);
-  const [lexical, physical] = [field('lexical'), field('physical')];
-  const problems: string[] = [];
-  if (lexical === undefined || physical === undefined || lexical !== physical) problems.push(`${m.name}: the profile ${m.profile} goes through a symlink or an unreadable directory: ${lexical ?? '?'} is ${physical || 'unreadable'} physically`);
-  else if (!(m.profile === lexical || m.profile.startsWith(lexical === '/' ? '/' : `${lexical}/`))) problems.push(`${m.name}: the scratch check walked to ${lexical}, which is no ancestor of ${m.profile}`);
-  for (const line of lines.filter((l) => l.startsWith('symlink '))) problems.push(`${m.name}: ${line.slice(8)} is a symlink, which a write would follow out of the profile`);
-  return problems;
+/** The line that writes its stdin to `target`: a fresh name in the target's checked directory, moved into place, so no existing symlink is followed. */
+export function copyLine(m: BenchMachine, target: string): string {
+  const dir = posix.dirname(target);
+  return guardedLine(m, [dir, target], `tmp=$(mktemp ${quote(`${dir}/.bench-copy.XXXXXX`)}) && cat > "$tmp" && mv -f "$tmp" ${quote(target)} || { rm -f "$tmp"; exit 1; }`);
+}
+
+/**
+ * A process-group deadline the mini's perl keeps (macOS has no `timeout`): the command in its own group, SIGTERM to the
+ * group at `seconds`, SIGKILL two seconds later, exit 124; else the command's own status.
+ */
+const PERL_DEADLINE = `my $t = shift; my $pid = fork; die "fork: $!" unless defined $pid; if ($pid == 0) { setpgrp(0, 0); exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill 'TERM', -$pid; sleep 2; kill 'KILL', -$pid; waitpid($pid, 0); exit 124 }; alarm $t; waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)`;
+
+/** `command` with its own deadline on the machine: GNU timeout on the VM (its whole group, SIGKILL 5 s later), the perl alarm on the mini. */
+export function deadlined(m: BenchMachine, seconds: number, command: string): string {
+  const shell = `sh -c ${quote(command)}`;
+  return m.transport.kind === 'devcloud' ? `timeout -k 5 ${seconds} ${shell}` : `perl -e ${quote(PERL_DEADLINE)} ${seconds} ${shell}`;
 }
 
 export interface BenchDeps {
@@ -385,12 +399,19 @@ export class BenchRun {
     return this.#m;
   }
 
-  /** One command on the machine, with a timeout always (its own or REMOTE_CALL_MS), refused when it would run into a quiet window. */
+  /**
+   * One command on the machine with a deadline always (its own or REMOTE_CALL_MS), kept on the machine (`deadlined`) and
+   * here REMOTE_GRACE_MS later; refused when it would run into a quiet window.
+   */
   #remote(command: string, options: { stdinFile?: string; timeoutMs?: number } = {}): Promise<RunResult> {
     const timeoutMs = options.timeoutMs ?? REMOTE_CALL_MS;
-    this.#quiet(timeoutMs);
+    this.#quiet(timeoutMs + REMOTE_GRACE_MS);
     this.#scratchOnly(command);
-    return this.#deps.runner.run(transportArgv(this.#m.transport, command), { ...options, timeoutMs });
+    return this.#deps.runner.run(transportArgv(this.#m.transport, deadlined(this.#m, Math.ceil(timeoutMs / 1000), command)), { ...options, timeoutMs: timeoutMs + REMOTE_GRACE_MS });
+  }
+  /** A writing or destructive command, behind the guard on its targets. */
+  #write(targets: readonly string[], command: string, what: string, options?: { stdinFile?: string; timeoutMs?: number }): Promise<RunResult> {
+    return this.#must(guardedLine(this.#m, targets, command), what, options);
   }
   /** Refuses a command that names the production mawsd's profile, entry or unit mode. */
   #scratchOnly(command: string): void {
@@ -415,24 +436,19 @@ export class BenchRun {
     return (this.#deps.now ?? Date.now)();
   }
 
-  /** Refuses every write when an existing component of the profile's path, or one of its own paths, is a symlink. */
-  async #scratchCheck(): Promise<void> {
-    const answer = await this.#must(scratchCheckLine(this.#m), 'checking the profile’s path for symlinks');
-    const problems = scratchCheckProblems(this.#m, answer.stdout);
-    if (problems.length > 0) throw new Error(`refused to write under the scratch profile:\n${problems.join('\n')}`);
-  }
-  /** The profile checked, then its own directories made, before anything else is written or run there. */
+  /** The profile's own directories made (each checked by the guard first), before anything else is written or run there. */
   async #scratchReady(): Promise<void> {
-    await this.#scratchCheck();
-    await this.#must(`mkdir -p ${scratchDirs(this.#m).map(quote).join(' ')}`, 'making the scratch profile’s directories');
+    const dirs = scratchDirs(this.#m);
+    await this.#write(dirs, `mkdir -p ${dirs.map(quote).join(' ')}`, 'making the scratch profile’s directories');
   }
 
   /** Copies the agent's bundle (a local file) to the machine and runs its `prepare`: the stub's wrapper, the store's trust. */
   async prepare(agentBundle: string): Promise<void> {
     const m = this.#m;
     await this.#scratchReady();
-    await this.#must(`cat > ${quote(`${benchDir(m)}/bench-agent.cjs`)}`, 'copying the bench agent', { stdinFile: agentBundle, timeoutMs: 5 * 60_000 });
-    await this.#must(agent(m, 'prepare', this.#deps.engineVersion), 'the bench agent’s prepare');
+    await this.#must(copyLine(m, `${benchDir(m)}/bench-agent.cjs`), 'copying the bench agent', { stdinFile: agentBundle, timeoutMs: 5 * 60_000 });
+    const p = m.profile;
+    await this.#write([benchDir(m), `${benchDir(m)}/checkout`, `${benchDir(m)}/latency-engine`, `${p}/claude-config`, `${p}/shell-home`, `${p}/home`, `${p}/tmp`], agent(m, 'prepare', this.#deps.engineVersion), 'the bench agent’s prepare');
     this.#deps.say(`[bench] ${m.name}: the bench agent is in place`);
   }
 
@@ -459,17 +475,18 @@ export class BenchRun {
       this.#deps.say(`[bench] ${m.name}: already prepared at ${m.commit.slice(0, 9)} (its head installed and packed); nothing to do`);
       return;
     }
-    await this.#must(`rm -f ${quote(preparedPath(m))} ${quote(packPath(m))}`, 'clearing the last prep’s marks');
+    await this.#write([preparedPath(m), packPath(m)], `rm -f ${quote(preparedPath(m))} ${quote(packPath(m))}`, 'clearing the last prep’s marks');
     await this.#unpack(source, 'source');
-    await this.#must(`cd ${quote(m.head)} && ${scratchEnv(m)} pnpm install --frozen-lockfile >&2`, 'pnpm install', { timeoutMs: 30 * 60_000 });
+    const builds = [m.head, `${m.head}/node_modules`, `${m.profile}/pnpm-store`, `${m.profile}/cache`, `${m.profile}/npm-cache`, `${m.profile}/home`, `${m.profile}/tmp`];
+    await this.#write(builds, `cd ${quote(m.head)} && ${scratchEnv(m)} pnpm install --frozen-lockfile >&2`, 'pnpm install', { timeoutMs: 30 * 60_000 });
     await this.#spawnHelpers();
     // mawsd-pack's own API with the commit named, since the unpacked source is no git checkout for it to read
     const script = `const { pack } = await import("./scripts/mawsd-pack.mjs"); process.stdout.write((await pack({ out: ${JSON.stringify(packDir(m))}, commit: ${JSON.stringify(m.commit.slice(0, 8))} })) + "\\n");`;
-    const packed = await this.#must(`cd ${quote(m.head)} && ${scratchEnv(m)} ${quote(m.node)} --input-type=module -e ${quote(script)}`, 'the pack (scripts/mawsd-pack.mjs)', { timeoutMs: 30 * 60_000 });
+    const packed = await this.#write([...builds, `${m.head}/out`, packDir(m)], `cd ${quote(m.head)} && ${scratchEnv(m)} ${quote(m.node)} --input-type=module -e ${quote(script)}`, 'the pack (scripts/mawsd-pack.mjs)', { timeoutMs: 30 * 60_000 });
     const pack = packed.stdout.trim().split('\n').at(-1) ?? '';
     if (containmentProblem('the pack', pack, packDir(m)) !== null) throw new Error(`${m.name}: the pack printed no path under ${packDir(m)}`);
-    await this.#must(`printf '%s' ${quote(pack)} > ${quote(packPath(m))}`, 'recording the pack');
-    await this.#must(`printf '%s\\n' ${m.commit} > ${quote(preparedPath(m))}`, 'recording the prep');
+    await this.#write([packPath(m)], `printf '%s' ${quote(pack)} > ${quote(packPath(m))}`, 'recording the pack');
+    await this.#write([preparedPath(m)], `printf '%s\\n' ${m.commit} > ${quote(preparedPath(m))}`, 'recording the prep');
     this.#deps.say(`[bench] ${m.name}: prepared at ${m.commit.slice(0, 9)}: its head installed and packed in ${pack}`);
   }
 
@@ -533,13 +550,13 @@ export class BenchRun {
   async #unpack(archive: HeadBundle, name: 'head' | 'source'): Promise<void> {
     const m = this.#m;
     const tar = `${benchDir(m)}/${name}.tar`;
-    await this.#must(`cat > ${quote(tar)}`, `copying the ${name} archive`, { stdinFile: archive.tar, timeoutMs: 10 * 60_000 });
-    await this.#must(`rm -rf ${quote(m.head)} && mkdir -p ${quote(m.head)} && tar -xf ${quote(tar)} -C ${quote(m.head)} && rm -f ${quote(tar)}`, `unpacking the ${name} archive`, { timeoutMs: 10 * 60_000 });
+    await this.#must(copyLine(m, tar), `copying the ${name} archive`, { stdinFile: archive.tar, timeoutMs: 10 * 60_000 });
+    await this.#write([m.head, tar], `rm -rf ${quote(m.head)} && mkdir -p ${quote(m.head)} && tar -xf ${quote(tar)} -C ${quote(m.head)} && rm -f ${quote(tar)}`, `unpacking the ${name} archive`, { timeoutMs: 10 * 60_000 });
   }
 
   /** node-pty's spawn-helper made executable: an install that skips its scripts (or a copy of one) leaves it 0644. */
   async #spawnHelpers(): Promise<void> {
-    await this.#must(`find ${quote(this.#m.head)} -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`, 'making node-pty’s spawn-helper executable');
+    await this.#write([this.#m.head], `find ${quote(this.#m.head)} -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`, 'making node-pty’s spawn-helper executable');
   }
 
   /** The VM's scratch daemon stopped by its recorded pid, once that pid is shown to be the daemon's. */
@@ -582,7 +599,7 @@ export class BenchRun {
     let answer: { enrollment?: string; name?: string; org?: string } = {};
     try {
       this.#deps.say(`[bench] ${m.name}: enrolling with the code from its file (the owner compares the key below and types y)`);
-      const result = await this.#remote(`${mawsd(m)} enroll ${scoped(m)} --name ${quote(m.name)} --wait ${ENROLL_WAIT_S} --json`, { stdinFile: m.codeFile, timeoutMs: enrollMs });
+      const result = await this.#remote(`${guardedLine(m, [m.profile, `${m.profile}/mawsd`], '')}${mawsd(m)} enroll ${scoped(m)} --name ${quote(m.name)} --wait ${ENROLL_WAIT_S} --json`, { stdinFile: m.codeFile, timeoutMs: enrollMs });
       code = result.code;
       try {
         const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -632,12 +649,14 @@ export class BenchRun {
   serve(onLine: (line: string) => void): Started {
     const m = this.#m;
     this.#quiet(SERVE_SPAN_MS);
-    const line = agent(m, 'serve', this.#deps.engineVersion);
+    const until = untilQuiet(quietWindows(m), this.#now());
+    // the agent's own deadline, which it keeps with its cleanup done: the margin before the next window, or SERVE_MAX_MS
+    const deadline = this.#now() + Math.min(SERVE_MAX_MS, until - QUIET_MARGIN_MS);
+    const line = agent(m, 'serve', this.#deps.engineVersion, deadline);
     this.#scratchOnly(line);
     const serving = this.#deps.runner.start(transportArgv(m.transport, line));
     serving.onLine(onLine);
     this.#agent = serving;
-    const until = untilQuiet(quietWindows(m), this.#now());
     const cancel = Number.isFinite(until)
       ? (this.#deps.after ?? afterFor)(Math.max(0, until - QUIET_MARGIN_MS), () => {
           this.#deps.say(`[bench] ${m.name}: its quiet window is ${QUIET_MARGIN_MS / 60_000} minutes off: the bench agent is ended now, its session and stubs with it`);
@@ -654,16 +673,26 @@ export class BenchRun {
     return serving;
   }
 
-  /** The agent ended once: its stdin's end (its session stopped, its stubs ended), killed when it outlives AGENT_END_MS, and its exit waited for. */
+  /**
+   * The agent ended once: its stdin's end (its session stopped, its stubs ended), killed when it outlives AGENT_END_MS,
+   * and its exit waited for. Only its exit 0 shows its cleanup done on the machine: any other exit, a lost transport or a
+   * kill throws, its cleanup unverified.
+   */
   #endAgent(): Promise<void> {
     const serving = this.#agent;
     if (serving === null) return Promise.resolve();
     this.#ending ??= (async () => {
-      const exited = serving.exited.then(() => 'exited' as const);
+      const name = this.#m.name;
+      const exited = serving.exited.then((code) => ({ code }));
       serving.end();
-      if ((await Promise.race([exited, this.#sleep(AGENT_END_MS).then(() => 'late' as const)])) === 'exited') return;
+      const first = await Promise.race([exited, this.#sleep(AGENT_END_MS).then(() => 'late' as const)]);
+      if (first !== 'late') {
+        if (first.code !== 0) throw new Error(`${name}: the bench agent exited ${first.code ?? 'by a signal'}: its cleanup on the machine is unverified`);
+        return;
+      }
       serving.kill();
-      if ((await Promise.race([exited, this.#sleep(AGENT_KILLED_MS).then(() => 'late' as const)])) === 'late') throw new Error(`${this.#m.name}: the bench agent's transport did not exit ${AGENT_KILLED_MS / 1000} s after it was killed`);
+      if ((await Promise.race([exited, this.#sleep(AGENT_KILLED_MS).then(() => 'late' as const)])) === 'late') throw new Error(`${name}: the bench agent's transport did not exit ${AGENT_KILLED_MS / 1000} s after it was killed`);
+      throw new Error(`${name}: the bench agent was killed: its cleanup on the machine is unverified`);
     })();
     return this.#ending;
   }
@@ -730,7 +759,6 @@ export class BenchRun {
    */
   async removeProfile(): Promise<boolean> {
     const m = this.#m;
-    await this.#scratchCheck();
     if (m.stage === 'runner') await this.#stopDaemon();
     const left = await this.benchProcesses();
     if (left.length > 0) {
@@ -738,7 +766,7 @@ export class BenchRun {
       return false;
     }
     // the profile and all the bench put in it: the head, a tarball left by a failed unpack, the pack, the stores
-    await this.#must(`rm -rf ${quote(m.profile)}`, 'removing the scratch profile', { timeoutMs: 10 * 60_000 });
+    await this.#write([m.profile], `rm -rf ${quote(m.profile)}`, 'removing the scratch profile', { timeoutMs: 10 * 60_000 });
     this.#deps.say(`[bench] ${m.name}: the scratch profile is removed, its head and every bench file in it`);
     return true;
   }
@@ -808,8 +836,8 @@ export async function buildHeadBundle(repo: string, out: string, runner: Command
 }
 
 /** The agent's arguments, one JSON word: what it needs of the machine, no secret. */
-export function agentArgs(m: BenchMachine, engineVersion: string): string {
-  return JSON.stringify({ name: m.name, profile: m.profile, bench: benchDir(m), head: m.head, engineVersion });
+export function agentArgs(m: BenchMachine, engineVersion: string, deadline?: number): string {
+  return JSON.stringify({ name: m.name, profile: m.profile, bench: benchDir(m), head: m.head, engineVersion, ...(deadline === undefined ? {} : { deadline }) });
 }
 
 /** Commands on this Mac's processes, every child's environment without WITHHELD_ENV. */
@@ -832,15 +860,31 @@ export function processRunner(env: NodeJS.ProcessEnv = process.env): CommandRunn
         let [stdout, stderr] = ['', ''];
         child.stdout!.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
         child.stderr!.on('data', (chunk: Buffer) => void (stderr += chunk.toString()));
-        const timer = options.timeoutMs === undefined ? null : setTimeout(() => child.kill('SIGTERM'), options.timeoutMs);
+        // at the deadline: SIGTERM, SIGKILL after KILL_GRACE_MS, and the command answered as failed at once, whatever
+        // the child does after
+        let settled = false;
+        const settle = (result: RunResult) => {
+          if (settled) return;
+          settled = true;
+          if (timer !== null) clearTimeout(timer);
+          resolve(result);
+        };
+        const timer =
+          options.timeoutMs === undefined
+            ? null
+            : setTimeout(() => {
+                child.kill('SIGTERM');
+                setTimeout(() => {
+                  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+                }, KILL_GRACE_MS).unref();
+                settle({ code: null, stdout, stderr: `${stderr}\n(timed out after ${Math.round(options.timeoutMs! / 1000)} s)` });
+              }, options.timeoutMs);
         child.once('error', (error) => {
           if (timer !== null) clearTimeout(timer);
-          reject(error);
+          if (!settled) reject(error);
+          settled = true;
         });
-        child.once('close', (code) => {
-          if (timer !== null) clearTimeout(timer);
-          resolve({ code, stdout, stderr });
-        });
+        child.once('close', (code) => settle({ code, stdout, stderr }));
       });
     },
     start(argv) {

@@ -15,7 +15,7 @@ import type { MachineState } from '../../src/shared/ipc/schema/machines';
 import type { MachineRef } from '../../src/shared/machine/ref';
 import { BENCH, clockCheck, summarize, type ClockBracket } from '../../test/support/local-latency';
 import { MARKER_SOURCE, markerOf, writeLatencyEngine } from '../../test/support/latency-engine';
-import { engineStartOf, EXPECTED_MARKERS, REMOTE_BENCH, type CaseRun, type Exchange, type Measures } from '../../test/support/remote-latency';
+import { delaysOf, engineStartOf, EXPECTED_MARKERS, REMOTE_BENCH, type CaseRun, type Exchange, type Measures } from '../../test/support/remote-latency';
 import { invoke, value } from './c7-replay';
 import { launchMaws, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
@@ -155,11 +155,7 @@ export async function measureTurns(page: Page, written: () => Written[], turns: 
   }
   const seen = new Map((await seenMarkers(page)).map((s) => [s.marker, s]));
   const kept = written().filter((w) => w.turn >= first + BENCH.warmupTurns && w.turn < first + BENCH.turns);
-  const delays = kept.flatMap((w) => {
-    const s = seen.get(markerOf(w.turn, w.k).trim());
-    const writtenAt = clock === 'wall' ? w.wallAt : w.writtenAt;
-    return s?.at != null && s.present === true && writtenAt !== undefined ? [s.at - writtenAt] : [];
-  });
+  const delays = delaysOf(kept, seen, clock, markerOf);
   return { run: { samples: delays, expected: EXPECTED_MARKERS, missing, clock: clockCheck(await clockBrackets(page)) }, delays };
 }
 

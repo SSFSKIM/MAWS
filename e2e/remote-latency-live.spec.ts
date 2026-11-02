@@ -46,7 +46,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
 import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
-import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
+import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, measureResume, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { markerOf } from '../test/support/latency-engine';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, TURN_MS, type Written } from './support/remote-latency-page';
@@ -152,7 +152,7 @@ function served(): Served & { onLine(line: string): void } {
 
 type LiveCase = { measures: LiveMeasures | null; run: CaseRun | null; exchanges: { start: Exchange[]; end: Exchange[] }; roundTripsMs: number[] };
 
-type Seam = { drop(ref: string): boolean; release(ref: string, timeoutMs: number): Promise<{ upAt: number; carrier: Carrier | null } | null> };
+type Seam = { drop(ref: string): boolean; unhold(ref: string): void; release(ref: string, timeoutMs: number): Promise<{ upAt: number; carrier: Carrier | null } | null> };
 
 // A's renderer's event batches of the session that carry `turn` (its prompt or one of its markers), each with its
 // arrival on the renderer's Date.now, kept from now on.
@@ -170,37 +170,31 @@ async function keepTurnArrivals(page: Page, machine: MachineRef, app: string, tu
 }
 const turnArrivals = (page: Page) => page.evaluate(() => (window as unknown as { __turnArrivals: number[] }).__turnArrivals);
 
-// The live resume: the link dropped through the seam and held down while the machine's session writes a turn, then
-// released; from its `up` again to the turn's first event batch in A. Null with the reason when not measured.
+// The live resume (test/support/remote-latency.ts's measureResume, which lifts the hold on every path): the link dropped
+// through the seam and held down while the machine's session writes a turn, then released; from its `up` again to the
+// turn's first event batch in A. Null with the reason when not measured.
 async function liveResume(page: Page, app: Parameters<typeof pings>[0], ref: MachineRef, session: string, carrier: Carrier, samples: () => Written[], turn: (content: string) => void, reasons: string[]): Promise<number | null> {
   const gapTurn = lastTurn(samples()) + 1;
   await keepTurnArrivals(page, ref, session, gapTurn);
-  if (!(await app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.drop(machine), ref))) {
-    reasons.push(`${carrier}: resume: the link had no channel to drop`);
-    return null;
-  }
-  await expect.poll(async () => (await linkOf(page, ref))?.state, { timeout: 30_000, message: 'the link down once dropped' }).toBe('down');
-  turn(prompt(gapTurn));
-  await expect.poll(() => samples().filter((w) => w.turn === gapTurn).length, { timeout: TURN_MS, message: `turn ${gapTurn} written on the machine while the link is down` }).toBe(BENCH.markersPerTurn);
-  const shown = (await turnArrivals(page)).length;
-  if (shown > 0) {
-    reasons.push(`${carrier}: resume: turn ${gapTurn} reached A while its link was held down`);
-    return null;
-  }
-  const up = await app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.release(machine, 60_000), ref);
-  if (up === null) {
-    reasons.push(`${carrier}: resume: the link did not come up within 60 s of its release`);
-    return null;
-  }
-  let first: number | null = null;
-  await expect.poll(async () => (first = (await turnArrivals(page))[0] ?? null), { timeout: 60_000, message: `turn ${gapTurn}'s first event in A` }).not.toBeNull();
-  await expect.poll(async () => (await main(page).evaluate((region) => region.textContent ?? '')).includes(markerOf(gapTurn, BENCH.markersPerTurn).trim()), { timeout: 30_000, message: `turn ${gapTurn} in A’s pane` }).toBe(true);
-  // the reconnect's carrier is the case's, or its resume is no number of that carrier's
-  if (up.carrier !== carrier) {
-    reasons.push(`${carrier}: resume: the link came back over ${up.carrier ?? 'no carrier'}, so its resume is not ${carrier}'s`);
-    return null;
-  }
-  return first! - up.upAt;
+  const { resumeMs, reason } = await measureResume(carrier, {
+    drop: () => app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.drop(machine), ref),
+    unhold: () => app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.unhold(machine), ref),
+    down: () => expect.poll(async () => (await linkOf(page, ref))?.state, { timeout: 30_000, message: 'the link down once dropped' }).toBe('down'),
+    writeTurn: async () => {
+      turn(prompt(gapTurn));
+      await expect.poll(() => samples().filter((w) => w.turn === gapTurn).length, { timeout: TURN_MS, message: `turn ${gapTurn} written on the machine while the link is down` }).toBe(BENCH.markersPerTurn);
+    },
+    reachedWhileHeld: async () => (await turnArrivals(page)).length > 0,
+    release: () => app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.release(machine, 60_000), ref),
+    firstArrival: async () => {
+      let first: number | null = null;
+      await expect.poll(async () => (first = (await turnArrivals(page))[0] ?? null), { timeout: 60_000, message: `turn ${gapTurn}'s first event in A` }).not.toBeNull();
+      return first!;
+    },
+    shown: () => expect.poll(async () => (await main(page).evaluate((region) => region.textContent ?? '')).includes(markerOf(gapTurn, BENCH.markersPerTurn).trim()), { timeout: 30_000, message: `turn ${gapTurn} in A’s pane` }).toBe(true),
+  });
+  if (reason !== null) reasons.push(reason);
+  return resumeMs;
 }
 
 // One carrier over a fresh launch of the bench app: its link up over that carrier, the clock's start, open, turns, round

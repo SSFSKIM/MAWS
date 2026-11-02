@@ -125,8 +125,9 @@ export interface RemoteLink extends MachineLink {
   pongs(): readonly PongStamps[];
   /**
    * P5 O7 M7, the live bench's resume (the bench seam's `drop`, never the app's own): the current channel closed as a
-   * loss and the link held off its machine, no attempt made (no retry, no probe) until `benchRelease`, so the machine's
-   * session writes a turn while the link is down, with no routing touched. True when a channel was current.
+   * loss and the link held off its machine, no attempt made (no retry, no probe) and no channel adopted (a direct
+   * recheck's included) until `benchRelease`, so the machine's session writes a turn while the link is down, with no
+   * routing touched. Only with a channel current: false, and nothing held, without one.
    */
   benchHold(): boolean;
   /** The hold lifted: an attempt at once, as on a network's return. */
@@ -475,6 +476,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   // ---- A current channel ---------------------------------------------------------------------------------------------
 
   function adopt(result: { channel: Channel; carrier: Carrier; trust: Trust }): void {
+    if (held) {
+      result.channel.close('closed'); // every path that adopts: a held link adopts nothing
+      return;
+    }
     const mine: Current = { channel: result.channel, carrier: result.carrier, serial: ++serial, trust: result.trust };
     current = mine;
     mine.channel.onMessage((message) => {
@@ -703,6 +708,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           }
           return;
         }
+        if (held) return void result.channel.close('closed'); // the bench's hold: a held link adopts nothing
         if (state === 'closed' || state === 'refused' || generation !== trustGeneration || result.trust.generation !== trustGeneration) {
           result.channel.close('closed');
           if (state !== 'closed' && state !== 'refused') startAttempt();
@@ -900,12 +906,12 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     ping,
     pongs: () => [...pongStamps],
     benchHold() {
-      if (state === 'closed' || held) return false;
+      // no channel, no hold: a link already reconnecting is left to its own attempts
+      if (state === 'closed' || held || current === null) return false;
       held = true;
       retryTimer = clear(retryTimer);
-      const had = current !== null;
-      current?.channel.close('closed');
-      return had;
+      current.channel.close('closed');
+      return true;
     },
     benchRelease() {
       if (!held) return;

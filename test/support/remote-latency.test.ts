@@ -2,7 +2,8 @@
 // same run's local numbers and its own round trip, the misses named, and the run's validity (the local bench's per case,
 // the pings, Rule B on the load).
 import { describe, expect, it } from 'vitest';
-import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, remoteLine, rttStats, signedStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
+import { markerOf } from './latency-engine';
+import { boundsOf, budgetMisses, clockEstimate, delaysOf, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, measureResume, remoteLine, rttStats, signedStats, type CaseRun, type Measures, type RemoteMeasures, type ResumeSteps } from './remote-latency';
 
 const stats = (p50: number, p95 = p50, n = 600) => ({ p50, p95, n });
 const LOCAL: Measures = { deltaToFrame: stats(24.5, 37.5), roundTrip: stats(0.9, 1.3, 200), openToFirstRowMs: 180, resumeMs: null, engineStartMs: 420 };
@@ -174,5 +175,65 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
     // one delay under zero even at the interval’s high edge (θ ≤ 1002 + 1): the clocks disagree
     const early = liveJudgement('direct', LOCAL, { rawDelta: raw, rawSamples: [...delays, -1010], roundTrip: stats(20), openToFirstRowMs: 400, rtt: stats(2), clock: clockOf, resumeMs: null });
     expect(early).toMatchObject({ void: 'direct: 1 delay under zero across the whole clock interval: the clocks disagree', delta: null });
+  });
+
+  it('collects a live case’s delays as the page does, signed: a frame on this Mac’s wall clock before the machine’s write stamp is kept negative, then judged after the clock', () => {
+    const kept = [{ turn: 2, k: 1, writtenAt: 50, wallAt: 1_000 }, { turn: 2, k: 2, writtenAt: 60, wallAt: 1_010 }, { turn: 2, k: 3, writtenAt: 70, wallAt: 1_020 }, { turn: 2, k: 4, writtenAt: 80 }];
+    const seen = new Map([
+      [markerOf(2, 1).trim(), { at: 995, present: true }], // the machine's clock 8 ms ahead: shown "before" it was written
+      [markerOf(2, 2).trim(), { at: 1_012, present: true }],
+      [markerOf(2, 3).trim(), { at: 1_030, present: false }], // gone again: not a frame
+      [markerOf(2, 4).trim(), { at: 1_040, present: true }], // no wall stamp: not a wall sample
+    ]);
+    const delays = delaysOf(kept, seen, 'wall', markerOf);
+    expect(delays).toEqual([-5, 2]);
+    expect(delaysOf(kept, seen, 'performance', markerOf)).toEqual([945, 952, 960]);
+    expect(signedStats(delays)).toEqual({ p50: -5, p95: 2, n: 2 });
+  });
+
+  describe('the live resume', () => {
+    function steps(over: Partial<ResumeSteps> = {}) {
+      const did: string[] = [];
+      const step = <T>(name: string, value: T) => async () => (did.push(name), value);
+      const all: ResumeSteps = {
+        drop: step('drop', true),
+        unhold: step('unhold', undefined),
+        down: step('down', undefined),
+        writeTurn: step('writeTurn', undefined),
+        reachedWhileHeld: step('reachedWhileHeld', false),
+        release: step('release', { upAt: 1_000, carrier: 'direct' as const }),
+        firstArrival: step('firstArrival', 1_180),
+        shown: step('shown', undefined),
+        ...over,
+      };
+      return { all, did };
+    }
+
+    it('takes resume from the link’s up again to the turn’s first event in A, and lifts the hold at the end', async () => {
+      const { all, did } = steps();
+      expect(await measureResume('direct', all)).toEqual({ resumeMs: 180, reason: null });
+      expect(did).toEqual(['drop', 'down', 'writeTurn', 'reachedWhileHeld', 'release', 'firstArrival', 'shown', 'unhold']);
+    });
+
+    it('lifts the hold on every early return and every failure', async () => {
+      const cases: [Partial<ResumeSteps>, string][] = [
+        [{ drop: async () => false }, 'direct: resume: the link had no channel to drop'],
+        [{ reachedWhileHeld: async () => true }, 'direct: resume: the turn reached A while its link was held down'],
+        [{ release: async () => null }, 'direct: resume: the link did not come up after its release'],
+        [{ release: async () => ({ upAt: 1_000, carrier: 'relay' }) }, "direct: resume: the link came back over relay, so its resume is not direct's"],
+      ];
+      for (const [over, reason] of cases) {
+        const { all, did } = steps(over);
+        expect(await measureResume('direct', all)).toEqual({ resumeMs: null, reason });
+        expect(did.at(-1)).toBe('unhold');
+      }
+      for (const failing of ['down', 'writeTurn', 'firstArrival', 'shown'] as const) {
+        const over: Partial<ResumeSteps> = {};
+        over[failing] = async () => Promise.reject(new Error(`${failing} timed out`));
+        const { all, did } = steps(over);
+        await expect(measureResume('direct', all)).rejects.toThrow(`${failing} timed out`);
+        expect(did.at(-1)).toBe('unhold');
+      }
+    });
   });
 });

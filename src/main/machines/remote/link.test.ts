@@ -868,7 +868,7 @@ describe('the bench hold', () => {
     h.link.probe('network');
     await settle();
     expect(h.attempts).toHaveLength(1);
-    expect(h.link.benchHold()).toBe(false); // held already: no channel to close
+    expect(h.link.benchHold()).toBe(false); // held already
     h.link.benchRelease();
     await settle();
     expect(h.link.state()).toBe('up');
@@ -876,22 +876,39 @@ describe('the bench hold', () => {
     expect(h.states).toEqual(['up', 'down', 'up']);
   });
 
-  it('discards an attempt that completes while held', async () => {
-    const h = await harness();
+  it('adopts nothing a direct recheck brings while held: the link stays held and down, the new channel closed', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    h.net.direct = false;
     await settle();
+    expect(h.link.carrier()).toBe('relay');
+    h.net.direct = true;
     h.hold(true);
-    h.last().end('carrier');
-    await settle();
-    expect(h.pending).toHaveLength(1);
-    expect(h.link.benchHold()).toBe(false); // the channel was lost already
+    await advance(60_000); // the recheck's direct handshake, held in flight
+    expect(h.pending.map((p) => p.carrier)).toEqual(['direct']);
+    expect(h.link.benchHold()).toBe(true);
     h.hold(false);
     h.pending.shift()!.release();
     await settle();
+    expect(h.channels.at(-1)!.carrier).toBe('direct');
     expect(h.channels.at(-1)!.closedWith).toBe('closed');
     await advance(3_000);
     expect(h.link.state()).toBe('down');
     h.link.benchRelease();
     await settle();
+    expect(h.link.state()).toBe('up');
+  });
+
+  it('holds nothing without a channel: a drop then is false and leaves the link to reconnect on its own', async () => {
+    const h = await harness();
+    await settle();
+    h.net.direct = false;
+    h.net.relay = false;
+    h.last().end('carrier');
+    await advance(3_000);
+    expect(h.link.state()).toBe('down');
+    expect(h.link.benchHold()).toBe(false);
+    h.net.relay = true;
+    await advance(10_000); // the backoff's own retry, unheld
     expect(h.link.state()).toBe('up');
   });
 

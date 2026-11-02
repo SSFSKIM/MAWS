@@ -22,7 +22,7 @@
 // names for the wrapper and never opens, and the node runtime it runs on. It starts no `claude` (the daemon runs under
 // MAWS_E2E, whose engine is MAWS_E2E_ENGINE_BIN and nothing else) and no sminos.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, fstatSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, fstatSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { daemonPaths } from '@shared/daemon/files';
 import { connect } from 'node:net';
@@ -37,7 +37,12 @@ export interface AgentArgs {
   /** the version the stub answers `--version` with (test/support/engine-pin's FIXTURE_ENGINE_VERSION, which this module
    * never imports: importing it runs the installed engine's `--version`) */
   engineVersion: string;
+  /** serve's absolute deadline (this Mac's epoch ms): the agent ends itself, its cleanup done, AGENT_CLEANUP_MS before it */
+  deadline?: number;
 }
+
+/** How long before its deadline the agent begins its end, so its cleanup is done by then. */
+export const AGENT_CLEANUP_MS = 60_000;
 
 export const BENCH_PROJECT = 'maws-remote-bench'; // sminos's project id for the bench checkout
 export const FIRST_PROMPT = 'latency bench turn 1';
@@ -46,12 +51,13 @@ const TURN_MS = 60_000;
 
 export function parseAgentArgs(word: string | undefined): AgentArgs {
   const parsed = JSON.parse(word ?? 'null') as Partial<AgentArgs> | null;
-  const { name, profile, bench, head, engineVersion } = parsed ?? {};
+  const { name, profile, bench, head, engineVersion, deadline } = parsed ?? {};
   if (typeof name !== 'string' || typeof profile !== 'string' || typeof bench !== 'string' || typeof head !== 'string' || typeof engineVersion !== 'string') throw new Error('the agent takes one JSON word {name, profile, bench, head, engineVersion}');
   if (!/^\d+\.\d+\.\d+$/.test(engineVersion)) throw new Error(`${engineVersion} is not an engine version`);
   for (const path of [profile, bench, head]) if (!isAbsolute(path)) throw new Error(`${path} is not absolute`);
   if (bench !== `${profile}/bench`) throw new Error('the bench directory is the profile’s own');
-  return { name, profile, bench, head, engineVersion };
+  if (deadline !== undefined && !Number.isSafeInteger(deadline)) throw new Error('the deadline is an epoch in milliseconds');
+  return { name, profile, bench, head, engineVersion, ...(deadline === undefined ? {} : { deadline }) };
 }
 
 /** Everything the agent and the daemon it serves write or open, each under the scratch profile; `stub` is only named. */
@@ -73,6 +79,13 @@ export function agentPaths(a: AgentArgs) {
 
 const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
 
+/** A file written under a fresh name (exclusive: never an existing one, a symlink included) and renamed into place, so no symlink at `path` is followed. */
+function writeFresh(path: string, content: string, mode = 0o644): void {
+  const fresh = `${path}.tmp-${process.pid}`;
+  writeFileSync(fresh, content, { mode, flag: 'wx' });
+  renameSync(fresh, path);
+}
+
 /**
  * The stub's wrapper, the store's trust and the daemon's directories; `node` is the runtime the wrapper runs the stub
  * on, an Electron run as Node as production runs its mawsd when `electron` (the mini's MAWS binary).
@@ -82,11 +95,11 @@ export function prepare(a: AgentArgs, node: string, electron: boolean): void {
   for (const dir of [a.bench, p.checkout, p.claudeConfig, p.home, p.tmp, p.sminosHome, p.shellHome, p.claudeUsage]) mkdirSync(dir, { recursive: true, mode: 0o700 });
   // the runner checked the profile's path before it wrote; what this writes goes through no symlink either
   for (const dir of [a.profile, a.bench, p.claudeConfig, p.shellHome]) if (realpathSync(dir) !== dir) throw new Error(`${dir} goes through a symlink (it is ${realpathSync(dir)}): nothing is written`);
-  writeFileSync(p.engine, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 MAWS_LATENCY_STUB_VERSION=${quote(a.engineVersion)} exec ${quote(node)}${electron ? ' --disable-sigusr1' : ''} ${quote(p.stub)} ${quote(p.samples)} "$@"\n`, { mode: 0o755 });
-  writeFileSync(`${p.claudeConfig}/.claude.json`, `${JSON.stringify({ projects: { [p.checkout]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
-  writeFileSync(`${p.claudeConfig}/settings.json`, `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+  writeFresh(p.engine, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 MAWS_LATENCY_STUB_VERSION=${quote(a.engineVersion)} exec ${quote(node)}${electron ? ' --disable-sigusr1' : ''} ${quote(p.stub)} ${quote(p.samples)} "$@"\n`, 0o755);
+  writeFresh(`${p.claudeConfig}/.claude.json`, `${JSON.stringify({ projects: { [p.checkout]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+  writeFresh(`${p.claudeConfig}/settings.json`, `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
   // the login shell the daemon's hosts capture reads its startup files here (test/support/shell-home.ts's pattern)
-  for (const name of ['.zprofile', '.bash_profile']) writeFileSync(`${p.shellHome}/${name}`, '');
+  for (const name of ['.zprofile', '.bash_profile']) writeFresh(`${p.shellHome}/${name}`, '');
 }
 
 // --- serve ---------------------------------------------------------------------------------------------------------------
@@ -278,6 +291,10 @@ export function bindLifetime(agent: { end(): Promise<void>; input(line: string):
   every(ms: number, run: () => void): () => void;
   exit(code: number): void;
   error(message: string): void;
+  /** serve's absolute deadline, with the clock and timer it is kept by */
+  deadline?: number;
+  now?(): number;
+  after?(ms: number, run: () => void): () => void;
 }): void {
   const parent = io.parent();
   let buffer = '';
@@ -308,9 +325,18 @@ export function bindLifetime(agent: { end(): Promise<void>; input(line: string):
   });
   io.stdin.on('end', () => finish(0));
   io.stdin.on('close', () => finish(0));
-  stopWatch = io.every(1_000, () => {
+  const stopParent = io.every(1_000, () => {
     if (io.parent() !== parent) finish(0);
   });
+  // the deadline: the end begun AGENT_CLEANUP_MS ahead of it, so the cleanup is done and the agent gone by then
+  const stopDeadline = io.deadline === undefined || io.after === undefined ? () => undefined : io.after(Math.max(0, io.deadline - (io.now ?? Date.now)() - AGENT_CLEANUP_MS), () => {
+    io.error('the serve’s deadline is near: ending');
+    finish(0);
+  });
+  stopWatch = () => {
+    stopParent();
+    stopDeadline();
+  };
 }
 
 // --- the process ---------------------------------------------------------------------------------------------------------
@@ -418,6 +444,12 @@ export async function main(argv: readonly string[]): Promise<void> {
     },
     exit: (code) => process.exit(code),
     error: (message) => void process.stderr.write(`[bench-agent] ${message}\n`),
+    ...(a.deadline === undefined ? {} : { deadline: a.deadline }),
+    now: Date.now,
+    after: (ms, run) => {
+      const timer = setTimeout(run, ms);
+      return () => clearTimeout(timer);
+    },
   });
   try {
     await agent.start();

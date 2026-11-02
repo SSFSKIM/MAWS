@@ -72,6 +72,29 @@ describe('the live bench’s resume (P5 O7 M7)', () => {
     expect(() => seam.drop('GoneMachine0000000000' as MachineRef)).toThrow(/no RL2 link/);
   });
 
+  it('lifts a hold unconditionally with unhold, and every hold it made when it is removed (the app closing)', () => {
+    const { link, deps } = linked();
+    const released: string[] = [];
+    link.benchHold = () => true;
+    link.benchRelease = () => void released.push('release');
+    const seam = remoteBenchSeam(deps);
+    seam.unhold(MINI); // nothing held: nothing to lift
+    expect(released).toEqual([]);
+    seam.drop(MINI);
+    seam.unhold(MINI);
+    expect(released).toEqual(['release']);
+    link.benchHold = () => false; // no channel: nothing held, nothing to lift later
+    seam.drop(MINI);
+    seam.dispose();
+    expect(released).toEqual(['release']);
+    link.benchHold = () => true;
+    const remove = installRemoteBenchSeam({ MAWS_E2E: '1' }, false, deps);
+    globalThis.__maws_remote_bench!.drop(MINI);
+    remove();
+    expect(released).toEqual(['release', 'release']);
+    expect(globalThis.__maws_remote_bench).toBeUndefined();
+  });
+
   it('refuses a release while the link still reports up (a reconnect within its grace), and answers null when no up comes in time', async () => {
     const { link, deps } = linked();
     const seam = remoteBenchSeam(deps);

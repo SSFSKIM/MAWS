@@ -313,3 +313,61 @@ export function liveJudgement(carrier: Carrier, local: Measures, live: LiveMeasu
   };
   return { bounds, void: voided === null ? null : `${carrier}: ${voided}`, delta, verdicts, misses, inconclusive };
 }
+
+/** The live resume's steps, as the live spec takes them through main's bench seam and A's page. */
+export interface ResumeSteps {
+  /** the link's current channel closed and the link held off the machine; false when it had no channel */
+  drop(): Promise<boolean>;
+  /** the hold lifted whatever happened (the seam's `unhold`) */
+  unhold(): Promise<void>;
+  /** until the link reports down */
+  down(): Promise<void>;
+  /** the turn sent on the machine and all of it written there */
+  writeTurn(): Promise<void>;
+  /** whether any of the turn reached A while the link was held */
+  reachedWhileHeld(): Promise<boolean>;
+  /** the hold lifted and the link's next up: its instant and carrier; null when it does not come */
+  release(): Promise<{ upAt: number; carrier: Carrier | null } | null>;
+  /** the turn's first event batch in A, its instant on the same clock as `upAt` */
+  firstArrival(): Promise<number>;
+  /** the whole turn in A's pane */
+  shown(): Promise<void>;
+}
+
+/**
+ * The live resume: the link dropped and held while the machine writes a turn, released, and resume taken from its up
+ * again to the turn's first event in A. Null with the reason when not measured (no channel to drop, the turn seen while
+ * held, no up, or an up over the other carrier). The hold is lifted on every path, a step's failure included.
+ */
+export async function measureResume(carrier: Carrier, steps: ResumeSteps): Promise<{ resumeMs: number | null; reason: string | null }> {
+  const no = (reason: string) => ({ resumeMs: null, reason: `${carrier}: resume: ${reason}` });
+  try {
+    if (!(await steps.drop())) return no('the link had no channel to drop');
+    await steps.down();
+    await steps.writeTurn();
+    if (await steps.reachedWhileHeld()) return no('the turn reached A while its link was held down');
+    const up = await steps.release();
+    if (up === null) return no('the link did not come up after its release');
+    const first = await steps.firstArrival();
+    await steps.shown();
+    // the reconnect's carrier is the case's, or its resume is no number of that carrier's
+    if (up.carrier !== carrier) return no(`the link came back over ${up.carrier ?? 'no carrier'}, so its resume is not ${carrier}'s`);
+    return { resumeMs: first - up.upAt, reason: null };
+  } finally {
+    await steps.unhold();
+  }
+}
+
+/**
+ * One case's delays, as the page collects them (e2e/support/remote-latency-page.ts's measureTurns): each kept write's
+ * marker's frame, on `clock`, less its write on the same clock; a marker not shown, gone again, or without that clock's
+ * stamp left out. Signed: across two clocks (`wall`, the live bench) a delay is negative while their offset is unapplied.
+ * `markerOf` is test/support/latency-engine's (passed in: that module imports engine-pin, which runs the engine).
+ */
+export function delaysOf(kept: readonly { turn: number; k: number; writtenAt: number; wallAt?: number }[], seen: ReadonlyMap<string, { at: number | null; present: boolean | null }>, clock: 'performance' | 'wall', markerOf: (turn: number, k: number) => string): number[] {
+  return kept.flatMap((w) => {
+    const s = seen.get(markerOf(w.turn, w.k).trim());
+    const writtenAt = clock === 'wall' ? w.wallAt : w.writtenAt;
+    return s?.at != null && s.present === true && writtenAt !== undefined ? [s.at - writtenAt] : [];
+  });
+}

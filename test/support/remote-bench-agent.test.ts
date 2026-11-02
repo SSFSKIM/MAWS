@@ -4,11 +4,11 @@
 // withdraws the listing, closes the fake sminos and ends the bench's stubs, once.
 import { EventEmitter } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { agentPaths, BenchAgent, BENCH_PROJECT, bindLifetime, openSminos, parseAgentArgs, prepare, type AgentArgs, type MachineClient, type ServeDeps } from './remote-bench-agent';
+import { AGENT_CLEANUP_MS, agentPaths, BenchAgent, BENCH_PROJECT, bindLifetime, openSminos, parseAgentArgs, prepare, type AgentArgs, type MachineClient, type ServeDeps } from './remote-bench-agent';
 
 const scratch: string[] = [];
 afterEach(() => {
@@ -271,5 +271,36 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
     const stuck = new BenchAgent(ARGS, always.deps);
     await stuck.start();
     await expect(stuck.end()).rejects.toThrow(/1 stub of the bench still run after SIGKILL/);
+  });
+
+  it('takes the serve’s absolute deadline, and ends itself before it with its cleanup done, exit 0', async () => {
+    expect(parseAgentArgs(JSON.stringify({ ...ARGS, deadline: 1_000_000 })).deadline).toBe(1_000_000);
+    expect(() => parseAgentArgs(JSON.stringify({ ...ARGS, deadline: 'soon' }))).toThrow(/deadline/);
+    const fake = fakeDeps();
+    const agent = new BenchAgent(ARGS, fake.deps);
+    const exits: number[] = [];
+    const armed: { at: { ms: number; fire: () => void } | null } = { at: null };
+    bindLifetime(agent, { stdin: new EventEmitter(), parent: () => 4242, every: () => () => undefined, exit: (code) => void exits.push(code), error: () => undefined, deadline: 100_000, now: () => 10_000, after: (ms, fire) => ((armed.at = { ms, fire }), () => undefined) });
+    await agent.start();
+    expect(armed.at!.ms).toBe(100_000 - 10_000 - AGENT_CLEANUP_MS);
+    armed.at!.fire();
+    await expect.poll(() => exits).toEqual([0]);
+    expect(fake.events).toContain('session stopped');
+    expect(fake.ended).toEqual(['/p/mini-bench/bench/samples.jsonl']);
+  });
+
+  it('prepare writes each file under a fresh name moved into place: a file that is a symlink is replaced, its target outside untouched', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'bench-agent-')));
+    scratch.push(root);
+    const profile = join(root, 'profile');
+    const a: AgentArgs = { ...ARGS, profile, bench: `${profile}/bench`, head: `${profile}/head` };
+    prepare(a, '/runtime/bin/node', false);
+    writeFileSync(join(root, 'outside'), 'the owner’s\n');
+    rmSync(`${profile}/bench/latency-engine`);
+    symlinkSync(join(root, 'outside'), `${profile}/bench/latency-engine`);
+    prepare(a, '/runtime/bin/node', false);
+    expect(readFileSync(join(root, 'outside'), 'utf8')).toBe('the owner’s\n');
+    expect(readFileSync(`${profile}/bench/latency-engine`, 'utf8')).toContain('exec ');
+    expect(readdirSync(`${profile}/bench`).filter((n) => n.includes('.tmp-'))).toEqual([]);
   });
 });
