@@ -192,6 +192,36 @@ describe('data', () => {
   });
 });
 
+// b3's review (2026-11-02): the endpoint sends only within the credit this side granted (at the open, plus each refund);
+// a chunk past it is the endpoint's fault, and the stream closes `malformed` before the chunk reaches the consumer.
+describe('the credit this side granted', () => {
+  it('closes `malformed` on a chunk past the credit outstanding, delivering none of it', () => {
+    const h = harness(['rl2.streams', 'rl2.read-open']);
+    const s = h.table.open({ kind: 'http', credit: 8, http: { url: 'maws-artifact://0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d/live/a', method: 'GET' } }, h.sink, null);
+    h.table.receive({ t: 'streamOpened', id: s.id, credit: 1, http: { status: 200, headers: {} } });
+    h.table.receive({ t: 'streamData', id: s.id, offset: 0, data: b64('abcdef') });
+    s.credit(2); // the consumer took two: four plus two outstanding
+    h.table.receive({ t: 'streamData', id: s.id, offset: 6, data: b64('ghij') });
+    expect(h.heard.filter(([kind]) => kind === 'data')).toEqual([['data', 0, 'abcdef'], ['data', 6, 'ghij']]);
+    h.table.receive({ t: 'streamData', id: s.id, offset: 10, data: b64('k') }); // none left
+    expect(h.heard.at(-1)).toEqual(['closed', 'malformed']);
+    expect(h.heard.filter(([kind]) => kind === 'data')).toHaveLength(2);
+    expect(h.of('streamClose')).toEqual([{ t: 'streamClose', id: s.id, reason: 'malformed' }]);
+    expect(h.table.size).toBe(0);
+  });
+
+  it('counts a refund given before the open once it is sent, for a terminal’s stream as for any', () => {
+    const h = harness();
+    const s = h.table.open({ kind: 'pty', op: 'op-1', credit: 2, pty: PTY }, h.sink, null);
+    s.credit(3); // held until the open
+    h.table.receive({ t: 'streamOpened', id: s.id, pty: { info: { ptyId: 'pty-1' }, ringStart: 0, nextOffset: 0 }, credit: 1 });
+    h.table.receive({ t: 'streamData', id: s.id, offset: 0, data: b64('abcde') });
+    expect(h.heard.at(-1)).toEqual(['data', 0, 'abcde']);
+    h.table.receive({ t: 'streamData', id: s.id, offset: 5, data: b64('f') });
+    expect(h.heard.at(-1)).toEqual(['closed', 'malformed']);
+  });
+});
+
 describe('ends', () => {
   it('ends every stream sent on a channel with that channel (`carrier`), and keeps one not yet sent', () => {
     const h = harness();

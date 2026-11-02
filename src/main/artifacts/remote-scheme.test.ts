@@ -249,6 +249,17 @@ describe('a request over the link', () => {
     expect((await next).done).toBe(true);
   });
 
+  it('fails the load of an endpoint that sends past the credit granted, holding none of the excess (b3’s review)', async () => {
+    const s = scene();
+    const page = s.handler(new Request(url(PAGE)));
+    const id = await s.opened(0);
+    s.link.hear({ t: 'streamOpened', id, credit: 1, http: { status: 200, headers: {} } });
+    const chunk = Buffer.alloc(64 * 1024, 1).toString('base64url');
+    for (let n = 0; n < (2 * HTTP_STREAM_CREDIT) / (64 * 1024); n += 1) s.link.hear({ t: 'streamData', id, offset: n * 64 * 1024, data: chunk });
+    expect(s.link.of('streamClose', id)).toEqual([{ t: 'streamClose', id, reason: 'malformed' }]);
+    await expect((await page).text()).rejects.toThrow();
+  });
+
   it('closes the stream when the frame stops reading the body', async () => {
     const s = scene();
     const page = s.handler(new Request(url(PAGE)));

@@ -11,7 +11,8 @@
 //   This side's, given at the open and refunded by the consumer (`credit`, as the bytes are taken: a terminal's as the
 //   renderer acknowledges them, a connection's as the local socket writes them), bounds what the endpoint sends.
 //   Credit is counted in decoded bytes, and a refund given before the stream opened is held until it has, since the
-//   endpoint is still admitting it.
+//   endpoint is still admitting it. b3's review: this side holds the endpoint to the credit it granted (the open's, plus
+//   each refund sent); a chunk past what is outstanding closes the stream `malformed`, none of it delivered.
 // - Data goes in chunks of at most STREAM_CHUNK_BYTES, each unpadded base64url, at the sender's byte offset: this side
 //   numbers its bytes from the open's `inputFrom` for a pty (the device's input offset in its epoch) and from zero for a
 //   connection; the endpoint's are the pty host's output offsets, or the connection's.
@@ -95,6 +96,8 @@ type Entry = {
   controls: Array<Record<string, unknown>>;
   /** A refund given before the stream opened. */
   refund: number;
+  /** The credit this side granted the endpoint that it hasn't yet spent: the open's, plus each refund sent, less its chunks. */
+  inbound: number;
 };
 
 const toBase64url = (bytes: Uint8Array): string => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64url');
@@ -115,7 +118,7 @@ export class StreamTable {
   /** `ended` names the link's permanent end (`removed`, `closed`) when it holds one. */
   open(request: StreamRequest, sink: StreamSink, ended: 'removed' | 'closed' | null): RemoteStream {
     const id = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-    const entry: Entry = { id, request, sink, state: 'waiting', credit: 0, offset: request.pty?.inputFrom ?? 0, outbox: [], queued: 0, controls: [], refund: 0 };
+    const entry: Entry = { id, request, sink, state: 'waiting', credit: 0, offset: request.pty?.inputFrom ?? 0, outbox: [], queued: 0, controls: [], refund: 0, inbound: 0 };
     const stream: RemoteStream = {
       id,
       send: (bytes) => {
@@ -191,9 +194,18 @@ export class StreamTable {
       case 'streamRefused':
         this.#entries.delete(entry.id);
         return entry.sink.closed(message.reason);
-      case 'streamData':
+      case 'streamData': {
         if (entry.state !== 'opened') return;
-        return entry.sink.data(message.offset, fromBase64url(message.data));
+        const bytes = fromBase64url(message.data);
+        if (bytes.byteLength > entry.inbound) {
+          this.#deps.log(`a stream's endpoint sent ${bytes.byteLength} bytes past the ${entry.inbound} of credit outstanding: closed`);
+          this.#entries.delete(entry.id);
+          this.#deps.send({ t: 'streamClose', id: entry.id, reason: 'malformed' });
+          return entry.sink.closed('malformed');
+        }
+        entry.inbound -= bytes.byteLength;
+        return entry.sink.data(message.offset, bytes);
+      }
       case 'streamCredit':
         if (entry.state !== 'opened') return;
         entry.credit = Math.min(entry.credit + message.bytes, STREAM_CREDIT_MAX);
@@ -215,11 +227,13 @@ export class StreamTable {
       return void queueMicrotask(() => entry.sink.closed('not-offered'));
     }
     const credit = Math.min(Math.max(1, entry.request.credit ?? STREAM_OPEN_CREDIT), STREAM_CREDIT_MAX);
+    entry.inbound = credit;
     const fields = { ...(op === undefined ? {} : { op }), ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }), ...(http === undefined ? {} : { http }), ...(document === undefined ? {} : { document }) };
     if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, credit, ...fields })) entry.state = 'sent';
   }
 
   #refund(entry: Entry, bytes: number): void {
+    entry.inbound += bytes;
     for (let left = bytes; left > 0; left -= STREAM_CREDIT_MAX) this.#deps.send({ t: 'streamCredit', id: entry.id, bytes: Math.min(left, STREAM_CREDIT_MAX) });
   }
 
