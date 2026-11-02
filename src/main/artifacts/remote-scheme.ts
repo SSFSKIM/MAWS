@@ -20,7 +20,7 @@
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { MachineRef } from '@shared/machine/ref';
 import type { RemoteLink, RemoteStream } from '../machines/remote/link';
-import type { StreamOpened } from '../machines/remote/streams';
+import type { StreamOpened, StreamRequest } from '../machines/remote/streams';
 import type { SchemeResponder } from '../../render/scheme';
 import type { ArtifactMachines } from './machines';
 
@@ -119,7 +119,7 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
     if (method !== 'GET' && method !== 'HEAD') return Promise.resolve(plain(405, 'method not allowed'));
     const range = request.headers.get('Range') ?? undefined;
     if (request.url.length > URL_MAX || (range !== undefined && (range === '' || range.length > RANGE_MAX))) return Promise.resolve(plain(400, `${name} doesn’t read this request`));
-    const http = { url: request.url, method, ...(range === undefined ? {} : { range }) };
+    const http: NonNullable<StreamRequest['http']> = { url: request.url, method, ...(range === undefined ? {} : { range }) };
 
     return new Promise<Response>((resolve) => {
       let answered = false;
