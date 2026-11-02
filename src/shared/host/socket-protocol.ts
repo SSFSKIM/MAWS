@@ -227,7 +227,7 @@ export const HOLDER_CAPABILITY = 'host.holder';
 // `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
 // hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option)

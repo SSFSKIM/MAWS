@@ -35,7 +35,8 @@ const ENGINE = 5_000; // the session's engine
 const CUA = 5_001; // its cua serve
 const NEXT_ENGINE = 5_100; // the engine a resume starts
 const NEXT_CUA = 5_101;
-const BROWSER_WORK_HOST = [...PEER_CAPABILITIES.engineHost, HOST_BROWSER_WORK_CAPABILITY]; // an engine host of M7's build
+const BROWSER_WORK_HOST = [...PEER_CAPABILITIES.engineHost]; // an engine host of M7's build: its welcome lists host.browserWork
+const OLD_ENGINE_HOST = PEER_CAPABILITIES.engineHost.filter((name) => name !== HOST_BROWSER_WORK_CAPABILITY); // one that predates it
 const SCREENCAST = { available: true, viewed: 'screencast' };
 const LOCAL = { available: true, viewed: 'local' };
 const OLD_HOST = { available: false, reason: `the engine host on ${MACHINE} predates browser work holds; it is replaced when idle` };
@@ -743,7 +744,7 @@ describe('the browser capability (Interfaces §I)', () => {
   });
 
   it('reads the old-host reason from an engine host that predates browser work, and no socket listens cold', async () => {
-    scene.engineSpawn = { capabilities: [...PEER_CAPABILITIES.engineHost] };
+    scene.engineSpawn = { capabilities: OLD_ENGINE_HOST };
     const t = await stand();
     expect((await t.capabilities()).browser).toEqual(OLD_HOST);
     const cua = Connector.open();

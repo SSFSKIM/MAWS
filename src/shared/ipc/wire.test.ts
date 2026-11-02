@@ -246,7 +246,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
   // adoption through a successor), mawsd's whatever its permanent-client option
   it('has each peer list only what it implements', () => {
     expect(PEER_CAPABILITIES).toEqual({
-      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY],
+      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7
       ptyHost: [PTY_FRAMES_CAPABILITY],
       app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY],
       daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY],
@@ -311,14 +311,14 @@ describe('the library’s reads and the catalog’s machine half on the wire (P5
 // machine.sock, the request and the exit among the machine host's events and the answer a machine-owned main-only command
 // P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A, §E, §F): mawsd's browser-work snapshot to
 // the engine host and its capability, the engine host's idle notice, and a tab engine's report to mawsd. Every name is
-// main-only; the engine host lists the capability from M7, when it serves the command, so no peer lists it yet.
+// main-only; the engine host lists the capability from M7, when it serves the command, and no other peer lists it.
 describe('browser work on the wire (P5 O17 M3)', () => {
   const manifest = wireManifestOf(REGISTRY);
 
   it('carries host.browserWork and browserEngine.work as main-only commands and host.browserIdle among the engine host’s events', () => {
     expect(HOST_BROWSER_WORK_CAPABILITY).toBe('host.browserWork');
     expect(WIRE_CAPABILITIES).toContain(HOST_BROWSER_WORK_CAPABILITY);
-    for (const list of Object.values(PEER_CAPABILITIES)) expect(list).not.toContain(HOST_BROWSER_WORK_CAPABILITY);
+    for (const [peer, list] of Object.entries(PEER_CAPABILITIES)) expect(list.includes(HOST_BROWSER_WORK_CAPABILITY), peer).toBe(peer === 'engineHost'); // P5 O17 M7: the engine host's welcome alone
     expect(REGISTRY.commands['host.browserWork'].owner).toBe('engine-host');
     expect(REGISTRY.commands['browserEngine.work'].owner).toBe('machine');
     for (const name of ['host.browserWork', 'browserEngine.work']) {

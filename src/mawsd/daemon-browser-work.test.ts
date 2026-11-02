@@ -9,7 +9,8 @@ import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
 
-const BROWSER_WORK_HOST = [...PEER_CAPABILITIES.engineHost, HOST_BROWSER_WORK_CAPABILITY]; // an engine host of M7's build
+const BROWSER_WORK_HOST = [...PEER_CAPABILITIES.engineHost]; // an engine host of M7's build: its welcome lists host.browserWork
+const OLD_ENGINE_HOST = PEER_CAPABILITIES.engineHost.filter((name) => name !== HOST_BROWSER_WORK_CAPABILITY); // one that predates it
 
 beforeEach(() => {
   scene = new MawsdScene('maws-bw-');
@@ -50,7 +51,7 @@ describe('browser work on the engine-host link', () => {
   });
 
   it('sends nothing to an engine host whose welcome lists no host.browserWork (the old-host cell)', async () => {
-    scene.engineSpawn = { capabilities: [...PEER_CAPABILITIES.engineHost] };
+    scene.engineSpawn = { capabilities: OLD_ENGINE_HOST };
     const daemon = await scene.start({ permanentClient: true });
     const engine = await awake(daemon, 1);
     await until(() => engine.named('host.interest').length > 0, 3_000, 'the interest');
