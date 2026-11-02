@@ -3,6 +3,14 @@
 // length, and the chunks the stream cuts it into are assembled back into whole frames on the other side. Both ends speak
 // it: the endpoint's plane (src/endpoint/stream-document.ts) and main's bridge to a window's port
 // (src/main/artifacts/remote-open.ts).
+import { DOC_FRAME_CAP } from '@shared/host/socket-protocol';
+
+/**
+ * The largest document frame either end admits: the engine host's own payload cap (socket-protocol.ts' DOC_FRAME_CAP,
+ * 64 MiB). Its 8 MiB high-water mark (doc-channels.ts) bounds what is queued before a frame is written, not a frame: a
+ * single larger frame (a big document's first step 2) goes through locally, so it must remotely too.
+ */
+export const DOCUMENT_FRAME_MAX = DOC_FRAME_CAP;
 
 /** `frame` prefixed by its u32be length, as the stream carries it. */
 export function lengthPrefixed(frame: Uint8Array): Uint8Array {
@@ -19,7 +27,7 @@ export class LengthPrefixed {
   /** The frame being assembled's length, once its prefix is read. */
   #length: number | null = null;
 
-  constructor(private readonly max: number) {}
+  constructor(private readonly max: number = DOCUMENT_FRAME_MAX) {}
 
   /** The frames `chunk` completes, in order, each an exact-size copy; null once a length is 0 or past the most a frame may be. */
   push(chunk: Uint8Array): Uint8Array[] | null {

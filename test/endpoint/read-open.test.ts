@@ -713,6 +713,48 @@ describe('the document stream', () => {
     expect(framesOf(a, id)[0].equals(largest)).toBe(true);
   });
 
+  it('carries a host frame past the 8 MiB high-water mark (a 20 MiB first sync, within the host’s 64 MiB) and the frames after it, never `behind`; a queue behind the frame being sent past 8 MiB closes `behind`', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 4 * 1024 * 1024);
+    const first = randomBytes(20 * 1024 * 1024);
+    first[0] = 0;
+    const ack = encodeFrame({ type: 'ack', frames: 1, revision: 9 });
+    docs.send(docs.last().channel, first);
+    docs.send(docs.last().channel, ack);
+    let granted = 4 * 1024 * 1024;
+    const want = first.byteLength + 4 + ack.byteLength + 4;
+    await until(
+      () => {
+        if (closeOf(a, id) !== undefined) return true;
+        const got = ofStream(a, id).filter((m) => m.t === 'streamData').reduce((n, m) => n + Buffer.from(m.data as string, 'base64url').byteLength, 0);
+        if (got === want) return true;
+        if (got === granted) {
+          granted += 4 * 1024 * 1024;
+          void a.channel.send({ t: 'streamCredit', id, bytes: 4 * 1024 * 1024 });
+        }
+        return undefined;
+      },
+      'the frames',
+      30_000,
+    );
+    expect(closeOf(a, id)).toBeUndefined();
+    expect(framesOf(a, id).map((frame) => frame.byteLength)).toEqual([first.byteLength, ack.byteLength]);
+
+    // The threshold is the queue behind the frame being sent: a device that takes nothing is closed past 8 MiB of it.
+    const slow = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+    const mebibyte = randomBytes(1024 * 1024);
+    mebibyte[0] = 0;
+    for (let i = 0; i < 9; i++) docs.send(docs.last().channel, mebibyte);
+    await sleep(30);
+    expect(closeOf(a, slow.id)).toBeUndefined();
+    docs.send(docs.last().channel, mebibyte);
+    await until(() => closeOf(a, slow.id), 'the close');
+    expect(closeOf(a, slow.id)).toBe('behind');
+  });
+
   it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {
     const { f, docs } = await startDocuments();
     const x = randomUUID();

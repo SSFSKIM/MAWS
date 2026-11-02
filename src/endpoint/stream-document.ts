@@ -11,13 +11,14 @@
 //
 // The frames. Each direction carries the document frames (src/artifacts/provider/frames.ts), each prefixed by its u32be
 // length, as one byte flow cut into `streamData` chunks under the other side's credit. The host's come from `onFrame`'s
-// `{owner: 'engine-host', channel, bytes}` and are held past the device's credit up to DOCUMENT_BACKLOG_BYTES (the host
-// can't be paused), past which the stream closes `behind` and the device reopens and resyncs. A provisional frame's
+// `{owner: 'engine-host', channel, bytes}` and are held past the device's credit (the host can't be paused): a frame that
+// finds more than DOCUMENT_BACKLOG_BYTES queued behind the one being sent closes the stream `behind`, and the device
+// reopens and resyncs. A provisional frame's
 // session is withheld (nothing a stream sends names a session the member may not view; the CRDT bytes keep the opaque ids
 // their provenance carries, M5a's known limit). The device's go to the host through `documents.frame` as each completes
-// across chunks; a length of 0 or past DOCUMENT_FRAME_MAX, or bytes that are no frame, close the stream `malformed`. Its
-// bytes are refunded as they are taken (one frame at most is assembled), and wait, unrefunded, while a re-check holds
-// the stream.
+// across chunks; a length of 0 or past the host's own frame cap (frame-stream.ts' DOCUMENT_FRAME_MAX), or bytes that are
+// no frame, close the stream `malformed`. Its bytes are refunded as they are taken (one frame at most is assembled), and
+// wait, unrefunded, while a re-check holds the stream.
 //
 // `view`. The decision's mode (the open's input as authorized) is the one predicate: a `view` open forwards only step 1
 // and awareness from the device, so its editor syncs and shows presence but never writes, and drops update, step 2 and
@@ -38,13 +39,13 @@ import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './str
 /** The endpoint's document channels: numbers from 2^31 (EndpointServices.documents; main's are below). */
 const CHANNEL_BASE = 2 ** 31;
 const CHANNEL_SPAN = 2 ** 31;
-/** The largest frame either way: the engine host's socket resets a document channel queued past it anyway. */
-export const DOCUMENT_FRAME_MAX = DOC_HIGH_WATER;
 /**
- * The host's frames held past the device's credit, at most, their length prefixes counted: one frame of the largest size
- * with its prefix fits, so the frame bound and this one agree; past it the stream closes `behind`.
+ * The host's frames queued for the device behind the one being sent, at most (their prefixes counted), as the host's socket
+ * admits a frame while what is queued before it is within its high-water mark (doc-channels.ts): a host frame that finds
+ * more closes the stream `behind`. The frame being sent is not counted, so one frame of any size up to DOCUMENT_FRAME_MAX
+ * (frame-stream.ts) goes, and the frames after it are measured against what waits behind it, never against it.
  */
-export const DOCUMENT_BACKLOG_BYTES = DOCUMENT_FRAME_MAX + 4;
+export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
 /** A `view` open's device frames dropped, at most: past it the stream closes `read-only`. */
 export const VIEW_DROPPED_MAX = 64 * 1024;
 
@@ -118,11 +119,14 @@ class DocumentStream extends Stream {
   #in = 0;
   /** The device's chunks a re-check holds, unrefunded, in order. */
   readonly #inbox: Buffer[] = [];
-  readonly #frames = new LengthPrefixed(DOCUMENT_FRAME_MAX);
+  readonly #frames = new LengthPrefixed();
   /** A `view` open's device frames dropped: how many, and their bytes. */
   #dropped = { frames: 0, bytes: 0 };
   /** The channel is open on the host's side. */
   #upstream = true;
+  /** Where each host frame queued for the device ends, in `#out`'s count; `#head` indexes the one being sent. */
+  readonly #ends: number[] = [];
+  #head = 0;
   readonly #log: (line: string) => void;
 
   constructor(
@@ -142,9 +146,27 @@ class DocumentStream extends Stream {
     if (this.ended || !this.#upstream) return;
     const frame = withheld(bytes);
     if (frame === null) return this.#log(`endpoint: a document's provisional frame was not read, and not sent (${bytes.byteLength} bytes)`);
+    if (this.#queuedBehindHead() > DOCUMENT_BACKLOG_BYTES) return this.end('behind');
     const out = lengthPrefixed(frame);
     this.push(this.#out, out);
     this.#out += out.byteLength;
+    this.#ends.push(this.#out);
+  }
+
+  /** The bytes queued behind the frame being sent (none when it is the only one, or nothing is queued). */
+  #queuedBehindHead(): number {
+    const sent = this.#out - this.backlog;
+    while (this.#head < this.#ends.length && this.#ends[this.#head] <= sent) this.#head++;
+    if (this.#head === this.#ends.length) {
+      this.#ends.length = 0;
+      this.#head = 0;
+      return 0;
+    }
+    if (this.#head >= 1024) {
+      this.#ends.splice(0, this.#head);
+      this.#head = 0;
+    }
+    return this.#out - this.#ends[this.#head];
   }
 
   /** The channel ended on the host's side: the stream closes with its word once what it holds is sent. */
@@ -152,10 +174,6 @@ class DocumentStream extends Stream {
     if (this.ended) return;
     this.#upstream = false;
     this.closeAfter(reason);
-  }
-
-  protected override queued(): void {
-    if (this.backlog > DOCUMENT_BACKLOG_BYTES) this.end('behind');
   }
 
   override unhold(): void {
