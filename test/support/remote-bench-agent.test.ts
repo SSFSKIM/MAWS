@@ -335,11 +335,12 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
     const refusedWire = await fakeHostSocket(`${root}/r.sock`, { t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: 'b', wire: 'w', liveSessions: 1 });
     const refusedToken = await fakeHostSocket(`${root}/t.sock`, { t: 'refuse', reason: 'token', protocol: SOCKET_PROTOCOL, buildId: 'b', wire: 'w', liveSessions: 0 });
     try {
-      await askExit(`${root}/w.sock`, 'host-token');
+      await askExit(`${root}/w.sock`, 'host-token'); // resolved once the exit is written: the host's exit is waited for by stopHosts
+      await expect.poll(() => welcome.heard.length).toBe(2);
       expect(welcome.heard).toEqual([{ t: 'hello', protocol: SOCKET_PROTOCOL, token: 'host-token', minor: expect.any(Number), build: 'remote-bench-agent', capabilities: [], appPid: process.pid }, { t: 'exit', when: 'now' }]);
       // a refused connection's one exit is still honoured by the host (the wire's, not the token's)
       await askExit(`${root}/r.sock`, 'host-token');
-      expect(refusedWire.heard.map((f) => f.t)).toEqual(['hello', 'exit']);
+      await expect.poll(() => refusedWire.heard.map((f) => f.t)).toEqual(['hello', 'exit']);
       await expect(askExit(`${root}/t.sock`, 'stale')).rejects.toThrow(/refused its token/);
       expect(refusedToken.heard.map((f) => f.t)).toEqual(['hello']);
       await expect(askExit(`${root}/none.sock`, 't')).rejects.toThrow(/ENOENT/);

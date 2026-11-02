@@ -398,7 +398,8 @@ export async function stopHosts(a: AgentArgs, deps: StopHostsDeps, waitMs = HOST
 
 /**
  * A host told to exit now through its socket: the hello with its token, its answer waited for (a welcome, or a refusal
- * of the wire, after which the host still honours one exit), then `{t: 'exit', when: 'now'}`. A refused token rejects.
+ * of the wire, after which the host still honours one exit), then `{t: 'exit', when: 'now'}`, resolved once it is written
+ * (the host's exit is the caller's to wait for). A refused token rejects.
  */
 export function askExit(socket: string, token: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -415,8 +416,7 @@ export function askExit(socket: string, token: string): Promise<void> {
     });
     connection.on('close', () => {
       clearTimeout(deadline);
-      if (answered) resolve();
-      else reject(new Error(`${socket} closed before its answer`));
+      if (!answered) reject(new Error(`${socket} closed before its answer`));
     });
     connection.once('connect', () => void connection.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'remote-bench-agent', capabilities: [], appPid: process.pid })}\n`));
     connection.on('data', (chunk: Buffer) => {
@@ -430,7 +430,10 @@ export function askExit(socket: string, token: string): Promise<void> {
         return reject(new Error(`${socket} refused its token`));
       }
       answered = true;
-      connection.end(`${JSON.stringify({ t: 'exit', when: 'now' })}\n`);
+      connection.end(`${JSON.stringify({ t: 'exit', when: 'now' })}\n`, () => {
+        clearTimeout(deadline);
+        resolve();
+      });
     });
   });
 }
