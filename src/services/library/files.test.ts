@@ -74,14 +74,20 @@ describe('the library’s reads of a stored file', () => {
 
   // M6b fix wave 2 (Decision Log 36i): a File artifact's file read by the artifact alone, its path resolved here, read by
   // the files service in process (no files.readResolved on the bus)
-  it('reads a File artifact’s stored file at a revision by its id through the files service; refuses another kind', async () => {
+  // P5 O7 M5a review: an HTML artifact's stored entry file is read too (another machine's open-a-copy of it), the file
+  // `library.openExternally` opens here; a kind with no stored file (a Yjs document) is refused in words saying so
+  it('reads a byte kind’s stored file (a File artifact’s, an HTML artifact’s entry) at a revision by its id through the files service; refuses another kind', async () => {
     const csv = put('ledger.csv', 'item,cost\n');
     const file = reads({ kind: 'file', files: { 2: { name: 'ledger.csv', path: csv } } });
     expect(await answer(file.bus, 'library.read', { artifactId: ID, offset: 0, hash: true })).toMatchObject({ ok: true, value: { content: 'item,cost\n' } });
     expect(file.readResolved).toHaveBeenCalledWith({ path: csv, offset: 0, hash: true });
-    const page = reads({ kind: 'html', files: { 4: { name: 'index.html', path: put('index.html', '<p>x</p>') } } });
-    expect(await answer(page.bus, 'library.read', { artifactId: ID })).toMatchObject({ ok: false, error: { code: 'invalid_input', message: `artifact ${ID} is not a file artifact` } });
-    expect(page.readResolved).not.toHaveBeenCalled();
+    const html = put('index.html', '<p>x</p>');
+    const page = reads({ kind: 'html', files: { 4: { name: 'index.html', path: html } } });
+    expect(await answer(page.bus, 'library.read', { artifactId: ID })).toMatchObject({ ok: true, value: { content: '<p>x</p>' } });
+    expect(page.readResolved).toHaveBeenCalledWith({ path: html });
+    const doc = reads({ kind: 'document', files: { 1: { name: 'notes', path: put('notes', 'x') } } });
+    expect(await answer(doc.bus, 'library.read', { artifactId: ID })).toMatchObject({ ok: false, error: { code: 'invalid_input', message: `artifact ${ID} is a document, which has no stored file to read` } });
+    expect(doc.readResolved).not.toHaveBeenCalled();
   });
 
   it('fails library.read with the files service’s own refusal', async () => {

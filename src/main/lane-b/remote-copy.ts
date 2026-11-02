@@ -10,6 +10,8 @@
 //   read. A file whose size moves between chunks changed under the read, which starts again (REMOTE_READ_TRIES). The
 //   copy is written beside its final name, every byte (a short write goes on), and renamed over it, owner-only and never
 //   executable. Fix wave 1: a file the machine sends as text is copied only when its bytes are proven (`fetchToFile`).
+//   M5a review: a library source reads either byte kind's stored file; an HTML artifact's is its entry file alone (an
+//   `html` page is one stored file; no read here names its assets), so a page's relative assets are not copied with it.
 // - The copy (`openCopy`): `<temp>/maws-remote-copies/<machine>/<sha256 of the source>/<name>`, a fresh copy at each open
 //   (64 MiB at most, larger refused "too large to copy from <machine>"), handed to the OS as `files.openExternal` hands a
 //   local file: a document kind (`opensExternally`), never a program. Under MAWS_E2E=1 MAWS_E2E_OPEN_LOG takes the copy's

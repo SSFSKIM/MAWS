@@ -8,7 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
+import { HostCommandError } from '@shared/host/runtime';
 import { createFilesService, type FilesService } from '../../services/files/service';
+import { createLibraryReads } from '../../services/library/files';
 import type { RemoteLink } from '../machines/remote/link';
 import { fetchToFile, notByteForByte } from './remote-copy';
 
@@ -102,6 +104,37 @@ describe('a copy is the file’s bytes', () => {
     const { link } = machineOver(big);
     expect(await fetch(link, join(dir, 'copy.log'))).toEqual({ ok: false, error: expect.objectContaining({ code: 'invalid_input', message: notByteForByte('mini') }) });
     expect(await readdir(dir)).toEqual(['big.log']);
+  });
+});
+
+// P5 O7 M5a review: a remote HTML artifact's Open externally copies its stored entry file through the real library
+// service's `library.read` (it once refused every kind but `file`)
+describe('a library artifact’s copy', () => {
+  it('copies an HTML artifact’s stored entry file byte for byte through library.read', async () => {
+    const dir = await scratch();
+    const entry = join(dir, 'index.html');
+    const bytes = Buffer.from('<!doctype html><h1>Q3 ünïcödé</h1>\n', 'utf8');
+    await writeFile(entry, bytes);
+    const files = createFilesService({ records: () => null });
+    services.push(files);
+    const dispatch = async () => ({ ok: true, value: { revision: 3, kind: 'html', name: 'index.html', size: bytes.length, sha256: 'x', path: entry } });
+    const library = createLibraryReads({ hosts: { dispatch } as never, files, port: {} as never, env: {}, artifactsRoot: join(dir, 'artifacts') });
+    const link = {
+      machine: 'FarMachineRef000000000',
+      name: 'mini',
+      call: async (name: string, input: never) => {
+        if (name !== 'library.read') throw new Error(`unexpected ${name}`);
+        try {
+          return { ok: true, output: await library.read(input) };
+        } catch (error) {
+          if (error instanceof HostCommandError) return { ok: false, error: error.ipcError };
+          throw error;
+        }
+      },
+    } as unknown as RemoteLink;
+    const to = join(dir, 'copy.html');
+    expect(await fetchToFile(link, { artifactId: '00000000-0000-4000-8000-000000000001', revision: 3 } as never, to, 64 * 1024 * 1024, () => {})).toEqual({ ok: true, value: 'written' });
+    expect(await readFile(to)).toEqual(bytes);
   });
 });
 

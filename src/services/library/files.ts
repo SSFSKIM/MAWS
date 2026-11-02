@@ -21,6 +21,7 @@
 // a link leads to. Links above the root are the profile's own location, as the delivery's admission reads them.
 import { appendFile, lstat, realpath } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { BYTE_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
 import { HostCommandError } from '@shared/host/runtime';
 import type { ClientRef } from '@shared/ipc/client';
@@ -39,6 +40,8 @@ export interface LibraryReadsDeps {
   env: NodeJS.ProcessEnv; // MAWS_E2E and MAWS_E2E_OPEN_LOG
   artifactsRoot: string; // P5 O7 M5a: <profile>/artifacts, where `library.read {export}` reads an export
 }
+
+const isByteKind = (kind: ArtifactKind) => (BYTE_KINDS as readonly ArtifactKind[]).includes(kind);
 
 type Out<N extends 'library.content' | 'library.read' | 'library.openExternally' | 'library.reveal'> = Promise<CommandOutput<N>>;
 
@@ -79,14 +82,16 @@ export function createLibraryReads(deps: LibraryReadsDeps) {
 
     // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file, read by the artifact alone (its path resolved
     // here, never taken from the window), so the owner's files read in their viewer with no session. The files
-    // service's refusal (`not found: <path>`, `not a regular file: <path>`) is thrown as it is.
+    // service's refusal (`not found: <path>`, `not a regular file: <path>`) is thrown as it is. P5 O7 M5a review: either
+    // byte kind's (BYTE_KINDS), an HTML artifact's being its entry file, the one `openExternally` opens, so another
+    // machine copies it; its relative assets are not read with it.
     async read({ artifactId, revision, export: exported, ...chunk }: CommandInput<'library.read'>): Out<'library.read'> {
       if (exported !== undefined) {
         if (revision !== undefined) throw new HostCommandError(ipcError('invalid_input', "an export's revision is named inside `export`"));
         return readExport(artifactId, exported, chunk);
       }
       const found = await content({ artifactId, revision });
-      if (found.kind !== 'file') throw new HostCommandError(ipcError('invalid_input', `artifact ${artifactId} is not a file artifact`));
+      if (!isByteKind(found.kind)) throw new HostCommandError(ipcError('invalid_input', `artifact ${artifactId} is a ${found.kind}, which has no stored file to read`));
       return deps.files.readResolved({ path: found.path, ...chunk });
     },
 
