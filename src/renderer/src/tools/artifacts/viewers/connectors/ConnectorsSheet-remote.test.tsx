@@ -3,7 +3,7 @@
 // and the machine's offer (a `not-offered` refusal it gave), never from the lane or the machine: a part either lacks is
 // greyed with why, and a refusal there is said in its words.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { ConnectorDeclareOutcome, ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
@@ -48,11 +48,13 @@ function setup(lease: 'opens' | 'refused' = 'opens') {
     revokeConnectorTool: vi.fn(),
   };
   const tab = new ConnectorsTab(ARTIFACT, { host: host as never, startSession: vi.fn(), owner });
+  tabs.push(tab);
   const port: PagePort & { send(data: unknown): void } = { onmessage: null, postMessage: () => {}, close: () => {}, send(data) { this.onmessage?.({ data } as MessageEvent); } };
   tab.attach(port);
   port.send({ id: 1, op: 'declare', tools: [TOOL] });
-  return { tab, owner };
+  return { tab, owner, host, port };
 }
+const tabs: ConnectorsTab[] = [];
 const open = async (tab: ConnectorsTab) => {
   tab.openSheet();
   render(<ConnectorsSheet tab={tab} context={{ kind: 'none' }} />);
@@ -60,12 +62,20 @@ const open = async (tab: ConnectorsTab) => {
 };
 const text = (selector: string) => document.querySelector(selector)?.textContent ?? null;
 const disabled = (name: string) => (screen.getByRole('button', { name }) as HTMLButtonElement).disabled;
+// P5 O7 M5c (the architect's ruling on Touch ID at the sheet's opening): another machine's rows are read by the owner's
+// explicit action, so the confirmation `machine-admin` asks there comes from that action
+const SHOW = 'Show the connectors on mini';
+const showServers = async () => {
+  fireEvent.click(screen.getByRole('button', { name: SHOW }));
+  await flush();
+};
 
 beforeEach(() => {
   recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
   useMachines.setState({ machines: new Map<MachineRef, MachineState>([[OTHER_MACHINE, { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-02T00:00:00Z', generation: 1 }]]) });
 });
 afterEach(() => {
+  for (const tab of tabs.splice(0)) tab.dispose();
   cleanup();
   resetArtifactMachines();
   resetRemoteLaneBStore();
@@ -88,17 +98,19 @@ describe('greyed by the device’s rights there', () => {
 
     linkSays(['spawn', 'shell', 'machine-admin']);
     await flush();
-    expect(owner.servers).toHaveBeenCalledOnce();
+    expect(owner.servers).not.toHaveBeenCalled(); // the right lets the owner read them; the owner's action reads them
     expect(disabled('Allow wiki · page to read')).toBe(false);
     expect(text('[data-connectors-grants-greyed]')).toBeNull();
     expect(text('[data-connectors-servers-greyed]')).toBeNull();
+    await showServers();
+    expect(owner.servers).toHaveBeenCalled();
     expect(disabled('Connect MAWS to wiki')).toBe(false);
   });
 
   it('greys nothing while the rights there are not known: no session heard, or no member yet', async () => {
-    const { tab, owner } = setup();
+    const { tab } = setup();
     await open(tab);
-    expect(owner.servers).toHaveBeenCalled();
+    expect(text('[data-connectors-servers-ask]')).toBe('Connectors on mini');
     linkSays([], null); // before the first caps
     await flush();
     expect(text('[data-connectors-servers-greyed]')).toBeNull();
@@ -112,6 +124,30 @@ describe('greyed by the device’s rights there', () => {
     await open(tab);
     expect(owner.servers).toHaveBeenCalled();
     expect(text('[data-connectors-grants-greyed]')).toBeNull();
+  });
+});
+
+describe('another machine’s rows, read on the owner’s action', () => {
+  it('opens the sheet with no machine-admin call, says “Connectors on <machine>” with an action that reads them, and asks again at the next opening', async () => {
+    linkSays(['machine-admin']);
+    const { tab, owner, host, port } = setup();
+    await open(tab);
+    const adminCalls = () => [owner.servers, owner.connect, owner.reconnect, owner.disconnect, host.grantConnectorTool, host.revokeConnectorTool].map((fn) => (fn as unknown as Mock).mock.calls.length).reduce((sum, n) => sum + n, 0);
+    expect(adminCalls()).toBe(0);
+    expect(text('[data-connectors-servers-ask]')).toBe('Connectors on mini');
+    expect(screen.queryByRole('button', { name: 'Connect MAWS to wiki' })).toBeNull();
+    port.send({ id: 2, op: 'declare', tools: [{ server: 'wiki', tool: 'other' }] }); // the page's tools changed: still not read
+    await flush();
+    expect(adminCalls()).toBe(0);
+    await showServers();
+    expect(owner.servers).toHaveBeenCalledOnce();
+    expect(text('[data-connectors-servers-ask]')).toBeNull();
+    expect(disabled('Connect MAWS to wiki')).toBe(false);
+    act(() => tab.closeSheet());
+    act(() => tab.openSheet());
+    await flush();
+    expect(owner.servers).toHaveBeenCalledOnce(); // a new opening asks again
+    expect(text('[data-connectors-servers-ask]')).toBe('Connectors on mini');
   });
 });
 
@@ -141,10 +177,25 @@ describe('greyed by the machine’s offer', () => {
 });
 
 describe('a refusal there, in words', () => {
+  it('says a grant the machine refused in its words, not as a route that failed, until a gesture succeeds', async () => {
+    linkSays(['machine-admin']);
+    const { tab, host } = setup();
+    await open(tab);
+    vi.mocked(host.grantConnectorTool).mockRejectedValueOnce(new ArtifactCommandError({ code: 'internal', message: 'artifacts.grantConnectorTool: refused grade by machine mini', issues: { refusal: 'grade' } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow wiki · page to read' }));
+    await flush();
+    expect(text('[data-connector-detail]')).toBe(` · ${W.noRight('mini')}`);
+    vi.mocked(host.grantConnectorTool).mockResolvedValueOnce({ ok: true, grant: { ...TOOL, fingerprint: 'f', mode: 'read', grantedAt: 1 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Allow wiki · page to read' }));
+    await flush();
+    expect(text('[data-connector-detail]') ?? '').not.toContain(W.noRight('mini'));
+  });
+
   it('reads a busy acknowledgment as busy on the machine, and the machine’s own refusals as theirs', async () => {
     linkSays(['machine-admin']);
     const { tab, owner } = setup();
     await open(tab);
+    await showServers();
     vi.mocked(owner.connect).mockResolvedValueOnce({ accepted: false, why: 'busy' });
     fireEvent.click(screen.getByRole('button', { name: 'Connect MAWS to wiki' }));
     await flush();

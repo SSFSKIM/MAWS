@@ -93,6 +93,7 @@ describe('a server’s latest sign-in', () => {
 describe('a sign-in on another machine', () => {
   beforeEach(() => resetSignIns());
   const ON_B = addressOf(OTHER_MACHINE, 'session-b');
+  const ON_MINI = { ...USER, machine: OTHER_MACHINE }; // the same server, configured on the other machine
   const failed = (opId: string, message: string): ConnectorSignInChanged => ({ ...event(opId, 'failed'), reason: 'engine', message });
   // the bridge's `on`, as the renderer's client hands a listener the machine an event came from
   const events = () => {
@@ -106,10 +107,11 @@ describe('a sign-in on another machine', () => {
     connectSignInEvents(bridge);
     await startSignIn(USER, USER.fingerprint, ON_B, bridge);
     say({ ...event('op-1', 'waiting_browser') }, TEST_MACHINE); // this Mac's operation of the same id: not the machine's
-    expect(recordOf(USER)).toBeUndefined();
+    expect(recordOf(ON_MINI)).toBeUndefined();
     say(failed('op-1', 'sign in on mini'), OTHER_MACHINE);
-    expect(recordOf(USER)).toMatchObject({ event: { state: 'failed', message: 'sign in on mini' }, appSessionId: ON_B });
-    const view = signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(USER)!, transport: 'http' });
+    expect(recordOf(ON_MINI)).toMatchObject({ event: { state: 'failed', message: 'sign in on mini' }, appSessionId: ON_B });
+    expect(recordOf(USER)).toBeUndefined(); // the machine's, never this Mac's row's
+    const view = signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(ON_MINI)!, transport: 'http' });
     expect(view).toMatchObject({ text: 'Sign-in didn’t finish: sign in on mini', tone: 'danger', signIn: true });
   });
 
@@ -119,7 +121,7 @@ describe('a sign-in on another machine', () => {
     await startSignIn(USER, USER.fingerprint, ON_B, bridge);
     const busy = 'another sign-in from this device is waiting on the same callback port';
     say(failed('op-1', busy), OTHER_MACHINE);
-    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(USER)!, transport: 'http' })?.text).toBe(`Sign-in didn’t finish: ${busy}`);
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(ON_MINI)!, transport: 'http' })?.text).toBe(`Sign-in didn’t finish: ${busy}`);
   });
 
   it('keeps another machine’s operations heard before any receipt apart from this Mac’s', async () => {
@@ -128,6 +130,26 @@ describe('a sign-in on another machine', () => {
     const bridge = bridgeAnswering('mine');
     await startSignIn(USER, USER.fingerprint, addressOf(TEST_MACHINE, 'session-a'), bridge);
     expect(recordOf(USER)).toMatchObject({ event: { opId: 'mine', state: 'starting' }, at: 100 });
+  });
+
+  // The task review's finding 4: a server's sign-ins are its machine's, so the same server signing in on this Mac and on
+  // another machine at once are two newest operations, each with its own result, neither cancelling the other's record
+  it('keeps the same server’s concurrent sign-ins on this Mac and on another machine apart', async () => {
+    let listener: ((payload: ConnectorSignInChanged, from: { machine: MachineRef }) => void) | null = null;
+    const bridge = { ...bridgeAnswering('here-1', 'there-1'), on: vi.fn((_name: string, l: typeof listener) => ((listener = l), () => {})) } as unknown as MawsBridge;
+    connectSignInEvents(bridge);
+    const ON_A = addressOf(TEST_MACHINE, 'session-a');
+    await startSignIn(USER, USER.fingerprint, ON_A, bridge);
+    await startSignIn(USER, USER.fingerprint, ON_B, bridge);
+    listener!(event('here-1', 'waiting_browser'), { machine: TEST_MACHINE });
+    listener!(event('there-1', 'waiting_callback'), { machine: OTHER_MACHINE });
+    expect(recordOf(USER)).toMatchObject({ event: { opId: 'here-1', state: 'waiting_browser' }, appSessionId: ON_A });
+    expect(recordOf({ ...USER, machine: TEST_MACHINE })).toBe(recordOf(USER)); // this Mac named or not, one key
+    expect(recordOf(ON_MINI)).toMatchObject({ event: { opId: 'there-1', state: 'waiting_callback' }, appSessionId: ON_B });
+    forgetSignIn(USER); // MAWS replaced this Mac's configuration: the machine's sign-in is not about it
+    expect(recordOf(USER)).toBeUndefined();
+    listener!(event('there-1', 'done'), { machine: OTHER_MACHINE });
+    expect(recordOf(ON_MINI)).toMatchObject({ event: { opId: 'there-1', state: 'done' } });
   });
 
   it('cancels on the machine its session is on', () => {

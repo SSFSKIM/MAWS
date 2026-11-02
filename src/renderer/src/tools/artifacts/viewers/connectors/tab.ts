@@ -22,7 +22,9 @@
 //   remote-surfaces.ts, `SERVER_NEEDS`: the device's `machine-admin` there, and the machine's offer); a greyed sheet says
 //   why instead. A refusal there is kept in words (a `busy` acknowledgment, or the machine's own word), never read as a
 //   changed row. A declaration the page made that found no lease is kept (`leaseRefused`), so the header can show why
-//   when the machine offers no leases.
+//   when the machine offers no leases. The rows there are read only once the owner asks for them in this opening of the
+//   sheet (`askServers`; the architect's ruling): reading them is `machine-admin`, which asks for Touch ID, and a
+//   confirmation belongs to a deliberate act, never to opening a sheet.
 import { createStore } from 'zustand/vanilla';
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantMode, type ConnectorRefusal, type ConnectorToolRef } from '@shared/artifacts/connectors';
@@ -64,6 +66,8 @@ export interface ConnectorsView {
   servers: ServersView; // P3-HD M3c2
   serverBusy: string | null; // P3-HD M3c2: the row an owner action is being acknowledged for
   leaseRefused: boolean; // P5 O7 M5c: the current load declared a tool and found no lease
+  serversAsked: boolean; // P5 O7 M5c: the owner asked for another machine's rows in this opening of the sheet
+  refusalWords: Readonly<Record<string, string>>; // P5 O7 M5c: by tool, another machine's refusal of the owner's last gesture, in its words
 }
 
 export interface ConnectorsTabDeps {
@@ -76,7 +80,7 @@ export interface ConnectorsTabDeps {
 const initialView = (): ConnectorsView => ({
   declared: [], last: {}, grants: null, refusals: {}, busy: null, needsSession: false, sheet: false, start: { phase: 'idle' },
   servers: { rows: null, saved: 'ok', withdrawnUnattributed: false, failed: false, refused: null }, serverBusy: null, // P3-HD M3c2
-  leaseRefused: false, // P5 O7 M5c
+  leaseRefused: false, serversAsked: false, refusalWords: {}, // P5 O7 M5c
 });
 
 // The sheet's tools: the page load's declared ones first, then the ones the artifact holds a grant for.
@@ -211,6 +215,7 @@ export class ConnectorsTab {
   async readServers(): Promise<void> {
     const { owner } = this.deps;
     if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return; // P5 O7 M5c: the sheet says why
+    if (artifactMachineOf(this.artifactId) !== null && !this.view.getState().serversAsked) return; // P5 O7 M5c: on the owner's word
     const serial = ++this.serverReads;
     const current = () => !this.disposed && serial === this.serverReads;
     try {
@@ -222,6 +227,12 @@ export class ConnectorsTab {
       this.deps.log?.(`the connector servers of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
       this.update({ servers: { ...this.view.getState().servers, failed: true } });
     }
+  }
+
+  /** P5 O7 M5c: the owner's explicit read of another machine's rows, for this opening of the sheet. */
+  askServers(): Promise<void> {
+    this.update({ serversAsked: true });
+    return this.readServers();
   }
 
   connectServer(sourceHandle: string): Promise<void> {
@@ -257,7 +268,7 @@ export class ConnectorsTab {
   // P3-HD M3c2 end
 
   closeSheet(): void {
-    this.update({ sheet: false });
+    this.update({ sheet: false, serversAsked: false }); // P5 O7 M5c: the next opening asks again
   }
 
   // The tab went: its page's relay and any wait for a session end.
@@ -281,17 +292,24 @@ export class ConnectorsTab {
     const key = connectorToolKey(tool);
     this.update({ busy: key });
     let refusal: ConnectorRefusal | null;
+    let words: string | null = null;
     try {
       refusal = await run();
     } catch (error) {
       this.deps.log?.(`a connector gesture on ${tool.server} · ${tool.tool} failed: ${error instanceof Error ? error.message : String(error)}`);
       refusal = { ok: false, state: 'failed', reason: 'routeFailed' };
+      // P5 O7 M5c: another machine's refusal in its own words (a right it lacks, a cancelled confirmation, the link down)
+      const machine = artifactMachineOf(this.artifactId);
+      if (machine !== null && error instanceof ArtifactCommandError) words = remoteRefusalWords(error.error, machineNameOf(machine));
     }
     if (this.disposed) return;
     const refusals = { ...this.view.getState().refusals };
     if (refusal === null) delete refusals[key];
     else refusals[key] = refusal;
-    this.update({ busy: null, refusals });
+    const refusalWords = { ...this.view.getState().refusalWords };
+    if (words === null) delete refusalWords[key];
+    else refusalWords[key] = words;
+    this.update({ busy: null, refusals, refusalWords });
     await this.readGrants();
   }
 

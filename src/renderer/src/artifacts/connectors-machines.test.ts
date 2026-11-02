@@ -3,6 +3,7 @@
 // preload that speaks the raw pipe (a target per invoke, `(payload, machine)` per event, no machine for main's own), so
 // every machine a command names here is the one the client hands the preload, as in the app.
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ConnectorSurface } from '@artifacts/host';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
@@ -15,6 +16,7 @@ const REMOTE = '11111111-1111-4111-8111-111111111111'; // an artifact on OTHER_M
 const LOCAL = '77777777-7777-4777-8777-777777777777'; // one of this Mac's
 const LEASE = '22222222-2222-4222-8222-222222222222'; // both machines answer this id: a lease is its machine's
 const NEW_LEASE = '55555555-5555-4555-8555-555555555555';
+const THIRD_LEASE = '33333333-3333-4333-8333-333333333333';
 const WATCH = '44444444-4444-4444-8444-444444444444';
 const NEW_WATCH = '66666666-6666-4666-8666-666666666666';
 const TOOL = { server: 'fixture', tool: 'read_series' };
@@ -64,7 +66,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // Each machine as a restarting broker answers it: each open the next lease, each watch the next id
 function brokers() {
-  const leases = new Map<MachineRef | undefined, string[]>([[OTHER_MACHINE, [LEASE, NEW_LEASE]], [TEST_MACHINE, [LEASE, NEW_LEASE]]]);
+  const leases = new Map<MachineRef | undefined, string[]>([[OTHER_MACHINE, [LEASE, NEW_LEASE, THIRD_LEASE]], [TEST_MACHINE, [LEASE, NEW_LEASE, THIRD_LEASE]]]);
   const watches = new Map<MachineRef | undefined, string[]>([[OTHER_MACHINE, [WATCH, NEW_WATCH]], [TEST_MACHINE, [WATCH, NEW_WATCH]]]);
   return pipe({
     'connectors.open': (_input, machine) => ({ leaseId: leases.get(machine)!.shift() }),
@@ -159,11 +161,12 @@ describe('connectors.reset, by machine', () => {
     return { p, remote, local, heard, count: { there: p.of(OTHER_MACHINE).length, here: p.of(TEST_MACHINE).length } };
   }
 
-  it('rebuilds only the named machine’s surfaces, under new ids; the other machine’s lease and watch run on as they were', async () => {
+  it('rebuilds only the named machine’s surfaces, under new ids, closing the lease each rebuilt one superseded; the other machine’s lease and watch run on as they were', async () => {
     const { p, remote, local, heard, count } = await twoSurfaces();
     p.emit('connectors.reset', { machine: OTHER_MACHINE });
     await settle();
     expect(p.of(OTHER_MACHINE).slice(count.there)).toEqual([
+      ['connectors.close', { leaseId: LEASE }], // best-effort: a lease the machine's broker already ended answers as it may
       ['connectors.open', { artifactId: REMOTE }],
       ['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }],
       ['connectors.visibility', { leaseId: NEW_LEASE, visible: true }],
@@ -186,7 +189,7 @@ describe('connectors.reset, by machine', () => {
     const { p, count } = await twoSurfaces();
     p.emit('connectors.reset', {});
     await settle();
-    expect(p.of(TEST_MACHINE).slice(count.here).map(([name]) => name)).toEqual(['connectors.open', 'connectors.declare', 'connectors.visibility', 'connectors.watch']);
+    expect(p.of(TEST_MACHINE).slice(count.here).map(([name]) => name)).toEqual(['connectors.close', 'connectors.open', 'connectors.declare', 'connectors.visibility', 'connectors.watch']);
     expect(p.of(OTHER_MACHINE).slice(count.there)).toEqual([]);
   });
 
@@ -211,12 +214,76 @@ describe('connectors.reset, by machine', () => {
     p.emit('connectors.reset', { machine: OTHER_MACHINE });
     const asked = surface.callTool(TOOL);
     await settle();
-    expect(p.of(OTHER_MACHINE).slice(2)).toEqual([['connectors.open', { artifactId: REMOTE }]]);
-    p.sent[2]!.answer({ leaseId: NEW_LEASE });
+    expect(p.of(OTHER_MACHINE).slice(2)).toEqual([['connectors.close', { leaseId: LEASE }], ['connectors.open', { artifactId: REMOTE }]]);
+    p.sent[3]!.answer({ leaseId: NEW_LEASE });
     await settle();
-    expect(p.of(OTHER_MACHINE).slice(3)).toEqual([['connectors.call', { leaseId: NEW_LEASE, request: TOOL }]]);
-    p.sent[3]!.answer(RESULT);
+    expect(p.of(OTHER_MACHINE).slice(4)).toEqual([['connectors.call', { leaseId: NEW_LEASE, request: TOOL }]]);
+    p.sent[4]!.answer(RESULT);
     await expect(asked).resolves.toEqual(RESULT);
     expect(p.of(OTHER_MACHINE).filter(([name, input]) => name === 'connectors.call' && (input as { leaseId: string }).leaseId === LEASE)).toHaveLength(1);
   });
+
+  // The task review's finding 1: a duplicate reset, or one heard while a rebuild runs, supersedes a lease the machine still
+  // runs; each rebuild closes the lease it supersedes, so its broker ends it and its watches with it
+  it('closes the rebuilt lease a second reset supersedes', async () => {
+    const { p, count } = await twoSurfaces();
+    p.emit('connectors.reset', { machine: OTHER_MACHINE });
+    await settle();
+    p.emit('connectors.reset', { machine: OTHER_MACHINE }); // a duplicate: the machine's broker still runs NEW_LEASE
+    await settle();
+    expect(p.of(OTHER_MACHINE).slice(count.there).filter(([name]) => name === 'connectors.close')).toEqual([
+      ['connectors.close', { leaseId: LEASE }],
+      ['connectors.close', { leaseId: NEW_LEASE }],
+    ]);
+    expect(p.of(OTHER_MACHINE).at(-1)).toEqual(['connectors.watch', { leaseId: THIRD_LEASE, request: SERIES }]);
+  });
+
+  it('closes a lease superseded while its rebuild’s declaration is in flight, after it, and declares the late answer on the next lease', async () => {
+    recordArtifactMachine(REMOTE, OTHER_MACHINE, TEST_MACHINE);
+    const p = pipe({ 'connectors.close': () => ({ closed: true }) });
+    const surface = createConnectorHost(p.client).openConnectors(REMOTE);
+    p.sent[0]!.answer({ leaseId: LEASE });
+    await settle();
+    const declaring = surface.declareTools([TOOL]);
+    await settle();
+    p.emit('connectors.reset', { machine: OTHER_MACHINE }); // the declaration is in flight on LEASE
+    await settle();
+    expect(p.of(OTHER_MACHINE).slice(1)).toEqual([
+      ['connectors.declare', { leaseId: LEASE, tools: [TOOL] }],
+      ['connectors.close', { leaseId: LEASE }],
+      ['connectors.open', { artifactId: REMOTE }],
+    ]);
+    p.sent[3]!.answer({ leaseId: NEW_LEASE });
+    await settle();
+    p.sent[1]!.answer({ ok: true, declared: [TOOL] }); // the superseded lease answered first: not failed
+    await expect(declaring).resolves.toEqual({ ok: true, declared: [TOOL] });
+    await settle();
+    expect(p.of(OTHER_MACHINE).slice(4)).toEqual([['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }]]);
+  });
+
+  // The task review's finding 2: the lease a command goes to is the one found current in the continuation that sends it,
+  // so a reset heard between the lease answering and the command's dispatch sends it to the rebuilt lease, never the old
+  for (const [what, ask] of [
+    ['a call', (surface: ConnectorSurface) => void surface.callTool(TOOL)],
+    ['a declaration', (surface: ConnectorSurface) => void surface.declareTools([TOOL])],
+    ['a watch’s start', (surface: ConnectorSurface) => void surface.watchTool(SERIES, () => {})],
+  ] as const) {
+    it(`sends ${what} asked before the lease opened nothing on the old lease once a reset is heard, wherever the reset falls`, async () => {
+      for (let gap = 0; gap < 24; gap += 1) {
+        resetArtifactMachines();
+        recordArtifactMachine(REMOTE, OTHER_MACHINE, TEST_MACHINE);
+        const p = pipe({ 'connectors.close': () => ({ closed: true }) });
+        const surface = createConnectorHost(p.client).openConnectors(REMOTE);
+        ask(surface);
+        p.sent[0]!.answer({ leaseId: LEASE });
+        for (let tick = 0; tick < gap; tick += 1) await Promise.resolve();
+        const heard = p.sent.length;
+        p.emit('connectors.reset', { machine: OTHER_MACHINE });
+        await settle();
+        const after = p.sent.slice(heard).filter(({ name, input }) => name !== 'connectors.close' && (input as { leaseId?: string }).leaseId === LEASE);
+        expect(after.map(({ name }) => [gap, name])).toEqual([]);
+        surface.close();
+      }
+    });
+  }
 });

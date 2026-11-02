@@ -266,6 +266,8 @@ describe('a surface’s rebuild on connectors.reset', () => {
   const NEW_WATCH = '66666666-6666-4666-8666-666666666666';
   const SERIES = { ...TOOL, intervalMs: 60_000 };
 
+  // P5 O7 M5c (the task review's finding 1): each rebuild closes the lease it supersedes; main answers the close at once
+  const closing = () => bridge({ 'connectors.close': () => ({ closed: true }) });
   // main as a restarted mawsd answers it: each open a new lease, each watch a new id
   function restarting() {
     const leases = [LEASE, NEW_LEASE];
@@ -278,6 +280,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
       'connectors.refresh': () => ({ refreshing: true }),
       'connectors.unwatch': () => ({ stopped: true }),
       'connectors.call': () => RESULT,
+      'connectors.close': () => ({ closed: true }),
     });
   }
 
@@ -293,6 +296,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     b.emit('connectors.reset', {});
     await settle();
     expect(b.calls().slice(before)).toEqual([
+      ['connectors.close', { leaseId: LEASE }], // the lease the rebuild supersedes, best-effort
       ['connectors.open', { artifactId: ARTIFACT }],
       ['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }],
       ['connectors.visibility', { leaseId: NEW_LEASE, visible: true }],
@@ -306,7 +310,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     await expect(surface.refreshWatch(WATCH)).resolves.toBe(true);
     await expect(surface.callTool(TOOL)).resolves.toEqual(RESULT);
     await expect(surface.unwatchTool(WATCH)).resolves.toBe(true);
-    expect(b.calls().slice(before + 4)).toEqual([
+    expect(b.calls().slice(before + 5)).toEqual([
       ['connectors.refresh', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
       ['connectors.call', { leaseId: NEW_LEASE, request: TOOL }],
       ['connectors.unwatch', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
@@ -316,7 +320,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
   });
 
   it('answers a call in flight at the reset as the host did, and sends what is asked meanwhile under the rebuilt lease', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     const inFlight = surface.callTool(TOOL);
     b.sent[0]!.answer({ leaseId: LEASE });
@@ -354,7 +358,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
   });
 
   it('stops under the new lease a watch the page unwatched while its re-install was in flight', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     const heard = vi.fn();
     const started = surface.watchTool(SERIES, heard);
@@ -390,7 +394,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: WATCH, update: RESULT });
     expect(heard).toEqual([RESULT]);
 
-    const c = bridge();
+    const c = closing();
     const other = createConnectorHost(c.ipc).openConnectors(ARTIFACT);
     const started = other.watchTool(SERIES, (update) => heard.push(update));
     c.sent[0]!.answer({ leaseId: LEASE });
@@ -409,7 +413,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
 
   // The task review's finding 2: main adds each declaration to the lease's, so the rebuilt lease is declared all of them
   it('declares the rebuilt lease every tool the old one was declared, not only the last declaration’s', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     b.sent[0]!.answer({ leaseId: LEASE });
     await settle();
@@ -430,7 +434,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
   // The re-review's finding 1: a declaration answered on the old lease after the rebuild declared the new one is
   // declared on the new lease before anything more is sent
   it('declares on the rebuilt lease a declaration the old lease answered after the rebuild, before the next call', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     b.sent[0]!.answer({ leaseId: LEASE });
     await settle();
@@ -453,7 +457,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
 
   // The re-review's finding 2: a start overtaken by one reset, answered before a second, is started once on the latest lease
   it('starts a watch once on the latest lease when two resets overtake its start', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     const watched = surface.watchTool(SERIES, () => {});
     b.sent[0]!.answer({ leaseId: LEASE });
@@ -475,7 +479,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
   // The task review's finding 3: the watch's start overtaken by the reset answers before the rebuilt lease opens, so the
   // rebuild and the overtaken start's own re-install both know it; it is started once on the rebuilt lease
   it('starts an overtaken watch once on the rebuilt lease, and its unwatch stops that one', async () => {
-    const b = bridge();
+    const b = closing();
     const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
     const watched = surface.watchTool(SERIES, () => {});
     b.sent[0]!.answer({ leaseId: LEASE });

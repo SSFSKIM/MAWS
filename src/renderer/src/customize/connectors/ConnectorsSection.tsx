@@ -31,7 +31,7 @@ import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../dis
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
 import { removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
-import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
+import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -182,7 +182,9 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ops } = useManage();
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
-  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
+  // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
+  const machine = signInMachineOf(session);
+  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine })) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);

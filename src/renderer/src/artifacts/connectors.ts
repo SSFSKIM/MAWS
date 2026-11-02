@@ -30,7 +30,9 @@
 //   machine's surfaces rebuild: another machine's leases are live there, their watches running, and a rebuild would open
 //   a second lease beside each and leave the first running under ids the page forgot. A command in flight at the drop
 //   answers `host_unavailable` through the rule above: main fails a lost channel's lease commands, and refuses them until
-//   it says the reset.
+//   it says the reset. Each rebuild closes the lease it supersedes (best-effort, after what was sent on it): a reset
+//   heard twice, or again mid-rebuild, finds that lease live, its watches running. And each command goes to the lease
+//   found current in the continuation that sends it, so a reset never falls between the two.
 import type { ConnectorSurface } from '@artifacts/host';
 import {
   CONNECTOR_WATCH_LIMIT,
@@ -135,6 +137,7 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
     const held = new Map<string, ConnectorCallOutcome[]>(); // by main's watch id, refreshes whose watch's start is unanswered
     let starting = 0; // watch starts not yet answered
     let generation = 0; // the lease's: each reset opens the next
+    let owned: string | null = null; // the lease this surface established and has not closed (P5 O7 M5c: the task review's finding 1)
 
     const deliver = (update: ConnectorWatchUpdate) => {
       if (closed) return;
@@ -192,26 +195,32 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
       }
     };
 
+    // Best-effort: a lease its machine already ended answers as it may. Sent after whatever was sent on it before, so its
+    // broker answers those first: a declaration or a watch start in flight is never failed by it.
+    const closeLease = (leaseId: string) => void call('connectors.close', { leaseId }, toMachine).catch(() => {});
     // A lease opened for `opened`'s generation; one that answers once a reset or the close overtook it is closed.
     const open = (opened: number): Promise<string | null> =>
       call('connectors.open', { artifactId }, toMachine).then(
         ({ leaseId }) => {
           if (closed || opened !== generation) {
-            void call('connectors.close', { leaseId }, toMachine).catch(() => {});
+            closeLease(leaseId);
             return null;
           }
+          owned = leaseId;
           unroute = route(machine, leaseId, deliver);
           return leaseId;
         },
         () => null,
       );
     let lease: Promise<string | null> = open(generation);
-    // The current lease, once every rebuild begun before it answered has (a reset meanwhile is waited for too)
-    const current = async (): Promise<string | null> => {
+    // `act` on the current lease (null: none opened) and its generation, once every rebuild begun before it answered has (a
+    // reset meanwhile is waited for too), in the very continuation that found it current: no reset falls between the check
+    // and what `act` sends (the task review's finding 2), so `act` must send before its first await.
+    const onCurrent = async <T>(act: (leaseId: string | null, on: number) => T): Promise<T> => {
       for (;;) {
         const pending = lease;
         const leaseId = await pending;
-        if (pending === lease) return leaseId;
+        if (pending === lease) return act(leaseId, generation);
       }
     };
     // D28: a new lease, asked again what the surface asked of the old one before anything asked meanwhile is sent. A
@@ -219,6 +228,10 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
     const rebuild = () => {
       if (closed) return;
       const opened = (generation += 1);
+      // the lease this rebuild supersedes: a reset heard twice, or again while a rebuild ran, finds it live on its machine,
+      // its watches running under ids the page no longer holds (the task review's finding 1)
+      if (owned !== null) closeLease(owned);
+      owned = null;
       unroute?.();
       unroute = null;
       pageIdOf.clear();
@@ -260,24 +273,25 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
 
     // `work` under the lease. Fenced twice by the close: nothing is sent once the surface closed (or when no lease
     // opened: `fallback`), and an answer that arrives after the close is not published (`closedAnswer` instead).
-    const under = async <T>(fallback: T, closedAnswer: T, work: (leaseId: string) => Promise<T>): Promise<T> => {
+    // `work` is given the lease and its generation, and sends before its first await.
+    const under = async <T>(fallback: T, closedAnswer: T, work: (leaseId: string, on: number) => Promise<T>): Promise<T> => {
       if (closed) return fallback;
-      const leaseId = await current();
-      if (leaseId === null || closed) return fallback;
-      const answer = await work(leaseId);
+      const sent = await onCurrent((leaseId, on) => (leaseId === null || closed ? null : { answer: work(leaseId, on) }));
+      if (sent === null) return fallback;
+      const answer = await sent.answer;
       return closed ? closedAnswer : answer;
     };
 
     return {
-      declareTools: (tools) => under(NO_LEASE, NO_LEASE, (leaseId) => declare(leaseId, tools, generation)),
+      declareTools: (tools) => under(NO_LEASE, NO_LEASE, (leaseId, on) => declare(leaseId, tools, on)),
       // E3: the owner's dataset sink rides beside the request, never inside it
       callTool: (request, options) => under<ConnectorCallOutcome>(NO_LEASE, CLOSED, (leaseId) => call('connectors.call', { leaseId, request, ...(options && { dataset: options.dataset }) }, toMachine)),
       watchTool: async (request, listener, options) => {
         if (closed) return NO_LEASE;
         let sentOn = -1; // the lease generation its start went to
         return starts(async () => {
-          const start = await under(NO_LEASE, NO_LEASE, (leaseId) => {
-            sentOn = generation;
+          const start = await under(NO_LEASE, NO_LEASE, (leaseId, on) => {
+            sentOn = on;
             return call('connectors.watch', { leaseId, request, ...(options && { dataset: options.dataset }) /* E3 */ }, toMachine);
           });
           if (!start.ok) return start; // a close before the answer: `under` answered the lease refusal
@@ -287,9 +301,7 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
           else {
             // started on a lease a reset ended meanwhile (the rebuild did not know it): started again on the rebuilt one
             const rebuilt = generation;
-            void current()
-              .then((leaseId) => (leaseId === null ? undefined : reinstall(start.watchId, watch, leaseId, rebuilt)))
-              .catch(() => {});
+            void onCurrent((leaseId) => (leaseId === null ? undefined : reinstall(start.watchId, watch, leaseId, rebuilt))).catch(() => {});
           }
           // a listener that closed the page while its held refreshes were handed over: no watch was started for it
           return closed ? NO_LEASE : start;
@@ -317,8 +329,8 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
         if (!closed) visible = shown;
         void under(null, null, (leaseId) => call('connectors.visibility', { leaseId, visible: shown }, toMachine)).catch(() => {});
       },
-      // The close's own path, past the fence it raises: the lease is closed in main once it is known (a lease answering
-      // after this is closed where it arrives).
+      // The close's own path, past the fence it raises: the lease it holds is closed in main at once (one still opening is
+      // closed where it answers).
       close: () => {
         if (closed) return;
         closed = true;
@@ -326,10 +338,10 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on' | 'loc
         watches.clear();
         pageIdOf.clear();
         held.clear();
-        void current().then((leaseId) => {
-          unroute?.();
-          if (leaseId !== null) void call('connectors.close', { leaseId }, toMachine).catch(() => {});
-        });
+        unroute?.();
+        unroute = null;
+        if (owned !== null) closeLease(owned);
+        owned = null;
       },
     };
   }

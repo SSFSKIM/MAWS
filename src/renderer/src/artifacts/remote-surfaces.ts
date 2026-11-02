@@ -13,6 +13,7 @@
 // for a connector surface the machine doesn't offer, and "Connect Drive on <machine>" (`delivery.connect` is not offered
 // on another machine: its sign-in is that machine's).
 import { create } from 'zustand';
+import { notOfferedPause, type LivePause } from '@artifacts/dashboard/editor/live';
 import type { CommandName, IpcError, MawsBridge } from '@shared/ipc/schema';
 import type { MACHINE_RIGHTS } from '@shared/ipc/schema/remote';
 import type { MachineRef } from '@shared/machine/ref';
@@ -27,6 +28,9 @@ type MachineRight = (typeof MACHINE_RIGHTS)[number];
 
 export const REMOTE_SURFACE_WORDS = {
   connectorsNeedApp: (machine: string) => `Connectors on ${machine} need its app`,
+  connectorsOn: (machine: string) => `Connectors on ${machine}`, // its rows, before the owner asks for them
+  showConnectors: 'Show',
+  showConnectorsLabel: (machine: string) => `Show the connectors on ${machine}`,
   notOffered: (machine: string) => `${machine} doesn’t offer this`,
   needsAdmin: (machine: string) => `Only an admin of ${machine} can change its connectors`,
   noRight: (machine: string) => `You don’t have the right to do this on ${machine}`,
@@ -125,6 +129,14 @@ export const machineNameOf = (machine: MachineRef): string => nameOf(machine);
 export function remoteGreyedOf(artifactId: string, needs: RemoteNeeds): string | null {
   const machine = artifactMachineOf(artifactId);
   return remoteGreyed(needs, { machine, name: nameOf(machine), rights: rightsOf(useRemoteLaneB.getState().links, machine), notOffered: useNotOffered.getState().refused });
+}
+
+/** A dashboard's live pause when its artifact's machine doesn't offer the connector surface it leases; null when it does
+ * or the artifact is this Mac's (acceptance 6: the dashboard says it in the Connectors sheet's words). */
+export function leaseNotOfferedPause(artifactId: string): LivePause | null {
+  const machine = artifactMachineOf(artifactId);
+  if (machine === null || !LEASE_NEEDS.commands.some((command) => useNotOffered.getState().refused.has(offerKey(machine, command)))) return null;
+  return notOfferedPause(nameOf(machine));
 }
 
 /** The same, followed in a render. */

@@ -14,7 +14,9 @@
 //   machine's, the one its session is on, and is heard from that machine alone: another machine's `signInChanged` (its
 //   artifacts feed carries them to a member holding `machine-admin` there) never binds to, or crowds out, this one's. Such
 //   a machine's failure says its own words (`sign in on <machine>` for a sign-in its engine keeps a listener for, the busy
-//   words for a callback port this Mac already waits on there), shown as they are.
+//   words for a callback port this Mac already waits on there), shown as they are. A server's result is its machine's too
+//   (the task review's finding 4): the same server signing in on this Mac and on another machine are two servers here,
+//   each with its own newest operation, and a row shows the one of the machine its Sign in runs on (`signInMachineOf`).
 import { create } from 'zustand';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -39,7 +41,13 @@ export interface SignInRecord {
   fingerprint: string | null; // the configuration's, when Sign in was pressed; null: not read then
 }
 
-export const signInKeyOf = ({ name, scope, cwd }: Omit<SignInTarget, 'path'>): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
+// P5 O7 M5c: a machine as the bookkeeping keys it: this Mac's, or a bare id's (sent to this Mac), as ''
+const machineKey = (machine: MachineRef | null): string => (machine === null || machine === ipc.localMachine ? '' : machine);
+
+/** A configured server on a machine (absent or null: this Mac's). */
+export type SignInServer = Omit<SignInTarget, 'path'> & { machine?: MachineRef | null };
+
+export const signInKeyOf = ({ name, scope, cwd, machine = null }: SignInServer): string => [machineKey(machine), scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
 interface SignIns {
   byServer: ReadonlyMap<string, SignInRecord>;
@@ -48,8 +56,6 @@ interface SignIns {
 export const useSignIns = create<SignIns>()(() => ({ byServer: new Map() }));
 
 const UNBOUND_KEPT = 32; // operations heard without a receipt (another window's), per machine: its oldest dropped past this
-// P5 O7 M5c: a machine as the bookkeeping keys it: this Mac's, or a bare id's (sent to this Mac), as ''
-const machineKey = (machine: MachineRef | null): string => (machine === null || machine === ipc.localMachine ? '' : machine);
 // an operation by its machine and opId
 const opKeyOf = (machine: MachineRef | null, opId: string): string => `${machineKey(machine)}\u0000${opId}`;
 const bound = new Map<string, { key: string; appSessionId: string; fingerprint: string | null }>(); // live operations by op key
@@ -91,16 +97,18 @@ export function connectSignInEvents(bridge: MawsBridge = ipc): () => void {
 
 // The machine a session's operation runs on (null: a bare id, which names none)
 const machineOfSession = (appSessionId: string): MachineRef | null => (isAddress(appSessionId) ? machineOf(appSessionId) : null);
+/** The machine a sign-in from `appSessionId` runs on, whose result a row shows (null: this Mac's, or no session). */
+export const signInMachineOf = (appSessionId: string | null): MachineRef | null => (appSessionId === null ? null : machineOfSession(appSessionId));
 
 export async function startSignIn(target: SignInTarget, fingerprint: string | null, appSessionId: string, bridge: MawsBridge = ipc): Promise<void> {
-  const key = signInKeyOf(target);
+  const machine = machineOfSession(appSessionId); // the session's address names where it goes
+  const key = signInKeyOf({ ...target, machine });
   const answer = await bridge.invoke('connectors.signIn', { name: target.name, scope: target.scope, cwd: target.cwd, path: target.path, appSessionId: appSessionId as AppSessionId });
   if (!answer.ok) {
     newest.set(key, `refused:${key}`);
     record(key, { appSessionId, fingerprint }, { opId: `refused:${key}`, name: target.name, state: 'failed', reason: 'engine', message: transportWords(answer.error), where: null }, Date.now());
     return;
   }
-  const machine = machineOfSession(appSessionId); // the session's address named where it went
   const op = opKeyOf(machine, answer.value.opId);
   bound.set(op, { key, appSessionId, fingerprint });
   newest.set(key, op);
@@ -117,8 +125,8 @@ export function cancelSignIn(opId: string, appSessionId: string, bridge: MawsBri
 }
 
 /** A server's result forgotten, and the rest of an operation still running for it dropped: MAWS removed or replaced its
- * configuration, so nothing that operation says is about what is configured now. */
-export function forgetSignIn(target: Omit<SignInTarget, 'path'>): void {
+ * configuration, so nothing that operation says is about what is configured now (the server's machine's alone). */
+export function forgetSignIn(target: SignInServer): void {
   const key = signInKeyOf(target);
   newest.delete(key);
   useSignIns.setState(({ byServer }) => {

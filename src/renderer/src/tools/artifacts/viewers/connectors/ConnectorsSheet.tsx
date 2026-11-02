@@ -94,7 +94,7 @@ function ToolRow({ tab, tool, greyed }: { tab: ConnectorsTab; tool: ConnectorToo
   const last = view.last[key] ?? null;
   const changed = last?.ok === false && last.state === 'revoked' && last.reason === 'fingerprintChanged';
   const state = changed ? C.changed : grant?.mode === 'read' ? C.allowedRead : grant?.mode === 'once' ? C.allowedOnce : C.notAllowed;
-  const detail = (tab.owned ? S.detail : C.detail)(view.refusals[key] ?? last); // P3-HD M3c2: both routes' words
+  const detail = view.refusalWords[key] ?? (tab.owned ? S.detail : C.detail)(view.refusals[key] ?? last); // P3-HD M3c2: both routes' words; P5 O7 M5c: a machine's own first
   const name = C.toolName(tool.server, tool.tool);
   const busy = view.busy === key || greyed; // P5 O7 M5c: greyed, the sheet says why below the tools
   return (
@@ -165,6 +165,8 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
   const heading = `connectors-servers-${tab.artifactId}`;
   // P5 O7 M5c: greyed, the rows are neither read nor shown; once the lists hold what they need, they are read
   const greyed = useRemoteGreyed(tab.artifactId, SERVER_NEEDS);
+  const elsewhere = useRemoteMachineName(tab.artifactId);
+  const asked = useStore(tab.view, (s) => s.serversAsked);
   const wasGreyed = useRef(greyed);
   useEffect(() => {
     if (wasGreyed.current !== null && greyed === null) void tab.readServers();
@@ -180,6 +182,16 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
         <p data-connectors-servers-greyed="" className="m-0 text-ui-sm text-fg-muted">
           {greyed}
         </p>
+      ) : elsewhere !== null && !asked ? (
+        // P5 O7 M5c: another machine's rows wait for the owner's action, whose confirmation there is that action's
+        <div className="flex flex-wrap items-baseline gap-2">
+          <p data-connectors-servers-ask="" className="m-0 text-ui-sm text-fg-muted">
+            {REMOTE_SURFACE_WORDS.connectorsOn(elsewhere)}
+          </p>
+          <button type="button" aria-label={REMOTE_SURFACE_WORDS.showConnectorsLabel(elsewhere)} className={SECONDARY} onClick={() => void tab.askServers()}>
+            {REMOTE_SURFACE_WORDS.showConnectors}
+          </button>
+        </div>
       ) : rows === null ? (
         <p role="status" className="m-0 text-ui-sm text-fg-muted">
           {failed ? S.readFailed : S.reading}
