@@ -14,8 +14,8 @@
 //   and then refused `unavailable` met an engine host that predates `host.artifactOp`, said in O17's words for an
 //   engine host replaced when idle. Refused here, before any act: a `copyAsset` whose two artifacts the table doesn't
 //   place both on the act's machine (`invalid_input`), an `uploadAsset` or a `create` whose bytes are past the channel
-//   (`REMOTE_INLINE_MAX_BYTES`, M2's words; parts for assets are a follow-up), a `create` from a path (a path on this
-//   Mac, `malformed`), and `artifacts.open` (the document's port over the link is M5b's).
+//   (`REMOTE_INLINE_MAX_BYTES`, M2's words; parts for assets are a follow-up), and a `create` from a path (a path on this
+//   Mac, `malformed`).
 // - `session.capabilities` (the tools: `artifact_screenshot`, `artifact_export`, `browser`) is read from the session's
 //   machine; for a machine that predates it (`not-offered`) and while the link is down the adapter answers every tool
 //   unavailable with the reason, as M2 substitutes `attention.request`, so the reader always holds a reading. Its changes
@@ -24,7 +24,12 @@
 // - P5 O7 M5b ("The `http` stream"): the scheme's remote responder (../artifacts/remote-scheme.ts), which main's chain asks
 //   for a page of an artifact the table places on an RL2 machine (`scheme`), and through which a dashboard's Download
 //   fetches another machine's asset (`assets`, for `artifacts.downloadAsset`; the artifact recorded as it goes).
+// - P5 O7 M5b ("The `document` stream"): `artifacts.open` of a document here is the bridge's (../artifacts/remote-open.ts):
+//   the artifact recorded on the link's machine as every request is, so the table that routes its pages routes its
+//   document, and the window's port bridged to a `document` stream, `edit` first, else `view` and `readOnly`.
 import { tmpdir } from 'node:os';
+import type { MessageChannelMain } from 'electron';
+import type { ClientRef } from '@shared/ipc/client';
 import { toWire } from '@shared/host/json-bytes';
 import { ipcError, type IpcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
@@ -32,6 +37,7 @@ import { REMOTE_INLINE_MAX_BYTES, type RemoteCopySource } from '@shared/ipc/sche
 import { SESSION_CAPABILITY_TOOLS } from '@shared/ipc/schema/session-capabilities';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactMachines } from '../artifacts/machines';
+import { createRemoteDocuments, DOCUMENT_OPEN_MS } from '../artifacts/remote-open';
 import { assetUrl, createRemoteScheme } from '../artifacts/remote-scheme';
 import type { RemoteAssets } from '../dashboard/download';
 import { CommandFailure } from '../ipc/router';
@@ -56,11 +62,10 @@ export const ARTIFACT_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'artifacts.pruneVersions', 'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', 'artifacts.uploadAsset', 'artifacts.copyAsset',
   'artifacts.rereadDatasetFile', 'artifacts.create',
 ]);
-/** Answered here for an RL2 machine whatever it offers: an edit's port (M5b's), the session's tools (the substitute). */
+/** Answered here for an RL2 machine whatever it offers: a document's port (M5b, the bridge), the session's tools (the substitute). */
 const ANSWERED_HERE: ReadonlySet<CommandName> = new Set<CommandName>(['artifacts.open', 'session.capabilities']);
 
 export const COPY_BETWEEN_MACHINES = 'an asset can’t be copied between machines yet';
-export const editNextLanding = (machine: string) => `editing an artifact on ${machine} arrives with the next landing`;
 export const predatesArtifactOp = (machine: string) => `${machine}’s engine host predates remote artifact edits; it is replaced when idle`;
 export const predatesCapabilities = (machine: string) => `${machine} predates session capabilities; update it`;
 export const offline = (machine: string) => `${machine} is offline`;
@@ -74,6 +79,10 @@ export interface RemoteArtifactsDeps {
   bounded(handle: ActHandle, deadline: number): Promise<ActOutcome | 'pending'>;
   pendingMs: number;
   feedRetryMs: readonly [number, number];
+  /** P5 O7 M5b: `new MessageChannelMain()`, a document's port pair; without it no document opens (`host_unavailable`). */
+  docChannel?(): Pick<MessageChannelMain, 'port1' | 'port2'>;
+  /** P5 O7 M5b: a document's open answers `timeout` when no stream opened by then (DOCUMENT_OPEN_MS by default). */
+  documentOpenMs?: number;
   /** shell.openPath, for an open copy. */
   openPath(path: string): Promise<string>;
   tempDir?(): string;
@@ -84,7 +93,8 @@ export interface RemoteArtifactsDeps {
 
 export interface RemoteArtifacts {
   handles(name: CommandName): boolean;
-  dispatch(link: RemoteLink, name: CommandName, fields: Record<string, unknown>): Promise<CommandResult<CommandName>>;
+  /** `client`: the window that asked, where a document's port goes (P5 O7 M5b). */
+  dispatch(link: RemoteLink, name: CommandName, fields: Record<string, unknown>, client?: ClientRef): Promise<CommandResult<CommandName>>;
   /** `remote.openCopy`, main's handler's. */
   openCopy(input: CommandInput<'remote.openCopy'>): Promise<CommandResult<'remote.openCopy'>>;
   /** A remote artifact's stored files and exports, for Save As (../library/files.ts); null while no link reaches it. */
@@ -105,6 +115,7 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
   const tempDir = deps.tempDir ?? tmpdir;
   const feed = createRemoteArtifactFeed({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, machines: deps.machines, retryMs: deps.feedRetryMs, log: deps.log });
   const scheme = createRemoteScheme({ machines: deps.machines, remote: deps.remote, log: deps.log }); // P5 O7 M5b
+  const documents = deps.docChannel === undefined ? null : createRemoteDocuments({ channel: deps.docChannel, openMs: deps.documentOpenMs ?? DOCUMENT_OPEN_MS, log: deps.log }); // P5 O7 M5b
 
   /** The artifacts an answer names, each on the machine that answered. */
   function recordAnswer(machine: MachineRef, name: CommandName, value: unknown): void {
@@ -158,6 +169,19 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
     return result;
   }
 
+  /** `artifacts.open` of a document on `link`'s machine, in `client`'s window, through the bridge. */
+  async function openDocument(link: RemoteLink, fields: Record<string, unknown>, client: ClientRef | undefined): Promise<Result> {
+    if (documents === null || client === undefined) return failure('host_unavailable', `artifacts.open: a document on ${link.name} can’t open in this process`);
+    recordRequest(link.machine, fields);
+    const doc = fields.doc === 'suggestions' ? 'suggestions' : undefined;
+    try {
+      return { ok: true, value: await documents.open(link, String(fields.artifactId), client, doc) } as Result;
+    } catch (error) {
+      if (error instanceof CommandFailure) return { ok: false, error: error.error };
+      throw error;
+    }
+  }
+
   /** Every tool unavailable for `reason`. */
   const unavailable = (reason: string): Result => ({ ok: true, value: Object.fromEntries(SESSION_CAPABILITY_TOOLS.map((tool) => [tool, { available: false, reason }])) }) as Result;
 
@@ -183,8 +207,8 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
 
   return {
     handles: (name) => ARTIFACT_CALLS.has(name) || ARTIFACT_ACTS.has(name) || ANSWERED_HERE.has(name),
-    async dispatch(link, name, fields) {
-      if (name === 'artifacts.open') return failure('host_unavailable', editNextLanding(link.name));
+    async dispatch(link, name, fields, client) {
+      if (name === 'artifacts.open') return openDocument(link, fields, client);
       if (name === 'session.capabilities') return capabilities(link, fields);
       if (ARTIFACT_ACTS.has(name)) return act(link, name, fields);
       return call(link, name, fields);
@@ -227,6 +251,7 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
     stop: () => {
       feed.stop();
       scheme.stop();
+      documents?.stop();
     },
   };
 }

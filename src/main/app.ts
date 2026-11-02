@@ -10,7 +10,7 @@ import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's regist
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
-import { app, BrowserWindow, dialog, screen, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, MessageChannelMain, screen, systemPreferences } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
@@ -394,6 +394,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     artifactMachines, // P5 O7 M5a: which machine an artifact is on, written by the adapter alone
     openPath: (path) => shell.openPath(path), // P5 O7 M5a: an open copy of another machine's file (A10)
     env: process.env, // P5 O7 M5a: MAWS_E2E_OPEN_LOG, the open seam
+    docChannel: () => new MessageChannelMain(), // P5 O7 M5b: a remote document's port, bridged to a `document` stream
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
