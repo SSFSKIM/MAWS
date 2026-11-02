@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import type { SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1097,13 +1097,22 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
   });
 
   describe('stopAllForQuit while restarting after a quiet close (the welcomed supervisor lives, unserved)', () => {
+    // P5 O16 panel fix (scalpel-4#3): a holder's SIGTERM detaches its sessions, so the quit's names it a stop first: a
+    // stop request naming the process, written whole before the signal
     it('SIGTERMs the supervisor the lock names, so its exit order stops every row; nothing reconnects or spawns', async () => {
       const fake = await startFake({ counts: { liveSessions: 2, rows: 2 } });
       await supervisor.start();
       fake.dropClient(); // a socket error: it lives on, still running its sessions
       await until(() => state().state === 'restarting');
+      const requested: unknown[] = [];
+      processes.onKill = (pid) => {
+        requested.push(JSON.parse(readFileSync(join(profile.dir, SUPERVISOR_FILES.stopRequest), 'utf8')));
+        processes.alive.delete(pid);
+      };
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([[fake.pid, 'SIGTERM']]);
+      expect(requested, 'the stop request, there at the signal').toEqual([{ pid: fake.pid, procStart: `start-${fake.pid}` }]);
+      expect(statSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)).mode & 0o777).toBe(0o600);
       await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
       expect(spawn).not.toHaveBeenCalled();
       expect(state().state).toBe('restarting');
@@ -1117,6 +1126,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
       processes.alive.set(fake.pid, 'another process');
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([]);
+      expect(existsSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)), 'no stop request').toBe(false);
     });
 
     it('signals nothing when the lock names another process than the one this app was served by', async () => {
@@ -1129,6 +1139,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
       writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), JSON.stringify({ ...lock, pid: other, procStart: `start-${other}` }));
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([]);
+      expect(existsSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)), 'no stop request').toBe(false);
     });
   });
 

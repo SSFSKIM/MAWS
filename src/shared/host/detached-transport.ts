@@ -73,6 +73,7 @@ import {
   PID_POLL_MS,
   procStartOf,
   readLock,
+  requestStop,
   socketPathFor,
   START_EXIT_HELD,
   SUPERVISOR_FILES,
@@ -1014,6 +1015,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     const lock = lockOf(filesOf());
     if (!lock || lock.pid !== proc.pid || !sameProcess(lock) || !sameProcess(proc)) return;
     log(`stopping supervisor pid ${proc.pid} for the quit: its connection closed and it still runs`);
+    // P5 O16 panel fix (scalpel-4#3): a holder's SIGTERM alone detaches its sessions; this one is the owner's stop, so it
+    // names the process first (requestStop), and that host's exit order stops every row as a stop-all does
+    try {
+      requestStop(filesOf().dir, proc);
+    } catch (error) {
+      log(`could not write the stop request for pid ${proc.pid}: ${error instanceof Error ? error.message : String(error)}; its SIGTERM detaches its sessions`);
+    }
     signal(proc.pid, 'SIGTERM');
   }
 
