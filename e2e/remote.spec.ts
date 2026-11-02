@@ -1096,7 +1096,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         });
         const servers = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }, { server: ROWS_SERVER, tool: ROWS_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
         const configHome = readdirSync(b.claudeConfigDir).join(', ');
-        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers for the dashboard: ${servers}\nB's config home holds: ${configHome}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
+        // the host's observation asked directly, as Send to's status read asks it, then the servers read again
+        const asked = row ? await b.request('connectors.observe', { appSessionId: observerApp, launchId: row.launchId, cwd: row.cwd }).then((answer) => JSON.stringify(answer), String) : 'no row';
+        const after = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 800), String);
+        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers for the dashboard: ${servers}\nB's config home holds: ${configHome}\nthe host's observe asked directly: ${asked}; the servers then: ${after}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
       };
       expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
