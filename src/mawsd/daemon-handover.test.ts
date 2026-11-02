@@ -24,7 +24,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const holder = (adopted: number, adopting = false) => ({ mode: 'detached', pid: 1, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: adopted, rows: adopted, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: adopted, adopted, failed: 0, gate: null, handover: 'none', adopting } });
+// its pid the answering host's (the newest engine host, the one served), as an engine host's status names its own
+const holder = (adopted: number, adopting = false) => ({ mode: 'detached', pid: scene.engines.length > 0 ? scene.lastEngine().pid : 1, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: adopted, rows: adopted, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: adopted, adopted, failed: 0, gate: null, handover: 'none', adopting } });
 
 describe('daemon.restartEngineHost', () => {
   it('detaching: answered once the successor is welcomed and its adoptions have ended, with its pid and the sessions it adopted', async () => {
@@ -50,6 +51,34 @@ describe('daemon.restartEngineHost', () => {
     expect(answer).toEqual({ t: 'res', id: expect.any(String), ok: true, value: { state: 'detaching', inFlight: 0, pid: scene.lastEngine().pid, adopted: 2 } });
     expect(successorAsked).toBe(2);
     expect(scene.logs).toContainEqual(expect.stringContaining(`restart --engine-host: pid ${old.pid} → ${scene.lastEngine().pid}, 2 sessions adopted`));
+  });
+
+  // O16 panel 1 (scalpel-3#2): the successor that crashes during its adoptions and is replaced is not paired with its
+  // replacement's count; the answer follows the newest successor and names its pid with what it adopted
+  it('detaching, the successor replaced before its adoptions end: the answer names the replacement’s pid with its own count', { timeout: 20_000 }, async () => {
+    scene.engineSpawn = {
+      answers: {
+        'host.handover': () => {
+          scene.lastEngine().handOver();
+          return { state: 'detaching' };
+        },
+        'host.supervisorStatus': () => {
+          if (scene.engines.length !== 2) return holder(scene.engines.length > 2 ? 3 : 0);
+          // the first successor, served (the restart's poll of its adoptions): it crashes while adopting
+          if (daemon.hosts.snapshot('engine-host').state === 'ready') void scene.lastEngine().supervisor.die({ keepLock: true });
+          return holder(2, true);
+        },
+      },
+    };
+    const daemon = await scene.start();
+    daemon.hosts.wake('engine-host');
+    await until(() => daemon.hosts.snapshot('engine-host').state === 'ready');
+    const app = await scene.app('machine');
+    const answer = await app.request('daemon.restartEngineHost', undefined, 20_000);
+    expect(scene.engines).toHaveLength(3);
+    const [, first, replacement] = scene.engines;
+    expect(answer).toMatchObject({ ok: true, value: { state: 'detaching', inFlight: 0, pid: replacement!.pid, adopted: 3 } });
+    expect(replacement!.pid).not.toBe(first!.pid);
   });
 
   it('deferred, its caller gone and the park clock fired: the old host’s exit after its drain starts the successor, never a park', async () => {

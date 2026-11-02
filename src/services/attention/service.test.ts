@@ -46,7 +46,7 @@ function event(kind: string, payload: Record<string, unknown> = {}): SessionEven
   return { id: `${APP}:L:${seq}:0`, sessionId: SID, at: new Date(Date.parse(AT) + seq).toISOString(), seq, agentId: null, parentToolUseId: null, kind, ...payload } as unknown as SessionEvent;
 }
 
-function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void; seenAt?: AttentionServiceDeps['seenAt'] } = {}) {
+function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void; seenAt?: AttentionServiceDeps['seenAt']; handingOver?: AttentionServiceDeps['handingOver'] } = {}) {
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const states = new Set<(state: HostState) => void>();
@@ -69,6 +69,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
     register: ((name: CommandName, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as AttentionServiceDeps['register'],
     log: opts.log ?? (() => {}),
     ...(opts.seenAt && { seenAt: opts.seenAt }),
+    ...(opts.handingOver && { handingOver: opts.handingOver }),
   });
   const fire = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const batch = (...events: SessionEvent[]) => fire('session.eventBatch', { appSessionId: APP, events });
@@ -133,6 +134,30 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(h.dispatch).not.toHaveBeenCalled();
     h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
     expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'error']);
+    h.service.stop();
+  });
+
+  // O16 panel 1 (scalpel-2#1): a live handover leaves ready with its sessions alive under their session hosts; the
+  // successor adopts them with their pending requests under the same ids. Their items stay, so the notification raised
+  // for a still-pending permission is neither closed nor lost; a crash or a deliberate restart clears them as before.
+  it('keeps broker and held-message attention while the engine host hands its sessions over; a crash after it clears them', async () => {
+    const handover = { draining: false };
+    const h = setup({ handingOver: () => handover.draining });
+    await h.service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
+    const changes = h.changed.length;
+    handover.draining = true;
+    h.hostState('restarting'); // the handover's ask: the link leaves ready and drains
+    expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'held_peer_message']);
+    expect(h.changed).toHaveLength(changes); // nothing told: no notification closes
+    handover.draining = false;
+    h.hostState('ready'); // the successor, its adoptions republishing what they restored
+    h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'held_peer_message']);
+    h.hostState('restarting'); // a crash: no handover under way
+    expect(h.service.list()).toEqual([]);
     h.service.stop();
   });
 

@@ -7,6 +7,7 @@ import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { bareOf, isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -154,8 +155,10 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
       let found = await listed();
       if (disposed) return; // P5 O16 M3c fix wave 2: the subscription ended during the read: no wait outlives it
       // P5 O16 M3c: a successor that holds session hosts lists a session only once it has adopted it, and its ready
-      // comes before its start's adoptions end: this machine's host is asked again once main's status says they ended
-      if (found === false && machine === client.localMachine && (await adoptionsEnded(client, () => disposed || asked !== heard, waits))) found = await listed();
+      // comes before its start's adoptions end: this machine's host is asked again once main's status says they ended.
+      // O16 panel 1 (sweep#4): another machine's, once its engine host's own status, asked on that machine, says so
+      const stale = () => disposed || asked !== heard;
+      if (found === false && (await (machine === client.localMachine ? adoptionsEnded(client, stale, waits) : remoteAdoptionsEnded(client, machine, stale, waits)))) found = await listed();
       if (disposed || asked !== heard) return; // a later departure: the next ready asks again
       const last = running();
       if (found !== false || last === null) return;
@@ -204,6 +207,41 @@ function adoptionsEnded(client: MawsBridge, stale: () => boolean, waits: Set<() 
     };
     const off = client.on('host.status', (status, { machine }) => void (machine === client.localMachine && hear(status)));
     void client.invoke('host.status', undefined).then((result) => (result.ok ? hear(result.value) : settle(false)));
+  });
+}
+
+// O16 panel 1 (sweep#4): `adoptionsEnded` for another machine's engine host, whose status main does not push here
+// (`host.status` and `host.supervisorStatus` events are each app's own): that host's `host.supervisorStatus`, asked over
+// the machine link every REMOTE_ADOPTIONS_POLL_MS while its holder says it adopts. True once it no longer adopts; false
+// at once for a host that holds no session hosts, and for a read that fails (told as before); false when `stale`, or
+// cancelled through `waits` at the subscription's end.
+export const REMOTE_ADOPTIONS_POLL_MS = 500;
+function remoteAdoptionsEnded(client: MawsBridge, machine: MachineRef, stale: () => boolean, waits: Set<() => void>): Promise<boolean> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let done = false;
+    const settle = (value: boolean) => {
+      if (done) return;
+      done = true;
+      if (timer !== null) clearTimeout(timer);
+      waits.delete(cancel);
+      resolve(value);
+    };
+    const cancel = () => settle(false);
+    waits.add(cancel);
+    const ask = () => {
+      timer = null;
+      if (stale()) return settle(false);
+      void client.invoke('host.supervisorStatus', undefined, { machine }).then((result) => {
+        if (done) return;
+        if (stale() || !result.ok) return settle(false);
+        const holder = result.value.holder;
+        if (holder === undefined) return settle(false);
+        if (holder.adopting !== true) return settle(true);
+        timer = setTimeout(ask, REMOTE_ADOPTIONS_POLL_MS);
+      });
+    };
+    ask();
   });
 }
 
