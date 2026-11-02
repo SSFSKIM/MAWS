@@ -89,6 +89,7 @@
     "src/renderer/src/stores/git.ts",
     "src/renderer/src/ipc/client.ts",
     "src/renderer/src/ipc/machine.ts",
+    "src/renderer/src/artifacts/machines.ts", // P5 O7 M5a: the renderer's client asks it which machine an artifact is on
     // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest,
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
     // sittings' pure parts and the OOPIF page (Task 6.1)

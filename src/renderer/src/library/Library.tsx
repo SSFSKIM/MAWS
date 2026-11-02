@@ -4,6 +4,8 @@
 // and new artifacts are then made in it); search over titles and text and a type filter whose counts follow both;
 // "Make something new" above the list when nothing is being searched; the rows and their actions; the Spaces'
 // management. Registered into P3-G's `artifactsLibrary` slot (App.tsx).
+// P5 O7 M5a: one machine's library at a time (the header's machine menu): its rows and Spaces read of it; Make something
+// new, which makes an artifact on this Mac, is not offered over another machine's.
 //
 // While the next answer is read (a new search, another view), the last answer stays on screen rather than the list
 // emptying; a failed read keeps it too, with the failure and a Try again above it.
@@ -33,7 +35,7 @@ function linesOf(view: LibraryViewState, read: LibraryRead<LibraryList>, list: L
   const lines: Line[] = [];
   const searching = view.query.trim() !== '';
   const narrowed = view.view === 'bySpace' && view.spaceId !== null;
-  if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
+  if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching && view.machine === null) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
   if (read.status === 'error') lines.push({ kind: 'note', key: 'error', text: P.readFailed(read.error ?? ''), retry: () => refreshLibrary(), tone: 'warning' });
   if (list === undefined) {
     if (read.status !== 'error') lines.push({ kind: 'note', key: 'reading', text: P.reading });
@@ -129,9 +131,10 @@ function focusSearch(event: KeyboardEvent<HTMLDivElement>): void {
 
 export function Library() {
   const view = useLibraryView(useShallow((s) => s));
-  const read = useLibraryList(filterOf(view));
+  const machine = view.machine ?? undefined;
+  const read = useLibraryList(filterOf(view), machine);
   const list = useKeptList(read);
-  const spacesRead = useLibrarySpaces();
+  const spacesRead = useLibrarySpaces(machine);
   const spaces = spacesRead.value;
   const now = useNow();
 

@@ -8,6 +8,7 @@ import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { Space } from '@shared/artifacts/entity';
+import { artifactMachineOf } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
@@ -53,9 +54,10 @@ export const deleteSpace = (spaceId: string, client: MawsBridge = ipc) => run(cl
 // The tab lives in the main area, so a maximized or floating panel docks first, as `openArtifacts` does for the library.
 // P4-B4: at the place `location` names (an artifact link's fragment), asked of the tab's editor at the latest version
 // unless it names one; a plain open asks nothing of the editor, so a tab opened again keeps the version it shows.
+// P5 O7 M5a: on the artifact's machine (artifacts/machines.ts; the library lists one machine's at a time).
 export function openArtifactTab(artifactId: string, location?: ArtifactLocation): void {
   if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
-  layout.openTab({ kind: 'artifact', artifactId, machine: ipc.localMachine }); // P5 O6 M2: the library is this machine's
+  layout.openTab({ kind: 'artifact', artifactId, machine: artifactMachineOf(artifactId) ?? ipc.localMachine });
 }
