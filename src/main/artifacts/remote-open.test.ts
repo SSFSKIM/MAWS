@@ -12,12 +12,13 @@ import type { DeviceMessage, EndpointMessage } from 'org-protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LengthPrefixed, lengthPrefixed } from '@artifacts/provider/frame-stream';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { PortProvider, type PortLike } from '@artifacts/provider/port';
+import { PortProvider } from '@artifacts/provider/port';
 import { applyV1, checkUpdate, diffV1, newDoc, stateVector, type Doc } from '@artifacts/yjs';
 import { DOC_PORT_CHANNEL } from '@shared/ipc/doc-port';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { FakeLink, MINI } from '../../../test/lane-b/fake-link';
+import { End } from '../../../test/lane-b/port-pair';
 import { clientOf } from '../ipc/clients';
 import type { MainContext } from '../ipc/router';
 import type { LinkState } from '../machines/manager';
@@ -30,56 +31,6 @@ const DOC = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const row = (kind = 'document') => ({ id: DOC, kind, title: 'Plan', createdBy: { kind: 'human' }, createdAt: 1, updatedAt: 1, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3 });
 const text = (doc: Doc) => doc.get('root').toString();
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-type Listener = (event: { data?: unknown }) => void;
-
-/**
- * One end of a MessageChannelMain: main's end is driven through `on` (MessagePortMain's), the page's through
- * `addEventListener` (a DOM port's, the provider's PortLike). Delivery on a microtask, held until the receiving end
- * starts; closing either end closes both and says `close` on each.
- */
-class End implements PortLike {
-  peer!: End;
-  closed = false;
-  #started = false;
-  readonly #queued: unknown[] = [];
-  readonly #listeners = { message: new Set<Listener>(), close: new Set<Listener>() };
-  static pair(): [End, End] {
-    const [a, b] = [new End(), new End()];
-    a.peer = b;
-    b.peer = a;
-    return [a, b];
-  }
-  postMessage(data: unknown): void {
-    if (this.closed) return;
-    const copy = data instanceof Uint8Array ? data.slice() : data;
-    queueMicrotask(() => this.peer.#deliver(copy));
-  }
-  start(): void {
-    this.#started = true;
-    for (const data of this.#queued.splice(0)) this.#deliver(data);
-  }
-  #deliver(data: unknown): void {
-    if (this.closed) return;
-    if (!this.#started) return void this.#queued.push(data);
-    for (const listener of [...this.#listeners.message]) listener({ data });
-  }
-  on(type: 'message' | 'close', listener: Listener): this {
-    this.#listeners[type].add(listener);
-    return this;
-  }
-  addEventListener(type: 'message' | 'close', listener: Listener): void {
-    this.#listeners[type].add(listener);
-  }
-  removeEventListener(type: 'message' | 'close', listener: Listener): void {
-    this.#listeners[type].delete(listener);
-  }
-  close(): void {
-    if (this.closed) return;
-    for (const end of [this, this.peer]) end.closed = true;
-    for (const end of [this, this.peer]) for (const listener of [...end.#listeners.close]) listener({});
-  }
-}
 
 /** A link whose streams are the device's real table; its channel is current while it is `up`. */
 class TableLink extends FakeLink {
