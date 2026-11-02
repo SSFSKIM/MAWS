@@ -6,8 +6,9 @@
 //   1. freshness and replay (freshness.ts: `stale`, `malformed`, `expired`, `replayed`), before anything is read;
 //   2. authorization (M5's gate, which calls `execute` with what it decided). The action's fingerprint is taken before
 //      it is decided (P5 O7 M5a fix wave 1), so `execute` hands a lane B, machine, pty host or artifact act to its ledger
-//      in the step its decision was taken, with nothing awaited between: a right withdrawn after that step finds the act
-//      on its way, never run on a decision that no longer stood;
+//      with nothing awaited from its decision's continuation, and a lane B or artifact act asks the decision whether it
+//      stands (`stands`) in the step it is accepted and sent, decided again once when it moved: a right withdrawn after
+//      that step finds the act on its way, never run on a decision that no longer stood;
 //   3. the lane's shape and context: a lane B action carries a lane B context, the engine session it was authorized
 //      against is the one the session runs now (`unavailable`: the machine's index lags it, P5 O7 M2), and its
 //      `launchId` and `engineSessionId` are the session's now (`context`; the engine host rechecks both at its claim);
@@ -244,6 +245,10 @@ export class Actions {
     // P5 O7 M5a: an artifact's write, under the engine host's ledger with the artifact as its target and no session.
     if (row.target === 'artifact') {
       if (decision.artifact === undefined) return refuse('malformed');
+      // The gate hands the act on in a later continuation than its decision's, and the engine host's ledger checks no
+      // standing: the decision is asked whether it stands in the step the act is accepted and sent, and taken again,
+      // once, when it moved meanwhile, `unavailable` when it moved again (the lane B branch's rule).
+      if (decision.stands?.() === false) return this.#again(m, refuse);
       accept();
       const release = this.#hold();
       try {
@@ -281,11 +286,7 @@ export class Actions {
     if (channel.closed) return;
     // The status read was awaited: the decision is asked whether it stands in the step the act goes to the ledger, and
     // taken again, once, when it moved meanwhile (authorize's own rule), `unavailable` when it moved again.
-    if (decision.stands?.() === false) {
-      const again = this.#decideAgain.get(m);
-      this.#decideAgain.delete(m);
-      return again === undefined ? refuse('unavailable') : again();
-    }
+    if (decision.stands?.() === false) return this.#again(m, refuse);
     accept();
     const release = this.#hold();
     try {
@@ -305,6 +306,13 @@ export class Actions {
     } finally {
       release();
     }
+  }
+
+  /** An act whose decision moved before it was handed on: decided again, once, through the gate; then `unavailable`. */
+  #again(m: ActMessage, refuse: (reason: RefusalReason) => void): void {
+    const again = this.#decideAgain.get(m);
+    this.#decideAgain.delete(m);
+    return again === undefined ? refuse('unavailable') : again();
   }
 
   /**

@@ -288,6 +288,29 @@ describe('the rule’s standing, read through the decision', () => {
     expect(await run(b, update(f, b, x, 'after'))).toEqual({ ack: 'grade' });
   });
 
+  it('decides an artifact write again when a right it stood on goes between its decision and the gate’s handing it on, and runs nothing', async () => {
+    const f = await startEndpoint(org, started);
+    const s1 = session(f, 'app-1', [org.B]);
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B);
+    const authorize = f.endpoint.authorizer.authorize.bind(f.endpoint.authorizer);
+    let revoked = false;
+    f.endpoint.authorizer.authorize = (request, who, now) => {
+      const decided = authorize(request, who, now);
+      // Queued on the decision before the gate's own continuation: B's ownership goes once it is taken.
+      if (!revoked && request.kind === 'act') {
+        revoked = true;
+        void decided.then(() => f.records.set({ lane: 'B', session: s1.engineSessionId!, owners: ['@machine'], access: 'private' }, 'app-1'));
+      }
+      return decided;
+    };
+    expect(await run(b, update(f, b, x))).toEqual({ ack: 'grade' });
+    expect(revoked).toBe(true);
+    expect(f.host.artifactRuns).toEqual([]);
+    expect(f.host.calls.some((c) => c.name === 'host.artifactOp')).toBe(false);
+  });
+
   it('gives a session’s spawner its artifacts while sminos lists no record of it, then only what the record grants, the placement read again', async () => {
     const f = await startEndpoint(org, started, withSminosRecords());
     f.host.add('app-s', 'eng-s');

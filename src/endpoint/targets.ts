@@ -179,14 +179,17 @@ export function artifactKey(name: string, input: unknown): ArtifactKey | null {
 
 /**
  * The `artifact` rule for one of the machine's owners (P5 O7 M5a), who stands on every artifact: what the input names,
- * read before any link is placed (a listing's session isn't placed either), so a request costs no read of the store.
+ * read before any link is placed, so a request costs no read of the store. Null for a listing by a session
+ * (`artifacts.list {filter: {appSessionId}}`): that is the session's, placed and ranked as for anyone (the milestone
+ * review: owning the machine is not viewing a member's private session, and an id is never a capability).
  */
-export function artifactShortCut(name: string, input: unknown, action: Action | undefined): Resolved {
+export function artifactShortCut(name: string, input: unknown, action: Action | undefined): Resolved | null {
   if (action?.session !== undefined) return { kind: 'refused', reason: 'malformed' };
   const key = artifactKey(name, input);
   if (key === null) return { kind: 'refused', reason: 'no-target' };
   if ('orphan' in key) return ORPHAN;
-  return { kind: 'artifact', artifactId: 'artifactId' in key ? key.artifactId : null, sessions: [], orphan: false, linked: [] };
+  if ('appSessionId' in key) return null;
+  return { kind: 'artifact', artifactId: key.artifactId, sessions: [], orphan: false, linked: [] };
 }
 
 /**

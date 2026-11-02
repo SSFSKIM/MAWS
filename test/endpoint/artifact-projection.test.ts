@@ -238,6 +238,16 @@ describe('a session id, never a capability', () => {
     }
   });
 
+  it('refuses the machine’s owner a listing of a member’s private session’s artifacts as it refuses one of an id nobody minted', async () => {
+    const { f, a } = await scene();
+    f.host.reads.set('artifacts.list', () => ({ artifacts: [f.host.artifacts.values().next().value!.row] }));
+    expect((await call(a, 'session.get', { appSessionId: 'visible' })).error).toEqual({ code: 'grade' }); // B's, private
+    for (const appSessionId of ['visible', WITHHELD_SESSION, randomUUID()]) {
+      expect([appSessionId, (await call(a, 'artifacts.list', { filter: { appSessionId } })).error]).toEqual([appSessionId, { code: 'grade' }]);
+    }
+    expect(await call(a, 'artifacts.list', { filter: { appSessionId: 'private' } })).toMatchObject({ ok: true }); // the machine's: theirs to view
+  });
+
   it('lists nothing by a session the member doesn’t view, as by one nobody minted, though it touched an artifact they view', async () => {
     const { f, b, libraryRow } = await scene();
     // The index answers the rows linked to the session the filter names: `private` touched the artifact B views.

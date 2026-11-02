@@ -375,8 +375,10 @@ export class Authorizer {
     // 4. The caller's standing at the floor, before anything of the session is read.
     // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
     const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'));
-    // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed.
-    const resolved = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action) : await resolveTarget(row.target, input, action, placing, request.session, name);
+    // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed; a listing by a session is
+    // the session's, which they view as anyone does (the short cut admits artifacts, never a session).
+    const shortCut = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action) : null;
+    const resolved = shortCut ?? (await resolveTarget(row.target, input, action, placing, request.session, name));
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
