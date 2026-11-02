@@ -48,6 +48,7 @@ import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
 import { useArtifactMachine } from '../../../artifacts/use-artifact-machine';
+import { LEASE_NEEDS, useRemoteGreyed } from '../../../artifacts/remote-surfaces'; // P5 O7 M5c
 import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
@@ -434,8 +435,11 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   }
   // P3-H H4: the owner's Connectors, once the page asked for a tool or the artifact holds a grant
   const connectorsAsked = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.declared.length > 0 || (s.grants?.length ?? 0) > 0);
+  // P5 O7 M5c: a page of another machine that offers it no leases asked in vain; the sheet says why
+  const leaseRefused = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.leaseRefused);
+  const leaseGreyed = useRemoteGreyed(connectors?.artifactId ?? null, LEASE_NEEDS);
   const connectorsOpen = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.sheet);
-  if (connectors && connectorsAsked) {
+  if (connectors && (connectorsAsked || (leaseRefused && leaseGreyed !== null))) {
     actions.push({ id: 'connectors', label: CONNECTORS_COPY.action, icon: ConnectorsIcon, pressed: connectorsOpen, onSelect: () => (connectors.view.getState().sheet ? connectors.closeSheet() : connectors.openSheet()) });
   }
   actions.push({ id: 'reload', label: VIEWERS_COPY.reload, icon: ReloadIcon, onSelect: onReload });

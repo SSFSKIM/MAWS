@@ -97,10 +97,10 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(owner.reconnect).toHaveBeenCalledWith(ARTIFACT, H1);
     fireEvent.click(screen.getByRole('button', { name: 'Forget the unreadable saved MAWS connection' }));
     await flush();
-    expect(owner.disconnect).toHaveBeenCalledWith(BAD);
+    expect(owner.disconnect).toHaveBeenCalledWith(ARTIFACT, BAD);
     fireEvent.click(screen.getByRole('button', { name: 'Retry disconnecting MAWS from notes' }));
     await flush();
-    expect(owner.disconnect).toHaveBeenLastCalledWith(GONE);
+    expect(owner.disconnect).toHaveBeenLastCalledWith(ARTIFACT, GONE);
     expect(vi.mocked(owner.servers).mock.calls.length - opened).toBe(4); // once after each acknowledgment
   });
 
@@ -125,7 +125,7 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(buttons(server('notes · MAWS connection being disconnected'))).toEqual(['Retry disconnect']);
     fireEvent.click(screen.getByRole('button', { name: 'Forget the unreadable saved MAWS connection' }));
     await flush();
-    expect(owner.disconnect).toHaveBeenCalledWith(BAD);
+    expect(owner.disconnect).toHaveBeenCalledWith(ARTIFACT, BAD);
   });
 
   it('says while it reads, and keeps the tools usable', async () => {

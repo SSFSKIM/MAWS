@@ -199,7 +199,7 @@ function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead,
           </span>
         )}
         <span className="ml-auto flex shrink-0 items-baseline gap-1">
-          {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId)}>{C.cancel}</TextButton>}
+          {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
           {state?.signIn &&
             (session === null ? (
               <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">

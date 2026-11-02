@@ -30,6 +30,7 @@ function bridge(auto: Partial<Record<CommandName, (input: never) => unknown>> = 
   const sent: Sent[] = [];
   const listeners = new Map<string, Set<(payload: unknown, from: { machine: typeof TEST_MACHINE }) => void>>();
   const ipc = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn((name: CommandName, input: unknown) => {
       const handler = auto[name];
       if (handler) return Promise.resolve({ ok: true, value: handler(input as never) } as Answer);
@@ -46,7 +47,9 @@ function bridge(auto: Partial<Record<CommandName, (input: never) => unknown>> = 
   };
   const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload, { machine: TEST_MACHINE }));
   const names = () => ipc.invoke.mock.calls.map(([name]) => name);
-  return { ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on'>, sent, emit, names, invoke: ipc.invoke };
+  // what reached main, by name and input (P5 O7 M5c: each also names its machine, ./connectors-machines.test.ts's)
+  const calls = () => ipc.invoke.mock.calls.map(([name, input]) => [name, input]);
+  return { ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, sent, emit, names, calls, invoke: ipc.invoke };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -166,7 +169,7 @@ describe('a page’s connector surface', () => {
     surface.setVisible(true);
     surface.setVisible(false);
     await expect(surface.refreshWatch(WATCH)).resolves.toBe(true);
-    expect(b.invoke.mock.calls.slice(1)).toEqual([
+    expect(b.calls().slice(1)).toEqual([
       ['connectors.visibility', { leaseId: LEASE, visible: true }],
       ['connectors.visibility', { leaseId: LEASE, visible: false }],
       ['connectors.refresh', { leaseId: LEASE, watchId: WATCH }],
@@ -289,7 +292,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     const before = b.invoke.mock.calls.length;
     b.emit('connectors.reset', {});
     await settle();
-    expect(b.invoke.mock.calls.slice(before)).toEqual([
+    expect(b.calls().slice(before)).toEqual([
       ['connectors.open', { artifactId: ARTIFACT }],
       ['connectors.declare', { leaseId: NEW_LEASE, tools: [TOOL] }],
       ['connectors.visibility', { leaseId: NEW_LEASE, visible: true }],
@@ -303,7 +306,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     await expect(surface.refreshWatch(WATCH)).resolves.toBe(true);
     await expect(surface.callTool(TOOL)).resolves.toEqual(RESULT);
     await expect(surface.unwatchTool(WATCH)).resolves.toBe(true);
-    expect(b.invoke.mock.calls.slice(before + 4)).toEqual([
+    expect(b.calls().slice(before + 4)).toEqual([
       ['connectors.refresh', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
       ['connectors.call', { leaseId: NEW_LEASE, request: TOOL }],
       ['connectors.unwatch', { leaseId: NEW_LEASE, watchId: NEW_WATCH }],
@@ -383,7 +386,7 @@ describe('a surface’s rebuild on connectors.reset', () => {
     await expect(surface.watchTool(SERIES, (update) => heard.push(update))).resolves.toEqual({ ok: true, watchId: WATCH, intervalMs: 60_000 });
     await settle();
     expect(b.names().filter((name) => name === 'connectors.watch')).toHaveLength(1);
-    expect(b.invoke.mock.calls.at(-1)).toEqual(['connectors.watch', { leaseId: NEW_LEASE, request: SERIES }]);
+    expect(b.calls().at(-1)).toEqual(['connectors.watch', { leaseId: NEW_LEASE, request: SERIES }]);
     b.emit('connectors.watchUpdate', { leaseId: NEW_LEASE, watchId: WATCH, update: RESULT });
     expect(heard).toEqual([RESULT]);
 
@@ -522,7 +525,7 @@ describe('the owner’s grants', () => {
     await expect(host.connectorGrants(ARTIFACT)).resolves.toEqual([grant]);
     await expect(host.grantConnectorTool(ARTIFACT, { ...TOOL, mode: 'read' })).resolves.toEqual({ ok: true, grant });
     await expect(host.revokeConnectorTool(ARTIFACT, TOOL)).resolves.toBe(true);
-    expect(b.invoke.mock.calls).toEqual([
+    expect(b.calls()).toEqual([
       ['artifacts.connectorGrants', { artifactId: ARTIFACT }],
       ['artifacts.grantConnectorTool', { artifactId: ARTIFACT, tool: { ...TOOL, mode: 'read' } }],
       ['artifacts.revokeConnectorTool', { artifactId: ARTIFACT, ...TOOL }],

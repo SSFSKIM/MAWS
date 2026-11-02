@@ -10,11 +10,18 @@
 //   before it answers) wait for it.
 // - Per server, the latest event of its newest operation: a second press cancels the first in main, and the first's
 //   events stop counting once the second's receipt is bound. A refused invoke reads as a failed sign-in.
+// - P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): an operation is its
+//   machine's, the one its session is on, and is heard from that machine alone: another machine's `signInChanged` (its
+//   artifacts feed carries them to a member holding `machine-admin` there) never binds to, or crowds out, this one's. Such
+//   a machine's failure says its own words (`sign in on <machine>` for a sign-in its engine keeps a listener for, the busy
+//   words for a callback port this Mac already waits on there), shown as they are.
 import { create } from 'zustand';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginsScope } from '@shared/plugins/cli';
+import { isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { transportWords } from '../../widgets/read';
 
@@ -40,10 +47,20 @@ interface SignIns {
 
 export const useSignIns = create<SignIns>()(() => ({ byServer: new Map() }));
 
-const UNBOUND_KEPT = 32; // operations heard without a receipt (another window's): the oldest dropped past this
-const bound = new Map<string, { key: string; appSessionId: string; fingerprint: string | null }>(); // live operations by opId
-const newest = new Map<string, string>(); // server key → its newest operation
-const unbound = new Map<string, { event: ConnectorSignInChanged; at: number }[]>(); // opId → events heard before its receipt
+const UNBOUND_KEPT = 32; // operations heard without a receipt (another window's), per machine: its oldest dropped past this
+// P5 O7 M5c: a machine as the bookkeeping keys it: this Mac's, or a bare id's (sent to this Mac), as ''
+const machineKey = (machine: MachineRef | null): string => (machine === null || machine === ipc.localMachine ? '' : machine);
+// an operation by its machine and opId
+const opKeyOf = (machine: MachineRef | null, opId: string): string => `${machineKey(machine)}\u0000${opId}`;
+const bound = new Map<string, { key: string; appSessionId: string; fingerprint: string | null }>(); // live operations by op key
+const newest = new Map<string, string>(); // server key → its newest operation's op key
+// by machine, then op key → events heard before its receipt (one machine's crowd never pushes out another's)
+const unbound = new Map<string, Map<string, { event: ConnectorSignInChanged; at: number }[]>>();
+const unboundOf = (machine: MachineRef | null) => {
+  const own = unbound.get(machineKey(machine)) ?? new Map<string, { event: ConnectorSignInChanged; at: number }[]>();
+  unbound.set(machineKey(machine), own);
+  return own;
+};
 
 const TERMINAL: ReadonlySet<ConnectorSignInChanged['state']> = new Set(['done', 'failed', 'cancelled']);
 
@@ -51,23 +68,29 @@ function record(key: string, owner: { appSessionId: string; fingerprint: string 
   useSignIns.setState(({ byServer }) => ({ byServer: new Map(byServer).set(key, { event, appSessionId: owner.appSessionId, at, fingerprint: owner.fingerprint }) }));
 }
 
-export function heard(event: ConnectorSignInChanged, at = Date.now()): void {
-  const owner = bound.get(event.opId);
+// `machine`: the machine that said it (null: a bare id's)
+export function heard(event: ConnectorSignInChanged, at = Date.now(), machine: MachineRef | null = null): void {
+  const op = opKeyOf(machine, event.opId);
+  const owner = bound.get(op);
   if (owner === undefined) {
-    const waiting = unbound.get(event.opId) ?? [];
-    unbound.delete(event.opId);
-    unbound.set(event.opId, [...waiting, { event, at }]);
-    if (unbound.size > UNBOUND_KEPT) unbound.delete(unbound.keys().next().value!);
+    const own = unboundOf(machine);
+    const waiting = own.get(op) ?? [];
+    own.delete(op);
+    own.set(op, [...waiting, { event, at }]);
+    if (own.size > UNBOUND_KEPT) own.delete(own.keys().next().value!);
     return;
   }
-  if (TERMINAL.has(event.state)) bound.delete(event.opId);
-  if (newest.get(owner.key) !== event.opId) return; // an older operation's
+  if (TERMINAL.has(event.state)) bound.delete(op);
+  if (newest.get(owner.key) !== op) return; // an older operation's
   record(owner.key, owner, event, at);
 }
 
 export function connectSignInEvents(bridge: MawsBridge = ipc): () => void {
-  return bridge.on('connectors.signInChanged', (event) => heard(event));
+  return bridge.on('connectors.signInChanged', (event, from) => heard(event, Date.now(), from.machine));
 }
+
+// The machine a session's operation runs on (null: a bare id, which names none)
+const machineOfSession = (appSessionId: string): MachineRef | null => (isAddress(appSessionId) ? machineOf(appSessionId) : null);
 
 export async function startSignIn(target: SignInTarget, fingerprint: string | null, appSessionId: string, bridge: MawsBridge = ipc): Promise<void> {
   const key = signInKeyOf(target);
@@ -77,16 +100,20 @@ export async function startSignIn(target: SignInTarget, fingerprint: string | nu
     record(key, { appSessionId, fingerprint }, { opId: `refused:${key}`, name: target.name, state: 'failed', reason: 'engine', message: transportWords(answer.error), where: null }, Date.now());
     return;
   }
-  const { opId } = answer.value;
-  bound.set(opId, { key, appSessionId, fingerprint });
-  newest.set(key, opId);
-  const waiting = unbound.get(opId) ?? [];
-  unbound.delete(opId);
-  for (const { event, at } of waiting) heard(event, at);
+  const machine = machineOfSession(appSessionId); // the session's address named where it went
+  const op = opKeyOf(machine, answer.value.opId);
+  bound.set(op, { key, appSessionId, fingerprint });
+  newest.set(key, op);
+  const own = unboundOf(machine);
+  const waiting = own.get(op) ?? [];
+  own.delete(op);
+  for (const { event, at } of waiting) heard(event, at, machine);
 }
 
-export function cancelSignIn(opId: string, bridge: MawsBridge = ipc): void {
-  void bridge.invoke('connectors.signInCancel', { opId });
+// `appSessionId`: the session the operation signs in, whose machine runs it
+export function cancelSignIn(opId: string, appSessionId: string, bridge: MawsBridge = ipc): void {
+  const machine = machineOfSession(appSessionId);
+  void bridge.invoke('connectors.signInCancel', { opId }, machine === null ? undefined : { machine });
 }
 
 /** A server's result forgotten, and the rest of an operation still running for it dropped: MAWS removed or replaced its

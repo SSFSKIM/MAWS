@@ -17,12 +17,21 @@
 //   per-server rows. They are read when the sheet opens, again on main's `connectors.serversChanged` for this artifact
 //   and after a change of its tools while it is open; an older read answering after a newer one, or after the tab went,
 //   is dropped. An owner action is acknowledged at once; the rows are read again then and when main says it ended.
+// - P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 6): on another machine's artifact the
+//   rows are that machine's, read and acted on only while both lists hold what they need (../../../../artifacts/
+//   remote-surfaces.ts, `SERVER_NEEDS`: the device's `machine-admin` there, and the machine's offer); a greyed sheet says
+//   why instead. A refusal there is kept in words (a `busy` acknowledgment, or the machine's own word), never read as a
+//   changed row. A declaration the page made that found no lease is kept (`leaseRefused`), so the header can show why
+//   when the machine offers no leases.
 import { createStore } from 'zustand/vanilla';
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantMode, type ConnectorRefusal, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ConnectorOwnerAck, ConnectorServerRow } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
+import { artifactMachineOf } from '../../../../artifacts/machines';
+import { machineNameOf, remoteGreyedOf, remoteRefusalWords, SERVER_NEEDS } from '../../../../artifacts/remote-surfaces';
+import { ArtifactCommandError } from '../../../../artifacts/command-error';
 import type { ArtifactSessionContext, ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
 import { relayPage, type PagePort, type PageRelay } from './relay';
 
@@ -39,7 +48,8 @@ export interface ServersView {
   saved: 'ok' | 'unavailable';
   withdrawnUnattributed: boolean;
   failed: boolean;
-  refused: { target: string; why: Extract<ConnectorOwnerAck, { accepted: false }>['why'] } | null;
+  // P5 O7 M5c: `words` (why null), a refusal that was no acknowledgment, as the artifact's machine said it
+  refused: { target: string; why: Extract<ConnectorOwnerAck, { accepted: false }>['why'] } | { target: string; why: null; words: string } | null;
 }
 
 export interface ConnectorsView {
@@ -53,6 +63,7 @@ export interface ConnectorsView {
   start: StartView;
   servers: ServersView; // P3-HD M3c2
   serverBusy: string | null; // P3-HD M3c2: the row an owner action is being acknowledged for
+  leaseRefused: boolean; // P5 O7 M5c: the current load declared a tool and found no lease
 }
 
 export interface ConnectorsTabDeps {
@@ -65,6 +76,7 @@ export interface ConnectorsTabDeps {
 const initialView = (): ConnectorsView => ({
   declared: [], last: {}, grants: null, refusals: {}, busy: null, needsSession: false, sheet: false, start: { phase: 'idle' },
   servers: { rows: null, saved: 'ok', withdrawnUnattributed: false, failed: false, refused: null }, serverBusy: null, // P3-HD M3c2
+  leaseRefused: false, // P5 O7 M5c
 });
 
 // The sheet's tools: the page load's declared ones first, then the ones the artifact holds a grant for.
@@ -105,9 +117,10 @@ export class ConnectorsTab {
         if (this.view.getState().sheet) void this.readServers(); // P3-HD M3c2: its tools changed
       },
       outcome: (tool, outcome) => this.page?.relay === relay && this.update({ last: { ...this.view.getState().last, [connectorToolKey(tool)]: outcome } }),
+      declareRefused: (outcome) => this.page?.relay === relay && outcome.reason === 'lease' && this.update({ leaseRefused: true }), // P5 O7 M5c
     });
     this.page = { relay, surface };
-    this.update({ declared: [], last: {} });
+    this.update({ declared: [], last: {}, leaseRefused: false });
     if (this.visible) surface.setVisible(true);
     return () => {
       relay.dispose();
@@ -197,7 +210,7 @@ export class ConnectorsTab {
 
   async readServers(): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed) return;
+    if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return; // P5 O7 M5c: the sheet says why
     const serial = ++this.serverReads;
     const current = () => !this.disposed && serial === this.serverReads;
     try {
@@ -220,22 +233,25 @@ export class ConnectorsTab {
   }
 
   disconnectServer(connectionId: string): Promise<void> {
-    return this.ownerGesture(connectionId, (owner) => owner.disconnect(connectionId));
+    return this.ownerGesture(connectionId, (owner) => owner.disconnect(this.artifactId, connectionId));
   }
 
   private async ownerGesture(target: string, run: (owner: ConnectorsOwner) => Promise<ConnectorOwnerAck>): Promise<void> {
     const { owner } = this.deps;
-    if (!owner || this.disposed || this.view.getState().serverBusy !== null) return;
+    if (!owner || this.disposed || this.view.getState().serverBusy !== null || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return;
     this.update({ serverBusy: target });
-    let ack: ConnectorOwnerAck;
+    let refused: ServersView['refused'];
     try {
-      ack = await run(owner);
+      const ack = await run(owner);
+      refused = ack.accepted ? null : { target, why: ack.why };
     } catch (error) {
       this.deps.log?.(`a connector server action failed: ${error instanceof Error ? error.message : String(error)}`);
-      ack = { accepted: false, why: 'stale' };
+      // P5 O7 M5c: another machine's refusal in its own words (a right it lacks, a cancelled confirmation, the link down)
+      const machine = artifactMachineOf(this.artifactId);
+      refused = machine !== null && error instanceof ArtifactCommandError ? { target, why: null, words: remoteRefusalWords(error.error, machineNameOf(machine)) } : { target, why: 'stale' };
     }
     if (this.disposed) return;
-    this.update({ serverBusy: null, servers: { ...this.view.getState().servers, refused: ack.accepted ? null : { target, why: ack.why } } });
+    this.update({ serverBusy: null, servers: { ...this.view.getState().servers, refused } });
     await this.readServers();
   }
   // P3-HD M3c2 end

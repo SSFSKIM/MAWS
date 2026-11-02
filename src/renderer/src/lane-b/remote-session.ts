@@ -13,8 +13,9 @@
 // doesn't make it lane A.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { RemoteSession } from '@shared/ipc/schema/remote';
+import type { RemoteLinkState, RemoteSession } from '@shared/ipc/schema/remote';
 import { isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
@@ -23,9 +24,12 @@ import { useSessions, type SessionsState } from '../stores/sessions';
 export interface RemoteLaneBStore {
   states: ReadonlyMap<AppSessionId, RemoteSession>;
   sending: ReadonlyMap<AppSessionId, number>; // the sends on their way, per session
+  // P5 O7 M5c: each machine's link as the latest `remote.session` of any of its sessions said it (one link per machine, so
+  // its member's rights are the machine's, whichever session carried them); absent: none heard yet
+  links: ReadonlyMap<MachineRef, RemoteLinkState>;
 }
 
-const empty = (): RemoteLaneBStore => ({ states: new Map(), sending: new Map() });
+const empty = (): RemoteLaneBStore => ({ states: new Map(), sending: new Map(), links: new Map() });
 
 export const useRemoteLaneB = create<RemoteLaneBStore>()(empty);
 
@@ -34,7 +38,7 @@ export function resetRemoteLaneBStore(): void {
 }
 
 export function applyRemoteSession(state: RemoteSession): void {
-  useRemoteLaneB.setState((s) => ({ states: new Map(s.states).set(state.address, state) }));
+  useRemoteLaneB.setState((s) => ({ states: new Map(s.states).set(state.address, state), ...(isAddress(state.address) && { links: new Map(s.links).set(machineOf(state.address), state.link) }) }));
 }
 
 export const remoteLaneBStateOf = (appSessionId: AppSessionId): RemoteSession | null => useRemoteLaneB.getState().states.get(appSessionId) ?? null;

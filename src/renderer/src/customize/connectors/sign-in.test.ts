@@ -4,7 +4,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { forgetSignIn, heard, resetSignIns, signInKeyOf, startSignIn, useSignIns } from './sign-in';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { signInViewOf } from './present';
+import { cancelSignIn, connectSignInEvents, forgetSignIn, heard, resetSignIns, signInKeyOf, startSignIn, useSignIns } from './sign-in';
 
 const event = (opId: string, state: ConnectorSignInChanged['state'], name = 'linear'): ConnectorSignInChanged => ({ opId, name, state, reason: null, message: null, where: null });
 const USER = { name: 'linear', scope: 'user', cwd: '/a', path: '/cfg/.claude.json', fingerprint: 'print-user' } as const;
@@ -81,5 +85,54 @@ describe('a server’s latest sign-in', () => {
     expect(recordOf(USER)).toBeUndefined();
     heard(event('one', 'done'), 2); // main's operation ends after the removal: it says nothing about what is configured now
     expect(recordOf(USER)).toBeUndefined();
+  });
+});
+
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): an operation is the
+// machine's its session is on, heard from that machine alone; such a machine's failures read in its own words.
+describe('a sign-in on another machine', () => {
+  beforeEach(() => resetSignIns());
+  const ON_B = addressOf(OTHER_MACHINE, 'session-b');
+  const failed = (opId: string, message: string): ConnectorSignInChanged => ({ ...event(opId, 'failed'), reason: 'engine', message });
+  // the bridge's `on`, as the renderer's client hands a listener the machine an event came from
+  const events = () => {
+    let listener: ((payload: ConnectorSignInChanged, from: { machine: MachineRef }) => void) | null = null;
+    const bridge = { ...bridgeAnswering('op-1'), on: vi.fn((_name: string, l: typeof listener) => ((listener = l), () => {})) } as unknown as MawsBridge;
+    return { bridge, say: (payload: ConnectorSignInChanged, machine: MachineRef) => listener!(payload, { machine }) };
+  };
+
+  it('binds only that machine’s events, and says its unrelayable sign-in and its busy port as it words them', async () => {
+    const { bridge, say } = events();
+    connectSignInEvents(bridge);
+    await startSignIn(USER, USER.fingerprint, ON_B, bridge);
+    say({ ...event('op-1', 'waiting_browser') }, TEST_MACHINE); // this Mac's operation of the same id: not the machine's
+    expect(recordOf(USER)).toBeUndefined();
+    say(failed('op-1', 'sign in on mini'), OTHER_MACHINE);
+    expect(recordOf(USER)).toMatchObject({ event: { state: 'failed', message: 'sign in on mini' }, appSessionId: ON_B });
+    const view = signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(USER)!, transport: 'http' });
+    expect(view).toMatchObject({ text: 'Sign-in didn’t finish: sign in on mini', tone: 'danger', signIn: true });
+  });
+
+  it('reads the busy port’s failure as busy, not as a generic one', async () => {
+    const { bridge, say } = events();
+    connectSignInEvents(bridge);
+    await startSignIn(USER, USER.fingerprint, ON_B, bridge);
+    const busy = 'another sign-in from this device is waiting on the same callback port';
+    say(failed('op-1', busy), OTHER_MACHINE);
+    expect(signInViewOf({ live: undefined, liveRead: null, posture: null, last: recordOf(USER)!, transport: 'http' })?.text).toBe(`Sign-in didn’t finish: ${busy}`);
+  });
+
+  it('keeps another machine’s operations heard before any receipt apart from this Mac’s', async () => {
+    heard(event('mine', 'starting'), 100, TEST_MACHINE); // main says `starting` before the receipt
+    for (let i = 0; i < 40; i += 1) heard(event(`b-${i}`, 'starting'), 200 + i, OTHER_MACHINE); // a machine's crowd of sign-ins
+    const bridge = bridgeAnswering('mine');
+    await startSignIn(USER, USER.fingerprint, addressOf(TEST_MACHINE, 'session-a'), bridge);
+    expect(recordOf(USER)).toMatchObject({ event: { opId: 'mine', state: 'starting' }, at: 100 });
+  });
+
+  it('cancels on the machine its session is on', () => {
+    const bridge = { invoke: vi.fn(async () => ({ ok: true, value: { cancelled: true } })) } as unknown as MawsBridge;
+    cancelSignIn('op-1', ON_B, bridge);
+    expect(bridge.invoke).toHaveBeenCalledWith('connectors.signInCancel', { opId: 'op-1' }, { machine: OTHER_MACHINE });
   });
 });

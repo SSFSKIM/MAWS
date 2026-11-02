@@ -15,9 +15,14 @@
 // unreadable one (Forget) and a disconnect still unconfirmed (Retry). Controls wrap below a row's identity when narrow.
 // Its sentences then name both routes, never a session alone. P3-F: the section stands whenever it has rows, a page
 // with no tool declared or granted included, so those recovery actions stay reachable.
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 6): another machine's artifact's sheet
+// is drawn from the device's rights there and the machine's offer (../../../../artifacts/remote-surfaces.ts): a part the
+// machine doesn't offer, or whose `machine-admin` the device lacks, is greyed with why, never hidden.
+import { useEffect, useRef } from 'react';
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
+import { GRANT_NEEDS, LEASE_NEEDS, REMOTE_SURFACE_WORDS, SERVER_NEEDS, useRemoteGreyed, useRemoteMachineName } from '../../../../artifacts/remote-surfaces';
 import { NO_SESSION_CONTEXT, useArtifactSessionContext, type ArtifactContextOf, type ArtifactSessionContext } from '../../../../artifacts/session-context';
 import { Sheet } from '../../../../sessions/Sheet';
 import { PRIMARY, SECONDARY } from '../../../../sessions/ui';
@@ -34,16 +39,28 @@ export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context:
   const view = useStore(tab.view);
   const tools = sheetTools(view);
   const servers = tools.length > 0 || (view.servers.rows?.length ?? 0) > 0; // P3-F: its recovery rows need no tool
+  const leaseGreyed = useRemoteGreyed(tab.artifactId, LEASE_NEEDS); // P5 O7 M5c
+  const grantGreyed = useRemoteGreyed(tab.artifactId, GRANT_NEEDS);
   const body = (
     <>
+      {leaseGreyed !== null && (
+        <p data-connectors-greyed="" className="m-0 mb-2 text-ui-sm text-fg-muted">
+          {leaseGreyed}
+        </p>
+      )}
       {tools.length === 0 ? (
         <p className="m-0 text-ui text-fg-muted">{C.none}</p>
       ) : (
         <ul className="m-0 flex list-none flex-col divide-y divide-border border-y border-border p-0">
           {tools.map((tool) => (
-            <ToolRow key={connectorToolKey(tool)} tab={tab} tool={tool} />
+            <ToolRow key={connectorToolKey(tool)} tab={tab} tool={tool} greyed={grantGreyed !== null} />
           ))}
         </ul>
+      )}
+      {tools.length > 0 && grantGreyed !== null && grantGreyed !== leaseGreyed && (
+        <p data-connectors-grants-greyed="" className="m-0 mt-2 text-ui-sm text-fg-muted">
+          {grantGreyed}
+        </p>
       )}
       {tab.owned && servers && <ServersSection tab={tab} />}
       {view.needsSession && <StartRow tab={tab} context={context} />}
@@ -70,7 +87,7 @@ export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context:
   );
 }
 
-function ToolRow({ tab, tool }: { tab: ConnectorsTab; tool: ConnectorToolRef }) {
+function ToolRow({ tab, tool, greyed }: { tab: ConnectorsTab; tool: ConnectorToolRef; greyed: boolean }) {
   const key = connectorToolKey(tool);
   const view = useStore(tab.view);
   const grant = view.grants?.find((held) => held.server === tool.server && held.tool === tool.tool) ?? null;
@@ -79,7 +96,7 @@ function ToolRow({ tab, tool }: { tab: ConnectorsTab; tool: ConnectorToolRef }) 
   const state = changed ? C.changed : grant?.mode === 'read' ? C.allowedRead : grant?.mode === 'once' ? C.allowedOnce : C.notAllowed;
   const detail = (tab.owned ? S.detail : C.detail)(view.refusals[key] ?? last); // P3-HD M3c2: both routes' words
   const name = C.toolName(tool.server, tool.tool);
-  const busy = view.busy === key;
+  const busy = view.busy === key || greyed; // P5 O7 M5c: greyed, the sheet says why below the tools
   return (
     <li data-connector-tool={name} className="flex items-start gap-3 py-2">
       <div className="min-w-0 flex-1">
@@ -146,13 +163,24 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
   const servers = useStore(tab.view, (s) => s.servers);
   const { rows, saved, withdrawnUnattributed, failed } = servers;
   const heading = `connectors-servers-${tab.artifactId}`;
+  // P5 O7 M5c: greyed, the rows are neither read nor shown; once the lists hold what they need, they are read
+  const greyed = useRemoteGreyed(tab.artifactId, SERVER_NEEDS);
+  const wasGreyed = useRef(greyed);
+  useEffect(() => {
+    if (wasGreyed.current !== null && greyed === null) void tab.readServers();
+    wasGreyed.current = greyed;
+  }, [tab, greyed]);
   return (
     <section data-connectors-servers="" aria-labelledby={heading} className="mt-4">
       <h3 id={heading} className="m-0 text-ui font-medium text-fg">
         {S.heading}
       </h3>
       <p className="m-0 mb-2 text-ui-sm text-fg-muted">{S.headingNote}</p>
-      {rows === null ? (
+      {greyed !== null ? (
+        <p data-connectors-servers-greyed="" className="m-0 text-ui-sm text-fg-muted">
+          {greyed}
+        </p>
+      ) : rows === null ? (
         <p role="status" className="m-0 text-ui-sm text-fg-muted">
           {failed ? S.readFailed : S.reading}
         </p>
@@ -234,8 +262,9 @@ function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boo
 function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: ConnectorServerRow; unattributed: boolean }) {
   const serverBusy = useStore(tab.view, (s) => s.serverBusy);
   const refused = useStore(tab.view, (s) => s.servers.refused);
+  const elsewhere = useRemoteMachineName(tab.artifactId); // P5 O7 M5c
   const target = row.kind === 'source' ? row.handle : row.kind === 'engineOnly' ? null : row.connectionId;
-  const refusal = refused !== null && refused.target === target ? S.refused(refused.why) : null;
+  const refusal = refused === null || refused.target !== target ? null : refused.why === null ? refused.words : refused.why === 'busy' && elsewhere !== null ? REMOTE_SURFACE_WORDS.busyOn(elsewhere) : S.refused(refused.why);
   const last = row.kind !== 'engineOnly' && row.last ? S.last(row.last) : null;
   const { name, origin, status, actions } = describe(tab, row, unattributed);
   return (
