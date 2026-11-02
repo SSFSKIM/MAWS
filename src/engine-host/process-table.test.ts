@@ -1682,6 +1682,21 @@ describe('process table (P5 O17 M7): the idle exception for a headless tab', () 
     expect(lifecycle(s.a!)).toBe('released'); // at once, its clock not restarted
   });
 
+  it('keeps no browser state on an ordinary row: the waits exist only while some row waits', async () => {
+    const { table, s } = await idleTable(['a', 'b']);
+    const idle = (table as unknown as { idle: { rows: Map<unknown, object>; waits: Map<unknown, boolean> | null } }).idle;
+    const clockKeys = () => [...idle.rows.values()].map((clock) => Object.keys(clock).sort());
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    expect(idle.waits).toBeNull();
+    expect(clockKeys()).toEqual([['appSessionId', 'kept', 'keptClearedAt', 'since'], ['appSessionId', 'kept', 'keptClearedAt', 'since']]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(idle.waits?.size).toBe(1); // a waits; b was released as idle
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle.waits).toBeNull();
+  });
+
   it('`unknown` is waited on the same way', async () => {
     const { table, s, asked } = await idleTable(['a']);
     s.a!.session.setBrowserHold('unknown');
