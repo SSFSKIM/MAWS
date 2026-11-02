@@ -12,6 +12,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
+import type { MachineRef } from '@shared/machine/ref';
 import { ChevronLeftIcon } from '../app/IconButton';
 import { useNow } from '../app/use-now';
 import { LIBRARY_PAGE as P } from './copy';
@@ -24,11 +25,13 @@ import { DeleteSpaceSheet, NewSpaceSheet, RenameSpaceSheet, SpaceMenu } from './
 import { refreshLibrary, useLibraryList, useLibrarySpaces, type LibraryList, type LibraryRead } from './store';
 import { currentSpaceOf, filterOf, setLibraryView, useLibraryView, type LibraryViewState } from './view';
 
-// The read's answer, or while it has none yet the last answer shown.
-function useKeptList(read: LibraryRead<LibraryList>): LibraryList | undefined {
-  const [kept, setKept] = useState(read.value);
-  if (read.value !== undefined && read.value !== kept) setKept(read.value);
-  return read.value ?? kept;
+// The read's answer, or while it has none yet the last answer shown of the same machine's library (P5 O7 M5a fix wave 1:
+// another machine's rows are never shown, or acted on, as this one's while its own list is read or refused).
+function useKeptList(read: LibraryRead<LibraryList>, machine: MachineRef | null): LibraryList | undefined {
+  const [kept, setKept] = useState({ machine, list: read.value });
+  if (kept.machine !== machine) setKept({ machine, list: read.value });
+  else if (read.value !== undefined && read.value !== kept.list) setKept({ machine, list: read.value });
+  return read.value ?? (kept.machine === machine ? kept.list : undefined);
 }
 
 function linesOf(view: LibraryViewState, read: LibraryRead<LibraryList>, list: LibraryList | undefined, spaces: LibrarySpace[] | undefined, now: number): Line[] {
@@ -133,7 +136,7 @@ export function Library() {
   const view = useLibraryView(useShallow((s) => s));
   const machine = view.machine ?? undefined;
   const read = useLibraryList(filterOf(view), machine);
-  const list = useKeptList(read);
+  const list = useKeptList(read, view.machine);
   const spacesRead = useLibrarySpaces(machine);
   const spaces = spacesRead.value;
   const now = useNow();

@@ -30,6 +30,7 @@ const SPACES: Record<string, LibrarySpace[]> = {
 let main: ReturnType<typeof installFakeMain>;
 const sentTo = (name: 'library.list' | 'library.spaces') => main.calls.flatMap((call, i) => (call.name === name ? [machines[i]] : []));
 let machines: (MachineRef | undefined)[];
+let studioDown = false;
 const offs: (() => void)[] = [];
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -50,10 +51,12 @@ beforeEach(() => {
   resetLibraryView();
   resetArtifactMachines();
   machines = [];
+  studioDown = false;
   main = installFakeMain((name, _input, target) => {
     const machine = (typeof target === 'object' && target !== null ? (target as { machine: MachineRef }).machine : target) ?? TEST_MACHINE;
     machines.push(machine);
     if (name === 'library.list') {
+      if (machine === OTHER_MACHINE && studioDown) return { ok: false, error: { code: 'host_unavailable', message: 'studio is offline' } };
       const rows = machine === OTHER_MACHINE ? STUDIO : HERE;
       return ok({ rows, counts: countsOf(rows) });
     }
@@ -137,5 +140,19 @@ describe('the library’s machine menu', () => {
     await waitFor(() => expect(main.callsOf('artifacts.update')).toEqual([{ artifactId: STUDIO[0]!.id, spaceId: null }]));
     const update = main.calls.findIndex((call) => call.name === 'artifacts.update');
     expect(machines[update]).toBe(OTHER_MACHINE);
+  });
+
+  // fix wave 1 (the task review): the list kept while the next is read is the same machine's, never another's
+  it('a machine whose list fails shows the failure, never this Mac’s rows as its own', async () => {
+    const user = userEvent.setup();
+    studioDown = true;
+    roster({ ref: OTHER_MACHINE, name: 'studio', state: 'up', carrier: 'direct' });
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Notes on this Mac' });
+    await user.click(menu()!);
+    await user.click(screen.getByRole('menuitemradio', { name: 'studio' }));
+    await screen.findByText(/studio is offline/);
+    expect(menu()?.textContent).toContain('studio');
+    expect(screen.queryByRole('article', { name: 'Notes on this Mac' })).toBeNull();
   });
 });
