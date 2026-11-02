@@ -137,7 +137,9 @@ async function startScene(more: Record<string, FrontHandler> = {}): Promise<Scen
   // out/main (P5 O17 M8 fix 1: pass 3's relay could not be confirmed with no addon loaded)
   const entry = executable ? [] : ['-r', join(dirname(fromRoot.resolve('playwright-core/package.json')), 'lib/server/electron/loader.js'), REPO_ROOT];
   const wrapped = stderrFromSpawn(fixtures, binary);
-  const app = await _electron.launch({ executablePath: wrapped.executablePath, args: [...entry, '--render-host', profile], env, cwd: REPO_ROOT });
+  // chromiumSandbox: Playwright adds --no-sandbox on Linux unless told, and the render host refuses to start without the
+  // sandbox (as designed); macOS never gets the flag
+  const app = await _electron.launch({ executablePath: wrapped.executablePath, args: [...entry, '--render-host', profile], env, cwd: REPO_ROOT, chromiumSandbox: true });
   const child = app.process();
   const exited = new Promise<number | null>((done) => {
     if (child.exitCode !== null) return done(child.exitCode);
