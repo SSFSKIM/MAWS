@@ -13,6 +13,7 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { MemoryJournal } from '../../src/engine-host/conformance/scripted-transport';
 import { buildLaunch, RELAY_URL } from '../../src/engine-host/launch';
 import { EngineSession, SESSION_START_HOOK_MS } from '../../src/engine-host/session';
+import { countWork, parseTree, readTreeSync } from '../../src/engine-host/holder/descendants'; // P5 O17 M7: the descendant veto's own count
 import { MAX_LINE_CHARS, spawnEngine } from '../../src/engine-host/transport';
 import { FIXTURE_ENGINE_VERSION } from './engine-pin';
 import { connectorControl, connectorReport, CUA_CONNECTOR, writeCuaEngine, type ConnectorControl } from './cua-engine';
@@ -175,6 +176,13 @@ describe('the cua engine stub (P5 O17 M8)', () => {
       const first = await until(() => connectorReport(root), (report) => report?.hellos === 1);
       const parentOf = (pid: number) => Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
       expect(parentOf(first!.pid), 'the connector is the engine’s child').toBe(enginePid);
+      // P5 O17 M7 (O16 M5's descendant veto, on the tree the guarded scenes run on): the connector is the engine's one child,
+      // and the engine's mcp_status names it as a stdio server, as the engine names `cua serve`, so a resting session holds
+      // no work under its engine and its idle clock can run (scene 9); the engine answers the read and stays ready
+      await session.readMcpCommands();
+      expect(session.lifecycle).toBe('ready');
+      expect(session.mcpCommands()).toHaveLength(1);
+      expect(countWork(parseTree(readTreeSync()), enginePid, { pids: new Set(), mcpCommands: session.mcpCommands()! }), 'no work under the engine').toBe(0);
 
       process.kill(first!.pid, 'SIGKILL');
       const second = await until(() => connectorReport(root), (report) => report !== null && report.pid !== first!.pid && report.hellos === 1);

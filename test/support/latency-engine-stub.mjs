@@ -23,6 +23,10 @@
 // id, the request id) a fresh one per turn, as the replay transport maps ids (src/engine-host/replay-transport.ts). Just
 // before each delta is written it reads `performance.timeOrigin + performance.now()`, and appends `{turn, k, writtenAt}`
 // to the samples file once the delta is on its way.
+//
+// P5 O17 M7: `mcp_status` is answered only when MAWS_LATENCY_STUB_MCP_SERVERS names the servers (a JSON array of
+// mcp_status entries): the cua engine stub runs this engine in its own process and names its connector there, as the
+// engine names `cua serve`, so O16's descendant veto reads the connector as registered infrastructure.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -84,6 +88,7 @@ const answers = new Map(Object.entries(CONTROLS).map(([subtype, [fixture, seq]])
   if (!response || response.frame.response.subtype !== 'success') throw new Error(`${fixture} records no success answer to seq ${seq}`);
   return [subtype, response.frame.response];
 }));
+if (process.env.MAWS_LATENCY_STUB_MCP_SERVERS) answers.set('mcp_status', { subtype: 'success', response: { mcpServers: JSON.parse(process.env.MAWS_LATENCY_STUB_MCP_SERVERS) } }); // P5 O17 M7
 
 // One text turn of queue-and-interrupt.jsonl (seq 199 is its prompt): queued, started, init, status, the user echo,
 // message_start, the text block (its recorded delta at 227 replaced; the thinking block at 207-225 left out, so the text

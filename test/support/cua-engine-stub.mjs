@@ -9,8 +9,10 @@
 // MAWS_CUA_STUB_READY=1 the engine comes ready, so a session reaches its engine through the ordinary start path
 // (`session.create` and `session.start`, or a message that resumes it), which tells it the daemon's socket in its
 // settings, never a raw `session.launch`: the engine protocol is test/support/latency-engine-stub.mjs's (each control
-// answered from its recording, each user message one whole turn), run as this process's child on the same stdio, so this
-// process stays the engine the host spawned and the connector stays its child, as cua's host is the engine's. The turns'
+// answered from its recording, each user message one whole turn), run in this process (P5 O17 M7: not as a child, since
+// O16's descendant veto counts every process under the engine but registered infrastructure), so this process stays the
+// engine the host spawned and the connector its one child, as cua's host is the engine's; the engine's `mcp_status` names
+// the connector as a stdio server, as the engine names `cua serve`, so a resting session holds no work. The turns'
 // samples go to `cua-engine-turns.jsonl` beside the report. With MAWS_CUA_STUB_RESPAWN=1 a connector that ends (a
 // scene kills it) is started again, as the engine starts `cua serve` again; the new one reports to the same file.
 import { spawn } from 'node:child_process';
@@ -35,8 +37,9 @@ if (typeof socket !== 'string' || socket === '') {
 
 let ending = false;
 let connector = null;
+const connectorArgs = [join(here, 'cua-connector.mjs'), socket, join(process.cwd(), 'cua-connector.json')];
 const startConnector = () => {
-  connector = spawn(process.execPath, [join(here, 'cua-connector.mjs'), socket, join(process.cwd(), 'cua-connector.json')], { stdio: 'ignore' });
+  connector = spawn(process.execPath, connectorArgs, { stdio: 'ignore' });
   connector.once('exit', () => {
     if (!ending && process.env.MAWS_CUA_STUB_RESPAWN === '1') setTimeout(startConnector, 200);
   });
@@ -48,13 +51,12 @@ const stopConnector = () => {
 };
 
 if (process.env.MAWS_CUA_STUB_READY === '1') {
-  // stdin is the child's alone (this process never reads it), and its exit is this engine's
-  const engine = spawn(process.execPath, [join(here, 'latency-engine-stub.mjs'), join(process.cwd(), 'cua-engine-turns.jsonl'), ...args], { stdio: 'inherit' });
-  engine.once('exit', (code, signal) => {
-    stopConnector();
-    process.exit(code ?? (signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1));
-  });
-  for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => engine.kill(signal));
+  // the latency engine reads its arguments and stdin, answers end_session, stdin's end and SIGTERM by exiting, and the
+  // connector ends with this process
+  process.env.MAWS_LATENCY_STUB_MCP_SERVERS = JSON.stringify([{ name: 'cua', status: 'connected', config: { type: 'stdio', command: process.execPath, args: connectorArgs } }]);
+  process.on('exit', stopConnector);
+  process.argv = [process.argv[0], join(here, 'latency-engine-stub.mjs'), join(process.cwd(), 'cua-engine-turns.jsonl'), ...args];
+  await import('./latency-engine-stub.mjs');
 } else {
   const end = () => {
     stopConnector();
