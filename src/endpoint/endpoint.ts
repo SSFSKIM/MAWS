@@ -82,6 +82,7 @@ import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
+import { SessionSafe } from './session-safe';
 import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
 import { Streams } from './streams';
@@ -161,6 +162,8 @@ export class Endpoint implements EndpointModule {
   readonly checkoutBounds = new CheckoutBounds();
   /** P5 O7 M5a: the `artifact` rule's placements per channel, which its decisions, `library.list` and the feed read. */
   readonly artifactRanks = new ArtifactRanks();
+  /** P5 O7 M5a2 fix wave 1: what artifact answers say of sessions (session-safe.ts); set with the executors. */
+  sessionSafe: SessionSafe | null = null;
   readonly interest: Interest;
   /** Remote reads (M8). */
   readonly calls: Calls;
@@ -364,7 +367,11 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now,
       log: (line) => log(line),
     });
+    // P5 O7 M5a2 fix wave 1: what artifact answers say of sessions, one projection for the calls, the acts and the queries.
+    const sessionSafe = new SessionSafe({ ranks: (member) => this.authorizer.ranks(member, this.deps.now()) });
+    this.sessionSafe = sessionSafe;
     this.actions = new Actions({
+      sessionSafe,
       freshness: new Freshness(),
       own: this.own,
       rl10: this.rl10,
@@ -376,6 +383,7 @@ export class Endpoint implements EndpointModule {
       log,
     });
     this.queries = new Queries({
+      sessionSafe,
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       own: this.own,
       rl10: this.rl10,
@@ -450,6 +458,7 @@ export class Endpoint implements EndpointModule {
       },
       recordFor: (report) => this.listings.recordFor(report),
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
+      sessionSafe,
       offers: authorization.offers,
       log,
     });
@@ -493,6 +502,7 @@ export class Endpoint implements EndpointModule {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
         this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
+        this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
       }),

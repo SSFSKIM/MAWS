@@ -31,6 +31,7 @@ import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { QueryAnswer, Rl10 } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
+import type { SessionSafe } from './session-safe';
 import type { SessionTarget } from './sources';
 import { resolveTarget, type Spawner } from './targets';
 
@@ -43,6 +44,8 @@ export type QueriesContext = {
   engineHostLedger?(closed: string | null): void;
   now(): number;
   log(line: string): void;
+  /** P5 O7 M5a2 fix wave 1: what an artifact op's result says of sessions (session-safe.ts). */
+  sessionSafe?: SessionSafe;
 };
 
 /** An executor's answer, as read here: its state, the op's outcome, and the binding it stored (absent: none). */
@@ -87,9 +90,29 @@ export class Queries {
     const { member, target, launchedBy, artifact } = answer.binding;
     // P5 O12 M11: the placement's spawner; P5 O7 M5a: the artifact, placed by authorization
     const input: QueryBinding = { member, target, ...(launchedBy === undefined ? {} : { launchedBy }), ...(artifact === undefined ? {} : { artifact }) };
+    // P5 O7 M5a2 fix wave 1: an artifact op's result tells the asker nothing of a session they don't view (session-safe.ts):
+    // its reads made before the decision, so the decision and the projection are taken in the step the answer goes.
+    const told = artifact === undefined ? () => answer.outcome : await this.#sessionSafe(who.member, answer.binding.name, answer.outcome, dispatchAs(this.ctx.dispatch, channel.client));
     const decision = await this.ctx.authorize({ kind: 'query', name: answer.binding.name, input }, who, this.ctx.now());
+    const outcome = told();
     if (!decision.ok) return artifact !== undefined && decision.reason === 'unavailable' ? queried({ state: 'unavailable' }) : queried({ state: 'refused', reason: decision.reason });
-    return queried({ state: answer.state as QueriedMessage['state'], ...(answer.outcome === undefined ? {} : { outcome: writeOutcome(channel, answer.outcome) }) });
+    if (outcome === null) return queried({ state: 'unavailable' });
+    return queried({ state: answer.state as QueriedMessage['state'], ...(outcome === undefined ? {} : { outcome: writeOutcome(channel, outcome) }) });
+  }
+
+  /** An artifact op's outcome as the asker may be told it, made as the answer goes; null when it can't be (`unavailable`). */
+  async #sessionSafe(member: string, name: string, outcome: unknown, dispatch: EndpointServices['dispatch']): Promise<() => unknown> {
+    if (this.ctx.sessionSafe === undefined || !isObject(outcome) || outcome.state !== 'done') return () => outcome;
+    try {
+      const projected = await this.ctx.sessionSafe.prepare(member, name, outcome.result, dispatch);
+      return () => {
+        const result = projected();
+        return result.ok ? { ...outcome, result: result.output } : null;
+      };
+    } catch (error) {
+      this.ctx.log(`endpoint: the result of \`${name}\` could not be told: ${(error as Error).message}`);
+      return () => null;
+    }
   }
 
   /**

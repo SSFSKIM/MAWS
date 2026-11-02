@@ -44,7 +44,8 @@
 // bytes codec's tagged form for a device that carries bytes (the ledger decodes its own copy). An engine host that
 // predates the command answers `unknown_command` (its runtime: a name outside its registry): nothing ran, and the act is
 // `refused {reason: 'unavailable'}`, logged, until the host is replaced. Every `done` result goes to a device that listed
-// `rl2.bytes` tagged (bytes.ts).
+// `rl2.bytes` tagged (bytes.ts). An artifact act's result tells its sender nothing of a session they don't view
+// (session-safe.ts, P5 O7 M5a2 fix wave 1).
 //
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
@@ -60,6 +61,7 @@ import { LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
+import type { SessionSafe } from './session-safe';
 
 export const STOP_WAIT_MS = 2000;
 
@@ -83,6 +85,8 @@ export type ActionsContext = {
   offers?: Offers;
   now(): number;
   log(line: string): void;
+  /** P5 O7 M5a2 fix wave 1: what an artifact act's result says of sessions (session-safe.ts). */
+  sessionSafe?: SessionSafe;
 };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
@@ -256,7 +260,8 @@ export class Actions {
         if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
         else if (answer.error.code === ARTIFACT_OP.predates) this.ctx.log(`endpoint: the engine host predates \`${ARTIFACT_OP.name}\`: \`${action.action}\` refused unavailable until it is replaced`);
         const outcome = answer.ok ? answered(answer.value) : answer.error.code === ARTIFACT_OP.predates ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        channel.send(doneMessage(channel, action.opId, outcome));
+        const send = await this.#sessionSafe(who.member, action.action, outcome, dispatch);
+        if (!channel.closed) channel.send(doneMessage(channel, action.opId, send()));
       } finally {
         release();
       }
@@ -299,6 +304,24 @@ export class Actions {
       channel.send(doneMessage(channel, action.opId, answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code }));
     } finally {
       release();
+    }
+  }
+
+  /**
+   * P5 O7 M5a2 fix wave 1: an artifact act's outcome as the sender may be told it, its result's sessions they don't view
+   * withheld (session-safe.ts), made as it is sent; one the spine can't place is `unknown` (the device asks by `query`).
+   */
+  async #sessionSafe(member: string, name: string, outcome: unknown, dispatch: EndpointServices['dispatch']): Promise<() => unknown> {
+    if (this.ctx.sessionSafe === undefined || !isObject(outcome) || outcome.state !== 'done') return () => outcome;
+    try {
+      const projected = await this.ctx.sessionSafe.prepare(member, name, outcome.result, dispatch);
+      return () => {
+        const result = projected();
+        return result.ok ? { ...outcome, result: result.output } : { state: 'unknown', reason: 'unavailable' };
+      };
+    } catch (error) {
+      this.ctx.log(`endpoint: the result of \`${name}\` could not be told: ${(error as Error).message}`);
+      return () => ({ state: 'unknown', reason: 'unavailable' });
     }
   }
 
