@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState } from '@shared/ipc/schema';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import { DaemonClocks } from './clocks';
 import { engineRequests, EXIT_SETTLE_MS } from './engine-requests';
 
 function scene() {
@@ -102,6 +103,28 @@ describe('a client’s request to the engine host and the park', () => {
     release();
     expect(t.s.steps, 'a need again at its close: the park clock starts from there').toEqual(['need', 'need']);
     expect(t.s.inFlight).toEqual([1, 0]);
+  });
+
+  it('on the real clocks, a hold kept past the idle time asks no park, and its release starts the idle time again from there (P5 O7 M5b)', async () => {
+    const parks: string[] = [];
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    try {
+      clocks.configure(1_000);
+      clocks.served();
+      clocks.engineHost(4242);
+      const guard = engineRequests({ hosts: { forward: vi.fn(), onState: () => () => {}, parked: () => false } as never, clocks, log: () => {} });
+      const release = guard.hold();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(parks, 'none under the open channel').toEqual([]);
+      release();
+      expect(parks, 'none at its close').toEqual([]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(parks).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(parks, 'the idle time from the close').toEqual(['idle']);
+    } finally {
+      clocks.stop();
+    }
   });
 
   it('another owner’s request goes straight on, no need and nothing counted', async () => {

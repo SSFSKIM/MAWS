@@ -67,8 +67,9 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
     }
   };
   // P5 O7 M5b: an open endpoint document channel (daemon.ts' `documents.open`) is a need held until it closes, counted
-  // with the requests in flight so no park is asked under it, and a need again at its close, the clock starting there: a
-  // document someone edits from another machine never parks under them
+  // with the requests in flight so no park is asked under it, and a need again at its close (told before the count, so the
+  // clock starts there and the last count's evaluation asks nothing on the old start): a document someone edits from
+  // another machine never parks under them
   const hold = (): (() => void) => {
     let held = true;
     inFlight += 1;
@@ -77,9 +78,10 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
     return () => {
       if (!held) return;
       held = false;
+      // The need first: the count's evaluation then reads the clock started at the close, never the one from the open
+      clocks.engineNeeded();
       inFlight -= 1;
       clocks.engineRequests(inFlight);
-      clocks.engineNeeded();
     };
   };
   return { forward, hold, inFlight: () => inFlight };

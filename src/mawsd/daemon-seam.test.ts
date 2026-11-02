@@ -287,6 +287,26 @@ describe('the endpoint’s document channels', () => {
     expect(app.closed).toBe(false);
   });
 
+  it('an open channel is a park need: the engine host is never armed under it past the idle time, and once it is closed the idle time runs again from the close (P5 O7 M5b)', async () => {
+    const { endpoint, links, closed } = await linked();
+    const app = await scene.app();
+    await app.request('host.configure', { idleExitMs: 200 });
+    endpoint.s.interest.report('viewer-1', ['s-remote' as never]); // the park held off while the app's departure settles
+    const engine = scene.lastEngine();
+    const before = links.length;
+    app.leave();
+    await until(() => links.slice(before).some((link) => !link.connected) && links.at(-1)?.connected === true, 3_000, 'the departure’s fresh link');
+    expect(endpoint.s.documents.open({ t: 'documents.open', channel: BASE, artifactId: ARTIFACT, actor: ACTOR })).toBe(true);
+    endpoint.s.interest.drop('viewer-1');
+    await sleep(800); // past the idle time several times over
+    expect(engine.supervisor.exits).toEqual([]);
+    endpoint.s.documents.close(BASE);
+    await sleep(100);
+    expect(engine.supervisor.exits, 'none at the close: the idle time runs from it').toEqual([]);
+    await until(() => engine.supervisor.exits.includes('idle'), 3_000, 'the park clock');
+    expect(closed).toEqual([]);
+  });
+
   it('an upstream reconnect with no app: each open channel closes upstream, then disconnected, then connected with the next generation; open is false between', async () => {
     const { endpoint, links, closed } = await linked();
     await endpoint.s.dispatch('engine-host', 'engine.ping', undefined);
