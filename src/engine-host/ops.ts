@@ -48,6 +48,9 @@ export type OpsDeps = {
   ledger: OpLedger;
   /** The handler this host registered for `name`, if any. */
   handler(name: string): Handler | undefined;
+  /** P5 O7 M5a: the host's handler for an artifact write (ARTIFACT_OP_COMMANDS), wherever the host registered it
+   * (keepArtifactWrites; the engine ipc always passes it). Absent, `handler`: a stand-in host's one table. */
+  artifactWrite?(name: string): Handler | undefined;
   /** The session's launch and engine session now; null for a session this host holds no row for. */
   status(appSessionId: string): { launchId: string; engineSessionId: string | null } | null;
   /** The originating event of a pending request (the broker's item), or null. */
@@ -70,9 +73,9 @@ export function opCommands(deps: OpsDeps): {
 
   /** The command's handler and its input checked, or the refusal: an engine-host command this host handles, never a
    * `host.*` one, its input a decoded copy of json-bytes' tagged form (P5 O7 M5a) that holds to its schema. */
-  function admit(name: string, input: unknown): { handler: Handler; value: unknown } | { refused: OpOutput } {
+  function admit(name: string, input: unknown, lookup: (name: string) => Handler | undefined): { handler: Handler; value: unknown } | { refused: OpOutput } {
     const spec = Object.hasOwn(commands, name) ? commands[name as keyof typeof commands] : undefined;
-    const handler = spec?.owner === 'engine-host' && !name.startsWith('host.') ? deps.handler(name) : undefined;
+    const handler = spec?.owner === 'engine-host' && !name.startsWith('host.') ? lookup(name) : undefined;
     if (handler === undefined) return { refused: refused('unavailable') };
     const checked = validateCommandInput(name as keyof typeof commands, fromWire(input));
     return checked.ok ? { handler, value: checked.value } : { refused: refused('malformed') };
@@ -80,7 +83,7 @@ export function opCommands(deps: OpsDeps): {
 
   async function op(input: OpInput, ctx: HandlerContext): Promise<OpOutput> {
     const { opId, opCreated, member, device, fingerprint, name, context, requestDigest } = input;
-    const checked = admit(name, input.input);
+    const checked = admit(name, input.input, deps.handler);
     if ('refused' in checked) return checked.refused;
     const appSessionId = (checked.value as { appSessionId?: unknown } | undefined)?.appSessionId;
     if (typeof appSessionId !== 'string') return refused('unavailable');
@@ -103,7 +106,7 @@ export function opCommands(deps: OpsDeps): {
   async function artifactOp(input: ArtifactOpInput, ctx: HandlerContext): Promise<OpOutput> {
     const { opId, opCreated, member, device, fingerprint, target, name } = input;
     if (!ARTIFACT_OPS.has(name)) return refused('unavailable'); // fail closed: an artifact write, and nothing else
-    const admitted = admit(name, input.input);
+    const admitted = admit(name, input.input, deps.artifactWrite ?? deps.handler);
     if ('refused' in admitted) return admitted.refused;
     const begun = ledger.begin(opId, opCreated, { member, device, fingerprint, target, name }, () => null);
     if (begun.kind === 'answered') return closedSaid(begun.answer as OpOutput);
@@ -133,6 +136,22 @@ export function opCommands(deps: OpsDeps): {
   }
 
   return { op, artifactOp, opQuery };
+}
+
+/**
+ * P5 O7 M5a: a host `on` that keeps, as it registers them, the handlers of the artifact writes (ARTIFACT_OP_COMMANDS),
+ * which the artifacts surface registers before and beside the engine ipc: `host.artifactOp`'s lookup. The engine host
+ * registers everything through it (src/engine-host/index.ts); `host.op`'s lookup stays the engine ipc's own table.
+ */
+export function keepArtifactWrites(on: HostOn): { on: HostOn; handler(name: string): Handler | undefined } {
+  const kept = new Map<string, Handler>();
+  return {
+    on: (name, handler) => {
+      if (ARTIFACT_OPS.has(name)) kept.set(name, handler as Handler);
+      on(name, handler);
+    },
+    handler: (name) => kept.get(name),
+  };
 }
 
 /** Registers `host.op`, `host.artifactOp` and `host.opQuery` over `deps`. */

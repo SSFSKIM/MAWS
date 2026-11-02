@@ -24,7 +24,9 @@ import { validateCommandInput, validateCommandOutput, validateEventPayload } fro
 import type { BinaryCheck } from './binary-info';
 import { registerEngineIpc } from './ipc';
 import { RELAY_URL } from './launch';
-import { opCommands, type OpsDeps } from './ops';
+import { openDocuments } from './documents';
+import { registerArtifacts } from './documents/register';
+import { keepArtifactWrites, opCommands, type OpsDeps } from './ops';
 import { SUPERVISOR_FILES } from './supervisor-files';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin';
 import { TESTED_ENGINE_VERSION } from './engine-compat';
@@ -400,3 +402,36 @@ describe('through the engine host’s handlers (a replayed session)', () => {
     await host.call('session.stop', { appSessionId: id, reason: 'stop' });
   });
 });
+
+// P5 O7 M5a (the hosted e2e:remote's finding): the artifact writes are registered by the artifacts surface, before and
+// beside registerEngineIpc, whose own table (host.op's) never holds them. host.artifactOp's lookup is the host's
+// collection of ARTIFACT_OP_COMMANDS, kept by the `on` every registration goes through, as src/engine-host/index.ts wires it:
+// the real artifacts surface over a real store, then the engine ipc, both registering through that `on`.
+describe('host.artifactOp over the host’s own registration', () => {
+  it('finds every artifact write the artifacts surface registers, and runs a real update once', async () => {
+    const handlers = new Map<string, (input: unknown, ctx: HandlerContext) => Promise<unknown>>();
+    const hostOn: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown, ctx: HandlerContext) => Promise<unknown>);
+    const emit: HostEmit = () => true;
+    const writes = keepArtifactWrites(hostOn);
+    const documents = openDocuments(dir, () => {});
+    const surface = registerArtifacts(writes.on, emit, { onDocPort: () => {} }, { documents, env: {} });
+    registerEngineIpc(writes.on, emit, { userData: dir, cwd: REPO_ROOT, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, artifactWrite: writes.handler });
+    try {
+      for (const name of ARTIFACT_OP_COMMANDS) expect(writes.handler(name), name).toBe(handlers.get(name));
+      expect(writes.handler('artifacts.get')).toBeUndefined(); // the lookup holds the writes alone
+      const call = async (name: string, input: unknown) => handlers.get(name)!(input, CTX);
+      const { artifact } = (await call('artifacts.create', { kind: 'html', title: 'Draft', content: { bytes: new TextEncoder().encode('<p>x</p>') } })) as { artifact: { id: string } };
+      const update = { opId: 'op-real-update-001', opCreated: iso(Date.now()), member: 'm-a', device: 'd-a', fingerprint: 'fp-1', target: `artifact:${artifact.id}`, name: 'artifacts.update', input: { artifactId: artifact.id, title: 'Renamed' } };
+      const done = await call('host.artifactOp', update);
+      expect(done).toMatchObject({ state: 'done', result: { ok: true, value: { artifact: { id: artifact.id, title: 'Renamed' } } } });
+      await call('artifacts.update', { artifactId: artifact.id, title: 'Changed here' }); // a local edit after it
+      expect(await call('host.artifactOp', update)).toEqual(done); // the reseal is the ledger's, run nowhere
+      expect(await call('artifacts.get', { artifactId: artifact.id })).toMatchObject({ artifact: { title: 'Changed here' } });
+      expect(await call('host.opQuery', { opId: update.opId, opCreated: update.opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: `artifact:${artifact.id}`, name: 'artifacts.update' });
+    } finally {
+      surface.close();
+      documents?.close();
+    }
+  });
+});
+
