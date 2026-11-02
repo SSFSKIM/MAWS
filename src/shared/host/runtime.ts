@@ -123,10 +123,11 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
   // attached once it said so and while it is the ready client; any other is attached while it is the ready client, as
   // E10 keyed every app-bound gate. Presence's gone hooks fire at each fall from attached, whatever caused it.
   let declaring = false; // the served client listed ATTACHMENT_CAPABILITY in its hello
+  let declared: readonly string[] = []; // P5 O17 M7 fix 2: the rest of what that hello listed (read by declaresAttachment)
   let signalled = false; // its last `host.attachment`; false at its connect and at its connection's end
   const attached = () => port !== null && ready && (!declaring || signalled);
   const { presence, fell: presenceFell } = presenceOf(attached, 'an app-gone hook');
-  const declaresAttachment = () => port !== null && declaring; // P5 O17 M7
+  const declaresAttachment = (also?: string) => port !== null && declaring && (also === undefined || declared.includes(also)); // P5 O17 M7; fix 2: `also`
   const setAttachment = (value: boolean): AttachmentSignal => {
     if (!port || !declaring) return 'refused';
     if (signalled === value) return 'unchanged';
@@ -257,6 +258,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
       port = p;
       ready = false; // E10
       declaring = peer?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false; // P5 O3-D M3
+      declared = declaring ? (peer?.capabilities ?? []) : []; // P5 O17 M7 fix 2
       declaringConnectors = peer?.capabilities.includes(CONNECTORS_CAPABILITY) ?? false; // P5 O4 M2
       signalled = false;
       endClients(); // P5 O1 M5: the replaced connection's clients end with it
@@ -425,8 +427,9 @@ export interface HostRuntime {
   presence: AppPresence;
   setAttachment(attached: boolean): AttachmentSignal; // the served client's signal (host.attachment's handler)
   // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): whether a client is served whose hello
-  // listed `host.attachment` (`mawsd`'s permanent link), the one client `host.browserWork` is taken from
-  declaresAttachment(): boolean;
+  // listed `host.attachment` (`mawsd`'s permanent link); fix 2: and, with `also`, listed that capability too (`mawsd`'s
+  // `host.browserWork`: it tells browser work, the one client `host.browserWork` is taken from)
+  declaresAttachment(also?: string): boolean;
 }
 // P5 O3-D M3 end
 

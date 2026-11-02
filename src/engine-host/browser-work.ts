@@ -1,8 +1,10 @@
 // `host.browserWork` (P5 O17 M7; docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M7 and Interfaces §E; D20): the
 // engine host's half of the browser fence. `mawsd` holds browser work for each session with a headless tab in its render
 // host, and tells this host the whole held set as a snapshot, first on every fresh link and at each change. Modelled on
-// attachment.ts: taken only from the served client whose hello listed `host.attachment` (`mawsd`'s permanent link), for
-// itself and not forwarded for another client; anything else is answered `internal` with nothing changed.
+// attachment.ts: taken only from the served client whose hello listed `host.attachment` and `host.browserWork` (`mawsd`'s
+// permanent link, from fix 2: the client that tells browser work), for itself and not forwarded for another client;
+// anything else is answered `internal` with nothing changed. A declaring client without `host.browserWork` (a `mawsd`
+// from before O17, which a rollback leaves serving this host) has no fenced tab: no default, no ask, today's release.
 //
 // A snapshot is applied to every row before it is answered: a live row it names is `held`, every other row's entry is
 // cleared (an exited row's included), each set on its session and published as its status. The set is kept for the link's life and gives its
@@ -28,6 +30,7 @@ import { namesClient } from '@shared/host/client-refs';
 import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
+import { HOST_BROWSER_WORK_CAPABILITY } from '@shared/host/socket-protocol';
 import type { ProcessTable } from './process-table';
 
 export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'onBrowserIdleDue' | 'browserSnapshotApplied'>;
@@ -40,7 +43,11 @@ export interface BrowserWorkOptions {
 // The kept set of every link whose snapshot named no session: shared, so an empty snapshot keeps nothing of its own
 const NONE: ReadonlySet<AppSessionId> = new Set();
 
-export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone'>, sessions: BrowserWorkSessions, opts: BrowserWorkOptions = {}): void {
+export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone' | 'onConnect' | 'hasClient'>, sessions: BrowserWorkSessions, opts: BrowserWorkOptions = {}): void {
+  // Fix 2: whether the served client tells browser work, its hello listing `host.attachment` and `host.browserWork`
+  // (`mawsd` from O17 on). A declaring client that does not (a `mawsd` from before O17, as a rollback leaves it) has no
+  // fenced headless tab, so it gets the release as it was: no default, no snapshot taken, no ask.
+  const tells = () => client.declaresAttachment(HOST_BROWSER_WORK_CAPABILITY);
   // The connection whose snapshots are the kept set (null while the current link has applied none), and that set
   let applied: ClientRef | null = null;
   let kept: ReadonlySet<AppSessionId> = NONE;
@@ -54,18 +61,25 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     for (const session of sessions.list()) if (session.lifecycle !== 'exited' && session.status().work?.holds?.browser === 'held') session.setBrowserHold('unknown');
   };
   client.onClientGone(linkEnded);
+  // Fix 2: a ready client that will tell no browser work leaves nothing to settle an `unknown` (an adoption's before any
+  // link, a lost link's): every entry is cleared
+  client.onConnect(() => {
+    if (tells()) return;
+    for (const session of sessions.list()) if (session.lifecycle !== 'exited' && session.status().work?.holds?.browser !== undefined) session.setBrowserHold(null);
+  });
 
-  // A row created later: the kept set's verdict; with none applied on the current link, `unknown` for an adopted row and
-  // for any row while a declaring link is up (its first snapshot settles it), clear otherwise (no `mawsd` link: main's
-  // own). Told at its reservation, before its start, so its first status carries it; nothing is kept per row.
+  // A row created later: the kept set's verdict; with none applied on the current link, `unknown` for any row while a
+  // client that tells browser work is served (its first snapshot settles it) and for an adopted row while no client is
+  // (the next one settles it, or clears it at its connection), clear otherwise. Told at its reservation, before its
+  // start, so its first status carries it; nothing is kept per row.
   sessions.onReserved((session) => {
     const status = session.status();
-    const hold = applied !== null ? (kept.has(status.appSessionId) ? 'held' : null) : status.holder?.adopted === true || client.declaresAttachment() ? 'unknown' : null;
+    const hold = applied !== null ? (kept.has(status.appSessionId) ? 'held' : null) : tells() || (status.holder?.adopted === true && !client.hasClient()) ? 'unknown' : null;
     if (hold !== null) session.setBrowserHold(hold, false);
   });
 
   on('host.browserWork', async ({ held }, ctx) => {
-    if (!client.declaresAttachment() || namesClient(ctx.client)) throw new HostCommandError(ipcError('internal', 'host.browserWork from a client whose hello did not list host.attachment, or for another client: nothing changed'));
+    if (!tells() || namesClient(ctx.client)) throw new HostCommandError(ipcError('internal', 'host.browserWork from a client whose hello did not list host.attachment and host.browserWork, or for another client: nothing changed'));
     if (opts.hold) await opts.hold();
     const connection = ctx.client;
     const fresh = applied !== connection;
@@ -88,7 +102,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   });
 
   sessions.onBrowserIdleDue((appSessionId) => {
-    if (client.declaresAttachment()) emit('host.browserIdle', { appSessionId });
+    if (tells()) emit('host.browserIdle', { appSessionId });
   });
 }
 

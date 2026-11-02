@@ -249,7 +249,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
       engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7
       ptyHost: [PTY_FRAMES_CAPABILITY],
       app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY],
-      daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY],
+      daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7 fix 2: it tells browser work
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
       daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY],
       link: [PTY_FRAMES_CAPABILITY],
@@ -318,7 +318,9 @@ describe('browser work on the wire (P5 O17 M3)', () => {
   it('carries host.browserWork and browserEngine.work as main-only commands and host.browserIdle among the engine host’s events', () => {
     expect(HOST_BROWSER_WORK_CAPABILITY).toBe('host.browserWork');
     expect(WIRE_CAPABILITIES).toContain(HOST_BROWSER_WORK_CAPABILITY);
-    for (const [peer, list] of Object.entries(PEER_CAPABILITIES)) expect((list as readonly string[]).includes(HOST_BROWSER_WORK_CAPABILITY), peer).toBe(peer === 'engineHost'); // P5 O17 M7: the engine host's welcome alone
+    // P5 O17 M7: the engine host's welcome; fix 2: and mawsd's hello to it (the client that tells browser work), as
+    // host.connectors and host.holder are listed both ways
+    for (const [peer, list] of Object.entries(PEER_CAPABILITIES)) expect((list as readonly string[]).includes(HOST_BROWSER_WORK_CAPABILITY), peer).toBe(peer === 'engineHost' || peer === 'daemonToEngineHost');
     expect(REGISTRY.commands['host.browserWork'].owner).toBe('engine-host');
     expect(REGISTRY.commands['browserEngine.work'].owner).toBe('machine');
     for (const name of ['host.browserWork', 'browserEngine.work']) {

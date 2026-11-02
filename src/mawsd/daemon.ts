@@ -308,7 +308,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // P5 O4 M2 (Interfaces §D): `host.connectors` with it, since only a connection that outlives every app owns the
   // connectors' work and the dataset refreshes app or no app
   const permanentClient = options.permanentClient ?? false;
-  const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY && name !== CONNECTORS_CAPABILITY);
+  // P5 O17 M7 fix 2: `host.browserWork` with it too, since only the permanent link sends the snapshots
+  const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY && name !== CONNECTORS_CAPABILITY && name !== HOST_BROWSER_WORK_CAPABILITY);
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
   // P5 O3-D M5a (§L): off until M5b; the second signal under it, behind its own switch until its probe answers (D21)
   const claimSpine = options.claimSpine ?? false;

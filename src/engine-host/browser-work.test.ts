@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { createHostRuntime, type HostPort, type HostRuntime } from '@shared/host/runtime';
-import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import { e2eHoldFor, registerBrowserWork } from './browser-work';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { handshakeResponder, launchSpec, scriptedSession } from './conformance/session-harness';
@@ -23,7 +23,8 @@ import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SESSION_HOST_PROTOCOL } from './holder/protocol';
 import type { RosterEntry } from './holder/roster';
 
-const DECLARING = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY] }; // mawsd's permanent link
+const DECLARING = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY] }; // mawsd's permanent link, which tells browser work
+const OLDER_MAWSD = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY] }; // a mawsd from before O17 (a rollback's): declaring, no browser work
 const MAIN = { capabilities: [PTY_FRAMES_CAPABILITY] }; // main's direct link, or a utility port
 const id = (name: string) => name as AppSessionId;
 
@@ -134,14 +135,16 @@ describe('host.browserWork (P5 O17 M7)', () => {
   });
 
   it.each([
-    ['its connection detached', (h: ReturnType<typeof host>) => h.runtime.detach()],
-    ['another client served in its place', (h: ReturnType<typeof host>) => void h.link(MAIN)],
-  ])('the permanent link\'s end (%s, heard through the runtime) turns held into unknown; the next link\'s snapshot settles it', async (_how, end) => {
+    ['its connection detached', (h: ReturnType<typeof host>) => h.runtime.detach(), 'unknown'],
+    ['another mawsd served in its place', (h: ReturnType<typeof host>) => void h.runtime.serve(fakePort().port, DECLARING), 'unknown'],
+    // fix 2: a ready client that tells no browser work (main's own link here) leaves nothing to settle it: cleared
+    ['main served and ready in its place', (h: ReturnType<typeof host>) => void h.link(MAIN), null],
+  ])('the permanent link\'s end (%s, heard through the runtime) turns held into unknown; the next link\'s snapshot settles it', async (_how, end, after) => {
     const h = host();
     const [a, b] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902)];
     await h.link().request('host.browserWork', { held: ['a'] });
     end(h);
-    expect([browser(a), browser(b)]).toEqual(['unknown', null]);
+    expect([browser(a), browser(b)]).toEqual([after, null]);
     await h.link().request('host.browserWork', { held: [] });
     expect([browser(a), browser(b)]).toEqual([null, null]);
   });
@@ -335,6 +338,22 @@ describe('host.browserIdle through the real wiring (P5 O17 M7, D20)', () => {
     expect(a.transport.requestsOf('end_session')).toHaveLength(1); // released at once, its clock not restarted
   });
 
+  it('a declaring client that does not list host.browserWork (a rolled-back mawsd) gets today\'s release: no entry, no ask, released when idle', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2026-11-02T10:00:00.000Z'));
+    const h = host();
+    const older = h.link(OLDER_MAWSD);
+    const a = await launch(h.table, 'a');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(browser(a)).toBeNull();
+    expect(await older.request('host.browserWork', { held: ['a'] })).toMatchObject({ ok: false, error: { code: 'internal' } }); // not one it tells
+    expect(browser(a)).toBeNull();
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(older.events('host.browserIdle')).toEqual([]);
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+  });
+
   it('no client that did not declare host.attachment is told', async () => {
     const { h, a } = await idleHost();
     const main = h.link(MAIN);
@@ -406,6 +425,19 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     const session = h.table.get(ID)!;
     return { session, reserved, published, end: async () => { transports[0]!.exit(0); await session.exited; } };
   }
+
+  it('adoption with no link reads unknown; a client that will tell no browser work (a rolled-back mawsd, main\'s own link) clears it at its connection, and an adoption under it starts clear', async () => {
+    const h = host();
+    const row = await adopting(h);
+    expect(row.reserved).toBe('unknown');
+    h.link(OLDER_MAWSD);
+    expect(row.session.status().work?.holds).toBeUndefined();
+    expect(row.published.at(-1)).toBeNull();
+    await row.end();
+    const again = await adopting(h);
+    expect(again.reserved).toBeNull();
+    expect(again.session.status().work?.holds).toBeUndefined();
+  });
 
   it('adoption, then the snapshot: unknown from the reservation, never empty in between, until the first snapshot settles it', async () => {
     const h = host();
