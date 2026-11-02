@@ -30,7 +30,8 @@ const BEFORE_HOLDER = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABIL
 const BACKOFF = [30, 60, 90] as const;
 
 // P5 O16 M3c fix wave 2: an engine host's status as it pushes it (host.supervisorStatus), for a fake to emit
-const supervisorStatus = (pid: number, over: Record<string, unknown> = {}) => ({ mode: 'detached', pid, startedAt: 't', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, ...over });
+// (the panel fix: with the start the fake serving that pid declares, as a real host's status carries its welcome's)
+const supervisorStatus = (pid: number, over: Record<string, unknown> = {}) => ({ mode: 'detached', pid, startedAt: fakes.findLast((fake) => fake.pid === pid)?.startedAt ?? 't', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, ...over });
 const holding = (pid: number, inFlight: number | undefined, tool?: string) => ({ ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'none', ...(inFlight !== undefined && { inFlight }), ...(tool !== undefined && { tool }) } });
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -641,6 +642,60 @@ describe('the detached transport: early exits and the crash ladder', () => {
     };
     await supervisor.start();
     expect(state()).toMatchObject({ state: 'ready', pid: candidates[1].pid, restarts: 1 });
+  });
+});
+
+// P5 O16 panel fix (scalpel-4#5, scalpel-4#6): a process is its pid and the start its welcome declares, so a later
+// process that reuses a gone one's pid is another process: the gone one's completions and its handover marker never
+// reach it
+describe('the detached transport: a reused pid is another process', () => {
+  // The next spawn starts a fake at `pid` (the old process's, now another's), with `register` served
+  function spawnReusing(pid: number, register?: FakeSupervisorOptions['register']): void {
+    spawn.mockImplementationOnce((_command: string, args: string[], options: SpawnOptions) => {
+      processes.alive.set(pid, `reused-${pid}`);
+      const candidate = new FakeCandidate(pid, args, options, processes);
+      candidates.push(candidate);
+      queueMicrotask(() => void startFake({ pid, register }));
+      return candidate;
+    });
+  }
+  const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+
+  it('a completion of a crashed process is refused, never sent to the process that reuses its pid', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    const answered: unknown[] = [];
+    spawnReusing(old.pid, (on) => on('maws.pane.answer', async (input) => (answered.push(input), { outcome: 'delivered' as const })));
+    await old.die(); // a crash: its pid dead, then reused by the successor
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    expect(state().pid).toBe(old.pid);
+    const result = await supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    expect(result).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(answered).toEqual([]);
+  });
+
+  it('a handover marker left by a process that exited when idle never makes the crash of the process that reuses its pid planned', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(supervisor.exitSupervisor('idle')).toBe(true);
+    const detached = { ...supervisorStatus(old.pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 0, detached: true } };
+    await until(() => old.emit('host.supervisorStatus', detached as never));
+    await until(() => emit.mock.calls.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { holder?: { detached?: boolean } }).holder?.detached === true));
+    spawnReusing(old.pid);
+    await old.die(); // its idle exit, as asked: deliberate, and its successor reuses its pid
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    const reused = fakes[1]!;
+    expect([reused.pid, state().restarts, supervisor.facts('engine-host').lastExit]).toEqual([old.pid, 0, null]);
+    await reused.die(); // a crash, with no status of its own heard
+    await until(() => state().state === 'ready' && fakes.length === 3);
+    expect(state().restarts).toBe(1);
+    expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
+    expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
   });
 });
 

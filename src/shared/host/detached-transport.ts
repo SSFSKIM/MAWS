@@ -203,6 +203,7 @@ export type DetachedFailure = 'held_lock' | 'other';
 // capabilities).
 export interface Welcomed {
   pid: number;
+  startedAt: string; // P5 O16 panel fix: the start the host declares (its lock's), which with `pid` names this process
   liveSessions: number;
   rows: number;
   peer: WirePeer;
@@ -1161,15 +1162,15 @@ function parseAnswer(line: string, form: Form, major: number, logDropped: (messa
     const v2 = readTolerant(ServerWelcomeV2Schema, data);
     if (v2.ok) {
       logDropped('socket v2.welcome', v2.dropped);
-      const { pid, liveSessions, rows, protocol, buildId } = v2.value;
-      return welcome({ pid, liveSessions, rows, peer: { major: protocol, minor: 0, build: buildId, capabilities: [] } });
+      const { pid, startedAt, liveSessions, rows, protocol, buildId } = v2.value;
+      return welcome({ pid, startedAt, liveSessions, rows, peer: { major: protocol, minor: 0, build: buildId, capabilities: [] } });
     }
   } else {
     const current = readTolerant(ServerWelcomeSchema, data);
     if (current.ok) {
       logDropped('socket welcome', current.dropped);
-      const { pid, liveSessions, rows, protocol, minor, build, capabilities } = current.value;
-      return welcome({ pid, liveSessions, rows, peer: { major: protocol, minor, build, capabilities } });
+      const { pid, startedAt, liveSessions, rows, protocol, minor, build, capabilities } = current.value;
+      return welcome({ pid, startedAt, liveSessions, rows, peer: { major: protocol, minor, build, capabilities } });
     }
   }
   const refuse = readTolerant(ServerRefuseSchema, data);

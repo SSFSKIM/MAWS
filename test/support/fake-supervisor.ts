@@ -96,6 +96,7 @@ export class FakeSupervisor {
   counts: { liveSessions: number; rows: number };
   private server: Server | null = null;
   private clients: SocketClients | null = null;
+  private started = ''; // P5 O16 panel fix: the start its lock records and its welcome and status declare
 
   constructor(
     private readonly profile: FakeProfile,
@@ -110,6 +111,11 @@ export class FakeSupervisor {
     return this.options.pid;
   }
 
+  // P5 O16 panel fix: the start this incarnation declares (its lock's `startedAt`, in its welcome); its statuses carry it
+  get startedAt(): string {
+    return this.started;
+  }
+
   // lock, token, listen: as the detached entry does (a leftover socket file is unlinked first)
   async start(): Promise<this> {
     const { dir, socketPath } = this.profile;
@@ -122,6 +128,7 @@ export class FakeSupervisor {
       socketPath,
       startedAt: new Date().toISOString(),
     };
+    this.started = lock.startedAt;
     writeFileSync(join(dir, SUPERVISOR_FILES.lock), JSON.stringify(lock));
     writeFileSync(join(dir, SUPERVISOR_FILES.token), this.token);
     try {

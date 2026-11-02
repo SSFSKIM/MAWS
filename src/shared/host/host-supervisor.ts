@@ -43,7 +43,7 @@ import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
 import { createDetachedTransport, HANDOVER_GRACE_MS, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
-import { CompletionRoutes, type CompletionRoute } from './completion-routes'; // P5 O16 M3b fix wave 3
+import { CompletionRoutes, pidOfProcess, processKey, type CompletionRoute, type ProcessKey } from './completion-routes'; // P5 O16 M3b fix wave 3
 import { DocumentsClosedSchema, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
 
 // The hosts a client reaches, and how a command is sent to one (main's router re-exports both).
@@ -260,7 +260,7 @@ interface Pending {
   client: ClientRef | null; // P5 O1 M5: the asker a `machine` request names, whose end the link relays once it is sent
   forwardedClient: string | null; // P5 O2 M3: a forwarded request's `client`, kept off a protocol-2 link
   forwardedRef: ClientRef | null; // P5 O7 M2: that client as a ref, whose end the link relays once the request carried it
-  issuer: number | null; // P5 O16 M3b fix wave 3: a held completion's raising pid: sent to that process alone, failed once it is gone (fix wave 3d: a held stop-all's draining pid, likewise)
+  issuer: ProcessKey | null; // P5 O16 M3b fix wave 3: a held completion's raising process (the panel fix: its incarnation, not its pid): sent to that process alone, failed once it is gone (fix wave 3d: a held stop-all's draining pid, likewise)
 }
 
 // E10: the port a host is spoken to through, a utility host's channel or the detached transport's socket link.
@@ -281,7 +281,7 @@ interface Host {
   draining: MainPort | null;
   // P5 O16 M3b fix waves 2 and 3: which process raised each request a DRAIN_REPLIES name answers, and each process's links
   routes: CompletionRoutes<MainPort>;
-  closedPid: number | null; // the process whose link closed last, for the loss that follows
+  closedPid: ProcessKey | null; // the process whose link closed last, for the loss that follows (the panel fix: its incarnation)
   pending: Map<string, Pending>;
   exits: number[]; // times of unexpected exits inside the crash window
   restartTimer: ReturnType<typeof setTimeout> | null;
@@ -335,12 +335,16 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // P5 O16 M3c fix wave 1: the engine host pids whose last status said their handover completed, heard on whichever link
   // carries the host's events (on the daemon shape, machine.sock); a close of one is that handover's, not a crash. Fix
   // wave 2 (the re-review's item 6): on the evidence (`holder.detached`: the drain settled and every row detached, said
-  // before the exit), never on the intent (`draining`), so a host killed mid-drain is a crash
-  const handedOver = new Set<number>();
+  // before the exit), never on the intent (`draining`), so a host killed mid-drain is a crash. The panel fix (scalpel-4#6):
+  // by process incarnation (the status's pid and `startedAt`, as its welcome declared them), so a later process reusing
+  // the pid never inherits the mark; dropped once its process is gone (processGone) or another is welcomed (connected)
+  const handedOver = new Set<ProcessKey>();
   const noteHandover = (status: SupervisorStatus) => {
-    if (status.holder?.detached === true) handedOver.add(status.pid);
-    else handedOver.delete(status.pid);
+    const incarnation = processKey(status.pid, status.startedAt);
+    if (status.holder?.detached === true) handedOver.add(incarnation);
+    else handedOver.delete(incarnation);
   };
+  let utilitySpawns = 0; // the panel fix: a utility host's incarnation, which declares no start of its own
   const hosts: Partial<Record<HostOwner, Host>> = {};
   // P5 O1 M5: for the calls that name a host this process runs
   const hostOf = (owner: HostOwner): Host => {
@@ -470,7 +474,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
     child.on('spawn', () => {
       if (host.utility !== link) return;
-      if (child.pid !== undefined) opened(host, port, child.pid); // P5 O16 M3b fix wave 3
+      if (child.pid !== undefined) opened(host, port, processKey(child.pid, `utility-${++utilitySpawns}`)); // P5 O16 M3b fix wave 3
       transition(host, { state: 'ready', pid: child.pid ?? null, restarts: host.state.restarts });
       host.settleFirstLaunch();
       if (external(host)) readyIfAsked(host); // P5 O2 M3
@@ -631,17 +635,21 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     pending.resolve({ ok: false, error: ipcError('host_unavailable', `the ${host.owner} that raised this request is gone; ${pending.name} not sent`) });
   }
 
-  function processGone(host: Host, pids: readonly number[]): void {
-    for (const pid of pids) host.routes.gone(pid);
-    for (const [id, pending] of host.pending) if (!pending.sent && pending.issuer !== null && pids.includes(pending.issuer)) failCompletion(host, id, pending);
+  function processGone(host: Host, incarnations: readonly ProcessKey[]): void {
+    for (const incarnation of incarnations) {
+      host.routes.gone(incarnation);
+      handedOver.delete(incarnation); // the panel fix: a gone process's handover mark goes with it
+    }
+    for (const [id, pending] of host.pending) if (!pending.sent && pending.issuer !== null && incarnations.includes(pending.issuer)) failCompletion(host, id, pending);
   }
 
   // A link to `pid` opened (fix wave 3c: whether it serves or meets the host draining): every other process reconnecting
-  // is gone, and the completions held for `pid` go out on it, so a completion follows its process, not a socket (D60)
-  function opened(host: Host, link: MainPort, pid: number): void {
+  // is gone, and the completions held for `incarnation` go out on it, so a completion follows its process, not a socket
+  // (D60)
+  function opened(host: Host, link: MainPort, incarnation: ProcessKey): void {
     host.closedPid = null;
-    processGone(host, host.routes.opened(link, pid));
-    for (const pending of host.pending.values()) if (!pending.sent && pending.issuer === pid) send(host, pending, link);
+    processGone(host, host.routes.opened(link, incarnation));
+    for (const pending of host.pending.values()) if (!pending.sent && pending.issuer === incarnation) send(host, pending, link);
   }
   // P5 O16 M3b fix wave 3 end
 
@@ -742,13 +750,16 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // fix wave 3: a process still reconnecting is gone, its completions failed; 3c: what was held for `pid` goes out on
         // the link (after the peer and the gone relay, which `send` reads); 3d: on a link met draining, once it drains,
         // so a held stop-all marks that drain's close (D61(4)) rather than an exit now
+        // the panel fix (scalpel-4#6): a welcome names its process; a handover mark of any other one is stale from here
+        const incarnation = processKey(welcome.pid, welcome.startedAt);
+        for (const marked of handedOver) if (marked !== incarnation) handedOver.delete(marked);
         if (facts?.draining && host.transport) {
           host.settleFirstLaunch();
           settle(host); // a recycle reached it
           takeBack(host, welcome.pid, facts.draining);
-          return opened(host, link, welcome.pid);
+          return opened(host, link, incarnation);
         }
-        opened(host, link, welcome.pid);
+        opened(host, link, incarnation);
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
         sendHeld(host);
         host.settleFirstLaunch();
@@ -780,6 +791,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // fix wave 3: the closed link's process is gone unless the loss was quiet (it lives; reconnected to), before
         // anything below reads what is held
         const closed = drained ?? host.closedPid;
+        // the panel fix (scalpel-4#6): the closed process's word that it handed over, read (and taken) before its end
+        // drops it, whichever branch below reads the loss; a quiet loss keeps it (the same process, reconnected to)
+        const saidHandedOver = loss !== 'quiet' && closed !== null && handedOver.delete(closed);
         if (loss !== 'quiet' && closed !== null) processGone(host, [closed]);
         // P5 O16 M3b (D40): a handover's close starts the successor, whatever is held (a deferral's caller may be gone).
         // M3c fix wave 3: at once when it left as planned (it said every row detached, a stop-all written to its drain
@@ -789,7 +803,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // signal or a failure code, known for a process this run started), as before the evidence. A close whose
         // process lives on is no `replace` (the transport reports it quiet: reconnected to, taken back; fix wave 3b)
         if (typeof loss === 'object' && 'replace' in loss) {
-          const detached = closed !== null && handedOver.delete(closed);
+          const detached = saidHandedOver;
           // fix wave 3b: an armed idle exit, like an unheard link, makes a clean exit planned, never a proven abnormal one
           const { code, signal } = loss.replace;
           const abnormal = signal !== null || (code !== null && code !== 0);
@@ -808,8 +822,8 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (loss === 'deliberate') return deliberate();
         // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
         // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
-        if (closed !== null && handedOver.delete(closed)) {
-          console.log(`[hosts] ${host.owner} pid ${closed} left after handing its sessions over; starting its successor`);
+        if (closed !== null && saidHandedOver) {
+          console.log(`[hosts] ${host.owner} pid ${pidOfProcess(closed)} left after handing its sessions over; starting its successor`);
           failSent(host, 'handed its sessions over');
           return launch(host);
         }
