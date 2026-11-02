@@ -838,6 +838,7 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
   test.setTimeout(600_000); // P5 O3-D M6: acceptance 9's two quits and reattaches; P5 O4 M4: a refresh at each, 200 s at most
   const { here, peer, newer, older } = builds();
   const gap = here === newer ? { newer, older } : null;
+  // a short root: the browser reading with no app (O17 §A) needs the daemon's cua socket for the session to fit 103 bytes
   await withScratch('xb-daemon-update', async (s) => {
     const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
     const said = await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' }, {
@@ -852,7 +853,7 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
       ],
     });
     record(said);
-  });
+  }, { shortRoot: true });
 });
 
 // P5 O4 M4 (D11's downgrade residual): before the crossing, a launch of this build seals a grant as a pre-O4 build kept it
@@ -1285,7 +1286,7 @@ test('(update, render) this build’s app on the peer’s unit mawsd, which list
 // app attached `mawsd` relays it to the app's own socket (O5 M5), the app makes the tab, the render host starts nothing,
 // and the engine host holds no browser work for it (an app's tabs are never browser work: they keep today's release). At
 // the app's quit the session reads this build's headless route. The app's cua sockets (`<profile>/browser/cua`, with no
-// fallback directory) fit sun_path only under a short root, so the scratch is made under /tmp. Run on the crossing the
+// fallback directory) fit sun_path only under a short root, so the scratch is a short one under /tmp (removed with it). Run on the crossing the
 // landing's gate stages (the peer at O16's merge, both listing host.holder): the handover crossing calls no `awayOnKept`,
 // so this cell stands on its own rather than in it.
 test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd: the agent’s browser relayed to the app’s own tabs, which hold no browser work; at the app’s quit the session reads this build’s headless route', async () => {
@@ -1294,15 +1295,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
   test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
   test.setTimeout(300_000);
   const pages = await startHeadlessPages();
-  const tmp = process.env.TMPDIR;
-  const restore = () => {
-    if (tmp === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = tmp;
-  };
-  process.env.TMPDIR = '/tmp'; // the scratch's root alone (withScratch makes it first)
   try {
     await withScratch('xb-o17-app', async (s) => {
-      restore();
       const bin = writeCuaEngine(join(s.root, 'cua-engine'), { ready: true, retry: true, control: true, lifeMs: 600_000 });
       await withUnit(s, here, 'xb-o17-app', async (unit) => {
         const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
@@ -1355,9 +1349,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
         }
         record(said);
       }, { MAWS_E2E_ENGINE_BIN: bin });
-    });
+    }, { shortRoot: true });
   } finally {
-    restore();
     await pages.close();
   }
 });

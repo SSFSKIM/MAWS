@@ -175,7 +175,10 @@ async function sequence({ url }) {
   return { tabId, windowId: window?.id ?? null, screenshotBytes: Buffer.from(String(shot?.data ?? ''), 'base64').length, steps };
 }
 
-// Another socket dialled from this process: what came first, a hello or the close
+// Another socket dialled from this process: what came first, a hello or the close, within PROBE_MS. A peer the socket
+// does not yet know waits for its session's root (PEER_ROOT_WAIT_MS, 3 s, src/main/browser/cua/peer.ts) before its
+// refusal, as every peer of the render host's sockets does, which no engine root names: the window outlasts that wait
+const PROBE_MS = 10_000;
 function probe({ path }) {
   return new Promise((done) => {
     const socket = connect(path);
@@ -185,7 +188,7 @@ function probe({ path }) {
       socket.destroy();
       done(outcome);
     };
-    const timer = setTimeout(() => settle({ hello: null, closed: false }), 3_000);
+    const timer = setTimeout(() => settle({ hello: null, closed: false }), PROBE_MS);
     socket.on('error', () => {});
     socket.on('close', () => settle({ hello: null, closed: true }));
     socket.on('data', (chunk) => {

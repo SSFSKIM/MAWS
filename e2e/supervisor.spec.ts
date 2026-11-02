@@ -1665,6 +1665,8 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const pages = await startHeadlessPages();
   try {
+    // a short root: the private mawsd's cua socket for each session, and each connector's control socket, fit 103 bytes
+    // only under one (a scratch under the runner's TMPDIR gives the launch no CUA_BROWSER_BACKENDS: the stub exits 64)
     await withScratch('o17-idle', async (s) => {
       const repos = [s.repo, join(s.root, 'repo2')];
       mkdirSync(repos[1]!, { recursive: true });
@@ -1762,7 +1764,7 @@ test('(o17) the idle close: a session holding a headless tab with no turn and no
       } finally {
         link.close();
       }
-    });
+    }, { shortRoot: true });
   } finally {
     await pages.close();
   }

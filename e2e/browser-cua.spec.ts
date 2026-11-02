@@ -987,6 +987,14 @@ const hostLogOf = (scene: HeadlessScene) => {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 };
 const linesOf = (text: string, line: string) => text.split('\n').filter((l) => l.includes(line)).length;
+const engineGone = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
 const idleAsked = (id: AppSessionId) => `idle release of ${id}: due, held by its headless browser work alone; its tabs are asked to close`;
 const idleReleased = (id: AppSessionId) => `idle release of ${id}: idle for ${SCENE6_IDLE_MS} ms with no interest held`;
 
@@ -1072,7 +1080,7 @@ test('O17 scene 6, adoption then snapshot: the successor adopts the session befo
 
     rmSync(s.hold);
     await expect.poll(() => hostLogOf(scene), { timeout: 30_000, message: 'the snapshots apply in order (held, then none): released as idle' }).toContain(idleReleased(id));
-    await expect.poll(async () => (await scene.sessionStatus(id)).process, { timeout: 20_000 }).toBe('exited');
+    await expect.poll(() => engineGone(engine), { timeout: 20_000, message: 'the released engine ended (session.status of the released adopted row answers unknown session, as CI run 41457361710 read it)' }).toBe(true);
     expect(linesOf(hostLogOf(scene), FIRST_SNAPSHOT_HOLDING_ONE), 'the successor’s first snapshot named the session').toBe(1);
     s.cua.close();
   } finally {
@@ -1106,7 +1114,7 @@ test('O17 scene 6, snapshot then adoption: mawsd’s first snapshot applies on t
     await expect.poll(() => hostLogOf(scene), { timeout: SCENE6_BOUND_MS, message: 'at its idle time the engine host asks for its tabs' }).toContain(idleAsked(id));
     await expect.poll(scene.mawsdLog, { message: 'mawsd closes its tab' }).toContain(`[browser] ${id}: headless → cold (idle for the machine’s whole idle time)`);
     await expect.poll(() => hostLogOf(scene), { timeout: 30_000, message: 'the hold cleared: released as idle at once' }).toContain(idleReleased(id));
-    await expect.poll(async () => (await scene.sessionStatus(id)).process, { timeout: 20_000 }).toBe('exited');
+    await expect.poll(() => engineGone(engine), { timeout: 20_000, message: 'the released engine ended (session.status of the released adopted row answers unknown session, as CI run 41457361710 read it)' }).toBe(true);
     expect((await scene.render()).browserTabs ?? 0).toBe(0);
     s.cua.close();
   } finally {
