@@ -145,6 +145,11 @@
 | `createBrowserFeed`, `BrowserFeedService`, `BrowserFeedOptions`; `DaemonServices.browser`; `FrontBrowser.frame`, `.ended` and `.gone`; `TabEngineDeps.frames` | `src/mawsd/browser-feed.ts`, `src/mawsd/front.ts`, the tab engine | O17 M6 | O17 M8 and M9 |
 | `session.search`'s optional `sessions` input (at most 10,000, applied in SQL before the 50-hit limit) and its `incomplete: true` answer; the `attention` feed (`src/endpoint/attention-feed.ts`, owned by `PlaneFeeds`); the `each-session` target rule and `attention.list` | machine wire (WIRE 19) | O7 M6 | main's lane B, O10 (desk Web, paused) |
 | `remote.attention {machine, items, greyed}` (main-owned event); `RemoteAttention.fed(machine)` (`src/main/lane-b/remote-attention.ts`), the one predicate for who speaks for a machine's sessions | renderer event and main member | O7 M6 | the renderer's attention store, the notifier, O7 M5b |
+| `host.artifactOp` (an engine-host command: the claim without `context`, running only `ARTIFACT_OP_COMMANDS`, the 13 artifact writes, under `host.op`'s ledger; `host.opQuery` answers either; an older host answers `unknown_command`) and `keepArtifactWrites`, its lookup over the writes wherever the host registers them | engine-host command (WIRE 20) | O7 M5a | the endpoint (`src/endpoint/actions.ts`), O16 (the engine host's ops) |
+| the `artifact` target rule (`src/endpoint/artifacts.ts`, `ArtifactRanks`); the session-safe projection (`src/endpoint/session-safe.ts`); `WITHHELD_SESSION` (`apps/org-protocol/src/withheld.ts`) | endpoint rule and org-protocol constant | O7 M5a | O10 (the endpoint), O12, the renderer |
+| the `artifacts` feed behind `rl2.artifacts`; bytes behind `rl2.bytes` (`RL2_PROTOCOL` 1.4); `library.list` on the `each-session` target; `library.read`'s `export` form and its stored read of either byte kind | RL2 capability and machine wire | O7 M5a | main's lane B, O10, desk Web (paused) |
+| `Actions.#again` and the standing check after the last shared await, before the executor branches; `LaneA.hand`'s `stands` and `DECISION_MOVED` | endpoint members (O10's code, carried at the desk track's choice) | O7 M5a | O10, O12 M11 |
+| calls over the link at their command's budget (`COMMAND_BUDGETS_MS` plus one second); `ArtifactMachines`; `remote.openCopy`; `artifacts.resync` | main members and invoke | O7 M5a | the renderer, O7 M5b |
 
 ## Shared files and who goes first
 
@@ -231,3 +236,4 @@
 - 2026-11-01, the architect: O7 M5's re-plan (PR #434) adds the read open's stream row and refusal word, which O17 M9 builds on, and a park need in `mawsd`'s engine requests; the `artifacts.export` row's consumers are corrected (`delivery.send`'s retag is O7 M5c's).
 - 2026-11-01, the architect: O17 M6's names (the screencast's shared schema, main's producer, `mawsd`'s feed) and the endpoint seam's type pin as a shared file.
 - 2026-11-01, the architect: O7 M6's names (the search's sessions input, the attention feed, remote.attention and fed) and the shared address-paths.json row, at its landing (PR #439).
+- 2026-11-02, the architect: O7 M5a landed (PR #441, P5 Decision Log 199); its names added above.
