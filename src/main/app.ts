@@ -364,6 +364,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
     register: registerMainHandler,
     dispatchLocal,
+    budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in)

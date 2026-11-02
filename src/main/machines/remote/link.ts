@@ -49,6 +49,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
+import type { CommandBudgets } from '../budgets';
 import type { LinkState, MachineLink } from '../manager';
 import { ActTable, type ActHandle, type ActRequest } from './acts';
 import { peerLists } from './capabilities';
@@ -85,6 +86,8 @@ export interface RemoteLink extends MachineLink {
   ended(): 'removed' | 'closed' | null;
   /** The latest `caps`, null before the first. */
   caps(): DeviceCaps | null;
+  /** P5 O7 M5a: each command's budget, which `dispatchOverLink` gives a call of it (../budgets.ts); none by default. */
+  readonly budgets?: CommandBudgets;
   onCaps(listener: (caps: DeviceCaps) => void): () => void;
   /** The current channel's `h2` capabilities (capabilities.ts); null while no channel is current (P5 O7 M2). */
   peerCapabilities(): readonly string[] | null;
@@ -123,6 +126,8 @@ export interface RemoteLinkDeps {
   /** connectChannel(dial, signedIn.identity, signedIn.view, { machine }) by default; link.test.ts runs the state machine on an in-memory Channel. */
   handshake?(dial: () => Promise<ByteDuplex>, signedIn: SignedIn, machine: MachineRef): Promise<Channel>;
   timing?: Partial<RemoteTiming>;
+  /** P5 O7 M5a: the services' COMMAND_BUDGETS_MS, from the composition root (../budgets.ts). */
+  budgets?: CommandBudgets;
   now?(): number;
   /** The jitter, for tests. */
   random?(): number;
@@ -728,6 +733,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     rename(next: string) {
       name = next;
     },
+    ...(deps.budgets !== undefined && { budgets: deps.budgets }),
     state: () => REPORTED[state],
     carrier: () => (isCurrent() ? current!.carrier : null),
     refusal: () => refusal,
