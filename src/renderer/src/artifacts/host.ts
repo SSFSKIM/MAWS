@@ -42,6 +42,11 @@ import { createConnectorHost } from './connectors';
 import { artifactMachineOf } from './machines';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
+/**
+ * P5 O7 M5b review fix 1: a connection whose first frame (the host's step 1, sent at attach) hasn't come by then is
+ * dropped into the reopen path: its port closed before the replica listened (a close said early is never said again).
+ */
+export const FIRST_FRAME_MS = 10_000;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
 
 // A command the store refused (P3-H H4: defined in ./command-error.ts, shared with the connector family).
@@ -125,6 +130,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private generation = 0; // bumped when the host leaves `ready`: an open begun before belongs to a dead host
     private attempt = 0; // reconnects since the last live connection
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private firstFrame: ReturnType<typeof setTimeout> | null = null; // review fix 1: the connection's first frame awaited
     private waitingForHost = false; // the backoff ran out: the next `ready` re-opens
     private readonly listeners = new Set<(state: DocumentState) => void>();
     private settleFirst: { resolve: () => void; reject: (error: unknown) => void } | null = null;
@@ -179,6 +185,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.closed = true;
       if (this.timer !== null) clearTimeout(this.timer);
       this.timer = null;
+      this.stopFirstFrame();
       replicas.delete(this);
       this.provider.destroy();
       this.listeners.clear();
@@ -199,6 +206,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
         if (stale()) return port.close();
         this.openedReadOnly = readOnly === true; // P5 O7 M5b: before the connect, so its first state says it
         this.provider.connect(port);
+        this.awaitFirstFrame();
         if (this.machine() === null) void this.readStatus(); // this Mac's store; another machine's read-only is its open's
       } catch (error) {
         const refusal = error instanceof ArtifactCommandError ? artifactRefusalOf(error.error) : null;
@@ -231,7 +239,24 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       else this.waitingForHost = true;
     }
 
+    private awaitFirstFrame(): void {
+      this.stopFirstFrame();
+      if (this.provider.state.phase !== 'handshake') return;
+      this.firstFrame = setTimeout(() => {
+        this.firstFrame = null;
+        if (this.closed || this.provider.state.phase !== 'handshake') return;
+        log(`${this.artifactId}: no frame on its port within ${FIRST_FRAME_MS / 1000} s; opening it again`);
+        this.provider.disconnect(); // the change listener schedules the reopen
+      }, FIRST_FRAME_MS);
+    }
+
+    private stopFirstFrame(): void {
+      if (this.firstFrame !== null) clearTimeout(this.firstFrame);
+      this.firstFrame = null;
+    }
+
     private changed(state: SaveState): void {
+      if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {
         this.attempt = 0;
         this.settleFirst?.resolve();

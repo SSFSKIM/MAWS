@@ -124,6 +124,8 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
     mode: Mode = 'edit';
     #stream: RemoteStream | null = null;
     #ended = false;
+    /** Why it ended, once it has. */
+    endedBy: string | null = null;
     #received = 0; // the machine's next byte offset
     #dropped = 0; // frames a `view` port wrote, not carried
     readonly #frames = new LengthPrefixed(DOCUMENT_FRAME_MAX);
@@ -183,6 +185,7 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
     end(reason: string): void {
       if (this.#ended) return;
       this.#ended = true;
+      this.endedBy = reason;
       bridges.delete(this);
       this.#offGone();
       this.#settle?.(reason === 'gone' ? 'gone' : 'closed');
@@ -227,6 +230,8 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
       const deadline = Date.now() + openMs;
       let outcome = await bridge.attempt('edit', doc, deadline);
       if (outcome === 'grade' || outcome === 'read-only') outcome = await bridge.attempt('view', doc, deadline);
+      // Review fix 1: a stream opened and already ended (a `host` close in the turn it opened) is no open: no port goes
+      if (outcome === 'opened' && bridge.endedBy !== null) outcome = bridge.endedBy;
       const page = pageOf(client);
       if (outcome === 'opened' && (!page || page.isDestroyed())) outcome = 'gone';
       if (outcome !== 'opened') {

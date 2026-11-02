@@ -11,7 +11,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { remoteSessionState } from '../lane-b/test-support/remote-session';
 import { savedOf } from '../tools/document/header';
-import { createArtifactHost, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
+import { createArtifactHost, FIRST_FRAME_MS, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
 import { recordArtifactMachine, resetArtifactMachines } from './machines';
 import { windowDocPorts } from './window-ports';
 
@@ -102,7 +102,8 @@ type Answer = CommandResult<CommandName> | (() => CommandResult<CommandName>);
 // The bridge and main: `artifacts.open` hands the window a fresh port attached to the host, unless the test says the
 // host is down; other commands answer what the test set.
 // `holdPorts`: a port the window takes arrives only when the test releases it (`releasePort`), as a slow route would.
-function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
+function harness(options: { host?: TestHost; holdPorts?: boolean; deadPorts?: number } = {}) {
+  let deadPorts = options.deadPorts ?? 0; // review fix 1: opens answered with a port nothing speaks on (its close never said)
   const host = options.host ?? new TestHost();
   let channel = 0;
   let hostUp = true;
@@ -130,7 +131,8 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
         const answer = answers.get('artifacts.open');
         if (answer) return typeof answer === 'function' ? answer() : answer;
         const [windowEnd, hostEnd] = AsyncPort.pair();
-        host.attach(hostEnd);
+        if (deadPorts > 0) deadPorts -= 1;
+        else host.attach(hostEnd);
         channel += 1;
         waiting.set(channel, windowEnd);
         return { ok: true, value: { channel, ...(readOnly && { readOnly: true }) } };
@@ -369,6 +371,34 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     h.artifacts.openExternal!('file:///etc/hosts'); // a rejection left unhandled would fail the run
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.calls.filter((c) => c.name === 'layout.openExternal').map((c) => c.input)).toEqual([{ url: 'https://example.com/brief' }, { url: 'file:///etc/hosts' }]);
+  });
+});
+
+// Review fix 1 (M5b4): a port whose close came before anyone listened (cached early, or closed as it was posted) never
+// leaves a replica in its handshake for ever: the route refuses a port it saw close, and a connection whose first frame
+// doesn't come within FIRST_FRAME_MS is dropped into the reopen path.
+describe('a port that is dead on arrival', () => {
+  it('a replica whose port says nothing reopens after FIRST_FRAME_MS and syncs on the next', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness({ deadPorts: 1 });
+    const opening = h.artifacts.open(ARTIFACT);
+    await settle();
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(1);
+    await settle(FIRST_FRAME_MS + RECONNECT_BACKOFF_MS[0]);
+    const handle = await opening;
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true });
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+    handle.close();
+  });
+
+  it('the window’s route refuses a port that closed before it was taken', async () => {
+    const ports = windowDocPorts(window);
+    const { port1, port2 } = new MessageChannel();
+    window.dispatchEvent(new MessageEvent('message', { data: { maws: 'doc-port', channel: 7, artifactId: ARTIFACT }, source: window, ports: [port1] }));
+    port2.close(); // main's end: the bridge ended its stream as the port was posted
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(ports.take(7, 50)).rejects.toThrow(/closed/);
+    ports.dispose();
   });
 });
 

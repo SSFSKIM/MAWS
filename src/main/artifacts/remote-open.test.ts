@@ -436,6 +436,16 @@ describe('every path ends', () => {
     expect(port.closed).toBe(true);
   });
 
+  // Review fix 1: a stream that opens and ends before the open's answer is made posts no port nobody stands behind
+  it('a stream the machine closes `host` right after it opened is no successful open: no port posted, a transient refusal', async () => {
+    const s = scene();
+    const opening = s.open();
+    const open = await s.machine.open(0);
+    s.machine.accept(open).close('host'); // in the same turn as its opening: before the open's continuation runs
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(s.window.postMessage).not.toHaveBeenCalled();
+  });
+
   it('a window gone while its open waited is answered, the stream closed, nothing posted', async () => {
     const s = scene();
     const opening = s.open();
