@@ -174,6 +174,44 @@ describe('host.op', () => {
   });
 });
 
+// P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): an engine host leaving (a handover's exit, any
+// exit order) waits, within the exit order's own bound, for the runs claimed so far, so a run in flight when the rows
+// froze keeps its result in this host's ledger before the process exits; a run that outlasts the bound is left open,
+// and the successor, which reopens the ledger with O7 M4's `orphanAtOpen`, answers it `expired` and runs nothing.
+describe('the runs in flight when the engine host leaves', () => {
+  const lines = () => readFileSync(join(dir, 'ops.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { opId: string; result?: unknown });
+
+  it('settles once each run claimed so far has kept its result on disk', async () => {
+    let finish!: () => void;
+    const h = ops({ handler: (name) => (name === 'session.send' ? async () => (await new Promise<void>((resolve) => (finish = resolve)), { messageUuid: null, disposition: 'queued', queueId: 'q1' }) : undefined) });
+    const answer = h.op(op(), CTX);
+    let settled = false;
+    const leaving = h.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled, 'the exit waits for the run').toBe(false);
+    expect(lines().filter((line) => 'result' in line), 'nothing kept yet').toEqual([]);
+    finish();
+    await leaving;
+    expect(lines().filter((line) => 'result' in line), 'the result on disk before the exit goes on').toEqual([{ opId: 'op-000000000000001', result: { ok: true, value: { messageUuid: null, disposition: 'queued', queueId: 'q1' } } }]);
+    expect(await answer).toMatchObject({ state: 'done' });
+    await h.settled(); // nothing in flight: at once
+  });
+
+  it('keeps a run that never ends waiting, so the exit order’s bound leaves its claim open: the successor answers it expired and runs nothing', async () => {
+    const h = ops();
+    const interrupt = op({ name: 'session.interrupt', input: { appSessionId: 'app-1', cancelEngineQueued: false } });
+    void h.op(interrupt, CTX);
+    const bound = new Promise<'bound'>((resolve) => setTimeout(() => resolve('bound'), 50));
+    expect(await Promise.race([h.settled().then(() => 'settled' as const), bound])).toBe('bound');
+    // the engine host's ledger opens with `orphanAtOpen` (ipc.ts; O7 M4's option): a claim the last host left is expired
+    const ran = vi.fn(async () => undefined);
+    const successor = ops({ ledger: OpLedger.open(dir, 'ops.jsonl', { orphanAtOpen: true }), handler: () => ran });
+    expect(successor.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'expired' });
+    expect(await successor.op(interrupt, CTX), 'a replay is answered, never run').toEqual({ state: 'in-progress' });
+    expect(ran).not.toHaveBeenCalled();
+  });
+});
+
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with
 // no session", Interfaces §O): an artifact write names no session, so the endpoint claims it through `host.artifactOp`,
 // with no context and the artifact it resolved as the claim's `target`, which a query answers as the binding's target
@@ -193,6 +231,20 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(await ops({ ledger: OpLedger.open(dir, 'ops.jsonl') }).artifactOp(save(), CTX)).toEqual(first); // after a restart too
     expect(h.ran).toEqual([{ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }]);
     expect(h.statusReads).toEqual([]);
+  });
+
+  // P5 O16 M3c: the exit order's settle waits for an artifact write's run as for host.op's, so its claim is kept first
+  it('keeps the engine host’s exit waiting for an artifact write in flight until its result is kept', async () => {
+    let finish!: () => void;
+    const h = ops({ artifactWrite: (name) => (name === 'artifacts.saveVersion' ? async () => (await new Promise<void>((resolve) => (finish = resolve)), { versionId: 7 }) : undefined) });
+    const answer = h.artifactOp(save(), CTX);
+    let settled = false;
+    const leaving = h.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled, 'the exit waits for the artifact write').toBe(false);
+    finish();
+    await leaving;
+    expect(await answer).toEqual({ state: 'done', result: { ok: true, value: { versionId: 7 } } });
   });
 
   it('answers the claim’s target from a query, across a reopen; the orphan form too', async () => {
@@ -368,6 +420,16 @@ function engineHost() {
 }
 
 describe('through the engine host’s handlers (a replayed session)', () => {
+  // P5 O16 M3c: an engine host killed, or handed over, between a claim and its result leaves the claim with no result;
+  // its successor opens the same ledger with `orphanAtOpen`, so the claim answers `expired` and a replay runs nothing
+  it('answers a claim the last engine host left without a result expired', async () => {
+    const left = OpLedger.open(join(dir, 'supervisor'), SUPERVISOR_FILES.ops);
+    expect(left.begin('op-left-000000001', iso(Date.now()), { member: 'm-a', device: 'd-a', fingerprint: 'fp-1', target: 'app-gone', name: 'session.send', context: { launchId: 'launch-1', engineSessionId: 'eng-1' } }, () => null)).toEqual({ kind: 'claimed' });
+    const host = engineHost();
+    expect(await host.call('host.opQuery', { opId: 'op-left-000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'expired' });
+    expect(await host.call('host.op', op({ opId: 'op-left-000000001', input: { appSessionId: 'app-gone', content: 'hello' } }))).toEqual({ state: 'in-progress' });
+  });
+
   it('registers both commands; an answer is bound to its request and its context, and resealed shows one effect', async () => {
     const host = engineHost();
     expect(host.handlers.has('host.op') && host.handlers.has('host.artifactOp') && host.handlers.has('host.opQuery')).toBe(true);

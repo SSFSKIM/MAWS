@@ -25,7 +25,13 @@ export const VERSION_TIMEOUT_MS = 5_000;
 export const PROBE_BOUND_MS = SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS + 2_500;
 export const INSTALLED_LINK = '.local/bin/claude'; // under the home directory: the native installer's link
 
-export type BinaryCheck = BinaryInfo;
+// P5 O16 M2: `declaresAwaitInitialize`, host-internal (the launch line's, D48), stripped from engine.binaryInfo's answer
+export type BinaryCheck = BinaryInfo & { declaresAwaitInitialize?: boolean };
+export function binaryInfoOf(check: BinaryCheck): BinaryInfo {
+  const info: BinaryCheck = { ...check };
+  delete info.declaresAwaitInitialize;
+  return info;
+}
 
 export interface BinaryProbeDeps {
   run?: (path: string, timeoutMs: number, env: Record<string, string> | undefined) => Promise<string>; // the stdout of `<path> --version` in env (undefined: the host's own)
@@ -78,9 +84,10 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
   const env = deps.env ?? process.env;
   const versions = new Map<string, Promise<string>>(); // by real path, size and mtime; a failure is dropped
   const declarations = new Map<string, Promise<boolean>>(); // P2-C: by the same key; the scan never fails
+  const awaits = new Map<string, Promise<boolean>>(); // P5 O16 M2: --await-initialize's, the same way
   return async () => {
     const started = now();
-    const fail = (path: string, error: string): BinaryCheck => ({ path, testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error, declaresSystemPromptSnapshot: false /* P2-C */ });
+    const fail = (path: string, error: string): BinaryCheck => ({ path, testedVersion: TESTED_ENGINE_VERSION, version: null, ok: false, error, declaresSystemPromptSnapshot: false /* P2-C */, declaresAwaitInitialize: false /* P5 O16 */ });
     let captured: Promise<Record<string, string> | undefined> | undefined; // read at most once a call, only when needed
     const shellEnv = () => (captured ??= deps.captureEnv ? deps.captureEnv() : Promise.resolve(undefined));
     const candidate = await candidateOf({ home, env, shellEnv });
@@ -103,6 +110,11 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
       declarations.set(key, declares);
     }
     // P2-C end
+    let awaitsInitialize = awaits.get(key); // P5 O16 M2
+    if (!awaitsInitialize) {
+      awaitsInitialize = binaryDeclares(path, AWAIT_INITIALIZE_LITERAL);
+      awaits.set(key, awaitsInitialize);
+    }
     let pending = versions.get(key);
     if (!pending) {
       pending = shellEnv()
@@ -116,7 +128,7 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
       pending.catch(() => versions.delete(key));
     }
     try {
-      return { path, testedVersion: TESTED_ENGINE_VERSION, version: await pending, ok: true, error: null, declaresSystemPromptSnapshot: await declares /* P2-C */ };
+      return { path, testedVersion: TESTED_ENGINE_VERSION, version: await pending, ok: true, error: null, declaresSystemPromptSnapshot: await declares /* P2-C */, declaresAwaitInitialize: await awaitsInitialize /* P5 O16 */ };
     } catch (error) {
       return fail(path, `${path} --version failed: ${messageOf(error)}`);
     }
@@ -128,6 +140,9 @@ export function createBinaryProbe(deps: BinaryProbeDeps = {}): () => Promise<Bin
 // option table carries this literal (2.1.295). The scan reads in chunks, never the whole file at once, keeping the
 // literal's length less one byte between chunks so a match across a boundary is found. Unreadable reads as undeclared.
 export const SYSTEM_PROMPT_SNAPSHOT_FLAG = '--system-prompt-snapshot <on|off>';
+// P5 O16 M2 (D48): `--await-initialize`, hidden from the help too; 2.1.283 and 2.1.316 carry it in their option table and
+// in its own error lines ("Error: --await-initialize requires --input-format=stream-json.")
+export const AWAIT_INITIALIZE_LITERAL = '--await-initialize';
 const SCAN_CHUNK_BYTES = 1024 * 1024;
 
 export async function binaryDeclares(path: string, literal: string, chunkBytes = SCAN_CHUNK_BYTES): Promise<boolean> {

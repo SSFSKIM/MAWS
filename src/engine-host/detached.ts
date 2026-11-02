@@ -18,6 +18,15 @@
 // P5 O3-D M3: a client that declared `host.attachment` (`mawsd`, whose connection outlives every app) drops it at its
 // {attached: true} instead (attachment.ts), since its welcome is no owner coming back.
 //
+// P5 O16 M3b (D9, D11, D33): the exit order's shutdown detaches every hosted row (its session host and engine left
+// running for a successor to adopt) for every reason but a stop-all, SIGTERM included; a client's `exit` goes to
+// Supervision with what its hello listed and whether its link was refused (`life.exitAsked`), which tells a handover
+// request from E10's idle exit.
+//
+// P5 O16 M3 (D10): before the sweep, in the same synchronous step, the session hosts' roster is read and a row held for
+// each live host the start adopts (`adopt`), so the first welcome counts them; the sweep skips every row a live host
+// holds and stops the live children of dead ones.
+//
 // P5 O2 M3 (RL §5.11): the directory and the socket's directory are created 0700 when missing and checked before the
 // lock, the token and the listen (@shared/host/private-path): a symlink, another owner or a mode wider than 0700 stops
 // the start (exit 1, the log naming the path). One that exists is no longer corrected to 0700. Before the listen, the
@@ -30,11 +39,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { runSocketHost, START_EXIT_ABORTED, startSocketHost, type HostProcess } from '@shared/host/socket-host'; // P5 O2 M4
-import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
-import { isAlive, procStartOf, socketPathFor, SUPERVISOR_FILES } from './supervisor-files';
+import { isAlive, procStartOf, socketPathFor, SUPERVISOR_FILES, takeStopRequest } from './supervisor-files';
 import type { SupervisorExit, SupervisorIdentity } from './supervision';
 
 export { BREAK_STALE_MS, buildIdOf, socketPathFor, START_EXIT_HELD, takeLock, type LockDeps, type LockFile } from './supervisor-files';
@@ -46,15 +55,32 @@ export interface DetachedOptions {
   log: (line: string) => void;
   // How the entry reaches the engine's process table (the welcome's counts, the exit order's ladder).
   counts(): { liveSessions: number; rows: number };
-  shutdown(graceMs: number): Promise<unknown>; // engine.shutdown's body: every live row's ladder and the plugin runner
+  // engine.shutdown's body: every live row's ladder and the plugin runner; P5 O16 M3b: `detach` detaches the hosted rows
+  // instead of stopping them
+  shutdown(graceMs: number, mode: 'stop' | 'detach'): Promise<unknown>;
   life: SupervisorLife;
+  // P5 O16 M3 (D10): called in `listening`, synchronously before the sweep and before any client is answered: reads the
+  // session hosts' roster, holds a row for each live host it adopts and starts the adoptions; answers what the sweep must
+  // leave (the live hosts' rows) and take (the dead hosts' live children)
+  adopt?(): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] };
+  env?: NodeJS.ProcessEnv; // P5 O16 M3c: the e2e seam's reading (e2eWithoutHolder); process.env when absent
+}
+
+// P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): the e2e's stand-in for an engine host from before
+// O16, under MAWS_E2E=1 with MAWS_E2E_HOST_WITHOUT_HOLDER=1 alone: its welcome lists no `host.holder`, so a client of
+// another build is served until idle (E10's update) rather than handing over, and a refused link's `exit idle` reaches
+// its life as from a hello that listed none, so it waits for idle (E10's incompatible update) rather than draining
+// (D11). The scenes keep their coverage of an older host with it (e2e/supervisor.spec.ts (f) and (g)).
+export function e2eWithoutHolder(env: NodeJS.ProcessEnv): boolean {
+  return env.MAWS_E2E === '1' && env.MAWS_E2E_HOST_WITHOUT_HOLDER === '1';
 }
 
 // The supervisor's own life as the engine host decides it (supervision.ts), told what only this entry knows.
 export interface SupervisorLife {
   started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void; // serving; `exit` runs the exit order
   clientChanged(connected: boolean): void; // a client was welcomed, or the client left
-  exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
+  // a client's `exit {when}` (P5 O16 M3b: with its hello's capabilities and whether its link was refused)
+  exitAsked(when: 'now' | 'idle', from: { refused: boolean; capabilities: readonly string[] }): void;
   // the start-up sweep ended: how many orphans it stopped, and the writer of this supervisor's own ledger, which the
   // engine host's table takes from here on (writing it before the sweep read the predecessor's would lose its rows)
   orphansSwept(killed: number, recordLive: (rows: readonly LiveRow[]) => void): void;
@@ -82,6 +108,9 @@ export function runDetached(hostVersion: string, register: HostRegister, opts: D
 // be created).
 export async function startSupervisor(hostVersion: string, register: HostRegister, opts: DetachedOptions, proc: SupervisorProcess): Promise<RunningSupervisor | null> {
   const { dir, log } = opts;
+  const withoutHolder = e2eWithoutHolder(opts.env ?? process.env); // P5 O16 M3c
+  const unlisted = (capabilities: readonly string[]) => (withoutHolder ? capabilities.filter((capability) => capability !== HOLDER_CAPABILITY) : capabilities);
+  let self: { pid: number; procStart: string } | null = null; // P5 O16 panel fix: this process as its lock names it, once listening
   return startSocketHost(
     {
       kind: 'supervisor',
@@ -92,11 +121,15 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       modulePath: opts.modulePath,
       register,
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
-      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: with `host.attachment`, which it serves from M3
+      capabilities: unlisted(PEER_CAPABILITIES.engineHost), // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
-      shutdown: () => opts.shutdown(EXIT_GRACE_MS), // (2) every live row stopped (grace 3 s) and the plugin runner with it
+      // (2) every live row stopped (grace 3 s) and the plugin runner with it; P5 O16 M3b: a hosted row detached instead,
+      // unless all were asked to stop. The panel fix (scalpel-4#3): a SIGTERM with a stop request naming this process
+      // (main's quit after a quiet close, supervisor-files.ts `requestStop`) is a stop-all too
+      shutdown: (reason) => opts.shutdown(EXIT_GRACE_MS, reason === 'stopAll' || (reason === 'signal' && self !== null && takeStopRequest(dir, self)) ? 'stop' : 'detach'),
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
-      exitWhenIdle: () => opts.life.exitWhenIdle(),
+      exitWhenIdle: () => opts.life.exitAsked('idle', { refused: false, capabilities: [] }),
+      exitAsked: (when, from) => opts.life.exitAsked(when, { ...from, capabilities: unlisted(from.capabilities) }), // P5 O16 M3b
       onClient: (connected, peer) => {
         // the owner is back: the next launch captures the shell again (a declaring client says so by host.attachment)
         if (connected && !peer?.capabilities.includes(ATTACHMENT_CAPABILITY)) invalidateShellEnvironment();
@@ -105,7 +138,9 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
       // background (up to the sweep's grace) while this supervisor already serves
       listening: (host) => {
-        const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log });
+        self = host.owner; // the panel fix: what a stop request must name
+        const held = opts.adopt?.() ?? {}; // P5 O16 M3: the roster first, so the sweep never stops what a live host holds
+        const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log }, held);
         const { pid } = host.owner;
         opts.life.started({ pid, startedAt: host.startedAt, buildId: host.buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: host.socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void host.stop(reason));
         void sweep.then((killed) => {

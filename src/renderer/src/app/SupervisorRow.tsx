@@ -8,7 +8,7 @@ import { clockTime } from '../budget/copy';
 import { ipc } from '../ipc/client';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
-import { SUPERVISOR_ROW } from './copy';
+import { ENGINE_HOST_UPDATE, SUPERVISOR_ROW } from './copy';
 import { restartSupervisor } from './supervisor-notices';
 
 const ROW = SUPERVISOR_ROW;
@@ -28,12 +28,15 @@ export function describeSupervisor(status: HostStatus | null): string {
   if (status.state === 'crashed') {
     if (status.reason === 'incompatible') parts.push(ROW.waiting(status.waitingLiveSessions ?? 0));
     else parts.push(status.reason === 'held_lock' ? ROW.heldLock : ROW.crashed);
-  } else if (status.state === 'restarting') parts.push(ROW.restarting);
-  else if (status.state === 'starting' || s === null) parts.push(ROW.starting);
-  else {
+  } else if (status.state === 'restarting' || status.state === 'starting' || s === null) {
+    // P5 O16 M3c fix wave 2 (D63): a deferred update says what it waits for
+    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool));
+    else parts.push(status.state === 'restarting' ? ROW.restarting : ROW.starting);
+  } else {
     const idle = status.transport === 'utility' ? ROW.idleWithApp : s.exitWhenIdle ? ROW.idleWithLast : s.idleExitMs === null ? ROW.idleNever : ROW.idleAfter(s.idleExitMs);
     parts.push(ROW.pid(s.pid));
     if (status.matches) parts.push(ROW.matches[status.matches]);
+    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool)); // the old build serves meanwhile
     parts.push(ROW.held(s.liveSessions), idle, ROW.orphans(s.orphansKilled));
     if (s.socketPath) parts.push(ROW.socket(s.socketPath));
   }

@@ -2,7 +2,7 @@
 // status"): what `session.status` and `engine.sessions` answer and C8's Session info and C12's budget read, and
 // `toSessionRecordPatch`, what C4's index applies from a status. Strict: an app shape.
 import * as z from 'zod';
-import { AUTO_MODE_REFUSAL_CODES, PermissionModeSchema } from '../graph/enums';
+import { AUTO_MODE_REFUSAL_CODES, ExitCauseSchema, PermissionModeSchema } from '../graph/enums';
 import { AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema, TaskIdSchema } from '../graph/ids';
 import type { SessionRecord } from '../graph/session';
 import { EffortSchema } from './launch-spec';
@@ -24,6 +24,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   exit: z.strictObject({
     code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */, 'idle' /* E10 */]), at: z.string(),
     release: z.strictObject({ limitKiB: z.number().int(), totalKiB: z.number().int() }).nullable(), // C12: the budget and the sum at a release; non-null exactly when the reason is `budget` (E10: an `idle` release, the supervisor's, has none)
+    cause: ExitCauseSchema.optional(), // P5 O16 M3b (D58a): an adopted engine's failed re-initialize after the handover
   }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']), // session_state_changed; 'unknown' before the first frame
   activity: z.enum(['compacting', 'requesting']).nullable(), // system/status
@@ -82,6 +83,12 @@ export const EngineSessionStatusSchema = z.strictObject({
   work: z.strictObject({
     crons: z.array(z.strictObject({ id: z.string(), schedule: z.string(), recurring: z.boolean(), prompt: z.string() })),
     unknown: z.string().nullable(),
+    // O16 M5 (additive; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the processes under the engine
+    // that are its work (every descendant but the registered infrastructure, src/engine-host/holder/descendants.ts), as
+    // last read: 0 for a row with no process (a replay's), null while the tree cannot be read (`unknown` then names
+    // `descendants_unreadable`). O16's unknowns beside O2's: 'observer_unhealthy', 'reap_term_ignored',
+    // 'descendants_unreadable'. Optional for an older host.
+    descendants: z.number().int().nullable().optional(),
   }).optional(),
   kept: z.boolean().optional(),
   // P5 O2 M2 end
@@ -90,6 +97,15 @@ export const EngineSessionStatusSchema = z.strictObject({
   // (unverified), the verb, and when. It moves no ref the git watcher sees, so the PR row re-asks gh when `at` moves
   // rather than at its next poll. Absent before the first, and from an older host.
   published: z.strictObject({ url: z.string(), action: z.string().nullable(), at: z.string() }).optional(),
+  // O16 M5 (additive): the idle and budget releases' reap (src/engine-host/holder/reap.ts) and the gate's observer of this
+  // process (holder/gate.ts): `absent` while none was ever seen on it, `unhealthy` once one was seen and went silent or
+  // away. Absent from an older host.
+  reap: z.strictObject({ state: z.enum(['idle', 'arming', 'armed', 'signalled', 'term_ignored']), observer: z.enum(['absent', 'healthy', 'unhealthy']) }).optional(),
+  // P5 O16 M2 (additive X6; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D): the session host the
+  // process runs under on the daemon and detached shapes (`pid` the host's, the status's own `pid` the engine's;
+  // `holderId` the launch id; `adopted` once a successor engine host re-attached to it, M3); null on a replay or
+  // embedded launch; absent from an older host.
+  holder: z.strictObject({ pid: z.number().int(), holderId: z.string(), adopted: z.boolean() }).nullable().optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

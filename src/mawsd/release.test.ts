@@ -129,6 +129,22 @@ describe('installing a release', () => {
     expect(install(fixturePack('eeeeeeee')).pruned).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb']);
   });
 
+  // P5 O16 M4 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §H): a session host runs its release's
+  // bin/maws-session-host and holds its session across every later install, the engine host's replacement included,
+  // until the session ends; its release is kept for it alone, whatever the engine host and mawsd now run from.
+  it('never prunes the release a session host’s executable lies under, the bin/ prebuild, while it runs', () => {
+    install(fixturePack('aaaaaaaa'));
+    const link = join(releasesRoot(home), 'current');
+    const hostsDir = '/p/supervisor/hosts';
+    const sessionHost = { exe: join(releaseDir('0.0.0-aaaaaaaa'), 'bin', 'maws-session-host'), cmdline: `${link}/bin/maws-session-host ${hostsDir}/l1.sock --hosts ${hostsDir}` };
+    live = [sessionHost];
+    const results = ['bbbbbbbb', 'cccccccc', 'dddddddd'].map((commit) => install(fixturePack(commit)));
+    expect(results.flatMap((r) => r.pruned)).toEqual([]);
+    expect(releases()).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb', '0.0.0-cccccccc', '0.0.0-dddddddd']);
+    live = []; // the session ended, its host with it
+    expect(install(fixturePack('eeeeeeee')).pruned).toEqual(['0.0.0-aaaaaaaa', '0.0.0-bbbbbbbb']);
+  });
+
   it('keeps a release a command line names under releases/, whatever its executable', () => {
     install(fixturePack('aaaaaaaa'));
     live = [{ exe: '/usr/bin/node', cmdline: `/usr/bin/node ${join(releaseDir('0.0.0-aaaaaaaa'), 'out', 'main', 'index-x.js')}` }];

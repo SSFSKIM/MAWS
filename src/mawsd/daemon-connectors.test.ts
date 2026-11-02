@@ -67,7 +67,7 @@ describe('mawsd’s hello to the engine host (Interfaces §D)', () => {
     const app = await scene.app('engine-host', { capabilities: POST_O4 });
     expect(app.welcomed()).toBe(true);
     await until(() => scene.lastEngine().supervisor.peer() !== null, 3_000, 'mawsd’s hello');
-    expect(scene.lastEngine().supervisor.peer()?.capabilities).toEqual(['socket.ptyFrames', 'host.attachment', 'host.connectors']);
+    expect(scene.lastEngine().supervisor.peer()?.capabilities).toEqual(['socket.ptyFrames', 'host.attachment', 'host.connectors', 'host.holder']); // P5 O16 M3b: host.holder, whatever the option
   });
 });
 

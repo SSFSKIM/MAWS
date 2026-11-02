@@ -14,7 +14,8 @@ import type { WireRegistry } from '../ipc/registry';
 import type { CommandName, CommandResult, HostState } from '../ipc/schema';
 import { HostPingSchema } from '../ipc/schema/common';
 import { createHostRuntime, type HostEmit } from './runtime';
-import { SOCKET_PROTOCOL } from './socket-protocol';
+import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL } from './socket-protocol';
+import { appIdentity } from './identity'; // P5 O16 M3b fix wave 2
 import { createHostSupervisor, REQUEST_TIMEOUT_MS, type HostOwner, type HostSpec, type HostSupervisor, type HostSupervisorOptions } from './host-supervisor';
 import type { DetachedTransportOptions, HostFiles } from './detached-transport';
 
@@ -301,6 +302,40 @@ describe('an on-demand host', () => {
     const fake = await startFake();
     await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
     expect(supervisor.parked('engine-host')).toBe(false);
+    expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  // P5 O16 M3c fix wave 3c: an adoption's connect lasts until the host's welcome status is answered (the transport asks
+  // it before reporting the link), so the host still reads parked meanwhile. A wake, a request or another adoption then
+  // joins that connect: a second connection would be another client to the host, which refuses the first `replaced`
+  // and, read as a takeover, ends a relay (`mawsd`'s onReplaced)
+  it('a wake, a request or an adoption while an adoption’s welcome status is still asked joins it: one connection, no takeover', async () => {
+    const status = { asks: 0, release: () => {} };
+    const fake = await startFake({
+      register: (on) =>
+        on('host.supervisorStatus', async () => {
+          if (++status.asks === 1) await new Promise<void>((resolve) => (status.release = resolve));
+          return fake.status() as never; // not draining (a whole status: the panel fix serves only an answer)
+        }),
+    });
+    const replaced: HostOwner[] = [];
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } }, { onReplaced: (owner) => void replaced.push(owner) });
+    await supervisor.start();
+    const adopted = supervisor.adopt('engine-host');
+    await until(() => status.asks === 1);
+    const again = supervisor.adopt('engine-host'); // still parked: the transport's adoption joins
+    supervisor.wake('engine-host');
+    const pinged = ping(supervisor);
+    await sleep(100);
+    expect(fake.connections, 'no second connection while the first is admitted').toHaveLength(1);
+    status.release();
+    await expect(adopted).resolves.toBe(true);
+    await expect(again).resolves.toBe(true);
+    await expect(pinged).resolves.toMatchObject({ ok: true });
+    await sleep(100);
+    expect(fake.connections).toHaveLength(1);
+    expect(replaced).toEqual([]);
     expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -668,5 +703,187 @@ describe('what mawsd reflects and takes back (P5 O2 M5)', () => {
     await until(() => replaced.length === 1);
     expect(replaced).toEqual(['engine-host']);
     expect(supervisor.snapshot('engine-host').state).toBe('crashed');
+  });
+});
+
+// P5 O16 M3b fix wave 2 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): a completion (DRAIN_REPLIES) goes to the
+// host that raised its request and never waits for, wakes or launches another; on main's daemon shape, with its
+// engine-host link down, it goes by the machine link to `mawsd`'s front, for an app that reads the requests there.
+describe('a completion of an engine host’s request', () => {
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+  const answers = (seen: unknown[]) => createHostRuntime((on) => on('maws.pane.answer', async (input) => (seen.push(input), { outcome: 'delivered' as const })));
+
+  it('to a parked engine host: host_unavailable at once, nothing spawned, the host still parked', async () => {
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(supervisor.completionGone('engine-host', 'maws.pane.answer', ANSWER)).toBe(true);
+    expect(supervisor.completionGone('engine-host', 'engine.ping', undefined)).toBe(false); // any other name is a need as before
+    await sleep(60);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.parked('engine-host')).toBe(true);
+  });
+
+  it('during a recycle: held, and sent on the same host’s fresh link', async () => {
+    const seen: unknown[] = [];
+    await startFake({ runtime: answers(seen) });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    await recycled;
+    await expect(answered).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(seen).toEqual([ANSWER]);
+  });
+
+  it('main’s daemon shape, its engine-host link down: by the machine link, keeping its deadline; any other name waits for the engine host as before', async () => {
+    const machineSeen: unknown[] = [];
+    const at = siblingProfile('machine');
+    await startFake({ runtime: answers(machineSeen) }, at);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(machineSeen).toEqual([ANSWER]);
+    expect(supervisor.completionGone('engine-host', 'maws.pane.answer', ANSWER)).toBe(false); // it has a route
+    expect(spawn).not.toHaveBeenCalled();
+    await expect(ping(supervisor)).resolves.toMatchObject({ ok: true }); // a need: it woke the engine host
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('an app whose machine-link hello does not list machine.spine reads no requests there: no fallback', async () => {
+    const machineSeen: unknown[] = [];
+    const at = siblingProfile('machine');
+    await startFake({ runtime: answers(machineSeen) }, at);
+    const identity = appIdentity(profile.modulePath, {}, 'detached', [PTY_FRAMES_CAPABILITY]);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' }, identity }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(machineSeen).toEqual([]);
+  });
+});
+
+// P5 O16 M3b fix wave 3: a held completion is its raiser's alone. Held while that process reconnects (a recycle, a
+// quiet loss), sent on its fresh link; failed host_unavailable the moment the process is known gone, never flushed to
+// whatever process is welcomed next, and never counted as work that needs another host.
+describe('a held completion and its raiser', () => {
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+  const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+
+  // A host that announces pane requests (`show`) and records the answers it gets
+  function paneHost(seen: unknown[]) {
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, hostEmit) => {
+      emit = hostEmit;
+      on('maws.pane.answer', async (input) => (seen.push(input), { outcome: 'delivered' as const }));
+    });
+    return { runtime, show: () => emit('maws.pane.show', PANE as never) };
+  }
+
+  async function raised(host: ReturnType<typeof paneHost>) {
+    await until(() => host.show());
+    await until(() => heard('maws.pane.show') === 1);
+  }
+
+  it('its raiser killed during a recycle, a successor welcomed: refused, never sent to the successor', async () => {
+    const oldSeen: unknown[] = [];
+    const old = paneHost(oldSeen);
+    const fake = await startFake({ runtime: old.runtime });
+    const successorSeen: unknown[] = [];
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid, runtime: paneHost(successorSeen).runtime });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    await raised(old);
+    fake.connections.at(-1)!.allowHalfOpen = true; // its side stays open while the drain runs
+    setTimeout(() => void fake.die(), 100); // it dies before the recycle reconnects
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER); // held for its raiser
+    await expect(answered).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await recycled;
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && supervisor.snapshot('engine-host').pid !== fake.pid);
+    await sleep(50);
+    expect(successorSeen).toEqual([]);
+    expect(oldSeen).toEqual([]);
+  });
+
+  it('its raiser, armed to exit when idle, exits during a recycle with only that completion held: a park, not a launch', async () => {
+    const old = paneHost([]);
+    const fake = await startFake({ runtime: old.runtime });
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true } });
+    await supervisor.start();
+    await expect(supervisor.adopt('engine-host')).resolves.toBe(true);
+    await raised(old);
+    expect(supervisor.expectIdleExit('engine-host')).toBe(true);
+    fake.connections.at(-1)!.allowHalfOpen = true;
+    setTimeout(() => void fake.die(), 100); // it exits once idle, 100 ms into the drain
+    const recycled = supervisor.recycle('engine-host');
+    const answered = supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    await recycled;
+    await expect(answered).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    await until(() => supervisor.parked('engine-host'));
+    await sleep(200);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(supervisor.parked('engine-host')).toBe(true);
+  });
+
+  it('during a quiet reconnect to the same live process: held, then delivered on the fresh link', async () => {
+    const seen: unknown[] = [];
+    const host = paneHost(seen);
+    const fake = await startFake({ runtime: host.runtime });
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    await raised(host);
+    fake.dropClient(); // the link closes; the process lives on
+    await until(() => supervisor.snapshot('engine-host').state !== 'ready');
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(seen).toEqual([ANSWER]);
+    expect(supervisor.snapshot('engine-host')).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(fake.connections).toHaveLength(2);
+  });
+});
+
+// P5 O16 M3b fix wave 3: a stop-all main sends by its machine link (its engine-host link down) marks nothing on that link:
+// a later quiet close of machine.sock, `mawsd` alive, reconnects as any quiet loss does
+describe('a stop-all by the machine link', () => {
+  it('leaves the machine link’s close a quiet loss: it reconnects', async () => {
+    const at = siblingProfile('machine');
+    const stops: unknown[] = [];
+    const machine = await startFake({ runtime: createHostRuntime((on) => on('host.stopAll', async (input) => (stops.push(input), { stopped: 0, forced: 0 }))) }, at);
+    const supervisor = makeSupervisor({ 'engine-host': { onDemand: true }, machine: { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('machine').state === 'ready');
+    await expect(supervisor.restartSupervisor({ stopSessions: true })).resolves.toEqual({ ok: true, value: undefined });
+    expect(stops).toHaveLength(1);
+    machine.dropClient(); // a quiet close: mawsd lives on
+    await until(() => machine.connections.length === 2 && supervisor.snapshot('machine').state === 'ready', 5_000);
+    expect(supervisor.facts('machine').reason).toBeNull();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+// P5 O16 wave 1 verification (group D's handover mark, scoped by owner): the engine host's word that it handed its
+// sessions over (`holder.detached`) is kept until its own close is classified; a welcome of another owner's host (the pty
+// host's reconnect, in `mawsd`) is no news about it and must not erase it, or the clean handover reads as a crash
+describe('a handover mark across two owners', () => {
+  it('a pty host welcomed between the engine host’s handover and its close leaves the mark: the close is planned', async () => {
+    const at = siblingProfile('pty-host');
+    const pty = await startFake({}, at);
+    const engine = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': {}, 'pty-host': { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && supervisor.snapshot('pty-host').state === 'ready');
+    const said = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // its word, heard alone (`handover` none: no take-back on this link, which a draining status would start), as another
+    // client's handover leaves it (`mawsd restart --engine-host` on the daemon shape)
+    const detached = { ...engine.status(), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'none', inFlight: 0, detached: true } };
+    await until(() => engine.emit('host.supervisorStatus', detached as never));
+    await until(() => emitted.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { holder?: { detached?: boolean } }).holder?.detached === true));
+    pty.dropClient(); // the pty host's link lost quietly: it lives, and is welcomed again
+    await until(() => pty.connections.length === 2 && supervisor.snapshot('pty-host').state === 'ready');
+    await engine.die({ keepLock: true }); // the engine host leaves after its handover, its successor spawned
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && fakes.length === 3);
+    expect(said.mock.calls.flat().join('\n')).toContain('left after handing its sessions over');
+    expect([supervisor.snapshot('engine-host').restarts, supervisor.facts('engine-host').lastExit]).toEqual([0, null]);
   });
 });

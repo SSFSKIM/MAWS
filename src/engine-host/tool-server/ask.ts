@@ -19,17 +19,23 @@ export class AskAnswerMismatch extends Error {
   override readonly name = 'AskAnswerMismatch';
 }
 
+// The ask a call's arguments open (its parse error's text when they do not parse): P5 O16 M3's adopter restores an async
+// ask the old manager acknowledged from the same call's journaled arguments.
+export function pendingAskOf(args: unknown, ctx: { toolUseId: PendingAsk['toolUseId']; requestId: PendingAsk['requestId']; fromSubagent: boolean }, openedAt: string): PendingAsk | string {
+  const parsed = parseToolArguments('ask', args);
+  if (!parsed.ok) return parsed.error;
+  const { title, context, questions } = parsed.data;
+  return {
+    askId: ctx.toolUseId ?? ctx.requestId, toolUseId: ctx.toolUseId, requestId: ctx.requestId, blocking: (parsed.data.blocking ?? true) || ctx.fromSubagent,
+    title: title ?? null, context: context ?? null, questions: withQuestionIds(questions), openedAt,
+  };
+}
+
 export function askTool(deps: { asks: AskTable; cancelled: (ask: PendingAsk, reason: AskCancelReason) => void; now?: () => Date }): McpToolDefinition {
   return defineMawsTool('ask', async (args, ctx) => {
-    const parsed = parseToolArguments('ask', args);
-    if (!parsed.ok) return toolError(parsed.error);
-    const { title, context, questions } = parsed.data;
-    const blocking = (parsed.data.blocking ?? true) || ctx.fromSubagent;
-    const askId = ctx.toolUseId ?? ctx.requestId;
-    const ask: PendingAsk = {
-      askId, toolUseId: ctx.toolUseId, requestId: ctx.requestId, blocking, title: title ?? null, context: context ?? null,
-      questions: withQuestionIds(questions), openedAt: (deps.now?.() ?? new Date()).toISOString(),
-    };
+    const ask = pendingAskOf(args, ctx, (deps.now?.() ?? new Date()).toISOString());
+    if (typeof ask === 'string') return toolError(ask);
+    const { askId, blocking } = ask;
     // While the call is in flight (for an async ask, until its acknowledgement is written), the engine withdrawing it
     // or the process ending cancels the ask: nothing will be written for it, so no one can answer it either. Once the
     // call settled the server never aborts its signal again.

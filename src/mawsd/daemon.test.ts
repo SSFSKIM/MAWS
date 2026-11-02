@@ -10,7 +10,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { AppSessionId } from '@shared/graph/ids';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
-import { buildIdOf } from '../engine-host/supervisor-files';
+import { buildIdOf, procStartOf } from '../engine-host/supervisor-files';
 import type { FakeSupervisor } from '../../test/support/fake-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineEntry } from './spine-seam';
@@ -19,7 +19,7 @@ import type { DaemonServices, EndpointModule } from './endpoint-seam';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import { machineKey } from '@shared/machine/org-key';
 import { machineProjectId } from '@shared/machine/project-ids';
-import { SPINE_REEXECUTE_DEFAULT } from './daemon';
+import { lockStartedAt, SPINE_REEXECUTE_DEFAULT } from './daemon';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
 import { fetchOverSocket } from '../services/artifacts/scheme/http'; // P5 O5 M2
 
@@ -205,6 +205,16 @@ describe('the upstreams and machine.sock', () => {
     expect(scene.spawn).toHaveBeenCalledOnce();
   });
 
+  // P5 O16 M2 (Interfaces §G): the engine host's session hosts, from its supervisor status; absent while it names none
+  it('daemon.status carries the engine host\'s session host counts when its supervisor status names them', async () => {
+    const holder = { hosts: 2, adopted: 1, failed: 0, gate: null, handover: 'none' };
+    const status = { mode: 'detached', pid: 1, startedAt: 'T', buildId: 'b', protocol: 1, wire: 'w', liveSessions: 2, rows: 2, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder };
+    scene.engineSpawn = { answers: { 'host.supervisorStatus': () => status } };
+    await scene.start();
+    const app = await scene.app('machine');
+    expect(await app.request('daemon.status')).toMatchObject({ ok: true, value: { sessionHosts: { hosts: 2, adopted: 1, failed: 0 } } });
+  });
+
   it('a wrong token on any socket is closed with nothing written', async () => {
     await scene.start();
     for (const socket of ['engine-host', 'pty-host', 'machine'] as const) {
@@ -254,6 +264,23 @@ describe('the handshake reflects the upstream', () => {
     });
     expect(app.first!.capabilities).toContain('socket.ptyFrames');
     expect(app.first!.pid).not.toBe(process.pid);
+  });
+
+  // The merge of panel fix wave 1 (group D's concern): a relayed welcome's start names its process (the client keys its
+  // completions and its handover mark by pid and start), so with no lock naming the pid it is that process's `ps` start,
+  // the same at every welcome and another for a process that reuses the pid; now only when `ps` knows no such process
+  it('a relayed welcome’s start is the lock’s when the lock names the host, else the host’s own start from ps', () => {
+    const dir = join(scene.root, 'starts');
+    mkdirSync(dir);
+    const own = procStartOf(process.pid);
+    expect(own).not.toBeNull();
+    expect(lockStartedAt(dir, process.pid), 'no lock').toBe(own);
+    const lock = { pid: process.pid + 1, procStart: '', protocol: SOCKET_PROTOCOL, buildId: 'b', socketPath: join(dir, 'host.sock'), startedAt: '2026-11-01T00:00:00.000Z' };
+    writeFileSync(join(dir, 'host.lock'), JSON.stringify(lock));
+    expect(lockStartedAt(dir, process.pid), 'a lock naming another pid').toBe(own);
+    writeFileSync(join(dir, 'host.lock'), JSON.stringify({ ...lock, pid: process.pid }));
+    expect(lockStartedAt(dir, process.pid), 'a lock naming it').toBe('2026-11-01T00:00:00.000Z');
+    expect(lockStartedAt(join(scene.root, 'none'), 2 ** 22 - 3), 'no such process').toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('holds a hello while the host starts, and closes it unanswered when no welcome comes within the hold', async () => {

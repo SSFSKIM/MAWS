@@ -19,7 +19,7 @@ import type { Availability } from '@shared/ipc/schema/session';
 import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
 import { endedBindings, liveBindings, type FrameBindings, type LiveReads } from '../../composer/frame/bindings';
 import { sendHumanPrompt, sendWithoutAcquiring } from '../../composer/submit/send-human-prompt';
-import { ENDED, STARTING } from '../../composer/submit/submit-state';
+import { ENDED, REATTACHING, reattaching, STARTING } from '../../composer/submit/submit-state';
 import { availabilityIn, availabilityRefusal } from '../../sessions/availability';
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
@@ -79,8 +79,9 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     return status?.process === 'ready' ? null : availabilityRefusal(availability, record?.holder ?? null);
   };
   const processRefusal = (): string | null => {
-    const process = now().status?.process;
-    return process === 'ready' ? null : process === 'starting' || process === 'initializing' ? STARTING : ENDED;
+    const status = now().status;
+    const process = status?.process;
+    return process === 'ready' ? null : reattaching(status ?? null) ? REATTACHING /* P5 O16 M3b */ : process === 'starting' || process === 'initializing' ? STARTING : ENDED;
   };
   const refusedHere = (key: ControlKey): Promise<ControlResult> => Promise.resolve({ state: 'refused', code: 'unsupported', message: ELSEWHERE[key]! });
   const ownCapability = (key: ControlKey): Capability => {

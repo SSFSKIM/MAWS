@@ -50,6 +50,9 @@ const notPublished = (outcome: MawsDatasetRefreshOutcome, tool: string, server: 
   const key = outcome.ok ? 'ok' : `${outcome.state}:${outcome.reason}`;
   return (NOT_PUBLISHED[key] ?? (() => `the refresh of ${tool} failed (${key}); nothing was published`))(tool, server);
 };
+// P5 O16 M3b fix wave 4 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): a refresh the engine host could not
+// finish because it handed its sessions over to its successor. The call is safe to repeat, and a repeat runs there.
+export const REFRESH_HANDED_OVER = 'the MAWS engine host was upgraded while this refresh ran, so nothing was published; call artifact_dataset with refresh: true again and it will run on the upgraded host';
 const ENDED: Record<'timeout' | 'withdrawn' | 'noClient', string> = {
   timeout: 'MAWS did not answer in time; nothing was published',
   withdrawn: 'the request was withdrawn',
@@ -117,6 +120,9 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
             case 'refused':
               if (settled.refusal !== null) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, `${settled.refusal}; nothing was published`);
               throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, notPublished(settled.outcome, named, query.server));
+            // P5 O16 M3b fix wave 4: main's `failed: routeFailed` code, with the handover named as its cause
+            case 'handedOver':
+              throw refuse(TOOL, { reason: 'unavailable', dataset: input.id, outcome: 'failed:routeFailed', retry: true }, REFRESH_HANDED_OVER);
             default:
               throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, ENDED[settled.kind]);
           }

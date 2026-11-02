@@ -28,7 +28,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { requestClassOf } from './controls';
-import { TransportClosed, type EngineTransport, type TransportItem } from './transport';
+import { TransportClosed, type EngineTransport, type StderrItem, type TransportItem } from './transport';
 
 export const PRELUDE_SUBTYPES: ReadonlySet<string> = new Set(['initialize', 'get_status']);
 export const SURFACE_READ_SUBTYPES: ReadonlySet<string> = new Set(['ui_attach', 'ui_detach', 'ui_render', 'ui_panes', 'ui_focus', 'ui_scroll', 'ui_pane_show', 'ui_pane_focus', 'ui_prompt_edit']); // R2
@@ -142,8 +142,8 @@ export function replayEngine(
   const idMap = new Map<string, string>(); // recorded id → minted id
   const injected: TransportItem[] = []; // prelude and unrecorded-read answers, delivered before the cursor's next row
   const waiters: Waiter[] = []; // writes not yet matched, in order
-  const stderrQueue: string[] = [];
-  let stderrWaiter: ((r: IteratorResult<string>) => void) | null = null;
+  const stderrQueue: StderrItem[] = [];
+  let stderrWaiter: ((r: IteratorResult<StderrItem>) => void) | null = null;
   let stderrEnded = false;
   let wake: (() => void) | null = null; // the frames iterator waiting for a write or a kill
   let held: JournalRow | null = null; // the `out` row `onHold` was last told about
@@ -160,8 +160,8 @@ export function replayEngine(
     if (stderrWaiter) {
       const w = stderrWaiter;
       stderrWaiter = null;
-      w({ value: line, done: false });
-    } else stderrQueue.push(line);
+      w({ value: { text: line }, done: false });
+    } else stderrQueue.push({ text: line });
   };
 
   const finish = (exit: { code: number | null; signal: NodeJS.Signals | null }) => {
@@ -328,7 +328,7 @@ export function replayEngine(
     },
   };
 
-  const stderr: AsyncIterable<string> = {
+  const stderr: AsyncIterable<StderrItem> = {
     [Symbol.asyncIterator]() {
       return {
         next: () => {

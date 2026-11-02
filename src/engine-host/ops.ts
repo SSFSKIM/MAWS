@@ -68,8 +68,10 @@ export function opCommands(deps: OpsDeps): {
   op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>;
   artifactOp(input: ArtifactOpInput, ctx: HandlerContext): Promise<OpOutput>;
   opQuery(input: OpQueryInput): OpQueryOutput;
+  settled(): Promise<void>;
 } {
   const { ledger } = deps;
+  const running = new Set<Promise<unknown>>(); // P5 O16 M3c: the runs claimed and not yet kept
 
   /** The command's handler and its input checked, or the refusal: an engine-host command this host handles, never a
    * `host.*` one, its input a decoded copy of json-bytes' tagged form (P5 O7 M5a) that holds to its schema. */
@@ -115,15 +117,30 @@ export function opCommands(deps: OpsDeps): {
 
   /** The claimed op run through the host's own handler, its answer (a throw included: it was tried) kept. */
   async function run(opId: string, name: string, handler: Handler, value: unknown, ctx: HandlerContext): Promise<OpOutput> {
-    let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
+    const kept = (async () => {
+      let result: { ok: true; value: unknown } | { ok: false; error: IpcError };
+      try {
+        const output = validateCommandOutput(name as keyof typeof commands, await handler(value, ctx));
+        result = output.ok ? { ok: true, value: output.value } : { ok: false, error: ipcError('internal', output.error.message) };
+      } catch (error) {
+        result = { ok: false, error: thrownError(error) };
+      }
+      ledger.finish(opId, result);
+      return result;
+    })();
+    running.add(kept);
     try {
-      const output = validateCommandOutput(name as keyof typeof commands, await handler(value, ctx));
-      result = output.ok ? { ok: true, value: output.value } : { ok: false, error: ipcError('internal', output.error.message) };
-    } catch (error) {
-      result = { ok: false, error: thrownError(error) };
+      return { state: 'done', result: await kept };
+    } finally {
+      running.delete(kept);
     }
-    ledger.finish(opId, result);
-    return { state: 'done', result };
+  }
+
+  // P5 O16 M3c: settles once every run claimed so far (host.op's and host.artifactOp's) has kept its result, so an exit
+  // that waits for it (ipc.ts's shutdown, within the exit order's bound) never ends this process between a run's claim
+  // and its result
+  async function settled(): Promise<void> {
+    await Promise.all([...running]);
   }
 
   function opQuery({ opId, opCreated, tombstoneIfAbsent }: OpQueryInput): OpQueryOutput {
@@ -135,7 +152,7 @@ export function opCommands(deps: OpsDeps): {
     return ledger.closed !== null ? { ...answer, ledger: ledger.closed } : answer;
   }
 
-  return { op, artifactOp, opQuery };
+  return { op, artifactOp, opQuery, settled };
 }
 
 /**
@@ -154,10 +171,12 @@ export function keepArtifactWrites(on: HostOn): { on: HostOn; handler(name: stri
   };
 }
 
-/** Registers `host.op`, `host.artifactOp` and `host.opQuery` over `deps`. */
-export function registerOps(on: HostOn, deps: OpsDeps): void {
-  const { op, artifactOp, opQuery } = opCommands(deps);
+/** Registers `host.op`, `host.artifactOp` and `host.opQuery` over `deps`; answers when the runs claimed so far have
+ * kept their results. */
+export function registerOps(on: HostOn, deps: OpsDeps): { settled(): Promise<void> } {
+  const { op, artifactOp, opQuery, settled } = opCommands(deps);
   on('host.op', async (input, ctx) => op(input, ctx));
   on('host.artifactOp', async (input, ctx) => artifactOp(input, ctx)); // P5 O7 M5a
   on('host.opQuery', async (input) => opQuery(input));
+  return { settled };
 }

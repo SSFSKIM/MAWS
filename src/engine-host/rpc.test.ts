@@ -45,6 +45,30 @@ describe('control client ids, timeouts, cancellation', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  // P5 O16 M3 (D26): an adopted writer's requests carry its fence, so the old manager's late answers never match them
+  it('names requests ${launchId}-${fence}-${n} past fence 1 and drops a response to the old writer\'s id', async () => {
+    const { transport, writes } = fakeTransport();
+    const warn = vi.fn();
+    const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01', { fence: 3, warn });
+    const pending = client.request('get_usage', {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requestOf(writes[0]!).request_id).toBe('LAUNCH01-3-1');
+    client.observe(success('LAUNCH01-1', {})); // the first writer's request 1, answered late
+    expect(client.pending).toBe(1);
+    expect(warn).toHaveBeenCalledWith('control_response for unknown request LAUNCH01-1');
+    client.observe(success('LAUNCH01-3-1', { session: { total_cost_usd: 0, total_api_duration_ms: 1, total_duration_ms: 1, model_usage: {} }, subscription_type: null, rate_limits_available: false, rate_limits: null, behaviors: null }));
+    await expect(pending).resolves.toMatchObject({ session: { total_cost_usd: 0 } });
+  });
+
+  it('names requests ${launchId}-${n} at fence 1', async () => {
+    const { transport, writes } = fakeTransport();
+    const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01', { fence: 1 });
+    void client.request('get_usage', {}).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requestOf(writes[0]!).request_id).toBe('LAUNCH01-1');
+    client.close('done');
+  });
+
   it('mints ${launchId}-${n} ids, journals the out row once the write resolved, and resolves the typed response', async () => {
     const { transport, writes } = fakeTransport();
     const journal = fakeJournal();

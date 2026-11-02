@@ -13,7 +13,7 @@ import { ReplayHost } from '../../src/engine-host/fs/replay/host';
 import { engineNormalizer } from '../../src/engine-host/fs/replay/normalizer';
 import type { SessionEvent } from '../../src/shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '../../src/shared/graph/ids';
-import type { HostDispatch, HostResync } from '../../src/shared/host/host-supervisor';
+import type { EngineHandoverState, HostDispatch, HostResync } from '../../src/shared/host/host-supervisor';
 import { ipcError } from '../../src/shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult, EventName, EventPayload, HostState } from '../../src/shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '../../src/shared/ipc/validate';
@@ -33,6 +33,7 @@ export class FakeSpineHost implements SpineHosts {
   private resync: HostResync | null = null;
   private state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
   private isStreaming = false;
+  handover: EngineHandoverState | null = null; // the supervisor's handover under way, as `handoverState` reads it (O16)
   private readonly replays = new ReplayHost({
     emit: (name, payload) => this.emit(name, payload),
     bindings: { bind: async () => {}, unbind: async () => {} },
@@ -102,6 +103,17 @@ export class FakeSpineHost implements SpineHosts {
 
   setResync(_owner: string, resync: HostResync | null): void {
     this.resync = resync;
+  }
+
+  handoverState(): EngineHandoverState | null {
+    return this.handover;
+  }
+
+  // The host leaves ready (a handover's drain, a crash): `restarting`, no longer streaming
+  leave(): void {
+    this.state = { state: 'restarting', pid: null, restarts: this.state.restarts, revision: this.state.revision + 1 };
+    this.isStreaming = false;
+    for (const listener of [...this.stateListeners]) listener(this.state);
   }
 
   // The host connects: `ready` (it answers from here), the resync the spine registered, then the streaming notice (the

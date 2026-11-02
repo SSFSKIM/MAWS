@@ -47,6 +47,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { SpineView } from '@shared/spine/view';
 import { QUIT_KEEP } from './copy'; // E10
+import { SESSION_HOST_BINARY } from '../../engine-host/holder/files'; // O16 panel 1
 
 // C12 start
 export type QuitAnswer = 'quit' | 'when_idle' | 'cancel' | 'save_all' /* E5 */ | 'keep' /* E10 */;
@@ -66,7 +67,7 @@ export const SHUTDOWN_BOUND_MS = 5_000;
 export const KILL_PS_TIMEOUT_MS = 1_000; // the process listing that confirms each pid before its SIGKILL
 
 // The engine host's processes as main reaches them at the bound: its pid (the supervisor's), the process listing
-// (`ps -axo pid=,ppid=`) and the signal.
+// (`ps -axo pid=,ppid=,comm=`; O16 panel 1: the command names a session host) and the signal.
 export interface EngineKill {
   hostPid(): number | null;
   ps(): Promise<string>;
@@ -74,7 +75,7 @@ export interface EngineKill {
 }
 
 export const listProcesses = (): Promise<string> =>
-  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
 
 class BoundExpired extends Error {}
 
@@ -138,18 +139,25 @@ export async function busyReport(
 // Debt wave 6: the ladder's SIGKILL rung for every engine the statuses name as not yet exited, sent only to a pid the
 // listing still shows as the engine host's child, so a pid the OS reused after an exit main has not heard of yet is
 // never signalled. A listing that fails or is late kills nothing; the quit goes on either way.
+//
+// O16 panel 1 (scalpel-4#4): a hosted engine is its session host's child, not the engine host's. Its parent must be the
+// session host its own status names (`holder.pid`), and the listing must show that pid as a session host by its
+// executable's basename, so a reused pid is never signalled. The session host's own parent is not checked: an adopted
+// session's host was launched by a predecessor engine host and, detached, was reparented to launchd (ppid 1) at its exit.
 export async function killEngines(statuses: readonly EngineSessionStatus[], deps: EngineKill): Promise<number[]> {
   const host = deps.hostPid();
-  const known = statuses.flatMap((s) => (s.process !== 'exited' && s.pid !== null ? [s.pid] : []));
+  const known = statuses.flatMap((s) => (s.process !== 'exited' && s.pid !== null ? [{ pid: s.pid, holder: s.holder?.pid ?? null }] : []));
   if (host === null || known.length === 0) return [];
-  const parents = new Map<number, number>();
+  const listed = new Map<number, { ppid: number; command: string }>();
   for (const line of (await within(deps.ps(), KILL_PS_TIMEOUT_MS)).split('\n')) {
-    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
-    if (Number.isInteger(pid) && Number.isInteger(ppid)) parents.set(pid!, ppid!);
+    const [pid, ppid, ...command] = line.trim().split(/\s+/);
+    if (Number.isInteger(Number(pid)) && Number.isInteger(Number(ppid))) listed.set(Number(pid), { ppid: Number(ppid), command: command.join(' ') });
   }
+  const isSessionHost = (pid: number) => basename(listed.get(pid)?.command ?? '') === SESSION_HOST_BINARY;
   const killed: number[] = [];
-  for (const pid of known) {
-    if (parents.get(pid) !== host) continue;
+  for (const { pid, holder } of known) {
+    const parent = listed.get(pid)?.ppid;
+    if (parent !== host && !(holder !== null && parent === holder && isSessionHost(holder))) continue;
     try {
       deps.kill(pid);
       killed.push(pid);

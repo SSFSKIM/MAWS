@@ -13,6 +13,7 @@ import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validat
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import { FileSessionStateStore } from './store/file-session-state-store';
+import { ProcessTable } from './process-table'; // P5 O16 panel fix wave 1 follow-up
 
 const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -151,6 +152,89 @@ describe('session.forget', () => {
 
     await host.call('session.forget', { appSessionId: 'app-never-launched' }); // nothing to erase is not an error
     await expect(host.handlers.get('session.forget')!({ appSessionId: '../escape' })).rejects.toBeInstanceOf(HostCommandError);
+  });
+
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host (its adoption failed, or a
+  // newer host of its session was adopted) runs its engine with no row. A launch of its id stops it first, so no second
+  // engine ever runs the session; a forget stops it, then forgets, and tells `session.forgotten`.
+  function unattached(id: AppSessionId, seen: () => string | null = () => null) {
+    const alive = { now: true };
+    const order: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242 && alive.now, procStartOf: () => 'then' });
+    table.onRowsChanged(() => void (table.get(id) && order.push('reserved')));
+    table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => {
+      order.push(`stopping (row ${table.get(id) ? 'present' : 'absent'})`);
+      const what = seen();
+      if (what !== null) order.push(what);
+      await new Promise((r) => setTimeout(r, 20));
+      alive.now = false;
+      order.push('stopped');
+      return 'stopped';
+    } });
+    return { table, order };
+  }
+
+  // wave 1 verification: a stop not done (the old host still waits for its spawn; its process cannot be verified) keeps
+  // the record and its guard: the launch and the forget are refused `already_live`, saying why, and nothing is erased
+  for (const [outcome, why] of [['incomplete', 'still starting'], ['unverified', 'could not be verified']] as const) {
+    it(`a launch and a forget of an unattached session whose stop is ${outcome} are refused already_live, nothing launched or erased`, async () => {
+      const id = `app-unattached-${outcome}` as AppSessionId;
+      const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242, procStartOf: () => 'then' });
+      table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => outcome });
+      const host = engineHost({ table });
+      const launched = await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+      expect(launched).toMatchObject({ status: 'refused', reason: 'already_live', message: expect.stringContaining(why) });
+      expect(table.get(id)).toBeUndefined();
+      const journal = join(userData, 'engine-host', 'journal', id);
+      await mkdir(journal, { recursive: true });
+      await expect(host.handlers.get('session.forget')!({ appSessionId: id })).rejects.toThrow(new RegExp(`^already_live: .*${why}`));
+      expect(existsSync(journal)).toBe(true);
+      expect(host.emitted.filter((e) => e.name === 'session.forgotten')).toEqual([]);
+    });
+  }
+
+  it('a launch of an unattached session stops its host first, then launches', async () => {
+    const id = 'app-unattached-launch' as AppSessionId;
+    const { table, order } = unattached(id);
+    const host = engineHost({ table });
+    await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    expect(order).toEqual(['stopping (row absent)', 'stopped', 'reserved']);
+    await until(() => table.get(id)?.lifecycle === 'ready', 'ready');
+    await table.shutdown({ graceMs: 0 });
+  });
+
+  it('a forget of an unattached session stops its host, then erases it and tells session.forgotten', async () => {
+    const id = 'app-unattached-forget' as AppSessionId;
+    const state = join(userData, 'engine-host', 'state', `${id}.json`);
+    const journal = join(userData, 'engine-host', 'journal', id);
+    const { table, order } = unattached(id, () => `files ${existsSync(state) && existsSync(journal) ? 'kept' : 'erased'}`);
+    const host = engineHost({ table });
+    await new FileSessionStateStore(userData).saveLaunchSpec(id, spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl'));
+    await mkdir(journal, { recursive: true });
+    await host.call('session.forget', { appSessionId: id });
+    expect(order).toEqual(['stopping (row absent)', 'files kept', 'stopped']);
+    expect([existsSync(state), existsSync(journal)]).toEqual([false, false]);
+    expect(host.emitted.filter((e) => e.name === 'session.forgotten').map((e) => e.payload)).toEqual([{ appSessionId: id }]);
+    expect(table.unattachedHosts(id)).toEqual([]);
+  });
+
+  // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, while
+  // the adopter reads its stored spec and resumes its journal; its forget is refused as a live process's is, erasing nothing
+  it('refuses already_live for a session held for adoption, its state file and journal kept', async () => {
+    const host = engineHost();
+    const id = 'app-forget-held' as AppSessionId;
+    const state = join(userData, 'engine-host', 'state', `${id}.json`);
+    const journal = join(userData, 'engine-host', 'journal', id);
+    await new FileSessionStateStore(userData).saveLaunchSpec(id, spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl'));
+    await mkdir(journal, { recursive: true });
+    await writeFile(join(journal, 'launch-1.jsonl'), '');
+    host.ipc.table.holdForAdoption([id]);
+    await expect(host.handlers.get('session.forget')!({ appSessionId: id })).rejects.toEqual(new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' }));
+    expect([existsSync(state), existsSync(journal)]).toEqual([true, true]);
+    expect(host.emitted.filter((e) => e.name === 'session.forgotten')).toEqual([]);
+    host.ipc.table.adoptionEnded(id); // a failed adoption's hold released: the forget goes ahead
+    await host.call('session.forget', { appSessionId: id });
+    expect([existsSync(state), existsSync(journal)]).toEqual([false, false]);
   });
 
   it("forgotten as soon as the process reads exited (the bootstrap's release on process.exited), the exit's queue save still lands first: no state file comes back", async () => {
