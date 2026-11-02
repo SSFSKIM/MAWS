@@ -1172,7 +1172,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sheet).toBeVisible();
       await sheet.getByRole('button', { name: `Show the connectors on ${B_NAME}` }).click();
       const secure = sheet.locator(`[data-connector-server="${OAUTH_SERVER}"][data-kind="source"]`);
-      await quoting(expect(secure.locator('[data-connector-server-state]'), 'the OAuth server needs MAWS’s own sign-in on B').toContainText(connectionWords('needsConnect'), { timeout: 60_000 }), async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      // observed open, so no MAWS sign-in is saved for it yet; Connect finds it demanding one now (the page only declares
+      // its tool, so no read has been refused: connectors-oauth.spec.ts's `needsConnect` follows a refused read)
+      await quoting(expect(secure.locator('[data-connector-server-state]'), 'the OAuth server, no MAWS sign-in on B yet').toContainText(connectionWords('disconnected'), { timeout: 60_000 }), async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`);
       const mainPid = a!.app.process().pid!;
       const before = tcpListeners(mainPid);
       const afterOpens = browserOpens(openLog);
