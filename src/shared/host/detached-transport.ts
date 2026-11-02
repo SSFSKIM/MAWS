@@ -293,6 +293,9 @@ interface Served {
   handovers: Map<string, (data: unknown) => void>; // P5 O16 M3b: the `host.handover` asks awaiting their answers
   replaced: boolean;
   recycled: (() => void) | null; // P5 O2 M3: a recycle's draining close, and what runs at its end
+  // P5 O16 panel fix (scalpel-3#1): closed because the welcomed host never answered its status within the start budget;
+  // its close reports `held_lock` (`report`), or nothing for an adoption, which reports nothing
+  silent: { report: boolean; why: string } | null;
 }
 
 // P5 O1 M6: the hello main sends, protocol 3 (the wire's major) or protocol 2 (the window's form)
@@ -559,7 +562,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       const answer = adopting; // P5 O2 M3: answered once served, not by the attempt's end
       adopting = null;
       finish();
-      serve(socket, leftover, proc, welcome, otherBuild && !updatePending, updatePending, (servedIt) => answer?.(servedIt));
+      serve(socket, leftover, proc, welcome, otherBuild && !updatePending, updatePending, answer !== null, (servedIt) => answer?.(servedIt));
     }
 
     function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null, form: Form): void {
@@ -748,12 +751,15 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   // `updatePending` (P5 O16 M3c fix wave 2): one of another build that hands over, told to the host supervisor.
   // Fix wave 3b: a host that hands over, reached directly (not through a relay, whose host is the relay's), is asked its
   // status on the fresh link before the link is reported, so a drain armed already reaches the host supervisor with the
-  // link (`draining`); no answer within helloTimeoutMs, or an error, reads as none. `then`: whether the link was reported.
+  // link (`draining`). `then`: whether the link was reported.
   // Fix wave 3c: until then the connect is not over: a launch or an adoption meanwhile joins it (`admitting`).
-  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean, updatePending: boolean, then: (servedIt: boolean) => void): void {
+  // The panel fix (scalpel-3#1): only an answer admits the link. A probe that gets none within helloTimeoutMs, or an error,
+  // is asked again every pidPollMs within the start budget; past it the host is unresponsive, as one that never answers a
+  // hello is: the link is closed and the host reported `held_lock` (an `adoption` reports nothing), never served ready.
+  function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean, updatePending: boolean, adoption: boolean, then: (servedIt: boolean) => void): void {
     const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
-    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, handovers: new Map(), replaced: false, recycled: null };
+    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, handovers: new Map(), replaced: false, recycled: null, silent: null };
     served = connection;
     unserved = null;
     waitingFor = null;
@@ -817,28 +823,60 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     }
     early = [];
     port.start();
-    void askStatus(port, connection.handovers, timing.helloTimeoutMs).then((draining) => report(draining ?? undefined)); // the host supervisor logs it
+    const budgetEnds = Date.now() + timing.startTimeoutMs;
+    const live = () => served === connection && !stopped;
+    void probeStatus(port, connection.handovers, () => Date.now() + timing.pidPollMs >= budgetEnds, live).then((probe) => {
+      if ('draining' in probe) return report(probe.draining ?? undefined); // the host supervisor logs a drain
+      if (!live()) return;
+      const why = `supervisor pid ${proc.pid} welcomed this app but did not answer its status within ${timing.startTimeoutMs / 1000} s (${probe.failed}); not serving it`;
+      log(why);
+      connection.silent = { report: !adoption, why };
+      port.close();
+    });
   }
 
-  // Fix wave 3b: `host.supervisorStatus` on a fresh port, answered through `answers` (as a handover ask is): its drain,
-  // when it is armed; null when it is not, or no answer came within `ms`, or the port closed first.
-  function askStatus(port: SocketPort, answers: Map<string, (data: unknown) => void>, ms: number): Promise<ServedFacts['draining'] | null> {
-    const id = `transport-status-${++handoverAsks}`;
+  // Fix wave 3b: `host.supervisorStatus` on a fresh port, answered through `answers` (as a handover ask is): its drain when
+  // it is armed, null when it is not. The panel fix (scalpel-3#1): an ask with no answer within helloTimeoutMs, or an error
+  // answer, is asked again after pidPollMs (an earlier ask's late answer still counts) until `over()`, then `failed`;
+  // whatever is still asked is dropped once the link is no longer `live()`.
+  function probeStatus(port: SocketPort, answers: Map<string, (data: unknown) => void>, over: () => boolean, live: () => boolean): Promise<{ draining: ServedFacts['draining'] | null } | { failed: string }> {
     return new Promise((resolve) => {
-      const settle = (draining: ServedFacts['draining'] | null) => {
+      const ids: string[] = [];
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let done = false;
+      const settle = (probe: { draining: ServedFacts['draining'] | null } | { failed: string }) => {
+        if (done) return;
+        done = true;
         clearTimeout(timer);
-        answers.delete(id);
-        resolve(draining);
+        for (const id of ids) answers.delete(id);
+        resolve(probe);
       };
-      const timer = setTimeout(() => settle(null), ms);
-      answers.set(id, (data) => {
-        const res = data as { ok?: unknown; value?: { holder?: { handover?: unknown; inFlight?: unknown; tool?: unknown } } };
-        const holder = res.ok === true ? res.value?.holder : undefined;
-        if (holder?.handover !== 'draining') return settle(null);
-        settle({ inFlight: typeof holder.inFlight === 'number' ? holder.inFlight : 0, ...(typeof holder.tool === 'string' && { tool: holder.tool }) });
-      });
-      const request: HostRequest = { t: 'req', id, name: 'host.supervisorStatus', input: undefined };
-      if (!port.postMessage(request)) settle(null);
+      const retry = (why: string) => {
+        clearTimeout(timer);
+        if (done) return;
+        if (!live() || over()) return settle({ failed: why });
+        timer = setTimeout(ask, timing.pidPollMs);
+      };
+      function ask(): void {
+        if (done) return;
+        if (!live()) return settle({ failed: 'the connection closed' });
+        const id = `transport-status-${++handoverAsks}`;
+        ids.push(id);
+        answers.set(id, (data) => {
+          const res = data as { ok?: unknown; value?: { holder?: { handover?: unknown; inFlight?: unknown; tool?: unknown } } };
+          if (res.ok !== true) {
+            answers.delete(id);
+            return retry('an error answer');
+          }
+          const holder = res.value?.holder;
+          if (holder?.handover !== 'draining') return settle({ draining: null });
+          settle({ draining: { inFlight: typeof holder.inFlight === 'number' ? holder.inFlight : 0, ...(typeof holder.tool === 'string' && { tool: holder.tool }) } });
+        });
+        const request: HostRequest = { t: 'req', id, name: 'host.supervisorStatus', input: undefined };
+        if (!port.postMessage(request)) return retry('the socket refused the request');
+        timer = setTimeout(() => retry(`no answer within ${timing.helloTimeoutMs} ms`), timing.helloTimeoutMs);
+      }
+      ask();
     });
   }
 
@@ -851,6 +889,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       stopped = true; // the quit's stop-all ended the supervisor, or it closed first: either way nothing follows
       return events.disconnected();
     }
+    // P5 O16 panel fix (scalpel-3#1): never reported, so nothing is disconnected; unresponsive, as a silent lock holder is
+    if (connection.silent) return connection.silent.report ? events.failed('held_lock', connection.silent.why) : undefined;
     // P5 O2 M3: a recycle's drain has ended: a fresh attempt at once, with nothing reported. P5 O2 M5: unless the host
     // was asked to exit now (a stop-all, `exit now`): its close stays deliberate, so an on-demand host parks
     if (connection.recycled) {

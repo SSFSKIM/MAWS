@@ -218,7 +218,7 @@ export class MawsdScene {
   async engine(options: StandInOptions = {}): Promise<StandIn> {
     const host = new StandIn('engine-host', options.answers);
     this.engines.push(host);
-    host.supervisor = await this.serve(this.profile, { ...options, runtime: host.runtime() });
+    host.supervisor = await this.serve(this.profile, { capabilities: [...PEER_CAPABILITIES.engineHost], ...options, runtime: host.runtime() }); // it answers its status, as a holder's welcome asks
     return host;
   }
 

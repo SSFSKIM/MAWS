@@ -261,6 +261,55 @@ describe('the detached transport: connecting', () => {
     expect(errors.mock.calls.flat().join(' ')).toContain(`a supervisor (pid ${holder}) holds the lock and does not answer`);
   });
 
+  // P5 O16 panel fix (scalpel-3#1): a holder-capable host reached directly is asked its status at the welcome, and is
+  // served only on an answer: a probe that times out or errs is asked again every pidPollMs within the start budget, and
+  // a host that never answers is left crashed (held_lock), as one that never answers a hello is, never read as ready
+  function probed(answer: (asked: number) => Promise<unknown>) {
+    const asks: number[] = [];
+    const readyAt: number[] = [];
+    supervisor.onState('engine-host', (next) => void (next.state === 'ready' && readyAt.push(asks.length)));
+    const register: FakeSupervisorOptions['register'] = (on) => {
+      on('host.supervisorStatus', async () => {
+        asks.push(Date.now());
+        return (await answer(asks.length)) as never;
+      });
+    };
+    return { asks, readyAt, register };
+  }
+
+  it('a capable host whose status probe times out once is asked again and served only once it answers', async () => {
+    let fake!: FakeSupervisor;
+    const probe = probed((asked) => (asked === 1 ? new Promise(() => {}) : Promise.resolve(supervisorStatus(fake.pid))));
+    fake = await startFake({ register: probe.register });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(probe.readyAt, 'ready only after the second probe answered').toEqual([2]);
+    expect(probe.asks[1]! - probe.asks[0]!).toBeGreaterThanOrEqual(TIMING.helloTimeoutMs);
+  });
+
+  it('a capable host whose status probe errs is asked again and served once it answers', async () => {
+    let fake!: FakeSupervisor;
+    const probe = probed((asked) => (asked === 1 ? Promise.reject(new Error('not yet')) : Promise.resolve(supervisorStatus(fake.pid))));
+    fake = await startFake({ register: probe.register });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(probe.readyAt).toEqual([2]);
+  });
+
+  it('a capable host that never answers its status probe is left crashed (held_lock) within the budget, never ready', async () => {
+    const probe = probed(() => new Promise(() => {}));
+    const fake = await startFake({ register: probe.register });
+    const started = Date.now();
+    await supervisor.start();
+    expect(Date.now() - started).toBeLessThan(TIMING.startTimeoutMs + 1_000);
+    expect(supervisor.facts('engine-host').reason).toBe('held_lock');
+    expect(state()).toMatchObject({ state: 'crashed' });
+    expect(probe.readyAt).toEqual([]);
+    expect(probe.asks.length).toBeGreaterThan(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(errors.mock.calls.flat().join(' ')).toContain(`pid ${fake.pid}`);
+  });
+
   // P5 O16 M3c fix wave 2 (D63; concern 1): a relay holds the app's hello while its engine host hands over, and reports it
   // (`handingOverAt`, main's daemon shape): the start budget holds, both ways main used to fail, and a report that ends
   // falls back to today's bound, whole from its end (fix wave 3)

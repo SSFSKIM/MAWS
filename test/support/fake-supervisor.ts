@@ -15,7 +15,7 @@ import { HostReadySchema, HostRequestV2Schema } from '@shared/ipc/host-protocol'
 import { createHostRuntime, type HostEmit, type HostRegister, type HostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
 import { serveSocketClients, type SocketClients } from '@shared/host/socket-server';
-import { ClientExitSchema, ClientHelloV2Schema, HelloPreambleSchema, PEER_CAPABILITIES, SOCKET_PROTOCOL, SOCKET_PROTOCOL_V2, splitLines, type ServerRefuse, type ServerWelcomeV2 } from '@shared/host/socket-protocol';
+import { ClientExitSchema, ClientHelloV2Schema, HelloPreambleSchema, HOLDER_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, SOCKET_PROTOCOL_V2, splitLines, type ServerRefuse, type ServerWelcomeV2 } from '@shared/host/socket-protocol';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf, socketPathFor, SUPERVISOR_FILES, type LockFile } from '../../src/engine-host/supervisor-files';
@@ -111,6 +111,11 @@ export class FakeSupervisor {
     return this.options.pid;
   }
 
+  // P5 O16 panel fix (scalpel-3#1): the status the engine host answers, not draining
+  status() {
+    return { mode: 'detached', pid: this.pid, startedAt: this.started, buildId: this.options.buildId ?? buildIdOf(this.profile.modulePath), protocol: this.options.protocol ?? SOCKET_PROTOCOL, wire: this.options.wire ?? wireFingerprint(), liveSessions: this.counts.liveSessions, rows: this.counts.rows, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: this.profile.socketPath, logPath: null, orphansKilled: 0 };
+  }
+
   // P5 O16 panel fix: the start this incarnation declares (its lock's `startedAt`, in its welcome); its statuses carry it
   get startedAt(): string {
     return this.started;
@@ -145,8 +150,13 @@ export class FakeSupervisor {
       this.options.runtime ??
       createHostRuntime((on, emit, client) => {
         this.emit = emit;
-        on('engine.ping', async () => ({ pid: this.pid, uptimeMs: 1, hostVersion: 'fake' }));
-        this.options.register?.(on, emit, client);
+        const named = new Set<string>();
+        const onNamed = ((name: string, handler: never) => (named.add(name), on(name as never, handler))) as typeof on;
+        onNamed('engine.ping', async () => ({ pid: this.pid, uptimeMs: 1, hostVersion: 'fake' }));
+        this.options.register?.(onNamed, emit, client);
+        // P5 O16 panel fix (scalpel-3#1): the engine host answers its status at any time, and a holder-capable host's welcome
+        // is served only once it has; a test that registers its own answers in its place
+        if (!named.has('host.supervisorStatus')) on('host.supervisorStatus', async () => this.status() as never);
       });
     if (this.options.speaks === 'protocol-2') this.serveProtocol2(server, runtime(), lock.startedAt);
     else if ((this.options.answer ?? 'serve') === 'serve') {
@@ -156,7 +166,9 @@ export class FakeSupervisor {
           protocol: this.options.protocol ?? SOCKET_PROTOCOL,
           minor: this.options.minor ?? WIRE_MINOR,
           buildId: this.options.buildId ?? buildIdOf(this.profile.modulePath),
-          capabilities: this.options.capabilities ?? PEER_CAPABILITIES.engineHost,
+          // P5 O16 panel fix (scalpel-3#1): a runtime the test built answers only what it registered, never the status a
+          // `host.holder` welcome is admitted on, so by default it does not list that capability
+          capabilities: this.options.capabilities ?? (this.options.runtime ? PEER_CAPABILITIES.engineHost.filter((capability) => capability !== HOLDER_CAPABILITY) : PEER_CAPABILITIES.engineHost),
           wire: this.options.wire ?? wireFingerprint(),
           pid: this.pid,
           startedAt: lock.startedAt,
