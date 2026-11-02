@@ -1,11 +1,13 @@
 // `EndpointServices` as `mawsd` will give them (O2's seam), for the endpoint's suites before O2 lands: a scratch profile
 // with its state directory (0700), the machine's ref, and a log the suite reads. Nothing here touches the owner's
 // profile: every directory is a fresh temporary one.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { MachineRef } from '@shared/machine/ref';
+import { endpointLibrary, type ContentLookup } from '../../src/services/artifacts/scheme/endpoint-library';
 import type { EndpointServices } from '../../src/endpoint/services';
 
 export type FakeServices = EndpointServices & { lines: string[]; holds: Set<string>; cleanup(): void };
@@ -41,5 +43,33 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
     lines,
     holds,
     cleanup: () => fs.rmSync(profileDir, { recursive: true, force: true }),
+  };
+}
+
+/**
+ * P5 O7 M5b: a real `artifacts.fetch` over a scratch store, in place of the fake's 404: the artifact endpoint's own library
+ * (endpoint-library.ts, the scheme's handler: its headers, ranges, the bridge script in an `html` page) over an
+ * `artifacts.content` that answers the files `put` here, under the profile. A path never put, or a revision but 1 or
+ * `live`, is the store's not-found. `fetches` counts the requests the handler answered.
+ */
+export function scratchArtifacts(services: FakeServices): { put(artifactId: string, path: string, content: string | Uint8Array, kind?: ArtifactKind): void; fetches: () => number } {
+  const root = join(services.machine.profileDir, 'scratch-artifacts');
+  const files = new Map<string, { disk: string; kind: ArtifactKind; size: number; sha256: string }>();
+  const content: ContentLookup = async ({ artifactId, revision, path }) => {
+    const file = files.get(`${artifactId}\n${path ?? ''}`);
+    if (file === undefined || (revision !== undefined && revision !== 1)) return { ok: false, error: { code: 'internal', message: 'not found' } };
+    return { ok: true, value: { revision: 1, kind: file.kind, name: basename(path!), size: file.size, sha256: file.sha256, path: file.disk } };
+  };
+  let fetches = 0;
+  services.artifacts = endpointLibrary(content, () => void fetches++);
+  return {
+    put(artifactId, path, data, kind = path.endsWith('.html') ? 'html' : 'file') {
+      const disk = join(root, artifactId, ...path.split('/'));
+      fs.mkdirSync(join(disk, '..'), { recursive: true });
+      fs.writeFileSync(disk, data);
+      const bytes = fs.readFileSync(disk);
+      files.set(`${artifactId}\n${path}`, { disk, kind, size: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') });
+    },
+    fetches: () => fetches,
   };
 }

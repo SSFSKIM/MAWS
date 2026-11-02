@@ -45,7 +45,10 @@
 //
 // P5 O7 M3: a device's streams (streams.ts) open under its acts: a terminal's bytes, read from the pty host's ring and its
 // `onFrame` output, and a forwarded port's connections, each naming a forward the endpoint keeps per device for the resume
-// window (forwards.ts). Both are authorized again at every refresh of the members' rights.
+// window (forwards.ts). Both are authorized again at every refresh of the members' rights. P5 O7 M5b: or under a stream
+// row (the read open: an artifact page's request through the machine's artifact endpoint), authorized again also at every
+// record change and at every change the artifact cache drops a placement for (a relink, a linked session's new placement),
+// the cache dropping it first.
 //
 // `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
 // every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
@@ -398,6 +401,10 @@ export class Endpoint implements EndpointModule {
     this.streams = new Streams({
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       dispatch,
+      // P5 O7 M5b: an `http` read open's request, to the machine's artifact endpoint (read when asked: a suite may replace it).
+      artifacts: {
+        fetch: (request) => (this.#services === null ? Promise.reject(new Error('the endpoint has not started')) : this.#services.artifacts.fetch(request)),
+      },
       own: this.own,
       forwards: this.forwards,
       now: this.deps.now,
@@ -408,7 +415,13 @@ export class Endpoint implements EndpointModule {
     });
     const recordSource = authorization.records ?? this.rl10.members;
     // P5 O7 M5a: before the subscriptions' re-check (registered below), so a feed re-checked on the change reads afresh.
-    this.#unseam.push(recordSource.onChange((target) => this.artifactRanks.dropSession(target)));
+    // P5 O7 M5b: then every read stream whose decision the change moved is authorized again.
+    this.#unseam.push(
+      recordSource.onChange((target) => {
+        this.artifactRanks.dropSession(target);
+        this.streams.accessMoved();
+      }),
+    );
     this.interest = new Interest({ interest: () => this.#services?.interest ?? null, log, resumeMs: seams.resumeMs });
     this.planeA = new PlaneA({
       send: (frame) => this.rl10.send(frame),
@@ -846,8 +859,14 @@ export class Endpoint implements EndpointModule {
     const payload = message.payload as { artifactId?: unknown; change?: unknown; record?: { appId?: unknown } } | null;
     // Every change but a write's (`updated`, which moves neither the artifact's existence nor its links: a write that
     // links its session says `linked` too) changes what `library.entry` answers: a relink, a delete, a create.
-    if (owner === 'engine-host' && message.name === 'artifacts.changed' && payload?.change !== 'updated' && typeof payload?.artifactId === 'string') this.artifactRanks.drop(payload.artifactId);
-    if (owner === 'machine' && message.name === 'session.changed' && typeof payload?.record?.appId === 'string') this.artifactRanks.dropSession(payload.record.appId);
+    if (owner === 'engine-host' && message.name === 'artifacts.changed' && payload?.change !== 'updated' && typeof payload?.artifactId === 'string') {
+      this.artifactRanks.drop(payload.artifactId);
+      this.streams.accessMoved(); // P5 O7 M5b: a read stream on it decided again, its placement read afresh
+    }
+    if (owner === 'machine' && message.name === 'session.changed' && typeof payload?.record?.appId === 'string') {
+      this.artifactRanks.dropSession(payload.record.appId);
+      this.streams.accessMoved();
+    }
   }
 
   /** A new head is on disk: end what it took away. Channels, listings and RL10 (M3–M6) subscribe beside this. */
