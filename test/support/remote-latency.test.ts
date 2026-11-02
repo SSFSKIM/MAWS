@@ -3,7 +3,7 @@
 // the pings, Rule B on the load).
 import { describe, expect, it } from 'vitest';
 import { markerOf } from './latency-engine';
-import { boundsOf, budgetMisses, clockEstimate, delaysOf, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, measureResume, remoteLine, rttStats, signedStats, type CaseRun, type Measures, type RemoteMeasures, type ResumeSteps } from './remote-latency';
+import { boundsOf, budgetMisses, carrierSwitch, clockEstimate, delaysOf, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, measureResume, remoteLine, rttStats, signedStats, type CaseRun, type Measures, type RemoteMeasures, type ResumeSteps } from './remote-latency';
 
 const stats = (p50: number, p95 = p50, n = 600) => ({ p50, p95, n });
 const LOCAL: Measures = { deltaToFrame: stats(24.5, 37.5), roundTrip: stats(0.9, 1.3, 200), openToFirstRowMs: 180, resumeMs: null, engineStartMs: 420 };
@@ -235,5 +235,17 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
         expect(did.at(-1)).toBe('unhold');
       }
     });
+  });
+});
+
+describe('the live bench’s carrier held (P5 O7 M7, the milestone review’s fix 5)', () => {
+  const pong = (carrier: 'direct' | 'relay') => ({ at: 1, received: 2, sent: 2, arrived: 3, carrier });
+  it('voids a case whose link moved during its timed part, or one of whose pings was answered over another carrier, naming why', () => {
+    expect(carrierSwitch('direct', 'the start exchanges, the open, the turns and the round trips', [], [pong('direct'), pong('direct')])).toBeNull();
+    // a change that leaves it up over its own carrier (a refusal's) is no switch
+    expect(carrierSwitch('direct', 'the timed part', [{ at: 5, state: 'up', carrier: 'direct' }], [])).toBeNull();
+    expect(carrierSwitch('direct', 'the start exchanges, the open, the turns and the round trips', [{ at: 5, state: 'up', carrier: 'relay' }, { at: 9, state: 'up', carrier: 'direct' }], [pong('direct')])).toBe('direct: the link moved to up/relay during the start exchanges, the open, the turns and the round trips (2 changes): the case is void');
+    expect(carrierSwitch('relay', 'the end exchanges', [{ at: 5, state: 'down', carrier: null }], [])).toBe('relay: the link moved to down/none during the end exchanges: the case is void');
+    expect(carrierSwitch('relay', 'the end exchanges', [], [pong('relay'), pong('direct'), pong('direct')])).toBe('relay: 2 of 3 pings during the end exchanges were answered over direct: the case is void');
   });
 });

@@ -56,6 +56,8 @@ export interface Exchange {
   received: number | null;
   sent: number | null;
   arrived: number;
+  /** the carrier the pong came over (the live bench's: link.ts's PongStamps) */
+  carrier?: Carrier;
 }
 
 /** The link's round trip over `exchanges`: each pong's arrival less its ping's send, by this device's clock. */
@@ -332,6 +334,25 @@ export interface ResumeSteps {
   firstArrival(): Promise<number>;
   /** the whole turn in A's pane */
   shown(): Promise<void>;
+}
+
+/** A change the link reported (src/main/machines/remote/bench-seam.ts's Transition). */
+export interface LinkTransition {
+  at: number;
+  state: string;
+  carrier: Carrier | null;
+}
+
+/**
+ * Why a live case is void for its carrier over `part` of its timed span: its link moved off `up` over `carrier` (a change
+ * that leaves it there, a refusal's, is none), or a ping in it was answered over another carrier. Null when it held.
+ */
+export function carrierSwitch(carrier: Carrier, part: string, transitions: readonly LinkTransition[], answered: readonly { carrier?: Carrier }[]): string | null {
+  const moves = transitions.filter((t) => t.state !== 'up' || t.carrier !== carrier);
+  if (moves.length > 0) return `${carrier}: the link moved to ${moves[0]!.state}/${moves[0]!.carrier ?? 'none'} during ${part}${transitions.length > 1 ? ` (${transitions.length} changes)` : ''}: the case is void`;
+  const other = answered.filter((a) => a.carrier !== carrier);
+  if (other.length > 0) return `${carrier}: ${other.length} of ${answered.length} pings during ${part} were answered over ${[...new Set(other.map((a) => a.carrier ?? 'no carrier'))].join(', ')}: the case is void`;
+  return null;
 }
 
 /**

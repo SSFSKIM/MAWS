@@ -8,7 +8,8 @@
 //   1. local: this Mac's own case, the latency stub as a scratch profile's engine (the same run's local numbers);
 //   2. the bench app: a scratch profile (the config's, kept between runs) launched with the mock keychain (MAWS_E2E),
 //      signed in from a pairing code read from its file and the file removed, the owner comparing the fingerprint and
-//      approving at their terminal; already signed in, the code is not needed and its file is removed unread;
+//      approving at their terminal; already registered, the code is not needed and its file is removed unread, and a
+//      profile whose session or hub access lapsed signs in again in the browser (org.signIn, test/support/bench-sign-in.ts);
 //   3. the machine (test/support/remote-bench.ts): the bench agent prepared, the scratch mawsd staged (on the VM, the
 //      pack prepare-vm built there before the sitting, started; on the mini, this checkout's head bundle copied into the
 //      profile, then started by mini-ops under the MAWS binary and waited for), enrolled with the code file on the
@@ -24,8 +25,10 @@
 // sends the session a turn and the stub writes it all; then main lifts the hold, the link attempts at once, and resume
 // runs from its `up` again (main's Date.now) to the first event batch of that turn in A's renderer (its Date.now: one
 // clock, this Mac's), judged against the same run's local engine start plus the rtt. When the link came back over the
-// other carrier, the measure is void, with its reason. Everything goes to test-results/remote-latency-live.json. The machine is torn down on every path; its
-// scratch profile is kept until the bench is done (`MAWS_REMOTE_BENCH_REMOVE=1`, below). The file name's `-live` keeps
+// other carrier, the measure is void, with its reason; a case whose link moved while it was timed (the seam's mark and
+// transitions), or one of whose pings came over the other carrier, is void as a whole, with its reason. Everything goes
+// to test-results/remote-latency-live.json. The machine is torn down on every path; its scratch profile is kept until
+// the bench is done (`MAWS_REMOTE_BENCH_REMOVE=1`, below). The file name's `-live` keeps
 // main's output out of the test's evidence (e2e/support/process-evidence.mjs's captureAllowed), and Playwright's tracing
 // and screenshots must be off, so the pairing code is in no artifact.
 //
@@ -45,8 +48,9 @@ import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
+import { benchSignIn } from '../test/support/bench-sign-in';
 import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
-import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, measureResume, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
+import { carrierSwitch, CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, measureResume, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LinkTransition, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { markerOf } from '../test/support/latency-engine';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, TURN_MS, type Written } from './support/remote-latency-page';
@@ -85,44 +89,29 @@ async function bundleAgent(dir: string): Promise<string> {
   return outfile;
 }
 
-const orgStatus = (page: Page) => raw<OrgStatus>(page, 'org.status', undefined);
-const signedIn = (s: OrgStatus) => s.state === 'registered' && s.session === 'signed-in' && s.hubAccess === 'connected';
-
-// The app's sign-in: already signed in, or registered from the pairing code read from its file, which is removed at
-// once whatever follows. The code crosses only into org.register's input; nothing here prints it, and an error that
-// could carry it is replaced by one that cannot.
-async function signIn(page: Page, pairingFile: string | undefined): Promise<string> {
-  const now = await orgStatus(page);
-  if (signedIn(now)) {
-    if (pairingFile !== undefined && existsSync(pairingFile)) rmSync(pairingFile, { force: true });
-    say(`[bench] app: already signed in to ${now.state === 'registered' ? now.org : '?'}; the unused pairing file is removed`);
-    return (now as Extract<OrgStatus, { state: 'registered' }>).member.id;
-  }
-  if (pairingFile === undefined || !existsSync(pairingFile)) throw new Error(`the bench app is not signed in (${now.state}) and the config names no pairing file that exists`);
-  let attempt: { ok: boolean; reason?: { code?: string } };
-  try {
-    const code = readFileSync(pairingFile, 'utf8').trim();
-    rmSync(pairingFile, { force: true });
-    attempt = await page.evaluate((c) => window.maws.invoke('org.register', { code: c }), code).then((r) => (r.ok ? (r.value as typeof attempt) : { ok: false, reason: { code: r.error.code } }));
-  } catch {
-    throw new Error('org.register did not answer (its error is not shown, since it could carry the code)');
-  } finally {
-    rmSync(pairingFile, { force: true });
-  }
-  if (!attempt.ok) throw new Error(`org.register refused the pairing code: ${attempt.reason?.code ?? 'no reason'}`);
-  say('[bench] app: the pairing file is removed; the owner signs in in the browser, then compares the fingerprint below with `admin pair`’s and approves');
-  let last = '';
-  for (const deadline = Date.now() + SIGN_IN_MS; ; ) {
-    const s = await orgStatus(page);
-    if (signedIn(s)) {
-      say(`[bench] app: signed in to ${(s as Extract<OrgStatus, { state: 'registered' }>).org}`);
-      return (s as Extract<OrgStatus, { state: 'registered' }>).member.id;
-    }
-    const line = s.state === 'registering' ? `registering: ${s.step}${s.fingerprint === null ? '' : `; the fingerprint to compare: ${s.fingerprint}`}` : s.state === 'registered' ? `registered: ${s.session}, hub ${s.hubAccess}` : s.state;
-    if (line !== last) say(`[bench] app: ${(last = line)}`);
-    if (Date.now() > deadline) throw new Error(`the bench app did not sign in within ${SIGN_IN_MS / 60_000} minutes (${line})`);
-    await page.waitForTimeout(2_000);
-  }
+// The app's sign-in over its page (test/support/bench-sign-in.ts): a registered profile signs in again; only an
+// unregistered one reads the pairing file, every path removing it.
+function signIn(page: Page, pairingFile: string | undefined): Promise<string> {
+  const removePairing = () => {
+    if (pairingFile !== undefined) rmSync(pairingFile, { force: true });
+  };
+  return benchSignIn({
+    status: () => raw<OrgStatus>(page, 'org.status', undefined),
+    register: (code) => page.evaluate((c) => window.maws.invoke('org.register', { code: c }), code).then((r) => (r.ok ? (r.value as { ok: boolean; reason?: { code?: string } }) : { ok: false, reason: { code: r.error.code } })),
+    signIn: () => page.evaluate(() => window.maws.invoke('org.signIn', undefined)).then((r) => (r.ok ? (r.value as { ok: boolean; reason?: { code?: string } }) : { ok: false, reason: { code: r.error.code } })),
+    takePairing: () => {
+      if (pairingFile === undefined || !existsSync(pairingFile)) return null;
+      try {
+        return readFileSync(pairingFile, 'utf8').trim();
+      } finally {
+        removePairing();
+      }
+    },
+    removePairing,
+    say,
+    sleep: (ms) => page.waitForTimeout(ms),
+    now: Date.now,
+  }, SIGN_IN_MS);
 }
 
 // What the agent streams: its session ready, listed, and each delta the stub wrote.
@@ -150,9 +139,16 @@ function served(): Served & { onLine(line: string): void } {
   });
 }
 
-type LiveCase = { measures: LiveMeasures | null; run: CaseRun | null; exchanges: { start: Exchange[]; end: Exchange[] }; roundTripsMs: number[] };
+/** A carrier's case; `void`, why its measures are not judged (its link moved while it was timed). */
+type LiveCase = { measures: LiveMeasures | null; void: string | null; run: CaseRun | null; exchanges: { start: Exchange[]; end: Exchange[] }; roundTripsMs: number[] };
 
-type Seam = { drop(ref: string): boolean; unhold(ref: string): void; release(ref: string, timeoutMs: number): Promise<{ upAt: number; carrier: Carrier | null } | null> };
+type Seam = {
+  drop(ref: string): boolean;
+  unhold(ref: string): void;
+  release(ref: string, timeoutMs: number): Promise<{ upAt: number; carrier: Carrier | null } | null>;
+  mark(ref: string): void;
+  transitions(ref: string): LinkTransition[];
+};
 
 // A's renderer's event batches of the session that carry `turn` (its prompt or one of its markers), each with its
 // arrival on the renderer's Date.now, kept from now on.
@@ -198,7 +194,10 @@ async function liveResume(page: Page, app: Parameters<typeof pings>[0], ref: Mac
 }
 
 // One carrier over a fresh launch of the bench app: its link up over that carrier, the clock's start, open, turns, round
-// trips, the clock's end, and the carrier asserted again; null with the reason when the link came up over another.
+// trips, the clock's end, and the carrier asserted again; null with the reason when the link came up over another. Its
+// link is watched over the timed part (the seam's mark and transitions: from its start to the resume's drop, and from
+// the resume's up to its end, the resume's own drop being no switch), and every ping's carrier read: a case whose link
+// moved, or whose pings came over another carrier, is void with its reason.
 async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: MachineRef, session: string, carrier: Carrier, samples: () => Written[], turn: (content: string) => void, reasons: string[]): Promise<LiveCase | null> {
   const carried = async () => {
     const m = await linkOf(page, ref);
@@ -210,6 +209,8 @@ async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: Ma
     reasons.push(`${carrier}: the link was ${seen} after 90 s, not up/${carrier}`);
     return null;
   }
+  const transitions = () => app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.transitions(machine), ref);
+  await app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.mark(machine), ref);
   await expect.poll(async () => (await raw<{ rows: { machine: string; session: string }[] }>(page, 'org.rows', undefined)).rows.some((r) => r.machine === ref && r.session === session), { timeout: 60_000, message: 'the bench session is a row of the app’s' }).toBe(true);
   const start = await pings(app, ref, REMOTE_BENCH.pings);
   await showProjectList(page);
@@ -239,13 +240,17 @@ async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: Ma
     closed,
   }, 'wall');
   const trips = await roundTrips(page, session, ref);
+  const timed = carrierSwitch(carrier, 'the start exchanges, the open, the turns and the round trips', await transitions(), start);
   const resumeMs = await liveResume(page, app, ref, session, carrier, samples, turn, reasons);
   await expect.poll(closed, { timeout: TURN_MS, message: 'the resume’s turn closed' }).toBe(true);
   const end = await pings(app, ref, LIVE_BENCH.clockExchanges);
+  const ended = carrierSwitch(carrier, 'the resume and the end exchanges', await transitions(), end);
   const after = await carried();
   if (after !== `up/${carrier}`) reasons.push(`${carrier}: the link was ${after} after the case's measures, not up/${carrier}`);
+  const voided = timed ?? ended;
+  if (voided !== null) reasons.push(voided);
   const measures: LiveMeasures | null = delays.length === 0 || start.length === 0 ? null : { rawDelta: signedStats(delays)!, rawSamples: delays, roundTrip: summarize(trips, BENCH.roundTripWarmup), openToFirstRowMs, rtt: rttStats(start), clock: liveClock(start, end), resumeMs };
-  return { measures, run, exchanges: { start, end }, roundTripsMs: trips };
+  return { measures, void: voided, run, exchanges: { start, end }, roundTripsMs: trips };
 }
 
 test('remote latency, live: delta to frame across two clocks, round trip and open of a lane B session on a scratch bench machine, per carrier, against the same run’s local numbers (acceptance 3)', async () => {
@@ -320,7 +325,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   const localMeasures = local?.measures ?? null;
   for (const carrier of CARRIERS) {
     const measures = live[carrier]?.measures ?? null;
-    if (localMeasures === null || measures === null) continue;
+    if (localMeasures === null || measures === null || live[carrier]?.void != null) continue; // a void case is not judged
     const j = (judged[carrier] = liveJudgement(carrier, localMeasures, measures));
     if (j.void !== null) reasons.push(j.void);
     misses.push(...j.misses);
@@ -344,8 +349,8 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   writeFileSync(join(info.project.outputDir, 'remote-latency-live.json'), `${JSON.stringify({
     lines, machine: machine.name, transport: machine.transport.kind, commit: machine.commit, valid: all.length === 0,
     local: localMeasures,
-    direct: live.direct === undefined ? null : { measures: live.direct.measures, judgement: judged.direct ?? null },
-    relay: live.relay === undefined ? null : { measures: live.relay.measures, judgement: judged.relay ?? null },
+    direct: live.direct === undefined ? null : { measures: live.direct.measures, void: live.direct.void, judgement: judged.direct ?? null },
+    relay: live.relay === undefined ? null : { measures: live.relay.measures, void: live.relay.void, judgement: judged.relay ?? null },
     invalidReasons: all, budgetMisses: misses, inconclusive,
     load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
     machineEngineStartMs: stream.ready?.engineStartMs ?? null,

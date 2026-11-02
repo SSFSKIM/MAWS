@@ -104,6 +104,42 @@ describe('the live bench’s resume (P5 O7 M7)', () => {
   });
 });
 
+describe('the live bench’s carrier watch (P5 O7 M7, the milestone review’s fix 5)', () => {
+  it('records every change of the link’s state or carrier from a mark, with its instant, until the next mark; a release’s up marks afresh', async () => {
+    const { link, deps } = linked();
+    link.benchHold = () => true;
+    link.benchRelease = () => undefined;
+    let clock = 0;
+    const seam = remoteBenchSeam({ ...deps, now: () => clock });
+    expect(seam.transitions(MINI)).toEqual([]); // nothing marked: nothing recorded
+    seam.mark(MINI);
+    clock = 10;
+    link.set('up', 'direct'); // a switch within the grace: still up, over another carrier
+    clock = 20;
+    link.set('down', null);
+    expect(seam.transitions(MINI)).toEqual([{ at: 10, state: 'up', carrier: 'direct' }, { at: 20, state: 'down', carrier: null }]);
+    seam.mark(MINI);
+    expect(seam.transitions(MINI)).toEqual([]);
+    // the resume's own drop and release are no switch: its up begins the record afresh, whatever heard it first
+    seam.drop(MINI);
+    const released = seam.release(MINI, 5_000);
+    clock = 30;
+    link.set('connecting', null);
+    clock = 40;
+    link.set('up', 'relay');
+    await expect(released).resolves.toEqual({ upAt: 40, carrier: 'relay' });
+    expect(seam.transitions(MINI)).toEqual([]);
+    clock = 50;
+    link.set('up', 'direct');
+    expect(seam.transitions(MINI)).toEqual([{ at: 50, state: 'up', carrier: 'direct' }]);
+    // its removal stops the watch
+    seam.dispose();
+    link.set('down', null);
+    expect(seam.transitions(MINI)).toEqual([{ at: 50, state: 'up', carrier: 'direct' }]);
+    expect(() => seam.mark('GoneMachine0000000000' as MachineRef)).toThrow(/no RL2 link/);
+  });
+});
+
 describe('the live bench’s relay case (P5 O7 M7)', () => {
   it('refuses every direct dial only under MAWS_E2E=1 and MAWS_E2E_REMOTE_CARRIER=relay in an unpackaged build', async () => {
     const on = { MAWS_E2E: '1', MAWS_E2E_REMOTE_CARRIER: 'relay' };

@@ -12,7 +12,10 @@
 //   as a network's return makes one) and answers the instant of the link's next `up` on this Mac's wall clock, which
 //   the renderer's Date.now reads too, with the carrier it came up over; `unhold` lifts a hold unconditionally (the
 //   bench's `finally`), and the seam's removal as the app closes lifts every hold it made. A link with no channel is
-//   not held. Only the bench's own app calls them, on its scratch profile.
+//   not held. Only the bench's own app calls them, on its scratch profile;
+// - mark and transitions, the live bench's carrier watch: from a mark (and afresh from a release's `up`, the resume's
+//   own drop being no switch), every change the link reports of its state or carrier, with its instant, so a case whose
+//   link moved while it was timed is voided.
 //
 // And the live bench's relay case (e2e:remote-latency-live): MAWS_E2E_REMOTE_CARRIER=relay, under the same two
 // conditions, refuses every direct dial at once, so each link comes up through the hub, as on a network with no tailnet
@@ -23,6 +26,13 @@ import { peerLists } from './capabilities';
 import type { ByteDuplex } from '../../../../apps/org-protocol/src/index.ts';
 import type { Carrier, PongStamps, ProbeReason, RemoteLink } from './link';
 
+/** One change the link reported, on this Mac's wall clock. */
+export interface Transition {
+  at: number;
+  state: LinkState;
+  carrier: Carrier | null;
+}
+
 export interface RemoteBenchSeam {
   machines(): { ref: MachineRef; name: string; state: LinkState; carrier: Carrier | null; clock: boolean }[];
   ping(ref: MachineRef, count: number, timeoutMs?: number): Promise<(PongStamps | null)[]>;
@@ -31,7 +41,11 @@ export interface RemoteBenchSeam {
   release(ref: MachineRef, timeoutMs?: number): Promise<{ upAt: number; carrier: Carrier | null } | null>;
   /** The hold lifted whatever the link's state, waiting for nothing: the bench's `finally`. */
   unhold(ref: MachineRef): void;
-  /** Every hold this seam made lifted: its removal, as the app closes. */
+  /** The link's changes recorded from now on, the record so far dropped. */
+  mark(ref: MachineRef): void;
+  /** The link's changes since its mark, or since its last release's `up`. */
+  transitions(ref: MachineRef): Transition[];
+  /** Every hold this seam made lifted and every watch stopped: its removal, as the app closes. */
   dispose(): void;
 }
 
@@ -50,6 +64,24 @@ export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }
     const link = deps.link(ref);
     if (link === null) throw new Error(`no RL2 link to machine ${ref}`);
     return link;
+  };
+  // one listener per watched link: the record, and whether the next `up` (a release's) begins it afresh
+  const watches = new Map<MachineRef, { seen: Transition[]; freshAtUp: boolean; stop: () => void }>();
+  const watch = (ref: MachineRef) => {
+    const known = watches.get(ref);
+    if (known !== undefined) return known;
+    const link = linkOf(ref);
+    const watched = { seen: [] as Transition[], freshAtUp: false, stop: () => {} };
+    watched.stop = link.onState((state) => {
+      if (watched.freshAtUp && state === 'up') {
+        watched.freshAtUp = false;
+        watched.seen = [];
+        return;
+      }
+      watched.seen.push({ at: now(), state, carrier: link.carrier() });
+    });
+    watches.set(ref, watched);
+    return watched;
   };
   return {
     machines: () =>
@@ -70,7 +102,16 @@ export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }
       return holding;
     },
     unhold: lift,
-    dispose: () => [...held].forEach(lift),
+    mark(ref) {
+      const watched = watch(ref);
+      watched.seen = [];
+      watched.freshAtUp = false;
+    },
+    transitions: (ref) => [...(watches.get(ref)?.seen ?? [])],
+    dispose: () => {
+      [...held].forEach(lift);
+      for (const watched of watches.values()) watched.stop();
+    },
     release(ref, timeoutMs = 60_000) {
       const link = linkOf(ref);
       // a link that still reports up is reconnecting within its grace, whose `up` again would be heard by no one
@@ -87,6 +128,7 @@ export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }
           stop();
           resolve({ upAt, carrier: link.carrier() });
         });
+        watch(ref).freshAtUp = true;
         held.delete(ref);
         link.benchRelease();
       });
