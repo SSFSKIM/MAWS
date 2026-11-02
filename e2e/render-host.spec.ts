@@ -556,6 +556,18 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
       for (const type of ['down', 'up'] as const) await input({ kind: 'pointer', type, ...centre, button: 'left', buttons: type === 'down' ? 1 : 0, clickCount: 1, modifiers: [] });
       await expect.poll(() => inPage<string>('/input', 'document.querySelector("#state").textContent'), { message: 'the click landed' }).toBe('clicked');
       await expect.poll(() => wire.states.at(-1)?.tabs.find((each) => each.tabId === tabId)?.control, { message: 'the tab is the person’s while they act' }).toBe('human');
+      // P5 O17 M7: a drag. Electron builds each mouse event alone, reading the held buttons from its modifiers, so the moves
+      // between a press and its release reach the page with the left button held (`buttons` 1) only through
+      // `leftbuttondown` (src/main/browser/screencast.ts's buttonsDown). The pointer is brought to the press's point first,
+      // so no move is synthesized at the press; the page may coalesce the drag's moves, so it hears one or more
+      await input({ kind: 'pointer', type: 'move', x: 300, y: 300, button: 'left', buttons: 0, clickCount: 0, modifiers: [] });
+      await inPage('/input', '(window.__dragButtons = [], document.addEventListener("mousemove", (e) => window.__dragButtons.push(e.buttons)), 0)');
+      await input({ kind: 'pointer', type: 'down', x: 300, y: 300, button: 'left', buttons: 1, clickCount: 1, modifiers: [] });
+      for (const step of [1, 2, 3]) await input({ kind: 'pointer', type: 'move', x: 300 + 20 * step, y: 300 + 10 * step, button: 'left', buttons: 1, clickCount: 0, modifiers: [] });
+      await expect.poll(async () => (await inPage<number[]>('/input', 'window.__dragButtons')).length, { message: 'the drag’s moves reached the page' }).toBeGreaterThan(0);
+      const dragged = await inPage<number[]>('/input', 'window.__dragButtons');
+      expect(dragged.filter((buttons) => buttons !== 1), `every move of the drag with the left button held (${JSON.stringify(dragged)})`).toEqual([]);
+      await input({ kind: 'pointer', type: 'up', x: 360, y: 330, button: 'left', buttons: 0, clickCount: 1, modifiers: [] });
       // the click left focus on the button: the person focuses the field through the same viewer, then types
       const field = (await inPage<{ x: number; y: number }>('/input', '(() => { const r = document.querySelector("#field").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()'))!;
       for (const type of ['down', 'up'] as const) await input({ kind: 'pointer', type, ...field, button: 'left', buttons: type === 'down' ? 1 : 0, clickCount: 1, modifiers: [] });
