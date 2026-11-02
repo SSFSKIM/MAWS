@@ -30,7 +30,10 @@
 //      the session's Artifacts tool in A lists them and reads the text; a rename in A's Library on B shows in B's own
 //      library (read over B's machine.sock); Export › PDF of the page renders on B and Save As lands it in A's folder
 //      (the save seam, MAWS_E2E_SAVE_PATH); Open externally on an HTML file of B's checkout opens a copy paged to A (the
-//      open-log seam, MAWS_E2E_OPEN_LOG); the Browser tool's notice reads B's own reason; then (M4, under
+//      open-log seam, MAWS_E2E_OPEN_LOG); the Browser tool's notice reads B's own reason; then (M5b) the page renders
+//      in the Artifacts tool's frame with what B's store holds (main's scheme reading it over the link), and a document
+//      B's session starts at A's ask opens in A's editor, where what A types reads back from B's store (B's own export
+//      over its machine.sock); then (M4, under
 //      MAWS_E2E_STEP_UP=accept) "+ Session" in
 //      A's own checkout of the same org project (a `.smns` naming B's project) starts sessions on B through the machine
 //      menu: one with its text as the brief, opening in A's pane with its reply and recording A's member as its
@@ -135,6 +138,11 @@ const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the
 const RENAMED = 'B notes, renamed on A';
 const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
 const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
+// M5b: a document B's first session starts at A's ask (an empty one, linked to the session on B), and what A types in it
+const PLAN_ASK = 'Start the plan.';
+const PLAN_MADE = 'The plan is in B’s library.';
+const PLAN = { title: 'B plan' };
+const TYPED_PLAN = 'Typed on A into the plan on B.';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
 // The repository's own settings, so the runner's global ones (a hooks path, signing, an identity) change nothing B's
@@ -393,6 +401,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     journal.mawsToolCall('artifact_create', { kind: 'html', title: REPORT.title, content: REPORT.html }, { status: 'created', kind: 'html', title: REPORT.title }, { asked: false });
     journal.reply(make, MADE_REPLY);
     journal.completed(make);
+    // M5b: A's next ask, answered by one `artifact_create` of a document, linked to the session as M5a's are
+    const plan = journal.prompt();
+    journal.mawsToolCall('artifact_create', { kind: 'document', title: PLAN.title }, { status: 'created', kind: 'document', title: PLAN.title }, { asked: false });
+    journal.reply(plan, PLAN_MADE);
+    journal.completed(plan);
     const fixture = journal.write(journals, 'b-session');
     // M4: the sessions "+ Session" starts on B, the next fixtures on B's list: one whose brief is its first turn, and one
     // in a new worktree, whose journal is written once A's tab names the worktree (its init's directory)
@@ -882,6 +895,63 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await openSurface(again, 'Browser');
       await expect(surface(again, 'browser').locator('[data-browser-agent-unavailable]')).toHaveText(`The agent has no browser here: ${browserOnB!.reason}`, { timeout: 30_000 });
       console.log(`[e2e:remote] M5a: the Browser tool reads B's reason: ${browserOnB!.reason}`);
+    });
+
+    await test.step('M5b: B’s page renders in A’s frame with what B’s store holds, and a document B’s session starts, typed in A’s editor, reads back from B’s store', async () => {
+      const sessionTab = mainTabById(again, `session:${address}`);
+      const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
+
+      // B's session starts the plan at A's ask
+      await sessionTab.click();
+      await composerOf(again).click();
+      await again.keyboard.type(PLAN_ASK);
+      await again.keyboard.press('Enter');
+      await quoting(expect(main(again).getByText(PLAN_MADE).first(), 'B’s reply once the plan is made').toBeVisible({ timeout: 60_000 }), () => `${mainSaid(again)}\nB's log:\n${bLines(/artifact|tool|maws|replay/i)}`);
+      await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+      type Linked = { artifacts: { id: string; title: string; kind: string }[] };
+      const linked = (await b.request<Linked>('artifacts.list', { filter: { appSessionId: app } })).artifacts;
+      const report = linked.find((x) => x.kind === 'html' && x.title === REPORT.title)!;
+      const plan = linked.find((x) => x.kind === 'document' && x.title === PLAN.title);
+      expect(plan, `the plan linked to B’s session in B’s store: ${JSON.stringify(linked)}`).toBeDefined();
+
+      // The page in the Artifacts tool's frame: what B's store holds, read here only over the link (A's own store has no
+      // such artifact), the bridge script B's scheme inserts left aside
+      const onB = (await b.request<{ content: string }>('library.read', { artifactId: report.id })).content;
+      const [heading, paragraph] = [/<h1>([^<]*)<\/h1>/.exec(onB)?.[1], /<p>([^<]*)<\/p>/.exec(onB)?.[1]];
+      expect([heading, paragraph], 'B’s store holds the page').toEqual(['Report from B', 'Rendered on B, saved on A.']);
+      const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
+      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      const tool = surface(again, 'artifacts');
+      const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
+      await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      const frame = pageRecord.frameLocator('[data-artifact-frame="html"]');
+      await quoting(expect(frame.locator('h1'), 'B’s page in A’s frame').toHaveText(heading!, { timeout: 60_000 }), async () => `the record: ${await pageRecord.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      await expect(frame.locator('p')).toHaveText(paragraph!);
+      console.log(`[e2e:remote] M5b: B's page renders in A's frame: ${heading}`);
+
+      // The plan in A's editor: what A types there lands in B's store, as B's own export of it reads it
+      await pageRecord.getByRole('button', { name: 'Back', exact: true }).click();
+      await tool.getByRole('button', { name: 'This session', exact: true }).click();
+      const planRow = tool.locator(`button[data-artifact-row][data-artifact-id="${plan!.id}"]`);
+      await quoting(expect(planRow, 'the plan in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
+      await planRow.click();
+      const editor = tool.locator(`[data-artifact-record="${plan!.id}"] .ds-doc .ProseMirror`);
+      await quoting(expect(editor, 'B’s plan in A’s editor').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      await expect(editor, 'writable: A owns B').toHaveAttribute('contenteditable', 'true', { timeout: 30_000 });
+      await editor.click();
+      await again.keyboard.type(TYPED_PLAN);
+      await expect(editor).toContainText(TYPED_PLAN);
+      const exported = async () => {
+        const { path } = await b.request<{ path: string }>('artifacts.export', { artifactId: plan!.id, format: 'md' });
+        return readFileSync(path, 'utf8');
+      };
+      await expect
+        .poll(exported, { timeout: 60_000, message: 'B’s store holds what A typed (B’s own export of the plan)' })
+        .toContain(TYPED_PLAN)
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(again)}\n${mainSaid(again)}\nB's log:\n${bLines(/document|artifact|endpoint|stream/i)}`);
+        });
+      console.log(`[e2e:remote] M5b: what A typed reads back from B's store`);
     });
 
     // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now:

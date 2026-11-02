@@ -130,7 +130,8 @@ function useSystemFiles(system: DesignSystemRef | { builtin: 'maws' } | null): {
     if (id === null || !host) return;
     let live = true;
     let close = () => {};
-    host.open(id).then(
+    const owner = new AbortController(); // P5 O7 M5b review fix 2: no retries once this effect is gone
+    host.open(id, { signal: owner.signal }).then(
       (handle) => {
         if (!live) return handle.close();
         const show = () => setRead({ id, files: readSystem(handle.doc).files, error: null });
@@ -145,6 +146,7 @@ function useSystemFiles(system: DesignSystemRef | { builtin: 'maws' } | null): {
     );
     return () => {
       live = false;
+      owner.abort();
       close();
     };
   }, [host, id]);

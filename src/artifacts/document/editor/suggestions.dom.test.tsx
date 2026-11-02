@@ -60,7 +60,7 @@ describe('document suggestion review', () => {
 
   it.each(['Accept', 'Reject'] as const)('%s sends the binding’s item-id block range to the host', async (action) => {
     const { host, range } = await mount();
-    expect(host.open).toHaveBeenCalledWith('doc1', { doc: 'suggestions' });
+    expect(host.open).toHaveBeenCalledWith('doc1', { doc: 'suggestions', signal: expect.any(AbortSignal) }); // P5 O7 M5b review fix 2: the effect owns the open
     expect(host.attributions).toHaveBeenCalledWith('doc1', 0, Number.MAX_SAFE_INTEGER, { doc: 'suggestions' });
     expect(screen.getByLabelText('Suggested document').textContent).toContain('Proposed.');
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: `${action} suggestion 1` })); });

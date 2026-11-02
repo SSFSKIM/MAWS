@@ -32,6 +32,14 @@ export interface DocOpenDeps {
 
 const HUMAN: Actor = { kind: 'human' };
 let lastChannel = 0;
+/**
+ * The next channel number a window awaits a document port by. One counter for every port main posts a window, the local
+ * host's and (P5 O7 M5b) another machine's (./remote-open.ts), so two never share a number in one page.
+ */
+export function nextDocChannel(): number {
+  lastChannel = (lastChannel + 1) >>> 0;
+  return lastChannel;
+}
 const watched = new Set<ClientId>(); // P3-A M5: the clients whose end ends their channels
 
 function watchClient(deps: DocOpenDeps, client: ClientRef): void {
@@ -55,8 +63,7 @@ export async function openDocument(deps: DocOpenDeps, artifactId: string, client
   if (!isDocKind(artifact.kind)) throw refusal('invalid', `a ${artifact.kind} artifact has no document to open`);
   const page = pageOf(client);
   if (!page || page.isDestroyed()) throw new CommandFailure(ipcError('internal', 'the window that asked is gone'));
-  lastChannel = (lastChannel + 1) >>> 0;
-  const channel = lastChannel;
+  const channel = nextDocChannel();
   const { port1, port2 } = deps.channel();
   watchClient(deps, client);
   if (!deps.postDocPort({ t: 'doc', channel, artifactId, actor: HUMAN, ...(doc && { doc }) }, port1, client.id)) {

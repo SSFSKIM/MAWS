@@ -25,7 +25,7 @@
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule"): `artifact`. An
 // artifact names no session; its links to sessions are the store's rows, which `library.entry` answers with the artifact
 // in one read (on the asker's behalf). The rule reads the artifact from the input (`artifactKey`): its `artifactId`
-// (`copyAsset`'s `to`, the write), or, for a listing that names a session (`artifacts.list {filter: {appSessionId}}`),
+// (`copyAsset`'s `to`, the write; P5 O7 M5b: an `http` read open's, from its URL), or, for a listing that names a session (`artifacts.list {filter: {appSessionId}}`),
 // that session, placed as the `appSessionId` rule places it; `artifacts.create` (no id yet) and a `pruneVersions` naming
 // no artifact (every one's) take the orphan form, which only the machine's owners hold. Each linked session is placed
 // through `laneB` and nothing else, its target with the record's `launchedBy` (O12 M11's bridge keys on the app session);
@@ -36,6 +36,7 @@
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
+import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import type { LaunchedBy } from '@shared/graph/session';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
@@ -167,6 +168,12 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
  * is by-effect.ts'); `create` and a `pruneVersions` with no `artifactId` the orphan form; anything else its `artifactId`.
  */
 export function artifactKey(name: string, input: unknown): ArtifactKey | null {
+  // P5 O7 M5b: an `http` read open names its artifact by its URL (its fields already held to the scheme's shape).
+  if (name === 'artifacts.fetch') {
+    const url = field(input, 'url');
+    const target = typeof url === 'string' ? parseArtifactUrl(url) : null;
+    return target === null ? null : { artifactId: target.artifactId };
+  }
   if (name === 'artifacts.list') {
     const id = field(field(input, 'filter'), 'appSessionId');
     return isId(id) ? { appSessionId: id } : null;

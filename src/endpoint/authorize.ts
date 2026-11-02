@@ -68,6 +68,15 @@
 // A by-effect rule may read an artifact's standing too (`copyAsset`'s `from`, by-effect.ts). Step 2 holds every registry
 // command's input to its schema, a row with its own grade too (M5a's `library.list` and `library.spaces`); an act's input
 // is the request's, which the gate decoded from the bytes codec's tagged form for a device that listed `rl2.bytes`.
+//
+// P5 O7 M5b (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The read open"): a `stream` whose name is a
+// stream row of the offer table (`artifacts.fetch`, `documents.open`) is a read open, which names no act: it is decided
+// by the eight steps as a call is, its input the open's kind fields (held to the row's `accepts`, `malformed`), standing
+// through the row's target rule, the effect's grade (an `edit` document `manage`), policy (`read_only` refuses one graded
+// above `view`, `read-only`), and, in place of presence, the device still the head's (`removed`): no step-up, since nothing
+// a stream row admits needs one. Its decision says whether it stands (`stands`), as an act's does: the stream's opening
+// asks it in the step it publishes the stream, and its re-checks ask it at a record change or a relink (streams.ts).
+// Any other `stream` is the act open's binding (`#stream`, above).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type SessionRank } from '@shared/ipc/grades';
@@ -85,7 +94,8 @@ import { artifactShortCut, CheckoutBounds, placeArtifact, resolveSubscription, r
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
- * names the act its stream opens under, its `input` the binding that act's ledger stored (`StreamBinding`).
+ * names the act its stream opens under, its `input` the binding that act's ledger stored (`StreamBinding`); or (P5 O7
+ * M5b) a stream row, its `input` the read open's kind fields.
  */
 export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub' | 'stream'; name: string; input: unknown; action?: Action; session?: SessionRef };
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
@@ -294,7 +304,7 @@ export class Authorizer {
       let standing: Standing;
       try {
         if (request.kind === 'query') standing = decided(await this.#query(request, who, reads));
-        else if (request.kind === 'stream') standing = decided(await this.#stream(request, who));
+        else if (request.kind === 'stream' && !this.#readOpen(request.name)) standing = decided(await this.#stream(request, who));
         else if (request.kind === 'sub') standing = decided(await this.#sub(request.input, who, reads));
         else standing = await this.#command(request, who, org, ref, reads);
       } catch (error) {
@@ -302,8 +312,9 @@ export class Authorizer {
         standing = decided(refuse(error.reason));
       }
       if (moved()) continue;
-      // An act's admission says whether it stands still, for an executor that awaits before its ledger (actions.ts).
-      const stands = (decision: Decision): Decision => (decision.ok && request.kind === 'act' ? { ...decision, stands: () => !moved() } : decision);
+      // An act's admission says whether it stands still, for an executor that awaits before its ledger (actions.ts); so
+      // does a stream's, for its opening's publication and its re-checks (streams.ts; P5 O7 M5b).
+      const stands = (decision: Decision): Decision => (decision.ok && (request.kind === 'act' || request.kind === 'stream') ? { ...decision, stands: () => !moved() } : decision);
       if (standing.presence === undefined) return stands(standing.decision);
       const decision = await standing.presence();
       return moved() ? refuse('unavailable') : stands(decision);
@@ -345,6 +356,11 @@ export class Authorizer {
     return this.ctx.offers ?? OFFERS;
   }
 
+  /** P5 O7 M5b: whether `name` is a stream row's, a read open's (decided by `#command`), not an act a stream opens under. */
+  #readOpen(name: string): boolean {
+    return Object.hasOwn(this.#offers.commands, name) && this.#offers.commands[name].kind === 'stream';
+  }
+
   #gradeOf(name: string, row: OfferRow): GradeSpec | null | undefined {
     return row.grade === undefined ? (this.ctx.gradeOf ?? declaredGrade)(name) : row.grade;
   }
@@ -357,6 +373,8 @@ export class Authorizer {
     if (row === undefined) return no('not-offered');
     if (kind === 'act' && row.kind !== 'act') return no('not-offered');
     if (kind === 'call' && row.kind === 'act') return no('act-required');
+    // P5 O7 M5b: a stream row admits its read open alone, never a call or an act of its name.
+    if ((kind === 'stream') !== (row.kind === 'stream')) return no('not-offered');
     if (kind === 'act' && (action === undefined || action.action !== name || action.org !== org.head.org || action.machine !== ref || action.device !== who.device)) return no('malformed');
     // An act's args as the gate read them (P5 O7 M5a: decoded from the bytes codec's form, for a device that sent it).
     const input = request.input;
@@ -419,11 +437,12 @@ export class Authorizer {
       if (!(await this.#asPending(name, input as Readonly<Record<string, unknown>>, reads))) return no('class');
     }
 
-    // 8. Presence, once the decision is known to stand.
+    // 8. Presence, once the decision is known to stand. A read open (P5 O7 M5b) asks no step-up: its device is the head's.
     const granted: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
-    if (kind !== 'act') return decided(granted);
+    if (kind !== 'act' && kind !== 'stream') return decided(granted);
     const device = deviceOf(org.head, who.member, who.device);
     if (device === undefined) return no('removed');
+    if (kind === 'stream') return decided(granted);
     if (webCards) {
       const passkey = device.passkey;
       if (passkey === undefined) return no('step-up');

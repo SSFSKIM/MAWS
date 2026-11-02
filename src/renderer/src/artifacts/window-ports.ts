@@ -8,9 +8,10 @@ const PORT_WAIT_MS = 10_000; // how long an answered open waits for its port
 
 // The page's side of the preload's route (src/preload/doc-port.ts): only a message whose source is this window itself is
 // a port from main; a frame inside the page posting the same shape is ignored. A port nobody takes within the wait is
-// closed.
+// closed. P5 O7 M5b review fix 1: a port whose close comes while it waits here is refused when taken, since a close said
+// before the replica listened is never said again (main's bridge ends its stream, and closes the port, whenever it likes).
 export function windowDocPorts(win: Window): DocPorts & { dispose(): void } {
-  const early = new Map<number, { port: MessagePort; timer: ReturnType<typeof setTimeout> }>();
+  const early = new Map<number, { port: MessagePort; timer: ReturnType<typeof setTimeout>; closed: boolean }>();
   const waiting = new Map<number, (port: MessagePort) => void>();
   const onMessage = (event: MessageEvent) => {
     if (event.source !== win || !isDocPortMessage(event.data) || event.ports.length !== 1) return;
@@ -21,7 +22,9 @@ export function windowDocPorts(win: Window): DocPorts & { dispose(): void } {
       waiting.delete(channel);
       return waiter(port);
     }
-    early.set(channel, { port, timer: setTimeout(() => early.delete(channel) && port.close(), PORT_WAIT_MS) });
+    const entry = { port, timer: setTimeout(() => early.delete(channel) && port.close(), PORT_WAIT_MS), closed: false };
+    port.addEventListener('close', () => void (entry.closed = true), { once: true });
+    early.set(channel, entry);
   };
   win.addEventListener('message', onMessage);
   return {
@@ -30,6 +33,7 @@ export function windowDocPorts(win: Window): DocPorts & { dispose(): void } {
       if (arrived) {
         early.delete(channel);
         clearTimeout(arrived.timer);
+        if (arrived.closed) return Promise.reject(new Error(`the port for document channel ${channel} closed before it was taken`));
         return Promise.resolve(arrived.port as unknown as PortLike);
       }
       return new Promise((resolve, reject) => {

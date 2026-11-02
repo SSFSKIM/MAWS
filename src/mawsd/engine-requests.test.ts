@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState } from '@shared/ipc/schema';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import { DaemonClocks } from './clocks';
 import { engineRequests, EXIT_SETTLE_MS } from './engine-requests';
 
 function scene() {
@@ -55,6 +56,31 @@ describe('a client’s request to the engine host and the park', () => {
     expect(t.s.inFlight).toEqual([1, 0]);
   });
 
+  it('on the real clocks, a request that outlives the idle time asks no park as it ends, and the idle time runs again from there (P5 O5)', async () => {
+    const parks: string[] = [];
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    try {
+      clocks.configure(1_000);
+      clocks.served();
+      clocks.engineHost(4242);
+      let answer: (value: HostResponse) => void = () => {};
+      const forward = vi.fn(() => new Promise<HostResponse>((resolve) => (answer = resolve)));
+      const guard = engineRequests({ hosts: { forward, onState: () => () => {}, parked: () => false, completionGone: () => false } as never, clocks, log: () => {} });
+      const asked = guard.forward('engine-host', { name: 'connectors.call', input: {} });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(parks, 'none under the request').toEqual([]);
+      answer({ t: 'res', id: 'x', ok: true, value: null } as HostResponse);
+      await asked;
+      expect(parks, 'none as it ends').toEqual([]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(parks).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(parks, 'the idle time from its end').toEqual(['idle']);
+    } finally {
+      clocks.stop();
+    }
+  });
+
   it('after the park’s ask, goes only once that host has exited (the supervisor then starts the next for it)', async () => {
     const t = scene();
     t.s.asked = true;
@@ -91,6 +117,40 @@ describe('a client’s request to the engine host and the park', () => {
     expect(t.hosts.forward).toHaveBeenCalledOnce();
     t.answer();
     await asked;
+  });
+
+  it('holds an open endpoint document channel as a need until it closes, counted in flight so no park is asked under it (P5 O7 M5b)', () => {
+    const t = scene();
+    const release = t.guard.hold();
+    expect(t.s.steps).toEqual(['need']);
+    expect(t.s.inFlight).toEqual([1]);
+    expect(t.guard.inFlight()).toBe(1);
+    release();
+    release();
+    expect(t.s.steps, 'a need again at its close: the park clock starts from there').toEqual(['need', 'need']);
+    expect(t.s.inFlight).toEqual([1, 0]);
+  });
+
+  it('on the real clocks, a hold kept past the idle time asks no park, and its release starts the idle time again from there (P5 O7 M5b)', async () => {
+    const parks: string[] = [];
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    try {
+      clocks.configure(1_000);
+      clocks.served();
+      clocks.engineHost(4242);
+      const guard = engineRequests({ hosts: { forward: vi.fn(), onState: () => () => {}, parked: () => false } as never, clocks, log: () => {} });
+      const release = guard.hold();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(parks, 'none under the open channel').toEqual([]);
+      release();
+      expect(parks, 'none at its close').toEqual([]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(parks).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(parks, 'the idle time from the close').toEqual(['idle']);
+    } finally {
+      clocks.stop();
+    }
   });
 
   it('another owner’s request goes straight on, no need and nothing counted', async () => {

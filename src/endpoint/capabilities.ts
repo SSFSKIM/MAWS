@@ -22,4 +22,9 @@ export const ENDPOINT_CAPABILITIES = [
   // M5a: a call's `input` and `output` and an act's `args` and `result` carry bytes in json-bytes' tagged form
   // (`{"$bytes": "<base64>"}`, `$plain` escaped): decoded and encoded here only for a device that listed it (bytes.ts).
   'rl2.bytes',
+  // M5b: the read open (§N): a `streamOpen` with no `op` of the kinds `http` (an artifact page's request) and `document`
+  // (an artifact's document channel), admitted by a stream row of the offer table; `streamOpened.http`; the refusal
+  // `read-only`, sent only in answer to a read open. A read open from a device that listed none of it is `malformed`.
+  // Not `rl2.browser-screencast`: reserved for O17 M9, listed by neither side until it builds the kind.
+  'rl2.read-open',
 ] as const;

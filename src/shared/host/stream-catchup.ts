@@ -45,9 +45,10 @@
 // link they stay available, but the link itself can drop and come back with both processes alive, and what the engine
 // host wrote to the socket that closed counts as delivered on its side (D41): so at each streaming of the engine-host
 // link (`relinked`) every open stream catches up from its cursor the same way, quietly. A read that fails ends the stream
-// for its reader (`end('unavailable')`); a reader that keeps it (the front) has it catch up at the next relink, and a
-// live status or event of a new launch opens that launch. A live event or status of another launch (the session
-// launched again), during an opening too, moves the stream to a snapshot of the new launch, announced by a new `subbed`.
+// for its reader (`end('unavailable')`); a reader that keeps it (the front) has it catch up at the next relink, or at a
+// live status of the launch it stands in (CATCHUP_RESTARTS of them in a row until it is live again), and a live status
+// or event of a new launch opens that launch. A live event or status of another launch (the session launched again),
+// during an opening too, moves the stream to a snapshot of the new launch, announced by a new `subbed`.
 //
 // A `cards` stream (lane B's phone view) carries only the session's pending requests: each broker item that stands for a
 // pending request, hydrated with its originating request (`session.pendingRequest`: the tool and input, or the question
@@ -62,6 +63,11 @@ export const BACKLOG_BYTES = 2 * 1024 * 1024;
 export const PAGE_EVENTS = 500;
 /** Rounds of reading again a replace-whole part that changed during the read before it. */
 const SETTLE_ROUNDS = 5;
+/**
+ * Restarts in a row of a failed stream's catch-up, each at a status of the launch it stands in, before it waits for the
+ * link's next streaming or a new launch: reads that fail this often fail for a reason a status does not change.
+ */
+export const CATCHUP_RESTARTS = 3;
 
 /** The replace-whole parts of a session, in the order an opening sends them (the status first). */
 export type StreamPart = 'status' | 'queue' | 'pendingItems' | 'catalog';
@@ -156,6 +162,10 @@ class Stream implements StreamHandle {
   paused = false;
   /** Its first opening failed: whatever launch it opens later is new to its reader, from the launch's first event. */
   unanswered = false;
+  /** A read failed and no opening or journal read started since: a status of its own launch restarts its catch-up. */
+  failed = false;
+  /** Catch-ups restarted that way since it was last live, up to CATCHUP_RESTARTS. */
+  restarts = 0;
   /** Bumped by each (re)open: a flow that finds it moved stops. */
   gen = 0;
   hydration = 0;
@@ -247,6 +257,7 @@ export class SessionStreams {
     // A catch-up before the opening was answered: it is answered as asked.
     if ((how === 'resume' || how === 'relink') && !stream.answered) how = 'open';
     const gen = ++stream.gen;
+    stream.failed = false;
     const { sink } = stream;
     const pastRow = stream.pastRow;
     stream.holdEvents = true;
@@ -420,6 +431,8 @@ export class SessionStreams {
       if (this.#otherLaunch(stream, event)) return void this.#open(stream, 'relaunch');
       if (!stream.catching) this.#take(stream, event);
     }
+    // Live again, nothing left to read: a later failure's restarts count from none
+    if (!stream.catching) stream.restarts = 0;
   }
 
   /** A live event held while a read is in flight; past the backlog, none is held and the journal gives them after. */
@@ -441,10 +454,11 @@ export class SessionStreams {
 
   /**
    * A read failed: the reader is told, and a stream it keeps takes no live event until it caught up from its cursor (a
-   * relink), and opens a new launch as soon as one shows.
+   * relink, or a status of its own launch), and opens a new launch as soon as one shows.
    */
   #fail(stream: Stream): void {
     stream.gen++;
+    stream.failed = true;
     this.#unhold(stream);
     stream.holdEvents = false;
     stream.holdState = false;
@@ -484,6 +498,12 @@ export class SessionStreams {
     if (part.part === 'status') {
       const status = part.value as { launchId?: unknown; engineSessionId?: unknown };
       if (status.launchId !== stream.epoch) return void this.#open(stream, 'relaunch');
+      // A status of the launch it stands in: the catch-up a failed read left undone restarts from the cursor, as at the
+      // link's next streaming (the opening reads this status again). Each restart waits on a status of its own.
+      if (stream.failed && stream.restarts < CATCHUP_RESTARTS) {
+        stream.restarts++;
+        return void this.#open(stream, 'relink');
+      }
       if (stream.view === 'cards') {
         // The context an answer needs moved: the cards are hydrated again.
         const engine = engineOf(status);
@@ -565,6 +585,7 @@ export class SessionStreams {
     if (!stream.catching || stream.reading || stream.holdEvents || stream.sink.ended || stream.closed || stream.sink.backlog > this.#backlog / 2) return;
     const gen = stream.gen;
     stream.reading = true;
+    stream.failed = false;
     stream.holdEvents = true;
     this.#unhold(stream);
     const from = stream.queued;

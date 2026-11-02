@@ -143,7 +143,7 @@ describe('artifact writes', () => {
     expect(await l.cmd('artifacts.update', { artifactId: A1, pinned: true })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'artifacts.update: machine mini is unavailable' } });
   });
 
-  it('refuse locally a copy between machines, an asset or bytes past the channel, a path on this Mac, and an edit’s port', async () => {
+  it('refuse locally a copy between machines, an asset or bytes past the channel, and a path on this Mac', async () => {
     const l = lab();
     l.machines.record(A1, MINI);
     l.machines.record(A2, OTHER);
@@ -153,7 +153,6 @@ describe('artifact writes', () => {
     expect(await l.cmd('artifacts.uploadAsset', { artifactId: A1, name: 'a.png', mime: 'image/png', bytes: big })).toMatchObject({ ok: false, error: { code: 'invalid_input', message: TOO_LARGE_WORDS } });
     expect(await l.cmd('artifacts.create', { kind: 'file', title: 'f', content: { bytes: big } })).toMatchObject({ ok: false, error: { code: 'invalid_input', message: TOO_LARGE_WORDS } });
     expect(await l.cmd('artifacts.create', { kind: 'file', title: 'f', content: { path: '/Users/me/f.pdf' } })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'malformed' } } });
-    expect(await l.cmd('artifacts.open', { artifactId: A1 })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'editing an artifact on mini arrives with the next landing' } });
     expect(l.link.acts).toEqual([]);
     // both on the act's machine: sent
     l.machines.record(A2, MINI);

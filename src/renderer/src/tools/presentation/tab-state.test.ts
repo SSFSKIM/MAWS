@@ -109,6 +109,26 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(handle.closed).toBe(true);
   });
 
+  // P5 O7 M5b: a replica ended by a refusal for good (another machine's deck its member can no longer view) says so
+  it('shows a refusal the replica ended with in place of the deck', async () => {
+    const { handle, state } = await opened();
+    expect(state.snapshot().failed).toBeNull();
+    handle.set({ phase: 'off', synced: false, refused: 'you can’t view this document on studio' });
+    expect(state.snapshot().failed).toBe('you can’t view this document on studio');
+    state.dispose();
+  });
+
+  // Review fix 2 (M5b4): the tab is the open's owner: disposed before the replica synced, it cancels the open's retries
+  it('cancels its replica’s open when disposed before it synced', async () => {
+    const signals: AbortSignal[] = [];
+    const host = { open: vi.fn((_id: string, options?: { signal?: AbortSignal }) => (signals.push(options!.signal!), new Promise(() => {}))), identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
+    const state = new DeckTabState({ artifactId: 'deck-1', kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard: vi.fn(async () => false), saveWaitMs: 30, savingShownMs: 10 });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0]!.aborted).toBe(false);
+    state.dispose();
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
   it('a restore it did not witness clears its undo stack', async () => {
     const { handle, state } = await opened();
     const session = state.snapshot().session!;

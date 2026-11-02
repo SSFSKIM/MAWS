@@ -85,6 +85,7 @@ export class DeckTabState {
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
   private disposed = false;
+  private readonly opening = new AbortController(); // review fix 2 (M5b4): the replica's open, owned by this tab until it syncs
   private closing = false;
   private holders = 0; // M7: what still writes into the replica (`hold`)
   private wasShown = false;
@@ -131,7 +132,7 @@ export class DeckTabState {
     if (this.deps.ipc) await this.readViewed(this.deps.ipc);
     let handle: DocumentHandle;
     try {
-      handle = await this.deps.host.open(this.artifactId);
+      handle = await this.deps.host.open(this.artifactId, { signal: this.opening.signal });
     } catch (error) {
       if (!this.disposed) this.set({ failed: messageOf(error) });
       return;
@@ -171,6 +172,8 @@ export class DeckTabState {
   // What the header reads of the replica: its phase, sync and read-only as they change, and edits left waiting for the
   // host past the delay (an edit acknowledged sooner publishes nothing).
   private follow(handle: DocumentHandle, document: DocumentState): void {
+    // P5 O7 M5b: the replica ended for good (the document gone, or no longer the member's to view): said in its place
+    if (document.refused !== undefined && this.current.failed !== document.refused) return this.set({ failed: document.refused });
     if (document.unsaved === 0) this.stopSavingTimer();
     else if (this.savingTimer === null && !this.current.saving) {
       this.savingTimer = setTimeout(() => {
@@ -258,6 +261,7 @@ export class DeckTabState {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.opening.abort();
     open.delete(this);
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
