@@ -233,6 +233,20 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(h.statusReads).toEqual([]);
   });
 
+  // P5 O16 M3c: the exit order's settle waits for an artifact write's run as for host.op's, so its claim is kept first
+  it('keeps the engine host’s exit waiting for an artifact write in flight until its result is kept', async () => {
+    let finish!: () => void;
+    const h = ops({ artifactWrite: (name) => (name === 'artifacts.saveVersion' ? async () => (await new Promise<void>((resolve) => (finish = resolve)), { versionId: 7 }) : undefined) });
+    const answer = h.artifactOp(save(), CTX);
+    let settled = false;
+    const leaving = h.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled, 'the exit waits for the artifact write').toBe(false);
+    finish();
+    await leaving;
+    expect(await answer).toEqual({ state: 'done', result: { ok: true, value: { versionId: 7 } } });
+  });
+
   it('answers the claim’s target from a query, across a reopen; the orphan form too', async () => {
     const h = ops();
     await h.artifactOp(save(), CTX);
