@@ -16,7 +16,7 @@ import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
 import { daemonPaths } from '@shared/daemon/files';
 import { appIdentity } from '@shared/host/identity';
-import type { HostSpec } from '@shared/host/host-supervisor';
+import { ENGINE_HOST_BUDGETS_MS, type HostSpec } from '@shared/host/host-supervisor';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
@@ -111,7 +111,7 @@ export function createHosts(
     hosts: daemon
       ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover?.drainingAt() ?? null)
       : {
-          'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
+          'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS }, // the spine runs here
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
         },
     emit,

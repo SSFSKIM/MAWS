@@ -47,6 +47,7 @@ export interface SourceOptions {
   searchDebounceMs?: number; // SEARCH_REINDEX_DEBOUNCE_MS
   now?: () => string;
   warmLinkedWorktrees?: (directories: string[]) => Promise<void>; // projects.ts's; a test holds the warm-up open
+  scanRetryMs?: readonly number[]; // SCAN_RETRY_MS
 }
 
 const TICK_MS = 16;
@@ -61,6 +62,9 @@ type SearchJob = { summary: TranscriptSummary; failures: number; retryAt: number
 // pass finished, so a session still writing costs one incremental pass per window, however often it appends.
 export const SEARCH_REINDEX_DEBOUNCE_MS = 30_000;
 const SEARCH_RETRY_MS = [250, 1000]; // three attempts per transcript stamp, then an explicit incomplete state
+// The waits before a failed scan's sync runs again (retrySync). A retry after a timeout queues behind the scan the host
+// is still running (it runs one at a time), and reads only what the index does not hold by then.
+const SCAN_RETRY_MS = [2_000, 10_000, 30_000];
 
 export class IndexSessionSource implements SessionSource {
   private readonly tickMs: number;
@@ -92,6 +96,7 @@ export class IndexSessionSource implements SessionSource {
   // precede its answer), the generation that transition started, and who waits to hear of the next answered scan
   private scanned = false;
   private generation = 0;
+  private scanRetry: ReturnType<typeof setTimeout> | null = null; // SCAN_RETRY_MS: the failed sync's next run
   private readonly scanListeners = new Set<() => void>();
   private readonly appliedListeners = new Set<() => void>(); // P5 O3-D M6: who waits for a scan's discoveries applied
   private readonly bridged = new Map<AppSessionId, BridgedPhase>(); // P5 O9 M6: what the bridges MAWS drives say
@@ -156,6 +161,7 @@ export class IndexSessionSource implements SessionSource {
       this.host.onState('engine-host', () => {
         this.generation += 1; // l1-sessions-13: what the store holds is unknown again until the next scan answers
         this.scanned = false;
+        this.dropScanRetry(); // the next host's streaming syncs afresh
         this.applyBefore([...this.holders.keys()]); // E11: what the host sent before it went (P4 W2-B: a record made later would miss the holder forgotten here)
         this.resetSearch(); // the new host's scan requeues every unfinished stamp
         this.live.clear(); // a host that went away took its processes with it
@@ -184,6 +190,7 @@ export class IndexSessionSource implements SessionSource {
       stopped = true;
       this.stopped = true;
       this.scanned = false;
+      this.dropScanRetry();
       this.resetSearch();
       this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
       for (const off of this.offs) off();
@@ -464,10 +471,12 @@ export class IndexSessionSource implements SessionSource {
     }
   }
 
-  private sync(): Promise<unknown> {
+  // `attempt`: 0 for a sync a host start asked for, n for the nth run again of one whose scan failed (SCAN_RETRY_MS)
+  private sync(attempt = 0): Promise<unknown> {
     this.syncs = this.syncs.then(async () => {
       if (this.stopped) return;
-      this.index.sessionSearch.retryFailures();
+      // once a host start: a retry gives the text reads that failed since then no second round
+      if (attempt === 0) this.index.sessionSearch.retryFailures();
       const bindings = this.index.sessions.bindings();
       const bare = bindings.filter((b) => b.size === null || b.mtimeMs === null).map(({ sessionId, appSessionId }) => ({ sessionId, appSessionId }));
       const known = bindings.flatMap(({ sessionId, appSessionId, size, mtimeMs }) => (size === null || mtimeMs === null ? [] : [{ sessionId, appSessionId, size, mtimeMs }]));
@@ -483,8 +492,33 @@ export class IndexSessionSource implements SessionSource {
       }
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
+      if (scan === null) this.retrySync(generation, attempt);
     });
     return this.syncs;
+  }
+
+  // A failed scan leaves discovery unknown (`scanned`), which holds the inactivity archive and mawsd's discovery wake,
+  // and leaves undiscovered what the CLI wrote while the app was closed (seen 2026-11-03: a 7,750-session store's scan
+  // outran its deadline, and nothing asked again until the host's next transition). So the sync runs again on
+  // SCAN_RETRY_MS while its generation lasts and no other sync's scan has answered in it; past the schedule, discovery
+  // waits for the next transition. One retry waits at most, and `syncs` runs one sync at a time.
+  private retrySync(generation: number, attempt: number): void {
+    if (this.stopped || generation !== this.generation || this.scanned) return;
+    const delay = (this.options.scanRetryMs ?? SCAN_RETRY_MS)[attempt];
+    if (delay === undefined) {
+      console.error(`[index] fs.scan failed ${attempt + 1} times; discovery waits for the engine host's next start`);
+      return;
+    }
+    this.dropScanRetry();
+    this.scanRetry = setTimeout(() => {
+      this.scanRetry = null;
+      if (!this.stopped && generation === this.generation && !this.scanned) void this.sync(attempt + 1);
+    }, delay);
+  }
+
+  private dropScanRetry(): void {
+    if (this.scanRetry) clearTimeout(this.scanRetry);
+    this.scanRetry = null;
   }
 
   private recordChanged(record: SessionRecord, cause: ChangeCause, revision: number): void {

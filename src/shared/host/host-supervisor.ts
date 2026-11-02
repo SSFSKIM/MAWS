@@ -226,6 +226,12 @@ export interface HostSupervisor {
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
+// The engine host's commands whose work grows with the store, with their own budgets (HostSpec.requestBudgetsMs) on every
+// supervisor whose engine host the index source scans through. `fs.scan` lists every transcript and reads each one the
+// index does not hold, after any scan the host is still running: 13.6 s on the owner's 7,750-session store after an
+// update (2026-11-03), where earlier measures were 1.4 to 3 s for 3,100 to 5,100 transcripts. Its budget is some 9
+// times the worst seen; a scan past it is asked again (src/services/index/source.ts, SCAN_RETRY_MS).
+export const ENGINE_HOST_BUDGETS_MS = { 'fs.scan': 120_000 } as const satisfies Partial<Record<CommandName, number>>;
 // The wait before the 1st, 2nd and 3rd-and-later restart of a host since app start.
 export const RESTART_BACKOFF_MS = [500, 2_000, 5_000] as const;
 // This many unexpected exits within the window leave a host `crashed` for good.
