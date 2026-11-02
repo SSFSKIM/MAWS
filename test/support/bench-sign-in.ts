@@ -28,7 +28,7 @@ export interface SignInDeps {
 }
 
 type Registered = Extract<OrgStatus, { state: 'registered' }>;
-const signedIn = (s: OrgStatus): s is Registered => s.state === 'registered' && s.session === 'signed-in' && s.hubAccess === 'connected';
+const signedIn = (s: Registered): boolean => s.session === 'signed-in' && s.hubAccess === 'connected';
 const lineOf = (s: OrgStatus) =>
   s.state === 'registering' ? `registering: ${s.step}${s.fingerprint === null ? '' : `; the fingerprint to compare: ${s.fingerprint}`}` : s.state === 'registered' ? `registered: ${s.session}, hub ${s.hubAccess}` : s.state;
 
@@ -65,7 +65,7 @@ export async function benchSignIn(deps: SignInDeps, withinMs: number): Promise<s
   let last = '';
   for (const deadline = deps.now() + withinMs; ; ) {
     const s = await deps.status();
-    if (signedIn(s)) {
+    if (s.state === 'registered' && signedIn(s)) {
       deps.say(`[bench] app: signed in to ${s.org}`);
       return s.member.id;
     }
