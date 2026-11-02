@@ -316,7 +316,7 @@ describe('an on-demand host', () => {
       register: (on) =>
         on('host.supervisorStatus', async () => {
           if (++status.asks === 1) await new Promise<void>((resolve) => (status.release = resolve));
-          return { mode: 'detached', pid: fake.pid } as never; // not draining
+          return fake.status() as never; // not draining (a whole status: the panel fix serves only an answer)
         }),
     });
     const replaced: HostOwner[] = [];

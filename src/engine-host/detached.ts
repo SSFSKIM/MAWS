@@ -43,7 +43,7 @@ import { ATTACHMENT_CAPABILITY, HOLDER_CAPABILITY, PEER_CAPABILITIES, SOCKET_PRO
 import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
-import { isAlive, procStartOf, socketPathFor, SUPERVISOR_FILES } from './supervisor-files';
+import { isAlive, procStartOf, socketPathFor, SUPERVISOR_FILES, takeStopRequest } from './supervisor-files';
 import type { SupervisorExit, SupervisorIdentity } from './supervision';
 
 export { BREAK_STALE_MS, buildIdOf, socketPathFor, START_EXIT_HELD, takeLock, type LockDeps, type LockFile } from './supervisor-files';
@@ -110,6 +110,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
   const { dir, log } = opts;
   const withoutHolder = e2eWithoutHolder(opts.env ?? process.env); // P5 O16 M3c
   const unlisted = (capabilities: readonly string[]) => (withoutHolder ? capabilities.filter((capability) => capability !== HOLDER_CAPABILITY) : capabilities);
+  let self: { pid: number; procStart: string } | null = null; // P5 O16 panel fix: this process as its lock names it, once listening
   return startSocketHost(
     {
       kind: 'supervisor',
@@ -123,8 +124,9 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       capabilities: unlisted(PEER_CAPABILITIES.engineHost), // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
       // (2) every live row stopped (grace 3 s) and the plugin runner with it; P5 O16 M3b: a hosted row detached instead,
-      // unless all were asked to stop
-      shutdown: (reason) => opts.shutdown(EXIT_GRACE_MS, reason === 'stopAll' ? 'stop' : 'detach'),
+      // unless all were asked to stop. The panel fix (scalpel-4#3): a SIGTERM with a stop request naming this process
+      // (main's quit after a quiet close, supervisor-files.ts `requestStop`) is a stop-all too
+      shutdown: (reason) => opts.shutdown(EXIT_GRACE_MS, reason === 'stopAll' || (reason === 'signal' && self !== null && takeStopRequest(dir, self)) ? 'stop' : 'detach'),
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
       exitWhenIdle: () => opts.life.exitAsked('idle', { refused: false, capabilities: [] }),
       exitAsked: (when, from) => opts.life.exitAsked(when, { ...from, capabilities: unlisted(from.capabilities) }), // P5 O16 M3b
@@ -136,6 +138,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
       // background (up to the sweep's grace) while this supervisor already serves
       listening: (host) => {
+        self = host.owner; // the panel fix: what a stop request must name
         const held = opts.adopt?.() ?? {}; // P5 O16 M3: the roster first, so the sweep never stops what a live host holds
         const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log }, held);
         const { pid } = host.owner;

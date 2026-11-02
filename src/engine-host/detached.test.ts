@@ -11,7 +11,7 @@ import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOpti
 import { Supervision, type SupervisorExit } from './supervision';
 import { registerAttachment } from './attachment';
 import { readLive, writeLive } from './live-ledger';
-import { buildIdOf, isAlive, procStartOf, readLock } from './supervisor-files';
+import { buildIdOf, isAlive, procStartOf, readLock, requestStop, SUPERVISOR_FILES } from './supervisor-files';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -436,6 +436,41 @@ describe('the detached entry', () => {
       const supervisor = (await signalled.start())!;
       await supervisor.stop('signal');
       expect(signalled.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'detach');
+    });
+
+    // P5 O16 panel fix (scalpel-4#3): the quit's stop after a quiet close (detached-transport.ts `stopUnserved`) writes a
+    // stop request naming this host before its SIGTERM, so that signal stops every row as a stop-all does; a request
+    // naming another process (another pid, or another start of this pid) is stale: removed, and the signal detaches
+    describe('a SIGTERM with a stop request', () => {
+      type Self = { pid: number; procStart: string };
+      const signalWith = async (request: ((self: Self) => Self) | null) => {
+        const host = harness();
+        const supervisor = (await host.start())!;
+        const lock = readLock(dir)!;
+        if (request) requestStop(dir, request({ pid: lock.pid, procStart: lock.procStart }));
+        await supervisor.stop('signal');
+        return { host, left: existsSync(join(dir, SUPERVISOR_FILES.stopRequest)) };
+      };
+
+      it('naming this host: the shutdown stops every row, and the request is taken', async () => {
+        const { host, left } = await signalWith((self) => self);
+        expect(host.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'stop');
+        expect(left).toBe(false);
+      });
+
+      it('naming another pid or another start: ignored and removed, the shutdown detaches', async () => {
+        for (const stale of [(self: Self) => ({ ...self, pid: self.pid + 1 }), (self: Self) => ({ ...self, procStart: `${self.procStart} earlier` })]) {
+          const { host, left } = await signalWith(stale);
+          expect(host.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'detach');
+          expect(left).toBe(false);
+        }
+      });
+
+      it('none: the shutdown detaches', async () => {
+        const { host, left } = await signalWith(null);
+        expect(host.shutdown).toHaveBeenCalledExactlyOnceWith(3_000, 'detach');
+        expect(left).toBe(false);
+      });
     });
   });
 

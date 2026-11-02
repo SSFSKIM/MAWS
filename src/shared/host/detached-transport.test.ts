@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import type { SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,7 +30,8 @@ const BEFORE_HOLDER = { capabilities: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABIL
 const BACKOFF = [30, 60, 90] as const;
 
 // P5 O16 M3c fix wave 2: an engine host's status as it pushes it (host.supervisorStatus), for a fake to emit
-const supervisorStatus = (pid: number, over: Record<string, unknown> = {}) => ({ mode: 'detached', pid, startedAt: 't', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, ...over });
+// (the panel fix: with the start the fake serving that pid declares, as a real host's status carries its welcome's)
+const supervisorStatus = (pid: number, over: Record<string, unknown> = {}) => ({ mode: 'detached', pid, startedAt: fakes.findLast((fake) => fake.pid === pid)?.startedAt ?? 't', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', liveSessions: 1, rows: 1, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, ...over });
 const holding = (pid: number, inFlight: number | undefined, tool?: string) => ({ ...supervisorStatus(pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'none', ...(inFlight !== undefined && { inFlight }), ...(tool !== undefined && { tool }) } });
 const until = (check: () => boolean, timeout = 3_000) => vi.waitFor(() => expect(check()).toBe(true), { timeout, interval: 5 });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -258,6 +259,55 @@ describe('the detached transport: connecting', () => {
     expect(state()).toMatchObject({ state: 'crashed' });
     expect(spawn).not.toHaveBeenCalled();
     expect(errors.mock.calls.flat().join(' ')).toContain(`a supervisor (pid ${holder}) holds the lock and does not answer`);
+  });
+
+  // P5 O16 panel fix (scalpel-3#1): a holder-capable host reached directly is asked its status at the welcome, and is
+  // served only on an answer: a probe that times out or errs is asked again every pidPollMs within the start budget, and
+  // a host that never answers is left crashed (held_lock), as one that never answers a hello is, never read as ready
+  function probed(answer: (asked: number) => Promise<unknown>) {
+    const asks: number[] = [];
+    const readyAt: number[] = [];
+    supervisor.onState('engine-host', (next) => void (next.state === 'ready' && readyAt.push(asks.length)));
+    const register: FakeSupervisorOptions['register'] = (on) => {
+      on('host.supervisorStatus', async () => {
+        asks.push(Date.now());
+        return (await answer(asks.length)) as never;
+      });
+    };
+    return { asks, readyAt, register };
+  }
+
+  it('a capable host whose status probe times out once is asked again and served only once it answers', async () => {
+    const pid = processes.newPid();
+    const probe = probed((asked) => (asked === 1 ? new Promise(() => {}) : Promise.resolve(supervisorStatus(pid))));
+    const fake = await startFake({ pid, register: probe.register });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(probe.readyAt, 'ready only after the second probe answered').toEqual([2]);
+    expect(probe.asks[1]! - probe.asks[0]!).toBeGreaterThanOrEqual(TIMING.helloTimeoutMs);
+  });
+
+  it('a capable host whose status probe errs is asked again and served once it answers', async () => {
+    const pid = processes.newPid();
+    const probe = probed((asked) => (asked === 1 ? Promise.reject(new Error('not yet')) : Promise.resolve(supervisorStatus(pid))));
+    const fake = await startFake({ pid, register: probe.register });
+    await supervisor.start();
+    expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
+    expect(probe.readyAt).toEqual([2]);
+  });
+
+  it('a capable host that never answers its status probe is left crashed (held_lock) within the budget, never ready', async () => {
+    const probe = probed(() => new Promise(() => {}));
+    const fake = await startFake({ register: probe.register });
+    const started = Date.now();
+    await supervisor.start();
+    expect(Date.now() - started).toBeLessThan(TIMING.startTimeoutMs + 1_000);
+    expect(supervisor.facts('engine-host').reason).toBe('held_lock');
+    expect(state()).toMatchObject({ state: 'crashed' });
+    expect(probe.readyAt).toEqual([]);
+    expect(probe.asks.length).toBeGreaterThan(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(errors.mock.calls.flat().join(' ')).toContain(`pid ${fake.pid}`);
   });
 
   // P5 O16 M3c fix wave 2 (D63; concern 1): a relay holds the app's hello while its engine host hands over, and reports it
@@ -644,6 +694,60 @@ describe('the detached transport: early exits and the crash ladder', () => {
   });
 });
 
+// P5 O16 panel fix (scalpel-4#5, scalpel-4#6): a process is its pid and the start its welcome declares, so a later
+// process that reuses a gone one's pid is another process: the gone one's completions and its handover marker never
+// reach it
+describe('the detached transport: a reused pid is another process', () => {
+  // The next spawn starts a fake at `pid` (the old process's, now another's), with `register` served
+  function spawnReusing(pid: number, register?: FakeSupervisorOptions['register']): void {
+    spawn.mockImplementationOnce((_command: string, args: string[], options: SpawnOptions) => {
+      processes.alive.set(pid, `reused-${pid}`);
+      const candidate = new FakeCandidate(pid, args, options, processes);
+      candidates.push(candidate);
+      queueMicrotask(() => void startFake({ pid, register }));
+      return candidate;
+    });
+  }
+  const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+  const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+
+  it('a completion of a crashed process is refused, never sent to the process that reuses its pid', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    const answered: unknown[] = [];
+    spawnReusing(old.pid, (on) => on('maws.pane.answer', async (input) => (answered.push(input), { outcome: 'delivered' as const })));
+    await old.die(); // a crash: its pid dead, then reused by the successor
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    expect(state().pid).toBe(old.pid);
+    const result = await supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
+    expect(result).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(answered).toEqual([]);
+  });
+
+  it('a handover marker left by a process that exited when idle never makes the crash of the process that reuses its pid planned', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(supervisor.exitSupervisor('idle')).toBe(true);
+    const detached = { ...supervisorStatus(old.pid), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 0, detached: true } };
+    await until(() => old.emit('host.supervisorStatus', detached as never));
+    await until(() => emit.mock.calls.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { holder?: { detached?: boolean } }).holder?.detached === true));
+    spawnReusing(old.pid);
+    await old.die(); // its idle exit, as asked: deliberate, and its successor reuses its pid
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    const reused = fakes[1]!;
+    expect([reused.pid, state().restarts, supervisor.facts('engine-host').lastExit]).toEqual([old.pid, 0, null]);
+    await reused.die(); // a crash, with no status of its own heard
+    await until(() => state().state === 'ready' && fakes.length === 3);
+    expect(state().restarts).toBe(1);
+    expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
+    expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
+  });
+});
+
 describe('the detached transport: the build and wire handshake (§Design 6’s table; P5 O1 M6: a wire refusal is the protocol-2 window’s)', () => {
   const live = (liveSessions: number) => ({ counts: { liveSessions, rows: liveSessions } });
 
@@ -993,13 +1097,22 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
   });
 
   describe('stopAllForQuit while restarting after a quiet close (the welcomed supervisor lives, unserved)', () => {
+    // P5 O16 panel fix (scalpel-4#3): a holder's SIGTERM detaches its sessions, so the quit's names it a stop first: a
+    // stop request naming the process, written whole before the signal
     it('SIGTERMs the supervisor the lock names, so its exit order stops every row; nothing reconnects or spawns', async () => {
       const fake = await startFake({ counts: { liveSessions: 2, rows: 2 } });
       await supervisor.start();
       fake.dropClient(); // a socket error: it lives on, still running its sessions
       await until(() => state().state === 'restarting');
+      const requested: unknown[] = [];
+      processes.onKill = (pid) => {
+        requested.push(JSON.parse(readFileSync(join(profile.dir, SUPERVISOR_FILES.stopRequest), 'utf8')));
+        processes.alive.delete(pid);
+      };
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([[fake.pid, 'SIGTERM']]);
+      expect(requested, 'the stop request, there at the signal').toEqual([{ pid: fake.pid, procStart: `start-${fake.pid}` }]);
+      expect(statSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)).mode & 0o777).toBe(0o600);
       await sleep(BACKOFF[2] + TIMING.pidPollMs * 5);
       expect(spawn).not.toHaveBeenCalled();
       expect(state().state).toBe('restarting');
@@ -1013,6 +1126,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
       processes.alive.set(fake.pid, 'another process');
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([]);
+      expect(existsSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)), 'no stop request').toBe(false);
     });
 
     it('signals nothing when the lock names another process than the one this app was served by', async () => {
@@ -1025,6 +1139,7 @@ describe('the detached transport: deliberate stops, restarts and the quit', () =
       writeFileSync(join(profile.dir, SUPERVISOR_FILES.lock), JSON.stringify({ ...lock, pid: other, procStart: `start-${other}` }));
       await supervisor.stopAllForQuit(5_000);
       expect(processes.kills).toEqual([]);
+      expect(existsSync(join(profile.dir, SUPERVISOR_FILES.stopRequest)), 'no stop request').toBe(false);
     });
   });
 

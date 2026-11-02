@@ -148,7 +148,7 @@ export class StandIn {
   // P5 O16 M3c fix wave 3: the engine host's exit once its handover's drain settled, as Supervision makes it: its status
   // says every row detached, then the exit order runs (after `delay` ms), so its client reads that close as planned
   handOver(delay = 0): void {
-    const status = { mode: 'detached', pid: this.pid, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: 0, rows: 0, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 0, detached: true } };
+    const status = { mode: 'detached', pid: this.pid, startedAt: this.supervisor.startedAt, buildId: 'b', protocol: 3, wire: 'w', liveSessions: 0, rows: 0, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 0, detached: true } };
     this.emitRaw('host.supervisorStatus', status); // dropped when no client said ready, as the runtime drops any event
     setTimeout(() => void this.supervisor.die(), delay);
   }
@@ -218,7 +218,7 @@ export class MawsdScene {
   async engine(options: StandInOptions = {}): Promise<StandIn> {
     const host = new StandIn('engine-host', options.answers);
     this.engines.push(host);
-    host.supervisor = await this.serve(this.profile, { ...options, runtime: host.runtime() });
+    host.supervisor = await this.serve(this.profile, { capabilities: [...PEER_CAPABILITIES.engineHost], ...options, runtime: host.runtime() }); // it answers its status, as a holder's welcome asks
     return host;
   }
 
