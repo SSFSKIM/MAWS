@@ -22,6 +22,9 @@ export const DEVICE_CAPABILITIES = [
   'rl2.artifacts',
   // M5a: a call's `input` and `output` and an act's `args` and `result` may carry bytes in json-bytes' tagged form.
   'rl2.bytes',
+  // M5b: the read open (§N): a stream with no `op`, an artifact page's request (`http`) or its document (`document`),
+  // sent only to an endpoint that listed it; the endpoint's `streamOpened.http` and its refusal `read-only`.
+  'rl2.read-open',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 

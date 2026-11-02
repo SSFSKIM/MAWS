@@ -11,27 +11,49 @@
 //   This side's, given at the open and refunded by the consumer (`credit`, as the bytes are taken: a terminal's as the
 //   renderer acknowledges them, a connection's as the local socket writes them), bounds what the endpoint sends.
 //   Credit is counted in decoded bytes, and a refund given before the stream opened is held until it has, since the
-//   endpoint is still admitting it.
+//   endpoint is still admitting it. b3's review: this side holds the endpoint to the credit it granted (the open's, plus
+//   each refund sent); a chunk past what is outstanding closes the stream `malformed`, none of it delivered.
 // - Data goes in chunks of at most STREAM_CHUNK_BYTES, each unpadded base64url, at the sender's byte offset: this side
 //   numbers its bytes from the open's `inputFrom` for a pty (the device's input offset in its epoch) and from zero for a
 //   connection; the endpoint's are the pty host's output offsets, or the connection's.
 // - A refusal is the stream's close with the refusal's reason; a close this side sends is not answered.
-import { STREAM_CHUNK_BYTES, STREAM_CREDIT_MAX, base64urlEncode, type DeviceMessage, type EndpointMessage, type StreamOpenedMessage } from '../../../../apps/org-protocol/src/index.ts';
+// - P5 O7 M5b (§N, the read open): a stream with no `op` is opened under a stream row of the endpoint's offer table, not
+//   under an act: an artifact page's request (`http`, its answer's status and headers in `streamOpened.http`, the body
+//   after) or its document (`document`). It goes only to a peer that listed `rl2.read-open` as well, judged on the
+//   channel it goes out on, and closes `not-offered` otherwise: an older endpoint reads a missing `op` as `malformed`.
+import {
+  STREAM_CHUNK_BYTES,
+  STREAM_CREDIT_MAX,
+  base64urlEncode,
+  type DeviceMessage,
+  type EndpointMessage,
+  type StreamDocumentOpen,
+  type StreamHttpOpen,
+  type StreamKind,
+  type StreamOpenedMessage,
+} from '../../../../apps/org-protocol/src/index.ts';
 import { peerLists } from './capabilities';
 
 /** The credit a stream gives the endpoint at its open, unless asked otherwise: twice a terminal's ring, which its opening sends whole. */
 export const STREAM_OPEN_CREDIT = 1024 * 1024;
 
 export interface StreamRequest {
-  kind: 'pty' | 'tcp';
-  /** The authorizing act's opId, sent on this link. */
-  op: string;
+  kind: StreamKind;
+  /** The authorizing act's opId, sent on this link, for the act open (`pty`, `tcp`); absent for the read open (`http`, `document`; P5 O7 M5b). */
+  op?: string;
   /** What the endpoint may send before a refund; STREAM_OPEN_CREDIT by default, at most STREAM_CREDIT_MAX. */
   credit?: number;
   pty?: { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
   tcp?: { forward: string };
+  /** P5 O7 M5b: one request of an artifact page, a `maws-artifact:` URL. */
+  http?: StreamHttpOpen;
+  /** P5 O7 M5b: an artifact's document, to edit or to view. */
+  document?: StreamDocumentOpen;
 }
-/** `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, and the endpoint's credit for this side's bytes. */
+/**
+ * `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, (P5 O7 M5b) an `http` answer's
+ * `{status, headers}`, and the endpoint's credit for this side's bytes.
+ */
 export type StreamOpened = Omit<StreamOpenedMessage, 't' | 'id'>;
 export interface StreamSink {
   opened(opened: StreamOpened): void;
@@ -74,6 +96,8 @@ type Entry = {
   controls: Array<Record<string, unknown>>;
   /** A refund given before the stream opened. */
   refund: number;
+  /** The credit this side granted the endpoint that it hasn't yet spent: the open's, plus each refund sent, less its chunks. */
+  inbound: number;
 };
 
 const toBase64url = (bytes: Uint8Array): string => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64url');
@@ -94,7 +118,7 @@ export class StreamTable {
   /** `ended` names the link's permanent end (`removed`, `closed`) when it holds one. */
   open(request: StreamRequest, sink: StreamSink, ended: 'removed' | 'closed' | null): RemoteStream {
     const id = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-    const entry: Entry = { id, request, sink, state: 'waiting', credit: 0, offset: request.pty?.inputFrom ?? 0, outbox: [], queued: 0, controls: [], refund: 0 };
+    const entry: Entry = { id, request, sink, state: 'waiting', credit: 0, offset: request.pty?.inputFrom ?? 0, outbox: [], queued: 0, controls: [], refund: 0, inbound: 0 };
     const stream: RemoteStream = {
       id,
       send: (bytes) => {
@@ -160,7 +184,7 @@ export class StreamTable {
         if (entry.state !== 'sent') return;
         entry.state = 'opened';
         entry.credit = message.credit;
-        entry.sink.opened({ ...(message.pty === undefined ? {} : { pty: message.pty }), credit: message.credit });
+        entry.sink.opened({ ...(message.pty === undefined ? {} : { pty: message.pty }), ...(message.http === undefined ? {} : { http: message.http }), credit: message.credit });
         if (this.#entries.get(entry.id) !== entry) return;
         for (const control of entry.controls.splice(0)) this.#deps.send({ t: 'streamControl', id: entry.id, control });
         if (entry.refund > 0) this.#refund(entry, entry.refund);
@@ -170,9 +194,18 @@ export class StreamTable {
       case 'streamRefused':
         this.#entries.delete(entry.id);
         return entry.sink.closed(message.reason);
-      case 'streamData':
+      case 'streamData': {
         if (entry.state !== 'opened') return;
-        return entry.sink.data(message.offset, fromBase64url(message.data));
+        const bytes = fromBase64url(message.data);
+        if (bytes.byteLength > entry.inbound) {
+          this.#deps.log(`a stream's endpoint sent ${bytes.byteLength} bytes past the ${entry.inbound} of credit outstanding: closed`);
+          this.#entries.delete(entry.id);
+          this.#deps.send({ t: 'streamClose', id: entry.id, reason: 'malformed' });
+          return entry.sink.closed('malformed');
+        }
+        entry.inbound -= bytes.byteLength;
+        return entry.sink.data(message.offset, bytes);
+      }
       case 'streamCredit':
         if (entry.state !== 'opened') return;
         entry.credit = Math.min(entry.credit + message.bytes, STREAM_CREDIT_MAX);
@@ -188,16 +221,19 @@ export class StreamTable {
 
   #open(entry: Entry): void {
     // What the peer could not read never goes: the stream ends here, as the peer would end the channel.
-    if (!peerLists(this.#deps, 'rl2.streams')) {
+    const { kind, op, pty, tcp, http, document } = entry.request;
+    if (!peerLists(this.#deps, 'rl2.streams') || (op === undefined && !peerLists(this.#deps, 'rl2.read-open'))) {
       this.#entries.delete(entry.id);
       return void queueMicrotask(() => entry.sink.closed('not-offered'));
     }
-    const { kind, op, pty, tcp } = entry.request;
     const credit = Math.min(Math.max(1, entry.request.credit ?? STREAM_OPEN_CREDIT), STREAM_CREDIT_MAX);
-    if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, op, credit, ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }) })) entry.state = 'sent';
+    entry.inbound = credit;
+    const fields = { ...(op === undefined ? {} : { op }), ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }), ...(http === undefined ? {} : { http }), ...(document === undefined ? {} : { document }) };
+    if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, credit, ...fields })) entry.state = 'sent';
   }
 
   #refund(entry: Entry, bytes: number): void {
+    entry.inbound += bytes;
     for (let left = bytes; left > 0; left -= STREAM_CREDIT_MAX) this.#deps.send({ t: 'streamCredit', id: entry.id, bytes: Math.min(left, STREAM_CREDIT_MAX) });
   }
 

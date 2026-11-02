@@ -91,7 +91,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
     states.push(state);
     return state;
   };
-  return { memory, handles, calls, exported, setExport: (answer: typeof exportAnswer) => (exportAnswer = answer), confirm, emit, open };
+  return { memory, host, handles, calls, exported, setExport: (answer: typeof exportAnswer) => (exportAnswer = answer), confirm, emit, open };
 }
 
 const ready = (state: DocumentTabState) => until(() => state.snapshot().ready, 'the tab to open');
@@ -189,6 +189,37 @@ describe('a document tab’s state', () => {
 
     push({ phase: 'off', synced: false });
     expect(state.snapshot().document?.phase).toBe('off'); // a dropped port is said at once
+  });
+
+  // P5 O7 M5b: a replica ended by a refusal for good (another machine's document its member can no longer view) says so
+  it('shows a refusal the replica ended with in place of the document', async () => {
+    const w = world();
+    const open = w.host.open.bind(w.host);
+    const said: Array<(state: DocumentState) => void> = [];
+    w.host.open = async (...args: Parameters<ArtifactHost['open']>) => {
+      const handle = await open(...args);
+      const subscribe = handle.subscribe.bind(handle);
+      handle.subscribe = (listener) => (said.push(listener), subscribe(listener));
+      return handle;
+    };
+    const state = w.open();
+    await ready(state);
+    expect(state.snapshot().failed).toBeNull();
+    const words = 'you can’t view this document on studio';
+    for (const listener of said) listener({ ...w.handles[0]!.state(), phase: 'off', synced: false, refused: words });
+    expect(state.snapshot().failed).toBe(words);
+  });
+
+  // Review fix 2 (M5b4): the tab is the open's owner: disposed before the replica synced, it cancels the open's retries
+  it('cancels its replica’s open when disposed before it synced', async () => {
+    const w = world();
+    const signals: AbortSignal[] = [];
+    w.host.open = ((_id: string, options?: { signal?: AbortSignal }) => (signals.push(options!.signal!), new Promise(() => {}))) as ArtifactHost['open'];
+    const state = w.open();
+    await until(() => signals.length === 1, 'the open');
+    expect(signals[0]!.aborted).toBe(false);
+    state.dispose();
+    expect(signals[0]!.aborted).toBe(true);
   });
 
   it('toggles the rail the header asks for and counts Save version requests', async () => {

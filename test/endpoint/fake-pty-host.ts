@@ -55,9 +55,15 @@ export class FakePtyHost {
         this.#events.delete(listener);
       };
     };
+    // beside the frames of any other host the services relay (P5 O7 M5b: the engine host's document channels)
+    const otherFrames = services.onFrame;
     services.onFrame = (listener) => {
+      const off = otherFrames(listener);
       this.#frames.add(listener);
-      return () => void this.#frames.delete(listener);
+      return () => {
+        off();
+        this.#frames.delete(listener);
+      };
     };
   }
 

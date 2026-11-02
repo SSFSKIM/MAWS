@@ -100,7 +100,7 @@ describe('the design system’s editor in L’s registry', () => {
     const host = fakeHost(() => new Promise<DocumentHandle>((resolve) => (arrive = resolve)));
     const editor = { ...createDesignSystemEditor({ host: () => host }), Main: createDesignSystemEditor({ host: () => host }).Panel } as RegisteredArtifactEditor<OpenedSystem>;
     const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
-    expect(host.open).toHaveBeenCalledWith(DS);
+    expect(host.open).toHaveBeenCalledWith(DS, { signal: expect.any(AbortSignal) }); // P5 O7 M5b review fix 2: the tab owns the open
     const { view } = mount(editor as RegisteredArtifactEditor, state);
     expect(view.container.textContent).toContain('Opening the design system…');
     await act(async () => arrive(handle));
@@ -124,6 +124,26 @@ describe('the design system’s editor in L’s registry', () => {
     const { view } = mount(editor as RegisteredArtifactEditor, state);
     await act(async () => {});
     expect(view.container.textContent).toBe('Could not open this design system · no artifact');
+  });
+
+  // P5 O7 M5b review fix 5: a replica the host ended for good (another machine's system its member can no longer view)
+  // replaces the page with the refusal, so no field stays editable over a closed replica
+  it('replaces the system with the refusal its replica ended with', async () => {
+    const handle = handleOf(systemDoc());
+    const said = new Set<(state: DocumentState) => void>();
+    handle.subscribe = (listener) => (said.add(listener), () => void said.delete(listener));
+    const editor = createDesignSystemEditor({ host: () => fakeHost(async () => handle) });
+    const state = editor.createState!({ artifactId: DS, kind: 'design_system', surface: 'main' });
+    const { view } = mount(editor as RegisteredArtifactEditor, state);
+    await act(async () => {});
+    expect(view.container.querySelector('[data-ds-page]')).not.toBeNull();
+    const words = 'you can’t view this document on studio';
+    await act(async () => {
+      for (const listener of [...said]) listener({ ...handle.state(), phase: 'off', synced: false, refused: words });
+    });
+    expect(view.container.querySelector('[data-ds-page]')).toBeNull();
+    expect(view.container.textContent).toBe(`Could not open this design system · ${words}`);
+    editor.dispose!(state);
   });
 
   it('calls onShown once the system is on screen and the body visible, not while hidden', async () => {

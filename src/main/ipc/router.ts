@@ -155,8 +155,9 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): a file of another machine lands on this Mac, by main's
   // handlers with that machine as `ctx.target`, which read it over the machine's link: Save As of its artifact (an export
   // the renderer made there, or the stored file) and an open copy (`remote.openCopy`, invoked on the machine a checkout
-  // file's address names).
-  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy']);
+  // file's address names). P5 O7 M5b ("The `http` stream"): a dashboard's Download of another machine's asset, fetched
+  // through the scheme's remote responder over that machine's link.
+  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy', 'artifacts.downloadAsset']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {

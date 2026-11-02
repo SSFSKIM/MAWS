@@ -7,7 +7,8 @@
 // A registry command takes its grade from O1's declaration (`gradeOf`, `ungraded` when its namespace declares none) and
 // its input is held to the registry's schema. Lane A's actions are sminos's RPC names, `sminos.<rpc>`, graded here
 // (§G's table); the endpoint's own take no grade (`null`): the grant's or the state's own signatures are the authority.
-import type { Feed } from 'org-protocol';
+import type { Feed, ReadStreamKind } from 'org-protocol';
+import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import type { GradeSpec } from '@shared/ipc/grades';
 
 /**
@@ -26,8 +27,13 @@ export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | '
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
 
+/**
+ * `kind`: a `call` (a read, list or view), an `act` (an RL4 action), or (P5 O7 M5b) a `stream`, the read open of the
+ * stream kind `stream` names: a `streamOpen` with no `op`, authorized as a call is, by authorization's eight steps at the
+ * row's grade with the open's kind fields as the input (authorize.ts), and run by the endpoint's stream planes (streams.ts).
+ */
 export type OfferRow = {
-  kind: 'call' | 'act';
+  kind: 'call' | 'act' | 'stream';
   executor: OfferExecutor;
   target: TargetRule;
   /** The grade, for a name outside the registry; `null` for the endpoint's signed actions. Absent: the registry's. */
@@ -38,6 +44,8 @@ export type OfferRow = {
    * the endpoint's signed actions).
    */
   accepts?(input: unknown): boolean;
+  /** P5 O7 M5b: the stream kind a `stream` row admits (its open's kind fields are the row's input). */
+  stream?: ReadStreamKind;
 };
 
 /**
@@ -61,6 +69,24 @@ const eachSession: OfferRow = { kind: 'call', executor: 'machine', target: 'each
 const artifact = (kind: 'call' | 'act', executor: 'engine-host' | 'machine' = 'engine-host'): OfferRow => ({ kind, executor, target: 'artifact' });
 /** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
 const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
+/**
+ * P5 O7 M5b: the read open's name for each of its kinds, the stream row that admits it (an endpoint name, not a
+ * registry command: its `accepts` reads the open's kind fields).
+ */
+export const READ_OPENS: Readonly<Record<ReadStreamKind, string>> = { http: 'artifacts.fetch', document: 'documents.open' };
+const isFields = (input: unknown, keys: readonly string[]): input is Readonly<Record<string, unknown>> =>
+  typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).every((key) => keys.includes(key));
+/** An `http` open's fields: a URL exactly of the artifact scheme's shape (scheme.ts; anything else `malformed`), a GET or a HEAD, a range header. */
+const isHttpOpen = (input: unknown): boolean =>
+  isFields(input, ['url', 'method', 'range']) &&
+  typeof input.url === 'string' &&
+  parseArtifactUrl(input.url) !== null &&
+  (input.method === 'GET' || input.method === 'HEAD') &&
+  (input.range === undefined || (typeof input.range === 'string' && input.range !== '' && input.range.length <= 256));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A `document` open's fields: the artifact (a UUID, as the store's document channel takes it), the mode, the suggestions' document. */
+const isDocumentOpen = (input: unknown): boolean =>
+  isFields(input, ['artifactId', 'mode', 'doc']) && typeof input.artifactId === 'string' && UUID.test(input.artifactId) && (input.mode === 'edit' || input.mode === 'view') && (input.doc === undefined || input.doc === 'suggestions');
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
@@ -229,6 +255,10 @@ export const OFFERS: Offers = {
     'library.spaces': { kind: 'call', executor: 'machine', target: 'machine', grade: 'list' },
     // O5's tools on a session (`view`); their changes ride the session's `checkout` feed (plane-feeds.ts).
     'session.capabilities': laneBMachine('call'),
+    // P5 O7 M5b: the read open's rows, both on the `artifact` rule: an artifact page's request (`view`, the artifact from
+    // the open's URL), and its document channel, `view` by effect, an `edit` open taking `manage` (by-effect.ts).
+    'artifacts.fetch': { kind: 'stream', stream: 'http', executor: 'endpoint', target: 'artifact', grade: 'view', accepts: isHttpOpen },
+    'documents.open': { kind: 'stream', stream: 'document', executor: 'endpoint', target: 'artifact', grade: { floor: 'view', byEffect: true }, accepts: isDocumentOpen },
   },
   subscriptions: ['A', 'B'],
   // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts).

@@ -10,7 +10,7 @@ import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's regist
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
-import { app, BrowserWindow, dialog, screen, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, MessageChannelMain, screen, systemPreferences } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
@@ -394,6 +394,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     artifactMachines, // P5 O7 M5a: which machine an artifact is on, written by the adapter alone
     openPath: (path) => shell.openPath(path), // P5 O7 M5a: an open copy of another machine's file (A10)
     env: process.env, // P5 O7 M5a: MAWS_E2E_OPEN_LOG, the open seam
+    docChannel: () => new MessageChannelMain(), // P5 O7 M5b: a remote document's port, bridged to a `document` stream
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
@@ -755,6 +756,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
     artifactsSocket: launch.mode === 'daemon' ? daemonPaths(profile).artifactsSocket : null, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
     authors: exportAuthors, // P5 O5 M3
+    remote: remoteLaneB.artifacts.scheme, // P5 O7 M5b: another machine's artifact pages, over its link
   });
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
@@ -817,6 +819,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     downloads: () => app.getPath('downloads'),
     port: clientPort,
     env: process.env,
+    local, // P5 O7 M5b: another machine's asset is fetched over that machine's link
+    remote: (machine) => remoteLaneB.artifacts.assets(machine),
   });
   // P3-E end
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a window's holds over a dashboard's snapshots, each

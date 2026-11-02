@@ -213,16 +213,19 @@ describe('main ipc router', () => {
   });
 
     // P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): Save As of another machine's artifact saves here, and a
-    // copy of another machine's file opens here, each by main's handler with that machine as ctx.target
-    it('answers library.saveAs and remote.openCopy for another machine here with that machine as ctx.target', async () => {
+    // copy of another machine's file opens here, each by main's handler with that machine as ctx.target. P5 O7 M5b: and a
+    // dashboard's Download of another machine's asset.
+    it('answers library.saveAs, remote.openCopy and (M5b) artifacts.downloadAsset for another machine here with that machine as ctx.target', async () => {
       const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
       await load(DEV_URL, undefined, remote);
       const targets: string[] = [];
       router.registerMainHandler('library.saveAs', (_input, context) => (targets.push(context.target), { saved: false }));
       router.registerMainHandler('remote.openCopy', (_input, context) => (targets.push(context.target), { opened: true, message: null }));
+      router.registerMainHandler('artifacts.downloadAsset', (_input, context) => (targets.push(context.target), { path: null }));
       await expect(invoke(appWindow(), 'library.saveAs', { artifactId: '11111111-1111-4111-8111-111111111111', source: { export: { revision: 3, format: 'pdf' } } }, OTHER)).resolves.toEqual({ ok: true, value: { saved: false } });
       await expect(invoke(appWindow(), 'remote.openCopy', { machine: OTHER, source: { appSessionId: 'app-1', path: '/w/a.pdf' } }, OTHER)).resolves.toEqual({ ok: true, value: { opened: true, message: null } });
-      expect(targets).toEqual([OTHER, OTHER]);
+      await expect(invoke(appWindow(), 'artifacts.downloadAsset', { artifactId: '11111111-1111-4111-8111-111111111111', ref: 'assets/data.csv' }, OTHER)).resolves.toEqual({ ok: true, value: { path: null } });
+      expect(targets).toEqual([OTHER, OTHER, OTHER]);
       expect(remote).not.toHaveBeenCalled();
     });
 

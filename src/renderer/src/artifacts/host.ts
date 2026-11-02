@@ -15,10 +15,19 @@
 // wrote it), asked at each connect. A renderer replica throttles its cursor awareness to one frame per 50 ms.
 //
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5): one host serves every machine's artifacts,
-// each command going to its artifact's machine (the client asks the page's table, ./machines.ts). Editing an artifact on
-// another machine arrives with M5b: main refuses its `artifacts.open` with the words to show, which end the attempts as
-// a refusal that names the document does. A dataset hold is its artifact's machine's, invalidated by that machine's
-// `artifacts.resync` alone (another machine's feed says it at each of its openings).
+// each command going to its artifact's machine (the client asks the page's table, ./machines.ts). A dataset hold is its
+// artifact's machine's, invalidated by that machine's `artifacts.resync` alone (another machine's feed says it at each of
+// its openings).
+//
+// P5 O7 M5b (M5's "The `document` stream", its "On this Mac" half): a document on another machine opens the same way,
+// its port bridged by main to a `document` stream (src/main/artifacts/remote-open.ts), which closes the port whenever
+// the stream ends; the provider is unchanged. Its liveness is its machine's link as `remote.session` says it, the one
+// reading of that link here, never this Mac's `engine.hostState`: the link leaving `up` drops the port (a stream lost
+// with its channel may close it late), and the backoff waits for it; its `up` reopens. While the link isn't known down
+// the backoff keeps its last step, since no host state will say when to try again. An open main answers `readOnly` (the
+// member holds `view` alone) makes the replica read-only until an open that doesn't; the editor reads it as it reads a
+// read-only store. A refusal for good (not found or not viewable, not a document, a malformed open) ends the attempts:
+// the first open rejects with it, and a replica that had synced says it as `refused`, which the editor shows.
 import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
 import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
@@ -33,6 +42,11 @@ import { createConnectorHost } from './connectors';
 import { artifactMachineOf } from './machines';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
+/**
+ * P5 O7 M5b review fix 1: a connection whose first frame (the host's step 1, sent at attach) hasn't come by then is
+ * dropped into the reopen path: its port closed before the replica listened (a close said early is never said again).
+ */
+export const FIRST_FRAME_MS = 10_000;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
 
 // A command the store refused (P3-H H4: defined in ./command-error.ts, shared with the connector family).
@@ -57,6 +71,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   const replicas = new Set<Replica>();
   let hostRevision = -1; // the engine host's state revision last heard; a consumer keeps the higher (HostState)
   let hostIsReady = false; // what that state said
+  // P5 O7 M5b: each other machine's link, up or not, as its latest `remote.session` said it (absent: not heard yet)
+  const linkUp = new Map<MachineRef, boolean>();
 
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input, ...opts);
@@ -85,7 +101,20 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     hostRevision = state.revision;
     hostIsReady = state.state === 'ready';
     for (const replica of replicas) {
+      if (replica.machine() !== null) continue; // P5 O7 M5b: another machine's document follows its link
       if (state.state === 'ready') replica.hostReady();
+      else replica.hostGone();
+    }
+  });
+
+  // P5 O7 M5b: another machine's documents live and die with its link (any of its sessions' `remote.session` says it).
+  ipc.on('remote.session', (state, from) => {
+    const up = state.link.state === 'up';
+    if (linkUp.get(from.machine) === up) return;
+    linkUp.set(from.machine, up);
+    for (const replica of replicas) {
+      if (replica.machine() !== from.machine) continue;
+      if (up) replica.hostReady();
       else replica.hostGone();
     }
   });
@@ -93,12 +122,15 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   class Replica implements DocumentHandle {
     readonly doc: Doc;
     readonly provider: PortProvider;
-    private readOnly = false;
+    private storeReadOnly = false; // the store is (a newer app wrote it)
+    private openedReadOnly = false; // P5 O7 M5b: main opened the port `view` (another machine's, held at `view` alone)
+    private refusal: string | null = null; // P5 O7 M5b: a refusal for good after a sync, said to the editor
     private closed = false;
     private connecting = false; // an open is in flight
     private generation = 0; // bumped when the host leaves `ready`: an open begun before belongs to a dead host
     private attempt = 0; // reconnects since the last live connection
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private firstFrame: ReturnType<typeof setTimeout> | null = null; // review fix 1: the connection's first frame awaited
     private waitingForHost = false; // the backoff ran out: the next `ready` re-opens
     private readonly listeners = new Set<(state: DocumentState) => void>();
     private settleFirst: { resolve: () => void; reject: (error: unknown) => void } | null = null;
@@ -117,8 +149,23 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     get awareness() {
       return this.provider.awareness;
     }
+    /** P5 O7 M5b: the machine the document is on when it is another's (the page's table), else null. */
+    machine(): MachineRef | null {
+      return artifactMachineOf(this.artifactId);
+    }
+    /** Whether what this replica's port stands on is there: this Mac's engine host, or another machine's link. */
+    private live(): boolean {
+      const machine = this.machine();
+      return machine === null ? hostIsReady : linkUp.get(machine) !== false;
+    }
+    private get readOnly(): boolean {
+      return this.storeReadOnly || this.openedReadOnly;
+    }
+    private full(state: SaveState): DocumentState {
+      return { ...state, readOnly: this.readOnly, ...(this.refusal !== null && { refused: this.refusal }) };
+    }
     state(): DocumentState {
-      return { ...this.provider.state, readOnly: this.readOnly };
+      return this.full(this.provider.state);
     }
     subscribe(listener: (state: DocumentState) => void): () => void {
       this.listeners.add(listener);
@@ -138,6 +185,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.closed = true;
       if (this.timer !== null) clearTimeout(this.timer);
       this.timer = null;
+      this.stopFirstFrame();
       replicas.delete(this);
       this.provider.destroy();
       this.listeners.clear();
@@ -152,16 +200,17 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       const generation = this.generation;
       const stale = () => this.closed || generation !== this.generation;
       try {
-        const { channel } = await call('artifacts.open', { artifactId: this.artifactId, ...(this.which && { doc: this.which }) });
+        const { channel, readOnly } = await call('artifacts.open', { artifactId: this.artifactId, ...(this.which && { doc: this.which }) });
         if (stale()) return; // a port that still comes is closed by the window's route when nobody takes it
         const port = await ports.take(channel);
         if (stale()) return port.close();
+        this.openedReadOnly = readOnly === true; // P5 O7 M5b: before the connect, so its first state says it
         this.provider.connect(port);
-        void this.readStatus();
+        this.awaitFirstFrame();
+        if (this.machine() === null) void this.readStatus(); // this Mac's store; another machine's read-only is its open's
       } catch (error) {
         const refusal = error instanceof ArtifactCommandError ? artifactRefusalOf(error.error) : null;
         if (refusal && (refusal.reason === 'notFound' || refusal.reason === 'invalid')) return this.fail(error);
-        if (error instanceof ArtifactCommandError && artifactMachineOf(this.artifactId) !== null) return this.fail(error); // P5 O7 M5a: M5b's to edit
         log(`could not open ${this.artifactId}: ${error instanceof Error ? error.message : String(error)}`);
         if (!stale()) this.retry();
       } finally {
@@ -186,24 +235,48 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // An open the host's loss interrupted has settled: open afresh on the host that is ready now, else at its next ready
     // (a `ready` heard while the attempt was in flight found it connecting and did nothing).
     private resume(): void {
-      if (hostIsReady) this.hostReady();
+      if (this.live()) this.hostReady();
       else this.waitingForHost = true;
     }
 
+    private awaitFirstFrame(): void {
+      this.stopFirstFrame();
+      if (this.provider.state.phase !== 'handshake') return;
+      this.firstFrame = setTimeout(() => {
+        this.firstFrame = null;
+        if (this.closed || this.provider.state.phase !== 'handshake') return;
+        log(`${this.artifactId}: no frame on its port within ${FIRST_FRAME_MS / 1000} s; opening it again`);
+        this.provider.disconnect(); // the change listener schedules the reopen
+      }, FIRST_FRAME_MS);
+    }
+
+    private stopFirstFrame(): void {
+      if (this.firstFrame !== null) clearTimeout(this.firstFrame);
+      this.firstFrame = null;
+    }
+
     private changed(state: SaveState): void {
+      if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {
         this.attempt = 0;
         this.settleFirst?.resolve();
         this.settleFirst = null;
       }
       if (state.phase === 'off' && !this.connecting) this.retry();
-      const full = { ...state, readOnly: this.readOnly };
+      const full = this.full(state);
       for (const listener of [...this.listeners]) listener(full);
     }
 
     private retry(): void {
       if (this.closed || this.timer !== null || this.waitingForHost) return;
-      const wait = RECONNECT_BACKOFF_MS[this.attempt];
+      // P5 O7 M5b: another machine's document waits for its link's `up` while the link is down, and while it isn't known
+      // down keeps the backoff's last step (no host state will say when)
+      const remote = this.machine() !== null;
+      if (remote && !this.live()) {
+        this.waitingForHost = true;
+        return;
+      }
+      const wait = RECONNECT_BACKOFF_MS[this.attempt] ?? (remote ? RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1] : undefined);
       if (wait === undefined) {
         this.waitingForHost = true;
         return;
@@ -216,9 +289,17 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
 
     private fail(error: unknown): void {
-      log(`${this.artifactId} cannot be opened: ${error instanceof Error ? error.message : String(error)}`);
-      this.settleFirst?.reject(error);
-      this.settleFirst = null;
+      const message = error instanceof Error ? error.message : String(error);
+      log(`${this.artifactId} cannot be opened: ${message}`);
+      if (this.settleFirst !== null) {
+        this.settleFirst.reject(error);
+        this.settleFirst = null;
+      } else {
+        // P5 O7 M5b: a replica the editor holds is told why it ends (a member who lost `view`, a document gone)
+        this.refusal = message;
+        const full = this.state();
+        for (const listener of [...this.listeners]) listener(full);
+      }
       this.close();
     }
 
@@ -226,8 +307,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       try {
         const { status } = await call('artifacts.status', undefined);
         const readOnly = status === 'readOnly';
-        if (readOnly === this.readOnly || this.closed) return;
-        this.readOnly = readOnly;
+        if (readOnly === this.storeReadOnly || this.closed) return;
+        this.storeReadOnly = readOnly;
         this.changed(this.provider.state);
       } catch (error) {
         log(`the store's status is unknown: ${error instanceof Error ? error.message : String(error)}`);
@@ -237,10 +318,19 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
   return {
     async open(artifactId, options) {
+      const signal = options?.signal;
+      if (signal?.aborted) throw new Error(`the open of ${artifactId} was cancelled`);
       const replica = new Replica(artifactId, options?.doc);
       replicas.add(replica);
+      // review fix 2: an owner gone before the first sync ends the attempts (`close` rejects the open)
+      const cancel = () => replica.close();
+      signal?.addEventListener('abort', cancel, { once: true });
       void replica.connect();
-      await replica.first;
+      try {
+        await replica.first;
+      } finally {
+        signal?.removeEventListener('abort', cancel);
+      }
       return replica;
     },
     assetUrl: (artifactId, ref, revision) => artifactUrl(artifactId, revision ?? 'live', ref), // P3-D: `revision` (Decision Log 59)

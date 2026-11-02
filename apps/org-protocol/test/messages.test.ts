@@ -91,7 +91,7 @@ describe('streams', () => {
 
   it('refuses an open of another kind, with the other kind’s start, without its own, or with an id, op, credit or epoch out of shape', () => {
     for (const bad of [
-      open({ kind: 'http' }),
+      open({ kind: 'ssh' }),
       open({ tcp: { forward: 'fw-1' } }),
       open({ pty: undefined }),
       open({ kind: 'tcp', tcp: { forward: 'fw-1' } }),
@@ -136,7 +136,68 @@ describe('streams', () => {
     expect(read('device', { t: 'streamOpened', id: ID, credit: 1 })).toBe('unknown');
   });
 
-  it('is at minor 4 of major 1 (P5 O7 M5a: `rl2.artifacts`, `rl2.bytes`)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 4 });
+  it('is at minor 5 of major 1 (P5 O7 M5b: `rl2.read-open`)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 5 });
+  });
+});
+
+// P5 O7 M5b (`rl2.read-open`; RL2 1.5): the read open, a `streamOpen` with no `op` of the kinds `http` and `document`, its
+// answer's `http`, and the refusal `read-only`; `browser.screencast` is a reserved name no validator admits.
+describe('the read open', () => {
+  const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const URL = 'maws-artifact://11111111-1111-4111-8111-111111111111/live/index.html';
+  const http = { url: URL, method: 'GET' };
+  const document = { artifactId: '11111111-1111-4111-8111-111111111111', mode: 'edit' };
+  const open = (fields: Record<string, unknown>) => ({ t: 'streamOpen', id: ID, credit: 65536, ...fields });
+  const read = (from: 'device' | 'endpoint', m: Record<string, unknown>) => readMessage(from as 'device', m).kind;
+
+  it('reads an `http` open of a GET or a HEAD, with or without a range, and a `document` open to edit or view, of the suggestions too', () => {
+    expect(read('device', open({ kind: 'http', http }))).toBe('message');
+    expect(read('device', open({ kind: 'http', http: { ...http, method: 'HEAD' } }))).toBe('message');
+    expect(read('device', open({ kind: 'http', http: { ...http, range: 'bytes=0-99' } }))).toBe('message');
+    expect(read('device', open({ kind: 'document', document }))).toBe('message');
+    expect(read('device', open({ kind: 'document', document: { ...document, mode: 'view', doc: 'suggestions' } }))).toBe('message');
+  });
+
+  it('refuses a read open naming an `op`, carrying another kind’s fields or none of its own, or with fields out of shape', () => {
+    for (const bad of [
+      open({ kind: 'http', op: OP, http }),
+      open({ kind: 'document', op: OP, document }),
+      open({ kind: 'http' }),
+      open({ kind: 'http', http, document }),
+      open({ kind: 'http', http, tcp: { forward: 'fw-1' } }),
+      open({ kind: 'document', http }),
+      open({ kind: 'http', http: { ...http, method: 'POST' } }),
+      open({ kind: 'http', http: { ...http, url: '' } }),
+      open({ kind: 'http', http: { ...http, url: 7 } }),
+      open({ kind: 'http', http: { ...http, range: '' } }),
+      open({ kind: 'document', document: { ...document, mode: 'write' } }),
+      open({ kind: 'document', document: { ...document, artifactId: '' } }),
+      open({ kind: 'document', document: { ...document, doc: 'other' } }),
+    ])
+      expect(read('device', bad)).toBe('malformed');
+  });
+
+  it('still requires an `op` of a pty or a tcp open (the act open)', () => {
+    const pty = { ptyId: 'p1', from: 0, inputEpoch: 'BBBBBBBBBBBBBBBBBBBBBA', inputFrom: 0 };
+    expect(read('device', open({ kind: 'pty', pty }))).toBe('malformed');
+    expect(read('device', open({ kind: 'tcp', tcp: { forward: 'fw-1' } }))).toBe('malformed');
+    expect(read('device', open({ kind: 'pty', op: OP, pty }))).toBe('message');
+  });
+
+  it('admits no `browser.screencast` open, with or without an `op` (reserved for O17 M9)', () => {
+    const browser = { appSessionId: 'app-1', epoch: 'e1', tabId: 't1' };
+    expect(read('device', open({ kind: 'browser.screencast', browser }))).toBe('malformed');
+    expect(read('device', open({ kind: 'browser.screencast', op: OP, browser }))).toBe('malformed');
+  });
+
+  it('reads an answer’s `http` status and headers, and refuses them out of shape', () => {
+    expect(read('endpoint', { t: 'streamOpened', id: ID, credit: 1024, http: { status: 206, headers: { 'content-type': 'text/html', 'content-range': 'bytes 0-9/20' } } })).toBe('message');
+    for (const bad of [{ status: 99, headers: {} }, { status: 600, headers: {} }, { status: 200.5, headers: {} }, { status: 200 }, { status: 200, headers: { a: 1 } }, { status: 200, headers: [] }])
+      expect(read('endpoint', { t: 'streamOpened', id: ID, credit: 1024, http: bad })).toBe('malformed');
+  });
+
+  it('reads the refusal `read-only`', () => {
+    expect(read('endpoint', { t: 'streamRefused', id: ID, reason: 'read-only' })).toBe('message');
   });
 });

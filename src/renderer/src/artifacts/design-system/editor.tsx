@@ -34,15 +34,25 @@ export class OpenedSystem {
   private deleteAsked = false;
   private readonly listeners = new Set<() => void>();
   private disposed = false;
+  private readonly opening = new AbortController(); // P5 O7 M5b review fix 2: the open, owned by this showing until it syncs
+  private offState: (() => void) | null = null;
 
   constructor(
     readonly artifactId: string,
     readonly host: ArtifactHost,
   ) {
-    host.open(artifactId).then(
+    host.open(artifactId, { signal: this.opening.signal }).then(
       (handle) => {
         if (this.disposed) return handle.close(); // the tab went while it opened
         this.set({ status: 'open', handle });
+        // P5 O7 M5b review fix 5: a replica ended for good (the system gone, or no longer the member's to view) is said in
+        // the page's place, as the document and deck tabs say it, so no field stays editable over a closed replica
+        this.offState = handle.subscribe((state) => {
+          if (state.refused === undefined || this.current.status !== 'open') return;
+          this.offState?.();
+          this.offState = null;
+          this.set({ status: 'failed', error: state.refused });
+        });
       },
       (error: unknown) => {
         if (!this.disposed) this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) });
@@ -73,6 +83,9 @@ export class OpenedSystem {
     if (this.disposed) return;
     this.disposed = true;
     this.deleteAsked = false;
+    this.opening.abort();
+    this.offState?.();
+    this.offState = null;
     if (this.current.status === 'open') this.current.handle.close();
     this.listeners.clear();
   }

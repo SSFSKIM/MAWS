@@ -112,4 +112,7 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
     if (typeof input.from !== 'string') return { refused: 'malformed' };
     return (await reads.holdsArtifactId(input.from, 'view')) ? 'manage' : { refused: 'grade' };
   },
+  // P5 O7 M5b: a document read open (the endpoint's stream row, offers.ts): an `edit` writes the artifact, `manage`; a
+  // `view` reads it and shows presence, at the floor.
+  'documents.open': (input) => (input.mode === 'edit' ? 'manage' : 'view'),
 };

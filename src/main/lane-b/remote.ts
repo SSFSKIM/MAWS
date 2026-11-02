@@ -48,8 +48,10 @@
 //   the notifier read beside this Mac's (`attention`).
 // - P5 O7 M5a: another machine's artifacts (./remote-artifacts.ts): their reads as calls, their writes as engine-host acts
 //   on no session (the third act shape), the id-to-machine table, the `session.capabilities` substitute, the machine's
-//   `artifacts` feed, and `remote.openCopy` and Save As's bytes, which main's handlers bring here (`artifacts`).
+//   `artifacts` feed, and `remote.openCopy` and Save As's bytes, which main's handlers bring here (`artifacts`). P5 O7 M5b:
+//   a document's `artifacts.open`, bridged to the window that asked (`ctx.client`) over a `document` stream.
 import type { Socket } from 'node:net';
+import type { MessageChannelMain } from 'electron';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -66,6 +68,7 @@ import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
+import { DOCUMENT_OPEN_MS } from '../artifacts/remote-open';
 import { createRemoteArtifacts, type RemoteArtifacts } from './remote-artifacts';
 import { createRemoteAttention, type RemoteAttention } from './remote-attention';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
@@ -90,6 +93,8 @@ export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTi
   spawnPendingMs: number;
   /** M4c fix wave 2: how long a spawn's outcome no caller waited for is kept for the tab that asked (remote-spawn.ts). */
   spawnKeptMs: number;
+  /** P5 O7 M5b: a document's open answers `timeout` when no stream opened by then (../artifacts/remote-open.ts). */
+  documentOpenMs: number;
 }
 
 export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
@@ -107,6 +112,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   // a day: a tombstone is a few bytes, and one let go too soon could let the tab's next Send start a second session
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
+  documentOpenMs: DOCUMENT_OPEN_MS, // P5 O7 M5b: a page's bound
   ...REMOTE_PTY_TIMING, // P5 O7 M3
   ...REMOTE_FORWARDS_TIMING,
 };
@@ -137,6 +143,8 @@ export interface RemoteLaneBDeps {
   tempDir?(): string;
   /** P5 O7 M5a: MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's open seam. */
   env?: NodeJS.ProcessEnv;
+  /** P5 O7 M5b: `new MessageChannelMain()`, a remote document's port pair (none opens without it). */
+  docChannel?(): Pick<MessageChannelMain, 'port1' | 'port2'>;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -164,7 +172,7 @@ export interface RemoteLaneB {
   /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
   attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
   /** P5 O7 M5a: `remote.openCopy` (main's handler's) and a remote artifact's files for Save As (src/main/library/files.ts). */
-  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files'>;
+  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets'>; // P5 O7 M5b: scheme, assets
   /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
@@ -267,6 +275,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     bounded: (handle, deadline) => bounded(handle, deadline),
     pendingMs: timing.sendPendingMs,
     feedRetryMs: timing.feedRetryMs,
+    ...(deps.docChannel !== undefined && { docChannel: deps.docChannel }),
+    documentOpenMs: timing.documentOpenMs,
     openPath: deps.openPath ?? (async () => 'opening a copy is not wired in this process'),
     ...(deps.tempDir !== undefined && { tempDir: deps.tempDir }),
     env: deps.env ?? {},
@@ -503,7 +513,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   async function run(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const deadline = now() + timing.sendPendingMs;
-    if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields); // P5 O7 M5a
+    if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
     if (name === 'files.upload') return upload(link, fields);
@@ -554,7 +564,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
-    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine) },
+    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);

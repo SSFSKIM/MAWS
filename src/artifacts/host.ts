@@ -140,9 +140,12 @@ export interface KindAdapter {
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
 // reconnecting, `readOnly` is read-only): the provider's SaveState, and whether the store is read-only (a newer app
-// wrote it, Decision Log 12), in which case the host refuses every write.
+// wrote it, Decision Log 12), in which case the host refuses every write. P5 O7 M5b: `readOnly` too while the port is
+// one that never writes (another machine's document, its member holding `view` alone); `refused`, the words of a
+// refusal for good that ended an open replica (the document gone, or no longer viewable), after which it reopens no more.
 export interface DocumentState extends SaveState {
   readOnly: boolean;
+  refused?: string;
 }
 
 // An open document as an editor holds it: a replica kept in sync with the host over a port, reconnecting by itself.
@@ -166,6 +169,13 @@ export interface DocumentHandle {
 // proposals on it, a suggestion doc on the replica's side too); omitted, the artifact's own.
 export interface ArtifactDocOption {
   doc?: 'suggestions';
+}
+
+// How an open is asked (P5 O7 M5b review fix 2): which document, and its owner's signal. An open that hasn't synced keeps
+// trying (the one reopen path); aborted before it syncs, it stops and rejects, so a tab closed during a failing open
+// leaves nothing retrying. Once it resolves, its handle's `close` is the owner's.
+export interface ArtifactOpenOptions extends ArtifactDocOption {
+  signal?: AbortSignal;
 }
 
 // P3-H H4: an artifact page's connector calls (the X9 amendment's bridge; docs/doperpowers/plans/2026-10-12-p3-co-work.md,
@@ -202,7 +212,7 @@ export interface ConnectorSurface {
 }
 
 export interface ArtifactHost {
-  open(artifactId: string, options?: ArtifactDocOption): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
+  open(artifactId: string, options?: ArtifactOpenOptions): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   // P3-D (the P3 spec's Decision Log 59): `revision` names a retained revision (a design-system pin's `versionSeq`), at
   // which the store serves a deleted system's assets while a version pins it (Decision Log 46); omitted, the live one.
   assetUrl(artifactId: string, ref: string, revision?: number): string;

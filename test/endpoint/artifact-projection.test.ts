@@ -84,7 +84,8 @@ async function scene(f?: Fixture) {
 
 describe('an artifact answer to a member who can’t view all its sessions', () => {
   it('goes through the projection for every artifact row whose answer’s schema names a session (its bytes aside)', () => {
-    const rows = Object.entries(OFFERS.commands).filter(([name, row]) => row.target === 'artifact' || name === 'library.list');
+    // A stream row's (P5 O7 M5b: `artifacts.fetch`, `documents.open`) answer is the artifact's own bytes, no registry output.
+    const rows = Object.entries(OFFERS.commands).filter(([name, row]) => (row.target === 'artifact' && row.kind !== 'stream') || name === 'library.list');
     const naming = rows.map(([name]) => name).filter((name) => JSON.stringify(z.toJSONSchema(commands[name as keyof typeof commands].output as z.ZodType, { unrepresentable: 'any' })).includes('appSessionId'));
     expect(naming.sort()).toEqual([...SESSION_NAMING].sort());
   });
