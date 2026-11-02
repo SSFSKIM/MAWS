@@ -92,6 +92,18 @@ describe('a client’s request to the engine host and the park', () => {
     await asked;
   });
 
+  it('holds an open endpoint document channel as a need until it closes, counted in flight so no park is asked under it (P5 O7 M5b)', () => {
+    const t = scene();
+    const release = t.guard.hold();
+    expect(t.s.steps).toEqual(['need']);
+    expect(t.s.inFlight).toEqual([1]);
+    expect(t.guard.inFlight()).toBe(1);
+    release();
+    release();
+    expect(t.s.steps, 'a need again at its close: the park clock starts from there').toEqual(['need', 'need']);
+    expect(t.s.inFlight).toEqual([1, 0]);
+  });
+
   it('another owner’s request goes straight on, no need and nothing counted', async () => {
     const t = scene();
     void t.guard.forward('pty-host', { name: 'pty.list', input: undefined });

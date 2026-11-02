@@ -1085,6 +1085,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const holds = new Map<number, string>();
   let nextHold = 0;
   const endpointChannels = new Map<number, EndpointChannel>();
+  const endpointNeeds = new Map<number, () => void>(); // P5 O7 M5b: each open channel's park need, released at its end
   const services: DaemonServices = {
     machine: { ref, profileDir, stateDir: paths.endpoint, kind },
     async dispatch(host, name, input, client?: ClientRef) {
@@ -1136,18 +1137,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     documents: {
       open(message: DocumentsOpen) {
         if (message.channel < ENDPOINT_CHANNEL_BASE || endpointChannels.has(message.channel)) return false;
+        const need = clientEngine.hold(); // P5 O7 M5b: a park need while the channel is open (engine-requests.ts)
         const channel = new EndpointChannel(message.channel, frameListeners, (number, reason) => {
           endpointChannels.delete(number);
+          endpointNeeds.delete(number);
+          need();
           each(closedListeners, number, reason);
         });
         const { channel: number, artifactId, actor, doc } = message;
-        if (!hosts.postDocPort({ t: 'doc', channel: number, artifactId, actor, ...(doc && { doc }) }, channel, 'endpoint')) return false;
+        if (!hosts.postDocPort({ t: 'doc', channel: number, artifactId, actor, ...(doc && { doc }) }, channel, 'endpoint')) return (need(), false);
         endpointChannels.set(number, channel);
+        endpointNeeds.set(number, need);
         return true;
       },
       close(channel) {
         endpointChannels.get(channel)?.endFromEndpoint();
         endpointChannels.delete(channel);
+        endpointNeeds.get(channel)?.();
+        endpointNeeds.delete(channel);
       },
       frame(channel, bytes) {
         const open = endpointChannels.get(channel);
