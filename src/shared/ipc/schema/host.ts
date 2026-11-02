@@ -96,6 +96,24 @@ export const HostOpInputSchema = z.strictObject({
 // session"): an act on no session (an artifact write) under the same ledger: `host.op`'s claim with no `context` and no
 // `requestDigest`, and the artifact the endpoint resolved as `target`. A command of its own, since OX1 classes a required
 // property made optional (`host.op`'s `context`) as breaking; `host.opQuery` answers its ops as `host.op`'s.
+// The commands `host.artifactOp` runs, and nothing else (fail closed): the artifact writes of the spec's §L M5a act row,
+// each keyed by artifact and naming no session. The endpoint's offer rows with the `artifact` target and kind `act` are
+// exactly these (test/endpoint/artifact-rows.test.ts holds the two together). A read is a call, never an act.
+export const ARTIFACT_OP_COMMANDS = [
+  'artifacts.update',
+  'artifacts.delete',
+  'artifacts.duplicate',
+  'artifacts.saveVersion',
+  'artifacts.nameVersion',
+  'artifacts.restore',
+  'artifacts.pruneVersions',
+  'artifacts.acceptSuggestion',
+  'artifacts.rejectSuggestion',
+  'artifacts.uploadAsset',
+  'artifacts.copyAsset',
+  'artifacts.rereadDatasetFile',
+  'artifacts.create',
+] as const;
 export const HostArtifactOpInputSchema = z.strictObject({
   opId: OpIdSchema,
   opCreated: z.string(),

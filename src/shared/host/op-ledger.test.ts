@@ -117,6 +117,44 @@ describe('a query', () => {
   });
 });
 
+// P5 O7 M5a1 fix wave 1: an outcome is a command's answer, which may carry bytes (`artifacts.versionState`'s, a machine
+// act's): the file keeps it in json-bytes' tagged form, so the answer after a reopen is the one the run gave, and a
+// plain value that looks like the tagged form reads back as it was; a claim (and its sealed action) is kept as sent
+describe('an outcome carrying bytes', () => {
+  const outcome = { ok: true, value: { bytes: new Uint8Array([0, 1, 255]), look: { $bytes: 'not bytes' }, nested: [{ raw: new Uint8Array([7]) }] } };
+  const tagged = { ok: true, value: { bytes: { $bytes: 'AAH/' }, look: { $plain: { $bytes: 'not bytes' } }, nested: [{ raw: { $bytes: 'Bw==' } }] } };
+  const resultLine = () => lines().find((line) => line.opId === OP && 'result' in line)?.result;
+
+  it('answers the reseal and a query with the same bytes, before and after a reopen; the file holds JSON, the claim as sent', () => {
+    const ledger = open();
+    const action = { args: { bytes: { $bytes: 'AAH/' } } }; // a sealed action as the endpoint sent it: tagged
+    ledger.begin(OP, iso(now), claim({ name: 'artifacts.versionState', action }), () => null);
+    ledger.finish(OP, outcome);
+    expect(ledger.begin(OP, iso(now), claim(), () => null)).toEqual({ kind: 'answered', answer: { state: 'done', result: outcome } });
+    expect(ledger.query(OP, iso(now), false)).toMatchObject({ state: 'done', outcome });
+    expect(lines()[0]).toMatchObject({ claim: { action } });
+    expect(resultLine()).toEqual(tagged);
+    const reopened = open();
+    expect(reopened.begin(OP, iso(now), claim(), () => null)).toEqual({ kind: 'answered', answer: { state: 'done', result: outcome } });
+    const queried = reopened.query(OP, iso(now), false) as { outcome: { value: { bytes: unknown } } };
+    expect(queried).toMatchObject({ state: 'done', outcome });
+    expect(queried.outcome.value.bytes).toBeInstanceOf(Uint8Array);
+  });
+
+  it('keeps the tagged form through a compaction’s rewrite', () => {
+    const ledger = open();
+    ledger.begin(OP2, iso(now), claim(), () => null); // dropped at the reopen below, which rewrites the file
+    now += KEPT_S * 1000 - 1000;
+    ledger.begin(OP, iso(now), claim(), () => null);
+    ledger.finish(OP, outcome);
+    now += 2000;
+    const compacted = open();
+    expect(lines().some((line) => line.opId === OP2)).toBe(false);
+    expect(resultLine()).toEqual(tagged);
+    expect(compacted.query(OP, iso(now), false)).toMatchObject({ state: 'done', outcome });
+  });
+});
+
 describe('the file', () => {
   it('creates nothing until its first record, then its directory 0700 and the file 0600', () => {
     const inner = join(dir, 'supervisor');

@@ -17,6 +17,9 @@ import { toWire } from '@shared/host/json-bytes';
 import { OpLedger } from '@shared/host/op-ledger';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { CommandName, CommandOutput } from '@shared/ipc/schema';
+import { gradeOf } from '@shared/ipc/grades';
+import { commands } from '@shared/ipc/schema';
+import { ARTIFACT_OP_COMMANDS } from '@shared/ipc/schema/host';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import type { BinaryCheck } from './binary-info';
 import { registerEngineIpc } from './ipc';
@@ -56,6 +59,10 @@ function ops(edit: Partial<OpsDeps> = {}) {
     ['artifacts.uploadAsset', async (input) => (ran.push({ name: 'artifacts.uploadAsset', input }), { assetId: ASSET_ID, ref: 'assets/logo.png' })],
     ['artifacts.testWrite', async (input) => (ran.push({ name: 'artifacts.testWrite', input }), { revision: 1 })],
     ['session.applyFlagSettings', async (input) => void ran.push({ name: 'session.applyFlagSettings', input })], // a free-form record
+    // commands that are no artifact write: a session named inside the input, a session under another key, a read
+    ['session.launch', async (input) => (ran.push({ name: 'session.launch', input }), { status: 'refused', reason: 'already_live', message: 'stand-in' })],
+    ['fs.sessionText', async (input) => (ran.push({ name: 'fs.sessionText', input }), { text: 'a transcript', cursor: null, size: 12, mtimeMs: 0 })],
+    ['artifacts.versionState', async (input) => (ran.push({ name: 'artifacts.versionState', input }), { bytes: new Uint8Array([0, 1, 255]) })],
   ]);
   const statusReads: string[] = [];
   const deps: OpsDeps = {
@@ -198,13 +205,25 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(again.opQuery({ opId: 'op-000000000000002', opCreated: created, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: 'artifact:' });
   });
 
-  it('refuses a session’s command `unavailable`, its id present or optional in its schema, running nothing and reading no status', async () => {
+  it('runs only the artifact writes it names, refusing anything else `unavailable`, running nothing and reading no status', async () => {
     const h = ops();
-    expect(await h.artifactOp(save({ name: 'session.send', input: { appSessionId: 'app-1', content: 'hello' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
-    expect(await h.artifactOp(save({ name: 'session.send', input: { content: 'no id' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
-    expect(await h.artifactOp(save({ name: 'artifacts.testWrite', input: { artifactId: ARTIFACT_ID, opId: 'w1', ops: [{ op: 'insertText', index: 0, text: 'x' }] } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' }); // its schema names a session
-    expect(await h.artifactOp(save({ name: 'host.op', input: {} }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
-    expect(await h.artifactOp(save({ name: 'artifacts.nonesuch', input: {} }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    const spec = LaunchSpecSchema.parse({
+      appSessionId: 'app-1', cwd: '/tmp', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
+      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null, replay: null,
+    });
+    // each a well-formed input of its own command, refused for its name alone
+    const others: [CommandName, unknown][] = [
+      ['session.launch', { spec }], // its session nested in the spec
+      ['fs.sessionText', { sessionId: 'engine-session' }], // a session under another key
+      ['session.send', { appSessionId: 'app-1', content: 'hello' }],
+      ['artifacts.testWrite', { artifactId: ARTIFACT_ID, opId: 'w1', ops: [{ op: 'insertText', index: 0, text: 'x' }] }],
+      ['artifacts.versionState', { artifactId: ARTIFACT_ID, versionId: 1 }], // an artifact read: a call, never an act
+    ];
+    for (const [name, input] of others) {
+      expect(validateCommandInput(name, input).ok, name).toBe(true);
+      expect(await h.artifactOp(save({ name, input }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
+    }
+    for (const name of ['host.op', 'artifacts.nonesuch']) expect(await h.artifactOp(save({ name, input: {} }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
     expect(await h.artifactOp(save({ input: { artifactId: ARTIFACT_ID, label: 'Draft', extra: 1 } }), CTX)).toEqual({ state: 'refused', reason: 'malformed' });
     expect(h.ran).toEqual([]);
     expect(h.statusReads).toEqual([]);
@@ -213,11 +232,39 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(await h.op(op({ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
   });
 
+  it('names the thirteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
+    expect([...ARTIFACT_OP_COMMANDS].sort()).toEqual([
+      'artifacts.acceptSuggestion', 'artifacts.copyAsset', 'artifacts.create', 'artifacts.delete', 'artifacts.duplicate', 'artifacts.nameVersion', 'artifacts.pruneVersions',
+      'artifacts.rejectSuggestion', 'artifacts.rereadDatasetFile', 'artifacts.restore', 'artifacts.saveVersion', 'artifacts.update', 'artifacts.uploadAsset',
+    ]);
+    for (const name of ARTIFACT_OP_COMMANDS) {
+      expect(commands[name].owner, name).toBe('engine-host');
+      const grade = gradeOf(name);
+      expect(typeof grade === 'object' ? grade.floor : grade, name).toBe('manage');
+      expect(Object.keys((commands[name].input as unknown as { shape: Record<string, unknown> }).shape), name).not.toContain('appSessionId');
+    }
+  });
+
   it('answers an op id the other command claimed from the ledger, running nothing', async () => {
     const h = ops();
     const sent = await h.op(op(), CTX);
     expect(await h.artifactOp(save({ opId: 'op-000000000000001' }), CTX)).toEqual(sent);
     expect(h.ran).toHaveLength(1);
+  });
+
+  // P5 O7 M5a1 fix wave 1: one ledger for both commands, faithful across a reopen (op-ledger.test.ts holds an answer's
+  // bytes; no command either runs answers any)
+  it('answers both commands’ ops from the ledger after a reopen, a reseal and a query alike', async () => {
+    const h = ops();
+    const viaOp = await h.op(op({ opId: 'op-000000000000010' }), CTX);
+    const viaArtifact = await h.artifactOp(save({ opId: 'op-000000000000011' }), CTX);
+    const again = ops({ ledger: OpLedger.open(dir, 'ops.jsonl') });
+    expect(await again.artifactOp(save({ opId: 'op-000000000000010' }), CTX)).toEqual(viaOp);
+    expect(await again.op(op({ opId: 'op-000000000000011' }), CTX)).toEqual(viaArtifact);
+    const created = iso(Date.now());
+    expect(again.opQuery({ opId: 'op-000000000000010', opCreated: created, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', outcome: viaOp.state === 'done' ? viaOp.result : null, target: 'app-1', name: 'session.send' });
+    expect(again.opQuery({ opId: 'op-000000000000011', opCreated: created, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', outcome: viaArtifact.state === 'done' ? viaArtifact.result : null, target: `artifact:${ARTIFACT_ID}`, name: 'artifacts.saveVersion' });
+    expect(again.ran).toEqual([]);
   });
 
   it('refuses a claim with no target, or one that names no artifact, at the schema', () => {

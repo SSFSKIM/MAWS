@@ -192,6 +192,25 @@ describe('machine.op for an artifact-targeted act', () => {
   });
 });
 
+// P5 O7 M5a1 fix wave 1: the services' ledger keeps an answer that carries bytes as it was given, across a reopen
+describe('machine.op’s answer carrying bytes', () => {
+  it('answers the first run, a reseal and a query after a reopen with the same bytes', async () => {
+    const value = { ok: true, result: { chunk: new Uint8Array([0, 1, 255]) } };
+    const invoke = vi.fn<Invoke>(async () => ({ ok: true, value }));
+    const { ops, reopen } = lab(invoke);
+    const opCreated = now();
+    const input = { opId: 'op-bytes-answer-01', opCreated, claim: CLAIM, name: 'connectors.call', input: { leaseId: '33333333-3333-4333-8333-333333333333', request: {} } };
+    const first = await ops.op(input, CONTEXT);
+    expect(first).toEqual({ state: 'done', result: { ok: true, value } });
+    const again = reopen();
+    expect(await again.op(input, CONTEXT)).toEqual(first);
+    const queried = again.opQuery({ opId: input.opId, opCreated, tombstoneIfAbsent: false }) as { outcome: { value: typeof value } };
+    expect(queried).toMatchObject({ state: 'done', outcome: { ok: true, value } });
+    expect(queried.outcome.value.result.chunk).toBeInstanceOf(Uint8Array);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
 // P5 O7 M4 (the milestone review's finding, as the architect refined it): a claim the last process left with no result
 // can't be finished by this one, so the services' ledger (`orphanAtOpen`) answers it `expired`, the RL4 state a device
 // settles unknown, instead of `in-progress` until the horizon; it is never run again, and an outcome read back later

@@ -15,9 +15,9 @@
 //     `{ok: false, error}`, a throw included: it was tried) is kept and returned.
 // `host.artifactOp {opId, opCreated, member, device, fingerprint, target, name, input}` (P5 O7 M5a;
 // docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "Artifact writes are engine-host acts with no session"):
-// an act on no session, an artifact write, under the same ledger: only a command whose input schema names no session
-// (no `appSessionId`, required or optional; else `unavailable`), its input decoded and validated as `host.op`'s, with no
-// context and no status to check; `target` (`artifact:<id>`, or `artifact:` for the orphan form) is the artifact the
+// an act on no session, an artifact write, under the same ledger: only a command of ARTIFACT_OP_COMMANDS (else
+// `unavailable`: a session's command, whatever key or depth names its session, runs only through `host.op`), its input
+// decoded and validated as `host.op`'s, with no context and no status to check; `target` (`artifact:<id>`, or `artifact:` for the orphan form) is the artifact the
 // endpoint resolved, kept as the binding's target. A new command rather than `host.op` with its `context` optional,
 // which OX1 classes as breaking; an engine host from before it answers `unknown_command`.
 // `host.opQuery {opId, opCreated, tombstoneIfAbsent}`: RL4's states with the stored binding, for an op of either command;
@@ -34,6 +34,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import { commands, type CommandInput, type CommandOutput } from '@shared/ipc/schema';
+import { ARTIFACT_OP_COMMANDS } from '@shared/ipc/schema/host';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 
 type Handler = (input: unknown, ctx: HandlerContext) => Promise<unknown>;
@@ -58,12 +59,7 @@ const refused = (reason: string): OpOutput => ({ state: 'refused', reason });
 const sameDigest = (a: RequestDigest | undefined, b: RequestDigest | null) =>
   a !== undefined && b !== null && a.session === b.session && a.request === b.request && a.tool === b.tool && a.input_sha256 === b.input_sha256;
 
-/** Whether `name`'s input schema names a session (`appSessionId`, required or optional): a session's command, which runs
- * only through `host.op`, under the context it was sealed for. Every engine-host input is an object schema or none. */
-function namesSession(name: string): boolean {
-  const shape = (commands[name as keyof typeof commands].input as { shape?: Record<string, unknown> }).shape;
-  return shape !== undefined && Object.hasOwn(shape, 'appSessionId');
-}
+const ARTIFACT_OPS: ReadonlySet<string> = new Set(ARTIFACT_OP_COMMANDS);
 
 export function opCommands(deps: OpsDeps): {
   op(input: OpInput, ctx: HandlerContext): Promise<OpOutput>;
@@ -106,7 +102,7 @@ export function opCommands(deps: OpsDeps): {
   // P5 O7 M5a: an act on no session, claimed in the same turn as its checks, with no status to read
   async function artifactOp(input: ArtifactOpInput, ctx: HandlerContext): Promise<OpOutput> {
     const { opId, opCreated, member, device, fingerprint, target, name } = input;
-    if (Object.hasOwn(commands, name) && namesSession(name)) return refused('unavailable'); // a session's act is host.op's
+    if (!ARTIFACT_OPS.has(name)) return refused('unavailable'); // fail closed: an artifact write, and nothing else
     const admitted = admit(name, input.input);
     if ('refused' in admitted) return admitted.refused;
     const begun = ledger.begin(opId, opCreated, { member, device, fingerprint, target, name }, () => null);

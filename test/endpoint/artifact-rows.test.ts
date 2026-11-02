@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Action } from 'org-protocol';
 import { fromWire, toWire } from '@shared/host/json-bytes';
 import type { CommandName } from '@shared/ipc/schema';
+import { ARTIFACT_OP_COMMANDS } from '@shared/ipc/schema/host';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { OFFERS } from '../../src/endpoint/offers';
 import type { SessionRecord } from '../../src/endpoint/sources';
@@ -112,6 +113,13 @@ describe('M5a’s rows', () => {
     expect(OFFERS.commands['library.spaces']).toEqual({ kind: 'call', executor: 'machine', target: 'machine', grade: 'list' });
     expect(OFFERS.commands['session.capabilities']).toEqual({ kind: 'call', executor: 'machine', target: 'appSessionId' });
     for (const name of ['artifacts.search', 'artifacts.open', 'library.saveAs', 'library.openExternally', 'library.reveal', 'files.openExternal', 'artifacts.content']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+  });
+
+  // P5 O7 M5a1 fix wave 1: the engine host's `host.artifactOp` runs ARTIFACT_OP_COMMANDS and refuses anything else, so an
+  // act row the endpoint offers by the artifact rule is exactly one of them
+  it('offer as artifact acts exactly the commands host.artifactOp runs', () => {
+    const acts = Object.entries(OFFERS.commands).filter(([, row]) => row.target === 'artifact' && row.kind === 'act').map(([name]) => name);
+    expect(new Set(acts)).toEqual(new Set(ARTIFACT_OP_COMMANDS));
   });
 
   it('take inputs the registry’s schemas hold, decoded (so what follows is about the grade alone)', () => {
