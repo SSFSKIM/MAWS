@@ -1129,8 +1129,26 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await block.getByRole('button', { name: `Allow ${ROWS_NAME} to read` }).click();
       await sourceSheet.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(tableRows(views), 'B’s first rows reach A').toHaveCount(FIRST_SIGNUPS.length, { timeout: 60_000 }).catch(() => undefined); // drawsRows says what is drawn
+      // on a failure: what A shows, what B holds (the grant, the dashboard's revision), what B's rows server was asked,
+      // and B's connector lines
+      const dashboardSaid = async () => {
+        const label = await labelOf(views).innerText().catch(String);
+        const blockText = await openSheet(views).then(async (open) => {
+          const text = await liveBlock(open).innerText().catch(String);
+          await open.getByRole('button', { name: 'Close', exact: true }).click().catch(() => undefined);
+          return text;
+        }, String);
+        const grants = await b.request('artifacts.connectorGrants', { artifactId: dashboard }).then((answer) => JSON.stringify(answer), String);
+        const revision = await b.request<{ artifact: { revision: number } }>('artifacts.get', { artifactId: dashboard }).then((answer) => String(answer.artifact.revision), String);
+        const asked = existsSync(mcpLog) ? readFileSync(mcpLog, 'utf8').trim().split('\n').filter((line) => line.includes('"series"')).slice(-10).join('\n') : 'no call log';
+        const logs = (readdirSync(b.userData, { recursive: true }) as string[]).filter((name) => name.endsWith('.log')).map((name) => {
+          const lines = readFileSync(join(b.userData, name), 'utf8').split('\n').filter((line) => /connector|dataset|direct|lease|publish|grant/i.test(line));
+          return `${name}:\n${lines.slice(-30).map((line) => line.slice(0, 400)).join('\n')}`;
+        });
+        return `A's label: ${label}\nA's live block: ${blockText}\nB's grants: ${grants}\nB's dashboard revision: ${revision}\nB's rows server was asked:\n${asked}\n${mainSaid(again)}\nB's logs:\n${logs.join('\n')}`;
+      };
       await drawsRows(views, FIRST_SIGNUPS, 'B’s rows drawn in A').catch(async (error: unknown) => {
-        throw new Error(`${error instanceof Error ? error.message : String(error)}\n${mainSaid(again)}\nB's log:\n${bLines(/connector|direct|lease|dataset|mcp/i)}`);
+        throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await dashboardSaid().catch(String)}`);
       });
       const firstCalls = callsOn(mcpLog, 'series').length;
       writeRows(rowsControl, NEXT_SIGNUPS);
