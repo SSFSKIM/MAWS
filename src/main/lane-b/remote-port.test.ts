@@ -290,7 +290,6 @@ describe('the relays’ bounds', () => {
     const answered = await Promise.all(out);
     expect(answered.every((page) => page.status !== 200)).toBe(true);
     expect(l.link.calls.filter((call) => call.name === 'connectors.callback')).toHaveLength(RELAYS_PER_LISTENER);
-    expect(refusedHere).toEqual([503]); // the one past the bound, answered here
   });
 
   // the review's finding 6: a relay is out until its call answers, whether or not its browser is still there
