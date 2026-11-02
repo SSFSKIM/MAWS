@@ -5,8 +5,8 @@
 // (test/machines/remote-link.test.ts's pattern); and the adapter reached as the router reaches it, `routeLaneB` over the
 // manager's path, which here is `dispatchOverLink` on the same link (how the pane's reads reach the machine). The tabs
 // are a `main.tabs` value the suite moves.
-import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { connect as dialTcp, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,7 +16,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { endableClientRef, type ClientRef, type HandlerOp } from '@shared/ipc/client';
+import { endableClientRef, type ClientRef, type EndableClientRef, type HandlerContext, type HandlerOp } from '@shared/ipc/client';
 import type { FilesListOutput, FilesReadOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { PtyAttach } from '@shared/ipc/schema/pty';
@@ -29,6 +29,7 @@ import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { loadDeviceKeys } from '../../src/main/device/keys';
 import { createStepUp } from '../../src/main/device/step-up';
+import type { ClientWindowShown } from '../../src/main/client/window-shown';
 import { harnessConfirmation } from '../../src/main/device/step-up-sheet';
 import { DEVICE_CAPABILITIES } from '../../src/main/machines/remote/capabilities';
 import type { MainContext } from '../../src/main/ipc/router';
@@ -52,7 +53,9 @@ import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
 import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
-import { item, record, status } from '../support/builders';
+import { item, project, record, status } from '../support/builders';
+import { fakeBus } from '../support/fake-bus';
+import { CONNECTOR_ART, CONNECTOR_FP, FakeConnectorHost } from '../support/fake-connector-host';
 import { fakeSpineView } from '../support/fake-spine-view';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -70,6 +73,18 @@ import { clientOf } from '../../src/main/ipc/clients';
 import { BRIDGE_SCRIPT } from '../../src/services/artifacts/scheme/bridge-script';
 import { fakeDocuments, fakeServices, scratchArtifacts, type FakeServices } from '../endpoint/fake-services';
 import { End } from './port-pair';
+// P5 O7 M5c: the machine's connectors and delivery as the spine's root composes them; main's own connectors for this Mac
+import { oauthIdentityOf } from '@shared/connectors/oauth-types';
+import type { DirectSource } from '@shared/ipc/schema/connectors';
+import { artifactExportName } from '@shared/maws/tools';
+import { startAppConnectors } from '../../src/main/connectors';
+import { createServicesFront, type ServicesFront } from '../../src/mawsd/front';
+import { composeConnectors } from '../../src/services/connectors';
+import { fileKeyCustody } from '../../src/services/connectors/custody';
+import type { DirectRoute } from '../../src/services/connectors/direct-route';
+import type { ConnectorOAuthProvider } from '../../src/services/connectors/oauth-provider';
+import { productionConnectorOAuth } from '../../src/services/connectors/root';
+import { startDelivery } from '../../src/services/delivery';
 
 // The endpoint's `h2` list, the build's own by default, which a case narrows to an endpoint of an earlier build (before the
 // `machine` executor, before M4's byte budget); each case starts from the whole list again.
@@ -234,6 +249,20 @@ function tapped(inner: ByteDuplex, tap: Tap): ByteDuplex {
 }
 
 type Emitted = { name: EventName; payload: Record<string, unknown> };
+/** P5 O7 M5c: a page's window as the window reporter reads it (ClientWindowShown), which a case shows and hides. */
+type ShownWindow = ClientWindowShown & { set(shown: boolean): void };
+function shownWindow(shown: boolean): ShownWindow {
+  const listeners = new Set<() => void>();
+  return {
+    shown: () => shown,
+    closed: () => false,
+    onChange: (listener) => (listeners.add(listener), () => void listeners.delete(listener)),
+    set(next) {
+      shown = next;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
 /** One MAWS app: its device keys, its link to the machine and its adapter. */
 type Device = {
   id: string;
@@ -246,6 +275,12 @@ type Device = {
   direct: { dead: boolean };
   /** What step-up was asked to confirm, by summary. */
   confirmed: string[];
+  /** P5 O7 M5c: what main told its windows as its own word (`emitOwn`; `connectors.reset {machine}`). */
+  own: Emitted[];
+  /** P5 O7 M5c: a page of this app whose window is shown or not, as the window reporter reads it. */
+  page(id: string, shown?: boolean): { client: EndableClientRef; window: ShownWindow };
+  /** P5 O7 M5c: each URL a machine's services asked this device to open (the consent's), in order. */
+  opened: string[];
   /** P5 O7 M3: the app quit and started again on this Mac: a new link and a new adapter under the same device keys. */
   restart(): Promise<Device>;
   /** P5 O7 M3: `remote.forward.open` and `.close`, as main's handlers take them. */
@@ -342,6 +377,9 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
   const emitted: Emitted[] = [];
   const logs: string[] = [];
+  const own: Emitted[] = [];
+  const windows = new Map<string, ShownWindow>();
+  const opened: string[] = [];
   const adapter = createRemoteLaneB({
     local: LOCAL,
     layout: { get: (key) => (key === 'main.tabs' ? tabs : null), onChange: (listener) => (layoutListeners.add(listener), () => void layoutListeners.delete(listener)) },
@@ -359,6 +397,17 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
     docChannel: () => {
       const [port1, port2] = End.pair();
       return { port1, port2 } as never;
+    },
+    // P5 O7 M5c: main's own word to its windows, each page's window, and the URLs this device is asked to open
+    emitOwn: (name, payload) => {
+      const checked = validateEventPayload(name, payload);
+      if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
+      own.push({ name, payload: payload as Record<string, unknown> });
+    },
+    windowShown: (client) => windows.get(client.id) ?? null,
+    openUrl: (url) => {
+      opened.push(url);
+      return { opened: true };
     },
   });
   cleanups.push(() => adapter.stop());
@@ -389,6 +438,15 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       for (const listener of layoutListeners) listener('main.tabs');
     },
     confirmed,
+    own,
+    opened,
+    page(pageId, shown = true) {
+      const window = shownWindow(shown);
+      windows.set(pageId, window);
+      const client = endableClientRef(pageId);
+      cleanups.push(() => client.end());
+      return { client, window };
+    },
     route: (name, input, from) => route(machine, name as CommandName, input, { ...ctx, ...from }),
     async cmd(name, input, from) {
       const result = await route(machine, name as CommandName, input, { ...ctx, ...from });
@@ -2005,5 +2063,434 @@ describe('pages and documents across machines (P5 O7 M5b)', { timeout: 30_000 },
 
     owner.doc.get('root').insert(11, ', still the owner’s'); // the owner's stream untouched
     await until(() => owner.provider.state.unsaved === 0 && text(docs.doc(DOC_ID)) === 'shared text, still the owner’s', 'the owner’s edit landed');
+  });
+});
+
+// ---- P5 O7 M5c: O4's surfaces across machines ----------------------------------------------------------------------------
+
+// M5c's "Proves" for this file: O4's surfaces on another machine through the real link and the real endpoint, over the
+// machine's connectors as the spine's root composes them (`composeConnectors`) on the endpoint's spine, route E over the
+// connector suite's scripted engine host (test/support/fake-connector-host.ts) and, where a case needs it, a fake route D
+// beside it. A dashboard's lease refreshes while its window is shown and is held while hidden; a forced carrier drop
+// rebuilds that machine's leases under new ids after its reset, the local machine's untouched; the local machine host's
+// own reconnect names the local machine, the remote lease left as it was; a lease command in flight at a drop answers
+// `host_unavailable`, never `grade`, and nothing of it reaches the next channel; a Connect completes through the device's
+// own loopback listener, relayed to the machine, sealing the grant there; Send to runs on the machine's delivery.
+const LIVE = CONNECTOR_ART; // the dashboard: an HTML artifact of a session of the machine's owners, its lease's artifact
+const ROWS = { server: 'fixture', tool: 'rows' };
+const AS = 'https://auth.example.com';
+const NOTES: DirectSource = { directory: '/repo', sourceId: '22222222-2222-4222-8222-222222222222', generation: 1, server: 'notes', scope: 'user', transport: 'http', path: '/h/.claude.json', entryPath: ['mcpServers', 'notes'], observedAt: '2026-11-02T00:00:00.000Z', resourceUrl: 'https://notes.example.com/mcp' };
+const NOTION: DirectSource = { directory: '/repo', sourceId: '44444444-4444-4444-8444-444444444444', generation: 1, server: 'notion', scope: 'user', transport: 'stdio', path: '/h/.claude.json', entryPath: ['mcpServers', 'notion'], observedAt: '2026-11-02T00:00:00.000Z' };
+const NOTION_PAGE = { content: [{ type: 'text', text: JSON.stringify({ pages: [{ id: 'abc', url: 'https://www.notion.so/Live-0123456789abcdef0123456789abcdef', properties: { title: 'Live' } }] }) }] };
+
+/** The connector service's view of the machine's index: the dashboard's creator and its project, as its own suite holds them. */
+const connectorView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
+
+/**
+ * A fake route D (route D's host leg stands in): the owner's sources by name, their discovery answered as an OAuth
+ * server answers it (refused until MAWS's own sign-in is saved; a stdio source needs none), Send to's tool located among
+ * them and run once, never a lease's route.
+ */
+function fakeRouteD(provider: () => ConnectorOAuthProvider | null) {
+  const sent: Array<{ source: DirectSource; request: { artifactId: string; tool: string; arguments: Record<string, unknown> } }> = [];
+  const route: DirectRoute = {
+    route: 'direct',
+    resolve: async () => null,
+    operationEnded: () => {},
+    reconcile: () => {},
+    hostLost: () => {},
+    stop: () => {},
+    close: async () => ({ ok: true, cancelled: 0 }),
+    resolveSource: async (_artifactId, server) => {
+      const source = [NOTES, NOTION].find((candidate) => candidate.server === server);
+      return source ? { ok: true, source, tool: { fingerprint: CONNECTOR_FP, readOnly: true } } : { ok: false, why: 'unobserved' };
+    },
+    discover: async (source) => {
+      const identity = oauthIdentityOf(source);
+      const connected = source.transport === 'stdio' || (identity !== null && (await provider()?.state(identity))?.state === 'connected');
+      return connected ? { ok: true, tools: [{ name: 'search', readOnly: true }] } : { ok: false, failure: 'unavailable', reason: 'unauthorized' };
+    },
+    locate: async (tool) => (tool === 'notion-create-pages' ? [NOTION] : []),
+    send: async (source, request) => {
+      sent.push({ source, request });
+      return { ok: true, result: NOTION_PAGE };
+    },
+  };
+  return { route, sent };
+}
+
+// The OAuth server and the protected resource of NOTES, as the flow's own suites script them (oauth-flow.test.ts)
+const jsonAnswer = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+function oauthServers(real: typeof fetch) {
+  return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.origin === 'https://notes.example.com' && url.pathname.startsWith('/.well-known/oauth-protected-resource')) return jsonAnswer({ resource: url.origin, authorization_servers: [AS] });
+    if (url.origin === AS && url.pathname === '/.well-known/oauth-authorization-server') {
+      return jsonAnswer({
+        issuer: AS, authorization_endpoint: `${AS}/authorize`, token_endpoint: `${AS}/token`, registration_endpoint: `${AS}/register`,
+        response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'],
+        token_endpoint_auth_methods_supported: ['none'],
+      });
+    }
+    if (url.origin === AS && url.pathname === '/register') {
+      const sent = JSON.parse(String(init?.body)) as { redirect_uris: string[] };
+      return jsonAnswer({ client_id: 'client-1', redirect_uris: sent.redirect_uris, token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' });
+    }
+    if (url.origin === AS && url.pathname === '/token') return jsonAnswer({ access_token: 'at-1', token_type: 'bearer', expires_in: 3600, refresh_token: 'rt-1' });
+    if (url.hostname === '127.0.0.1') return real(input, init);
+    return new Response('not found', { status: 404 });
+  };
+}
+
+type MachineConnectorsOptions = { routeD?: true; front?: ServicesFront; delivery?: true };
+/**
+ * The machine's connectors on the endpoint's spine, as the spine's root composes them: every command the spine ran, with
+ * the ref it ran under (`ran`), any of them held at the machine until released (`hold`); the bus's events the machine's
+ * own (`emitMachine`), as `mawsd`'s front sends the spine's. With `routeD`, the fake route D and MAWS's own OAuth over a
+ * scratch key file beside route E (the machine's loopback never bound: its `listen` throws); with `delivery`, Send to's
+ * service over the connectors' owner delivery, the library's Export a file planted as the root's export leaves it.
+ */
+function machineConnectors(l: Lab, options: MachineConnectorsOptions = {}) {
+  const host = new FakeConnectorHost();
+  host.grants.set(JSON.stringify([ROWS.server, ROWS.tool]), 'read');
+  host.endAtStart = true; // each operation ends as it starts: a refresh publishes at once
+  const ran: Array<{ name: string; input: Record<string, unknown>; client: ClientRef }> = [];
+  const gates = new Map<string, Promise<void>>();
+  const bus = {
+    register: (name: string, handler: (input: never, context: HandlerContext) => unknown) =>
+      l.f.spine.handle(name, async (input, context) => {
+        ran.push({ name, input: input as Record<string, unknown>, client: context.client });
+        await gates.get(name);
+        return handler(input as never, context);
+      }),
+    emit: (name: EventName, payload: unknown) => {
+      if (!validateEventPayload(name, payload).ok) return false;
+      l.f.host.emitMachine(name, payload);
+      return true;
+    },
+  };
+  // the engine host's reads the scripted host has no answer for: the delivery's title and its observation of a live session
+  const dispatch = (owner: string, name: CommandName, input: unknown) => {
+    if (name === 'artifacts.get') return Promise.resolve({ ok: true as const, value: { artifact: host.artifact } });
+    if (name === 'connectors.observe') return Promise.resolve({ ok: true as const, value: { observed: true } });
+    return host.dispatch(owner, name, input);
+  };
+  const port = options.front?.port ?? { openExternal: async () => ({ opened: false as const, reason: 'no client port here' }) };
+  const root = mkdtempSync(join(tmpdir(), 'maws-o7-connectors-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, 'connectors', 'oauth');
+  let provider: ConnectorOAuthProvider | null = null;
+  const d = fakeRouteD(() => provider);
+  const part = composeConnectors({
+    hosts: { dispatch: dispatch as never, onEvent: host.onEvent as never, onState: host.onState as never, onStreaming: host.onStreaming as never, streaming: host.streaming as never },
+    bus: bus as never,
+    view: connectorView(),
+    realpath: (path) => path,
+    port,
+    log: () => {},
+    ...(options.routeD && {
+      direct: () => d.route,
+      oauth: (own) =>
+        (provider = productionConnectorOAuth({
+          ...own,
+          custody: fileKeyCustody(directory, { excludeFromBackup: async () => true }),
+          directory,
+          listen: async () => {
+            throw new Error('a remote asker’s consent bound the machine’s loopback');
+          },
+        })),
+    }),
+  });
+  cleanups.push(() => part.stop());
+  const artifactsRoot = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o7-exports-')));
+  cleanups.push(() => rmSync(artifactsRoot, { recursive: true, force: true }));
+  const exported: string[] = [];
+  if (options.delivery) {
+    const delivery = startDelivery({
+      bus: bus as never,
+      hosts: { dispatch: dispatch as never },
+      connectors: part.delivery,
+      shellEnv: async () => ({}),
+      port,
+      artifactsRoot,
+      exportArtifact: async (input) => {
+        const exports = join(artifactsRoot, input.artifactId, 'exports');
+        mkdirSync(exports, { recursive: true });
+        const exportId = randomUUID();
+        const path = join(exports, artifactExportName(1, input.format, exportId));
+        writeFileSync(path, '# Live\n\nRows from the mini.\n');
+        exported.push(path);
+        return { ok: true, value: { path, revision: 1, exportId } };
+      },
+      log: () => {},
+    });
+    cleanups.push(() => delivery.stop());
+  }
+  return {
+    host,
+    ran,
+    sent: d.sent,
+    exported,
+    /** The machine's sealed grants (MAWS's own OAuth's records). */
+    sealed: () => (existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith('.sealed')) : []),
+    /** Each command of `name` the spine ran from now on waits at the machine until the release. */
+    hold(name: string): () => void {
+      let release!: () => void;
+      gates.set(name, new Promise<void>((resolve) => (release = resolve)));
+      return () => (gates.delete(name), release());
+    },
+    /** The window reports the machine took, in order. */
+    shown: () => ran.filter((r) => r.name === 'connectors.windowShown').map((r) => r.input.shown),
+    named: (name: string) => ran.filter((r) => r.name === name),
+  };
+}
+
+/** The endpoint with a session of its owners' and the dashboard linked to it, the machine's connectors on its spine. */
+async function leaseLab(options: LabOptions & MachineConnectorsOptions = {}) {
+  const l = await lab(options);
+  l.host.add('app-1');
+  l.place('app-1');
+  l.host.artifact(LIVE, ['app-1'], { kind: 'html', title: 'Live' });
+  const m = machineConnectors(l, options);
+  l.a.roster(); // the machine's gate and its artifacts feed, on the roster's link
+  await until(() => resets(l.a).length === 1, 'the machine’s first reset', 10_000);
+  return { l, m };
+}
+
+const resets = (d: Device) => d.own.filter((e) => e.name === 'connectors.reset').map((e) => e.payload);
+type Watching = { leaseId: string; watchId: string };
+/** A page's watching lease, as the renderer's connectors client makes one: the lease, its declaration, shown, and a watch. */
+async function watching(d: Device, client: EndableClientRef): Promise<Watching> {
+  const { leaseId } = (await d.cmd('connectors.open', { artifactId: LIVE }, { client })) as { leaseId: string };
+  expect(await d.cmd('connectors.declare', { leaseId, tools: [ROWS] }, { client })).toMatchObject({ ok: true });
+  expect(await d.cmd('connectors.visibility', { leaseId, visible: true }, { client })).toEqual({ ok: true });
+  const watch = (await d.cmd('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } }, { client })) as { ok: true; watchId: string };
+  expect(watch).toMatchObject({ ok: true });
+  return { leaseId, watchId: watch.watchId };
+}
+const updatesOf = (d: Device, w: Watching) => d.emitted.filter((e) => e.name === 'connectors.watchUpdate' && e.payload.leaseId === w.leaseId && e.payload.watchId === w.watchId).map((e) => e.payload.update);
+
+/** One GET of the device's consent listener, as the browser makes it after the redirect: its status and body. */
+function browse(url: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpGet(url, { agent: false }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => (body += chunk));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(10_000, () => req.destroy(new Error(`GET ${url} timed out`)));
+  });
+}
+
+describe('O4’s surfaces across machines (P5 O7 M5c)', { timeout: 30_000 }, () => {
+  it('refreshes a dashboard’s watch on the machine while its window is shown, and holds the lease while it is hidden', async () => {
+    const { l, m } = await leaseLab();
+    const { client, window } = l.a.page('page-dash');
+    const lease = await watching(l.a, client);
+    await until(() => updatesOf(l.a, lease).length === 1, 'the watch’s first refresh, said from the machine');
+    expect(updatesOf(l.a, lease)[0]).toEqual({ ok: true, result: { content: 'rows 107' }, fetchedAt: expect.any(Number), via: { route: 'engine' } }); // its session withheld
+    expect(m.shown()).toEqual([true]); // one report for the device, made before the page's first lease command
+    expect(m.named('connectors.windowShown')[0]!.client).toBe(m.named('connectors.open')[0]!.client); // under the channel's one ref
+    expect(await l.a.cmd('connectors.refresh', lease, { client })).toEqual({ refreshing: true });
+    await until(() => updatesOf(l.a, lease).length === 2, 'the page’s refresh');
+
+    window.set(false);
+    await until(() => m.shown().at(-1) === false, 'the hidden window reported to the machine');
+    const ran = m.host.started().length;
+    expect(await l.a.cmd('connectors.refresh', lease, { client })).toEqual({ refreshing: false });
+    expect(await l.a.cmd('connectors.call', { leaseId: lease.leaseId, request: ROWS }, { client })).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    await sleep(200);
+    expect(m.host.started()).toHaveLength(ran); // nothing runs on the machine while the window is hidden
+    expect(updatesOf(l.a, lease)).toHaveLength(2);
+
+    window.set(true);
+    await until(() => m.shown().at(-1) === true, 'the window shown again, reported');
+    expect(await l.a.cmd('connectors.refresh', lease, { client })).toEqual({ refreshing: true }); // the same lease and watch
+    await until(() => updatesOf(l.a, lease).length === 3, 'a refresh once shown again');
+    expect(m.named('connectors.open')).toHaveLength(1);
+    expect(m.named('connectors.close')).toEqual([]); // held while hidden, never closed
+  });
+
+  it('rebuilds a machine’s watch under new ids after a forced carrier drop: the next channel reports the window, then that machine’s reset; the local machine’s leases are untouched', async () => {
+    const { l, m } = await leaseLab({ link: { UP_GRACE_MS: 100, BACKOFF_MS: [0, 100, 100] } });
+    // this Mac's own connectors (its mawsd's), a page of its own watching there
+    const localHost = new FakeConnectorHost();
+    localHost.grants.set(JSON.stringify([ROWS.server, ROWS.tool]), 'read');
+    localHost.endAtStart = true;
+    const localBus = fakeBus();
+    const local = composeConnectors({ hosts: { dispatch: localHost.dispatch as never, onEvent: localHost.onEvent as never, onState: localHost.onState as never, onStreaming: localHost.onStreaming as never, streaming: localHost.streaming as never }, bus: localBus, view: connectorView(), realpath: (path) => path, port: { openExternal: async () => ({ opened: false as const, reason: 'none' }) }, log: () => {} });
+    cleanups.push(() => local.stop());
+    const localPage = endableClientRef('page-local');
+    cleanups.push(() => localPage.end());
+    const localCmd = async (name: CommandName, input: unknown) => {
+      const answer = await localBus.main(name, input, localPage);
+      if (!answer.ok) throw new Error(`${name}: ${answer.error.message}`);
+      return answer.value as Record<string, unknown>;
+    };
+    await localCmd('connectors.windowShown', { shown: true });
+    const localLease = (await localCmd('connectors.open', { artifactId: LIVE })).leaseId as string;
+    await localCmd('connectors.declare', { leaseId: localLease, tools: [ROWS] });
+    await localCmd('connectors.visibility', { leaseId: localLease, visible: true });
+    const localWatch = (await localCmd('connectors.watch', { leaseId: localLease, request: { ...ROWS, intervalMs: 30_000 } })).watchId as string;
+    const localUpdates = () => localBus.emittedOf('connectors.watchUpdate').filter((u) => u.leaseId === localLease && u.watchId === localWatch);
+    await until(() => localUpdates().length === 1, 'the local watch’s first refresh');
+
+    const { client } = l.a.page('page-dash');
+    const first = await watching(l.a, client);
+    await until(() => updatesOf(l.a, first).length === 1, 'the remote watch’s first refresh');
+    const firstRef = m.named('connectors.open')[0]!.client;
+    const localAsked = localHost.dispatched.length;
+
+    const before = l.a.link.peerCapabilities();
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await onNewChannel(l.a, before);
+    await until(() => resets(l.a).length === 2, 'the machine’s reset on its next channel', 10_000);
+    expect(resets(l.a)).toEqual([{ machine: l.f.ref }, { machine: l.f.ref }]); // that machine alone, never the local one
+    let gone = false;
+    firstRef.onGone(() => (gone = true)); // at once for a ref that has ended
+    expect(gone).toBe(true); // the old channel's ref ended, and the machine closed its leases with it
+
+    const rebuilt = await watching(l.a, client); // the renderer's rebuild of that machine's surfaces
+    expect(rebuilt.leaseId).not.toBe(first.leaseId);
+    expect(rebuilt.watchId).not.toBe(first.watchId);
+    await until(() => updatesOf(l.a, rebuilt).length === 1, 'the watch resumed under its new ids');
+    // the next channel took the window's report under its own ref before the rebuild's first lease command
+    const reopened = m.ran.findIndex((r) => r.name === 'connectors.open' && r.client !== firstRef);
+    const reported = m.ran.findIndex((r) => r.name === 'connectors.windowShown' && r.client !== firstRef);
+    expect(m.ran[reported]!.input).toEqual({ shown: true });
+    expect(m.ran[reported]!.client).toBe(m.ran[reopened]!.client);
+    expect(reported).toBeLessThan(reopened);
+    expect(m.shown()).toEqual([true, true]); // one report per channel for the device
+    expect(updatesOf(l.a, first)).toHaveLength(1); // the old watch ended with its channel
+    expect(await l.a.route('connectors.refresh', first, { client })).toMatchObject({ ok: false, error: { issues: { refusal: 'grade' } } }); // its lease is nobody's now
+
+    // the local machine's lease and watch, as they were: nothing reached it, and it refreshes under its own ids
+    expect(localHost.dispatched).toHaveLength(localAsked);
+    expect(await localCmd('connectors.refresh', { leaseId: localLease, watchId: localWatch })).toEqual({ refreshing: true });
+    await until(() => localUpdates().length === 2, 'the local watch refreshing still');
+  });
+
+  it('leaves a remote dashboard’s lease and watch as they were when the local machine host reconnects: its reset names the local machine', async () => {
+    const { l, m } = await leaseLab();
+    // main's own connectors for this Mac (src/main/connectors/index.ts): the machine host's streaming after the first
+    // says this Mac's reset, to the same windows as the remote lane's
+    const streamings = new Set<() => void>();
+    const app = startAppConnectors({
+      local: LOCAL,
+      machine: { streaming: () => true, onStreaming: (listener) => (streamings.add(listener), () => void streamings.delete(listener)) },
+      windowShown: () => null,
+      invoke: (async () => ({ ok: true, value: { ok: true } })) as never,
+      before: () => () => {},
+      emit: (name, payload) => void l.a.own.push({ name, payload: payload as Record<string, unknown> }),
+      adopt: async () => ({ retry: false }),
+      log: () => {},
+    });
+    cleanups.push(() => app.stop());
+    const { client } = l.a.page('page-dash');
+    const lease = await watching(l.a, client);
+    await until(() => updatesOf(l.a, lease).length === 1, 'the remote watch’s first refresh');
+    const channel = l.a.link.peerCapabilities();
+
+    for (const listener of [...streamings]) listener(); // this Mac's mawsd restarted: its host streams again
+    expect(resets(l.a)).toEqual([{ machine: l.f.ref }, { machine: LOCAL }]);
+    await sleep(200);
+    expect(resets(l.a)).toHaveLength(2); // no reset of the remote machine follows
+    expect(l.a.link.peerCapabilities()).toBe(channel);
+    // the remote lease and its watch stand: refreshed under the same ids, nothing opened, closed or reported again
+    expect(await l.a.cmd('connectors.refresh', lease, { client })).toEqual({ refreshing: true });
+    await until(() => updatesOf(l.a, lease).length === 2, 'the remote watch refreshing under its ids');
+    expect(m.named('connectors.open')).toHaveLength(1);
+    expect(m.named('connectors.close')).toEqual([]);
+    expect(m.shown()).toEqual([true]);
+  });
+
+  it('answers a lease command in flight at a drop `host_unavailable`, never `grade`, and sends nothing of it on the next channel', async () => {
+    const { l, m } = await leaseLab({ link: { UP_GRACE_MS: 100, BACKOFF_MS: [0, 100, 100] } });
+    const { client } = l.a.page('page-dash');
+    const lease = await watching(l.a, client);
+    await until(() => updatesOf(l.a, lease).length === 1, 'the watch’s first refresh');
+    const releases = [m.hold('connectors.declare'), m.hold('connectors.call')];
+    const declaring = l.a.route('connectors.declare', { leaseId: lease.leaseId, tools: [ROWS] }, { client }); // a call
+    const calling = l.a.route('connectors.call', { leaseId: lease.leaseId, request: ROWS }, { client }); // an act
+    await until(() => m.named('connectors.declare').length === 2 && m.named('connectors.call').length === 1, 'both at the machine');
+
+    const before = l.a.link.peerCapabilities();
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    const [declared, called] = await Promise.all([declaring, calling]);
+    expect(declared).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(called).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    for (const release of releases) release(); // the machine answers them now, to a channel that has ended
+
+    await onNewChannel(l.a, before);
+    await until(() => resets(l.a).length === 2, 'the machine’s reset on its next channel', 10_000);
+    await sleep(300);
+    expect(m.named('connectors.declare')).toHaveLength(2); // the watch's own, then the one in flight: never again
+    expect(m.named('connectors.call')).toHaveLength(1);
+    expect(l.f.host.calls.filter((c) => c.name === 'machine.opQuery')).toEqual([]); // the act not asked after on the next channel
+  });
+
+  it('completes a Connect through the device’s own loopback listener, the consent’s redirect relayed to the machine, sealing the grant there', async () => {
+    vi.stubGlobal('fetch', vi.fn(oauthServers(fetch)));
+    cleanups.push(() => vi.unstubAllGlobals());
+    // the machine's services front's client port (mawsd's), its targets the endpoint's channels
+    const front = createServicesFront({
+      spine: { ensure: async () => ({}) as never },
+      hosts: { forward: async () => ({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'none' } }) as HostResponse, onRaw: () => () => {}, onStreaming: () => () => {}, parked: () => false },
+      intercept: () => null,
+      daemon: async () => undefined,
+      identity: () => ({ ref: 'TestMachineRef00000000' as MachineRef, name: 'mini', project: { key: 'machine:TestMachineRef00000000', name: 'mini', smnsId: null } }),
+      isApp: () => false,
+      log: () => {},
+    });
+    cleanups.push(() => front.close());
+    const services = fakeServices();
+    services.clientPort = { serve: (ref, target) => front.serveRemote(ref, target) };
+    const { l, m } = await leaseLab({ endpoint: { services }, routeD: true, front });
+    const tools = [{ server: 'notes', tool: 'search' }];
+    const notesRow = async () => {
+      const { servers } = (await l.a.cmd('connectors.servers', { artifactId: LIVE, tools })) as { servers: Array<{ kind: string; server?: string; handle?: string } & Record<string, unknown>> };
+      return servers.find((row) => row.kind === 'source' && row.server === 'notes')!;
+    };
+    const row = await notesRow();
+    expect(await l.a.cmd('connectors.connect', { artifactId: LIVE, sourceHandle: row.handle })).toEqual({ accepted: true });
+    await until(() => l.a.opened.length === 1, 'the consent opened on this device');
+    const consent = new URL(l.a.opened[0]!);
+    expect(consent.origin + consent.pathname).toBe(`${AS}/authorize`);
+    const redirect = new URL(consent.searchParams.get('redirect_uri')!);
+    expect([redirect.hostname, redirect.pathname]).toEqual(['127.0.0.1', '/callback']); // this device's listener
+    const connect = m.named('connectors.connect')[0]!;
+    expect(connect.input.callback).toEqual({ port: Number(redirect.port) });
+    expect(m.sealed()).toEqual([]);
+
+    // the browser lands on this device's loopback: a stray request first (the flow's own 404, the wait goes on), then the redirect
+    expect(await browse(`${redirect.origin}/favicon.ico`)).toEqual({ status: 404, body: '' });
+    expect(await browse(`${redirect.href}?code=c-1&state=${consent.searchParams.get('state')}`)).toEqual({ status: 200, body: 'MAWS is connected. You can close this window.' });
+    expect(m.named('connectors.callback').map((r) => r.client)).toEqual([connect.client, connect.client]); // under the asking channel's ref
+    await until(() => m.sealed().length === 1, 'the grant sealed on the machine');
+    // the flow's end, heard on the artifacts feed, ends the listener
+    await until(() => l.a.emitted.some((e) => e.name === 'connectors.serversChanged' && (e.payload.ended as { sourceHandle?: string } | undefined)?.sourceHandle === row.handle), 'the flow’s end on the feed');
+    let closed = false;
+    for (let tries = 0; tries < 50 && !closed; tries += 1) {
+      closed = await browse(redirect.href).then(() => false, () => true);
+      if (!closed) await sleep(50);
+    }
+    expect(closed).toBe(true);
+    expect(await notesRow()).toMatchObject({ connection: { state: 'connected' }, last: { action: 'connect', ok: true, credential: 'maws' } });
+  });
+
+  it('sends an artifact of the machine to Notion through the machine’s delivery: exported there, one page made, the receipt said from the machine', async () => {
+    const { l, m } = await leaseLab({ routeD: true, delivery: true });
+    const status = (await l.a.cmd('delivery.status', { target: 'notion', artifactId: LIVE })) as { state: string; source?: { key: string; server: string } };
+    expect(status).toMatchObject({ state: 'ready', source: { server: 'notion' } });
+    const answer = await l.a.cmd('delivery.send', { runId: randomUUID(), target: 'notion', artifactId: LIVE, format: 'md', destination: { kind: 'default' }, source: status.source!.key });
+    expect(answer).toMatchObject({ ok: true, receipt: { artifactId: LIVE, target: 'notion', name: 'Live', url: 'https://www.notion.so/Live-0123456789abcdef0123456789abcdef', format: 'md' } });
+    expect(m.sent).toEqual([{ source: NOTION, request: { artifactId: LIVE, tool: 'notion-create-pages', arguments: expect.objectContaining({ pages: [{ properties: { title: 'Live' }, content: '# Live\n\nRows from the mini.\n' }] }) } }]);
+    expect(m.named('delivery.send')).toHaveLength(1);
+    expect(m.exported.every((path) => !existsSync(path))).toBe(true); // the export made on the machine, removed after the send
+    await until(() => l.a.emitted.some((e) => e.name === 'delivery.receipt' && e.payload.artifactId === LIVE), 'the receipt from the machine');
+    expect(l.a.confirmed).toEqual([]); // `manage`: no step-up
   });
 });
