@@ -31,7 +31,8 @@
 //   grant, an Allow once included, that the owner's newer decision withdrew.
 // - Watches: 30 s to 24 h, at most 64 across the whole app, one refresh at a time, the next an interval after the last
 //   ended; hidden, none run, and shown, a due one catches up once. A watch with no route reads paused and asks again at
-//   its interval; one with no grant waits, timerless, for a grant (a denial computed before a grant that arrived while
+//   its interval, or at once at a grant of its tool (P5 O7 M5c: a grant proves a route live; the owner's Start answers
+//   before the engine's servers connect, so the refresh it asks can find none); one with no grant waits, timerless, for a grant (a denial computed before a grant that arrived while
 //   it ran is obsolete: the watch asks again rather than wait); one of a tool that is not read-only ends.
 // - What a page reads of a failure is a state and a reason from a closed list (P3 Decision Log 84); the words of an
 //   error, the route's or main's own, go to main's log only.
@@ -140,6 +141,7 @@ interface Watch {
   waitingSince: number; // the tool's grant generation when it began to wait: a grant since makes the wait obsolete
   rechecking?: boolean; // P3-H H3b: its grant being re-read from the store
   endedAt?: number; // when its last refresh that ran ended; the next is due an interval later
+  routeless?: boolean; // P5 O7 M5c: its last refresh found no route (`paused/noRoute`): a grant of its tool wakes it
   timer?: ReturnType<typeof setTimeout>;
   running?: Work;
 }
@@ -599,10 +601,19 @@ export class ConnectorBroker {
   }
 
   // A grant of the tool: its waiting watches wake now, and a refresh of it in flight that comes back denied asks again.
+  // P5 O7 M5c: so does one whose last refresh found no route, which would otherwise wait out its interval: the grant
+  // resolved a live route (the owner's), or a route answered for it (another window's).
   private granted(artifactId: string, tool: ConnectorToolRef): void {
     const key = workKey(artifactId, tool);
     this.grantGenerations.set(key, this.generation(key) + 1);
-    for (const watch of this.watches.values()) if (watch.key === key && watch.waitingForGrant) this.schedule(watch);
+    for (const watch of this.watches.values()) {
+      if (watch.key !== key) continue;
+      if (watch.routeless === true && !watch.waitingForGrant) {
+        watch.routeless = false;
+        delete watch.endedAt;
+      } else if (!watch.waitingForGrant) continue;
+      this.schedule(watch);
+    }
   }
 
   // P3-H H3b: a waiting watch's grant re-read from the store's committed grants: a read grant of its tool there is a
@@ -707,6 +718,7 @@ export class ConnectorBroker {
       return;
     }
     watch.endedAt = Date.now();
+    watch.routeless = !outcome.ok && outcome.state === 'paused' && outcome.reason === 'noRoute';
     this.schedule(watch);
   }
 
