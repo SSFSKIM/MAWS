@@ -70,6 +70,54 @@ describe('opening', () => {
   });
 });
 
+// P5 O7 M5b (Interfaces §N, the read open): a stream with no `op`, an artifact page's request or its document, sent only
+// to an endpoint that listed `rl2.read-open`; the endpoint's `streamOpened.http` reaches the consumer.
+describe('the read open', () => {
+  const HTTP = { url: 'maws-artifact://0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d/live/index.html', method: 'GET' as const, range: 'bytes=0-9' };
+  const DOCUMENT = { artifactId: '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d', mode: 'view' as const };
+
+  it('sends an http or a document open with no `op` to an endpoint that listed `rl2.read-open`', () => {
+    const h = harness(['rl2.streams', 'rl2.read-open']);
+    const page = h.table.open({ kind: 'http', credit: 4096, http: HTTP }, h.sink, null);
+    const doc = h.table.open({ kind: 'document', document: DOCUMENT }, h.sink, null);
+    expect(h.of('streamOpen')).toEqual([
+      { t: 'streamOpen', id: page.id, kind: 'http', credit: 4096, http: HTTP },
+      { t: 'streamOpen', id: doc.id, kind: 'document', credit: STREAM_OPEN_CREDIT, document: DOCUMENT },
+    ]);
+    expect(h.of('streamOpen').every((m) => !('op' in m))).toBe(true);
+  });
+
+  it('closes a read open `not-offered` at once, sending nothing, when the endpoint lists `rl2.streams` but not `rl2.read-open`', async () => {
+    const h = harness(['rl2.streams']);
+    h.table.open({ kind: 'http', http: HTTP }, h.sink, null);
+    await tick();
+    expect(h.heard).toEqual([['closed', 'not-offered']]);
+    expect(h.sent).toEqual([]);
+    expect(h.table.size).toBe(0);
+    h.table.open({ kind: 'pty', op: 'op-1', pty: PTY }, h.sink, null); // the act open is unchanged
+    expect(h.of('streamOpen')).toHaveLength(1);
+  });
+
+  it('judges `rl2.read-open` on the channel the open goes out on', async () => {
+    const h = harness(['rl2.streams', 'rl2.read-open']);
+    h.channel.current = false;
+    h.table.open({ kind: 'http', http: HTTP }, h.sink, null);
+    h.channel.peer = ['rl2.streams']; // the next channel's peer is an older endpoint
+    h.channel.current = true;
+    h.table.onCurrent();
+    await tick();
+    expect(h.heard).toEqual([['closed', 'not-offered']]);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('hands the consumer the answer’s status and headers with the endpoint’s credit', () => {
+    const h = harness(['rl2.streams', 'rl2.read-open']);
+    const s = h.table.open({ kind: 'http', http: HTTP }, h.sink, null);
+    h.table.receive({ t: 'streamOpened', id: s.id, credit: 1, http: { status: 206, headers: { 'content-range': 'bytes 0-9/99' } } });
+    expect(h.heard).toEqual([['opened', { http: { status: 206, headers: { 'content-range': 'bytes 0-9/99' } }, credit: 1 }]]);
+  });
+});
+
 describe('data', () => {
   it('delivers the endpoint’s chunks decoded at their offsets, and refunds only what the consumer gives back', () => {
     const h = harness();

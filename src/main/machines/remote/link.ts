@@ -108,7 +108,9 @@ export interface RemoteLink extends MachineLink {
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
   /**
    * P5 O7 M3 (§N): a byte stream under an act sent on this link, on the current channel (or the next, while none is);
-   * closed('not-offered') at once when the peer lists no `rl2.streams`, and closed('carrier') with its channel.
+   * closed('not-offered') at once when the peer lists no `rl2.streams`, and closed('carrier') with its channel. P5 O7
+   * M5b: or a read open (no `op`: an artifact page's `http` request, its `document`), closed('not-offered') at once when
+   * the peer lists no `rl2.read-open`.
    */
   openStream(request: StreamRequest, sink: StreamSink): RemoteStream;
   /** `person`: a person acted on this machine (also lifts `refused`). */

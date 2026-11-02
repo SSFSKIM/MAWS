@@ -16,22 +16,43 @@
 //   numbers its bytes from the open's `inputFrom` for a pty (the device's input offset in its epoch) and from zero for a
 //   connection; the endpoint's are the pty host's output offsets, or the connection's.
 // - A refusal is the stream's close with the refusal's reason; a close this side sends is not answered.
-import { STREAM_CHUNK_BYTES, STREAM_CREDIT_MAX, base64urlEncode, type DeviceMessage, type EndpointMessage, type StreamOpenedMessage } from '../../../../apps/org-protocol/src/index.ts';
+// - P5 O7 M5b (§N, the read open): a stream with no `op` is opened under a stream row of the endpoint's offer table, not
+//   under an act: an artifact page's request (`http`, its answer's status and headers in `streamOpened.http`, the body
+//   after) or its document (`document`). It goes only to a peer that listed `rl2.read-open` as well, judged on the
+//   channel it goes out on, and closes `not-offered` otherwise: an older endpoint reads a missing `op` as `malformed`.
+import {
+  STREAM_CHUNK_BYTES,
+  STREAM_CREDIT_MAX,
+  base64urlEncode,
+  type DeviceMessage,
+  type EndpointMessage,
+  type StreamDocumentOpen,
+  type StreamHttpOpen,
+  type StreamKind,
+  type StreamOpenedMessage,
+} from '../../../../apps/org-protocol/src/index.ts';
 import { peerLists } from './capabilities';
 
 /** The credit a stream gives the endpoint at its open, unless asked otherwise: twice a terminal's ring, which its opening sends whole. */
 export const STREAM_OPEN_CREDIT = 1024 * 1024;
 
 export interface StreamRequest {
-  kind: 'pty' | 'tcp';
-  /** The authorizing act's opId, sent on this link. */
-  op: string;
+  kind: StreamKind;
+  /** The authorizing act's opId, sent on this link, for the act open (`pty`, `tcp`); absent for the read open (`http`, `document`; P5 O7 M5b). */
+  op?: string;
   /** What the endpoint may send before a refund; STREAM_OPEN_CREDIT by default, at most STREAM_CREDIT_MAX. */
   credit?: number;
   pty?: { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
   tcp?: { forward: string };
+  /** P5 O7 M5b: one request of an artifact page, a `maws-artifact:` URL. */
+  http?: StreamHttpOpen;
+  /** P5 O7 M5b: an artifact's document, to edit or to view. */
+  document?: StreamDocumentOpen;
 }
-/** `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, and the endpoint's credit for this side's bytes. */
+/**
+ * `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, (P5 O7 M5b) an `http` answer's
+ * `{status, headers}`, and the endpoint's credit for this side's bytes.
+ */
 export type StreamOpened = Omit<StreamOpenedMessage, 't' | 'id'>;
 export interface StreamSink {
   opened(opened: StreamOpened): void;
@@ -160,7 +181,7 @@ export class StreamTable {
         if (entry.state !== 'sent') return;
         entry.state = 'opened';
         entry.credit = message.credit;
-        entry.sink.opened({ ...(message.pty === undefined ? {} : { pty: message.pty }), credit: message.credit });
+        entry.sink.opened({ ...(message.pty === undefined ? {} : { pty: message.pty }), ...(message.http === undefined ? {} : { http: message.http }), credit: message.credit });
         if (this.#entries.get(entry.id) !== entry) return;
         for (const control of entry.controls.splice(0)) this.#deps.send({ t: 'streamControl', id: entry.id, control });
         if (entry.refund > 0) this.#refund(entry, entry.refund);
@@ -188,13 +209,14 @@ export class StreamTable {
 
   #open(entry: Entry): void {
     // What the peer could not read never goes: the stream ends here, as the peer would end the channel.
-    if (!peerLists(this.#deps, 'rl2.streams')) {
+    const { kind, op, pty, tcp, http, document } = entry.request;
+    if (!peerLists(this.#deps, 'rl2.streams') || (op === undefined && !peerLists(this.#deps, 'rl2.read-open'))) {
       this.#entries.delete(entry.id);
       return void queueMicrotask(() => entry.sink.closed('not-offered'));
     }
-    const { kind, op, pty, tcp } = entry.request;
     const credit = Math.min(Math.max(1, entry.request.credit ?? STREAM_OPEN_CREDIT), STREAM_CREDIT_MAX);
-    if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, op, credit, ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }) })) entry.state = 'sent';
+    const fields = { ...(op === undefined ? {} : { op }), ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }), ...(http === undefined ? {} : { http }), ...(document === undefined ? {} : { document }) };
+    if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, credit, ...fields })) entry.state = 'sent';
   }
 
   #refund(entry: Entry, bytes: number): void {
