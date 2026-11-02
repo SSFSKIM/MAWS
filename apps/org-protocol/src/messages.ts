@@ -83,12 +83,29 @@ export type EndedMessage = { t: 'ended'; sub: string; reason: string };
  * device that never listed it never receives one. An older reader would ignore the kinds as unknown (`readMessage`); what
  * closes a channel is a known kind out of shape, which a peer reading these at 1.3 holds them to.
  */
-export type StreamKind = 'pty' | 'tcp';
-const STREAM_KINDS: readonly string[] = ['pty', 'tcp'] satisfies readonly StreamKind[];
+/**
+ * P5 O7 M5b (behind `rl2.read-open`; RL2_PROTOCOL 1.5): the read open, a `streamOpen` that names no `op`, admitted by a
+ * stream row of the endpoint's offer table at the row's grade: `http` (one request to the machine's artifact endpoint) and
+ * `document` (one endpoint document channel). A device sends one only to an endpoint that listed the capability: an
+ * older endpoint reads a missing `op`, or these kinds, as `malformed` and closes the channel. A `pty` or `tcp` open (the act
+ * open) still names its act. Reserved for O17 M9 and admitted by no validator until then: the kind `browser.screencast`
+ * and the capability `rl2.browser-screencast` (O7's Interfaces §M and §N), so an open of that kind is `malformed` here.
+ */
+export type StreamKind = ActStreamKind | ReadStreamKind;
+/** The kinds opened under an act (`op`). */
+export type ActStreamKind = 'pty' | 'tcp';
+/** The kinds of the read open (no `op`; P5 O7 M5b). */
+export type ReadStreamKind = 'http' | 'document';
+const ACT_STREAM_KINDS: readonly string[] = ['pty', 'tcp'] satisfies readonly ActStreamKind[];
+const READ_STREAM_KINDS: readonly string[] = ['http', 'document'] satisfies readonly ReadStreamKind[];
+/** Whether `kind` is a read open's (no `op`). */
+export const isReadStreamKind = (kind: unknown): kind is ReadStreamKind => READ_STREAM_KINDS.includes(kind as string);
 /** Why an open is refused: the act doesn't authorize it (`grade`), names nothing the machine still holds (`unknown`: a
  * fresh act may), the port answers no connection (`unreachable`), the channel holds MAX_STREAMS (`busy`), the open is out
- * of shape (`malformed`), or the machine can't say now (`unavailable`: ask again). */
-export const STREAM_REFUSALS = ['grade', 'unknown', 'unreachable', 'busy', 'malformed', 'unavailable'] as const;
+ * of shape (`malformed`), or the machine can't say now (`unavailable`: ask again). P5 O7 M5b: `read-only`, an edit open
+ * the machine's policy refuses, sent only in answer to a read open, which only a device that listed `rl2.read-open` makes
+ * (an older validator would close the channel on it). */
+export const STREAM_REFUSALS = ['grade', 'unknown', 'unreachable', 'busy', 'malformed', 'unavailable', 'read-only'] as const;
 export type StreamRefusal = (typeof STREAM_REFUSALS)[number];
 /** The most a `streamData` carries, decoded. */
 export const STREAM_CHUNK_BYTES = 64 * 1024;
@@ -103,10 +120,16 @@ export const MAX_STREAMS = 32;
  * forgot it) can't tell what of `[inputFrom, inputSent)` it wrote, and drops it: input is at most once.
  */
 export type StreamPtyOpen = { ptyId: string; from: number; inputEpoch: string; inputFrom: number; inputSent?: number };
-export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string } };
+/** An `http` read open (P5 O7 M5b): one request to the machine's artifact endpoint, `url` a `maws-artifact:` URL. */
+export type StreamHttpOpen = { url: string; method: 'GET' | 'HEAD'; range?: string };
+/** A `document` read open (P5 O7 M5b): one endpoint document channel on the artifact, to edit or to view. */
+export type StreamDocumentOpen = { artifactId: string; mode: 'edit' | 'view'; doc?: 'suggestions' };
+/** `op`: the authorizing act's opId, for the act open (`pty`, `tcp`); absent for the read open (`http`, `document`). */
+export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op?: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string }; http?: StreamHttpOpen; document?: StreamDocumentOpen };
 /** `pty.ringStart`: where the output this opening delivers starts, max(from, the ring's start); a value past `from` says
- * the ring moved past it. `credit`: the endpoint's, for the device's bytes. */
-export type StreamOpenedMessage = { t: 'streamOpened'; id: string; pty?: { info: Record<string, unknown>; ringStart: number; nextOffset: number }; credit: number };
+ * the ring moved past it. `credit`: the endpoint's, for the device's bytes. `http` (P5 O7 M5b): the artifact endpoint's
+ * status and headers; the body follows as `streamData` from offset 0, then `streamClose 'closed'`. */
+export type StreamOpenedMessage = { t: 'streamOpened'; id: string; pty?: { info: Record<string, unknown>; ringStart: number; nextOffset: number }; http?: { status: number; headers: Record<string, string> }; credit: number };
 export type StreamRefusedMessage = { t: 'streamRefused'; id: string; reason: StreamRefusal };
 /** `offset`: the sender's byte count on this stream (a pty's output: the pty host's; its input: the device's, per epoch) before this chunk. */
 export type StreamDataMessage = { t: 'streamData'; id: string; offset: number; data: string };
@@ -166,12 +189,21 @@ const isChunk = (v: unknown) => typeof v === 'string' && v.length >= 2 && v.leng
 const isPtyOpen = (v: unknown) =>
   isObject(v) && isText(v.ptyId, 128) && isCount(v.from) && isStreamId(v.inputEpoch) && isCount(v.inputFrom) && (v.inputSent === undefined || (isCount(v.inputSent) && v.inputSent >= v.inputFrom));
 const isTcpOpen = (v: unknown) => isObject(v) && isText(v.forward, 128);
-const streamOpen = (m: Fields) =>
-  isStreamId(m.id) &&
-  STREAM_KINDS.includes(m.kind as string) &&
-  isOpId(m.op) &&
-  isPositive(m.credit, STREAM_CREDIT_MAX) &&
-  (m.kind === 'pty' ? isPtyOpen(m.pty) && m.tcp === undefined : isTcpOpen(m.tcp) && m.pty === undefined);
+// The read open's fields (P5 O7 M5b): the URL's own shape is the endpoint's to read (`malformed` there, as a refusal).
+const isHttpOpen = (v: unknown) => isObject(v) && isText(v.url, 4096) && (v.method === 'GET' || v.method === 'HEAD') && optional(v.range, (r) => isText(r, 256));
+const isDocumentOpen = (v: unknown) => isObject(v) && isText(v.artifactId, 128) && (v.mode === 'edit' || v.mode === 'view') && optional(v.doc, (d) => d === 'suggestions');
+/** Each kind's own field and its check; an open carries its kind's and no other's. */
+const STREAM_OPEN_FIELDS: Readonly<Record<StreamKind, readonly [string, (v: unknown) => boolean]>> = { pty: ['pty', isPtyOpen], tcp: ['tcp', isTcpOpen], http: ['http', isHttpOpen], document: ['document', isDocumentOpen] };
+const streamOpen = (m: Fields) => {
+  if (!isStreamId(m.id) || !isPositive(m.credit, STREAM_CREDIT_MAX)) return false;
+  // The act open names its act; the read open names none.
+  if (ACT_STREAM_KINDS.includes(m.kind as string) ? !isOpId(m.op) : !READ_STREAM_KINDS.includes(m.kind as string) || m.op !== undefined) return false;
+  const [own, check] = STREAM_OPEN_FIELDS[m.kind as StreamKind];
+  return check(m[own]) && Object.values(STREAM_OPEN_FIELDS).every(([field]) => field === own || m[field] === undefined);
+};
+/** An answer's `http` (P5 O7 M5b): an HTTP status and headers whose values are strings. */
+const isHttpAnswer = (v: unknown) =>
+  isObject(v) && Number.isSafeInteger(v.status) && (v.status as number) >= 100 && (v.status as number) <= 599 && isObject(v.headers) && Object.values(v.headers).every((h) => typeof h === 'string');
 const STREAM_EITHER: Record<string, (m: Fields) => boolean> = {
   streamData: (m) => isStreamId(m.id) && isCount(m.offset) && isChunk(m.data),
   streamCredit: (m) => isStreamId(m.id) && isPositive(m.bytes, STREAM_CREDIT_MAX),
@@ -227,7 +259,10 @@ const FROM_ENDPOINT: Record<string, (m: Fields) => boolean> = {
   ended: (m) => isText(m.sub, 128) && isText(m.reason, 64),
   ...STREAM_EITHER,
   streamOpened: (m) =>
-    isStreamId(m.id) && isPositive(m.credit, STREAM_CREDIT_MAX) && optional(m.pty, (v) => isObject(v) && isObject(v.info) && isCount(v.ringStart) && isCount(v.nextOffset)),
+    isStreamId(m.id) &&
+    isPositive(m.credit, STREAM_CREDIT_MAX) &&
+    optional(m.pty, (v) => isObject(v) && isObject(v.info) && isCount(v.ringStart) && isCount(v.nextOffset)) &&
+    optional(m.http, isHttpAnswer),
   streamRefused: (m) => isStreamId(m.id) && (STREAM_REFUSALS as readonly string[]).includes(m.reason as string),
 };
 
