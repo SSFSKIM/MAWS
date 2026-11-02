@@ -76,6 +76,7 @@ const CONTROLS = {
   get_sandbox_dialog: ['reads.jsonl', 74],
   get_workspace_diff: ['reads.jsonl', 80],
   export_conversation: ['reads.jsonl', 83],
+  list_models: ['pass2/auto-unrouted.jsonl', 32], // P5 O7 M7: a remote pane's `session.listModels` (the remote bench)
 };
 const answers = new Map(Object.entries(CONTROLS).map(([subtype, [fixture, seq]]) => {
   const request = rowAt(fixture, seq).frame;
@@ -114,7 +115,16 @@ const write = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 const now = () => performance.timeOrigin + performance.now();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
-let turns = 0;
+// P5 O7 M7: a resumed launch (the engine host parked the session, the next prompt started it again) numbers its turns on
+// from the samples file's last, so a marker is never written twice in one bench run
+const writtenTurns = () => {
+  try {
+    return Math.max(0, ...readFileSync(samplesPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line).turn));
+  } catch {
+    return 0;
+  }
+};
+let turns = writtenTurns();
 async function playTurn(user) {
   const turn = ++turns;
   const before = turnRows(TURN.before);

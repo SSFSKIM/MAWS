@@ -26,12 +26,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import type { AppSessionId } from '../src/shared/graph/ids';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { BENCH, clockCheck, summarize, type ClockBracket, type ClockCheck } from '../test/support/local-latency';
 import { MARKER_SOURCE, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
-import { boundsOf, budgetMisses, CARRIERS, EXPECTED_MARKERS, invalidReasons, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, type Bounds, type CaseRun, type Carrier, type Exchange, type Measures, type RemoteMeasures } from '../test/support/remote-latency';
+import { boundsOf, budgetMisses, CARRIERS, engineStartOf, EXPECTED_MARKERS, invalidReasons, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, type Bounds, type CaseRun, type Carrier, type Exchange, type Measures, type RemoteMeasures } from '../test/support/remote-latency';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -186,7 +187,8 @@ async function measureTurns(page: Page, samples: string, turns: Turns): Promise<
 
 const statsOf = (delays: number[]) => (delays.length === 0 || delays.some((d) => d < 0) ? null : summarize(delays, 0));
 
-// `session.start` to the process's `ready`, polled every 10 ms on the machine that runs it.
+// `session.start` to the process's `ready`, polled every 10 ms on the machine that runs it (B's, for the record only: no
+// bound reads it).
 async function startTimed(start: () => Promise<unknown>, ready: () => Promise<boolean>): Promise<number> {
   const at = now();
   await start();
@@ -203,6 +205,47 @@ const trust = (dir: string) => ({ claudeConfigDir }: { claudeConfigDir: string }
 };
 
 type CaseResult = { measures: Measures | null; run: CaseRun | null; roundTripsMs: number[] };
+
+// The local engine start, which the resume bound's allowance reads: in the page, from just before `session.start` is
+// invoked to the `session.status` event that first says `ready`, less the most a renderer-to-main hop each way can add
+// (the largest of ten main-owned round trips just before), so an observation delay only ever narrows the allowance.
+async function localEngineStart(page: Page, id: AppSessionId, message: string): Promise<number> {
+  const timed = await page.evaluate(async ({ appSessionId, content, within }) => {
+    const hops: number[] = [];
+    for (let i = 0; i < 10; i += 1) {
+      const at = performance.now();
+      await window.maws.invoke('machines.list' as never, undefined as never);
+      hops.push(performance.now() - at);
+    }
+    let ready: number | null = null;
+    const off = window.maws.on('session.status', (payload) => {
+      const p = payload as { appSessionId: string; status: { process: string } };
+      if (ready === null && p.appSessionId === appSessionId && p.status.process === 'ready') ready = performance.now();
+    });
+    const at = performance.now();
+    const answer = await window.maws.invoke('session.start', { appSessionId: appSessionId as never, message: { content, display: content }, options: { gateway: 'direct' } });
+    const deadline = at + within;
+    while (ready === null && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    off();
+    return { answer: answer.ok ? (answer.value as { status: string }).status : `${answer.error.code}: ${answer.error.message}`, observedMs: ready === null ? null : ready - at, hopMs: Math.max(...hops) };
+  }, { appSessionId: id as string, content: message, within: TURN_MS });
+  expect(timed.answer, 'the local session starts').toBe('starting');
+  expect(timed.observedMs, 'the local session comes ready within 60 s').not.toBeNull();
+  return engineStartOf(timed.observedMs!, timed.hopMs);
+}
+
+/** Every cleanup attempted whatever the ones before it threw; the first failure thrown after the last. */
+async function cleanupAll(steps: readonly (() => unknown)[]): Promise<void> {
+  let first: unknown = null;
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      first ??= error;
+    }
+  }
+  if (first !== null) throw first;
+}
 
 // 1. The local case, on its own scratch profile.
 async function localCase(root: string): Promise<CaseResult & { engineStartMs: number }> {
@@ -223,10 +266,7 @@ async function localCase(root: string): Promise<CaseResult & { engineStartMs: nu
       return s.ok ? s.value : null;
     };
     // the first turn is the history the open shows, before any tab of the session
-    const engineStartMs = await startTimed(
-      async () => expect(value(await invoke(page, 'session.start', { appSessionId: id, message: { content: prompt(1), display: prompt(1) }, options: { gateway: 'direct' } })).status).toBe('starting'),
-      async () => (await status())?.process === 'ready',
-    );
+    const engineStartMs = await localEngineStart(page, id, prompt(1));
     await expect.poll(() => writtenOf(samples).length, { timeout: TURN_MS }).toBe(BENCH.markersPerTurn);
     await expect.poll(async () => (await status())?.turn === null, { timeout: TURN_MS }).toBe(true);
     const row = await sidebarRow(page, { appSessionId: id });
@@ -280,8 +320,11 @@ const probe = (app: ElectronApplication, ref: MachineRef) =>
   app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: { probe(ref: string, reason: string): void } }).__maws_remote_bench!.probe(machine, 'network'), ref);
 
 test('remote latency: delta to frame, round trip, open, resume and the link’s round trip of a lane B session on another machine, per carrier, against the same run’s local numbers (acceptance 3)', async () => {
+  // Rule B's samples every 30 s from the start; the reading at the end, a shorter interval, is kept apart from them
   const loads = [loadavg()[0]];
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
+  let terminalLoad: number | undefined;
+  const carrierReasons: string[] = [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rl-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-rla-'));
   const checkout = join(root, 'b-checkout');
@@ -358,8 +401,11 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
       });
       const trips = await roundTrips(page, app, b.ref);
       exchanges[carrier] = await pings(a.app, b.ref);
+      const after = await linkOf(page, b.ref);
+      if (after?.state !== 'up' || after.carrier !== carrier) carrierReasons.push(`${carrier}: the link was ${after?.state ?? 'gone'}/${after?.carrier ?? 'none'} after the case's measures, not up/${carrier}`);
 
-      // The forced drop: both of A's ways to B cut, B's session writes a turn A can't see, both restored with the probe.
+      // The forced drop: both of A's ways to B cut, B's session writes a turn A can't see; then only the case's own way
+      // restored, with the probe a returning network brings, so the recovery can come back over that carrier alone.
       await keepArrivals(page, b.ref, app);
       scene.aHub.cut();
       scene.aDirect!.cut();
@@ -369,14 +415,17 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
       await expect.poll(() => writtenOf(bSamples).filter((w) => w.turn === gapTurn).length, { timeout: TURN_MS }).toBe(BENCH.markersPerTurn);
       await expect.poll(bClosed, { timeout: TURN_MS }).toBe(true);
       const before = (await arrivals(page)).length;
-      scene.aHub.restore();
-      scene.aDirect!.restore();
+      (carrier === 'direct' ? scene.aDirect! : scene.aHub).restore();
       const restoredAt = now();
       await probe(a.app, b.ref);
       let first: number | null = null;
       await expect.poll(async () => (first = (await arrivals(page)).slice(before)[0] ?? null), { timeout: 60_000, message: 'the first event after the gap in A' }).not.toBeNull();
-      const resumeMs = first! - restoredAt;
+      const recovered = await linkOf(page, b.ref);
+      // the event came over the case's carrier, or its resume is no number of that carrier's
+      const resumeMs = recovered?.carrier === carrier ? first! - restoredAt : null;
+      if (resumeMs === null) carrierReasons.push(`${carrier}: the first event after the gap came with the link ${recovered?.state ?? 'gone'}/${recovered?.carrier ?? 'none'}, so its resume is not ${carrier}'s`);
       await expect.poll(async () => (await main(page).evaluate((region) => region.textContent ?? '')).includes(markerOf(gapTurn, BENCH.markersPerTurn).trim()), { timeout: 30_000, message: 'the gap’s turn in A’s pane' }).toBe(true);
+      (carrier === 'direct' ? scene.aHub : scene.aDirect!).restore();
 
       const deltaToFrame = statsOf(delays);
       cases[carrier] = { measures: null, run, roundTripsMs: trips };
@@ -390,14 +439,11 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
     }
   } finally {
     clearInterval(sampler);
-    loads.push(loadavg()[0]);
-    await a?.cleanup();
-    await scene?.stop();
-    rmSync(aUserData, { recursive: true, force: true });
-    rmSync(root, { recursive: true, force: true });
+    terminalLoad = loadavg()[0];
+    await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
   }
 
-  const reasons = invalidReasons({ cases: { local: cases.local?.run ?? null, direct: cases.direct?.run ?? null, relay: cases.relay?.run ?? null }, pings: { direct: exchanges.direct.length, relay: exchanges.relay.length }, loads });
+  const reasons = invalidReasons({ cases: { local: cases.local?.run ?? null, direct: cases.direct?.run ?? null, relay: cases.relay?.run ?? null }, pings: { direct: exchanges.direct.length, relay: exchanges.relay.length }, loads, terminalLoad: terminalLoad ?? null, notes: carrierReasons });
   const localMeasures = cases.local?.measures ?? null;
   const bounds: Partial<Record<Carrier, Bounds>> = {};
   const misses: string[] = [];
@@ -407,7 +453,7 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
     bounds[carrier] = boundsOf(localMeasures, measured.rtt);
     misses.push(...budgetMisses(carrier, measured, bounds[carrier]!));
   }
-  const load = loadVerdict(loads);
+  const load = loadVerdict(loads, terminalLoad ?? null);
   const lines = [...(localMeasures === null ? [] : [remoteLine('local', localMeasures)]), ...CARRIERS.flatMap((c) => (remote[c] === undefined ? [] : [remoteLine(c, remote[c]!)]))];
   const info = test.info();
   mkdirSync(info.project.outputDir, { recursive: true });
@@ -415,7 +461,7 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
   writeFileSync(join(info.project.outputDir, 'remote-latency.json'), `${JSON.stringify({
     lines, valid: reasons.length === 0, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
     local: localMeasures, direct: remote.direct ?? null, relay: remote.relay ?? null, bounds, invalidReasons: reasons, budgetMisses: misses,
-    load: { samples: loads, peak: load.peak, pair: load.pair },
+    load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
     bEngineStartMs: bEngineStartMs ?? null,
     clocks: { local: clockOf(cases.local), direct: clockOf(cases.direct), relay: clockOf(cases.relay) },
     roundTripsMs: { local: cases.local?.roundTripsMs ?? [], direct: cases.direct?.roundTripsMs ?? [], relay: cases.relay?.roundTripsMs ?? [] },

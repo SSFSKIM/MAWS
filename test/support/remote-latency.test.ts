@@ -2,7 +2,7 @@
 // same run's local numbers and its own round trip, the misses named, and the run's validity (the local bench's per case,
 // the pings, Rule B on the load).
 import { describe, expect, it } from 'vitest';
-import { boundsOf, budgetMisses, EXPECTED_MARKERS, invalidReasons, loadVerdict, remoteLine, rttStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
+import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, loadVerdict, remoteLine, rttStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
 
 const stats = (p50: number, p95 = p50, n = 600) => ({ p50, p95, n });
 const LOCAL: Measures = { deltaToFrame: stats(24.5, 37.5), roundTrip: stats(0.9, 1.3, 200), openToFirstRowMs: 180, resumeMs: null, engineStartMs: 420 };
@@ -13,6 +13,13 @@ describe('the remote bench (P5 O7 M7)', () => {
   it('reads the link’s round trip as each pong’s arrival less its ping’s send', () => {
     const exchanges = [3, 1, 2, 2].map((d, i) => ({ at: 1000 * i, received: null, sent: null, arrived: 1000 * i + d }));
     expect(rttStats(exchanges)).toEqual({ p50: 2, p95: 3, n: 4 });
+  });
+
+  it('reads the local engine start less the observation’s hops, never more than observed, so the resume allowance only narrows', () => {
+    expect(engineStartOf(420, 3)).toBe(417);
+    expect(engineStartOf(2, 3)).toBe(0);
+    expect(engineStartOf(420, -1)).toBe(420);
+    for (const hop of [0, 0.5, 7]) expect(boundsOf({ ...LOCAL, engineStartMs: engineStartOf(420, hop) }, stats(1)).resumeMs).toBeLessThanOrEqual(boundsOf({ ...LOCAL, engineStartMs: 420 }, stats(1)).resumeMs);
   });
 
   it('bounds a carrier by the same run’s local numbers and its own round trip (acceptance 3)', () => {
@@ -52,8 +59,66 @@ describe('the remote bench (P5 O7 M7)', () => {
     expect(invalidReasons({ cases: { local: valid(), direct: valid(), relay: valid() }, pings: { direct: 100, relay: 100 }, loads: sustained })).toEqual([expect.stringMatching(/^the machine's load: peak 6\.8 at or over 5, 30 s pair \d+\.\d at or over 4\.7 \(Rule B\)$/)]);
   });
 
+  it('keeps the terminal reading out of the 30 s pair, which assumes the spacing, and in the peak', () => {
+    const regular = [1, 1.2, 1.1, 1.3];
+    // the run ended 4 s after the last sample: read as a 30 s interval, its rise would rebuild a sustained load
+    const verdict = loadVerdict(regular, 6.5);
+    expect(verdict.pair).toBe(loadVerdict(regular).pair);
+    expect(verdict.pair!).toBeLessThan(4.7);
+    expect(verdict).toMatchObject({ peak: 6.5, void: false });
+    expect(loadVerdict([...regular, 6.5]).pair!).toBeGreaterThan(loadVerdict(regular).pair!); // what folding it in would read
+  });
+
+  it('skips the resume bound of a carrier whose recovery came back over another, and carries the note as a reason', () => {
+    const bounds = boundsOf(LOCAL, stats(1));
+    const voided: RemoteMeasures = { deltaToFrame: stats(30), roundTrip: stats(5), openToFirstRowMs: 200, resumeMs: null, engineStartMs: 400, rtt: stats(1) };
+    expect(budgetMisses('direct', voided, bounds)).toEqual([]);
+    const cases = { local: valid(), direct: valid(), relay: valid() };
+    expect(invalidReasons({ cases, pings: { direct: 100, relay: 100 }, loads: [1, 1, 1], notes: ['direct: the first event after the gap came with the link up/relay, so its resume is not direct’s'] })).toEqual(['direct: the first event after the gap came with the link up/relay, so its resume is not direct’s']);
+  });
+
   it('prints one line per case, the carrier’s round trip and resume beside its numbers', () => {
     expect(remoteLine('local', LOCAL)).toBe('[remote-latency] local: delta-to-frame p50 24.5 ms p95 37.5 ms (n=600) · round trip p50 0.9 ms p95 1.3 ms · open to first row 180.0 ms · engine start 420.0 ms');
     expect(remoteLine('direct', { ...LOCAL, resumeMs: 61, rtt: stats(1, 2, 100) })).toContain('· resume 61.0 ms · engine start 420.0 ms · rtt p50 1.0 ms (n=100)');
+  });
+});
+
+describe('the live bench’s clock (P5 O7 M7)', () => {
+  // the machine's clock 1000 ms ahead of this Mac's; each exchange's way out `up` and back `down` milliseconds
+  const exchange = (at: number, up: number, down: number, offset = 1000) => ({ at, received: at + up + offset, sent: at + up + offset, arrived: at + up + down });
+
+  it('places the offset in [sent − arrived, received − at], widened by the stamps’ millisecond, and keeps the narrowest', () => {
+    const estimate = clockEstimate([exchange(0, 10, 10), exchange(100, 2, 4), exchange(200, 30, 1)])!;
+    expect(estimate).toEqual({ offsetMs: 999, intervalMs: [995, 1003], samples: 3 }); // the 2 + 4 exchange: [1000 − 4 − 1, 1000 + 2 + 1]
+    expect(estimate.intervalMs[0]).toBeLessThanOrEqual(1000);
+    expect(estimate.intervalMs[1]).toBeGreaterThanOrEqual(1000);
+    expect(clockEstimate([{ at: 0, received: null, sent: null, arrived: 3 }])).toBeNull();
+  });
+
+  it('holds the true offset inside every exchange’s interval, whatever the route’s asymmetry', () => {
+    for (const [up, down] of [[1, 40], [40, 1], [0, 0], [7, 7]]) {
+      const { intervalMs } = clockEstimate([exchange(50, up!, down!, -321)])!;
+      expect(intervalMs[0]).toBeLessThanOrEqual(-321);
+      expect(intervalMs[1]).toBeGreaterThanOrEqual(-321);
+    }
+  });
+
+  it('takes the union of the start’s and the end’s intervals, their estimates’ distance as the spread, and voids past 5 ms or under 50 exchanges', () => {
+    const fifty = (offset: number) => Array.from({ length: 50 }, (_, i) => exchange(i * 10, 1, 1, offset));
+    const clock = liveClock(fifty(1000), fifty(1004))!;
+    expect(clock).toMatchObject({ offsetMs: 1002, intervalMs: [998, 1006], spreadMs: 4, samples: { start: 50, end: 50 } });
+    expect(clockVoid(clock)).toBeNull();
+    expect(clockVoid(liveClock(fifty(1000), fifty(1006)))).toBe('the clock’s spread 6 ms is over 5 ms');
+    expect(clockVoid(liveClock(fifty(1000).slice(0, 49), fifty(1000)))).toBe('49 clock exchanges at the run’s start, under 50');
+    expect(clockVoid(liveClock([], fifty(1000)))).toMatch(/no exchange carried the machine’s clock/);
+  });
+
+  it('judges a cross-clock delta at its interval’s worst edge: pass, miss beyond its best edge, else inconclusive, and inconclusive when wider than the allowance', () => {
+    const clock = liveClock([exchange(0, 1, 1)], [exchange(10, 1, 1)])!; // [998, 1002]: θ = remote − here
+    // raw = this Mac's frame − the machine's write = true − θ: a true 30 ms reads −970
+    expect(deltaVerdict(-970, clock, 33, 12)).toEqual({ verdict: 'pass', p50IntervalMs: [28, 32], wide: false });
+    expect(deltaVerdict(-970, clock, 30, 12).verdict).toBe('inconclusive');
+    expect(deltaVerdict(-970, clock, 27, 12).verdict).toBe('miss');
+    expect(deltaVerdict(-970, clock, 33, 3)).toMatchObject({ verdict: 'inconclusive', wide: true });
   });
 });
