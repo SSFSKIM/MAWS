@@ -31,6 +31,17 @@
 // is `host.browserIdle` to the declaring client, which closes the session's tabs. A fresh link's first snapshot has
 // every session still waiting ask again.
 //
+// The landing fix wave. (1) A lost link's `unknown` is settled by its producer's death. The producer is the last
+// declaring client's process, pid and start as its hello gave them (the start read then; one record per host process,
+// replaced at each declaring hello). Its render host exits when that `mawsd`'s machine.sock goes, and the profile's lock
+// makes it the only producer, so once that process is dead, or its pid runs another start, every lost link's `unknown`
+// is cleared. A start that cannot be read counts as alive. The check runs at a non-declaring client's ready and at the
+// table's own evaluations (the idle release's due handling of a row held by its tab alone, the budget's), never on a
+// timer of its own. A `mawsd` alive behind main's transient direct link keeps its holds. (2) A fresh link tells its
+// first snapshot before its `ready` line, so a due row's notice can come while that link is served and not ready: it is
+// kept for the link's ready and sent there if the row still waits; the link's end drops it (the next link's first
+// snapshot asks again), so the idle release's "asked" stays true to what was sent.
+//
 // The first snapshot on each link is logged with how many sessions it holds. M8's scene 6 stages both arrival orders of an
 // adoption and the snapshot at e2e with two holds read under MAWS_E2E=1 alone (`e2eHoldFor`): one on a snapshot's
 // application (here), one on the start's adoptions (index.ts).
@@ -43,19 +54,21 @@ import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import { HOST_BROWSER_WORK_CAPABILITY } from '@shared/host/socket-protocol';
 import type { ProcessTable } from './process-table';
+import { isAlive, isSameProcess, procStartOf } from './supervisor-files';
 
-export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'onBrowserIdleDue' | 'browserSnapshotApplied'>;
+export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'onBrowserIdleDue' | 'browserSnapshotApplied' | 'onBrowserCheck' | 'browserIdleWaiting'>;
 
 export interface BrowserWorkOptions {
   log?: (line: string) => void;
   hold?: () => Promise<void>; // the e2e's hold on a snapshot's application (MAWS_E2E_BROWSER_WORK_HOLD)
   spawnedByMawsd?: boolean; // fix 4: this host's own launch named `mawsd` as its spawner (spawner.ts)
+  processes?: { isAlive(pid: number): boolean; procStartOf(pid: number): string | null }; // the landing fix wave: the producer's reads
 }
 
 // The kept set of every link whose snapshot named no session: shared, so an empty snapshot keeps nothing of its own
 const NONE: ReadonlySet<AppSessionId> = new Set();
 
-export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone' | 'onConnect' | 'hasClient'>, sessions: BrowserWorkSessions, opts: BrowserWorkOptions = {}): void {
+export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone' | 'onConnect' | 'hasClient' | 'onDeclaringHello'>, sessions: BrowserWorkSessions, opts: BrowserWorkOptions = {}): void {
   // Fix 2: whether the served client tells browser work, its hello listing `host.attachment` and `host.browserWork`
   // (`mawsd` from O17 on). A declaring client that does not (a `mawsd` from before O17, as a rollback leaves it) has no
   // fenced headless tab, so it gets the release as it was: no default, no snapshot taken, no ask.
@@ -67,6 +80,19 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   // Fix 4: true from the start in a host `mawsd` spawned, whose tabs may be open before its link to this host is
   let capableSeen = opts.spawnedByMawsd === true;
   const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
+  // The landing fix wave (1): the producer, as the last declaring hello named it ('' for a start ps could not read)
+  const processes = opts.processes ?? { isAlive, procStartOf };
+  let producer: { pid: number; procStart: string } | null = null;
+  client.onDeclaringHello((pid) => void (producer = { pid, procStart: processes.procStartOf(pid) ?? '' }));
+  const settleIfProducerDead = () => {
+    const lost = live().filter((session) => session.browserEntry() === 'unknown:lost');
+    if (lost.length === 0 || producer === null || isSameProcess(producer, processes)) return;
+    opts.log?.(`browser work: mawsd (pid ${producer.pid}) is gone, and its render host with it; ${lost.length} lost link's hold(s) settled`);
+    for (const session of lost) session.setBrowserHold(null);
+  };
+  sessions.onBrowserCheck(settleIfProducerDead);
+  // The landing fix wave (2): notices due while the applying link is served and not ready, kept for its ready
+  let pendingNotices: Set<AppSessionId> | null = null;
 
   // The applying link's end, heard once whichever way it comes (the runtime's gone hook for a ready client, the
   // connection's own end for any): the set is void and every `held` becomes a lost link's `unknown`
@@ -74,6 +100,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     if (applied === null) return;
     applied = null;
     kept = NONE;
+    pendingNotices = null; // the landing fix wave (2): the next link's first snapshot asks again
     for (const session of live()) if (session.browserEntry() === 'held') session.setBrowserHold('unknown:lost');
   };
   client.onClientGone(linkEnded);
@@ -86,6 +113,10 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     if (tells()) {
       capableSeen = true;
       for (const session of live()) if (session.browserEntry() === 'unknown:adopted') session.setBrowserHold('unknown:lost');
+      // the landing fix wave (2): kept only while this link applies, so they are this link's; sent if the row still waits
+      const notices = pendingNotices;
+      pendingNotices = null;
+      for (const appSessionId of notices ?? []) if (sessions.browserIdleWaiting(appSessionId)) emit('host.browserIdle', { appSessionId });
       return;
     }
     const declaring = client.declaresAttachment();
@@ -93,6 +124,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
       const entry = session.browserEntry();
       if (entry !== null && (declaring || entry === 'unknown:adopted')) session.setBrowserHold(null);
     }
+    if (!declaring) settleIfProducerDead(); // the landing fix wave (1): main's direct link, its fallback included
   });
 
   // A row created later: the kept set's verdict; with none applied on the current link, a lost link's `unknown` while a
@@ -135,8 +167,13 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     sessions.browserSnapshotApplied();
   });
 
+  // The landing fix wave (2): an emit refused while the applying link is still served is its not-yet-ready window (its
+  // first snapshot came before its `ready`): kept for that ready. One refused for any other reason (no telling client,
+  // a telling link with no snapshot applied, a write that found the client gone) is asked again by the next link's
+  // first snapshot.
   sessions.onBrowserIdleDue((appSessionId) => {
-    if (tells()) emit('host.browserIdle', { appSessionId });
+    if (!tells() || emit('host.browserIdle', { appSessionId })) return;
+    if (applied !== null && tells()) (pendingNotices ??= new Set()).add(appSessionId);
   });
 }
 

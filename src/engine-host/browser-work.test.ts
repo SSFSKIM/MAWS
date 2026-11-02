@@ -59,13 +59,17 @@ function host(opts: Parameters<typeof registerBrowserWork>[4] = {}, statuses = f
     registerBrowserWork(on, emit, client, table, opts);
     if (statuses) table.onChange((status) => void emit('session.status', { appSessionId: status.appSessionId, status }));
   });
-  const link = (peer = DECLARING, refuses?: (message: Record<string, unknown>) => boolean) => {
+  const served = (peer: { capabilities: readonly string[]; pid?: number } = DECLARING, refuses?: (message: Record<string, unknown>) => boolean) => {
     const fake = fakePort(refuses);
     runtime.serve(fake.port, peer);
+    return fake;
+  };
+  const link = (peer: { capabilities: readonly string[]; pid?: number } = DECLARING, refuses?: (message: Record<string, unknown>) => boolean) => {
+    const fake = served(peer, refuses);
     runtime.setReady();
     return fake;
   };
-  return { table, runtime, link };
+  return { table, runtime, link, served };
 }
 
 type Scripted = ReturnType<typeof scriptedSession>;
@@ -648,5 +652,183 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     h.link(OLDER_MAWSD); // a declaring client that tells none still clears it
     expect(row.session.status().work?.holds).toBeUndefined();
     await row.end();
+  });
+});
+
+// The landing fix wave, finding 1: a lost link's `unknown` settled by its producer's death. The engine host keeps the last
+// declaring client's process (its hello's pid, its start read then); a check at a non-declaring client's ready, at the
+// idle release's due handling and at the budget's evaluation clears every lost link's `unknown` once that process is dead
+// or its pid runs another start (the render host exits with its `mawsd`'s machine.sock, and the profile's lock makes that
+// `mawsd` the only producer). A start that cannot be read counts as alive.
+describe('a lost link\'s unknown settled by its producer\'s death (P5 O17 M7 landing fix 1)', () => {
+  const IDLE_MS = 10 * 60_000;
+  const MAWSD_PID = 4242;
+  const MAWSD = { ...DECLARING, pid: MAWSD_PID };
+  const START = 'Mon Nov  2 09:00:00 2026';
+
+  // mawsd's permanent link holds `a` by its snapshot; `alive` and `starts` are the machine's processes as the check reads them
+  async function held() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2026-11-02T10:00:00.000Z'));
+    const alive = new Set([MAWSD_PID]);
+    const starts = new Map<number, string | null>([[MAWSD_PID, START]]);
+    const h = host({ processes: { isAlive: (pid) => alive.has(pid), procStartOf: (pid) => (alive.has(pid) ? (starts.get(pid) ?? null) : null) } });
+    const a = await launch(h.table, 'a');
+    await vi.advanceTimersByTimeAsync(0);
+    await h.link(MAWSD).request('host.browserWork', { held: ['a'] });
+    expect(a.session.browserEntry()).toBe('held');
+    return { h, a, alive, starts };
+  }
+
+  it('the reviewer\'s order: main\'s fallback replaces mawsd\'s link, mawsd ends for good, then main is ready: the row settles there and is released when idle', async () => {
+    const { h, a, alive } = await held();
+    const main = h.served(MAIN); // main's direct link replaces mawsd's
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    alive.delete(MAWSD_PID); // mawsd's onReplaced: stop('replaced', 0), its render host gone with machine.sock
+    h.runtime.setReady();
+    expect(a.session.browserEntry()).toBeNull();
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+    expect(main.events('host.browserIdle')).toEqual([]);
+  });
+
+  it('main falls back while mawsd lives, then mawsd exits: at the due time the row settles and is released', async () => {
+    const { h, a, alive } = await held();
+    h.link(MAIN); // ready: the check finds mawsd alive
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    alive.delete(MAWSD_PID);
+    expect(a.session.browserEntry()).toBe('unknown:lost'); // no timer of its own
+    await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
+    expect(a.session.browserEntry()).toBeNull();
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+  });
+
+  it('mawsd alive behind main\'s direct link keeps its hold: nothing settles at the ready, the due time or the budget, nothing is released', async () => {
+    const { h, a } = await held();
+    h.link(MAIN);
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(2 * IDLE_MS);
+    h.table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    expect(a.transport.requestsOf('end_session')).toEqual([]);
+  });
+
+  it('the same pid with another start is another process: mawsd read as dead, the row settled', async () => {
+    const { h, a, starts } = await held();
+    h.runtime.detach();
+    starts.set(MAWSD_PID, 'Mon Nov  2 11:30:00 2026'); // mawsd gone, its pid reused
+    h.link(MAIN);
+    expect(a.session.browserEntry()).toBeNull();
+  });
+
+  it('a start unreadable now, or at the hello, counts as alive', async () => {
+    const { h, a, starts } = await held();
+    h.runtime.detach();
+    starts.set(MAWSD_PID, null);
+    h.link(MAIN);
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    const b = await launch(h.table, 'b', 902);
+    starts.set(MAWSD_PID, null);
+    await h.link(MAWSD).request('host.browserWork', { held: ['a', 'b'] }); // mawsd's start unreadable at its hello
+    starts.set(MAWSD_PID, 'Mon Nov  2 11:30:00 2026');
+    h.link(MAIN);
+    expect([a.session.browserEntry(), b.session.browserEntry()]).toEqual(['unknown:lost', 'unknown:lost']);
+  });
+
+  it('mawsd\'s link dropped first and was never replaced: once mawsd is dead the due time settles the row and releases it', async () => {
+    const { h, a, alive } = await held();
+    h.runtime.detach();
+    alive.delete(MAWSD_PID);
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+  });
+
+  it('the budget\'s evaluation settles it too', async () => {
+    const { h, a, alive } = await held();
+    h.link(MAIN);
+    alive.delete(MAWSD_PID);
+    h.table.configure({ enabled: false, limitKiB: 1, statefulMcpServers: [] });
+    expect(a.session.browserEntry()).toBeNull();
+  });
+
+  it('a newer declaring hello is the producer: a dead earlier mawsd settles nothing while the newer one lives', async () => {
+    const { h, a, alive, starts } = await held();
+    h.runtime.detach();
+    alive.delete(MAWSD_PID);
+    alive.add(4343);
+    starts.set(4343, START);
+    h.served({ ...DECLARING, pid: 4343 }); // the lock's next holder, its link lost before its first snapshot
+    h.runtime.detach();
+    h.link(MAIN);
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    alive.delete(4343);
+    h.runtime.detach();
+    h.link(MAIN);
+    expect(a.session.browserEntry()).toBeNull();
+  });
+});
+
+// The landing fix wave, finding 2: a fresh link sends its first snapshot before its `ready` line, so a due row's notice
+// can come while the link is served and not ready. It is kept for that link's ready and sent once there; a link that ends
+// before its ready drops it, and the next link's first snapshot asks again.
+describe('host.browserIdle between a fresh link\'s first snapshot and its ready (P5 O17 M7 landing fix 2)', () => {
+  const IDLE_MS = 10 * 60_000;
+
+  // `a` due and waiting, told once on a first link that has since ended
+  async function waiting() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2026-11-02T10:00:00.000Z'));
+    const h = host();
+    const a = await launch(h.table, 'a');
+    await vi.advanceTimersByTimeAsync(0);
+    const first = h.link();
+    await first.request('host.browserWork', { held: ['a'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(first.events('host.browserIdle')).toEqual([{ appSessionId: 'a' }]);
+    h.runtime.detach();
+    return { h, a };
+  }
+
+  it('a zero-delay due timer firing between the first snapshot and ready: the notice is kept and sent at the ready, once', async () => {
+    const { h } = await waiting();
+    const second = h.served(); // mawsd reconnected: its first snapshot comes before its ready line
+    await second.request('host.browserWork', { held: ['a'] });
+    await vi.advanceTimersByTimeAsync(0); // the waiting row asks again, in the gap
+    expect(second.events('host.browserIdle')).toEqual([]);
+    h.runtime.setReady();
+    expect(second.events('host.browserIdle')).toEqual([{ appSessionId: 'a' }]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(second.events('host.browserIdle')).toHaveLength(1);
+  });
+
+  it('a link that ends before its ready drops the kept notice; the next link\'s first snapshot asks again', async () => {
+    const { h } = await waiting();
+    const second = h.served();
+    await second.request('host.browserWork', { held: ['a'] });
+    await vi.advanceTimersByTimeAsync(0);
+    h.runtime.detach(); // before its ready
+    const third = h.link(); // ready before its first snapshot: nothing kept reaches it
+    expect(third.events('host.browserIdle')).toEqual([]);
+    await third.request('host.browserWork', { held: ['a'] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second.events('host.browserIdle')).toEqual([]);
+    expect(third.events('host.browserIdle')).toEqual([{ appSessionId: 'a' }]);
+  });
+
+  it('a kept notice whose wait ended before the ready is not sent', async () => {
+    const { h, a } = await waiting();
+    const second = h.served();
+    await second.request('host.browserWork', { held: ['a'] });
+    await vi.advanceTimersByTimeAsync(0);
+    await second.request('host.browserWork', { held: [] }); // the tabs closed: the wait ends and the row is released
+    await vi.advanceTimersByTimeAsync(0);
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+    h.runtime.setReady();
+    expect(second.events('host.browserIdle')).toEqual([]);
   });
 });

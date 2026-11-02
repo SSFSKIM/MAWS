@@ -185,15 +185,19 @@ export class ProcessTable {
     this.idle = new IdleRelease({
       current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */,
       browserIdleDue: (appSessionId) => { for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId)); }, // P5 O17 M7
+      browserCheck: () => this.browserCheck(), // P5 O17 M7 landing fix wave
     }); // P5 O2 M2
   }
 
   // P5 O17 M7 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the table's bridge to
   // browser work (browser-work.ts). Outward, a due row held by its headless tab alone, told once per wait by the idle
   // release (which becomes `host.browserIdle`), and each row at its reservation; inward, a fresh `mawsd` link applied its
-  // first snapshot, so every row still waiting asks again.
+  // first snapshot, so every row still waiting asks again. The landing fix wave: the table's own evaluations (the idle
+  // release's due handling of a row held by its tab alone, the budget's) first let browser work settle what a dead
+  // producer held (`onBrowserCheck`), and browser work reads whether a row still waits before a notice it kept is sent.
   private readonly browserIdleListeners = new Set<(appSessionId: AppSessionId) => void>();
   private readonly reservedListeners = new Set<(session: EngineSession) => void>();
+  private readonly browserCheckListeners = new Set<() => void>();
 
   // Each row at its reservation (a launch's or an adoption's), before its start, so its first status carries what the
   // listener set on it: browser work gives it the link's verdict, keeping nothing per row
@@ -209,6 +213,19 @@ export class ProcessTable {
 
   browserSnapshotApplied(): void {
     this.idle.browserSnapshotApplied();
+  }
+
+  onBrowserCheck(listener: () => void): () => void {
+    this.browserCheckListeners.add(listener);
+    return () => this.browserCheckListeners.delete(listener);
+  }
+
+  browserIdleWaiting(appSessionId: AppSessionId): boolean {
+    return this.idle.browserWaiting(appSessionId);
+  }
+
+  private browserCheck(): void {
+    for (const listener of this.browserCheckListeners) this.safely('browser check', listener);
   }
 
   private safely(what: string, run: () => void): void {
@@ -697,6 +714,7 @@ export class ProcessTable {
   // moved since: the sample's baseline alone would call quiet a row that spoke just before that sample (a turn's
   // `result`, say, with the engine's own follow-up `init` still to come), which has not been quiet for a period.
   private evaluateBudget(sample: boolean): void {
+    this.browserCheck(); // P5 O17 M7 landing fix wave: a dead producer's holds settled before the rows are read
     const sessions = this.list();
     const statuses = sessions.map((session) => session.status());
     const quiet = new Set<AppSessionId>();

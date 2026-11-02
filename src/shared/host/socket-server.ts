@@ -342,7 +342,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         log('client disconnected');
         options.onClient?.(false);
       });
-      runtime.serve(envelopeOnly(port, client), { capabilities: peer.capabilities }); // P5 O3-D M3: the app's presence reads them
+      runtime.serve(envelopeOnly(port, client), { capabilities: peer.capabilities, pid: appPid }); // P5 O3-D M3: the app's presence reads them; P5 O17 M7's landing fix wave: and browser work's producer the pid
       log(`client connected: appPid ${appPid} build ${peer.build} wire ${peer.major}.${peer.minor} capabilities [${peer.capabilities.join(', ')}]`);
       options.onClient?.(true, peer, appPid);
     }

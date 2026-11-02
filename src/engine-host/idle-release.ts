@@ -30,6 +30,8 @@
 // that clears the hold ends the wait at once and the next `fire` hands the row to its reap as any due row; a turn, interest
 // or a Keep mark ends it as well and restarts or stops the clock as before. A fresh `mawsd` link's first snapshot
 // (`browserSnapshotApplied`) has every waiting row ask again. Closed (a handover's freeze, the exit order), it asks nothing.
+// The landing fix wave: before a due row starts to wait, browser work may settle what a dead producer held
+// (`browserCheck`, once per `fire`), and the row is read again; one it settled is released at once.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientRef } from '@shared/ipc/client';
@@ -49,6 +51,7 @@ export interface IdleReleaseDeps {
   interestChanged?(): void; // a holder's set replaced or ended (the supervisor's quiet reads `interested`)
   release(session: EngineSession): void; // O16 M5: the row's reap, due as `idle`
   browserIdleDue?(appSessionId: AppSessionId): void; // P5 O17 M7: a due row held by its headless tab alone, once per wait
+  browserCheck?(): void; // P5 O17 M7 landing fix wave: a due row is about to wait on its hold; a dead producer's holds may settle first
 }
 
 interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null }
@@ -145,6 +148,12 @@ export class IdleRelease {
     this.schedule();
   }
 
+  // P5 O17 M7 landing fix wave: whether the session's row waits on its hold now (browser work's kept notice is sent only then)
+  browserWaiting(appSessionId: AppSessionId): boolean {
+    for (const session of this.waits?.keys() ?? []) if (this.rows.get(session)?.appSessionId === appSessionId) return true;
+    return false;
+  }
+
   private endWait(session: EngineSession): void {
     if (this.waits?.delete(session) && this.waits.size === 0) this.waits = null;
   }
@@ -202,12 +211,21 @@ export class IdleRelease {
     this.timer = null;
     const now = Date.now();
     const union = this.union();
+    // P5 O17 M7: held by its headless tab alone (the landing fix wave: read before and after the check)
+    const heldByTabAlone = (status: EngineSessionStatus | null): status is EngineSessionStatus => status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful());
+    let checked = false;
     for (const [session, clock] of [...this.rows]) {
       const due = this.dueOf(session, clock, union);
       if (due === null || now < due) continue;
-      const status = this.deps.current(session);
-      // P5 O17 M7: held by its headless tab alone: it waits, its clock kept, and asks once for this wait
-      if (status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful())) {
+      let status = this.deps.current(session);
+      // P5 O17 M7 landing fix wave: a dead producer's holds settled first (once per fire), and the row read again
+      if (heldByTabAlone(status) && !checked) {
+        checked = true;
+        this.deps.browserCheck?.();
+        status = this.deps.current(session);
+      }
+      // P5 O17 M7: it waits, its clock kept, and asks once for this wait
+      if (heldByTabAlone(status)) {
         const asked = this.waits?.get(session) === true;
         (this.waits ??= new Map()).set(session, true);
         if (!asked) {
