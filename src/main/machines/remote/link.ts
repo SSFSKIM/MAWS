@@ -82,6 +82,13 @@ export interface RemoteLink extends MachineLink {
   /** The permanent verdict holding it `refused`, else null. */
   refusal(): string | null;
   /**
+   * P5 O7 M5c: the machine's client-port requests (`client`, sent only to a device that listed `rl2.client-port`): each
+   * goes to the listeners with its `answer`, which sends one `clientAnswer` on the channel that asked and nothing once that
+   * channel ended (the endpoint settles its pending requests `noClient` at the channel's end). With no listener the link
+   * answers `{noClient: true}` at once.
+   */
+  onClient(listener: (request: ClientRequest, answer: (answer: unknown) => void) => void): () => void;
+  /**
    * P5 O7 M3: the link's end, heard on `onState`: `closed` once `close()` ran (for good), `removed` while a sealed
    * `removed` holds it refused (until the session changes or a person acts on the machine); null while it lives.
    */

@@ -136,7 +136,8 @@ export function createRemoteConnectors(deps: RemoteConnectorsDeps): RemoteConnec
       if (!isOpen(gate)) return failure('host_unavailable', rebuilding(name, link.name));
       if (!reported) return failure('host_unavailable', `${name}: ${link.name} has not taken this window’s report`);
       const result = MACHINE_CALLS.has(name) ? await callOverLink(link, name, fields, { oneChannel: true }) : await deps.act(link, name, fields, { oneChannel: true, ...answerMs(link, name) });
-      if (name === 'connectors.open' && result.ok && isObject(result.value) && typeof result.value.leaseId === 'string') leaseId = result.value.leaseId;
+      const opened: unknown = result.ok ? result.value : null;
+      if (name === 'connectors.open' && isObject(opened) && typeof opened.leaseId === 'string') leaseId = opened.leaseId;
       return result;
     } finally {
       deps.windows.after(link, client, name, leaseId);
