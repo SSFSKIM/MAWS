@@ -23,7 +23,7 @@
 // A barrier (a load's, and each later connection's once the link streams): the coalesced parts replay; the resync runs
 // under E10's contract (RESYNC_BOUND_MS, aborted when the link leaves `ready`, its dispatch refused once aborted); the
 // hold drains in order; live delivery begins after `onDrained`'s listeners ran; then the root's streaming listeners.
-import type { HostDispatch, HostOwner, HostResync, HostSupervisor } from '@shared/host/host-supervisor';
+import type { EngineHandoverState, HostDispatch, HostOwner, HostResync, HostSupervisor } from '@shared/host/host-supervisor';
 import { RESYNC_BOUND_MS } from '@shared/host/host-supervisor';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
@@ -32,7 +32,7 @@ import type { SpineHosts } from '../services/spine-root';
 import type { RelayRequest } from './relay';
 
 // What the seam reads of the daemon's supervisor: the engine host's link.
-export type EngineLink = Pick<HostSupervisor, 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'dispatch'>;
+export type EngineLink = Pick<HostSupervisor, 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'dispatch'> & Partial<Pick<HostSupervisor, 'handoverState'>>; // O16 panel 1: handoverState
 export type EngineIntercept = (request: RelayRequest) => Promise<HostResponse> | null;
 
 export const COALESCED_EVENTS: ReadonlySet<string> = new Set(['session.status', 'session.queue', 'session.brokerItems', 'session.catalogChanged', 'engine.budget']);
@@ -324,6 +324,10 @@ export class SpineHostsAdapter implements SpineHosts {
   }
   snapshot(owner: HostOwner): HostState {
     return this.options.link.snapshot(owner);
+  }
+  // O16 panel 1 (scalpel-2#1): the daemon's handover, read by the spine's attention as the link leaves ready
+  handoverState(owner: HostOwner): EngineHandoverState | null {
+    return this.options.link.handoverState?.(owner) ?? null;
   }
   setResync(owner: HostOwner, resync: HostResync | null): void {
     if (owner === 'engine-host') this.resync = resync;
