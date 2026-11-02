@@ -7,7 +7,9 @@
 // goes uncounted, so no failure is left out by what the roster said at the start.
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { adoptable, adoptAll, holdsEngine } from './adopt';
+import { adoptable, adoptAll, holdsEngine, recordFailed, recordStart } from './adopt';
+import { ProcessTable } from '../process-table'; // P5 O16 wave 1 verification
+import type { HeldStopOutcome } from './stop-held'; // P5 O16 wave 1 verification
 import type { RosterEntry } from './roster';
 
 const entry = (holderId: string, over: Partial<RosterEntry> = {}): RosterEntry => ({
@@ -81,5 +83,34 @@ describe('holdsEngine', () => {
     expect(holdsEngine(entry('spawn001', { state: 'committed', child: null }))).toBe(true);
     expect(holdsEngine(entry('ready001', { state: 'ready', child: null }))).toBe(false);
     expect(holdsEngine(entry('nosess01', { state: 'committed', child: null, appSessionId: null }))).toBe(false);
+  });
+});
+
+// P5 O16 wave 1 verification: a host the start leaves to a newer host of its session (D59(10)) is known from the roster
+// alone, so it is unattached at once, in the start's synchronous step; a stop-all during the adoptions (another
+// adoption's preparation or re-initialize) then stops it beside the hold, not only once every adoption has ended
+describe('the start’s records', () => {
+  const tableOf = () => new ProcessTable({ ps: async () => '', log: () => {}, isAlive: () => true, procStartOf: () => 'start' });
+
+  it('unattaches a losing host before any adoption ends, so a stop-all meanwhile stops both it and the hold', async () => {
+    const older = entry('older001', { appSessionId: 'app-shared', pid: 4300, startedAt: '2026-10-31T09:00:00.000Z' });
+    const newer = entry('newer001', { appSessionId: 'app-shared', pid: 4400, startedAt: '2026-10-31T10:00:00.000Z' });
+    const table = tableOf();
+    const stopped: string[] = [];
+    const stop = async (e: RosterEntry): Promise<HeldStopOutcome> => (stopped.push(e.holderId), 'stopped');
+    expect(recordStart(table, [older, newer], stop)).toEqual(['app-shared']);
+    expect(table.unattachedHosts('app-shared' as AppSessionId).map((h) => h.holderId)).toEqual(['older001']);
+    expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 2, forced: 0 }); // the adoption still under way
+    expect(stopped.sort()).toEqual(['newer001', 'older001']);
+  });
+
+  it('records a losing host once: the failures after the adoptions add a failed adoption, not the loser again', () => {
+    const older = entry('older001', { appSessionId: 'app-shared', pid: 4300, startedAt: '2026-10-31T09:00:00.000Z' });
+    const newer = entry('newer001', { appSessionId: 'app-shared', pid: 4400, startedAt: '2026-10-31T10:00:00.000Z' });
+    const table = tableOf();
+    const stop = async (): Promise<HeldStopOutcome> => 'stopped';
+    recordStart(table, [older, newer], stop);
+    recordFailed(table, [{ entry: older, reason: 'a newer session host (newer001) holds its session; left running' }, { entry: newer, reason: 'no stored launch spec' }], stop);
+    expect(table.unattachedHosts('app-shared' as AppSessionId).map((h) => h.holderId)).toEqual(['older001', 'newer001']);
   });
 });

@@ -11,6 +11,8 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_HOST_PROTOCOL } from './protocol';
 import type { RosterEntry } from './roster';
+import type { ProcessTable } from '../process-table'; // P5 O16 wave 1 verification
+import type { HeldStopOutcome } from './stop-held'; // P5 O16 wave 1 verification
 
 // Whether the entry's host holds an engine, or is forking one, for a session: what the start holds a row for.
 export function holdsEngine(entry: RosterEntry): boolean {
@@ -62,4 +64,35 @@ export async function adoptAll(entries: readonly RosterEntry[], deps: { adopt(en
     }
   }));
   return outcome;
+}
+
+// The start's records in the process table (index.ts `adoptAtStart`). `recordStart` runs synchronously in `listening`,
+// before any client is served: a hold for each host the start adopts, a stop-all's stop beside it. `recordFailed` runs
+// once the adoptions have ended: each failed host still running its engine under this major with no row of its own is
+// unattached (D59(6)); one `recordStart` unattached already (D59(10)) is not recorded twice; a host of another major is
+// that major's.
+export type StartTable = Pick<ProcessTable, 'holdForAdoption' | 'unattach' | 'get'>;
+
+const unattachable = (entry: RosterEntry): boolean => holdsEngine(entry) && entry.protocol === SESSION_HOST_PROTOCOL;
+
+function unattachEntry(table: StartTable, entry: RosterEntry, stop: (entry: RosterEntry) => Promise<HeldStopOutcome>): void {
+  table.unattach(entry.appSessionId as AppSessionId, { holderId: entry.holderId, host: { pid: entry.pid, procStart: entry.procStart }, stop: () => stop(entry) });
+}
+
+// Wave 1 verification: a host left to a newer host of its session (D59(10)) is known from the roster alone, so it is
+// unattached here, before any adoption runs; a stop-all during the adoptions then stops it beside the holds.
+export function recordStart(table: StartTable, live: readonly RosterEntry[], stop: (entry: RosterEntry) => Promise<HeldStopOutcome>): AppSessionId[] {
+  const { take, leave } = adoptable(live);
+  const holding = new Map(take.filter(holdsEngine).map((entry) => [entry.appSessionId as AppSessionId, entry]));
+  table.holdForAdoption([...holding.keys()], (id) => stop(holding.get(id)!));
+  for (const { entry } of leave) if (unattachable(entry)) unattachEntry(table, entry, stop);
+  return [...holding.keys()];
+}
+
+export function recordFailed(table: StartTable, failed: AdoptionOutcome['failed'], stop: (entry: RosterEntry) => Promise<HeldStopOutcome>): void {
+  for (const { entry } of failed) {
+    if (!unattachable(entry)) continue;
+    if (table.get(entry.appSessionId as AppSessionId)?.status().holder?.holderId === entry.holderId) continue; // its row's
+    unattachEntry(table, entry, stop);
+  }
 }
