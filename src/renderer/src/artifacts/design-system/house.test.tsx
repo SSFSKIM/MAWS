@@ -4,7 +4,7 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult, EventName, PreloadBridge } from '@shared/ipc/schema';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { createClient } from '../../ipc/client';
 import { followHouseDesignSystem, useHouseDesignSystem } from './house';
 
@@ -15,7 +15,7 @@ const DOC = '33333333-3333-4333-8333-333333333333';
 /** A preload bridge whose `designSystems.house` answers are released by the test, in any order. */
 function fakeBridge() {
   const answers: ((houseId: string | null) => void)[] = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, machine?: string) => void>>();
   const invoke = vi.fn((name: string) => {
     if (name !== 'designSystems.house') throw new Error(`unexpected ${name}`);
     return new Promise<CommandResult<'designSystems.house'>>((resolve) => answers.push((houseId) => resolve({ ok: true, value: { houseId } })));
@@ -23,7 +23,7 @@ function fakeBridge() {
   const bridge = {
     localMachine: TEST_MACHINE,
     invoke,
-    on: (name: string, listener: (payload: unknown) => void) => {
+    on: (name: string, listener: (payload: unknown, machine?: string) => void) => {
       const set = listeners.get(name) ?? listeners.set(name, new Set()).get(name)!;
       set.add(listener);
       return () => void set.delete(listener);
@@ -35,7 +35,7 @@ function fakeBridge() {
     invoke,
     /** Answers the `n`th read (from 0) with `houseId`. */
     answer: (n: number, houseId: string | null) => act(async () => answers[n]!(houseId)),
-    emit: (name: EventName, payload: unknown) => act(() => listeners.get(name)?.forEach((listener) => listener(payload))),
+    emit: (name: EventName, payload: unknown, machine?: string) => act(() => listeners.get(name)?.forEach((listener) => listener(payload, machine))),
     listening: () => [...listeners.values()].reduce((n, set) => n + set.size, 0),
   };
 }
@@ -83,6 +83,20 @@ describe('useHouseDesignSystem', () => {
 });
 
 describe('followHouseDesignSystem', () => {
+  // P5 O7 M5a: the house is this Mac's store's; another machine's feed says its own changes and resyncs
+  it('reads again for this Mac’s changes and resyncs alone', async () => {
+    const fake = fakeBridge();
+    const house = followHouseDesignSystem(createClient(() => fake.bridge));
+    const stop = house.subscribe(() => {});
+    await fake.answer(0, HOUSE);
+    fake.emit('artifacts.resync', {}, OTHER_MACHINE);
+    fake.emit('artifacts.changed', changed('design_system', 'deleted'), OTHER_MACHINE);
+    expect(fake.invoke).toHaveBeenCalledTimes(1);
+    fake.emit('artifacts.resync', {});
+    expect(fake.invoke).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
   it('drops an answer a later read overtook', async () => {
     const fake = fakeBridge();
     const house = followHouseDesignSystem(createClient(() => fake.bridge));

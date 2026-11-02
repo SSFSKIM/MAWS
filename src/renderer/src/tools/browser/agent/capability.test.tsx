@@ -112,4 +112,18 @@ describe('the agent\'s browser capability', () => {
     act(() => fake.event('session.capabilitiesChanged', { appSessionId: A, capabilities: { browser: { available: true } } }));
     expect(screen.queryByRole('status')).toBeNull();
   });
+
+  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The capability lists"): a session on another
+  // machine is asked by its address and heard on its checkout feed; main always answers a reading, its substitute's words
+  // for a machine that predates the read included, and the notice draws the machine's words as they are
+  it('draws a remote session’s reading in the machine’s words, the substitute’s included, and follows its changes', async () => {
+    other('up', 1);
+    const fake = fakeClient();
+    render(<AgentBrowserNotice appSessionId={R} client={fake.client} />);
+    expect(fake.invoked('session.capabilities')).toEqual([{ appSessionId: R }]);
+    await act(() => fake.reply('session.capabilities', { browser: { available: false, reason: 'studio predates session capabilities; update it' } }));
+    expect(screen.getByRole('status').textContent).toBe('The agent has no browser here: studio predates session capabilities; update it');
+    act(() => fake.event('session.capabilitiesChanged', { appSessionId: R, capabilities: { browser: { available: false, reason: 'no browser is attached on studio' } } }, OTHER_MACHINE));
+    expect(screen.getByRole('status').textContent).toBe('The agent has no browser here: no browser is attached on studio');
+  });
 });

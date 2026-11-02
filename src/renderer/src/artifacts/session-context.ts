@@ -29,6 +29,7 @@ import type { TrustState } from '@shared/sessions/trust'; // P3-F F4
 import { START } from '../gateway/copy';
 import { startRefusal } from '../gateway/session-start';
 import { ipc } from '../ipc/client';
+import { actorSessionOnPage } from '../ipc/machine';
 import { acquireSession, acquisitionWords, cardWords, dockFor, RELAY_FIRST } from '../sessions/acquire';
 import { holderWords } from '../sessions/holder-words';
 import { useLibrarySpaces } from '../library/store';
@@ -55,7 +56,8 @@ export interface ArtifactContextOf {
 }
 
 export function artifactSessionContext(artifact: ArtifactContextOf, facts: ArtifactContextFacts): ArtifactSessionContext {
-  const own = artifact.createdBy.kind === 'session' ? artifact.createdBy.appSessionId : (artifact.sessions.find((session) => session.roles.includes('created'))?.appSessionId ?? null);
+  // P5 O7 M5a: a creator the machine withheld is no session (ipc/machine.ts)
+  const own = artifact.createdBy.kind === 'session' ? (actorSessionOnPage(artifact.createdBy.appSessionId) === null ? null : artifact.createdBy.appSessionId) : (artifact.sessions.find((session) => session.roles.includes('created'))?.appSessionId ?? null);
   const record = own === null ? undefined : facts.records.get(own);
   if (own !== null && record !== undefined && (artifact.projectId === undefined || record.projectId === artifact.projectId)) return { kind: 'session', appSessionId: own };
   const linked = artifact.spaceId === undefined ? undefined : facts.spaces.find((space) => space.id === artifact.spaceId)?.linkedDir;

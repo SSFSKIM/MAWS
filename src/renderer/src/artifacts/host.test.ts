@@ -9,6 +9,7 @@ import type { CommandName, CommandResult, EventName, MawsBridge } from '@shared/
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createArtifactHost, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
+import { recordArtifactMachine, resetArtifactMachines } from './machines';
 import { windowDocPorts } from './window-ports';
 
 type Listener = (event: { data?: unknown }) => void;
@@ -384,5 +385,23 @@ describe('document ports from the preload', () => {
     await expect(waiting).rejects.toThrow();
     expect(forged).toBeDefined();
     ports.dispose();
+  });
+});
+
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5, "What crosses, as what"): editing an artifact
+// on another machine arrives with M5b. Main refuses its `artifacts.open` with the words to show; the replica takes the
+// refusal as the open's answer, so the editor shows those words, rather than asking again with the backoff.
+describe('an artifact on another machine (M5a)', () => {
+  afterEach(() => resetArtifactMachines());
+
+  it('rejects its open with main’s words, and asks no more', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const h = harness();
+    const words = 'editing an artifact on studio arrives with the next landing';
+    h.answers.set('artifacts.open', { ok: false, error: { code: 'host_unavailable', message: words } });
+    await expect(h.artifacts.open(ARTIFACT)).rejects.toThrow(words);
+    await settle(10_000);
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(1);
   });
 });

@@ -6,6 +6,9 @@
 // The panel's scalpel-4#1: a machine's link replays no event it missed while it was away, so the reading is asked again
 // whenever the session's machine is back: another machine's link up as a new generation (`machines.changed`), the local
 // machine's host heard (`host.status`, main's at each ready of its daemon). A refused asking is asked again there too.
+// P5 O7 M5a ("The capability lists"): a lane B session on another machine is asked by its address and heard on its checkout
+// feed; main answers a reading for it always, standing in for a machine that predates the read or is offline, and the
+// notice draws the machine's words as they come.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';

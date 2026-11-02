@@ -2,7 +2,10 @@
 // `ArtifactHost.holdDatasets` is main's `artifacts.holdDatasets`, all or none over the refs named, and its release
 // main's `artifacts.releaseDatasets` with the window's handle, sent once however often it is called.
 import { describe, expect, it, vi } from 'vitest';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createArtifactHost } from './host';
+import { recordArtifactMachine, resetArtifactMachines } from './machines';
 
 const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const HOLD = '22222222-2222-4222-8222-222222222222';
@@ -34,7 +37,7 @@ describe('ArtifactHost.holdDatasets', () => {
 // connection streams again): every hold taken before it is invalidated, one asked for across it is invalidated as soon as
 // it is answered, and a released hold stops listening.
 function resyncing() {
-  const listeners = new Set<(payload: unknown) => void>();
+  const listeners = new Set<(payload: unknown, from: { machine: MachineRef }) => void>();
   let answer: (() => void) | null = null;
   const invoke = vi.fn(async (name: string) => {
     if (name === 'artifacts.holdDatasets' && answer === null) {
@@ -42,13 +45,13 @@ function resyncing() {
     }
     return { ok: true as const, value: name === 'artifacts.holdDatasets' ? { holdId: HOLD } : { released: true } };
   });
-  const on = vi.fn((name: string, listener: (payload: unknown) => void) => {
+  const on = vi.fn((name: string, listener: (payload: unknown, from: { machine: MachineRef }) => void) => {
     if (name !== 'artifacts.resync') return () => {};
     listeners.add(listener);
     return () => void listeners.delete(listener);
   });
-  const host = createArtifactHost({ ipc: { invoke, on } as never, ports: { take: () => Promise.reject(new Error('no ports')) } });
-  return { host, resync: () => [...listeners].forEach((listener) => listener({})), answerNow: () => (answer ? answer() : (answer = () => {})) };
+  const host = createArtifactHost({ ipc: { invoke, on, localMachine: TEST_MACHINE } as never, ports: { take: () => Promise.reject(new Error('no ports')) } });
+  return { host, resync: (machine: MachineRef = TEST_MACHINE) => [...listeners].forEach((listener) => listener({}, { machine })), answerNow: () => (answer ? answer() : (answer = () => {})) };
 }
 const settled = async (promise: Promise<void>) => {
   let done = false;
@@ -85,5 +88,31 @@ describe('ArtifactHost.holdDatasets across a host restart (E3)', () => {
     hold.release();
     r.resync();
     expect(await settled(hold.invalidated)).toBe(false);
+  });
+});
+
+// P5 O7 M5a (M5a-b's report, "Scope every artifacts.resync listener by from.machine"): a machine's artifacts feed says
+// `artifacts.resync` at each opening; a hold is invalidated by its own machine's resync alone.
+describe('ArtifactHost.holdDatasets and another machine’s resync (P5 O7 M5a)', () => {
+  it('keeps this Mac’s hold through another machine’s resync, and drops it at this Mac’s', async () => {
+    const { host, resync, answerNow } = resyncing();
+    answerNow();
+    const hold = await host.holdDatasets(ARTIFACT, ['assets/a.json']);
+    resync(OTHER_MACHINE);
+    expect(await settled(hold.invalidated)).toBe(false);
+    resync(TEST_MACHINE);
+    expect(await settled(hold.invalidated)).toBe(true);
+  });
+
+  it('drops another machine’s artifact’s hold at that machine’s resync, not at this Mac’s', async () => {
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const { host, resync, answerNow } = resyncing();
+    answerNow();
+    const hold = await host.holdDatasets(ARTIFACT, ['assets/a.json']);
+    resync(TEST_MACHINE);
+    expect(await settled(hold.invalidated)).toBe(false);
+    resync(OTHER_MACHINE);
+    expect(await settled(hold.invalidated)).toBe(true);
+    resetArtifactMachines();
   });
 });

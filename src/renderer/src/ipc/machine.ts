@@ -2,7 +2,8 @@
 // machine's. A file tab carries it (the same path on two machines is two files), and so does an artifact tab, whose
 // library stays this machine's until its child spans machines.
 import type { AppSessionId } from '@shared/graph/ids';
-import { addressOf, isAddress, machineOf } from '@shared/machine/address';
+import { WITHHELD_SESSION } from 'org-protocol';
+import { addressOf, bareOf, isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from './client';
 
@@ -27,4 +28,11 @@ export function checkoutKey(machine: MachineRef, path: string): string {
 // of the machine that holds the artifact, this one's while the library is local. An address already is one.
 export function storedSessionOnPage(appSessionId: string): AppSessionId {
   return (isAddress(appSessionId) ? appSessionId : addressOf(ipc.localMachine, appSessionId)) as AppSessionId;
+}
+
+// P5 O7 M5a2 fix wave 1: a machine writes org-protocol's reserved WITHHELD_SESSION in an artifact answer's actor fields for
+// every session the member can't view. It names no session anywhere: the session an actor names, on the page, or null for
+// the withheld one, so a lookup by it finds no title, and nothing opens, links or names it (shown, it is "Claude").
+export function actorSessionOnPage(appSessionId: string): AppSessionId | null {
+  return (isAddress(appSessionId) ? bareOf(appSessionId) : appSessionId) === WITHHELD_SESSION ? null : storedSessionOnPage(appSessionId);
 }
