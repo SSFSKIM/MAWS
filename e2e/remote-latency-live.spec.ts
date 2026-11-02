@@ -10,7 +10,8 @@
 //      signed in from a pairing code read from its file and the file removed, the owner comparing the fingerprint and
 //      approving at their terminal; already signed in, the code is not needed and its file is removed unread;
 //   3. the machine (test/support/remote-bench.ts): the bench agent prepared, the scratch mawsd staged (packed and started
-//      on the VM; started by mini-ops on the mini and waited for), enrolled with the code file on the enroll's stdin
+//      on the VM; on the mini, this checkout's head bundle copied into the profile, then started by mini-ops under the
+//      MAWS binary and waited for), enrolled with the code file on the enroll's stdin
 //      alone and the file removed, the stub's session served and listed for the app's member by the harness's fake
 //      sminos on the scratch RL10 socket;
 //   4. per carrier, a fresh launch of the app over its profile: direct (the tailnet), then relay
@@ -26,7 +27,7 @@
 //
 // Inputs: MAWS_REMOTE_BENCH, the path of a JSON file `{ app: { profile, pairingFile? }, machines: [BenchMachine…] }`
 // (test/support/remote-bench.ts's `BenchMachine`: name, transport, stage, codeFile, profile, label, port, head, commit,
-// node, quietUtc?), and MAWS_REMOTE_BENCH_MACHINE, the name of the machine this run benches.
+// node, quietUtc?, runtime?, stageHead?), and MAWS_REMOTE_BENCH_MACHINE, the name of the machine this run benches.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +38,7 @@ import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
-import { BenchRun, processRunner, type BenchMachine } from '../test/support/remote-bench';
+import { BenchRun, buildHeadBundle, processRunner, type BenchMachine } from '../test/support/remote-bench';
 import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { cleanupAll, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, type Written } from './support/remote-latency-page';
@@ -224,7 +225,9 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
 
     // 3. The machine: staged, enrolled, its session served and listed for the app's member.
     await bench.prepare(await bundleAgent(root));
-    await bench.stage();
+    // the mini's head, by default this checkout's own bundle copied over (its HEAD must be the machine's commit)
+    const copied = machine.stage === 'mini-ops' && (machine.stageHead ?? 'copy') === 'copy';
+    await bench.stage(copied ? await buildHeadBundle(REPO_ROOT, join(root, 'head-bundle'), processRunner(), machine.commit) : undefined);
     await bench.enroll();
     bench.serve((line) => stream.onLine(line));
     await expect.poll(() => stream.failed ?? (stream.ready === null ? null : 'ready'), { timeout: 5 * 60_000, message: 'the bench agent’s session ready' }).toBe('ready');

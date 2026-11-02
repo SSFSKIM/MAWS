@@ -90,11 +90,14 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
     scratch.push(root);
     const profile = join(root, 'profile');
     const a: AgentArgs = { ...ARGS, profile, bench: `${profile}/bench`, head: `${profile}/head` };
-    prepare(a, '/runtime/bin/node');
+    prepare(a, '/runtime/bin/node', false);
     const made = walk(root).map((path) => relative(root, path));
     expect(made.filter((path) => !path.startsWith('profile'))).toEqual([]);
     expect(made.sort()).toEqual(['profile', 'profile/bench', 'profile/bench/checkout', 'profile/bench/latency-engine', 'profile/claude-config', 'profile/claude-config/.claude.json', 'profile/claude-config/settings.json', 'profile/claude-usage', 'profile/home', 'profile/shell-home', 'profile/shell-home/.bash_profile', 'profile/shell-home/.zprofile', 'profile/sminos', 'profile/tmp'].sort());
-    expect(readFileSync(`${profile}/bench/latency-engine`, 'utf8')).toBe(`#!/bin/sh\nMAWS_LATENCY_STUB_VERSION='2.1.283' exec '/runtime/bin/node' '${profile}/head/test/support/latency-engine-stub.mjs' '${profile}/bench/samples.jsonl' "$@"\n`);
+    expect(readFileSync(`${profile}/bench/latency-engine`, 'utf8')).toBe(`#!/bin/sh\nELECTRON_RUN_AS_NODE=1 MAWS_LATENCY_STUB_VERSION='2.1.283' exec '/runtime/bin/node' '${profile}/head/test/support/latency-engine-stub.mjs' '${profile}/bench/samples.jsonl' "$@"\n`);
+    // on the mini's MAWS binary, run as production runs its mawsd
+    prepare(a, '/Applications/MAWS.app/Contents/MacOS/MAWS', true);
+    expect(readFileSync(`${profile}/bench/latency-engine`, 'utf8')).toContain(`exec '/Applications/MAWS.app/Contents/MacOS/MAWS' --disable-sigusr1 '${profile}/head/`);
     expect(statSync(`${profile}/bench/latency-engine`).mode & 0o777).toBe(0o755);
     expect(JSON.parse(readFileSync(`${profile}/claude-config/.claude.json`, 'utf8'))).toEqual({ projects: { [`${profile}/bench/checkout`]: { hasTrustDialogAccepted: true } } });
     for (const path of Object.values(agentPaths(a))) expect(path.startsWith(`${profile}/`), path).toBe(true);

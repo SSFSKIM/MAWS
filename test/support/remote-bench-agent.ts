@@ -70,11 +70,14 @@ export function agentPaths(a: AgentArgs) {
 
 const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
 
-/** The stub's wrapper, the store's trust and the daemon's directories; `node` is the runtime the wrapper runs the stub on. */
-export function prepare(a: AgentArgs, node: string): void {
+/**
+ * The stub's wrapper, the store's trust and the daemon's directories; `node` is the runtime the wrapper runs the stub
+ * on, an Electron run as Node as production runs its mawsd when `electron` (the mini's MAWS binary).
+ */
+export function prepare(a: AgentArgs, node: string, electron: boolean): void {
   const p = agentPaths(a);
   for (const dir of [a.bench, p.checkout, p.claudeConfig, p.home, p.tmp, p.sminosHome, p.shellHome, p.claudeUsage]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(p.engine, `#!/bin/sh\nMAWS_LATENCY_STUB_VERSION=${quote(a.engineVersion)} exec ${quote(node)} ${quote(p.stub)} ${quote(p.samples)} "$@"\n`, { mode: 0o755 });
+  writeFileSync(p.engine, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 MAWS_LATENCY_STUB_VERSION=${quote(a.engineVersion)} exec ${quote(node)}${electron ? ' --disable-sigusr1' : ''} ${quote(p.stub)} ${quote(p.samples)} "$@"\n`, { mode: 0o755 });
   writeFileSync(`${p.claudeConfig}/.claude.json`, `${JSON.stringify({ projects: { [p.checkout]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
   writeFileSync(`${p.claudeConfig}/settings.json`, `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
   // the login shell the daemon's hosts capture reads its startup files here (test/support/shell-home.ts's pattern)
@@ -309,7 +312,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   const [command, word] = argv;
   const a = parseAgentArgs(word);
   const out = (message: object) => void process.stdout.write(`${JSON.stringify(message)}\n`);
-  if (command === 'prepare') return prepare(a, process.execPath);
+  if (command === 'prepare') return prepare(a, process.execPath, process.versions.electron !== undefined);
   if (command !== 'serve') throw new Error(`the agent has no command ${command}`);
   const agent = new BenchAgent(a, {
     async machine() {

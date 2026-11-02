@@ -5,11 +5,12 @@
 // every resource is ended on a failure mid-way; no command is a sminos call, or names SMINOS_RL10, or names
 // MAWS_USER_DATA outside the scratch daemon's own start; every path a command names is the scratch profile's but the
 // runtime's; the profile is removed only once no bench process is left; and the mini's quiet window refuses every call.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { BenchRun, machineProblems, meetsQuiet, processRunner, quote, transportArgv, type BenchMachine, type CommandRunner, type RunResult, type Started } from './remote-bench';
+import { archiveProblems, BenchRun, buildHeadBundle, machineProblems, meetsQuiet, processRunner, productionProblem, quote, stubFixtures, transportArgv, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -31,6 +32,8 @@ function codeFile(): string {
 const MINI = (file: string): BenchMachine => ({ name: 'mini-bench', transport: { kind: 'ssh', host: 'mini' }, stage: 'mini-ops', codeFile: file, profile: '/Users/kimmi/.local/share/maws-bench/mini-bench', label: 'dev.maws.bench.mini', port: 47901, head: '/Users/kimmi/.local/share/maws-bench/mini-bench/head', commit: COMMIT, node: '/Applications/MAWS.app/Contents/MacOS/MAWS' });
 const VM = (file: string): BenchMachine => ({ name: 'vm-bench', transport: { kind: 'devcloud', vm: 'o7-accept' }, stage: 'runner', codeFile: file, profile: '/home/dev/maws-bench/vm-bench', label: 'dev.maws.bench.vm', port: 47902, head: '/home/dev/maws-bench/vm-bench/head', commit: COMMIT, node: '/usr/bin/node' });
 const ENGINE_VERSION = '2.1.283';
+const BUNDLE: HeadBundle = { tar: '/tmp/bench-local/head.tar', tarBytes: 40 * 1024 * 1024, unpackedBytes: 90 * 1024 * 1024, electron: '44.4.5', commit: COMMIT };
+const DF = (availableKb: number) => `Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 970000000 400000000 ${availableKb} 42% /System/Volumes/Data\n`;
 const at = (iso: string) => Date.parse(iso);
 
 type Call = { argv: readonly string[]; stdinFile?: string; stdin?: string };
@@ -42,7 +45,7 @@ function fakeRunner(script: Script) {
   const started: { argv: readonly string[]; written: string[]; ended: boolean; killed: boolean }[] = [];
   const runner: CommandRunner = {
     async run(argv, options = {}) {
-      const call: Call = { argv, ...(options.stdinFile !== undefined && { stdinFile: options.stdinFile, stdin: readFileSync(options.stdinFile, 'utf8') }) };
+      const call: Call = { argv, ...(options.stdinFile !== undefined && { stdinFile: options.stdinFile, stdin: options.stdinFile === BUNDLE.tar ? '(the head bundle)' : readFileSync(options.stdinFile, 'utf8') }) };
       calls.push(call);
       return script(argv.at(-1)!, call) ?? { code: 0, stdout: '', stderr: '' };
     },
@@ -79,6 +82,8 @@ function machineScript(options: { enrollExit?: number; listedAfter?: number; alr
     }
     if (/ keys /.test(command)) return { code: 0, stdout: JSON.stringify({ key: { keyId: 'KEYID-for-compare', heldKeys: 1 } }), stderr: '' };
     if (/mawsd:pack/.test(command)) return { code: 0, stdout: '/home/dev/maws-bench/vm-bench/bench/pack/0.0.0-aaaa-1234\n', stderr: '' };
+    if (/ -p process\.versions\.electron$/.test(command)) return { code: 0, stdout: '44.4.5\n', stderr: '' };
+    if (/^df -Pk /.test(command)) return { code: 0, stdout: DF(200 * 1024 * 1024), stderr: '' };
     return undefined;
   };
 }
@@ -95,7 +100,7 @@ function leaks(calls: Call[], started: { argv: readonly string[]; written: strin
   return out;
 }
 
-async function fullRun(machine: BenchMachine, script: Script, startAt = 0) {
+async function fullRun(machine: BenchMachine, script: Script, startAt = 0, bundle: HeadBundle | null = BUNDLE) {
   const fake = fakeRunner(script);
   const said: string[] = [];
   let clock = startAt;
@@ -103,7 +108,7 @@ async function fullRun(machine: BenchMachine, script: Script, startAt = 0) {
   let failure: unknown = null;
   try {
     await run.prepare(machine.codeFile.replace(/code$/, 'agent.cjs'));
-    await run.stage();
+    await run.stage(bundle ?? undefined);
     await run.enroll();
     run.serve(() => undefined);
     run.list(['member-1'], 'the bench session');
@@ -246,7 +251,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     });
   }
 
-  it('removes the profile only once no bench process is left on the machine: refused, said and kept while one lives', async () => {
+  it('removes the profile, its head and any tarball with it, only once no bench process is left on the machine: refused, said and kept while one lives', async () => {
     for (const machine of [VM, MINI]) {
       let pids = '4242\n4243\n';
       const fake = fakeRunner((command) => (/pgrep -f -- /.test(command) ? { code: 0, stdout: pids, stderr: '' } : undefined));
@@ -259,11 +264,12 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       expect(pgrep).toContain(`pgrep -f -- '[/]${machine === VM ? 'home/dev/maws-bench/vm-bench' : 'Users/kimmi/\\.local/share/maws-bench/mini-bench'}'`);
       pids = '';
       expect(await run.removeProfile()).toBe(true);
-      if (machine === VM) expect(fake.calls.at(-1)!.argv.at(-1)).toBe('rm -rf /home/dev/maws-bench/vm-bench');
-      else {
-        expect(fake.calls.some((c) => /rm -rf/.test(c.argv.at(-1)!))).toBe(false); // the mini's profile is mini-ops' to remove
-        expect(said.at(-1)).toBe('[bench] mini-bench: no bench process is left; mini-ops removes the scratch profile: rm -rf /Users/kimmi/.local/share/maws-bench/mini-bench');
-      }
+      // the profile with all the bench put in it (its head, a tarball left, the pack), and only after the check passed
+      const lines = fake.calls.map((c) => c.argv.at(-1)!);
+      expect(lines.at(-1)).toBe(`rm -rf ${machine === VM ? '/home/dev/maws-bench/vm-bench' : '/Users/kimmi/.local/share/maws-bench/mini-bench'}`);
+      expect(lines.at(-2)).toMatch(/^pgrep -f -- /);
+      expect(lines.filter((line) => /rm -rf/.test(line))).toHaveLength(1);
+      expect(said.at(-1)).toMatch(/the scratch profile is removed, its head and every bench file in it$/);
     }
   });
 
@@ -297,6 +303,99 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(late.started).toEqual([]);
     const vmFile = codeFile();
     expect((await fullRun(VM(vmFile), machineScript({ listedAfter: 0 }), at('2026-11-03T06:50:00Z'))).failure).toBeNull();
+  });
+
+  it('the mini: copies the head bundle by cat > into its bench directory and unpacks it under its head alone, after the Electron and free-space preflights, before mini-ops starts the daemon', async () => {
+    const { calls, failure, said } = await fullRun(MINI(codeFile()), machineScript({ listedAfter: 0 }));
+    expect(failure).toBeNull();
+    const lines = calls.map((c) => c.argv.at(-1)!);
+    const at = (pattern: RegExp) => lines.findIndex((line) => pattern.test(line));
+    const p = '/Users/kimmi/.local/share/maws-bench/mini-bench';
+    expect(lines[at(/process\.versions\.electron/)]).toBe(`env HOME=${p}/home TMPDIR=${p}/tmp ELECTRON_RUN_AS_NODE=1 /Applications/MAWS.app/Contents/MacOS/MAWS -p process.versions.electron`);
+    expect(lines[at(/^df -Pk/)]).toBe(`df -Pk ${p}`);
+    const copy = calls.find((c) => c.stdinFile === BUNDLE.tar)!;
+    expect(copy.argv.at(-1)).toBe(`mkdir -p ${p}/bench && cat > ${p}/bench/head.tar`);
+    expect(lines[at(/tar -xf/)]).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/head.tar -C ${p}/head && rm -f ${p}/bench/head.tar`);
+    expect(at(/process\.versions\.electron/)).toBeLessThan(at(/^df -Pk/));
+    expect(at(/^df -Pk/)).toBeLessThan(lines.indexOf(copy.argv.at(-1)!));
+    expect(lines.indexOf(copy.argv.at(-1)!)).toBeLessThan(at(/tar -xf/));
+    expect(said.findIndex((line) => line.includes('is unpacked in'))).toBeLessThan(said.findIndex((line) => line.includes('mini-ops starts the scratch mawsd')));
+    // the mini's runtime runs as production runs its mawsd
+    expect(lines.filter((line) => /mawsd\.js status/.test(line)).every((line) => line.includes('/Applications/MAWS.app/Contents/MacOS/MAWS --disable-sigusr1 '))).toBe(true);
+    // `present`: mini-ops put the head there; nothing is copied
+    const present = await fullRun({ ...MINI(codeFile()), stageHead: 'present' }, machineScript({ listedAfter: 0 }), 0, null);
+    expect(present.failure).toBeNull();
+    expect(present.calls.some((c) => /tar -xf|head\.tar|process\.versions/.test(c.argv.at(-1)!))).toBe(false);
+  });
+
+  it('refuses to copy the head when the runtime’s Electron is not the bundle’s, or the volume is short of room, saying both', async () => {
+    const other = await fullRun(MINI(codeFile()), (command, call) => (/process\.versions\.electron$/.test(command) ? { code: 0, stdout: '43.1.0\n', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(other.failure)).toMatch(/refused to copy the head: the runtime \/Applications\/MAWS\.app\/Contents\/MacOS\/MAWS is Electron 43\.1\.0, the head bundle's is Electron 44\.4\.5/);
+    expect(other.calls.some((c) => c.stdinFile === BUNDLE.tar)).toBe(false);
+    const full = await fullRun(MINI(codeFile()), (command, call) => (/^df -Pk /.test(command) ? { code: 0, stdout: DF(200 * 1024), stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(full.failure)).toMatch(/the profile's volume has 200\.0 MiB free, under the 220\.0 MiB the bundle needs \(its 40\.0 MiB tarball and twice its 90\.0 MiB unpacked\)/);
+    expect(full.calls.some((c) => c.stdinFile === BUNDLE.tar)).toBe(false);
+    const stale = await fullRun(MINI(codeFile()), machineScript({ listedAfter: 0 }), 0, { ...BUNDLE, commit: 'b'.repeat(40) });
+    expect(String(stale.failure)).toMatch(/the head bundle is of bbbbbbbbb, not aaaaaaaaa/);
+    expect((await fullRun(MINI(codeFile()), machineScript({ listedAfter: 0 }), 0, null)).failure).toMatchObject({ message: expect.stringMatching(/no head bundle was built/) });
+  });
+
+  it('refuses every command naming the production mawsd’s profile, its app.asar entry or its unit mode, and such inputs', () => {
+    expect(productionProblem(`ls '/Users/new/Library/Application Support/MAWS/mawsd'`)).toMatch(/production mawsd's profile/);
+    expect(productionProblem('/Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js status')).toMatch(/app\.asar entry/);
+    expect(productionProblem('mawsd.js run --unit --dir x')).toMatch(/unit mode/);
+    expect(productionProblem('/Applications/MAWS.app/Contents/MacOS/MAWS --disable-sigusr1 /p/head/out/main/mawsd.js run --private --dir /p/mawsd')).toBeNull();
+    const file = '/tmp/code';
+    expect(machineProblems({ ...MINI(file), head: '/Users/new/Library/Application Support/MAWS/head' })).toContain("head /Users/new/Library/Application Support/MAWS/head: it names the production mawsd's profile (Library/Application Support/MAWS)");
+    expect(machineProblems({ ...MINI(file), node: '/Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js' })).toContain("node /Applications/MAWS.app/Contents/Resources/app.asar/out/main/mawsd.js: it names the production mawsd's app.asar entry");
+  });
+
+  it('refuses a head bundle entry that is absolute or climbs out with ..', () => {
+    expect(archiveProblems(['./', './out/main/mawsd.js', './node_modules/node-pty/package.json', 'bench-head.json'])).toEqual([]);
+    expect(archiveProblems(['./out/../../etc/passwd', '/Users/kimmi/.zshrc', './a/..b'])).toEqual([
+      "the head bundle's entry ./out/../../etc/passwd would unpack outside the head",
+      "the head bundle's entry /Users/kimmi/.zshrc would unpack outside the head",
+    ]);
+  });
+
+  it('builds the head bundle from the checkout at its commit: the pack, the stub and the fixtures it reads, the pinned Electron, one tarball whose entries stay inside', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'bench-bundle-'));
+    scratch.push(root);
+    const repo = join(root, 'repo');
+    mkdirSync(join(repo, 'test/support'), { recursive: true });
+    mkdirSync(join(repo, 'spikes/protocol-probe/fixtures/pass2'), { recursive: true });
+    mkdirSync(join(repo, 'node_modules/electron'), { recursive: true });
+    writeFileSync(join(repo, 'test/support/latency-engine-stub.mjs'), "const C = { a: ['init.jsonl', 1], b: ['pass2/auto-unrouted.jsonl', 2] }; // reads.jsonl in a comment is not read\n");
+    writeFileSync(join(repo, 'spikes/protocol-probe/fixtures/init.jsonl'), '{}\n');
+    writeFileSync(join(repo, 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl'), '{}\n');
+    writeFileSync(join(repo, 'node_modules/electron/package.json'), JSON.stringify({ version: '44.4.5' }));
+    let dirty = false;
+    const runner: CommandRunner = {
+      async run(argv) {
+        if (argv[0] === 'git' && argv[3] === 'rev-parse') return { code: 0, stdout: `${COMMIT}\n`, stderr: '' };
+        if (argv[0] === 'git') return { code: dirty ? 1 : 0, stdout: '', stderr: '' };
+        if (argv[0] === 'pnpm') {
+          const pack = join(argv[argv.length - 1]!, '0.0.0-aaaaaaaa-12345678');
+          mkdirSync(join(pack, 'out/main'), { recursive: true });
+          writeFileSync(join(pack, 'out/main/mawsd.js'), '// main');
+          return { code: 0, stdout: `${pack}\n`, stderr: '' };
+        }
+        const ran = spawnSync(argv[0]!, argv.slice(1), { encoding: 'utf8' });
+        return { code: ran.status, stdout: ran.stdout, stderr: ran.stderr };
+      },
+      start: () => {
+        throw new Error('no process is started');
+      },
+    };
+    expect(stubFixtures(readFileSync(join(repo, 'test/support/latency-engine-stub.mjs'), 'utf8'))).toEqual(['init.jsonl', 'pass2/auto-unrouted.jsonl']);
+    const bundle = await buildHeadBundle(repo, join(root, 'out'), runner, COMMIT);
+    expect(bundle).toMatchObject({ tar: join(root, 'out', 'head.tar'), electron: '44.4.5', commit: COMMIT });
+    const entries = spawnSync('tar', ['-tf', bundle.tar], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean).map((entry) => entry.replace(/^\.\//, '')).filter(Boolean).sort();
+    expect(entries).toEqual(['bench-head.json', 'out/', 'out/main/', 'out/main/mawsd.js', 'spikes/', 'spikes/protocol-probe/', 'spikes/protocol-probe/fixtures/', 'spikes/protocol-probe/fixtures/init.jsonl', 'spikes/protocol-probe/fixtures/pass2/', 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl', 'test/', 'test/support/', 'test/support/latency-engine-stub.mjs']);
+    expect(bundle.unpackedBytes).toBeGreaterThan(0);
+    await expect(buildHeadBundle(repo, join(root, 'out2'), runner, 'c'.repeat(40))).rejects.toThrow(/is built from ccccccccc, and .* is at aaaaaaaaa/);
+    dirty = true;
+    await expect(buildHeadBundle(repo, join(root, 'out3'), runner, COMMIT)).rejects.toThrow(/has tracked changes/);
   });
 
   it('runs a child with the file’s descriptor as its stdin and neither SMINOS_RL10 nor MAWS_USER_DATA in its environment', async () => {

@@ -6,9 +6,12 @@
 //
 // Per machine, from its inputs (`BenchMachine`): a scratch `mawsd` from M7's head with its own profile, label and port,
 // never the default profile, the label `dev.maws.mawsd`, `mawsd install` or ~/.local/bin/mawsd:
-//   1. stage: on the VM the runner fetches the commit into its checkout, packs it (`pnpm mawsd:pack`) and starts the
-//      pack's mawsd; on the mini, mini-ops starts it under the production mawsd's node runtime (no firewall dialog for a
-//      new binary), and the runner prints that command and waits until the scratch daemon answers;
+//   1. stage: on the VM the runner fetches the commit into its checkout, packs it there (`pnpm mawsd:pack`) and starts
+//      the pack's mawsd; on the mini, the runner copies this Mac's head bundle (`buildHeadBundle`: the pack of this
+//      checkout at the commit, the stub and its fixtures) as a tarball over the same ssh and unpacks it into `head`, once
+//      the MAWS binary's Electron is the bundle's and the volume has room (`stageHead: 'present'`: mini-ops put it there);
+//      then mini-ops starts the daemon under the production mawsd's runtime, the MAWS binary run as Node as production
+//      runs it (no firewall dialog for a new binary), and the runner prints that command and waits until it answers;
 //   2. the bench agent (e2e/support/remote-bench-agent.ts, bundled here and copied over): it writes the latency stub's
 //      wrapper and the scratch engine store's trust first (`prepare`, before the daemon starts), then (`serve`) starts
 //      the stub's session over the scratch machine.sock and, once told the owner's member, lists it through the
@@ -34,8 +37,8 @@
 // host alias). SMINOS_RL10 and MAWS_USER_DATA are set only where the fake sminos and the scratch daemon run, and are
 // taken out of every command the runner starts, so no real sminos it could reach reads them; the runner calls no sminos.
 import { spawn } from 'node:child_process';
-import { closeSync, openSync, rmSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 
 export type Transport = { kind: 'ssh'; host: string } | { kind: 'devcloud'; vm: string };
 
@@ -61,6 +64,12 @@ export interface BenchMachine {
   repo?: string;
   /** a daily UTC window ("HH:MM", from, to) in which no call reaches the machine; the mini's is 06:45 to 07:00 */
   quietUtc?: readonly [string, string];
+  /** what `node` is: the production app's Electron run as Node (the mini's default: ELECTRON_RUN_AS_NODE=1,
+   * --disable-sigusr1, as the production mawsd runs), or a Node (the VM's) */
+  runtime?: 'electron' | 'node';
+  /** the mini's head: `copy`, this Mac's head bundle sent as a tarball and unpacked into `head` (the default), or
+   * `present`, put there by mini-ops */
+  stageHead?: 'copy' | 'present';
 }
 
 export interface RunResult {
@@ -86,6 +95,13 @@ export const DEFAULT_LABEL = 'dev.maws.mawsd';
 export const MINI_QUIET_UTC = ['06:45', '07:00'] as const;
 /** What a serve may run for, so it starts only when the quiet window is that far off. */
 export const SERVE_SPAN_MS = 45 * 60_000;
+/** What a scratch command never names: the production profile (with its space), the production app's own mawsd entry, its unit mode. */
+const PRODUCTION = [/Library\/Application Support\/MAWS\b/, /app\.asar/, /(^|\s)--unit(\s|$)/] as const;
+/** Why `command` is refused as naming the production mawsd's own paths or mode; null when it doesn't. */
+export const productionProblem = (command: string): string | null => {
+  const hit = PRODUCTION.find((pattern) => pattern.test(command));
+  return hit === undefined ? null : `it names the production mawsd's ${hit === PRODUCTION[0] ? 'profile (Library/Application Support/MAWS)' : hit === PRODUCTION[1] ? 'app.asar entry' : 'unit mode (--unit)'}`;
+};
 const SOCKET_PATH_MAX_BYTES = 103; // src/engine-host/supervisor-files.ts's, so a socket never falls back out of the profile
 const LONGEST_SOCKET = 'mawsd/engine-host.sock';
 export const ENROLL_WAIT_S = 900; // the code's TTL
@@ -109,6 +125,10 @@ export function machineProblems(m: BenchMachine): string[] {
   if (m.label === DEFAULT_LABEL || !/^[\w.-]+$/.test(m.label)) problems.push(`label ${m.label} is the default profile’s, or not a label`);
   for (const [what, path] of [['profile', m.profile], ['head', m.head], ['node', m.node], ['code file', m.codeFile]] as const) if (!isAbsolute(path)) problems.push(`${what} ${path} is not absolute`);
   if (/\/(Library\/Application Support|\.config)\/MAWS\/?$/.test(m.profile)) problems.push(`profile ${m.profile} is a default profile`);
+  for (const [what, path] of [['profile', m.profile], ['head', m.head], ['node', m.node]] as const) {
+    const named = productionProblem(path);
+    if (named !== null && !(what === 'profile' && problems.some((p) => p.endsWith('is a default profile')))) problems.push(`${what} ${path}: ${named}`);
+  }
   if (/\.local\/bin\/mawsd$/.test(m.node)) problems.push(`node ${m.node} is the installed mawsd`);
   if (!Number.isSafeInteger(m.port) || m.port < 1024 || m.port > 65535) problems.push(`port ${m.port} is not a free-range port`);
   if (!/^[0-9a-f]{40}$/.test(m.commit)) problems.push(`commit ${m.commit} is not a full sha`);
@@ -120,6 +140,11 @@ export function machineProblems(m: BenchMachine): string[] {
   if (quiet !== null && !quiet.every((at) => /^([01]\d|2[0-3]):[0-5]\d$/.test(at))) problems.push(`quiet window ${quiet.join('–')} is not two UTC times HH:MM`);
   return problems;
 }
+
+const runtimeOf = (m: BenchMachine) => m.runtime ?? (m.stage === 'mini-ops' ? 'electron' : 'node');
+const stageHeadOf = (m: BenchMachine) => m.stageHead ?? 'copy';
+/** The machine's runtime as a command's first words: an Electron as production runs its mawsd (--disable-sigusr1). */
+const runtimeWords = (m: BenchMachine) => `${quote(m.node)}${runtimeOf(m) === 'electron' ? ' --disable-sigusr1' : ''}`;
 
 /** The machine's quiet window: its own, else the mini's for a mini-ops machine, else none. */
 export const quietOf = (m: BenchMachine): readonly [string, string] | null => m.quietUtc ?? (m.stage === 'mini-ops' ? MINI_QUIET_UTC : null);
@@ -139,11 +164,11 @@ export const benchDir = (m: BenchMachine) => `${m.profile}/bench`;
 const packDir = (m: BenchMachine) => `${benchDir(m)}/pack`;
 const packPath = (m: BenchMachine) => `${benchDir(m)}/pack-path`;
 /** The scratch daemon's program, on the VM its pack's runtime and entry (read from where the pack was recorded). */
-const mawsdEntry = (m: BenchMachine) => (m.stage === 'runner' ? `"$(cat ${quote(packPath(m))})/runtime/bin/node" "$(cat ${quote(packPath(m))})/out/main/mawsd.js"` : `${quote(m.node)} ${quote(`${m.head}/out/main/mawsd.js`)}`);
+const mawsdEntry = (m: BenchMachine) => (m.stage === 'runner' ? `"$(cat ${quote(packPath(m))})/runtime/bin/node" "$(cat ${quote(packPath(m))})/out/main/mawsd.js"` : `${runtimeWords(m)} ${quote(`${m.head}/out/main/mawsd.js`)}`);
 /** A command of the scratch daemon's (status, keys, enroll), in the profile's home and temporary directory. */
 const mawsd = (m: BenchMachine) => `env ${envWords(profileEnv(m))} ${mawsdEntry(m)}`;
 /** The bench agent's command, on the machine's runtime. */
-const agent = (m: BenchMachine, command: 'prepare' | 'serve', engineVersion: string) => `env ${envWords(profileEnv(m))} ${quote(m.node)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion))}`;
+const agent = (m: BenchMachine, command: 'prepare' | 'serve', engineVersion: string) => `env ${envWords(profileEnv(m))} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion))}`;
 const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quote(m.label)}`;
 
 /**
@@ -212,7 +237,13 @@ export class BenchRun {
 
   #remote(command: string, options?: { stdinFile?: string; timeoutMs?: number }): Promise<RunResult> {
     this.#quiet(options?.timeoutMs ?? 0);
+    this.#scratchOnly(command);
     return this.#deps.runner.run(transportArgv(this.#m.transport, command), options);
+  }
+  /** Refuses a command that names the production mawsd's profile, entry or unit mode. */
+  #scratchOnly(command: string): void {
+    const named = productionProblem(command);
+    if (named !== null) throw new Error(`${this.#m.name}: refused a command: ${named}`);
   }
   /** Refuses a call that would reach the machine inside its quiet window, now or within `spanMs`. */
   #quiet(spanMs: number): void {
@@ -240,7 +271,7 @@ export class BenchRun {
   }
 
   /** The scratch daemon from M7's head: packed and started here on the VM; on the mini, mini-ops' start waited for. */
-  async stage(): Promise<void> {
+  async stage(headBundle?: HeadBundle): Promise<void> {
     const m = this.#m;
     if (m.stage === 'runner') {
       const repo = m.repo ?? 'https://github.com/SSFSKIM/MAWS.git';
@@ -255,7 +286,11 @@ export class BenchRun {
       await this.#must(startLine(m, mawsdEntry(m)), 'starting the scratch mawsd');
       this.#teardown.push({ what: 'the scratch mawsd', step: () => this.#stopDaemon() });
     } else {
-      this.#deps.say(`[bench] ${m.name}: mini-ops starts the scratch mawsd from ${m.head} at ${m.commit.slice(0, 9)} under the production mawsd's node runtime, with:`);
+      if (stageHeadOf(m) === 'copy') {
+        if (headBundle === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
+        await this.#copyHead(headBundle);
+      }
+      this.#deps.say(`[bench] ${m.name}: mini-ops starts the scratch mawsd from ${m.head} at ${m.commit.slice(0, 9)} under the production mawsd's runtime, with:`);
       this.#deps.say(`[bench]   ${startLine(m, mawsdEntry(m))}`);
       this.#deps.say(`[bench] ${m.name}: waiting for it to answer on ${m.profile}`);
       this.#teardown.push({ what: 'the scratch mawsd', step: async () => this.#deps.say(`[bench] ${m.name}: mini-ops stops the scratch mawsd: kill "$(cat ${benchDir(m)}/mawsd.pid)"`) });
@@ -268,6 +303,27 @@ export class BenchRun {
       await this.#sleep(STATUS_EVERY_MS);
     }
     this.#deps.say(`[bench] ${m.name}: the scratch mawsd answers`);
+  }
+
+  /**
+   * The head bundle into `head`, after two read-only preflights: the runtime's Electron is the bundle's, and the profile's
+   * volume has room for the tarball and twice what it unpacks to. Sent by `cat >` into the bench directory, unpacked under
+   * `head` alone (its entries checked when it was built: none absolute, none with `..`), the tarball removed after.
+   */
+  async #copyHead(bundle: HeadBundle): Promise<void> {
+    const m = this.#m;
+    if (bundle.commit !== m.commit) throw new Error(`${m.name}: the head bundle is of ${bundle.commit.slice(0, 9)}, not ${m.commit.slice(0, 9)}`);
+    const versions = await this.#must(`env ${envWords(profileEnv(m))} ${quote(m.node)} -p process.versions.electron`, 'reading the runtime’s Electron version');
+    const electron = versions.stdout.trim();
+    if (electron !== bundle.electron) throw new Error(`${m.name}: refused to copy the head: the runtime ${m.node} is Electron ${electron || '(none: not an Electron)'}, the head bundle's is Electron ${bundle.electron}`);
+    const df = await this.#must(`df -Pk ${quote(m.profile)}`, 'reading the profile volume’s free space');
+    const available = Number(df.stdout.trim().split('\n').at(-1)?.trim().split(/\s+/)[3]) * 1024;
+    const needed = bundle.tarBytes + 2 * bundle.unpackedBytes;
+    if (!Number.isFinite(available) || available < needed) throw new Error(`${m.name}: refused to copy the head: the profile's volume has ${mib(available)} MiB free, under the ${mib(needed)} MiB the bundle needs (its ${mib(bundle.tarBytes)} MiB tarball and twice its ${mib(bundle.unpackedBytes)} MiB unpacked)`);
+    const tar = `${benchDir(m)}/head.tar`;
+    await this.#must(`mkdir -p ${quote(benchDir(m))} && cat > ${quote(tar)}`, 'copying the head bundle', { stdinFile: bundle.tar, timeoutMs: 10 * 60_000 });
+    await this.#must(`rm -rf ${quote(m.head)} && mkdir -p ${quote(m.head)} && tar -xf ${quote(tar)} -C ${quote(m.head)} && rm -f ${quote(tar)}`, 'unpacking the head bundle', { timeoutMs: 10 * 60_000 });
+    this.#deps.say(`[bench] ${m.name}: the head ${m.commit.slice(0, 9)} is unpacked in ${m.head} (Electron ${electron}, ${mib(bundle.unpackedBytes)} MiB)`);
   }
 
   async #stopDaemon(): Promise<void> {
@@ -353,7 +409,9 @@ export class BenchRun {
   serve(onLine: (line: string) => void): Started {
     const m = this.#m;
     this.#quiet(SERVE_SPAN_MS);
-    const serving = this.#deps.runner.start(transportArgv(m.transport, agent(m, 'serve', this.#deps.engineVersion)));
+    const line = agent(m, 'serve', this.#deps.engineVersion);
+    this.#scratchOnly(line);
+    const serving = this.#deps.runner.start(transportArgv(m.transport, line));
     serving.onLine(onLine);
     this.#agent = serving;
     this.#teardown.push({
@@ -396,8 +454,9 @@ export class BenchRun {
   }
 
   /**
-   * Once the bench is done: the scratch profile removed (the VM's here; the mini's by mini-ops), unless a bench process
-   * still lives on the machine, when it refuses, saying so, and leaves the profile. True when the profile goes.
+   * Once the bench is done: the scratch profile removed with everything the bench put in it, unless a bench process still
+   * lives on the machine (on the mini, mini-ops stops its scratch mawsd first), when it refuses, saying so, and leaves the
+   * profile. True when the profile goes.
    */
   async removeProfile(): Promise<boolean> {
     const m = this.#m;
@@ -407,14 +466,61 @@ export class BenchRun {
       this.#deps.say(`[bench] ${m.name}: refused to remove the scratch profile: ${left.length} bench process${left.length === 1 ? '' : 'es'} still run${left.length === 1 ? 's' : ''} there (pids ${left.join(', ')}); ${m.stage === 'mini-ops' ? `mini-ops stops them (kill "$(cat ${benchDir(m)}/mawsd.pid)" for the daemon)` : 'end them'} and remove it again`);
       return false;
     }
-    if (m.stage === 'mini-ops') {
-      this.#deps.say(`[bench] ${m.name}: no bench process is left; mini-ops removes the scratch profile: rm -rf ${quote(m.profile)}`);
-      return true;
-    }
+    // the profile and all the bench put in it: the head, a tarball left by a failed unpack, the pack, the stores
     await this.#must(`rm -rf ${quote(m.profile)}`, 'removing the scratch profile');
-    this.#deps.say(`[bench] ${m.name}: the scratch profile is removed`);
+    this.#deps.say(`[bench] ${m.name}: the scratch profile is removed, its head and every bench file in it`);
     return true;
   }
+}
+
+const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+
+/** This Mac's head bundle for a machine whose head is copied: the tarball, its size, what it unpacks to, its Electron. */
+export interface HeadBundle {
+  tar: string;
+  tarBytes: number;
+  unpackedBytes: number;
+  electron: string;
+  commit: string;
+}
+
+/** The fixtures the latency stub reads (each quoted `….jsonl` in its source), under spikes/protocol-probe/fixtures. */
+export const stubFixtures = (stubSource: string): string[] => [...new Set([...stubSource.matchAll(/'([\w./-]+\.jsonl)'/g)].map((match) => match[1]!))].sort();
+
+/** Why an archive's entries are refused: one that is absolute or climbs out with `..`. */
+export const archiveProblems = (entries: readonly string[]): string[] => entries.filter((entry) => entry.startsWith('/') || entry.split('/').includes('..')).map((entry) => `the head bundle's entry ${entry} would unpack outside the head`);
+
+const sizeOf = (dir: string): number => readdirSync(dir, { withFileTypes: true }).reduce((sum, entry) => sum + (entry.isDirectory() ? sizeOf(join(dir, entry.name)) : entry.isFile() ? statSync(join(dir, entry.name)).size : 0), 0);
+
+/**
+ * Builds the head bundle in `out` from `repo` at `commit` (its HEAD, with no tracked change): `pnpm mawsd:pack --no-build`
+ * (main's build, the externals' closure with node-pty's N-API prebuild, the session host's prebuild, no runtime on a Mac), the
+ * latency stub and its fixtures beside it as the checkout lays them out, `bench-head.json` (the commit and the pinned
+ * Electron, which the machine's runtime must be), and the tarball of it all, its entries checked.
+ */
+export async function buildHeadBundle(repo: string, out: string, runner: CommandRunner, commit: string): Promise<HeadBundle> {
+  const head = await runner.run(['git', '-C', repo, 'rev-parse', 'HEAD']);
+  if (head.stdout.trim() !== commit) throw new Error(`the head bundle is built from ${commit.slice(0, 9)}, and ${repo} is at ${head.stdout.trim().slice(0, 9) || '?'}`);
+  if ((await runner.run(['git', '-C', repo, 'diff', '--quiet', 'HEAD'])).code !== 0) throw new Error(`${repo} has tracked changes: the head bundle is its commit's alone`);
+  // --no-build: the bench's own `scripts/e2e-build.sh plain` built out/, which the bench app runs too (a main-only
+  // rebuild here would change it under the app)
+  const packed = await runner.run(['pnpm', '--dir', repo, '--silent', 'mawsd:pack', '--no-build', '--out', join(out, 'pack')], { timeoutMs: 20 * 60_000 });
+  const pack = packed.stdout.trim().split('\n').at(-1) ?? '';
+  if (packed.code !== 0 || !pack.startsWith(join(out, 'pack'))) throw new Error(`pnpm mawsd:pack failed (exit ${packed.code}): ${packed.stderr.trim().slice(-600)}`);
+  const stub = 'test/support/latency-engine-stub.mjs';
+  for (const file of [stub, ...stubFixtures(readFileSync(join(repo, stub), 'utf8')).map((name) => `spikes/protocol-probe/fixtures/${name}`)]) {
+    mkdirSync(dirname(join(pack, file)), { recursive: true });
+    cpSync(join(repo, file), join(pack, file));
+  }
+  const electron = (JSON.parse(readFileSync(join(repo, 'node_modules/electron/package.json'), 'utf8')) as { version: string }).version;
+  writeFileSync(join(pack, 'bench-head.json'), `${JSON.stringify({ commit, electron })}\n`);
+  const tar = join(out, 'head.tar');
+  const made = await runner.run(['env', 'COPYFILE_DISABLE=1', 'tar', '-C', pack, '-cf', tar, '.']); // no AppleDouble entries
+  if (made.code !== 0) throw new Error(`tar failed (exit ${made.code}): ${made.stderr.trim().slice(-600)}`);
+  const listed = await runner.run(['tar', '-tf', tar]);
+  const problems = archiveProblems(listed.stdout.split('\n').filter(Boolean));
+  if (listed.code !== 0 || problems.length > 0) throw new Error(problems.join('\n') || `tar -tf failed (exit ${listed.code})`);
+  return { tar, tarBytes: statSync(tar).size, unpackedBytes: sizeOf(pack), electron, commit };
 }
 
 /** The agent's arguments, one JSON word: what it needs of the machine, no secret. */
