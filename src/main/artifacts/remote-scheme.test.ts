@@ -108,7 +108,7 @@ function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: strin
   machines.record(PAGE, MINI);
   const dispatch = vi.fn(async (_owner: string, name: string, input: { artifactId: string }) => {
     asked.push(`local:${name} ${input.artifactId}`);
-    if (name === 'artifacts.content') return { ok: true, value: { revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path: file } };
+    if (name === 'artifacts.content' && input.artifactId === HERE) return { ok: true, value: { revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path: file } };
     return { ok: false, error: { code: 'invalid_input', message: 'no such artifact' } };
   });
   const logged: string[] = [];
@@ -155,24 +155,36 @@ describe('the responder chain', () => {
   });
 });
 
+// b3's review: this Mac's store answers an id the table doesn't place before any referrer does, and the responder never
+// writes the table, so a referrer can't take a local artifact to another machine. An embed this Mac's store doesn't hold
+// goes to the machine of the page it loads from.
 describe('the referrer rule', () => {
-  it('sends a page’s embed to the machine of the page it loads from, and records it there once that machine answered it', async () => {
+  it('sends a page’s embed this Mac’s store doesn’t hold to the machine of the page it loads from, recording nothing', async () => {
     const s = scene();
     const font = s.handler(new Request(url(EMBED, 'assets/face.woff2'), { referrer: url(PAGE, 'index.html', 3) }));
     const id = await s.opened(0);
     expect(s.link.opens()[0]!.http).toEqual({ url: url(EMBED, 'assets/face.woff2'), method: 'GET' });
     s.link.answer(id, 200, { 'content-length': '4' }, ['font']);
     expect(await (await font).text()).toBe('font');
-    expect(s.machines.machineOf(EMBED)).toBe(MINI);
-    // the embed's own loads (its referrer the embed) find it, and an origin-only referrer is the page's too
-    const own = s.handler(new Request(url(EMBED, 'index.html')));
-    s.link.answer(await s.opened(1), 200, {}, ['embed']);
-    expect(await (await own).text()).toBe('embed');
-    const other = '3d4e5f6a-7b8c-4d9e-afb0-b1c2d3e4f5a6';
-    const viaOrigin = s.handler(new Request(url(other, 'assets/a.png'), { referrer: `maws-artifact://${PAGE}/` }));
-    s.link.answer(await s.opened(2), 404, { 'content-type': 'text/plain' });
+    expect(s.asked).toEqual([`local:artifacts.content ${EMBED}`, `stream ${url(EMBED, 'assets/face.woff2')}`]); // this Mac's store first
+    expect(s.machines.machineOf(EMBED)).toBeNull();
+    // an origin-only referrer is the page's too, and the machine's own 404 is the answer
+    const viaOrigin = s.handler(new Request(url(EMBED, 'assets/a.png'), { referrer: `maws-artifact://${PAGE}/` }));
+    s.link.answer(await s.opened(1), 404, { 'content-type': 'text/plain' });
     expect((await viaOrigin).status).toBe(404);
-    expect(s.machines.machineOf(other)).toBeNull(); // the machine didn't have it: nothing recorded
+    // a load of the embed with no referrer (an unplaced id): this Mac's 404, nothing sent
+    const bare = await s.handler(new Request(url(EMBED, 'index.html')));
+    expect(bare.status).toBe(404);
+    expect(s.link.opens()).toHaveLength(2);
+  });
+
+  it('keeps a local artifact here whatever page refers to it, and later loads of it too', async () => {
+    const s = scene();
+    const referred = await s.handler(new Request(url(HERE), { referrer: url(PAGE, 'index.html', 3) }));
+    expect(await referred.text()).toContain('from main');
+    expect(await (await s.handler(new Request(url(HERE)))).text()).toContain('from main');
+    expect(s.link.sent).toEqual([]);
+    expect(s.machines.machineOf(HERE)).toBeNull();
   });
 
   it('leaves to this Mac an embed whose page is this Mac’s, or whose referrer is no artifact', async () => {

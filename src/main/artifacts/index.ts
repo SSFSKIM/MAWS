@@ -31,7 +31,9 @@
 //
 // P5 O7 M5b (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5's "The `http` stream"): the chain asks the
 // remote responder (`remote`, remote lane B's: ./remote-scheme.ts) after the presenter's embeds and before the local path,
-// so a page of an artifact on another machine's session renders here from that machine's artifact endpoint.
+// so a page of an artifact on another machine's session renders here from that machine's artifact endpoint; and, b3's
+// review, at its referrer stage after the local path answered 404 (an embed this Mac's store doesn't hold, of a page
+// another machine serves), so a referrer never takes a local artifact elsewhere.
 //
 // P5 O5 M4 (M4's "`artifacts.export` becomes `machine`"): the command is machine-owned, registered here through
 // `registerMachine`, which the router runs on the embedded shape and, on the daemon shape, only while the attached `mawsd`
@@ -48,7 +50,8 @@ import { installRenderSeams } from '../../render/e2e-seams'; // P5 O5 M3
 import { answerExportRequests, type ExporterRegistry, type ExportService } from '../../render/export';
 import type { DocumentAuthorDeps } from '../../render/export-document';
 import { appOriginOf, guardPermissions, installFramePolicies } from '../../render/policies';
-import { inOrder, serveArtifacts, type ContentLookup, type SchemeResponder } from '../../render/scheme'; // P5 O5 M2; P5 O7 M5b: inOrder
+import { inOrder, serveArtifacts, type ContentLookup } from '../../render/scheme'; // P5 O5 M2; P5 O7 M5b: inOrder
+import type { RemoteResponder } from './remote-scheme'; // P5 O7 M5b
 import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
 import { MACHINE_ARTIFACTS_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M2
 
@@ -64,7 +67,7 @@ export interface ArtifactsDeps {
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
   artifactsSocket: string | null; // P5 O5 M2: the daemon shape's `mawsd` artifacts.sock, proxied to while its welcome lists machine.artifacts; null on the embedded shape
   authors?: DocumentAuthorDeps; // P5 O5 M3: a document's Word comment authors (WR 73), the root's to read
-  remote?: SchemeResponder; // P5 O7 M5b: the scheme's remote responder (./remote-scheme.ts), after the embeds
+  remote?: RemoteResponder; // P5 O7 M5b: the scheme's remote responder (./remote-scheme.ts): after the embeds, and after a local 404
 }
 
 // The store frames' policies on the window's default session and on the capture partition (P3-L M6b; E2's, in
@@ -86,8 +89,10 @@ export function startArtifacts({ hosts, register, registerMachine, emit, env, op
   const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
   // P5 O5 M2: read per request, so a daemon restarted into another build is followed (the build check's restart)
   const endpoint = artifactsSocket === null ? undefined : () => (hosts.peer('machine')?.capabilities.includes(MACHINE_ARTIFACTS_CAPABILITY) ? { socketPath: artifactsSocket } : null);
-  const first = remote === undefined ? embeds : inOrder(embeds, remote); // P5 O7 M5b
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, first, endpoint);
+  // P5 O7 M5b: the embeds, the remote responder by placement, this Mac's store (or its daemon's), the remote responder by referrer
+  const first = remote === undefined ? embeds : inOrder(embeds, (request) => remote(request, 'placed'));
+  const notFound = remote === undefined ? undefined : (request: Request) => remote(request, 'referred');
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, first, endpoint, notFound);
   // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart
   let hostLosses = 0;
   const stopLosses = hosts.onState('engine-host', (state) => {

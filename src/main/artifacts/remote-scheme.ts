@@ -3,10 +3,16 @@
 // artifact of another machine's session renders in the pane's frame, each request of its page fetched from that machine's
 // artifact endpoint over the machine's RL2 link.
 //
-// - Which requests are its own (`respond`): one for an artifact `ArtifactMachines` places on an RL2 machine, else one whose
-//   referrer is a scheme URL of an artifact placed there (a page's embeds: another artifact's assets, fonts, frames), else
-//   none (null: the local path answers). An embed the referrer's machine answered is that machine's, and is recorded so,
-//   so the embed's own loads find it. The table is the one predicate every reader of an artifact's machine reads.
+// - Which requests are its own (`respond`), in two stages of main's chain (../artifacts/index.ts):
+//   - `placed` (the default), after the presenter's embeds: an artifact `ArtifactMachines` places on an RL2 machine;
+//   - `referred`, after this Mac's store answered 404: an artifact whose request's referrer is a scheme URL of an artifact
+//     placed on an RL2 machine (a page's embeds: another artifact's assets, fonts, frames) goes to that machine.
+//   Otherwise null (the local path's answer stands). b3's review: a local artifact is absent from the table as an unheard
+//   remote one is, so this Mac's store answers an unplaced id before any referrer does, and the responder never writes
+//   the table (its writer is the adapter, from what a link answers): a referrer can't take a local id to another machine.
+//   An embed's own loads (its referrer the embed, which the table doesn't place) fall to this Mac's store; the stock frame
+//   policy and CSP keep an artifact page from embedding another artifact's frames in the first place
+//   (src/render/policies.ts, src/services/artifacts/scheme/scheme-handler.ts).
 // - Each request is one `http` read open (`{url, method, range?}`, no `op`), at most HTTP_STREAMS_PER_LINK open per link at
 //   once, the rest queued in arrival order. Its `Response` is answered with the status and headers the endpoint sent, the
 //   body the stream's bytes, which this side's credit bounds: the endpoint may send HTTP_STREAM_CREDIT bytes ahead, and each
@@ -25,7 +31,6 @@ import { artifactUrl } from '@shared/artifacts/scheme';
 import type { MachineRef } from '@shared/machine/ref';
 import type { RemoteLink, RemoteStream } from '../machines/remote/link';
 import type { StreamOpened, StreamRequest } from '../machines/remote/streams';
-import type { SchemeResponder } from '../../render/scheme';
 import type { ArtifactMachines } from './machines';
 
 /** The most `http` streams one link holds open at once; the rest wait their turn (the channel holds 32 of every kind). */
@@ -73,7 +78,7 @@ export function artifactIdOfUrl(url: string): string | null {
 const plain = (status: number, body: string): Response => new Response(body, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
 
 export interface RemoteSchemeDeps {
-  machines: Pick<ArtifactMachines, 'machineOf' | 'record'>;
+  machines: Pick<ArtifactMachines, 'machineOf'>;
   remote(machine: MachineRef): RemoteLink | null;
   openTimeoutMs?: number;
   idleMs?: number;
@@ -81,13 +86,19 @@ export interface RemoteSchemeDeps {
 }
 
 export interface RemoteScheme {
-  /** The scheme's responder for another machine's artifacts: its answer, or null for a request that isn't one. */
-  respond: SchemeResponder;
+  /** The scheme's responder for another machine's artifacts at a stage of the chain: its answer, or null for a request that isn't one. */
+  respond: RemoteResponder;
   /** `request` answered by `machine`'s artifact endpoint over its link (an asset's download). */
   fetch(machine: MachineRef, request: Request): Promise<Response>;
   /** Ends every request in flight (the app's shutdown). */
   stop(): void;
 }
+
+/**
+ * The remote responder at a stage of main's chain: `placed` (the default) for an artifact the table places on an RL2
+ * machine, `referred` (after this Mac's store answered 404) for one whose referrer's artifact the table places there.
+ */
+export type RemoteResponder = (request: Request, stage?: 'placed' | 'referred') => Promise<Response | null>;
 
 /** A link's open `http` streams and the requests waiting for one. */
 type Slots = { open: number; waiting: Array<() => void>; holders: Set<Holder>; sweep: ReturnType<typeof setTimeout> | null };
@@ -274,16 +285,15 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
   }
 
   return {
-    async respond(request) {
+    async respond(request, stage = 'placed') {
       const artifactId = artifactIdOfUrl(request.url);
       if (artifactId === null) return null;
-      const own = deps.machines.machineOf(artifactId);
-      const from = own === null ? artifactIdOfUrl(request.referrer) : null;
-      const machine = own ?? (from === null ? null : deps.machines.machineOf(from));
-      if (machine === null) return null;
-      const response = await fetch(machine, request);
-      if (own === null && response.ok) deps.machines.record(artifactId, machine); // the embed is the referrer's machine's
-      return response;
+      const placed = deps.machines.machineOf(artifactId);
+      if (stage === 'placed') return placed === null ? null : fetch(placed, request);
+      if (placed !== null) return null; // asked of its machine at the first stage
+      const from = artifactIdOfUrl(request.referrer);
+      const machine = from === null ? null : deps.machines.machineOf(from);
+      return machine === null ? null : fetch(machine, request);
     },
     fetch,
     stop() {
