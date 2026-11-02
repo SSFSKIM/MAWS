@@ -1085,7 +1085,18 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         const rows = readFileSync(journalPath, 'utf8').trim().split('\n');
         return rows.slice(rows.findLastIndex((row) => row.includes('"result"'))).map((row) => row.slice(0, 600)).join('\n');
       };
-      expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's log:\n${bLines(/replay|connector|mcp|deliver|observ|locat/i)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
+      // and, on a failure, the observer's row, its report read directly, and what B's logs said of connectors
+      const observerSaid = async () => {
+        if (observed.state === 'ready') return '';
+        const row = (await b.request<Record<string, unknown>[]>('engine.sessions')).find((s) => s.appSessionId === observerApp);
+        const report = await b.request('session.mcpStatus', { appSessionId: observerApp }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
+        const logs = (readdirSync(b.userData, { recursive: true }) as string[]).filter((name) => name.endsWith('.log')).map((name) => {
+          const lines = readFileSync(join(b.userData, name), 'utf8').split('\n').filter((line) => /connector|observ|mcp|deliver|locat|status cache/i.test(line));
+          return `${name}:\n${lines.slice(-30).map((line) => line.slice(0, 400)).join('\n')}`;
+        });
+        return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
+      };
+      expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
       await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s observer stopped' }).toEqual([]);
 
