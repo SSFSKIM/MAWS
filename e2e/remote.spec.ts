@@ -25,7 +25,13 @@
 //      A runs this launch with no harness confirmation, so the owner's terminal and forward ask nothing: a step-up
 //      would stop the act at a sheet nobody answers;
 //   2. directly: the map sends it to B's listener, so the link comes `up` over the direct carrier; the hover reads
-//      "direct (tailnet)" and the pane shows B's history again; then (M4, under MAWS_E2E_STEP_UP=accept) "+ Session" in
+//      "direct (tailnet)" and the pane shows B's history again; then (M5a) at A's ask B's session makes two artifacts
+//      through its `maws` tools (a text file of B's checkout as a File artifact, and an HTML page), linked to it on B:
+//      the session's Artifacts tool in A lists them and reads the text; a rename in A's Library on B shows in B's own
+//      library (read over B's machine.sock); Export › PDF of the page renders on B and Save As lands it in A's folder
+//      (the save seam, MAWS_E2E_SAVE_PATH); Open externally on an HTML file of B's checkout opens a copy paged to A (the
+//      open-log seam, MAWS_E2E_OPEN_LOG); the Browser tool's notice reads B's own reason; then (M4, under
+//      MAWS_E2E_STEP_UP=accept) "+ Session" in
 //      A's own checkout of the same org project (a `.smns` naming B's project) starts sessions on B through the machine
 //      menu: one with its text as the brief, opening in A's pane with its reply and recording A's member as its
 //      requester; one in a new worktree with a dropped file, which goes up under the worktree's desk-uploads before the
@@ -38,10 +44,10 @@
 // No wall-clock bound beyond Playwright's own timeouts: the measured numbers are M7's.
 // Run by `pnpm e2e:remote` (MAWS_REMOTE_E2E=1).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
@@ -120,6 +126,15 @@ const WAITING_AGAIN = 'Check it once more.';
 const WAITING_SECOND = 'second-asked';
 // M6: a word of B's first session's transcript (its first prompt, FIRST) and of no session's title once B's owner names it
 const SEARCHED = 'hello';
+// M5a: what B's first session makes at A's ask, through its `maws` tools (served by B's engine host, so each artifact is
+// linked to the session): a text file it wrote in B's checkout, delivered as a File artifact, and an HTML page, whose
+// PDF B's render host exports; the title A renames the File artifact to; an HTML file of B's checkout A opens a copy of
+const MAKE_ASK = 'Make the notes and the report.';
+const MADE_REPLY = 'Both are in B’s library.';
+const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the session on B delivered.\n' };
+const RENAMED = 'B notes, renamed on A';
+const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
+const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
 // The repository's own settings, so the runner's global ones (a hooks path, signing, an identity) change nothing B's
@@ -346,7 +361,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
   const journals = join(root, 'journals');
   const hooks = join(root, 'no-hooks'); // B's repository's hooks path: none run
   const aCheckout = join(root, A_PROJECT); // A's own checkout of the org project, for "+ Session"
-  for (const dir of [checkout, journals, hooks, aCheckout]) mkdirSync(dir);
+  const savedOnA = join(root, 'saved-on-a'); // M5a: where A's Save As lands (MAWS_E2E_SAVE_PATH, A's second launch)
+  const openLog = join(root, 'a-open.log'); // M5a: what A's main hands the OS to open (MAWS_E2E_OPEN_LOG)
+  for (const dir of [checkout, journals, hooks, aCheckout, savedOnA]) mkdirSync(dir);
   checkoutRepository(checkout, hooks);
   checkoutRepository(aCheckout, hooks); // a repository too: New chat offers Worktree only in git
   let scene: RemoteScene | null = null;
@@ -368,6 +385,14 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     journal.turn(UPLOAD_REPLY); // M4: the message naming the dropped file's path on B
     const devPort = await quietPort();
     journal.turn(linkReply(devPort)); // M3: the reply naming B's dev server
+    // M5a: A's ask in its second launch, answered by two `artifact_create` calls (a rule allows them: nothing asked) that
+    // B's engine host serves, linking each artifact to the session; the tool results are the engine's words, the host's
+    // own answers are what B's store holds
+    const make = journal.prompt();
+    journal.mawsToolCall('artifact_create', { kind: 'file', title: NOTES_ARTIFACT.title, path: NOTES_ARTIFACT.file }, { status: 'created', kind: 'file', title: NOTES_ARTIFACT.title }, { asked: false });
+    journal.mawsToolCall('artifact_create', { kind: 'html', title: REPORT.title, content: REPORT.html }, { status: 'created', kind: 'html', title: REPORT.title }, { asked: false });
+    journal.reply(make, MADE_REPLY);
+    journal.completed(make);
     const fixture = journal.write(journals, 'b-session');
     // M4: the sessions "+ Session" starts on B, the next fixtures on B's list: one whose brief is its first turn, and one
     // in a new worktree, whose journal is written once A's tab names the worktree (its init's directory)
@@ -731,7 +756,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // 2. Directly: B's address maps to its listener, so the link comes up over the direct carrier.
     // MAWS_E2E_STEP_UP=accept: the step-up sheet a spawn always asks for is accepted with no sheet and no Touch ID
     // (src/main/device/step-up-sheet.ts's harness confirmation); the signed action is still the device's.
-    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } });
+    // M5a: Save As lands in `savedOnA` with no dialog, and what main would hand the OS is written to `openLog` instead.
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept', MAWS_E2E_SAVE_PATH: savedOnA, MAWS_E2E_OPEN_LOG: openLog } });
     keepMainLines(a);
     const again = a.page;
     const againApp = a.app;
@@ -751,6 +777,105 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await hoverMachineLine(again, rowAgain, `${B_NAME} · direct (tailnet)`);
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
+
+    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout opens as a copy, and the Browser tool reads B’s reason', async () => {
+      const sessionTab = mainTabById(again, `session:${address}`);
+      const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
+
+      // B's session makes its artifacts at A's ask: the text file it wrote in B's checkout, and a page
+      writeFileSync(join(checkout, NOTES_ARTIFACT.file), NOTES_ARTIFACT.text);
+      await composerOf(again).click();
+      await again.keyboard.type(MAKE_ASK);
+      await again.keyboard.press('Enter');
+      await quoting(expect(main(again).getByText(MADE_REPLY).first(), 'B’s reply once its artifacts are made').toBeVisible({ timeout: 60_000 }), () => `${mainSaid(again)}\nB's log:\n${bLines(/artifact|tool|maws|replay/i)}`);
+      await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+      type Linked = { artifacts: { id: string; title: string; kind: string }[] };
+      const linked = (await b.request<Linked>('artifacts.list', { filter: { appSessionId: app } })).artifacts;
+      expect(linked.map((x) => [x.kind, x.title]).sort(), 'both linked to B’s session in B’s store').toEqual([['file', NOTES_ARTIFACT.title], ['html', REPORT.title]]);
+      const notes = linked.find((x) => x.kind === 'file')!;
+      const report = linked.find((x) => x.kind === 'html')!;
+
+      // The session's Artifacts tool lists them from B, and the text artifact reads there
+      await openSurface(again, 'Artifacts');
+      const tool = surface(again, 'artifacts');
+      await tool.getByRole('button', { name: 'This session', exact: true }).click();
+      const toolRow = (id: string) => tool.locator(`button[data-artifact-row][data-artifact-id="${id}"]`);
+      await quoting(expect(toolRow(notes.id), 'the text artifact in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
+      await expect(toolRow(report.id), 'and the page').toBeVisible();
+      await toolRow(notes.id).click();
+      const record = tool.locator(`[data-artifact-record="${notes.id}"]`);
+      await quoting(expect(record, 'the text read from B').toContainText(NOTES_ARTIFACT.text.trim(), { timeout: 60_000 }), async () => `the record: ${await record.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      await record.getByRole('button', { name: 'Back', exact: true }).click();
+
+      // Open library opens B's library; a rename there is B's store's, as B's own library reads it
+      await tool.getByRole('button', { name: 'Open library', exact: true }).click();
+      const library = again.locator('[data-library]');
+      await expect(library.locator('button[data-library-machine]'), 'the library is B’s').toHaveAttribute('data-library-machine', b.ref, { timeout: 30_000 });
+      await expect(library.getByRole('button', { name: `Library on ${B_NAME}` })).toBeVisible();
+      const libraryRow = (id: string) => library.locator(`article[data-artifact-row="${id}"]`);
+      await expect(libraryRow(notes.id)).toHaveAttribute('aria-label', NOTES_ARTIFACT.title, { timeout: 60_000 });
+      await libraryRow(notes.id).getByRole('button', { name: `Actions for ${NOTES_ARTIFACT.title}` }).click();
+      await again.getByRole('menuitem', { name: 'Rename…' }).click();
+      const rename = again.getByRole('dialog', { name: 'Rename artifact' });
+      await rename.getByRole('textbox', { name: 'Title' }).fill(RENAMED);
+      await rename.getByRole('button', { name: 'Rename', exact: true }).click();
+      await expect(rename).toBeHidden();
+      type Rows = { rows: { id: string; title: string }[] };
+      await expect
+        .poll(async () => (await b.request<Rows>('library.list', {})).rows.find((row) => row.id === notes.id)?.title, { timeout: 60_000, message: `B's own library, over its machine.sock, holds the new title\n${mainSaid(again)}` })
+        .toBe(RENAMED);
+      await expect(libraryRow(notes.id), 'and A’s view of B’s library follows').toHaveAttribute('aria-label', RENAMED, { timeout: 60_000 });
+
+      // Export › PDF of B's page: B's render host exports it, and Save As pages it to A's folder (the save seam)
+      await libraryRow(report.id).getByRole('button', { name: `Actions for ${REPORT.title}` }).click();
+      await again.getByRole('menuitem', { name: 'Export', exact: true }).click();
+      await again.getByRole('menuitem', { name: 'PDF', exact: true }).click();
+      const pdf = join(savedOnA, `${REPORT.title}.pdf`);
+      await expect
+        .poll(() => (existsSync(pdf) ? readFileSync(pdf).subarray(0, 5).toString('latin1') : ''), { timeout: 180_000, message: 'the PDF B exported, saved in A’s folder' })
+        .toBe('%PDF-')
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(again)}\n${mainSaid(again)}\nB's log:\n${bLines(/render|export/i)}`);
+        });
+      await expect(again.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
+      console.log(`[e2e:remote] M5a: B's PDF export saved on A, ${readFileSync(pdf).length} bytes`);
+
+      // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
+      writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
+      await sessionTab.click();
+      await openSurface(again, 'Files');
+      const files = surface(again, 'files');
+      const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+      await expect(checkoutRow, `B's checkout in A's Files tool\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
+      await expect(async () => {
+        if ((await checkoutRow.getAttribute('aria-expanded')) !== 'true') await checkoutRow.click();
+        await expect(checkoutRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+      }).toPass({ timeout: 30_000 });
+      const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await pageRow.click();
+      const external = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"] [data-external-row]`);
+      const open = external.getByRole('button', { name: 'Open externally', exact: true });
+      await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
+      await open.click();
+      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`));
+      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the row: ${await external.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const [copy] = opened();
+      expect(copy, 'a copy under this Mac’s copies of B’s files, not B’s path').toContain(`/maws-remote-copies/${b.ref}/`);
+      expect(readFileSync(copy!, 'utf8'), 'holding the file’s bytes').toBe(PAGE_ON_B.content);
+      await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
+      rmSync(dirname(copy!), { recursive: true, force: true });
+
+      // The Browser tool's notice is B's reason the session's agent has no browser there, as B's own front answers it
+      await sessionTab.click();
+      type Capabilities = { browser?: { available: boolean; reason?: string } };
+      const browserOnB = (await b.request<Capabilities>('session.capabilities', { appSessionId: app })).browser;
+      expect(browserOnB?.available, `B's session has no browser on B: ${JSON.stringify(browserOnB)}`).toBe(false);
+      expect(browserOnB?.reason, 'B’s reason names B').toContain(B_NAME);
+      await openSurface(again, 'Browser');
+      await expect(surface(again, 'browser').locator('[data-browser-agent-unavailable]')).toHaveText(`The agent has no browser here: ${browserOnB!.reason}`, { timeout: 30_000 });
+      console.log(`[e2e:remote] M5a: the Browser tool reads B's reason: ${browserOnB!.reason}`);
+    });
 
     // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now:
     // B's listed row then sits under that project's row, no longer under B's machine row, which the steps above read.)
