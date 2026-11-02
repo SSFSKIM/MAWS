@@ -67,7 +67,7 @@
 // (e2e/support/stub-engine.ts, a real process playing the same fixture through MAWS_E2E_ENGINE_BIN) under a real session
 // host, then SESSION_HOST_RUN's settle (60 s) and window (300 s, every 30 s) over the one process of the profile whose
 // argv0 names `maws-session-host` (the session's holder), with the same readers and validity rule, against
-// SESSION_HOST_BOUND_KIB (4 MiB) on its own, outside DAEMON_IDLE_BOUND's two processes; a valid run over it fails. It
+// SESSION_HOST_BOUND_KIB (5 MiB) on its own, outside DAEMON_IDLE_BOUND's two processes; a valid run over it fails. It
 // writes test-results/daemon-idle-session-host.json and runs as `pnpm e2e:daemon-idle-session-host`, which the plain
 // group's and the baseline's --grep-invert leave out. The stub runs no model and spends nothing.
 //

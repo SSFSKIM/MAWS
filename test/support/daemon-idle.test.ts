@@ -509,9 +509,9 @@ describe("the session host's case", () => {
   const root = '/private/var/folders/x/T/maws-di-sh-abc';
   const hosts = `${root}/ud/supervisor/hosts`;
 
-  it('settles 60 s, then reads every 30 s for 300 s: 11 samples, under the same load rule; the bound is 4 MiB', () => {
+  it('settles 60 s, then reads every 30 s for 300 s: 11 samples, under the same load rule; the bound is 5 MiB (D67)', () => {
     expect(SESSION_HOST_RUN).toEqual({ settleS: 60, windowS: 300, everyS: 30, samples: 11, maxLoad: 5, pairLoad: 4.7 });
-    expect(SESSION_HOST_BOUND_KIB).toBe(4_096);
+    expect(SESSION_HOST_BOUND_KIB).toBe(5_120);
   });
 
   it("measures the profile's session hosts by their argv0's name, a checkout's prebuild or a packaged one: never the engine host, the engine, a look-alike, a process naming the binary in an argument, or another profile's host", () => {
@@ -534,17 +534,17 @@ describe("the session host's case", () => {
 
   it('misses nothing at or under the bound, rounding the footprint as the line prints it, and names a miss and by how much', () => {
     expect(sessionHostMisses(3_089)).toEqual([]);
-    expect(sessionHostMisses(4_096.4)).toEqual([]);
-    expect(sessionHostMisses(4_096.6)).toEqual(["the footprint 4097 KiB is 1 KiB over the session host's bound 4096 KiB"]);
-    expect(sessionHostMisses(5_000)).toEqual(["the footprint 5000 KiB is 904 KiB over the session host's bound 4096 KiB"]);
+    expect(sessionHostMisses(5_120.4)).toEqual([]);
+    expect(sessionHostMisses(5_120.6)).toEqual(["the footprint 5121 KiB is 1 KiB over the session host's bound 5120 KiB"]);
+    expect(sessionHostMisses(6_000)).toEqual(["the footprint 6000 KiB is 880 KiB over the session host's bound 5120 KiB"]);
   });
 
-  it('reads as the document quotes it, `session host: footprint <KiB> (bound 4096) <verdict>`, then the samples, the RSS and CPU as diagnostics and the load with its pair', () => {
+  it('reads as the document quotes it, `session host: footprint <KiB> (bound 5120) <verdict>`, then the samples, the RSS and CPU as diagnostics and the load with its pair', () => {
     expect(sessionHostLine({ footprintKiB: 3_089.4, rssKiB: 4_784, samples: 11, cpuS: 0.01, load: 2.31, loadPair: 1.52 })).toBe(
-      '[daemon-idle] session host: footprint 3089 KiB (bound 4096) within · median of 11 · rss 4784 KiB · cpu 0.01 s over 300 s · load 2.3 (30 s pair 1.5)',
+      '[daemon-idle] session host: footprint 3089 KiB (bound 5120) within · median of 11 · rss 4784 KiB · cpu 0.01 s over 300 s · load 2.3 (30 s pair 1.5)',
     );
-    expect(sessionHostLine({ footprintKiB: 5_000, rssKiB: 6_000, samples: 11, cpuS: 0.2, load: 3, loadPair: 2 })).toBe(
-      '[daemon-idle] session host: footprint 5000 KiB (bound 4096) over by 904 KiB · median of 11 · rss 6000 KiB · cpu 0.20 s over 300 s · load 3.0 (30 s pair 2.0)',
+    expect(sessionHostLine({ footprintKiB: 6_000, rssKiB: 6_000, samples: 11, cpuS: 0.2, load: 3, loadPair: 2 })).toBe(
+      '[daemon-idle] session host: footprint 6000 KiB (bound 5120) over by 880 KiB · median of 11 · rss 6000 KiB · cpu 0.20 s over 300 s · load 3.0 (30 s pair 2.0)',
     );
   });
 });

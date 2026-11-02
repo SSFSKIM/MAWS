@@ -531,11 +531,12 @@ export function mawsdSpineLine(run: { windows: Record<SpineWindow, ShapeReading 
 // P5 O16 M6 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §I; D3, D18): the session host's own cost, one
 // `maws-session-host` holding an idle stub-engine session on the daemon shape, read alone against its own bound, outside
 // DAEMON_IDLE_BOUND's two processes (D18: a session host exists only with a live session, which the idle scene's replay
-// never spawns). The bound is 4 MiB of physical footprint: D3's Go prototype read 3,089 KiB idle on the MacBook, and with
-// the writer's acks trimming the ring at idle the host holds little beyond the binary's own, so about a third's margin.
+// never spawns). The bound is 5 MiB of physical footprint (D67): the real host on two Ps read about 3.5 MiB idle on the
+// MacBook and 4.7 MiB in CI before the two-P saving, mostly the Go runtime's own memory for its goroutines; D3's 4 MiB,
+// from a prototype that ran none of them, undercounted. A quarter's margin over CI's expected reading, rounded to 256.
 // The window settles 60 s and reads 300 s under IDLE_RUN's load rule.
 export const SESSION_HOST_RUN = { settleS: 60, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad, pairLoad: IDLE_RUN.pairLoad } as const;
-export const SESSION_HOST_BOUND_KIB = 4_096;
+export const SESSION_HOST_BOUND_KIB = 5_120;
 const SESSION_HOST_ARGV0 = 'maws-session-host';
 
 // The profile's session hosts: those naming the profile's root (each host's `--hosts <profile>/supervisor/hosts`) whose
