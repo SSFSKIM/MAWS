@@ -19,6 +19,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { MachineRef } from '@shared/machine/ref';
 import { DAEMON_FILES, daemonPaths, socketFallbackDir } from '@shared/daemon/files';
 import type { MachineLink } from './manager';
+import type { CommandBudgets } from './budgets';
 import { createSocketLink, LINK_TIMING, retryDelay } from './socket-link';
 
 const REF = 'FarMachineRef000000000' as MachineRef;
@@ -29,6 +30,8 @@ const PROBE = {
     'probe.echo': { input: z.strictObject({ text: z.string() }), output: z.strictObject({ text: z.string(), client: z.string() }), owner: 'machine' },
     'probe.slow': { input: z.void(), output: z.void(), owner: 'machine' },
     'probe.fail': { input: z.void(), output: z.void(), owner: 'machine' },
+    'probe.late': { input: z.void(), output: z.void(), owner: 'machine' }, // P5 O7 M5a: answers past the default deadline
+    'probe.later': { input: z.void(), output: z.void(), owner: 'machine' },
   },
   events: { 'probe.event': z.strictObject({ n: z.number() }) },
   hostEvents: [],
@@ -83,6 +86,8 @@ async function farMachine(profile = mkdtempSync(join(tmpdir(), 'maws-link-'))): 
         return { text, client: client.id };
       });
       on('probe.slow', () => new Promise<void>(() => {}));
+      on('probe.late', () => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+      on('probe.later', () => new Promise<void>((resolve) => setTimeout(resolve, 600)));
       on('probe.fail', async () => {
         throw new HostCommandError(ipcError('timeout', 'the far side ran out of time'));
       });
@@ -136,9 +141,9 @@ async function farMachine(profile = mkdtempSync(join(tmpdir(), 'maws-link-'))): 
   return far;
 }
 
-function link(profile: string, timing = TIMING): { link: MachineLink; states: string[]; events: [EventName, unknown][]; log: Mock<(line: string) => void> } {
+function link(profile: string, timing = TIMING, budgets?: CommandBudgets): { link: MachineLink; states: string[]; events: [EventName, unknown][]; log: Mock<(line: string) => void> } {
   const log = vi.fn<(line: string) => void>();
-  const made = createSocketLink({ profile, build: 'near-build', log, registry: PROBE, timing });
+  const made = createSocketLink({ profile, build: 'near-build', log, registry: PROBE, timing, ...(budgets !== undefined && { budgets }) });
   cleanups.push(() => made.close());
   const states: string[] = [];
   const events: [EventName, unknown][] = [];
@@ -212,6 +217,16 @@ describe('the socket link', () => {
     await expect(made.dispatch('probe.fail' as CommandName, undefined, page(1))).resolves.toEqual({ ok: false, error: { code: 'timeout', message: 'the far side ran out of time' } });
     await expect(made.dispatch('session.list', {}, page(1))).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     await expect(made.dispatch('probe.slow' as CommandName, undefined, page(1))).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
+  });
+
+  // P5 O7 M5a ("The link gives each call its command's budget"): a name the injected table budgets is waited for its
+  // budget and a round trip; any other at the link's default (300 ms here, 10 s in production)
+  it('waits a budgeted name past the default deadline, and times an unbudgeted one out at it', async () => {
+    const far = await farMachine();
+    const { link: made } = link(far.profile, TIMING, { ['probe.late' as CommandName]: 400 });
+    await until(() => made.state() === 'up');
+    await expect(made.dispatch('probe.late' as CommandName, undefined, page(1))).resolves.toEqual({ ok: true, value: undefined });
+    await expect(made.dispatch('probe.later' as CommandName, undefined, page(1))).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
   });
 
   it('delivers an event the far side emits once it is up', async () => {

@@ -36,6 +36,13 @@
 // or the machine's `attention` feed, cut to the sessions the member views as its rights stand (`Authorizer.ranks`, read
 // again at every record change and new head), as `attention.list` and `session.search` are cut when called.
 //
+// P5 O7 M5a: the `artifact` target rule's placements are kept per channel (`artifactRanks`, artifacts.ts), read by the
+// decisions, `library.list`'s cut and the machine's `artifacts` feed, and dropped by everything that can change what they
+// say or what is decided on them: a record change naming a linked session (the record source's listener here runs before
+// the subscriptions' re-check), the spine's `session.changed` of one and an artifact's relink, create or delete (before the
+// feeds hear the event), a `caps` refresh and a new head. Every drop rechecks the `artifacts` feeds' queued output at once
+// (ArtifactRanks' `onDropped`).
+//
 // P5 O7 M3: a device's streams (streams.ts) open under its acts: a terminal's bytes, read from the pty host's ring and its
 // `onFrame` output, and a forwarded port's connections, each naming a forward the endpoint keeps per device for the resume
 // window (forwards.ts). Both are authorized again at every refresh of the members' rights.
@@ -45,6 +52,7 @@
 // each engine-host link `mawsd` reports.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
@@ -74,6 +82,7 @@ import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
+import { SessionSafe } from './session-safe';
 import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
 import { Streams } from './streams';
@@ -151,6 +160,10 @@ export class Endpoint implements EndpointModule {
   readonly planeFeeds: PlaneFeeds;
   /** Lane B sessions' checkout bounds, which the `checkout` rule and the `checkout` feed both read. */
   readonly checkoutBounds = new CheckoutBounds();
+  /** P5 O7 M5a: the `artifact` rule's placements per channel, which its decisions, `library.list` and the feed read. */
+  readonly artifactRanks = new ArtifactRanks();
+  /** P5 O7 M5a2 fix wave 1: what artifact answers say of sessions (session-safe.ts); set with the executors. */
+  sessionSafe: SessionSafe | null = null;
   readonly interest: Interest;
   /** Remote reads (M8). */
   readonly calls: Calls;
@@ -293,7 +306,10 @@ export class Endpoint implements EndpointModule {
       log,
       now: this.deps.now,
       pingMs: options.pingMs,
-      refreshed: () => this.streams.recheck(),
+      refreshed: () => {
+        this.artifactRanks.clear(); // P5 O7 M5a: a `caps` refresh drops every artifact placement
+        this.streams.recheck();
+      },
     });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
@@ -310,6 +326,7 @@ export class Endpoint implements EndpointModule {
       records: authorization.records ?? this.rl10.members,
       checkouts: this.checkouts,
       checkoutBounds: this.checkoutBounds,
+      artifacts: this.artifactRanks,
       dispatch: (...request) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(...request);
@@ -350,7 +367,11 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now,
       log: (line) => log(line),
     });
+    // P5 O7 M5a2 fix wave 1: what artifact answers say of sessions, one projection for the calls, the acts and the queries.
+    const sessionSafe = new SessionSafe({ ranks: (member) => this.authorizer.ranks(member, this.deps.now()) });
+    this.sessionSafe = sessionSafe;
     this.actions = new Actions({
+      sessionSafe,
       freshness: new Freshness(),
       own: this.own,
       rl10: this.rl10,
@@ -362,6 +383,7 @@ export class Endpoint implements EndpointModule {
       log,
     });
     this.queries = new Queries({
+      sessionSafe,
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       own: this.own,
       rl10: this.rl10,
@@ -385,6 +407,8 @@ export class Endpoint implements EndpointModule {
       transmitDeadlineMs: seams.transmitDeadlineMs,
     });
     const recordSource = authorization.records ?? this.rl10.members;
+    // P5 O7 M5a: before the subscriptions' re-check (registered below), so a feed re-checked on the change reads afresh.
+    this.#unseam.push(recordSource.onChange((target) => this.artifactRanks.dropSession(target)));
     this.interest = new Interest({ interest: () => this.#services?.interest ?? null, log, resumeMs: seams.resumeMs });
     this.planeA = new PlaneA({
       send: (frame) => this.rl10.send(frame),
@@ -399,7 +423,7 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
-    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), artifacts: this.artifactRanks, log, backlogBytes: seams.backlogBytes });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
@@ -434,6 +458,7 @@ export class Endpoint implements EndpointModule {
       },
       recordFor: (report) => this.listings.recordFor(report),
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
+      sessionSafe,
       offers: authorization.offers,
       log,
     });
@@ -473,9 +498,11 @@ export class Endpoint implements EndpointModule {
     // the subscriptions; its events and each engine-host link, for notify's counts.
     this.#unseam.push(
       services.onEvent((owner, message) => {
+        this.#artifactEvent(owner, message); // P5 O7 M5a: a relink, or a linked session's new placement, first
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
         this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
+        this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
       }),
@@ -811,10 +838,23 @@ export class Endpoint implements EndpointModule {
     void this.syncNow();
   }
 
+  /**
+   * P5 O7 M5a: what the machine says that changes an artifact's placement: its relink (`artifacts.changed {linked}`), or
+   * a session's record in the spine's index (its engine session, or its first one).
+   */
+  #artifactEvent(owner: string, message: { name: string; payload: unknown }): void {
+    const payload = message.payload as { artifactId?: unknown; change?: unknown; record?: { appId?: unknown } } | null;
+    // Every change but a write's (`updated`, which moves neither the artifact's existence nor its links: a write that
+    // links its session says `linked` too) changes what `library.entry` answers: a relink, a delete, a create.
+    if (owner === 'engine-host' && message.name === 'artifacts.changed' && payload?.change !== 'updated' && typeof payload?.artifactId === 'string') this.artifactRanks.drop(payload.artifactId);
+    if (owner === 'machine' && message.name === 'session.changed' && typeof payload?.record?.appId === 'string') this.artifactRanks.dropSession(payload.record.appId);
+  }
+
   /** A new head is on disk: end what it took away. Channels, listings and RL10 (M3–M6) subscribe beside this. */
   #adopted(change: OrgChange): void {
     const parts = this.parts;
     if (parts === null) return;
+    this.artifactRanks.clear(); // P5 O7 M5a: before anything re-checks under the new head
     // Removal closes at once, before anything else hears of the new head (M4): the machine's own standing first, then
     // each device's.
     if (!this.#plainlyStands(change.head)) {

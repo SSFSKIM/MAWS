@@ -14,7 +14,7 @@ import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SideExchange } from '@shared/side/question';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import { builder, uuid } from '../transcript/model/test-events';
@@ -233,7 +233,7 @@ describe('the Side pane', () => {
       await userEvent.click(screen.getByRole('button', { name: SHOW }));
       const tab = panelOf(A)!.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)!;
       expect(panelOf(A)!.activeTabId).toBe(tab.id);
-      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID }]); // no version: the latest
+      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID, machine: TEST_MACHINE }]); // no version: the latest; P5 O7 M5a: on its machine
       expect(useCommentCard.getState().open).toMatchObject({
         parent: A,
         anchor: ELEMENT,
@@ -255,7 +255,7 @@ describe('the Side pane', () => {
       await userEvent.click(screen.getByRole('button', { name: SHOW }));
       const tab = panelOf(A)!.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)!;
       expect(panelOf(A)!.activeTabId).toBe(tab.id);
-      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID }]); // the latest
+      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID, machine: TEST_MACHINE }]); // the latest, on its machine
       expect(useCommentCard.getState().open).toMatchObject({
         parent: A, anchor: page, host: 'artifact-page', hostId: null, claimMode: 'panel',
         target: { kind: 'artifact-page', artifactId: RECORD_ID, revision: 7 }, phase: { kind: 'thread', child: ONE, echo: null },

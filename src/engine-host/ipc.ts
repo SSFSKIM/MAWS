@@ -140,7 +140,7 @@ type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
 // `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision. P5 O3-D:
 // `host.attachment` sets the app's presence at once (declared at M1, served from M3)
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.artifactOp': 'bounded' /* P5 O7 M5a */, 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -185,6 +185,9 @@ export interface EngineIpcDeps {
   // pool's own bound, beside the sessions' ladder rather than after it) before engine.shutdown answers
   duringShutdown?: () => Promise<void>;
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
+  // P5 O7 M5a: host.artifactOp's lookup, the host's artifact writes wherever it registered them (ops.ts' keepArtifactWrites);
+  // absent, it finds none and refuses every write `unavailable`
+  artifactWrite?: (name: string) => ((input: unknown, ctx: HandlerContext) => Promise<unknown>) | undefined;
   datasetRefresh?: DatasetRefreshRequests; // E3: the host's registry of agents' dataset refreshes (absent: none is ever pending)
 }
 
@@ -932,6 +935,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   registerOps(hostOn, {
     ledger: OpLedger.open(join(deps.userData, 'supervisor'), SUPERVISOR_FILES.ops, { log }),
     handler: (name) => own.get(name),
+    artifactWrite: deps.artifactWrite ?? (() => undefined), // P5 O7 M5a
     status: (id) => {
       const status = table.get(id as AppSessionId)?.status();
       return status === undefined ? null : { launchId: status.launchId, engineSessionId: status.engineSessionId };

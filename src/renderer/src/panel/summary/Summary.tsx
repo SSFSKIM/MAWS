@@ -33,7 +33,7 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
       <Environment appSessionId={appSessionId} record={record} directory={directory} />
       <Context appSessionId={appSessionId} directory={directory} />
       <Connectors appSessionId={appSessionId} />
-      <Artifacts key={record.projectId ?? 'no-project'} projectId={record.projectId} />
+      <Artifacts key={record.projectId ?? 'no-project'} projectId={record.projectId} machine={machine} />
     </div>
   );
 }

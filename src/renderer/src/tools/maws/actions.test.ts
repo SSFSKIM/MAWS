@@ -9,6 +9,10 @@ import { registerPanelTool } from '../../panel/host';
 import { A, panelOf, probeTool, resetPanelStores } from '../../test-support/panel';
 import type { AskRowData } from '../../transcript';
 import { mawsTranscriptActionsOver } from './actions';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
+import { remoteSessionState } from '../../lane-b/test-support/remote-session';
 
 const PATH = '/repo/hello.txt';
 const ASK: AskRowData = {
@@ -29,6 +33,19 @@ describe('the delivery row’s actions', () => {
     const answer = mawsTranscriptActionsOver(refused.client).openDelivered(A, PATH);
     await refused.fail('files.openExternal', 'not opened outside MAWS: /repo/hello.txt');
     expect(await answer).toBe('Refused: not opened outside MAWS: /repo/hello.txt');
+  });
+
+  // P5 O7 M5a (A10): a lane B session on another machine's file opens as a copy paged here
+  it('Open externally on another machine’s session: remote.openCopy of the file there; null when opened, its words otherwise', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    const opened = fakeClient({ 'remote.openCopy': { opened: true, message: null } });
+    expect(await mawsTranscriptActionsOver(opened.client).openDelivered(REMOTE, PATH)).toBeNull();
+    expect(opened.invoked('remote.openCopy')).toEqual([{ machine: OTHER_MACHINE, source: { appSessionId: REMOTE, path: PATH } }]);
+    expect(opened.invoked('files.openExternal')).toEqual([]);
+    const tooLarge = fakeClient({ 'remote.openCopy': { opened: false, message: 'too large to copy from mini' } });
+    expect(await mawsTranscriptActionsOver(tooLarge.client).openDelivered(REMOTE, PATH)).toBe('Not opened: too large to copy from mini');
+    resetRemoteLaneBStore();
   });
 
   it('Reveal in Finder: files.reveal with the session and path; null when revealed, the refusal otherwise', async () => {

@@ -1,7 +1,8 @@
 // The Artifacts tab's head (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M4): the page's title and the view switch
 // (All, Pinned, By Space) at the left, as the plugin library's title and switch sit; at the right the search ("Search
 // artifacts": titles and text, main's index), the type filter (All types and the seven kinds, each with the count the
-// view and search would give it) and New Space.
+// view and search would give it) and New Space. P5 O7 M5a: beside the title, the machine whose library it lists
+// (MachineMenu.tsx); New Space is this Mac's, so it is not offered for another machine's library.
 import { DropdownMenu, ToggleGroup } from 'radix-ui';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import type { LibraryCounts } from '@shared/ipc/schema/library';
@@ -11,6 +12,7 @@ import { SearchField } from '../widgets/plugins/LibraryHeader';
 import { KIND_PLURAL_LABELS, LIBRARY_PAGE as P } from './copy';
 import { openLibraryDialog } from './dialogs';
 import { KindIcon } from './icons';
+import { LibraryMachineMenu } from './MachineMenu';
 import { setLibraryView, useLibraryView, type LibraryViewName } from './view';
 
 const VIEWS: readonly LibraryViewName[] = ['all', 'general', 'pinned', 'bySpace'];
@@ -91,18 +93,22 @@ function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
 
 export function LibraryHeader({ counts }: { counts: LibraryCounts | undefined }) {
   const query = useLibraryView((s) => s.query);
+  const remote = useLibraryView((s) => s.machine !== null);
   return (
     <div data-library-header className="shrink-0 border-b border-border">
       <div className="mx-auto flex max-w-(--measure-wide) flex-wrap items-center gap-x-3 gap-y-2 px-6 py-3">
         <h1 className="m-0 text-ui font-semibold text-fg">{P.title}</h1>
+        <LibraryMachineMenu />
         <ViewSwitch />
         <span className="ml-auto flex min-w-0 items-center gap-1.5">
           <SearchField label={P.search} value={query} onChange={(next) => setLibraryView({ query: next })} />
           <TypeFilter counts={counts} />
-          <button type="button" onClick={() => openLibraryDialog({ kind: 'newSpace' })} className={`${SECONDARY} inline-flex h-7 items-center gap-1 text-ui`}>
-            <PlusIcon className="size-3.5" />
-            {P.newSpace}
-          </button>
+          {!remote && (
+            <button type="button" onClick={() => openLibraryDialog({ kind: 'newSpace' })} className={`${SECONDARY} inline-flex h-7 items-center gap-1 text-ui`}>
+              <PlusIcon className="size-3.5" />
+              {P.newSpace}
+            </button>
+          )}
         </span>
       </div>
     </div>

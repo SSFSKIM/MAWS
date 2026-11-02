@@ -5,6 +5,8 @@
 // of a design system (a deletion, or a new house system, moves it) and every `artifacts.resync` (the store's events of a
 // span with no ready window are not replayed). The app provides it to the portable layer through
 // `DesignSystemHouseContext` (provider.tsx); renderer code reads it with `useHouseDesignSystem`.
+// P5 O7 M5a: the house is this Mac's store's, so only this Mac's changes and resyncs move it (another machine's artifacts
+// feed says its own).
 import { useSyncExternalStore } from 'react';
 import type { HouseDesignSystem } from '@artifacts/design-system/apply';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -40,8 +42,9 @@ export function followHouseDesignSystem(client: MawsBridge): HouseDesignSystem {
     subscribe: (listener) => {
       listeners.add(listener);
       if (!stop) {
-        const offChanged = client.on('artifacts.changed', ({ kind }) => kind === 'design_system' && read());
-        const offResync = client.on('artifacts.resync', read);
+        const here = (from: { machine: string }) => from.machine === client.localMachine;
+        const offChanged = client.on('artifacts.changed', ({ kind }, from) => kind === 'design_system' && here(from) && read());
+        const offResync = client.on('artifacts.resync', (_resync, from) => here(from) && read());
         stop = () => (offChanged(), offResync());
         read();
       }

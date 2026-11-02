@@ -25,13 +25,28 @@
 //     nothing of another session. A session the spine can't place answers `unavailable`. `session.search` answers at most
 //     SESSION_SEARCH_LIMIT hits, so its input names the sessions the caller views (`sessions`, from `session.list`'s
 //     records), applied by the store before its limit; a full page the cut still took hits from says `incomplete`.
+//   - P5 O7 M5a: `library.list` takes the same shape over its rows: each row's own sessions (`LibraryRowSchema.sessions`,
+//     the index's view of the artifact's links) are what it names, and a row is kept when the caller holds `view` on its
+//     artifact by the `artifact` rule's predicate (artifacts.ts' `holdsArtifact`): on any one of its sessions, at every
+//     placement the call saw of that session; a row with no session is the machine owners' alone. A machine owner holds
+//     every artifact, so keeps every row. The listing is asked without its `kind`, so the counts per kind a caller is
+//     answered are those of the rows it keeps, never of the machine's. The artifact rule's reads (`artifacts.get` and its kin) are answered as
+//     their executor answers, their decision having placed the artifact.
+//   - P5 O7 M5a2 fix wave 1: what an artifact answer says of sessions the caller doesn't view is withheld as it goes
+//     (session-safe.ts): the reads that name sessions (SESSION_NAMING) through `SessionSafe`, `library.list`'s kept rows
+//     through the same projection over its own placements; a listing filtered by a session the caller doesn't view
+//     lists nothing, as one by a session nobody minted does (an id is never a capability). Fix wave 2: the machine's
+//     owners too, whose rows are kept whole but told nothing of a member's private session.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
-// `too-large`.
+// `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
+// bytes codec's tagged form (bytes.ts), measured so.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
+import { holdsArtifact } from './artifacts';
 import { holdsToSchema, type SessionRanks } from './authorize';
+import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
 import { isSessionRank, rankAtLeast, sessionRank } from './grades';
 import type { SessionReport } from './listings';
@@ -39,6 +54,7 @@ import { OFFERS, type Offers } from './offers';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
+import { namedSessions, projectSessions, SESSION_NAMING, type SessionSafe } from './session-safe';
 import { namesSession, type SessionSubscription, type Subscription } from './subscriptions';
 import { placeRecorded, recordedPlacement, type Placement } from './targets';
 
@@ -56,6 +72,8 @@ export type CallsContext = {
   recordFor(report: SessionReport): Promise<Signed<Listing> | null>;
   /** P5 O7 M6: the member's ranks on the machine's sessions (`Authorizer.ranks`), for the `each-session` cut. */
   ranks(member: string): Promise<SessionRanks>;
+  /** P5 O7 M5a2 fix wave 1: what an artifact answer says of sessions (session-safe.ts). */
+  sessionSafe: SessionSafe;
   offers?: Offers;
   log(line: string): void;
 };
@@ -118,8 +136,31 @@ const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSes
  * hits, each by its `appSessionId`; `keep` answers it with only what `kept` holds (a part naming no session is dropped).
  * `narrow`: the input naming the sessions the caller views, for a read that answers at most a limit of them, so the
  * limit is spent on those (milestone fix: `session.search`'s 50 hits); the cut stays the authorization.
+ * P5 O7 M5a: `ask`, the input the machine is asked for; `keep` is told whether the caller owns the machine (the `artifact`
+ * rule's short cut, which holds every row for them), and what they asked.
  */
-const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(output: unknown, kept: (id: string | null) => boolean): unknown; narrow?(input: Fields, sessions: string[]): Fields }> = {
+type EachSession = {
+  sessions(output: unknown, input: unknown): string[];
+  keep(output: unknown, kept: (id: string | null) => boolean, ownsMachine: boolean, input: unknown): unknown;
+  narrow?(input: Fields, sessions: string[]): Fields;
+  ask?(input: unknown): unknown;
+};
+const rowsOf = (output: unknown): Fields[] => (isObject(output) && Array.isArray(output.rows) ? output.rows.filter(isObject) : []);
+const rowSessions = (row: Fields): string[] => (Array.isArray(row.sessions) ? row.sessions.map(sessionOf).filter((id) => id !== null) : []);
+/**
+ * A caller's library listing, asked without its `kind` (`ask`): the counts are the kept rows', and the rows the kind's.
+ */
+/** The session a library listing is filtered by (`filter.appSessionId`), if any. */
+const filteredBy = (input: unknown): string | null => (isObject(input) && isObject(input.filter) && isText(input.filter.appSessionId, 512) ? input.filter.appSessionId : null);
+
+function keptByKind(output: Fields, input: unknown): Fields {
+  const rows = rowsOf(output);
+  const kind = isObject(input) && isObject(input.filter) ? input.filter.kind : undefined;
+  const counts = Object.fromEntries(Object.keys(isObject(output.counts) ? output.counts : {}).map((k) => [k, rows.filter((row) => row.kind === k).length]));
+  return { ...output, rows: kind === undefined ? rows : rows.filter((row) => row.kind === kind), counts };
+}
+
+const EACH_SESSION: Record<string, EachSession> = {
   'attention.list': {
     sessions: (output) => (Array.isArray(output) ? output.map(sessionOf).filter((id) => id !== null) : []),
     keep: (output, kept) => (Array.isArray(output) ? output.filter((item) => kept(sessionOf(item))) : []),
@@ -134,6 +175,30 @@ const EACH_SESSION: Record<string, { sessions(output: unknown): string[]; keep(o
       return { ...output, hits: shown, incomplete: output.incomplete === true || (hits.length >= SESSION_SEARCH_LIMIT && shown.length < hits.length) };
     },
     narrow: (input, sessions) => ({ ...input, sessions }),
+  },
+  // P5 O7 M5a: the library's rows, each kept by the `artifact` rule over its own sessions.
+  'library.list': {
+    // A row's own sessions (its cut), every other it names (its creator, its last editor), each placed for the
+    // projection, and the session the listing is filtered by.
+    sessions: (output, input) => [...namedSessions('library.list', output), ...(filteredBy(input) === null ? [] : [filteredBy(input)!])],
+    keep: (output, kept, ownsMachine, input) => {
+      if (!isObject(output)) return output;
+      // A listing by a session the caller doesn't view lists nothing, as one by a session nobody minted, whoever asks:
+      // an id is no way to learn what a hidden session touched.
+      const by = filteredBy(input);
+      const listed = by === null || kept(by) ? rowsOf(output) : [];
+      // A machine owner holds every artifact, so keeps every row; what any row says of a session the caller doesn't
+      // view is withheld, theirs too (session-safe.ts).
+      const rows = listed.filter((row) => holdsArtifact({ sessions: rowSessions(row), orphan: rowSessions(row).length === 0 }, ownsMachine, (id) => kept(id)));
+      const projected = projectSessions('library.list', { ...output, rows }, (id) => kept(id));
+      return isObject(projected) ? keptByKind(projected, input) : projected;
+    },
+    ask: (input) => {
+      if (!isObject(input) || !isObject(input.filter) || input.filter.kind === undefined) return input;
+      const filter: Fields = { ...input.filter };
+      delete filter.kind;
+      return { ...input, filter };
+    },
   },
 };
 
@@ -158,13 +223,16 @@ export class Calls {
     const row = Object.hasOwn(offers.commands, m.name) ? offers.commands[m.name] : undefined;
     const answer = (result: { ok: true; output: unknown } | { ok: false; code: string }) => {
       if (channel.closed) return;
-      if (result.ok && Buffer.byteLength(JSON.stringify(result.output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
-      channel.send(result.ok ? { t: 'result', id: m.id, ok: true, output: result.output } : { t: 'result', id: m.id, ok: false, error: { code: result.code } });
+      if (!result.ok) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: result.code } });
+      const output = writeBytes(channel, result.output);
+      if (Buffer.byteLength(JSON.stringify(output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
+      channel.send({ t: 'result', id: m.id, ok: true, output });
     };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
     let run: Promise<Result | (() => Result)>;
     if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
+    else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -185,6 +253,15 @@ export class Calls {
   }
 
   /**
+   * P5 O7 M5a2 fix wave 1: an artifact read whose answer names sessions, forwarded raw and projected as it goes to what the
+   * caller may be told of them (session-safe.ts).
+   */
+  async #sessionSafe(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', member: string, m: CallMessage): Promise<Result | (() => Result)> {
+    const result = await this.#forward(dispatch, owner, m);
+    return result.ok ? this.ctx.sessionSafe.prepare(member, m.name, result.output, dispatch) : result;
+  }
+
+  /**
    * P5 O7 M6: an `each-session` read, answered by the machine's services and cut to the sessions `member` holds the
    * registry's grade on. Every read is made first (the answer, each session's placement by its record, the member's
    * ranks); what it resolves to is the cut, which `execute` takes in the same synchronous step as it sends the answer.
@@ -201,10 +278,12 @@ export class Calls {
     this.#heard.add(heard);
     const done = (result: Result): Result => (this.#heard.delete(heard), result);
     let ranks: SessionRanks;
-    let input = m.input === null ? undefined : m.input;
+    const asked = m.input === null ? undefined : m.input;
+    let input: unknown = asked;
     let listed = new Map<string, Placement>();
     try {
       ranks = await this.ctx.ranks(member);
+      if (filter.ask !== undefined) input = filter.ask(input);
       if (filter.narrow !== undefined && isObject(input)) {
         const read = await this.#listed(dispatch);
         if (read === null) return done({ ok: false, code: 'unavailable' });
@@ -219,7 +298,7 @@ export class Calls {
     const response = await dispatch('machine', m.name, input).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
     if (!response.ok) return done(unavailable(response.error.code));
     const output = response.value ?? null;
-    const sessions = [...new Set(filter.sessions(output))];
+    const sessions = [...new Set(filter.sessions(output, asked))];
     let placed: Map<string, Placement>;
     try {
       placed = new Map(await Promise.all(sessions.map(async (id): Promise<[string, Placement]> => [id, await placeRecorded(id, dispatch)])));
@@ -231,7 +310,7 @@ export class Calls {
       this.#heard.delete(heard);
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
       const seen = (id: string): Placement[] => [...(listed.has(id) ? [listed.get(id)!] : []), placed.get(id) ?? null, ...(heard.get(id) ?? [])];
-      return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade))) };
+      return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade)), ranks.ownsMachine(), asked) };
     };
   }
 

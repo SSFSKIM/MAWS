@@ -49,8 +49,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
+import type { CommandBudgets } from '../budgets';
 import type { LinkState, MachineLink } from '../manager';
 import { ActTable, type ActHandle, type ActRequest } from './acts';
+import { fromWire, needsCodec, toWire } from '@shared/host/json-bytes';
+import { ANSWERS_BYTES } from './bytes';
 import { peerLists } from './capabilities';
 import { CARRIER_CLOSED, dialDirect as dialDirectCarrier, isTailnetAddress, openRelaySocket, raceDirect, RelayUpgradeError, type RelaySocket } from './carriers';
 import { dispatchOverLink } from './dispatch';
@@ -85,6 +88,8 @@ export interface RemoteLink extends MachineLink {
   ended(): 'removed' | 'closed' | null;
   /** The latest `caps`, null before the first. */
   caps(): DeviceCaps | null;
+  /** P5 O7 M5a: each command's budget, which `dispatchOverLink` gives a call of it (../budgets.ts); none by default. */
+  readonly budgets?: CommandBudgets;
   onCaps(listener: (caps: DeviceCaps) => void): () => void;
   /** The current channel's `h2` capabilities (capabilities.ts); null while no channel is current (P5 O7 M2). */
   peerCapabilities(): readonly string[] | null;
@@ -93,6 +98,8 @@ export interface RemoteLink extends MachineLink {
    * `rl2.call-session` (checked at each send, so a call carried to the next channel follows that channel's peer).
    * `lacking` (fix wave 2): the input sent instead to a peer that doesn't list `capability`, judged at each send the
    * same way (an input field only some peers read, as `session.events`' `maxBytes`); an answer to it says `fellBack`.
+   * P5 O7 M5a: bytes in the input go tagged, and an answer is read back, with a peer that lists `rl2.bytes`; a call that
+   * carries bytes either way (./bytes.ts) is refused `not-offered` by a peer that doesn't, judged at each send too.
    */
   call(name: string, input: unknown, options?: CallOptions): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
@@ -123,6 +130,8 @@ export interface RemoteLinkDeps {
   /** connectChannel(dial, signedIn.identity, signedIn.view, { machine }) by default; link.test.ts runs the state machine on an in-memory Channel. */
   handshake?(dial: () => Promise<ByteDuplex>, signedIn: SignedIn, machine: MachineRef): Promise<Channel>;
   timing?: Partial<RemoteTiming>;
+  /** P5 O7 M5a: the services' COMMAND_BUDGETS_MS, from the composition root (../budgets.ts). */
+  budgets?: CommandBudgets;
   now?(): number;
   /** The jitter, for tests. */
   random?(): number;
@@ -698,7 +707,14 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     const session = pending.session !== undefined && peerLists({ peerCapabilities }, 'rl2.call-session') ? { session: pending.session } : {};
     const fellBack = pending.lacking !== undefined && peerCapabilities()?.includes(pending.lacking.capability) !== true;
     const input = fellBack ? pending.lacking!.input : pending.input;
-    if (send({ t: 'call', id: pending.id, name: pending.name, input: input ?? null, ...session })) [pending.sentOn, pending.fellBack] = [current.serial, fellBack];
+    // P5 O7 M5a: bytes, in the input or the answer, cross only to a peer that tags them (./bytes.ts)
+    const tagged = needsCodec(input);
+    if ((tagged || ANSWERS_BYTES.has(pending.name)) && !peerLists({ peerCapabilities }, 'rl2.bytes')) {
+      calls.delete(pending.id);
+      clearTimeout(pending.timer);
+      return pending.resolve({ ok: false, error: { code: 'not-offered', message: `${pending.name}: machine ${name} carries no bytes (it lists no rl2.bytes)` } });
+    }
+    if (send({ t: 'call', id: pending.id, name: pending.name, input: (tagged ? toWire(input) : input) ?? null, ...session })) [pending.sentOn, pending.fellBack] = [current.serial, fellBack];
   }
 
   function answered(message: Extract<EndpointMessage, { t: 'result' }>): void {
@@ -707,7 +723,9 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     calls.delete(message.id);
     clearTimeout(pending.timer);
     const fellBack = pending.fellBack ? { fellBack: true as const } : {};
-    pending.resolve(message.ok ? { ok: true, output: message.output, ...fellBack } : { ok: false, error: message.error, ...fellBack });
+    // P5 O7 M5a: a peer that lists `rl2.bytes` answers in the tagged form, read back before the link's codec check
+    const output = message.ok && peerLists({ peerCapabilities }, 'rl2.bytes') ? fromWire(message.output) : message.ok ? message.output : undefined;
+    pending.resolve(message.ok ? { ok: true, output, ...fellBack } : { ok: false, error: message.error, ...fellBack });
   }
 
   function failCalls(code: string): void {
@@ -728,6 +746,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     rename(next: string) {
       name = next;
     },
+    ...(deps.budgets !== undefined && { budgets: deps.budgets }),
     state: () => REPORTED[state],
     carrier: () => (isCurrent() ? current!.carrier : null),
     refusal: () => refusal,

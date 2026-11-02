@@ -237,7 +237,10 @@ export const commands = {
   // A replica's port to the document (X24, Decision Log 13): main posts the port to the asking window on `maws:doc-port`
   // with this `channel`, and the host attaches the other end with the human as actor. Refused for a byte kind (`invalid`).
   // `doc: 'suggestions'` opens the artifact's suggestion doc (Decision Log 45).
-  'artifacts.open': main(z.strictObject({ artifactId: Id, doc: ArtifactDocSchema.optional() }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
+  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The `document` stream"; main-owned, outside the
+  // manifest): `readOnly`, a port the replica may sync and show presence on but never write (an artifact on another
+  // machine opened by a member who holds `view` on it); absent, a port that writes.
+  'artifacts.open': main(z.strictObject({ artifactId: Id, doc: ArtifactDocSchema.optional() }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff), readOnly: z.literal(true).optional() })),
   // The library's Export (X31; M7): main's export service writes the artifact's live revision, or a version's, as
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the

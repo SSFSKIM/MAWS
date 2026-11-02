@@ -11,7 +11,9 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record as sessionRecord } from '../../../../../../test/support/builders';
-import { at } from '../../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { recordArtifactMachine, resetArtifactMachines } from '../../../artifacts/machines';
+import { useMachines } from '../../../stores/machines';
 import { resetArtifactEditors, type ArtifactEditor } from '../../../artifacts/registry';
 import { resetExportFormats } from '../../../library/export';
 import { connectLibrary, resetLibrary } from '../../../library/store';
@@ -246,6 +248,28 @@ describe('the HTML viewer', () => {
     act(() => action('Reveal in Finder').onSelect());
     await waitFor(() => expect(main.callsOf('library.reveal')).toEqual([{ artifactId: ID, revision: 9 }]));
     expect(main.callsOf('library.openExternally')).toEqual([{ artifactId: ID, revision: 9 }]);
+  });
+
+  // P5 O7 M5a (A10): another machine's page reads there, opens externally as a copy paged here, and Reveal is greyed
+  // "on <machine>" (nothing here to reveal)
+  it('another machine’s page reads on its machine, opens a copy, and greys Reveal on that machine', async () => {
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: '2026-11-01T00:00:00.000Z', generation: 1, carrier: 'direct' }]);
+    recordArtifactMachine(ID, OTHER_MACHINE, TEST_MACHINE);
+    const sentTo: [string, unknown][] = [];
+    const bridge = window.maws;
+    window.maws = { ...bridge, invoke: (name: string, input: unknown, target: unknown) => (sentTo.push([name, target]), bridge.invoke(name as never, input as never, target as never)) } as typeof bridge;
+    mount('html');
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    const reads = sentTo.filter(([name]) => name === 'artifacts.versions' || name === 'library.content' || name === 'library.get');
+    expect(reads.length).toBeGreaterThan(0);
+    expect(new Set(reads.map(([, target]) => target))).toEqual(new Set([OTHER_MACHINE]));
+    expect(action('Reveal in Finder (on studio)').disabled).toBe(true);
+    act(() => action('Open externally').onSelect());
+    await waitFor(() => expect(main.callsOf('remote.openCopy')).toEqual([{ machine: OTHER_MACHINE, source: { artifactId: ID, revision: 9 } }]));
+    expect(sentTo.find(([name]) => name === 'remote.openCopy')?.[1]).toBe(TEST_MACHINE);
+    expect(main.callsOf('library.openExternally')).toEqual([]);
+    resetArtifactMachines();
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
   });
 });
 

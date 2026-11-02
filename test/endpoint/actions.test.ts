@@ -751,6 +751,55 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     expect((rpc.args as { text: string }).text).toHaveLength(65_536);
   });
 
+  it('decides an action again when its sender’s standing goes between its decision and the gate’s handing it on, and hands nothing down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const b = await open(f, b1, B);
+    const authorize = f.endpoint.authorizer.authorize.bind(f.endpoint.authorizer);
+    let revoked = false;
+    // The decision taken, Bob's session handed to the machine (sminos's frame, which lands asynchronously), then the
+    // gate's continuation: the gap from the decision to the hand-off, with the revocation inside it.
+    f.endpoint.authorizer.authorize = (request, who, now) =>
+      authorize(request, who, now).then(async (decision) => {
+        if (!revoked && request.kind === 'act') {
+          revoked = true;
+          s.send({ t: 'member', session: 'la-b', alias: 'bob', project: PROJECT, lane: 'A', state: 'idle', title: 'bob', cwd: CHECKOUT, launch: 'LB', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' } });
+          await until(() => f.endpoint.rl10.members.get('la-b')?.owners.includes('@machine'), 'Bob’s session the machine’s');
+        }
+        return decision;
+      });
+    const steer = bobsSteer(f, b);
+    // Were it handed on, sminos's admission query is answered (holding nothing), so the act would be accepted.
+    const answering = setInterval(() => {
+      if (s.received.some((x) => x.t === 'query' && x.opId === steer.opId) && !s.received.some((x) => x.t === 'rpc')) s.send({ t: 'queried', opId: steer.opId, state: 'not-received' });
+    }, 5);
+    const acked = await act(b, steer).finally(() => clearInterval(answering));
+    expect(acked).toBe('grade');
+    expect(revoked).toBe(true);
+    await sleep(100);
+    expect(s.received.filter((x) => (x.t === 'rpc' || x.t === 'query') && (x.opId === steer.opId || (x.rpc as { opId?: string } | undefined)?.opId === steer.opId))).toEqual([]);
+  });
+
+  it('decides an action again when its sender’s standing goes while sminos is asked whose the op is, and sends no rpc', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    await bobsSession(f, s);
+    const b = await open(f, b1, B);
+    const steer = bobsSteer(f, b);
+    const from = b.inbox.length;
+    const acked = act(b, steer);
+    await s.next((x) => x.t === 'query' && x.opId === steer.opId, 'the admission query');
+    // While the query is out, Bob's session is handed to the machine; then sminos answers that it holds nothing.
+    s.send({ t: 'member', session: 'la-b', alias: 'bob', project: PROJECT, lane: 'A', state: 'idle', title: 'bob', cwd: CHECKOUT, launch: 'LB', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' } });
+    await until(() => f.endpoint.rl10.members.get('la-b')?.owners.includes('@machine'), 'Bob’s session the machine’s');
+    s.send({ t: 'queried', opId: steer.opId, state: 'not-received' });
+    expect(await acked).toBe('grade');
+    await sleep(100);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+    expect(b.inbox.slice(from).filter((m) => m.t === 'ack' && (m as { state?: string }).state === 'accepted')).toEqual([]);
+  });
+
   it('refuses an action sealed for another launch (`context`), and one on a session with no bridge (`unavailable`), sending nothing down', async () => {
     const f = await start();
     const s = await sminos(f);

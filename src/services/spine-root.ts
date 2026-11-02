@@ -461,7 +461,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // port) and the catalog's machine half (the engine's reads per cwd and the watch of the engine's plugin state, with
   // MAWS's own servers in the machine settings), after the checkouts and stopped before them, in a refused run too (they
   // write nothing)
-  registerLibraryReads(bus.register, { hosts, files: checkouts.files, port: deps.clientPort, env: deps.env });
+  registerLibraryReads(bus.register, { hosts, files: checkouts.files, port: deps.clientPort, env: deps.env, artifactsRoot: join(profile, 'artifacts') });
   const catalog = startCatalogMachine({ hosts, bus, machineSettings: settingsPaths(profile).machine });
   parts.splice(parts.length - 1, 0, ['catalog', () => catalog.stop()]);
 

@@ -131,6 +131,7 @@ import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsT
 import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
+import { connectArtifactTabMachines } from './artifacts/tab-machines';
 // P3-L end
 // P3-B start
 import { registerDocumentEditor } from './tools/document';
@@ -343,6 +344,7 @@ export function App() {
   // P3-L start: the library store reads main's index again at every committed change (`library.changed`), and the
   // `artifact` tab kind's handlers
   useEffect(() => connectLibrary(), []);
+  useEffect(() => connectArtifactTabMachines(), []); // P5 O7 M5a: a restored artifact tab names its artifact's machine
   useEffect(() => registerArtifactTabs(), []); // an `artifact` tab with unsaved changes is not replaced by a session
   useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
   useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console

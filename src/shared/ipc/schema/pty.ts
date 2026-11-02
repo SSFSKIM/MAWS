@@ -8,7 +8,7 @@ import * as z from 'zod';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
 import { HostOpOutputSchema, HostOpQueryOutputSchema, OpIdSchema } from './host';
-import { MachineOpInputSchema } from './machine';
+import { ClaimedOpInputSchema } from './machine';
 
 export const PtyIdSchema = z.string().brand<'PtyId'>();
 export type PtyId = z.infer<typeof PtyIdSchema>;
@@ -121,7 +121,7 @@ export const commands = {
   // `machine.op` and `machine.opQuery`, sent by the endpoint in `mawsd` for a remote act (`pty.spawn`, `pty.attach`,
   // `pty.kill`, `pty.listFor`) and its query; `pty.replay`, the endpoint's in-process read of the ring at a stream's open.
   'pty.listFor': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ ptys: z.array(PtyInfoSchema) }), owner: 'pty-host' },
-  'pty.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'pty-host' },
+  'pty.op': { input: ClaimedOpInputSchema, output: HostOpOutputSchema, owner: 'pty-host' },
   'pty.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'pty-host' },
   'pty.replay': { input: z.strictObject({ ptyId: PtyIdSchema, from: Offset }), output: PtyReplaySchema, owner: 'pty-host' },
 } as const satisfies Record<`pty.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

@@ -26,6 +26,7 @@ function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: Endp
     device: 'd-1',
     clientClass: 'native-mac',
     client: endableClientRef('d-1/ch-1'),
+    capabilities: [],
     closed: false,
     sent,
     send: (message) => (sent.push(message), true),
