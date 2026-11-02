@@ -115,7 +115,26 @@ export interface RemoteLink extends MachineLink {
   openStream(request: StreamRequest, sink: StreamSink): RemoteStream;
   /** `person`: a person acted on this machine (also lifts `refused`). */
   probe(reason: ProbeReason): void;
+  /**
+   * P5 O7 M7 (`rl2.pong-clock`): one `ping` on the current channel, answered with its pong's stamps; null with no
+   * channel, when the channel is lost first, or with no pong within `timeoutMs` (5 s). Unlike a probe it closes nothing
+   * and rechecks no carrier, so the remote bench can measure a carrier by its pings without moving it.
+   */
+  ping(options?: { timeoutMs?: number }): Promise<PongStamps | null>;
+  /** P5 O7 M7: the stamps of the newest PONG_STAMPS_KEPT pongs this link heard (a probe's, `ping`'s, any other), oldest first. */
+  pongs(): readonly PongStamps[];
 }
+
+/**
+ * One pong as the remote bench reads it (P5 O7 M7), each stamp in milliseconds: `at`, this device's clock at the ping's
+ * send (the ping's own `at`, which the pong echoes); `received` and `sent`, the machine's clock at the ping's arrival and
+ * at the pong's send, from a peer that listed `rl2.pong-clock` (else null); `arrived`, this device's clock at the pong's
+ * arrival; `carrier`, the channel's.
+ */
+export type PongStamps = { at: number; received: number | null; sent: number | null; arrived: number; carrier: Carrier };
+/** How many pongs' stamps a link keeps (the bench reads at most a few hundred per run). */
+export const PONG_STAMPS_KEPT = 512;
+const PING_ANSWER_MS = 5_000;
 
 export type CallResult = ({ ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } }) & { fellBack?: true };
 export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown } };
@@ -242,6 +261,9 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     return true;
   };
   const ended = (): 'removed' | 'closed' | null => (state === 'closed' ? 'closed' : state === 'refused' ? 'removed' : null);
+  // P5 O7 M7: the pongs heard, and the pings `ping()` waits on, each on the channel it was sent on (`serial`)
+  const pongStamps: PongStamps[] = [];
+  const pingWaiters = new Set<{ at: number; serial: number; settle(stamps: PongStamps | null): void }>();
 
   const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
   const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
@@ -487,6 +509,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       case 'ping':
         send({ t: 'pong', at: message.at });
         return;
+      case 'pong':
+        return heardPong(message);
       case 'state': {
         const signedIn = deps.session.current();
         signedIn?.view.advance(message.states, message.transitions).catch((error: unknown) => log(`a state the endpoint sent did not advance the view: ${(error as Error).message}`));
@@ -497,10 +521,41 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     }
   }
 
+  /** P5 O7 M7: a pong's stamps kept, and the `ping()` it answers settled. */
+  function heardPong(message: Extract<EndpointMessage, { t: 'pong' }>): void {
+    if (current === null) return;
+    const clock = current.channel.peer.capabilities.includes('rl2.pong-clock');
+    const stamps: PongStamps = { at: message.at, received: clock ? (message.received ?? null) : null, sent: clock ? (message.sent ?? null) : null, arrived: now(), carrier: current.carrier };
+    pongStamps.push(stamps);
+    if (pongStamps.length > PONG_STAMPS_KEPT) pongStamps.splice(0, pongStamps.length - PONG_STAMPS_KEPT);
+    for (const waiter of pingWaiters) if (waiter.at === message.at && waiter.serial === current.serial) waiter.settle(stamps);
+  }
+
+  function ping(options: { timeoutMs?: number } = {}): Promise<PongStamps | null> {
+    if (!isCurrent()) return Promise.resolve(null);
+    const at = now();
+    const on = current!.serial;
+    return new Promise((resolve) => {
+      const waiter = {
+        at,
+        serial: on,
+        settle(stamps: PongStamps | null) {
+          clearTimeout(timer);
+          pingWaiters.delete(waiter);
+          resolve(stamps);
+        },
+      };
+      const timer = setTimeout(() => waiter.settle(null), options.timeoutMs ?? PING_ANSWER_MS);
+      pingWaiters.add(waiter);
+      send({ t: 'ping', at });
+    });
+  }
+
   /** The current channel ended. A sealed `removed` refuses the link; anything else is a loss, retried at once. */
   function lost(reason: string): void {
     const was = current;
     current = null;
+    for (const waiter of [...pingWaiters]) waiter.settle(null);
     silenceTimer = clear(silenceTimer);
     probeTimer = clear(probeTimer);
     recheckTimer = clear(recheckTimer);
@@ -801,6 +856,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     subscribe: (request, sink) => subs.subscribe(request, sink, ended()),
     openStream: (request, sink) => streams.open(request, sink, ended()),
     probe,
+    ping,
+    pongs: () => [...pongStamps],
     close() {
       if (state === 'closed') return;
       state = 'closed';
@@ -815,6 +872,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       streams.close('closed');
       acts.close('closed');
       failCalls('closed');
+      for (const waiter of [...pingWaiters]) waiter.settle(null);
       was?.channel.close('closed');
       closeRelay();
       notify();

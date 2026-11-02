@@ -8,6 +8,7 @@ import { duplexPair } from '../../apps/org-protocol/test-support/tamper-relay.ts
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import { createEndpoint } from '../../src/endpoint';
 import { Channels, type ChannelRoutes, type RemoteChannel } from '../../src/endpoint/channels';
+import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import type { ChannelHandler } from '../../src/endpoint/hub-link';
 import { fakeServices, mintRef } from './fake-services';
 import { genesis, memberId, newDevice, retiredDevice, revokedDevice, successor, type TestDevice } from './org-fixtures';
@@ -208,14 +209,30 @@ describe('the loop', () => {
     const dev = device(a1, A);
     const channel = await dev.open(dialDirect(h), REF);
     const pong = await dev.request(channel, { t: 'ping', at: 42 }, (m): m is ChannelMessage => m.t === 'pong');
-    expect(pong).toEqual({ t: 'pong', at: 42 });
+    expect(pong).toEqual({ t: 'pong', at: 42, received: expect.any(Number), sent: expect.any(Number) });
     await channel.send({ t: 'gossip', words: 'from a newer device' });
     await channel.send({ t: 'gossip' });
-    expect(await dev.request(channel, { t: 'ping', at: 43 }, (m): m is ChannelMessage => m.t === 'pong')).toEqual({ t: 'pong', at: 43 });
+    expect(await dev.request(channel, { t: 'ping', at: 43 }, (m): m is ChannelMessage => m.t === 'pong')).toMatchObject({ t: 'pong', at: 43 });
     expect(h.log.filter((line) => line.includes('gossip'))).toHaveLength(1);
     const seen = watch(channel);
     await channel.send({ t: 'call', name: 'daemon.status' });
     expect(await seen.closed).toBe('malformed');
+  });
+
+  // P5 O7 M7 (`rl2.pong-clock`): the pong carries the endpoint's own clock at the ping's arrival and at the pong's send,
+  // so a device can place the machine's clock against its own; the device's `at` is echoed untouched.
+  it('stamps its pong with its clock at the ping’s arrival and at the pong’s send, and lists `rl2.pong-clock`', async () => {
+    const h = harness();
+    const dev = device(a1, A);
+    const channel = await dev.open(dialDirect(h), REF);
+    expect(ENDPOINT_CAPABILITIES).toContain('rl2.pong-clock');
+    const before = Date.now();
+    const pong = (await dev.request(channel, { t: 'ping', at: 7 }, (m): m is ChannelMessage => m.t === 'pong')) as { at: number; received: number; sent: number };
+    const after = Date.now();
+    expect(pong.at).toBe(7);
+    expect(pong.received).toBeGreaterThanOrEqual(before);
+    expect(pong.sent).toBeGreaterThanOrEqual(pong.received);
+    expect(pong.sent).toBeLessThanOrEqual(after);
   });
 
   it('refuses every request as not offered until a route is set', async () => {

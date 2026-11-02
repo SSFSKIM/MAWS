@@ -9,7 +9,7 @@ import { genesis, memberId, newDevice, successor, type TestDevice } from '../../
 import { heldOrgSession, watchedView, type SignedIn } from '../../org/session';
 import type { RelaySocket } from './carriers';
 import type { EndpointRecords } from './endpoint-records';
-import { createRemoteLink, type RemoteLinkDeps } from './link';
+import { createRemoteLink, PONG_STAMPS_KEPT, type RemoteLinkDeps } from './link';
 import type { SubscriptionSink } from './subs';
 
 // An attempt computes key ids (`trustOf`), which WebCrypto's digest runs on libuv's thread pool. Under a loaded runner
@@ -498,6 +498,70 @@ describe('probes and liveness', () => {
     h.link.probe('network');
     await settle();
     expect(h.link.state()).toBe('up');
+  });
+});
+
+// P5 O7 M7 (`rl2.pong-clock`): the remote bench's clock. Each pong the link hears is kept with its four stamps, the
+// device's `at` (the ping's send) and `arrived` (the pong's arrival) and, from a peer that lists the capability, the
+// endpoint's `received` and `sent`; `ping()` sends one ping on the current channel and answers its pong's stamps.
+describe('the pong clock', () => {
+  const T0 = Date.parse('2026-10-28T12:00:00.000Z');
+
+  it('answers a ping with its pong’s four stamps and the carrier, and keeps every pong heard', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const channel = h.last();
+    const at = Date.now();
+    const answer = h.link.ping();
+    expect(channel.of('ping')).toEqual([{ t: 'ping', at }]);
+    await vi.advanceTimersByTimeAsync(3);
+    channel.deliver({ t: 'pong', at, received: T0 + 5_001, sent: T0 + 5_002 });
+    expect(await answer).toEqual({ at, received: T0 + 5_001, sent: T0 + 5_002, arrived: at + 3, carrier: 'direct' });
+    // a probe's pong, and one the link did not ask for (the endpoint's answer to its silence ping), are kept the same way
+    h.link.probe('focus');
+    const probeAt = Date.now();
+    channel.deliver({ t: 'pong', at: probeAt, received: T0 + 6_000, sent: T0 + 6_000 });
+    expect(h.link.pongs()).toEqual([
+      { at, received: T0 + 5_001, sent: T0 + 5_002, arrived: at + 3, carrier: 'direct' },
+      { at: probeAt, received: T0 + 6_000, sent: T0 + 6_000, arrived: probeAt, carrier: 'direct' },
+    ]);
+  });
+
+  it('keeps no endpoint stamps from a peer that does not list `rl2.pong-clock`', async () => {
+    const h = await harness();
+    await settle();
+    const answer = h.link.ping();
+    const at = Date.now();
+    h.last().deliver({ t: 'pong', at, received: 1, sent: 2 });
+    expect(await answer).toEqual({ at, received: null, sent: null, arrived: at, carrier: 'direct' });
+  });
+
+  it('answers null with no channel, and when its channel is lost or stays silent; never closes the channel nor rechecks direct', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    expect(await h.link.ping()).toBeNull(); // still connecting
+    h.net.direct = false;
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    const attempts = h.attempts.length;
+    const silent = h.link.ping({ timeoutMs: 1_000 });
+    await advance(1_000);
+    expect(await silent).toBeNull();
+    expect(h.last().closed).toBe(false);
+    expect(h.attempts).toHaveLength(attempts); // a probe on the relay would have tried the direct carrier
+    const lost = h.link.ping();
+    h.last().end('carrier');
+    expect(await lost).toBeNull();
+  });
+
+  it('keeps the newest PONG_STAMPS_KEPT pongs', async () => {
+    const h = await harness();
+    await settle();
+    for (let i = 0; i < PONG_STAMPS_KEPT + 5; i += 1) h.last().deliver({ t: 'pong', at: i });
+    const kept = h.link.pongs();
+    expect(kept).toHaveLength(PONG_STAMPS_KEPT);
+    expect(kept[0]!.at).toBe(5);
+    expect(kept.at(-1)!.at).toBe(PONG_STAMPS_KEPT + 4);
   });
 });
 

@@ -142,7 +142,13 @@ export type EndpointStreamMessage = StreamOpenedMessage | StreamRefusedMessage |
 
 export type StateMessage = { t: 'state'; states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
 export type PingMessage = { t: 'ping'; at: number };
-export type PongMessage = { t: 'pong'; at: number };
+/**
+ * `at` echoes the ping's. P5 O7 M7 (`rl2.pong-clock`; RL2_PROTOCOL 1.6): the endpoint's clock at the ping's arrival
+ * (`received`) and at the pong's send (`sent`), milliseconds, from which the remote bench estimates the machine's clock
+ * offset. An older reader passes them by (named fields only are checked), so they need no gate; the capability tells a
+ * device they are meant.
+ */
+export type PongMessage = { t: 'pong'; at: number; received?: number; sent?: number };
 /** `stateVersion` rides with `behind` only (§A's catch-up). */
 export type CloseMessage = { t: 'close'; reason: string; stateVersion?: number };
 
@@ -213,7 +219,7 @@ const STREAM_EITHER: Record<string, (m: Fields) => boolean> = {
 const EITHER: Record<string, (m: Fields) => boolean> = {
   state: (m) => Array.isArray(m.states) && Array.isArray(m.transitions),
   ping: (m) => isCount(m.at),
-  pong: (m) => isCount(m.at),
+  pong: (m) => isCount(m.at) && optional(m.received, isCount) && optional(m.sent, isCount),
   close: (m) => isText(m.reason, 64) && optional(m.stateVersion, isCount),
 };
 
