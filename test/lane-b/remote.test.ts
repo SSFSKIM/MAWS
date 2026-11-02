@@ -61,10 +61,9 @@ import { startNotifier } from '../../src/main/attention/notifier';
 import { DaemonClocks } from '../../src/mawsd/clocks';
 import { engineRequests } from '../../src/mawsd/engine-requests';
 import { EventEmitter } from 'node:events';
-import { decodeFrame } from '@artifacts/provider/frames';
+import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
 import { PortProvider } from '@artifacts/provider/port';
-import { newDoc, type Doc } from '@artifacts/yjs';
-import { MemoryDocumentHost } from '@artifacts/document/editor/memory-host';
+import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '@artifacts/yjs';
 import { DOC_PORT_CHANNEL } from '@shared/ipc/doc-port';
 import { startArtifacts, type ArtifactsDeps } from '../../src/main/artifacts';
 import { clientOf } from '../../src/main/ipc/clients';
@@ -1761,51 +1760,68 @@ function mainChain(d: Device): { fetch(request: Request): Promise<Response>; loc
 }
 
 /**
- * The machine's document host behind the endpoint's document channels (as `mawsd` relays them to the engine host): one
- * in-memory host per artifact (src/artifacts/document/editor/memory-host.ts: step 1 at the attach, step 2 answered, each
- * content frame applied, acked and sent to the other connections, awareness relayed), each endpoint channel a connection
- * of it, over the fake host port (`fakeDocuments`), which keeps each channel's open, the frames the endpoint wrote and its
- * end. Installed before the endpoint starts.
+ * The machine's document host behind the endpoint's document channels (as `mawsd` relays them to the engine host), over
+ * the fake host port (`fakeDocuments`, which keeps each channel's open, the frames the endpoint wrote and its end): one
+ * Yjs doc per artifact, speaking A's frames to each channel as the engine host's document service does as far as a
+ * replica can observe (src/artifacts/document/editor/memory-host.ts's rules): step 1 at the open, a step 2 for a step 1,
+ * each content frame applied and acked by the channel's count, what lands sent to the other channels, awareness relayed.
+ * Each answer goes a turn later, as over the host's socket. Installed before the endpoint starts.
  */
 function documentHost(services: FakeServices) {
   const port = fakeDocuments(services);
-  const hosts = new Map<string, MemoryDocumentHost>();
-  const connections = new Map<number, MessagePort>();
-  const hostOf = (artifactId: string) => {
-    if (!hosts.has(artifactId)) hosts.set(artifactId, new MemoryDocumentHost());
-    return hosts.get(artifactId)!;
+  type Held = { doc: Doc; revision: number; channels: Map<number, number> /* the content frames each channel sent */ };
+  const held = new Map<string, Held>();
+  const artifactOf = new Map<number, string>();
+  const send = (channel: number, frame: Frame) => queueMicrotask(() => port.send(channel, encodeFrame(frame)));
+  const heldOf = (artifactId: string): Held => {
+    const existing = held.get(artifactId);
+    if (existing !== undefined) return existing;
+    const made: Held = { doc: newDoc(), revision: 0, channels: new Map() };
+    cleanups.push(onUpdate(made.doc, (update, origin) => {
+      made.revision += 1;
+      for (const channel of made.channels.keys()) if (channel !== origin) send(channel, { type: 'update', update, seq: made.revision });
+    }));
+    held.set(artifactId, made);
+    return made;
+  };
+  const receive = (channel: number, frame: Frame) => {
+    const artifact = heldOf(artifactOf.get(channel)!);
+    if (!artifact.channels.has(channel)) return; // closed meanwhile
+    if (frame.type === 'step1') return send(channel, { type: 'step2', update: diffV1(artifact.doc, frame.sv), revision: artifact.revision });
+    if (frame.type === 'awareness') return void [...artifact.channels.keys()].filter((c) => c !== channel).forEach((c) => send(c, frame));
+    if (frame.type !== 'step2' && frame.type !== 'update') return;
+    applyV1(artifact.doc, frame.update, channel);
+    artifact.channels.set(channel, artifact.channels.get(channel)! + 1);
+    send(channel, { type: 'ack', frames: artifact.channels.get(channel)!, revision: artifact.revision });
   };
   const { open, close, frame } = services.documents;
   services.documents = {
     ...services.documents,
     open(message) {
       if (!open(message)) return false;
-      const connection = hostOf(message.artifactId).connect();
-      connections.set(message.channel, connection);
-      connection.onmessage = (event: MessageEvent) => port.send(message.channel, event.data as Uint8Array);
+      artifactOf.set(message.channel, message.artifactId);
+      const artifact = heldOf(message.artifactId);
+      artifact.channels.set(message.channel, 0);
+      send(message.channel, { type: 'step1', sv: stateVector(artifact.doc) });
       return true;
     },
     close(channel) {
       close(channel);
-      connections.get(channel)?.close();
-      connections.delete(channel);
+      heldOf(artifactOf.get(channel)!).channels.delete(channel);
     },
     frame(channel, bytes) {
       if (!frame(channel, bytes)) return false;
-      connections.get(channel)?.postMessage(bytes.slice());
+      const decoded = decodeFrame(bytes);
+      queueMicrotask(() => receive(channel, decoded));
       return true;
     },
   };
-  cleanups.push(() => {
-    for (const connection of connections.values()) connection.close();
-    for (const host of hosts.values()) host.destroy();
-  });
   return {
     port,
     /** The machine's document, as its store holds it. */
-    doc: (artifactId: string) => hostOf(artifactId).doc,
+    doc: (artifactId: string) => heldOf(artifactId).doc,
     /** A write made on the machine. */
-    write: (artifactId: string, value: string) => hostOf(artifactId).write((doc) => doc.get('root').insert(0, value)),
+    write: (artifactId: string, value: string) => transact(heldOf(artifactId).doc, () => heldOf(artifactId).doc.get('root').insert(0, value)),
     /** The frame types the endpoint wrote to a channel (what reached the host from the device). */
     heard: (channel: number) => port.channels.get(channel)!.received.map((bytes) => decodeFrame(bytes).type),
   };
