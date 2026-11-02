@@ -2,17 +2,18 @@
 // tests): a host started and attached, the launch's records handed on with their sequences, writes settled by the host's
 // answers, the frontier's acks trimming the ring, the release after the exit, a reconnect while the host lives (D45),
 // and a host that dies (`host_lost`, its child ended). Runs wherever a prebuild matches the platform.
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LaunchPlan } from '../launch';
 import { signalOrphan } from '../live-ledger';
 import { isAlive, procStartOf } from '../supervisor-files';
-import type { StderrItem, TransportItem } from '../transport';
+import type { EngineTransport, StderrItem, TransportItem } from '../transport';
 import { HostConnection } from './client';
 import { hostsDirOf, sessionHostBinary } from './files';
-import { HostStartFailed, startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
+import { adoptHosted, HostStartFailed, startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const LONG = 30_000;
@@ -93,6 +94,11 @@ async function helloOf(host: StartedHost) {
 function frameOf(item: TransportItem): unknown {
   expect(item.error).toBeNull();
   return item.frame;
+}
+
+// What a promise settled to within `ms`, or 'pending'.
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | 'pending'> {
+  return Promise.race([promise, sleep(ms).then(() => 'pending' as const)]);
 }
 
 describe.skipIf(!existsSync(BINARY))('the host transport', () => {
@@ -309,7 +315,84 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     expect(await t.exited).toEqual({ code: 0, signal: null });
   });
 
-  it('a host killed with SIGKILL ends the session as host_lost and its child is ended', { timeout: LONG }, async () => {
+  // O16 panel wave 1 (sweep#1): a handover's detach owns the session from then on; a reconnect already under way
+  // neither attaches a writer nor ends the host or its engine
+  it('a detach while the writer reconnects attaches no writer: the host keeps its engine for the successor', { timeout: LONG }, async () => {
+    const { deps, logs } = profile();
+    const signals: string[] = [];
+    let t: EngineTransport | null = null;
+    const connections: HostConnection[] = [];
+    const host = await start({
+      ...deps, child: { isAlive, procStartOf, signal: (_pid, name) => void signals.push(name), graceMs: 200 },
+      onConnection: (c) => {
+        connections.push(c);
+        if (connections.length === 2) t!.detach!({ ack: true }); // the handover lands while the reconnect has connected
+      },
+    });
+    t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    const frames = drain(t.frames);
+    await t.write({ type: 'n', k: 1 } as never);
+    pids.push(t.pid!);
+    connections[0]!.close();
+    expect(await within(frames, 5_000)).not.toBe('pending'); // the stream ended at the detach
+    await sleep(300);
+    expect(connections.length).toBe(2);
+    expect(await helloOf(host)).toMatchObject({ state: 'running', fence: 1, writer: false });
+    expect(signals).toEqual([]);
+    expect(logs.filter((line) => line.includes(' is lost: '))).toEqual([]);
+    expect(isAliveNow(t.pid!)).toBe(true);
+  });
+
+  it('a detach while the writer reconnects ends nothing when that reconnect then fails', { timeout: LONG }, async () => {
+    const { deps, logs } = profile();
+    const signals: string[] = [];
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, startMs: 1_500, child: { isAlive, procStartOf, signal: (_pid, name) => void signals.push(name), graceMs: 200 }, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'n', k: 1 } as never);
+    pids.push(t.pid!);
+    const moved = `${host.paths.socket}.moved`;
+    renameSync(host.paths.socket, moved); // the reconnect finds no socket until its bound passes
+    first!.close();
+    t.detach!({ ack: true });
+    await sleep(2_500);
+    renameSync(moved, host.paths.socket);
+    expect(logs.some((line) => line.includes('the reconnect after'))).toBe(true); // it ran, and failed
+    expect(logs.filter((line) => line.includes(' is lost: '))).toEqual([]);
+    expect(signals).toEqual([]);
+    expect(isAliveNow(t.pid!)).toBe(true);
+    expect(isAliveNow(host.pid)).toBe(true);
+  });
+
+  // O16 panel wave 1 (scalpel-5#2): a stop's EOF and signal asked while no connection carries them are sent once the
+  // writer is back, not dropped
+  it('an end asked while the writer reconnects is sent once the writer is back', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    const frames = drain(t.frames);
+    await t.write({ type: 'n', k: 1 } as never);
+    first!.close();
+    t.endInput();
+    expect(await within(t.exited, 5_000)).toEqual({ code: 0, signal: null });
+    expect((await frames).map((i) => (i.frame as { k?: unknown }).k)).toEqual([1]);
+  });
+
+  it('a signal asked while the writer reconnects is sent once the writer is back', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'n', k: 1 } as never);
+    pids.push(t.pid!);
+    first!.close();
+    t.kill('SIGTERM');
+    expect(await within(t.exited, 5_000)).toEqual({ code: null, signal: 'SIGTERM' });
+  });
+
+  // O16 panel wave 1 (scalpel-4#1): `exited` is what frees the row's reservation, so it waits for the engine's end
+  it('a host killed with SIGKILL ends the session as host_lost, and reads exited only once its child is ended', { timeout: LONG }, async () => {
     const { deps } = profile();
     const host = await start({ ...deps, child: { isAlive, procStartOf, signal: signalOrphan, graceMs: 1_000 } });
     const t = host.transport(plan(['/bin/sh', '-c', 'trap "" TERM; echo up; while :; do sleep 1; done']), { appSessionId: 'app-1', maxLineChars: 1024 });
@@ -320,8 +403,10 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     process.kill(host.pid, 'SIGKILL');
     const lost = await frames.next();
     expect(lost.error?.kind).toBe('host_lost');
+    expect(await within(t.exited, 500)).toBe('pending'); // SIGTERM ignored: the child lives through its grace
+    expect(isAliveNow(child)).toBe(true);
     expect(await t.exited).toEqual({ code: null, signal: 'SIGKILL' });
-    await expectGone(child, 8_000); // SIGTERM ignored: SIGKILL to its group after the grace
+    expect(isAliveNow(child)).toBe(false); // SIGKILL to its group after the grace, and its end awaited
   });
 
   it('fails the start, naming the host\'s log, when the binary cannot run or exits at once', { timeout: LONG }, async () => {
@@ -340,6 +425,111 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     await expectGone(host.pid);
     expect(existsSync(host.paths.roster)).toBe(false);
     expect(existsSync(host.paths.socket)).toBe(false);
+  });
+});
+
+// O16 panel wave 1 (scalpel-5#1): the host tells every connection of its child's exit, one that has attached but not
+// yet read too, so an exit can come between a writer's hello and its read, ahead of the ring's replay. A scripted host
+// (the host's side of Interfaces §A, as each case directs) puts the exit exactly there.
+type ScriptedMessage = { t: string } & Record<string, unknown>;
+type Reply = (out: object | Buffer) => void;
+const recordOf = (seq: number, line: string): Buffer => Buffer.concat([Buffer.from(`{"t":"out","seq":${seq},"len":${Buffer.byteLength(line)}}\n`), Buffer.from(line)]);
+const EXIT = { t: 'exit', code: 0, signal: null, at: '2026-11-01T10:00:00.000Z' };
+const helloLine = (over: Record<string, unknown> = {}) => ({
+  t: 'hello', protocol: 1, holderId: 'Lscripted', pid: process.pid, procStart: '', appSessionId: 'app-s', engineSessionId: 'eng-s', state: 'running',
+  child: { pid: 2_000_000_000, procStart: 'x' }, fence: 1, writer: false, stdinApplied: 0, stdinAccepted: 0, stdinQueued: 0, ring: { firstSeq: 1, lastSeq: 2, bytes: 10 }, exit: null, ...over,
+});
+const attachedLine = (fence: number) => ({ t: 'attached', fence, stdinApplied: 0, stdinAccepted: 0, ring: { firstSeq: 1, lastSeq: 2, bytes: 10 } });
+
+async function scriptedHost(on: (message: ScriptedMessage, reply: Reply, connection: number) => void): Promise<{ socket: string; connections: Socket[]; received: ScriptedMessage[] }> {
+  const dir = mkdtempSync(join(tmpdir(), 'msh-s-'));
+  scratch.push(dir);
+  const socket = join(dir, 'h.sock');
+  const connections: Socket[] = [];
+  const received: ScriptedMessage[] = [];
+  const server = createServer((s) => {
+    connections.push(s);
+    const n = connections.length;
+    let pending = '';
+    s.on('data', (chunk: Buffer) => {
+      pending += chunk.toString('utf8');
+      for (let at = pending.indexOf('\n'); at !== -1; at = pending.indexOf('\n')) {
+        const message = JSON.parse(pending.slice(0, at)) as ScriptedMessage;
+        pending = pending.slice(at + 1);
+        received.push(message);
+        on(message, (out) => s.write(Buffer.isBuffer(out) ? out : `${JSON.stringify(out)}\n`), n);
+      }
+    });
+    s.on('error', () => {});
+  });
+  await new Promise<void>((done) => server.listen(socket, done));
+  servers.push({ server, connections });
+  return { socket, connections, received };
+}
+const servers: { server: ReturnType<typeof createServer>; connections: Socket[] }[] = [];
+afterEach(async () => {
+  for (const { server, connections } of servers.splice(0)) {
+    for (const connection of connections) connection.destroy();
+    await new Promise((done) => server.close(done));
+  }
+});
+
+function adoptDeps(): Parameters<typeof adoptHosted>[1] {
+  return { hostsDir: '/nonexistent', binary: '/nonexistent', userData: '/nonexistent', tmpdir: tmpdir(), log: () => {}, token: 't'.repeat(64), checkpoint: { frontier: 0, above: [] }, maxLineChars: 1024 };
+}
+const entryOf = (socket: string) => ({ holderId: 'Lscripted', pid: process.pid, procStart: '', socket, appSessionId: 'app-s' });
+
+describe('an exit that comes between the hello and the read (scalpel-5#1)', () => {
+  it('an adoption hands on the ring\'s replay before the exit ends the streams, and releases once it is journaled', async () => {
+    const host = await scriptedHost((m, reply) => {
+      if (m.t === 'auth') reply(helloLine());
+      else if (m.t === 'attach') {
+        reply(EXIT); // the child exits after the hello: told before the attach's answer
+        reply(attachedLine(2));
+      } else if (m.t === 'read') {
+        reply(recordOf(1, '{"n":1}'));
+        reply(recordOf(2, '{"n":2}'));
+        reply({ t: 'caughtUp', lastSeq: 2, gap: null });
+      }
+    });
+    const { transport: t } = await adoptHosted(entryOf(host.socket), adoptDeps());
+    const items = await within(drain(t.frames), 5_000);
+    expect(items === 'pending' ? items : items.map((i) => [i.hseq ?? null, i.error?.kind ?? null, i.frame])).toEqual([[1, null, { n: 1 }], [2, null, { n: 2 }]]);
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+    expect(host.received.some((m) => m.t === 'release')).toBe(false);
+    t.journaled!(1);
+    t.journaled!(2);
+    await sleep(50);
+    expect(host.received.filter((m) => m.t === 'release')).toHaveLength(1);
+  });
+
+  it('a reconnect hands on its replay, a gap included, before the exit ends the streams', async () => {
+    const host = await scriptedHost((m, reply, n) => {
+      if (m.t === 'auth') reply(helloLine({ fence: n }));
+      else if (m.t === 'attach' && n === 1) reply(attachedLine(2));
+      else if (m.t === 'attach') {
+        reply(EXIT);
+        reply(attachedLine(3));
+      } else if (m.t === 'read' && n === 1) {
+        reply(recordOf(1, '{"n":1}'));
+        reply({ t: 'caughtUp', lastSeq: 1, gap: null });
+      } else if (m.t === 'read') {
+        reply(recordOf(4, '{"n":4}')); // read from 2: 2 and 3 left the ring meanwhile
+        reply({ t: 'caughtUp', lastSeq: 4, gap: 4 });
+      }
+    });
+    const { transport: t } = await adoptHosted(entryOf(host.socket), adoptDeps());
+    const frames = reader(t.frames);
+    expect(frameOf(await frames.next())).toEqual({ n: 1 });
+    expect((await frames.next()).error?.kind).toBe('host_caught_up');
+    host.connections[0]!.destroy(); // the writer's connection is lost while the host lives: a reconnect
+    const rest: TransportItem[] = [];
+    const ended = (async () => {
+      for (;;) rest.push(await frames.next(5_000));
+    })().catch((error: Error) => error.message);
+    expect(await ended).toBe('the stream ended');
+    expect(rest.map((i) => [i.hseq ?? null, i.error?.kind ?? null, i.error?.gap ? [i.error.gap.lostFrom, i.error.gap.firstSeq] : i.frame])).toEqual([[null, 'host_gap', [2, 4]], [4, null, { n: 4 }]]);
+    expect(await t.exited).toEqual({ code: 0, signal: null });
   });
 });
 

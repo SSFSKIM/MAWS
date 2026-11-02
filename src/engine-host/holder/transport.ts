@@ -16,8 +16,9 @@
 // An abort is honoured only before the record is handed to the socket; after, it settles on the host's answer.
 // The writer's connection closed while the host lives is a reconnect at the next fence, read from the last delivered
 // sequence + 1 (D45); a dead host, or a reconnect that fails in time, is `host_lost`: the session ends as a crash and
-// the child is signalled here (SIGTERM, the sweep's grace, SIGKILL to its group). After the child's exit the host is
-// released once every record it sent is journaled, so its ring outlives nothing it still owes.
+// the child is signalled here (SIGTERM, the sweep's grace, SIGKILL to its group), reading exited only once it is gone.
+// A detach ends what a reconnect under way may still do: the host is the successor's. After the child's exit the host
+// is released once every record it sent is journaled, so its ring outlives nothing it still owes.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, openSync, rmSync, writeFileSync } from 'node:fs';
@@ -215,6 +216,11 @@ class HostedTransport {
   private released = false;
   private endSent = false;
   private reconnecting = false;
+  // O16 panel wave 1 (scalpel-5#2): termination asked while no connection carries it (a reconnect under way), sent by
+  // the reconnect once it holds the writer: the signals in order, then `end` after any record it resends
+  private readonly owedSignals: ('SIGTERM' | 'SIGKILL')[] = [];
+  private endOwed = false;
+  private replaying = false; // O16 panel wave 1 (scalpel-5#1): a `read` sent, its `caughtUp` not yet in
   private resolveExited!: (exit: Exit) => void;
   private readonly skip = new Set<number>(); // P5 O16 M3: records an adoption found journaled above the frontier
   private catchingUp = false; // P5 O16 M3: an adoption's first read, until its `caughtUp`
@@ -269,10 +275,11 @@ class HostedTransport {
       journaled: (seq) => this.journaled(seq),
       detach: (opts) => this.detach(opts),
     };
+    this.replaying = true; // before the listener: an exit kept since the hello waits for the replay
+    this.catchingUp = adopt !== undefined;
     this.attachListeners(connection);
     if (adopt) {
       this.settleSpawn(null); // the engine was spawned under the old manager
-      this.catchingUp = true;
       connection.send({ t: 'read', fromSeq: adopt.frontier + 1 });
       return;
     }
@@ -349,6 +356,7 @@ class HostedTransport {
         return;
       }
       case 'caughtUp':
+        this.replaying = false;
         // a loss no surviving record showed (the ring kept none of what was asked for): reported here instead
         if (message.gap !== null && message.gap > this.lastDelivered + 1) this.lostBefore(message.gap);
         // P5 O16 M3: an adoption's replay is over: the session disposes of what the old manager left (its barrier). An
@@ -364,9 +372,14 @@ class HostedTransport {
           this.recordExit(exit);
         }
         return;
-      case 'exit':
-        this.recordExit({ code: message.code, signal: message.signal as NodeJS.Signals | null });
+      case 'exit': {
+        const exit = { code: message.code, signal: message.signal as NodeJS.Signals | null };
+        // O16 panel wave 1 (scalpel-5#1): the host tells every connection of the exit, one that has not read yet too, so
+        // an exit that came between the hello and the read is held until the replay's records and gaps are handed on
+        if (this.replaying) this.pendingExit = exit;
+        else this.recordExit(exit);
         return;
+      }
       case 'problem':
         if (message.kind === 'line_budget' && message.stream !== 'err') {
           this.frames.push({ frame: null, raw: '', error: { kind: 'line_budget', message: `line budget exceeded: a stdout line of ${message.length ?? '?'} bytes was dropped by the session host (budget ${this.o.maxLineChars})`, length: message.length ?? 0, typeGuess: null } });
@@ -396,7 +409,8 @@ class HostedTransport {
     this.maybeRelease();
   }
 
-  private finish(exit: Exit): void {
+  // `exited` resolves once `confirmed` settles: a lost host's engine is reported exited only once it is gone.
+  private finish(exit: Exit, confirmed: Promise<void> | null = null): void {
     if (this.ended) return;
     this.ended = true;
     this.frontier.flush();
@@ -404,7 +418,8 @@ class HostedTransport {
     this.stderr.end();
     this.settleSpawn(new TransportClosed('the process exited'));
     this.answered(() => true, new TransportClosed('the process exited'));
-    this.resolveExited(exit);
+    if (confirmed === null) this.resolveExited(exit);
+    else void confirmed.then(() => this.resolveExited(exit));
   }
 
   // ---- the frontier --------------------------------------------------------------------------------------------------
@@ -492,12 +507,16 @@ class HostedTransport {
   private endInput(): void {
     if (this.endSent || this.ended) return;
     this.endSent = true;
-    void this.chain.then(() => this.connection?.send({ t: 'end' }));
+    void this.chain.then(() => {
+      if (this.connection) this.connection.send({ t: 'end' });
+      else this.endOwed = true; // reconnecting: the reconnect sends it
+    });
   }
 
   private kill(name: 'SIGTERM' | 'SIGKILL'): void {
     if (this.ended || this.child === null) return;
-    this.connection?.send({ t: 'signal', name, group: name === 'SIGKILL' });
+    if (this.connection) this.connection.send({ t: 'signal', name, group: name === 'SIGKILL' });
+    else this.owedSignals.push(name); // reconnecting: the reconnect sends it
   }
 
   // P5 O16 M3a fix wave 1: an adoption given up: the connection closed without `release` (the host keeps its engine and
@@ -524,9 +543,16 @@ class HostedTransport {
 
   // ---- the connection's loss -----------------------------------------------------------------------------------------
 
+  // O16 panel wave 1 (sweep#1): the session is this transport's while it is neither released (a release, or a detach that
+  // handed it over) nor ended; a reconnect rechecks after each of its waits and, once it is not, attaches nothing more
+  // and ends nothing: the host and its engine are the successor's.
+  private owned(): boolean {
+    return !this.released && !this.ended;
+  }
+
   private async lost(why: string): Promise<void> {
     this.connection = null;
-    if (this.released || this.ended) return; // after the exit nothing is owed but the release, which the host's linger covers
+    if (!this.owned()) return; // after the exit nothing is owed but the release, which the host's linger covers
     this.frontier.dispose();
     const alive = isAlive(this.o.hostPid) && (this.o.hostProcStart === '' || procStartOf(this.o.hostPid) === this.o.hostProcStart);
     const gone = this.o.hostGone() ?? (alive ? null : 'its process is gone');
@@ -537,6 +563,7 @@ class HostedTransport {
         return;
       } catch (error) {
         this.o.deps.log(`session host ${this.o.holderId}: the reconnect after "${why}" failed: ${(error as Error).message}`);
+        if (!this.owned()) return; // handed over or ended meanwhile: the host is not this transport's to call lost
         const half = this.connection as HostConnection | null; // set by the reconnect: attached, then failed (the spawn's outcome unreadable)
         this.connection = null;
         half?.close();
@@ -553,19 +580,30 @@ class HostedTransport {
     const deadline = Date.now() + (this.o.deps.startMs ?? HOST_START_MS);
     const { connection, hello } = await HostConnection.open(this.o.paths.socket, this.o.token, { deadline, gone: () => this.o.hostGone(), log: this.o.deps.log });
     this.o.deps.onConnection?.(connection);
+    if (!this.owned()) {
+      connection.close(); // handed over while connecting: no writer is attached
+      return;
+    }
     this.fence = Math.max(this.fence, hello.fence) + 1;
     connection.send({ t: 'attach', role: 'writer', fence: this.fence });
     const attached = await connection.expect('attached', deadline).catch((error: unknown) => {
       connection.close();
       throw error;
     });
+    if (!this.owned()) {
+      connection.close();
+      return;
+    }
     this.o.deps.log(`session host ${this.o.holderId}: reconnected as writer at fence ${this.fence}, reading from ${this.lastDelivered + 1}`);
     this.connection = connection;
     if (this.frontier.value > 0) connection.send({ t: 'ack', seq: this.frontier.value }); // an ack the closed connection may have dropped
     if (hello.exit) this.pendingExit = { code: hello.exit.code, signal: hello.exit.signal as NodeJS.Signals | null };
+    for (const name of this.owedSignals.splice(0)) connection.send({ t: 'signal', name, group: name === 'SIGKILL' });
+    this.replaying = true; // before the listener: an exit kept since the hello waits for the replay
     this.attachListeners(connection);
     connection.send({ t: 'read', fromSeq: this.lastDelivered + 1 });
     if (!this.spawnSettled) await this.recoverSpawn(connection, deadline);
+    if (!this.owned()) return; // a detach closed this connection, or the exit came: nothing to resend
     const w = this.inFlight;
     this.nextOffset = attached.stdinAccepted;
     if (w) {
@@ -576,6 +614,10 @@ class HostedTransport {
         connection.write(stdinRecord(w.offset, w.data));
         w.sent = true;
       } else this.answered(() => true, new TransportClosed('the session host lost track of a record across the reconnect'));
+    }
+    if (this.endOwed) {
+      this.endOwed = false;
+      connection.send({ t: 'end' }); // after the record resent above: the host applies it first
     }
   }
 
@@ -588,7 +630,7 @@ class HostedTransport {
     for (;;) {
       const { connection: observer, hello } = await HostConnection.open(this.o.paths.socket, this.o.token, { deadline, gone: () => this.o.hostGone(), log: this.o.deps.log });
       observer.close();
-      if (this.spawnSettled) return;
+      if (this.spawnSettled || !this.owned()) return; // sweep#1: a host handed over is not this writer's to end
       if (hello.child !== null) {
         this.child = { pid: hello.child.pid, procStart: hello.child.procStart };
         this.settleSpawn(null);
@@ -606,6 +648,7 @@ class HostedTransport {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, SPAWN_POLL_MS));
+      if (!this.owned()) return;
     }
   }
 
@@ -615,8 +658,9 @@ class HostedTransport {
     this.o.deps.log(`session host ${this.o.holderId} (pid ${this.o.hostPid}) is lost: ${why}`);
     if (!this.spawnSettled) this.endHost(); // a live host may still be forking the child this writer never learned of
     this.frames.push({ frame: null, raw: '', error: { kind: 'host_lost', message: `The session host (pid ${this.o.hostPid}) stopped: ${why}.`, length: 0, typeGuess: null } });
-    this.finish({ code: null, signal: 'SIGKILL' });
-    void this.endChild();
+    // O16 panel wave 1 (scalpel-4#1): `exited` waits for the engine's end, so the row keeps its reservation and no
+    // relaunch runs a second engine beside it through its SIGTERM grace
+    this.finish({ code: null, signal: 'SIGKILL' }, this.endChild());
   }
 
   // A host this writer gives up on while its committed spawn is unresolved (the recovery's bound passed, or the
@@ -634,19 +678,32 @@ class HostedTransport {
     }
   }
 
+  // Settles once the engine is gone (or was never known): SIGTERM, the sweep's grace, SIGKILL to its group, then a wait
+  // for its end however long it takes, since the reservation it keeps is what stops a second engine (scalpel-4#1).
   private async endChild(): Promise<void> {
     const child = this.child;
     if (child === null) return;
     const deps = this.o.deps.child ?? { isAlive, procStartOf, signal: signalOrphan };
     const same = () => deps.isAlive(child.pid) && deps.procStartOf(child.pid) === child.procStart;
-    try {
-      if (!same()) return;
-      deps.signal(child.pid, 'SIGTERM');
-      const until = Date.now() + (deps.graceMs ?? SWEEP_GRACE_MS);
-      while (Date.now() < until && deps.isAlive(child.pid)) await new Promise((resolve) => setTimeout(resolve, 100));
-      if (same()) deps.signal(child.pid, 'SIGKILL');
-    } catch (error) {
-      this.o.deps.log(`the engine pid ${child.pid} of the lost session host could not be signalled: ${(error as Error).message}`);
+    const signal = (name: 'SIGTERM' | 'SIGKILL') => {
+      try {
+        deps.signal(child.pid, name);
+      } catch (error) {
+        this.o.deps.log(`the engine pid ${child.pid} of the lost session host could not be signalled: ${(error as Error).message}`);
+      }
+    };
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
+    if (!same()) return;
+    signal('SIGTERM');
+    const grace = deps.graceMs ?? SWEEP_GRACE_MS;
+    for (const until = Date.now() + grace; Date.now() < until && deps.isAlive(child.pid); ) await pause();
+    if (!same()) return;
+    signal('SIGKILL');
+    for (let logged = false, since = Date.now(); same(); await pause()) {
+      if (!logged && Date.now() - since > grace) {
+        logged = true;
+        this.o.deps.log(`the engine pid ${child.pid} of the lost session host outlives its SIGKILL; its session stays reserved until it ends`);
+      }
     }
   }
 }
