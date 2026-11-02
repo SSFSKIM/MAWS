@@ -51,31 +51,32 @@ describe('the agent\'s browser capability', () => {
   });
 
   // The panel's scalpel-4#1: the machine's link replays no event it missed while it was down, so a reading is asked again
-  // at each new generation of the session's machine link, and a refused one is asked again there
-  it('asks again when the session\'s machine link comes back as a new generation, and shows the fresh answer', async () => {
+  // at each new generation of the session's machine link, and a refused one is asked again there. P5 O7 M5a fix wave 1:
+  // and at the link's going down, when main answers its own reading for the machine (offline), sending no event of it
+  it('asks again when the session\'s machine link goes down and when it comes back as a new generation', async () => {
     other('up', 1);
     const fake = fakeClient();
     const { result } = renderHook(() => useAgentBrowser(R, fake.client));
     await act(() => fake.reply('session.capabilities', { browser: NONE }));
     expect(result.current).toEqual(NONE);
     other('down', 1); // the browser attaches over there meanwhile: its event is not heard here
-    expect(fake.pending('session.capabilities'), 'nothing is asked while the link is down').toBe(0);
+    expect(fake.invoked('session.capabilities')).toHaveLength(2);
+    const OFFLINE = { available: false, reason: 'studio is offline' };
+    await act(() => fake.reply('session.capabilities', { browser: OFFLINE }));
+    expect(result.current).toEqual(OFFLINE);
     other('up', 2);
-    expect(fake.invoked('session.capabilities')).toEqual([{ appSessionId: R }, { appSessionId: R }]);
+    expect(fake.invoked('session.capabilities')).toEqual([{ appSessionId: R }, { appSessionId: R }, { appSessionId: R }]);
     await act(() => fake.reply('session.capabilities', { browser: { available: true } }));
     expect(result.current).toEqual({ available: true });
   });
 
-  it('a first asking refused while the session\'s machine link is down is asked again when it comes up', async () => {
+  it('a first asking refused while the session\'s machine link is not up is asked again when it comes up', async () => {
     other('connecting', 0);
     const fake = fakeClient();
     const { result } = renderHook(() => useAgentBrowser(R, fake.client));
-    expect(fake.pending('session.capabilities'), 'nothing is asked before the link is up').toBe(0);
-    other('up', 1);
     await act(() => fake.fail('session.capabilities', 'the machine is unreachable', 'host_unavailable'));
     expect(result.current).toBeNull();
-    other('down', 1);
-    other('up', 2);
+    other('up', 1);
     await act(() => fake.reply('session.capabilities', { browser: NONE }));
     expect(result.current).toEqual(NONE);
   });

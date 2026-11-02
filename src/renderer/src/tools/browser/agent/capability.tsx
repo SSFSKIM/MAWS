@@ -6,6 +6,7 @@
 // The panel's scalpel-4#1: a machine's link replays no event it missed while it was away, so the reading is asked again
 // whenever the session's machine is back: another machine's link up as a new generation (`machines.changed`), the local
 // machine's host heard (`host.status`, main's at each ready of its daemon). A refused asking is asked again there too.
+// P5 O7 M5a fix wave 1: and when another machine's link goes down, where main answers the offline reading.
 // P5 O7 M5a ("The capability lists"): a lane B session on another machine is asked by its address and heard on its checkout
 // feed; main answers a reading for it always, standing in for a machine that predates the read or is offline, and the
 // notice draws the machine's words as they come.
@@ -18,8 +19,9 @@ import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
 import { BROWSER_COPY } from '../copy';
 
-// The session's machine link as far as asking goes: the generation it is up as, null while it is not up. The local
-// machine (and one the roster does not name) is up for the app's life: its returns are its host's (`host.status`).
+// The session's machine link as far as asking goes: the generation it is up as, null while it is not up (a change either
+// way asks again). The local machine (and one the roster does not name) is up for the app's life: its returns are its
+// host's (`host.status`).
 function useLinkGeneration(appSessionId: AppSessionId): number | null {
   const machine = machineOf(appSessionId);
   return useMachines((state) => {
@@ -51,11 +53,11 @@ export function useAgentBrowser(appSessionId: AppSessionId, client: MawsBridge =
       heard = true;
       setReading({ appSessionId, entry: payload.capabilities.browser ?? null });
     });
-    // while the link is down nothing is asked: the reading stands as last known, and is asked for at the return
-    if (generation !== null)
-      void client.invoke('session.capabilities', { appSessionId }).then((result) => {
-        if (live && !heard && result.ok) setReading({ appSessionId, entry: result.value.browser ?? null });
-      });
+    // P5 O7 M5a fix wave 1: asked at the link's going down too, where main answers its own reading of the machine
+    // (offline) and sends no event of it, so the notice never keeps an up machine's reading through its absence
+    void client.invoke('session.capabilities', { appSessionId }).then((result) => {
+      if (live && !heard && result.ok) setReading({ appSessionId, entry: result.value.browser ?? null });
+    });
     return () => {
       live = false;
       off();
