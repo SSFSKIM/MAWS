@@ -173,6 +173,8 @@ export class DocumentTabState {
   // waiting for the host past the delay (an edit acknowledged sooner publishes nothing).
   private savingTimer: ReturnType<typeof setTimeout> | null = null;
   private follow(handle: DocumentHandle, document: DocumentState): void {
+    // P5 O7 M5b: the replica ended for good (the document gone, or no longer the member's to view): said in its place
+    if (document.refused !== undefined && this.current.failed !== document.refused) return this.set({ failed: document.refused });
     if (document.unsaved === 0) this.stopSavingTimer();
     else if (this.savingTimer === null && !this.current.saving) {
       this.savingTimer = setTimeout(() => {

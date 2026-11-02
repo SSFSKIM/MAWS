@@ -140,9 +140,12 @@ export interface KindAdapter {
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
 // reconnecting, `readOnly` is read-only): the provider's SaveState, and whether the store is read-only (a newer app
-// wrote it, Decision Log 12), in which case the host refuses every write.
+// wrote it, Decision Log 12), in which case the host refuses every write. P5 O7 M5b: `readOnly` too while the port is
+// one that never writes (another machine's document, its member holding `view` alone); `refused`, the words of a
+// refusal for good that ended an open replica (the document gone, or no longer viewable), after which it reopens no more.
 export interface DocumentState extends SaveState {
   readOnly: boolean;
+  refused?: string;
 }
 
 // An open document as an editor holds it: a replica kept in sync with the host over a port, reconnecting by itself.

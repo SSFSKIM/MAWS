@@ -7,7 +7,10 @@ import type { PortLike } from '@artifacts/provider/port';
 import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, type Doc } from '@artifacts/yjs';
 import type { CommandName, CommandResult, EventName, MawsBridge } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
+import type { AppSessionId } from '@shared/graph/ids';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteSessionState } from '../lane-b/test-support/remote-session';
+import { savedOf } from '../tools/document/header';
 import { createArtifactHost, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
 import { recordArtifactMachine, resetArtifactMachines } from './machines';
 import { windowDocPorts } from './window-ports';
@@ -103,6 +106,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
   const host = options.host ?? new TestHost();
   let channel = 0;
   let hostUp = true;
+  let readOnly = false; // P5 O7 M5b: main answers the open `readOnly` (a `view` stream)
   const answers = new Map<string, Answer>();
   const calls: { name: string; input: unknown }[] = [];
   const eventListeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
@@ -129,7 +133,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
         host.attach(hostEnd);
         channel += 1;
         waiting.set(channel, windowEnd);
-        return { ok: true, value: { channel } };
+        return { ok: true, value: { channel, ...(readOnly && { readOnly: true }) } };
       }
       const answer = answers.get(name);
       if (answer) return typeof answer === 'function' ? answer() : answer;
@@ -152,6 +156,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
     answers,
     emit,
     setHostUp: (up: boolean) => void (hostUp = up),
+    setReadOnly: (on: boolean) => void (readOnly = on),
     heldPorts: () => held.length,
     releasePort: () => held.shift()!(),
     hostState: (state: 'ready' | 'restarting', revision: number, machine?: MachineRef) => emit('engine.hostState', { state, pid: state === 'ready' ? 2 : null, restarts: 1, revision }, machine),
@@ -388,20 +393,114 @@ describe('document ports from the preload', () => {
   });
 });
 
-// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5, "What crosses, as what"): editing an artifact
-// on another machine arrives with M5b. Main refuses its `artifacts.open` with the words to show; the replica takes the
-// refusal as the open's answer, so the editor shows those words, rather than asking again with the backoff.
-describe('an artifact on another machine (M5a)', () => {
+// P5 O7 M5b (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5's "The `document` stream", its "On this Mac"
+// half): a document on another machine opens over main's bridge, read-only when main answers the open `readOnly`; its
+// replica's liveness is its machine's link as `remote.session` says it, not this Mac's engine host; and a refusal for
+// good ends the attempts, said to the editor whether or not the replica had synced.
+describe('an artifact on another machine (M5b)', () => {
   afterEach(() => resetArtifactMachines());
+  const SESSION = 'b1' as AppSessionId;
+  const link = (state: 'up' | 'down' | 'connecting') => remoteSessionState(SESSION, { link: { state, carrier: state === 'up' ? 'relay' : null, refusal: null, member: 'member-1', rights: [] } });
 
-  it('rejects its open with main’s words, and asks no more', async () => {
+  it('is read-only while main answers its open `readOnly`, and writable again once an open doesn’t', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
     const h = harness();
-    const words = 'editing an artifact on studio arrives with the next landing';
-    h.answers.set('artifacts.open', { ok: false, error: { code: 'host_unavailable', message: words } });
-    await expect(h.artifacts.open(ARTIFACT)).rejects.toThrow(words);
+    h.setReadOnly(true);
+    const handle = await h.artifacts.open(ARTIFACT);
+    const seen: boolean[] = [];
+    handle.subscribe((state) => seen.push(state.readOnly));
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: true });
+    // what the editor reads of it: no input (the editors follow `readOnly`, P3's), the header's read-only word
+    expect(savedOf(handle.state(), false, false)).toBe('readonly');
+    h.setReadOnly(false); // the member was given `manage`; the next open is `edit`
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }));
+    expect(seen).toContain(false);
+    expect(savedOf(handle.state(), false, false)).toBe('saved');
+    handle.close();
+  });
+
+  it('follows its machine’s link: down drops the port and asks nothing until it is up, this Mac’s host leaving moves nothing, and an edit made meanwhile lands', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const opens = () => h.calls.filter((c) => c.name === 'artifacts.open').length;
+    h.hostState('restarting', 3); // this Mac's engine host: not this document's
+    expect(handle.state().phase).toBe('live');
+    h.emit('remote.session', link('up'), OTHER_MACHINE);
+    expect(handle.state().phase).toBe('live');
+    h.emit('remote.session', link('down'), OTHER_MACHINE);
+    expect(handle.state().phase, 'a link down drops the port, which may never say it closed').toBe('off');
+    expect(h.host.conns.size).toBe(0);
+    handle.doc.get('root').insert(0, 'offline');
+    await settle(60_000);
+    expect(opens(), 'nothing asked while the link is down').toBe(1);
+    h.emit('remote.session', link('connecting'), OTHER_MACHINE);
     await settle(10_000);
-    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(1);
+    expect(opens()).toBe(1);
+    h.hostState('ready', 4); // this Mac's host being ready reopens nothing of another machine's
+    await settle(10_000);
+    expect(opens()).toBe(1);
+    h.emit('remote.session', link('up'), OTHER_MACHINE);
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0 }));
+    expect(opens()).toBe(2);
+    expect(text(h.host.doc)).toBe('offline');
+    handle.close();
+  });
+
+  it('a local replica doesn’t follow another machine’s link', async () => {
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.emit('remote.session', link('down'), OTHER_MACHINE);
+    expect(handle.state().phase).toBe('live');
+    handle.close();
+  });
+
+  it('retries an open main answers offline with the backoff, and keeps trying at its last step while the link isn’t known down', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const h = harness();
+    h.setHostUp(false); // main answers host_unavailable: the machine is offline, or its stream closed before it opened
+    const opening = h.artifacts.open(ARTIFACT);
+    const opens = () => h.calls.filter((c) => c.name === 'artifacts.open').length;
+    await settle();
+    expect(opens()).toBe(1);
+    await settle(RECONNECT_BACKOFF_MS[0] + RECONNECT_BACKOFF_MS[1] + RECONNECT_BACKOFF_MS[2]);
+    expect(opens()).toBe(4);
+    await settle(RECONNECT_BACKOFF_MS[2] * 2);
+    expect(opens(), 'no host state to wait for: the last step again').toBe(6);
+    h.setHostUp(true);
+    await settle(RECONNECT_BACKOFF_MS[2]);
+    const handle = await opening;
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true });
+    handle.close();
+  });
+
+  it('stops on a refusal for good: the first open rejects with main’s words; after a sync the editor is told, and nothing is asked again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    recordArtifactMachine(ARTIFACT, OTHER_MACHINE, TEST_MACHINE);
+    const words = 'you can’t view this document on studio';
+    const refused = { ok: false, error: { code: 'invalid_input', message: words, issues: { reason: 'notFound', data: { refusal: 'grade' } } } } as const;
+    const first = harness();
+    first.answers.set('artifacts.open', refused);
+    await expect(first.artifacts.open(ARTIFACT)).rejects.toThrow(words);
+    await settle(10_000);
+    expect(first.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(1);
+
+    const later = harness();
+    const handle = await later.artifacts.open(ARTIFACT);
+    const states: Array<string | undefined> = [];
+    handle.subscribe((state) => states.push(state.refused));
+    later.answers.set('artifacts.open', refused); // the member lost `view`: the stream closed `removed`, and the reopen is refused
+    later.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state().refused).toBe(words);
+    expect(states).toContain(words);
+    await settle(60_000);
+    expect(later.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
   });
 });

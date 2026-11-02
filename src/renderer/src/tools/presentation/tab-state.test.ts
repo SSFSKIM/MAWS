@@ -109,6 +109,15 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(handle.closed).toBe(true);
   });
 
+  // P5 O7 M5b: a replica ended by a refusal for good (another machine's deck its member can no longer view) says so
+  it('shows a refusal the replica ended with in place of the deck', async () => {
+    const { handle, state } = await opened();
+    expect(state.snapshot().failed).toBeNull();
+    handle.set({ phase: 'off', synced: false, refused: 'you can’t view this document on studio' });
+    expect(state.snapshot().failed).toBe('you can’t view this document on studio');
+    state.dispose();
+  });
+
   it('a restore it did not witness clears its undo stack', async () => {
     const { handle, state } = await opened();
     const session = state.snapshot().session!;
