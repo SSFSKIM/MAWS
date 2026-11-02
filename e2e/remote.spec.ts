@@ -1089,7 +1089,6 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const observerSaid = async () => {
         if (observed.state === 'ready') return '';
         const row = (await b.request<Record<string, unknown>[]>('engine.sessions')).find((s) => s.appSessionId === observerApp);
-        const report = await b.request('session.mcpStatus', { appSessionId: observerApp }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
         const logs = (readdirSync(b.userData, { recursive: true }) as string[]).filter((name) => name.endsWith('.log')).map((name) => {
           const lines = readFileSync(join(b.userData, name), 'utf8').split('\n').filter((line) => /connector|observ|mcp|deliver|locat|status cache/i.test(line));
           return `${name}:\n${lines.slice(-30).map((line) => line.slice(0, 400)).join('\n')}`;
@@ -1099,6 +1098,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         // the host's observation asked directly, as Send to's status read asks it, then the servers read again
         const asked = row ? await b.request('connectors.observe', { appSessionId: observerApp, launchId: row.launchId, cwd: row.cwd }).then((answer) => JSON.stringify(answer), String) : 'no row';
         const after = await b.request('connectors.servers', { artifactId: dashboard, tools: [{ server: NOTION, tool: NOTION_TOOL }] }).then((answer) => JSON.stringify(answer).slice(0, 800), String);
+        const report = await b.request('session.mcpStatus', { appSessionId: observerApp }).then((answer) => JSON.stringify(answer).slice(0, 1500), String);
         return `the observer's row: ${JSON.stringify(row && { launchId: row.launchId, cwd: row.cwd, process: row.process, pid: row.pid })}\nB's servers for the dashboard: ${servers}\nB's config home holds: ${configHome}\nthe host's observe asked directly: ${asked}; the servers then: ${after}\nits report, read directly: ${report}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's logs:\n${logs.join('\n')}`;
       };
       expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\n${await observerSaid().catch(String)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
