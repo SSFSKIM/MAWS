@@ -487,6 +487,7 @@ jobs:
           cache: false
       - if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |
+          .github/scripts/gate-bg.sh start session-host-go '^(ok|FAIL|--- FAIL|panic:)' go -C native/session-host test -count=1 ./...
           .github/scripts/gate-bg.sh start session-host '^session-host: ' scripts/check-session-host.sh
       - name: pnpm typecheck
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
@@ -505,6 +506,10 @@ jobs:
       - name: the session host prebuilds
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait session-host
+      # The session host's Go tests on Linux, under go.version's toolchain; unit:darwin runs them on macOS.
+      - name: the session host's Go tests
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: .github/scripts/gate-bg.sh wait session-host-go
 
   # On the pool the whole suite runs in shards, `unit <k>/<n>`, each its own box (gate-plan.mjs's UNIT_SHARDS); a
   # selected run that tests the related suites, and a run off the pool, is the one job `unit`.
@@ -592,6 +597,17 @@ jobs:
           else
             .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" --fsModuleCache $(scripts/darwin-unit-files.sh)
           fi
+      # P5 O16: the session host's Go tests on macOS, where the darwin-arm64 prebuild runs; static runs them on Linux.
+      # They run whatever the vitest step did, in an admitted job only (the upload's guard; gate-plan.test.mjs's
+      # refused-start walk). On a self-hosted Mac setup-go fills the runner's tool cache once; the guest downloads it each
+      # clone.
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: native/session-host/go.version
+          cache: false
+      - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
+        run: .github/scripts/gate-run.sh '^(ok|FAIL|--- FAIL|panic:)' go -C native/session-host test -count=1 ./...
       - if: ${{ !cancelled() && (steps.test.outcome == 'success' || steps.test.outcome == 'failure') }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
