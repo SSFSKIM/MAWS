@@ -767,7 +767,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   shutdown.add(
     'delivery send',
     registerDeliverySend({
-      register: registerMainHandler,
+      // P5 O7 M5c: `delivery.send` is `machine`-owned from the contracts on; until main reads the daemon's
+      // `machine.delivery` (the shim kept behind it), main answers it here first, as before
+      register: (name, handler) => void interceptCommand(name, handler),
       before: beforeCommand,
       // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the
       // embedded shape (and on an older daemon), mawsd's render seam on the daemon shape; the e2e's hold around it

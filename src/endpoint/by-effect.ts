@@ -112,6 +112,17 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
     if (typeof input.from !== 'string') return { refused: 'malformed' };
     return (await reads.holdsArtifactId(input.from, 'view')) ? 'manage' : { refused: 'grade' };
   },
+  // P5 O7 M5c (A13): a page's lease, on the artifact the lease was opened on: the two that run the owner's connector tools
+  // (within the grants the owner declared for that artifact) take `converse`, as driving the session's agent to call the
+  // same tool does; the rest only open, declare, watch, show or end the lease, at the floor.
+  'connectors.open': () => 'view',
+  'connectors.declare': () => 'view',
+  'connectors.call': () => 'converse',
+  'connectors.watch': () => 'view',
+  'connectors.unwatch': () => 'view',
+  'connectors.refresh': () => 'converse',
+  'connectors.visibility': () => 'view',
+  'connectors.close': () => 'view',
   // P5 O7 M5b: a document read open (the endpoint's stream row, offers.ts): an `edit` writes the artifact, `manage`; a
   // `view` reads it and shows presence, at the floor.
   'documents.open': (input) => (input.mode === 'edit' ? 'manage' : 'view'),

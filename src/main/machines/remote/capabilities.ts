@@ -25,6 +25,9 @@ export const DEVICE_CAPABILITIES = [
   // M5b: the read open (§N): a stream with no `op`, an artifact page's request (`http`) or its document (`document`),
   // sent only to an endpoint that listed it; the endpoint's `streamOpened.http` and its refusal `read-only`.
   'rl2.read-open',
+  // M5c: the client port across the channel: the endpoint's `client` (a machine service's request of this device: a
+  // consent page to open) and this device's `clientAnswer`.
+  'rl2.client-port',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 

@@ -1,16 +1,21 @@
 // OX9 grades of `connectors.*` (`../grades.ts`; M4's rubric in docs/doperpowers/plans/2026-10-27-p5-o1-seams.md): the
-// owner's grants, leases and accounts, `machine-admin` (OX9).
-import type { CommandGrades } from '../grades';
+// owner's grants and accounts, `machine-admin` (OX9). P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md,
+// "O4's surfaces: the grade"; A13): a page's lease is graded on its artifact, as the page is: at least `view`, and by
+// effect (src/endpoint/by-effect.ts) `converse` for the two that run the owner's connector tools (`call`, `refresh`),
+// `view` for the rest; so a member who may view a shared dashboard uses its widgets as its owner granted them.
+import type { CommandGrades, GradeSpec } from '../grades';
+
+const lease = { floor: 'view', byEffect: true } as const satisfies GradeSpec;
 
 export const grades = {
-  'connectors.open': 'machine-admin',
-  'connectors.declare': 'machine-admin',
-  'connectors.call': 'machine-admin',
-  'connectors.watch': 'machine-admin',
-  'connectors.unwatch': 'machine-admin',
-  'connectors.refresh': 'machine-admin',
-  'connectors.visibility': 'machine-admin',
-  'connectors.close': 'machine-admin',
+  'connectors.open': lease,
+  'connectors.declare': lease,
+  'connectors.call': lease,
+  'connectors.watch': lease,
+  'connectors.unwatch': lease,
+  'connectors.refresh': lease,
+  'connectors.visibility': lease,
+  'connectors.close': lease,
   'connectors.servers': 'machine-admin',
   'connectors.connect': 'machine-admin',
   'connectors.reconnect': 'machine-admin',
@@ -39,4 +44,6 @@ export const grades = {
   'connectors.observe': 'internal',
   'connectors.windowShown': 'internal', // P5 O4 M2: main's report of a page's window
   'connectors.adoptGrant': 'internal', // P5 O4 M2: main's one-time adoption (U7)
+  // P5 O7 M5c: a consent's redirect relayed from the asking device, run by the flow its own channel armed for the port
+  'connectors.callback': 'list',
 } as const satisfies CommandGrades<'connectors'>;

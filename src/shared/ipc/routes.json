@@ -376,6 +376,7 @@
   "clientPort.answer",
   "connectors.adoptGrant",
   "connectors.call",
+  "connectors.callback",
   "connectors.cancel",
   "connectors.check",
   "connectors.close",

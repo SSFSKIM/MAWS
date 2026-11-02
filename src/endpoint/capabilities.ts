@@ -27,4 +27,7 @@ export const ENDPOINT_CAPABILITIES = [
   // `read-only`, sent only in answer to a read open. A read open from a device that listed none of it is `malformed`.
   // Not `rl2.browser-screencast`: reserved for O17 M9, listed by neither side until it builds the kind.
   'rl2.read-open',
+  // M5c: the client port across the channel: `client` (a machine service's request for the asking device, posted only to
+  // a device that listed it) and the device's `clientAnswer` (client-port.ts).
+  'rl2.client-port',
 ] as const;

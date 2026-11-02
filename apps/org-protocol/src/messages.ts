@@ -140,6 +140,18 @@ export type StreamCloseMessage = { t: 'streamClose'; id: string; reason: string 
 export type DeviceStreamMessage = StreamOpenMessage | StreamDataMessage | StreamControlMessage | StreamCreditMessage | StreamCloseMessage;
 export type EndpointStreamMessage = StreamOpenedMessage | StreamRefusedMessage | StreamDataMessage | StreamCreditMessage | StreamCloseMessage;
 
+/**
+ * The client port across the channel (P5 O7 M5c, behind `rl2.client-port`; RL2_PROTOCOL 1.6; O7's Interfaces §M): a
+ * request of the machine's services for an effect only the asking device can perform (`openExternal {url}`: a connector's
+ * consent page), posted to the channel that asked, and its answer. `id` is the machine's, unique among its pending
+ * requests; `kind` one of the port's kinds (`openExternal`, `reveal`, …), read by the device, which answers a kind it
+ * does not serve `{noClient: true}`; `request` and `answer` are the port's own shapes (`src/shared/client/port.ts`). The
+ * endpoint sends `client` only to a device whose `h1` listed the capability, and the device answers only a `client` it
+ * was sent, so an older peer never meets either kind.
+ */
+export type ClientMessage = { t: 'client'; id: string; kind: string; request: unknown };
+export type ClientAnswerMessage = { t: 'clientAnswer'; id: string; answer: unknown };
+
 export type StateMessage = { t: 'state'; states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
 export type PingMessage = { t: 'ping'; at: number };
 export type PongMessage = { t: 'pong'; at: number };
@@ -147,7 +159,7 @@ export type PongMessage = { t: 'pong'; at: number };
 export type CloseMessage = { t: 'close'; reason: string; stateVersion?: number };
 
 export type EitherMessage = StateMessage | PingMessage | PongMessage | CloseMessage;
-export type DeviceMessage = CallMessage | ActMessage | QueryMessage | SubMessage | CreditMessage | UnsubMessage | DeviceStreamMessage | EitherMessage;
+export type DeviceMessage = CallMessage | ActMessage | QueryMessage | SubMessage | CreditMessage | UnsubMessage | DeviceStreamMessage | ClientAnswerMessage | EitherMessage;
 export type EndpointMessage =
   | CapsMessage
   | ResultMessage
@@ -161,6 +173,7 @@ export type EndpointMessage =
   | ResumedMessage
   | EndedMessage
   | EndpointStreamMessage
+  | ClientMessage
   | EitherMessage;
 
 type Fields = Record<string, unknown>;
@@ -234,6 +247,7 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
   ...STREAM_EITHER,
   streamOpen,
   streamControl: (m) => isStreamId(m.id) && isObject(m.control),
+  clientAnswer: (m) => isText(m.id, 128) && 'answer' in m, // P5 O7 M5c
 };
 
 const GRADES = ['spawn', 'shell', 'machine-admin'];
@@ -264,6 +278,7 @@ const FROM_ENDPOINT: Record<string, (m: Fields) => boolean> = {
     optional(m.pty, (v) => isObject(v) && isObject(v.info) && isCount(v.ringStart) && isCount(v.nextOffset)) &&
     optional(m.http, isHttpAnswer),
   streamRefused: (m) => isStreamId(m.id) && (STREAM_REFUSALS as readonly string[]).includes(m.reason as string),
+  client: (m) => isText(m.id, 128) && isText(m.kind, 64) && 'request' in m, // P5 O7 M5c
 };
 
 /**

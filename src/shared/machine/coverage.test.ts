@@ -132,6 +132,7 @@ const SESSION_TOOLS = "a tool name (artifact_screenshot, artifact_export, browse
 // P5 O4 M2: a grant's OAuth documents as the legacy reader hands them to the machine; the store validates each with the
 // SDK's own schema before it keeps them
 const OAUTH_DOCUMENT = "an OAuth document's own fields (RFC 8414 server metadata, RFC 7591 client information): no MAWS id";
+const HTTP_HEADERS = "an HTTP response's header names → their values (a consent callback's answer, P5 O7 M5c): no MAWS id";
 const RENDER_AUTHOR_SESSIONS = "a document comment actor's appSessionId → that session's title (the export's comment authors)";
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
@@ -143,6 +144,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.connectors.adoptGrant.input.record.authorizationServer': OAUTH_DOCUMENT, // P5 O4 M2
   'commands.connectors.adoptGrant.input.record.client': OAUTH_DOCUMENT,
   'commands.connectors.call.output.result': JSON_OBJECT,
+  'commands.connectors.callback.output.headers': HTTP_HEADERS, // P5 O7 M5c
   'commands.connectors.directSend.input.arguments': TOOL_ARGUMENTS,
   'commands.connectors.directStart.input.arguments': TOOL_ARGUMENTS,
   'commands.connectors.directTake.output.outcome<kind=call>.outcome.result': JSON_OBJECT,

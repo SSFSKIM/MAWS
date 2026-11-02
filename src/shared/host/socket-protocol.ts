@@ -204,6 +204,12 @@ export const HOST_RENDER_CAPABILITY = 'host.render';
 // obeys the machine's sealed store, and a post-O4 `mawsd` refuses an app's hello that lacks it.
 export const CONNECTORS_CAPABILITY = 'host.connectors';
 export const CONNECTORS_CLIENT_CAPABILITY = 'machine.connectors';
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `mawsd`'s welcome lists it when its
+// spine serves `delivery.send` (the export and the delivery on the machine), so main sends it there; main's own send (the
+// export here, then `delivery.deliver`) stays the shim for a `mawsd` whose welcome lacks it. In the wire's union from the
+// contracts on; `daemon`'s list below gains it with the service that serves the command (each peer lists only what it
+// implements).
+export const MACHINE_DELIVERY_CAPABILITY = 'machine.delivery';
 // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11): on the engine host's welcome, that it
 // hands its sessions over (`host.handover`, the drain, then an exit that leaves every session host and its engine
 // running for the successor to adopt); on a client's hello, that the client will adopt through its successor, so an

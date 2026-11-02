@@ -33,6 +33,7 @@ import { OperationReceiptSchema } from '../../engine/operations'; // P4-AGG M4
 import { isMcpName, isMcpUrl, MCP_TRANSPORTS } from '../../plugins/cli'; // P4-AGG M4
 import { PluginsBinarySchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins'; // P4-AGG M4
 import { JsonValueSchema, type CommandSpec } from './common';
+import { MachineRefSchema } from '../../machine/ref'; // P5 O7 M5c
 
 const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M2
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -321,7 +322,18 @@ export type ConnectorServers = z.infer<typeof ConnectorServersSchema>;
 // An owner action acknowledged at once; its end is `connectors.serversChanged`, and the rows are read again.
 export const ConnectorOwnerAckSchema = z.union([z.strictObject({ accepted: z.literal(true) }), z.strictObject({ accepted: z.literal(false), why: z.enum(['stale', 'busy', 'capacity', 'stopped']) })]);
 export type ConnectorOwnerAck = z.infer<typeof ConnectorOwnerAckSchema>;
-const OwnerSource = z.strictObject({ artifactId: ArtifactId, sourceHandle: SourceHandle });
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; Interfaces §O; A15):
+// the asking device's loopback port for a consent's redirect, when the asker is a remote device: the flow registers
+// `http://127.0.0.1:<port>/callback`, binds nothing on the machine, and waits for that device's `connectors.callback`.
+export const ConnectorCallbackPortSchema = z.number().int().min(1).max(65_535);
+const Callback = { callback: z.strictObject({ port: ConnectorCallbackPortSchema }).optional() };
+const OwnerSource = z.strictObject({ artifactId: ArtifactId, sourceHandle: SourceHandle, ...Callback });
+// The redirect as the device's listener received it (`url`: its path and query as received) and the answer the flow's own
+// callback handler gives it, which the listener writes to the browser.
+export const ConnectorCallbackRequestSchema = z.strictObject({ port: ConnectorCallbackPortSchema, method: z.string().min(1).max(16), url: z.string().min(1).max(4_096) });
+export const ConnectorCallbackAnswerSchema = z.strictObject({ status: z.number().int().min(100).max(599), headers: z.record(z.string(), z.string()).optional(), body: z.string().max(65_536) });
+export type ConnectorCallbackRequest = z.infer<typeof ConnectorCallbackRequestSchema>;
+export type ConnectorCallbackAnswer = z.infer<typeof ConnectorCallbackAnswerSchema>;
 // P3-HD M3c2 end
 
 const ToolOf = z.strictObject({ artifactId: ArtifactId, ...ConnectorToolRefSchema.shape });
@@ -423,7 +435,7 @@ export const commands = {
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
   // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
-  'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema }), OperationReceiptSchema), // path: the file the entry is in
+  'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema, ...Callback /* P5 O7 M5c */ }), OperationReceiptSchema), // path: the file the entry is in
   'connectors.signInCancel': machine(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
   // P4-AGG M4 end
   // P5 O4 M2 start (Interfaces §C, §F; D8, D23): main's alone, never bridged.
@@ -438,6 +450,11 @@ export const commands = {
     z.union([z.strictObject({ adopted: z.literal(true) }), z.strictObject({ adopted: z.literal(false), reason: z.enum(CONNECTOR_ADOPT_REFUSALS) })]),
   ),
   // P5 O4 M2 end
+  // P5 O7 M5c (Interfaces §O): main's, to another machine, for the consent flow its remote device armed with `callback`:
+  // the redirect its loopback listener received, run by the flow armed for this asker and `port` through the flow's own
+  // callback handler (method, duplicate parameters, `error`, `state`, `iss`), answered as that handler would have written
+  // it to the browser; `{status: 404, body: ''}` when this asker armed no flow for the port.
+  'connectors.callback': machine(ConnectorCallbackRequestSchema, ConnectorCallbackAnswerSchema),
   // ── the engine host's, main's alone ──
   'connectors.grants': host(z.strictObject({ artifactId: ArtifactId }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
   'connectors.grant': host(z.strictObject({ artifactId: ArtifactId, grant: ConnectorGrantRequestSchema }), z.strictObject({ grant: ConnectorGrantSchema })),
@@ -492,6 +509,8 @@ export const events = {
   'connectors.signInChanged': ConnectorSignInChangedSchema,
   // P5 O4 M2 (D28): main's, to its windows, at each streaming of the machine host after the launch's first: `mawsd`'s
   // leases ended with its connection, so the renderer's connectors client opens every surface's lease again. Off the
-  // wire (main to its renderer), never on the embedded shape.
-  'connectors.reset': z.strictObject({}),
+  // wire (main to its renderer), never on the embedded shape. P5 O7 M5c: `machine`, whose leases ended (the local one
+  // for main's own emission, a remote one at its link's reconnection): only that machine's surfaces are rebuilt, and
+  // an absent `machine` reads as the local machine.
+  'connectors.reset': z.strictObject({ machine: MachineRefSchema.optional() }),
 } as const satisfies Record<`connectors.${string}`, z.ZodType>;
