@@ -213,7 +213,7 @@ export class IdleRelease {
     const now = Date.now();
     const union = this.union();
     // P5 O17 M7: held by its headless tab alone (the landing fix wave: read before and after the check)
-    const heldByTabAlone = (status: EngineSessionStatus | null): status is EngineSessionStatus => status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful());
+    const heldByTabAlone = (status: EngineSessionStatus | null): boolean => status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful());
     let checked = false;
     for (const [session, clock] of [...this.rows]) {
       const due = this.dueOf(session, clock, union);
@@ -226,7 +226,7 @@ export class IdleRelease {
         status = this.deps.current(session);
       }
       // P5 O17 M7: it waits, its clock kept, and asks once for this wait
-      if (heldByTabAlone(status)) {
+      if (status !== null && heldByTabAlone(status)) {
         const asked = this.waits?.get(session) === true;
         (this.waits ??= new Map()).set(session, true);
         if (!asked) {
