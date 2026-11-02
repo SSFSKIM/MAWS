@@ -328,7 +328,7 @@ describe('the descendant veto after an adoption', () => {
     await until(() => session.status().work?.unknown === null, 'the first Stop');
     return session;
   }
-  const work = (session: { status(): { work?: { descendants: number | null } } }) => session.status().work?.descendants;
+  const work = (session: { status(): { work?: { descendants?: number | null } } }) => session.status().work?.descendants;
 
   it('restores what the launch’s manager saved: a bare command and an exec’d launcher with nothing to resolve, the bridge, and the releases take it', async () => {
     const { launchId, entry } = launched();

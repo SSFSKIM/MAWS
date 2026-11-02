@@ -289,7 +289,8 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     const infra = new Infrastructure(restored);
     expect(infra.count(owner(), CLAUDE, rebuilt)).toBe(0);
     expect(infra.changed()).toBeNull(); // nothing new to save
-    expect(new Infrastructure(restored).count(owner().set(501, { pid: 501, ppid: CLAUDE, stat: 'S', start: HOUR, command: CUA.join(' ') }), CLAUDE, rebuilt)).toBe(1); // another process at that pid
+    const reused = parseTree([...owner().values()].map((p) => lined(p.pid, p.ppid, p.pid === 501 ? HOUR : p.start, p.command)).join('\n'));
+    expect(new Infrastructure(restored).count(reused, CLAUDE, rebuilt)).toBe(1); // another process at that pid
   });
 
   it('the bindings are offered for saving when they change, and only then', () => {
