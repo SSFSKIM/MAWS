@@ -1664,15 +1664,17 @@ describe('process table (P5 O17 M7): the idle exception for a headless tab', () 
     const { table, s, asked, logs } = await idleTable(['a']);
     s.a!.session.setBrowserHold('held');
     expect(s.a!.session.status()).toMatchObject({ work: { holds: { browser: 'held' } }, keepAlive: ['background_tasks'] });
-    const timersBefore = vi.getTimerCount();
+    // the release's own timer, read directly: the table's other timers (a reap's ladder, a sample) come and go meanwhile
+    const idleTimer = () => (table as unknown as { idle: { timer: unknown } }).idle.timer;
+    expect(idleTimer()).toBeNull();
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
-    expect(vi.getTimerCount()).toBe(timersBefore + 1); // its clock runs
+    expect(idleTimer()).not.toBeNull(); // its clock runs
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(asked).toEqual(['a']);
     expect(lifecycle(s.a!)).toBe('ready');
-    expect(vi.getTimerCount()).toBe(timersBefore); // waiting: no timer, so no `fire` loop
+    expect(idleTimer()).toBeNull(); // waiting: no timer, so no `fire` loop
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(asked).toEqual(['a']); // once for the due period
     expect(lifecycle(s.a!)).toBe('ready');
