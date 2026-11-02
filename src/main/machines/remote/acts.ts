@@ -437,7 +437,7 @@ export class ActTable {
     return Math.min(entry.windowFrom + this.#deps.timing.ACT_FRESH_MS, entry.sendBy ?? Infinity);
   }
 
-  /** Whether the current channel's peer reads `entry`'s executor; when it doesn't, the act settles (see the header). */
+  /** Whether the current channel's peer reads `entry`'s executor and lists what it needs; else the act settles (see the header). */
   #offered(entry: Entry): boolean {
     const capabilities = this.#deps.peerCapabilities();
     if (capabilities === null || (peerTakesExecutor(entry.executor, capabilities) && entry.needs.every((needed) => capabilities.includes(needed)))) return true;
