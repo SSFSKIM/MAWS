@@ -19,7 +19,7 @@ import { adoptHosted, releaseHost, startSessionHost, type SessionHostDeps, type 
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const LONG = 30_000;
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 const scratch: string[] = [];
 const pids: number[] = [];
