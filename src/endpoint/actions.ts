@@ -95,7 +95,7 @@ export type ActionsContext = {
   /** P5 O7 M5a2 fix wave 1: what an artifact act's result says of sessions (session-safe.ts). */
   sessionSafe?: SessionSafe;
   /** P5 O7 M5c: the runs each channel sent, for their cancel (leases.ts). */
-  leases?: Pick<Leases, 'sent'>;
+  leases?: Pick<Leases, 'reserveRun' | 'sendEnded'>;
 };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
@@ -246,9 +246,13 @@ export class Actions {
       // P5 O7 M5c: an artifact act's claim names the artifact authorization placed.
       const onArtifact = row.executor === 'machine' && row.target === 'artifact';
       if (onArtifact && decision.artifact === undefined) return refuse('malformed');
+      // A send's run id reserved for this channel and its artifact in the step it is handed on (leases.ts): one any
+      // channel holds is `busy`, never moved to another artifact; freed when the machine says the run ended.
+      const runId = action.action === 'delivery.send' && isObject(action.args) && typeof action.args.runId === 'string' ? action.args.runId : null;
+      if (runId !== null && (decision.artifact?.artifactId == null || this.ctx.leases?.reserveRun(channel, runId, decision.artifact.artifactId) !== true)) return refuse('busy');
       accept();
-      if (action.action === 'delivery.send' && decision.artifact?.artifactId != null && isObject(action.args) && typeof action.args.runId === 'string') this.ctx.leases?.sent(channel, action.args.runId, decision.artifact.artifactId);
       const release = this.#hold();
+      let ended = false;
       try {
         const kept = row.executor === 'pty-host' || KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
         const target = onArtifact ? { target: artifactTarget(decision.artifact!) } : {};
@@ -256,9 +260,12 @@ export class Actions {
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
+        // the run ended when its op did (its send answered) or never ran; anything else may still be running
+        ended = answer.ok && isObject(answer.value) && (answer.value.state === 'done' || answer.value.state === 'refused');
         const told = onArtifact ? (await this.#sessionSafe(who.member, action.action, outcome, dispatch))() : outcome;
         if (!channel.closed) channel.send(doneMessage(channel, action.opId, told));
       } finally {
+        if (runId !== null) this.ctx.leases?.sendEnded(channel, runId, ended);
         release();
       }
       return;

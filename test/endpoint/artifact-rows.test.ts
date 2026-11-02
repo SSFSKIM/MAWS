@@ -355,6 +355,17 @@ describe('M5c’s rows', () => {
     return asked;
   }
 
+  /** The machine's sends held until `finish`, so a run is live while a test acts on its id. */
+  function holdSends(f: Fixture): { finish(): void } {
+    let finish!: () => void;
+    const running = new Promise<void>((resolve) => (finish = resolve));
+    f.spine.handle('delivery.send', async () => {
+      await running;
+      return { ok: false, why: 'cancelled' };
+    });
+    return { finish: () => finish() };
+  }
+
   /** A shares `app-shared` (and its artifact `shared`) with B at `grade`; B owns `app-b` and `held`; `other` is the owners'. */
   async function scene(grade: 'view' | 'converse' = 'view') {
     const { f, held, other, a, b } = await setup();
@@ -465,15 +476,59 @@ describe('M5c’s rows', () => {
     const send = (artifactId: string, runId = randomUUID()) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
     expect(validateCommandInput('delivery.send', send(held)).ok).toBe(true);
     expect(await act(b, actOf(f, b, 'delivery.send', send(shared)))).toBe('grade'); // `view` only
+    const delivering = holdSends(f);
     const runId = randomUUID();
     const sent = actOf(f, b, 'delivery.send', send(held, runId));
     const from = b.inbox.length;
     expect(await act(b, sent)).toBe('ok'); // B owns `app-b`: `manage`, which never steps up
-    await done(b, sent, from);
-    expect(f.spine.claimed.find((c) => c.name === 'delivery.send')).toBeDefined();
-    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('ok');
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'the send run');
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('ok'); // while it runs
     await until(() => asked.some((x) => x.name === 'delivery.cancel'), 'the cancel run');
     expect(await act(b, actOf(f, b, 'delivery.cancel', { runId: randomUUID() }))).toBe('no-target'); // a run this channel never sent
+    delivering.finish();
+    await done(b, sent, from);
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('no-target'); // the run ended with its send's answer
+  });
+
+  // P5 O7 M5c1 fix wave 1: the machine's runs are one namespace, by id (a second send of a running id answers `busy`, a
+  // cancel ends whichever run holds it), so the endpoint reserves an id for one channel and one artifact while it runs
+  it('reserve a run’s id for the one channel and artifact that sent it, while it runs: another send of it is `busy`, a cancel of it someone else’s', async () => {
+    const { f, held, other, a, b } = await scene('view');
+    session(f, 'app-b2', [org.B]);
+    const held2 = randomUUID();
+    f.host.artifact(held2, ['app-b2']);
+    const delivering = holdSends(f);
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    expect(await act(b, sent)).toBe('ok');
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'the send run');
+    // across artifacts: B loses `manage` on `held`, sends the same id on `held2` (which B owns), and can't move the run there
+    f.records.set({ lane: 'B', session: 'eng-app-b', owners: ['@machine'], access: 'private' }, 'app-b');
+    expect(await act(b, actOf(f, b, 'delivery.send', send(held2, runId)))).toBe('busy');
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('grade'); // decided on `held`, the run's own
+    // across channels: a machine owner's send of the id is `busy`, and its cancel names no run of its channel's
+    expect(await act(a, actOf(f, a, 'delivery.send', send(other, runId)))).toBe('busy');
+    expect(await act(a, actOf(f, a, 'delivery.cancel', { runId }))).toBe('no-target');
+    const b2 = await openRemote(f, org.b1, org.B);
+    expect(await act(b2, actOf(f, b2, 'delivery.cancel', { runId }))).toBe('no-target');
+    expect(f.spine.claimed.filter((c) => c.name === 'delivery.send')).toHaveLength(1);
+    expect(f.spine.claimed.some((c) => c.name === 'delivery.cancel')).toBe(false);
+    // the run's end frees its id
+    delivering.finish();
+    await done(b, sent, from);
+    const again = actOf(f, a, 'delivery.send', send(other, runId));
+    const at = a.inbox.length;
+    expect(await act(a, again)).toBe('ok');
+    await done(a, again, at);
+    // a send refused before it ran reserves nothing
+    const refused = randomUUID();
+    expect(await act(b, actOf(f, b, 'delivery.send', send(other, refused)))).toBe('grade');
+    const next = actOf(f, a, 'delivery.send', send(other, refused));
+    const at2 = a.inbox.length;
+    expect(await act(a, next)).toBe('ok');
+    await done(a, next, at2);
   });
 
   it('keep the owner’s connector management at `machine-admin`, a step-up each; refuse it to a member without the right', async () => {

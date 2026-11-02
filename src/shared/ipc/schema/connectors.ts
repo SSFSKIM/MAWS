@@ -331,7 +331,16 @@ const OwnerSource = z.strictObject({ artifactId: ArtifactId, sourceHandle: Sourc
 // The redirect as the device's listener received it (`url`: its path and query as received) and the answer the flow's own
 // callback handler gives it, which the listener writes to the browser.
 export const ConnectorCallbackRequestSchema = z.strictObject({ port: ConnectorCallbackPortSchema, method: z.string().min(1).max(16), url: z.string().min(1).max(4_096) });
-export const ConnectorCallbackAnswerSchema = z.strictObject({ status: z.number().int().min(100).max(599), headers: z.record(z.string(), z.string()).optional(), body: z.string().max(65_536) });
+/** A relayed callback's page: at most 64 KiB of UTF-8 (the units bound first, so a long string is never encoded). */
+const CALLBACK_BODY_BYTES = 65_536;
+export const ConnectorCallbackAnswerSchema = z.strictObject({
+  status: z.number().int().min(100).max(599),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z
+    .string()
+    .max(CALLBACK_BODY_BYTES)
+    .refine((body) => new TextEncoder().encode(body).length <= CALLBACK_BODY_BYTES, 'at most 64 KiB of UTF-8'),
+});
 export type ConnectorCallbackRequest = z.infer<typeof ConnectorCallbackRequestSchema>;
 export type ConnectorCallbackAnswer = z.infer<typeof ConnectorCallbackAnswerSchema>;
 // P3-HD M3c2 end

@@ -2091,6 +2091,14 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('connectors.callback', { status: 404, body: '' }).ok).toBe(true);
       expect(validateCommandOutput('connectors.callback', { status: 200, headers: { 'content-type': 'text/html' }, body: '<p>done</p>' }).ok).toBe(true);
       expect(validateCommandOutput('connectors.callback', { status: 99, body: '' }).ok).toBe(false);
+      // P5 O7 M5c1 fix wave 1: the body's bound is 64 KiB of UTF-8, not of UTF-16 units
+      const body = (text: string) => validateCommandOutput('connectors.callback', { status: 200, body: text }).ok;
+      expect(body('x'.repeat(65_536)), 'ASCII at the bound').toBe(true);
+      expect(body('x'.repeat(65_537)), 'ASCII past it').toBe(false);
+      expect(body('é'.repeat(32_768)), 'two-byte characters at the bound').toBe(true);
+      expect(body('é'.repeat(32_769)), 'two-byte characters past it, in fewer units').toBe(false);
+      expect(body(`${'😀'.repeat(16_383)}xxxx`), 'four-byte characters to the bound').toBe(true);
+      expect(body(`${'😀'.repeat(16_383)}xxx€`), 'one byte past it').toBe(false);
       expect(commands['delivery.send'].owner).toBe('machine');
       expect(validateEventPayload('connectors.reset', {}).ok).toBe(true);
       expect(validateEventPayload('connectors.reset', { machine: 'm'.repeat(20) }).ok).toBe(true);

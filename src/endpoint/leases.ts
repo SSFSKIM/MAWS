@@ -10,35 +10,45 @@
 //
 // A lease outlives the decision that admitted it: the broker's refresh loop runs and publishes on its own, ended only by
 // the owner's close or the ref's end. So a lease is authorized again as a stream is, by the one predicate the call rows
-// read: the `artifact` rule, run through authorization's steps for its `connectors.open` (`view` on the artifact). It
-// is decided again whenever the artifact cache drops the placement it was last decided on (`ArtifactRanks.onDropped`:
-// a `caps` refresh, a new head, a certificate change, a record change naming one of the artifact's sessions, its relink,
-// a linked session's new placement), and once at its opening, in case a change landed while the open was out. A lease
-// whose member no longer holds `view` is closed by the endpoint (`connectors.close` under the channel's ref), its mapping
-// dropped in the same step, so its next update reaches no one and its next command is refused `grade`, as a lease the
-// channel never held. An answer that can't be had now (`unavailable`) is asked again after each retry delay, and the
-// lease is closed after the last: no lease runs on a decision nobody could take.
+// read: the `artifact` rule, run through authorization's steps for its `connectors.open` (`view` on the artifact; a
+// machine owner's standing, which rests on no placement). It is decided again at every change that can move that
+// decision, each of which drops placements from the artifact cache (`ArtifactRanks.onDropped`: a `caps` refresh, a new
+// head, a certificate change, a record change, a relink, a linked session's new placement), and once at its opening, in
+// case a change landed while the open was out. Each change counts on the lease (its generation), and a decision is used
+// only in the step it is still the latest change's: keep or close alike. One that a change overtook, or one that can't be
+// had now (`unavailable`), is asked again after each retry delay (RECHECK_RETRY_MS), never at once, and the lease is
+// closed after the last: no lease runs on a decision nobody could take. A lease has at most one decision or one wait out,
+// so a burst of changes costs one more decision, not one each. A lease whose member no longer holds `view` is closed by
+// the endpoint (`connectors.close` under the channel's ref), its mapping dropped in the same step, so its next update
+// reaches no one and its next command is refused `grade`, as a lease the channel never held.
+//
+// A run's id is the machine's one namespace (a second send of a running id answers `busy`; a cancel ends whichever run
+// holds the id), so the endpoint reserves an id endpoint-wide for the one channel and artifact that sent it, in the step
+// the send is handed on: a send of an id reserved by any channel is refused `busy` (never moved to another artifact), and
+// a cancel is placed only by a run its own channel reserved, on that run's artifact. A reservation ends when the send is
+// answered as ended (done, or refused before it ran), or at its channel's end once no send of it is out; one whose
+// answer said nothing of the run (the machine unreachable, the run still in progress) is kept until then.
 //
 // Bounded: at most LEASES_KEPT leases a channel (an open past it is refused `busy` before it reaches the machine), and
-// RUNS_KEPT runs, the oldest forgotten first (its cancel is then `no-target`; the run is the machine's either way). A
-// channel's leases and runs go with its end, when the machine closes every lease of its ref.
+// RUNS_KEPT reserved runs (a send past it `busy`: a reservation is never forgotten while its run may live). A channel's
+// leases go with its end, when the machine closes every lease of its ref.
 import type { ClientRef } from '@shared/ipc/client';
 import type { ArtifactRanks } from './artifacts';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
-import { dispatchAs, type EndpointServices } from './services';
+import type { EndpointServices } from './services';
 import { RECHECK_RETRY_MS } from './subscriptions';
 
 /** How many leases one channel may hold open (one per page that shows connector data). */
 export const LEASES_KEPT = 64;
-/** How many runs' artifacts one channel keeps for their cancel. */
+/** How many runs one channel may hold reserved at once. */
 export const RUNS_KEPT = 256;
 
 export type LeasesContext = {
   authorize(request: AuthorizeRequest, who: Who, now: number): Promise<Decision>;
   dispatch: EndpointServices['dispatch'];
-  /** The `artifact` rule's placements, whose drops say a lease's decision may have moved. */
-  artifacts: ArtifactRanks;
+  /** The `artifact` rule's placements, whose drops are the changes that can move a lease's decision. */
+  artifacts: Pick<ArtifactRanks, 'onDropped'>;
   now(): number;
   log(line: string): void;
   recheckRetryMs?: readonly number[];
@@ -48,17 +58,21 @@ type Lease = {
   leaseId: string;
   artifactId: string;
   channel: RemoteChannel;
-  /** Whether the placement its last decision rests on still stands; null while a decision is out. */
-  current: (() => boolean) | null;
-  /** Decisions begun: only the latest one's answer is taken. */
-  checks: number;
+  /** The changes counted so far: a decision is used only while it is still the latest one's. */
+  generation: number;
+  /** A decision out, or a wait before the next one: the change it will read is already counted. */
+  pending: boolean;
 };
 
-type Held = { leases: Map<string, Lease>; opening: number; runs: Map<string, string> };
+type Held = { leases: Map<string, Lease>; opening: number; runs: Set<string> };
+/** A reserved run: its channel, its artifact, and how many of its sends are out. */
+type Run = { client: ClientRef; artifactId: string; sending: number };
 
 export class Leases {
   readonly #ctx: LeasesContext;
   readonly #channels = new Map<ClientRef, Held>();
+  /** Every channel's reserved runs, by the machine's run id. */
+  readonly #runs = new Map<string, Run>();
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
   readonly #offDropped: () => void;
   #stopped = false;
@@ -73,9 +87,10 @@ export class Leases {
     return this.#channels.get(client)?.leases.get(leaseId)?.artifactId ?? null;
   }
 
-  /** The artifact of a run the channel sent; null for one it didn't (or forgot). */
+  /** The artifact of a run the channel reserved; null for one it didn't (another channel's, or one that ended). */
   run(client: ClientRef, runId: string): string | null {
-    return this.#channels.get(client)?.runs.get(runId) ?? null;
+    const run = this.#runs.get(runId);
+    return run !== undefined && run.client === client ? run.artifactId : null;
   }
 
   /**
@@ -100,9 +115,9 @@ export class Leases {
     this.unopened(channel);
     const held = this.#held(channel);
     if (held === null) return; // the channel ended: the machine closed the lease with its ref
-    const lease: Lease = { leaseId, artifactId, channel, current: null, checks: 0 };
+    const lease: Lease = { leaseId, artifactId, channel, generation: 0, pending: false };
     held.leases.set(leaseId, lease);
-    this.#check(lease);
+    this.#check(lease, 0);
   }
 
   /** The device closed the lease (the machine answered its close). */
@@ -110,13 +125,24 @@ export class Leases {
     this.#channels.get(client)?.leases.delete(leaseId);
   }
 
-  /** The device's send of `runId` on `artifactId` was handed to the machine: kept for its cancel. */
-  sent(channel: RemoteChannel, runId: string, artifactId: string): void {
+  /**
+   * A send of `runId` on `artifactId` about to be handed to the machine, in the step it is: reserved for the channel, or
+   * false when any channel holds the id reserved, or this one holds RUNS_KEPT. A true answer is given back by `sendEnded`.
+   */
+  reserveRun(channel: RemoteChannel, runId: string, artifactId: string): boolean {
     const held = this.#held(channel);
-    if (held === null) return;
-    held.runs.delete(runId);
-    if (held.runs.size >= RUNS_KEPT) held.runs.delete(held.runs.keys().next().value!);
-    held.runs.set(runId, artifactId);
+    if (held === null || this.#runs.has(runId) || held.runs.size >= RUNS_KEPT) return false;
+    this.#runs.set(runId, { client: channel.client, artifactId, sending: 1 });
+    held.runs.add(runId);
+    return true;
+  }
+
+  /** The machine answered the send: `ended` (done, or refused before it ran) frees the id; else it is kept for a cancel. */
+  sendEnded(channel: RemoteChannel, runId: string, ended: boolean): void {
+    const run = this.#runs.get(runId);
+    if (run === undefined || run.client !== channel.client) return;
+    run.sending--;
+    if (ended || this.#channels.get(channel.client) === undefined) this.#release(runId);
   }
 
   stop(): void {
@@ -125,6 +151,7 @@ export class Leases {
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     this.#channels.clear();
+    this.#runs.clear();
   }
 
   /** The channel's table, made at its first lease or run and dropped at its end; null for a channel that ended. */
@@ -132,17 +159,34 @@ export class Leases {
     if (channel.closed || this.#stopped) return null;
     let held = this.#channels.get(channel.client);
     if (held === undefined) {
-      held = { leases: new Map(), opening: 0, runs: new Map() };
+      held = { leases: new Map(), opening: 0, runs: new Set() };
       this.#channels.set(channel.client, held);
       const client = channel.client;
-      client.onGone(() => this.#channels.delete(client));
+      const ended = held;
+      client.onGone(() => {
+        this.#channels.delete(client);
+        // its runs' ids freed, but for one whose send is still out (freed at its answer)
+        for (const runId of ended.runs) if (this.#runs.get(runId)?.sending === 0) this.#release(runId);
+      });
     }
     return held;
   }
 
-  /** Placements were dropped: every lease whose last decision rests on one no longer standing is decided again. */
+  #release(runId: string): void {
+    const run = this.#runs.get(runId);
+    if (run === undefined) return;
+    this.#runs.delete(runId);
+    this.#channels.get(run.client)?.runs.delete(runId);
+  }
+
+  /** A change that can move a lease's decision: counted on every lease, and one with nothing out decided again. */
   #moved(): void {
-    for (const held of this.#channels.values()) for (const lease of held.leases.values()) if (lease.current !== null && !lease.current()) this.#check(lease);
+    for (const held of this.#channels.values()) {
+      for (const lease of held.leases.values()) {
+        lease.generation++;
+        if (!lease.pending) this.#check(lease, 0);
+      }
+    }
   }
 
   #stands(lease: Lease): boolean {
@@ -150,40 +194,41 @@ export class Leases {
   }
 
   /**
-   * The lease decided again, as its open would be now: kept, resting on the placement the decision read (read first,
-   * so a drop while the decision is out is seen), or closed. `unavailable` is asked again after each retry delay.
+   * The lease decided again, as its open would be now, and the decision used in the step it is still the latest change's:
+   * kept, or closed. One a change overtook, or `unavailable`, is asked again after the attempt's retry delay.
    */
-  #check(lease: Lease, attempt = 0): void {
-    const n = attempt === 0 ? ++lease.checks : lease.checks;
-    lease.current = null;
+  #check(lease: Lease, attempt: number): void {
+    lease.pending = true;
+    const generation = lease.generation;
     const { channel } = lease;
     const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
-    const placing = { dispatch: dispatchAs(this.#ctx.dispatch, channel.client), log: (line: string) => this.#ctx.log(line) };
     void (async () => {
-      const placed = await this.#ctx.artifacts.of(channel.client, lease.artifactId, placing);
       const decision = await this.#ctx.authorize({ kind: 'call', name: 'connectors.open', input: { artifactId: lease.artifactId } }, who, this.#ctx.now());
-      if (n !== lease.checks || !this.#stands(lease)) return;
+      if (!this.#stands(lease)) return;
+      if (lease.generation !== generation) return this.#again(lease, attempt, 'unavailable');
       if (decision.ok) {
-        // A placement dropped while the decision was out may be one it read: decided again on what stands now.
-        const current = placed.resolved.kind === 'refused' ? () => false : placed.current;
-        if (!current()) return this.#check(lease);
-        lease.current = current;
+        lease.pending = false;
         return;
       }
       if (decision.reason !== 'unavailable') return this.#close(lease, decision.reason);
-      const retries = this.#ctx.recheckRetryMs ?? RECHECK_RETRY_MS;
-      if (attempt >= retries.length) return this.#close(lease, 'unavailable');
-      const timer = setTimeout(() => {
-        this.#timers.delete(timer);
-        if (n === lease.checks && this.#stands(lease)) this.#check(lease, attempt + 1);
-      }, retries[attempt]);
-      timer.unref?.();
-      this.#timers.add(timer);
+      this.#again(lease, attempt, 'unavailable');
     })().catch((error: unknown) => {
-      if (n !== lease.checks || !this.#stands(lease)) return;
+      if (!this.#stands(lease)) return;
       this.#ctx.log(`endpoint: lease ${lease.leaseId}'s access could not be checked again: ${(error as Error).message}`);
       this.#close(lease, 'unavailable');
     });
+  }
+
+  /** The decision asked again after the attempt's retry delay; past the last, the lease closed `reason`. */
+  #again(lease: Lease, attempt: number, reason: string): void {
+    const retries = this.#ctx.recheckRetryMs ?? RECHECK_RETRY_MS;
+    if (attempt >= retries.length) return this.#close(lease, reason);
+    const timer = setTimeout(() => {
+      this.#timers.delete(timer);
+      if (this.#stands(lease)) this.#check(lease, attempt + 1);
+    }, retries[attempt]);
+    timer.unref?.();
+    this.#timers.add(timer);
   }
 
   /** The lease's mapping dropped, and the lease closed on the machine under its channel's ref, in this step. */
