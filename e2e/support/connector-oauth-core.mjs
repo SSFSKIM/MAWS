@@ -31,15 +31,20 @@ const REVOCATION = new Set(['available', 'unavailable']);
 // P3-HD panel correction: what the trust-binding scene makes a fixture advertise instead of its own, in the OAuth
 // phase only: `resource` (protected-resource metadata), `authorizationServer` (its one authorization server) and
 // `issuer` (the issuer its metadata names, also served then as OpenID discovery metadata). Loopback URLs only.
-const ADVERTISED = ['resource', 'authorizationServer', 'issuer'];
+// P5 O7 M5c: `authorizationEndpoint`, the metadata's `authorization_endpoint`, an `https:` URL ending in `/authorize`
+// that only a fake browser follows (support/connector-oauth-browser.ts's `authorizeAt`, which sends it to this origin):
+// a consent another machine asks this Mac to open must not be a loopback URL (src/main/open-external.ts's
+// `openForMachine`), and MAWS's OAuth takes no plain-HTTP endpoint off 127.0.0.1 (src/services/connectors/oauth-http.ts).
+const ADVERTISED = ['resource', 'authorizationServer', 'issuer', 'authorizationEndpoint'];
 const ADVERTISED_MAX = 2048;
 const advertisedUrl = (value) => typeof value === 'string' && value.length <= ADVERTISED_MAX && value.startsWith('http://127.0.0.1:');
+const advertisedAuthorize = (value) => typeof value === 'string' && value.length <= ADVERTISED_MAX && value.startsWith('https://') && value.endsWith('/authorize');
 
 // The override as given, or null when malformed (then the whole control is).
 function parseAdvertise(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const keys = Object.keys(value);
-  if (!keys.every((key) => ADVERTISED.includes(key) && advertisedUrl(value[key]))) return null;
+  if (!keys.every((key) => ADVERTISED.includes(key) && (key === 'authorizationEndpoint' ? advertisedAuthorize(value[key]) : advertisedUrl(value[key])))) return null;
   return Object.fromEntries(ADVERTISED.filter((key) => key in value).map((key) => [key, value[key]]));
 }
 
@@ -118,8 +123,10 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], mo
   const advertisedResource = ({ resource: advertised, authorizationServer }) => ({
     ...resourceMetadata, ...(advertised !== undefined && { resource: advertised }), ...(authorizationServer !== undefined && { authorization_servers: [authorizationServer] }),
   });
-  const advertisedServer = ({ issuer }) =>
-    issuer === undefined ? serverMetadata : { ...serverMetadata, issuer, jwks_uri: `${origin}/jwks`, subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] };
+  const advertisedServer = ({ issuer, authorizationEndpoint }) => {
+    const server = authorizationEndpoint === undefined ? serverMetadata : { ...serverMetadata, authorization_endpoint: authorizationEndpoint }; // P5 O7 M5c
+    return issuer === undefined ? server : { ...server, issuer, jwks_uri: `${origin}/jwks`, subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] };
+  };
 
   function bearerOf(headers) {
     const header = headers.authorization;
