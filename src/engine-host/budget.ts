@@ -83,7 +83,8 @@ export function isIdleRow(s: EngineSessionStatus, stateful: ReadonlySet<string>)
 // tab rather than take the session (idle-release.ts). The due check and the reap still read `isIdleRow`.
 export function isIdleRowIgnoringBrowser(s: EngineSessionStatus, stateful: ReadonlySet<string>): boolean {
   if (s.work?.holds?.browser === undefined) return isIdleRow(s, stateful);
-  const { browser: _set, ...holds } = s.work.holds;
+  const holds = { ...s.work.holds };
+  delete holds.browser;
   return isIdleRow({ ...s, work: { ...s.work, holds } }, stateful);
 }
 

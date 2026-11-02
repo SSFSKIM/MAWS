@@ -318,7 +318,7 @@ describe('browser work on the wire (P5 O17 M3)', () => {
   it('carries host.browserWork and browserEngine.work as main-only commands and host.browserIdle among the engine host’s events', () => {
     expect(HOST_BROWSER_WORK_CAPABILITY).toBe('host.browserWork');
     expect(WIRE_CAPABILITIES).toContain(HOST_BROWSER_WORK_CAPABILITY);
-    for (const [peer, list] of Object.entries(PEER_CAPABILITIES)) expect(list.includes(HOST_BROWSER_WORK_CAPABILITY), peer).toBe(peer === 'engineHost'); // P5 O17 M7: the engine host's welcome alone
+    for (const [peer, list] of Object.entries(PEER_CAPABILITIES)) expect((list as readonly string[]).includes(HOST_BROWSER_WORK_CAPABILITY), peer).toBe(peer === 'engineHost'); // P5 O17 M7: the engine host's welcome alone
     expect(REGISTRY.commands['host.browserWork'].owner).toBe('engine-host');
     expect(REGISTRY.commands['browserEngine.work'].owner).toBe('machine');
     for (const name of ['host.browserWork', 'browserEngine.work']) {
