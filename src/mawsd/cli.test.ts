@@ -204,7 +204,8 @@ describe('mawsd restart', () => {
           setImmediate(() => void old.supervisor.die());
           return { state: 'detaching' };
         },
-        'host.supervisorStatus': () => ({ mode: 'detached', pid: 1, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: 3, rows: 3, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 3, adopted: 3, failed: 0, gate: null, handover: 'none', adopting: false } }),
+        // its pid the answering host's, as an engine host's status names its own (the restart pairs the count with it)
+        'host.supervisorStatus': () => ({ mode: 'detached', pid: scene.lastEngine().pid, startedAt: 'T', buildId: 'b', protocol: 3, wire: 'w', liveSessions: 3, rows: 3, idleExitMs: null, idleExitAt: null, exitWhenIdle: false, socketPath: null, logPath: null, orphansKilled: 0, holder: { hosts: 3, adopted: 3, failed: 0, gate: null, handover: 'none', adopting: false } }),
       },
     };
     const daemon = await scene.start();
