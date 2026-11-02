@@ -446,6 +446,24 @@ describe('every path ends', () => {
     expect(s.window.postMessage).not.toHaveBeenCalled();
   });
 
+  // Review fix 3: the app's stop ends an open still in its preflight, before any bridge stands for it
+  it('the app’s stop answers an open waiting on its preflight, and nothing opens or is posted once the preflight comes', async () => {
+    const s = scene();
+    let answer!: (result: { ok: true; output: unknown }) => void;
+    s.link.answers.set('artifacts.get', () => new Promise((resolve) => (answer = resolve)));
+    const opening = s.open();
+    await vi.waitFor(() => expect(s.link.calls.map((c) => c.name)).toContain('artifacts.get'));
+    s.adapter.stop();
+    expect(await opening).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    answer({ ok: true, output: { artifact: row() } });
+    await flush();
+    await flush();
+    expect(s.link.opens()).toEqual([]);
+    expect(s.window.postMessage).not.toHaveBeenCalled();
+    expect(await s.open()).toMatchObject({ ok: false, error: { code: 'host_unavailable' } }); // and none after it
+    expect(s.link.opens()).toEqual([]);
+  });
+
   it('a window gone while its open waited is answered, the stream closed, nothing posted', async () => {
     const s = scene();
     const opening = s.open();

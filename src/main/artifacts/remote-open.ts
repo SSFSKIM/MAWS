@@ -96,6 +96,8 @@ function failureOf(reason: string, machine: string): CommandFailure {
       return new CommandFailure(ipcError('timeout', notAnswered(machine)));
     case 'gone':
       return new CommandFailure(ipcError('internal', 'the window that asked is gone'));
+    case 'stopped':
+      return new CommandFailure(ipcError('host_unavailable', `documents on ${machine} closed with the app`));
     case 'busy':
       return new CommandFailure(ipcError('host_unavailable', `${machine} is busy; try again`));
     case 'carrier':
@@ -118,6 +120,19 @@ function preflightFailure(error: IpcError, machine: string): CommandFailure {
 export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocuments {
   const openMs = deps.openMs ?? DOCUMENT_OPEN_MS;
   const bridges = new Set<Bridge>();
+  // Review fix 3: the app's stop ends every open, those still before a bridge too, and answers every open after it
+  let stopped = false;
+  const onStop = new Set<() => void>();
+
+  /** `work`'s value, or 'stopped' as soon as the app stops. */
+  function untilStopped<T>(work: Promise<T>): Promise<T | 'stopped'> {
+    if (stopped) return Promise.resolve('stopped');
+    return new Promise<T | 'stopped'>((resolve, reject) => {
+      const stop = () => resolve('stopped');
+      onStop.add(stop);
+      work.then(resolve, reject).finally(() => onStop.delete(stop));
+    });
+  }
 
   /** One window port and the stream behind it; a `view` refusal's reopen is the same bridge on a second stream. */
   class Bridge {
@@ -218,8 +233,10 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
 
   return {
     async open(link, artifactId, client, doc) {
+      if (stopped) throw failureOf('stopped', link.name);
       if (link.state() === 'down') throw new CommandFailure(ipcError('host_unavailable', offline(link.name)));
-      const found = await dispatchOverLink(link, 'artifacts.get', { artifactId });
+      const found = await untilStopped(dispatchOverLink(link, 'artifacts.get', { artifactId }));
+      if (found === 'stopped') throw failureOf('stopped', link.name);
       if (!found.ok) throw preflightFailure(found.error, link.name);
       const { artifact } = found.value as CommandOutput<'artifacts.get'>;
       if (!artifact) throw refusal('notFound', `no artifact ${artifactId} on ${link.name}`);
@@ -247,6 +264,8 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
       return bridges.size;
     },
     stop() {
+      stopped = true;
+      for (const stop of [...onStop]) stop();
       for (const bridge of [...bridges]) bridge.end('stopped');
     },
   };
