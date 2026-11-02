@@ -50,7 +50,7 @@ import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
 import { isAlive as pidAlive, procStartOf as psProcStart } from './supervisor-files'; // E10; P5 O16 panel fix wave 1 follow-up: isAlive
-import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
+import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync, type Registered } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
 import { processState, stopUnresolved, type HeldStopOutcome, type ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart); re-verification: processState
@@ -95,8 +95,12 @@ const signatureOf = (state: BudgetState): string => JSON.stringify({ ...state, s
 const runPs = (): Promise<string> =>
   new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { env: PS_TREE_ENV, timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
 
+// O16 M5: a row's reap, its gate channel and its registered infrastructure (D69: and what its last `mcp_status` ask was about)
+interface RowReap { reap: Reap; channel: GateChannel; infrastructure: Infrastructure; asked: string | null; pending: boolean; asking: boolean }
+// D69: the children a row's read left unnamed, as the key of what its `mcp_status` ask was about
+const keyOfUnnamed = (infrastructure: Infrastructure): string => infrastructure.unnamed.map((p) => `${p.pid}@${p.start}`).join(',');
 // O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
-const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
+const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm: () => null, acknowledged: () => false, disarm() {}, listen() {}, close() {} };
 
 // P5 O16 M3b (D9): the launch refusal while the engine host hands its sessions over
 export const HANDING_OVER = 'the engine host is handing over; try again in a moment';
@@ -158,7 +162,9 @@ export class ProcessTable {
   private ledgerWritten: string | null = null; // the rows last written, so an unchanged set is not rewritten
   // E10 end
   // O16 M5 start: each row's reap and gate channel, the gate, the synchronous tree read, a budget release's numbers
-  private readonly reaps = new WeakMap<EngineSession, { reap: Reap; channel: GateChannel; infrastructure: Infrastructure }>();
+  // D69: each row's infrastructure keeps the unbound children it last asked `mcp_status` about (`asked`), whether that
+  // answer named a server still pending, and whether an ask is under way
+  private readonly reaps = new WeakMap<EngineSession, RowReap>();
   private readonly gate: Gate | null;
   private readonly psSync: () => string;
   private lastPs = '';
@@ -484,13 +490,13 @@ export class ProcessTable {
       stateful: () => this.stateful,
       interest: () => this.idle.held(id),
       descendants: () => this.descendantsNow(session),
-      reap: (reason: ReapReason) => {
-        if (reason === 'idle') return session.reap('idle');
+      reap: (reason: ReapReason, mayTerm) => {
+        if (reason === 'idle') return session.reap('idle', { mayTerm }); // D70: the SIGTERM's gate
         const release = this.budgetReleases.get(session) ?? { limitKiB: this.policy.limitKiB, totalKiB: this.budget.totalKiB };
         this.lastRelease = { appSessionId: id, at: new Date().toISOString(), totalKiB: release.totalKiB };
         this.budget = { ...this.budget, lastRelease: this.lastRelease };
         this.emitBudget(false);
-        return session.reap('budget', release);
+        return session.reap('budget', { release });
       },
       now: () => Date.now(),
       log: (line) => this.log(line),
@@ -501,7 +507,7 @@ export class ProcessTable {
       },
       changed: (view) => session.noteReap(view),
     });
-    this.reaps.set(session, { reap, channel, infrastructure: new Infrastructure() });
+    this.reaps.set(session, { reap, channel, infrastructure: new Infrastructure(session.restoredInfrastructure), asked: null, pending: false, asking: false });
     session.noteReap({ state: reap.state, observer: reap.observer }, false);
   }
 
@@ -536,16 +542,61 @@ export class ProcessTable {
     return count;
   }
 
-  // Registered infrastructure, bound by identity across the row's reads (D52): the bridge child the row's observer named,
-  // and the launch's stdio MCP servers, asked of the engine once when the tree first shows it a child the row cannot name.
-  // Null for a read that began before the newest the row applied: the caller keeps the newer count.
+  // Registered infrastructure, bound by identity across the row's reads (D52, D69): the bridge child the row's observer
+  // named (or, until it names one, the bridge by its argv), and the launch's stdio MCP servers, by their command lines and
+  // by count, asked of the engine when the tree shows it children the row cannot name. Null for a read that began before
+  // the newest the row applied: the caller keeps the newer count.
   private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>, read: number): number | null {
     const held = this.reaps.get(session);
-    const childPid = held?.channel.childPid ?? null;
-    const commands = session.mcpCommands();
-    const count = (held?.infrastructure ?? new Infrastructure()).count(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] }, read);
-    if (count !== null && count > 0 && commands === null) void session.readMcpCommands();
+    const infrastructure = held?.infrastructure ?? new Infrastructure();
+    const count = infrastructure.count(tree, pid, this.registeredOf(session), read);
+    if (count !== null && held) this.infrastructureRead(session, pid, held);
     return count;
+  }
+
+  private registeredOf(session: EngineSession): Registered {
+    const childPid = this.reaps.get(session)?.channel.childPid ?? null;
+    return { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: session.mcpCommands() ?? [], sessionIds: session.engineSessionIds(), sminosRoots: session.sminosRoots(), firstTurnAt: session.firstTurnAt };
+  }
+
+  // After a read: the bindings saved when they changed (an adopter restores them), and `mcp_status` asked when the read
+  // left children unnamed that a count could bind (a set not asked about yet, or asked while a server was pending), or
+  // before the launch's command lines are known at all. One ask at a time per row; its answer is counted against a tree
+  // read at once, synchronously, as the reap's step reads it.
+  private infrastructureRead(session: EngineSession, pid: number, held: RowReap): void {
+    const bindings = held.infrastructure.changed();
+    if (bindings !== null) session.saveInfrastructure(bindings);
+    const unnamed = held.infrastructure.unnamed;
+    const key = keyOfUnnamed(held.infrastructure);
+    const want = session.mcpCommands() === null ? unnamed.length > 0 : held.infrastructure.countable && (key !== held.asked || held.pending);
+    if (!want || held.asking) return;
+    held.asking = true;
+    held.asked = key;
+    void session.stdioServers().then((stdio) => {
+      held.asking = false;
+      if (stdio === null) {
+        held.asked = null; // asked again at the next read
+        return;
+      }
+      held.pending = stdio.pending > 0;
+      if (session.pid !== pid || session.lifecycle === 'exited' || this.reaps.get(session) !== held) return;
+      let tree: ReturnType<typeof parseTree>;
+      try {
+        tree = parseTree(this.psSync());
+      } catch {
+        held.asked = null; // the next read asks again
+        return;
+      }
+      const count = held.infrastructure.settle(tree, pid, this.registeredOf(session), stdio, ++this.reads);
+      if (count === null) {
+        held.asked = null; // a newer read overtook this one: the next read asks again
+        return;
+      }
+      held.asked = keyOfUnnamed(held.infrastructure); // what was left unnamed in the tree this answer was counted on
+      const saved = held.infrastructure.changed();
+      if (saved !== null) session.saveInfrastructure(saved);
+      session.noteDescendants(count);
+    });
   }
 
   // The gate's counts over the live rows (the supervisor's status, `release.gate`): rows whose reap holds a fence, and

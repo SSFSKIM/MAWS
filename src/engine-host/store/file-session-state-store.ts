@@ -1,9 +1,10 @@
 // The P0 SessionStateStore (charter §4.4 as amended 2026-09-28; C3 execution document, Interfaces "Queue, steer,
 // interrupt"): one JSON file per app session at `<userData>/engine-host/state/<appSessionId>.json` holding
-// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds?, owedInterrupt?, observerSeenLaunch? }` (P5 O2 M2:
+// `{ version: 1, queue, grants, launchSpec, keep?, engineSessionIds?, owedInterrupt?, observerSeenLaunch?, infrastructure? }` (P5 O2 M2:
 // `keep`, the owner's Keep running mark, and `engineSessionIds`, the ids the session has had; P5 O16 M2: `owedInterrupt`,
 // an interrupt written and not yet answered; O16 M5: `observerSeenLaunch`, the launch whose process an observer bridge was
-// seen on; each absent when never set; an older build's reader strips them),
+// seen on; O16 D69: `infrastructure`, the processes the descendant veto bound for a launch; each absent when never set; an
+// older build's reader strips them),
 // written to a temp file and renamed so a crash leaves the old file or the new one, never half of either. The session's
 // cron record (P5 O2 M2, P5 Decision Log 49) is its own file beside it, `<appSessionId>.cron.json`, written the same way.
 // Operations on one session run strictly in the order they were issued (one chain per session, loads included), so a
@@ -14,7 +15,7 @@ import { join } from 'node:path';
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { CronRecordSchema, GrantSnapshotSchema, PendingSteerSchema, QueueEntrySchema, QueueStateSchema, type GrantSnapshot, type CronRecord, type QueueState, type SessionStateStore, type StoredQueue } from '@shared/engine/session-state-store';
+import { CronRecordSchema, GrantSnapshotSchema, PendingSteerSchema, QueueEntrySchema, QueueStateSchema, type GrantSnapshot, type CronRecord, type InfrastructureRecord, type QueueState, type SessionStateStore, type StoredQueue } from '@shared/engine/session-state-store';
 
 // C10 start: a launch spec stored before C10's additive `inheritGrantsFrom` (X6) still parses, and reads as null there;
 // without this a state file from an earlier build would be moved aside as unreadable, taking its queue and grants
@@ -35,7 +36,9 @@ const StoredQueueStateSchema = QueueStateSchema.extend({
 // P2-0 (X6): ignore a later build's state/spec keys on read, rather than moving its queue and grants aside. Strip,
 // not passthrough: an update still writes only this build's shape; saveQueue, saveGrants and saveLaunchSpec keep the
 // strict IPC/write schemas.
-const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */, owedInterrupt: z.boolean().optional() /* P5 O16 M2 */, observerSeenLaunch: z.string().optional() /* O16 M5 */ });
+// O16 (D69): a field this build cannot read is dropped (`catch`), never a reason to move the whole file aside
+const InfrastructureSchema = z.object({ launch: z.string(), processes: z.array(z.object({ pid: z.number().int(), start: z.string(), kind: z.string() }).strip()) }).strip();
+const StateFileSchema = z.object({ version: z.literal(1), queue: StoredQueueStateSchema, grants: GrantSnapshotSchema.strip(), launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */, keep: z.boolean().optional() /* P5 O2 M2 */, engineSessionIds: z.array(z.string()).optional() /* P5 O2 M2 */, owedInterrupt: z.boolean().optional() /* P5 O16 M2 */, observerSeenLaunch: z.string().optional() /* O16 M5 */, infrastructure: InfrastructureSchema.optional().catch(undefined) /* O16 D69 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
@@ -122,6 +125,15 @@ export class FileSessionStateStore implements SessionStateStore {
 
   saveObserverSeen(id: AppSessionId, launchId: string): Promise<void> {
     return this.update(id, (file) => ({ ...file, observerSeenLaunch: launchId }));
+  }
+
+  // O16 (D69): the launch's bound infrastructure, in the state file beside the observer seen, for an adopter
+  loadInfrastructure(id: AppSessionId): Promise<InfrastructureRecord | null> {
+    return this.run(id, async () => (await this.read(id)).infrastructure ?? null);
+  }
+
+  saveInfrastructure(id: AppSessionId, record: InfrastructureRecord): Promise<void> {
+    return this.update(id, (file) => ({ ...file, infrastructure: InfrastructureSchema.parse(record) }));
   }
 
   // P5 O16 M2 (D12): the owed interrupt, in the state file, so an adopter after a crash sends it first

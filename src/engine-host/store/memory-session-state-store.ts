@@ -4,7 +4,7 @@
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { CronRecord, GrantSnapshot, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
+import type { CronRecord, GrantSnapshot, InfrastructureRecord, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
 
 export class MemorySessionStateStore implements SessionStateStore {
   readonly queues = new Map<AppSessionId, QueueState>();
@@ -14,10 +14,11 @@ export class MemorySessionStateStore implements SessionStateStore {
   readonly engineSessionIds = new Map<AppSessionId, string[]>(); // P5 O2 M2
   readonly cronRecords = new Map<AppSessionId, CronRecord>(); // P5 O2 M2
   readonly observerSeen = new Map<AppSessionId, string>(); // O16 M5
+  readonly infrastructure = new Map<AppSessionId, InfrastructureRecord>(); // O16 D69
   readonly owedInterrupts = new Map<AppSessionId, boolean>(); // P5 O16 M2
 
   async exists(id: AppSessionId): Promise<boolean> {
-    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id) || this.observerSeen.has(id);
+    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id) || this.keeps.has(id) || this.engineSessionIds.has(id) || this.cronRecords.has(id) || this.observerSeen.has(id) || this.infrastructure.has(id);
   }
   async loadQueue(id: AppSessionId): Promise<StoredQueue> {
     return { ...structuredClone(this.queues.get(id) ?? { entries: [], paused: false }), corrupt: null };
@@ -75,6 +76,12 @@ export class MemorySessionStateStore implements SessionStateStore {
   async saveObserverSeen(id: AppSessionId, launchId: string): Promise<void> {
     this.observerSeen.set(id, launchId);
   }
+  async loadInfrastructure(id: AppSessionId): Promise<InfrastructureRecord | null> {
+    return structuredClone(this.infrastructure.get(id) ?? null);
+  }
+  async saveInfrastructure(id: AppSessionId, record: InfrastructureRecord): Promise<void> {
+    this.infrastructure.set(id, structuredClone(record));
+  }
   // keeps no journal: nothing to delete, but the id is still checked as the file store checks it
   async forgetJournal(id: AppSessionId): Promise<void> {
     assertSafeAppSessionId(id);
@@ -88,5 +95,6 @@ export class MemorySessionStateStore implements SessionStateStore {
     this.engineSessionIds.delete(id);
     this.cronRecords.delete(id);
     this.observerSeen.delete(id);
+    this.infrastructure.delete(id);
   }
 }

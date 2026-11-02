@@ -292,6 +292,29 @@ describe('FileSessionStateStore: observerSeenLaunch (O16 M5)', () => {
   });
 });
 
+// O16 (the plan's D69): the processes the descendant veto bound for a launch, kept for an adopter beside observerSeenLaunch
+describe('FileSessionStateStore: infrastructure (O16 D69)', () => {
+  const record = { launch: 'launch-1', processes: [{ pid: 820, start: 'Mon Nov  2 14:26:56 2026', kind: 'server' }, { pid: 823, start: 'Mon Nov  2 14:26:56 2026', kind: 'bridge' }] };
+  it('reads null until saved, then the record, through the other writes and a new store', async () => {
+    const store = new FileSessionStateStore(userData);
+    expect(await store.loadInfrastructure(ID)).toBeNull();
+    await store.saveInfrastructure(ID, record);
+    await Promise.all([store.saveObserverSeen(ID, 'launch-1'), store.saveQueue(ID, { entries: [entry()], paused: false })]);
+    expect(await new FileSessionStateStore(userData).loadInfrastructure(ID)).toEqual(record);
+  });
+
+  it('a record this build cannot read is dropped, never a reason to move the state file aside', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveObserverSeen(ID, 'launch-1');
+    const file = join(userData, 'engine-host', 'state', `${ID}.json`);
+    await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), infrastructure: { launch: 7, processes: 'x' } }));
+    const fresh = new FileSessionStateStore(userData, { warn: () => {} });
+    expect(await fresh.loadInfrastructure(ID)).toBeNull();
+    expect(await fresh.loadObserverSeen(ID)).toBe('launch-1');
+    expect((await readdir(join(userData, 'engine-host', 'state'))).filter((name) => name.includes('corrupt'))).toEqual([]);
+  });
+});
+
 describe('FileSessionStateStore: the cron record (P5 O2 M2, P5 Decision Log 49)', () => {
   const record = { sessionCrons: [{ id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' }], toolSinceStop: false };
   it('round-trips through a new instance; never written, it is null', async () => {

@@ -2,16 +2,17 @@
 // design §8 item 6), over a real gate and a fake observer on a real Unix socket, with a stand-in session: a due row that
 // is verified empty arms the fence when an observer is healthy and signals only after `armed`, within the lease less its
 // margin, re-checking everything in the step that signals; a turn before the signal cancels (`proceed`, disarmed), one
-// after it is told `stop`; an observer that was seen and went silent or away blocks the release; a row on which none
-// was ever seen is released on verified-empty alone (owner Q1).
+// after it is told `stop`; an observer that was seen and went silent or away blocks the release (a silence heals at a
+// later heartbeat on the same connection, re-arming nothing); a row on which none was ever seen is released on
+// verified-empty alone (owner Q1); the lease is live only while both the wall and the monotonic clock say so (D70).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import { FakeObserver } from './fake-observer';
 import { Gate, STOP_REASON } from './gate';
-import { isVerifiedEmpty, Reap, type ReapDeps, type ReapReason, type ReapView } from './reap';
+import { isVerifiedEmpty, LEASE_MARGIN_MS, LEASE_MS, Reap, type ReapDeps, type ReapReason, type ReapView } from './reap';
 
 const LEASE = 400;
 const MARGIN = 100;
@@ -44,6 +45,7 @@ beforeEach(async () => {
   await gate.listen(path);
 });
 afterEach(async () => {
+  vi.useRealTimers();
   for (const o of observers.splice(0)) if (!o.isClosed) await o.close();
   await gate.close();
   rmSync(root, { recursive: true, force: true });
@@ -59,7 +61,7 @@ const until = async (check: () => boolean, what: string, ms = 2_000) => {
 };
 
 // A stand-in row: its status, interest and tree as a test sets them; what the reap signalled and how it ended.
-function scene(opts: { outcome?: 'exited' | 'ignored' } = {}) {
+function scene(opts: { outcome?: 'exited' | 'ignored'; gate?: Gate; leaseMs?: number; leaseMarginMs?: number } = {}) {
   const s = {
     status: status() as EngineSessionStatus | null,
     interest: false,
@@ -70,7 +72,7 @@ function scene(opts: { outcome?: 'exited' | 'ignored' } = {}) {
     views: [] as ReapView[],
     logs: [] as string[],
     settle: null as ((outcome: 'exited' | 'ignored') => void) | null,
-    channel: gate.channel({ lineage: () => new Set(['eng-r']), pid: () => 700 }),
+    channel: (opts.gate ?? gate).channel({ lineage: () => new Set(['eng-r']), pid: () => 700 }),
   };
   const deps: ReapDeps = {
     gate: s.channel,
@@ -88,15 +90,15 @@ function scene(opts: { outcome?: 'exited' | 'ignored' } = {}) {
     cancelled: (reason) => void s.cancelled.push(reason),
     ignored: () => void (s.ignored += 1),
     changed: (view) => void s.views.push(view),
-    leaseMs: LEASE,
-    leaseMarginMs: MARGIN,
+    leaseMs: opts.leaseMs ?? LEASE,
+    leaseMarginMs: opts.leaseMarginMs ?? MARGIN,
   };
   const reap = new Reap('app-r', deps);
   return Object.assign(s, { reap });
 }
 
-async function observer(opts: { beat?: boolean } = {}): Promise<FakeObserver> {
-  const o = await FakeObserver.connect(path);
+async function observer(opts: { beat?: boolean; at?: string } = {}): Promise<FakeObserver> {
+  const o = await FakeObserver.connect(opts.at ?? path);
   observers.push(o);
   o.hello('eng-r', { pid: 700, childPid: 812 });
   await o.next('welcome');
@@ -423,5 +425,79 @@ describe('the signal’s outcome', () => {
     s.reap.cancel('stopped');
     expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
     expect(s.reap.state).toBe('idle');
+  });
+});
+
+// D70, on fake timers over the real sockets: Date, performance and the timers are faked (the gate judges silence on
+// performance.now(), the lease reads both it and Date.now()); setImmediate and process.hrtime stay real, so socket I/O
+// runs and `settle` waits on it. Production timings throughout.
+describe('the clocks (D70)', () => {
+  const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] };
+  const settle = async (check: () => boolean, what: string, ms = 2_000) => {
+    const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
+    while (!check()) {
+      if (process.hrtime.bigint() > end) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setImmediate(r));
+    }
+  };
+  const drain = (ms = 30) => settle(() => false, 'nothing', ms).catch(() => {}); // real time for the socket, no timer
+  let real: Gate;
+  let at: string;
+  beforeEach(async () => {
+    vi.useFakeTimers(FAKE);
+    at = join(root, 'supervisor', 'production.sock');
+    real = new Gate({ log: () => {} }); // OBSERVER_SILENCE_MS and the default clock
+    await real.listen(at);
+  });
+  afterEach(async () => {
+    vi.useRealTimers();
+    await real.close();
+  });
+
+  it('a 20 s loop stall makes the observer unhealthy and cancels the arm; the next heartbeat on the same connection heals the row and re-arms nothing', async () => {
+    const s = scene({ gate: real, leaseMs: 30_000 }); // a lease past the silence window, so the silence is what cancels
+    const o = await observer({ at, beat: false });
+    s.reap.due('idle');
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: 30_000 });
+    vi.advanceTimersByTime(20_000); // the loop stalled: the silence timer runs late, and nothing was heard
+    expect(s.reap.observer).toBe('unhealthy');
+    expect(s.reap.state).toBe('idle');
+    expect(s.cancelled).toEqual(['idle']);
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    o.hb();
+    await settle(() => s.reap.observer === 'healthy', 'the heal');
+    expect(s.views.at(-1)).toEqual({ state: 'idle', observer: 'healthy' });
+    await drain();
+    expect(o.pending()).toEqual([]); // healing re-arms nothing: the disarmed fence stays disarmed
+    expect(s.reaped).toEqual([]);
+    s.reap.due('idle'); // the row's next due takes a new fence
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 2, leaseMs: 30_000 });
+  });
+
+  it('a forward wall-clock jump with no monotonic time passed (sleep) reads the lease as expired: the armed is renewed before any signal', async () => {
+    const s = scene({ gate: real, leaseMs: LEASE_MS, leaseMarginMs: LEASE_MARGIN_MS });
+    const o = await observer({ at, beat: false });
+    s.reap.due('idle');
+    await o.next('arm');
+    vi.setSystemTime(Date.now() + 20_000); // the Mac slept between the arm and its answer
+    o.send({ t: 'armed', fence: 1 });
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE_MS }); // the renewal
+    expect(s.reaped).toEqual([]);
+    o.send({ t: 'armed', fence: 1 });
+    await settle(() => s.reaped.length === 1, 'the signal under the renewal');
+  });
+
+  it('a backward wall-clock step with the monotonic clock advancing still expires the lease: the armed is renewed before any signal', async () => {
+    const s = scene({ gate: real, leaseMs: LEASE_MS, leaseMarginMs: LEASE_MARGIN_MS });
+    const o = await observer({ at, beat: false });
+    s.reap.due('idle');
+    await o.next('arm');
+    vi.advanceTimersByTime(LEASE_MS - LEASE_MARGIN_MS + 500); // both clocks past the lease less its margin
+    vi.setSystemTime(Date.now() - 5_000); // then the wall clock steps back: by it, only 4.5 s have passed
+    o.send({ t: 'armed', fence: 1 });
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE_MS }); // the renewal
+    expect(s.reaped).toEqual([]);
+    o.send({ t: 'armed', fence: 1 });
+    await settle(() => s.reaped.length === 1, 'the signal under the renewal');
   });
 });
