@@ -115,6 +115,7 @@ class Channel {
   #out = 0; // this side's next offset
   #taken = 0; // content frames received on this channel
   #grantLeft: number;
+  #withheld = 0; // what a stingy machine took and hasn't refunded
   readonly #outbox: Uint8Array[] = [];
 
   constructor(
@@ -140,6 +141,14 @@ class Channel {
   refund(bytes: number): void {
     this.credit += bytes;
     this.#flush();
+  }
+  /** A stingy machine taking again: everything it withheld refunded at once. */
+  release(): void {
+    this.machine.stingy = false;
+    const bytes = this.#withheld;
+    this.#withheld = 0;
+    this.#grantLeft += bytes;
+    if (bytes > 0) this.machine.link.hear({ t: 'streamCredit', id: this.id, bytes });
   }
   close(reason: string): void {
     this.machine.channels.delete(this.id);
@@ -167,7 +176,7 @@ class Channel {
     if (!this.machine.stingy) {
       this.#grantLeft += bytes.byteLength;
       this.machine.link.hear({ t: 'streamCredit', id: this.id, bytes: bytes.byteLength });
-    }
+    } else this.#withheld += bytes.byteLength;
     for (const raw of this.#frames.push(bytes) ?? []) this.#frame(decodeFrame(raw));
   }
 
@@ -416,7 +425,8 @@ describe('the window’s writes past the machine’s credit', () => {
       await flush();
       if (closedAt < 0 && documents.size === 0) closedAt = n;
     }
-    // bounded: 4 KiB in flight and four 16 KiB edits waiting pass the 64 KiB bound, and the next edit ends the bridge
+    // bounded: the first edit draining (4 KiB of it in flight), four 16 KiB edits waiting behind it pass the 64 KiB bound,
+    // and the next edit ends the bridge
     expect(closedAt, 'the bridge closed as the queue passed its bound').toBe(5);
     expect(documents.size).toBe(0);
     expect(s.link.table.size, 'the stream gone: nothing waits in main').toBe(0);
@@ -433,6 +443,56 @@ describe('the window’s writes past the machine’s credit', () => {
     await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'live', synced: true, unsaved: 0 }));
     for (let n = 0; n < 12; n += 1) expect(text(s.machine.doc)).toContain(String(n).padStart(2, '0') + 'x');
   });
+
+  // The last milestone fix: a reopen carrying more than the bound sends its step 2 whole; what comes behind it while it
+  // drains (presence, typing) waits under the bound rather than closing the bridge into the same reopen again
+  it('let a step 2 past the bound drain, with the awareness and edits behind it, and still close on more than the bound behind it', async () => {
+    const s = scene();
+    const documents = createRemoteDocuments({ channel: () => (([port1, port2]) => ({ port1, port2 }))(End.pair()) as never, log: () => {} });
+    stops.push(() => documents.stop());
+    const client = clientOf(s.window as never);
+    const r = replica();
+    const opening = documents.open(s.link, DOC, client);
+    const first = s.machine.accept(await s.machine.open(0));
+    r.provider.connect(s.posted((await opening).channel));
+    await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'live', synced: true }));
+    // a 12 MiB paste the machine takes and never commits, then the channel lost: the reopen's step 2 carries it
+    s.machine.deaf = true;
+    const paste = 'p'.repeat(12 * 1024 * 1024);
+    r.doc.get('root').insert(0, paste);
+    await vi.waitFor(() => expect(s.machine.heard.get(first.id)).toContain('update'));
+    first.close('host');
+    await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'off', unsaved: 1 }));
+    // the reopen on a slow link: the endpoint's real grant, refunded only when the test says
+    s.machine.deaf = false;
+    s.machine.stingy = true;
+    const again = documents.open(s.link, DOC, client);
+    const second = s.machine.accept(await s.machine.open(1));
+    r.provider.connect(s.posted((await again).channel));
+    // the provider's step 2, answering the machine's step 1, admitted: 256 KiB of it in flight, the rest waiting (the fake
+    // port hands the machine's step 1 over inside connect, so here the provider's own step 1 waits behind it too)
+    await vi.waitFor(() => expect(r.provider.state.phase).toBe('live'));
+    for (let n = 0; n < 8; n += 1) {
+      r.provider.awareness.setLocalStateField('cursor', n);
+      r.doc.get('root').insert(0, `e${n}`);
+      await flush();
+    }
+    expect(documents.size, 'the bridge stands while its step 2 drains').toBe(1);
+    // the machine takes again: the step 2 and everything behind it land
+    second.release();
+    await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'live', synced: true, unsaved: 0 }));
+    expect(text(s.machine.doc)).toBe('e7e6e5e4e3e2e1e0' + paste);
+    // and the bound still holds behind a draining frame: 1 MiB edits pile up until more than 8 MiB waits behind the first
+    s.machine.stingy = true;
+    let closedAt = -1;
+    for (let n = 0; n < 10 && closedAt < 0; n += 1) {
+      r.doc.get('root').insert(0, 'm'.repeat(1024 * 1024));
+      await flush();
+      if (documents.size === 0) closedAt = n;
+    }
+    expect(closedAt, 'the edit arriving with eight full ones behind the draining first closes the bridge').toBe(9);
+    expect(s.link.table.size, 'the stream gone: nothing waits in main').toBe(0);
+  }, 30_000);
 });
 
 describe('every path ends', () => {

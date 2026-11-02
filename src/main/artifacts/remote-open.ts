@@ -11,8 +11,8 @@
 //   forwards from a `view` port only what the endpoint would (step 1 and awareness), so a replica's local edits never
 //   reach a channel that would drop them and close.
 // - The frames. Each document frame (src/artifacts/provider/frames.ts) crosses length-prefixed (frame-stream.ts): the
-//   window's go into the stream, which sends within the endpoint's credit and holds the rest up to DOCUMENT_OUTBOUND_MAX
-//   (past it the bridge ends: the host socket's own queue rule); the machine's are taken within the credit given
+//   window's go into the stream, which sends within the endpoint's credit and holds the rest: the frame draining, whatever
+//   its size, and up to DOCUMENT_OUTBOUND_MAX behind it (past that the bridge ends); the machine's are taken within the credit given
 //   at the open, refunded as they are taken in (one frame at most is assembled here), and posted to the window whole.
 // - The reopen is the window's. Any end of the stream (a carrier lost, the machine's `host`, `reset` or `upstream`, a
 //   re-check's `removed`, `behind`, `malformed`) closes the window's port, and the renderer's ArtifactHost opens again
@@ -46,10 +46,12 @@ import { notAnswered, notOffered, offline, OPEN_TIMEOUT_MS } from './remote-sche
 /** What the machine may send of the document's frames ahead of this side taking them. */
 export const DOCUMENT_STREAM_CREDIT = 1024 * 1024;
 /**
- * Milestone review item 4: the window's frames waiting here for the machine's credit, at most, as the engine host's own
- * socket bounds its queue (src/shared/host/doc-channels.ts' `write`): a frame that comes while more than this waits closes
- * the bridge, and one that comes while less waits is taken whole, whatever its size up to the frame maximum. A machine
- * that keeps its channel but takes nothing can't grow main's memory; the reopen's step 2 carries what never landed.
+ * Milestone review item 4: the window's frames waiting here for the machine's credit behind the one draining, at most
+ * (the engine host's high water, src/shared/host/doc-channels.ts): a frame that comes while more than this waits behind
+ * the draining one closes the bridge, and one that comes while less waits is taken whole, whatever its size up to the
+ * frame maximum. The draining frame is exempt so a reopen's step 2 past the bound completes rather than closing the
+ * bridge into the same reopen again (the last milestone fix). A machine that keeps its channel but takes nothing can't
+ * grow main's memory past one frame and the bound; the reopen's step 2 carries what never landed.
  */
 export const DOCUMENT_OUTBOUND_MAX = DOC_HIGH_WATER;
 /** An open not answered by then, from its start (the preflight and both stream attempts in it), is answered `timeout`: a page's bound. */
@@ -159,6 +161,8 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
     #received = 0; // the machine's next byte offset
     #dropped = 0; // frames a `view` port wrote, not carried
     readonly #frames = new LengthPrefixed(); // frame-stream's DOCUMENT_FRAME_MAX, the host's own frame cap
+    #admitted = 0; // the window's bytes handed to the stream
+    readonly #ends: number[] = []; // where each of them not yet wholly sent ends, in #admitted's count
     readonly #offGone: () => void;
     /** Settles the attempt in flight: its stream opened, or the word it ended with. */
     #settle: ((outcome: string) => void) | null = null;
@@ -182,6 +186,8 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
       this.mode = mode;
       this.#received = 0;
       this.#frames.clear();
+      this.#admitted = 0;
+      this.#ends.length = 0;
       return new Promise<string>((resolve) => {
         const timer = setTimeout(() => settle('timeout'), Math.max(0, deadline - Date.now()));
         const settle = (outcome: string) => {
@@ -234,8 +240,24 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
       }
       if (this.#stream === null) return;
       // review item 4: past the bound the machine isn't taking what it is sent; the bridge ends, the provider reopens
-      if (this.#stream.queued() > outboundMax) return this.end('behind');
-      this.#stream.send(lengthPrefixed(data));
+      if (this.#waitingBehindHead(this.#stream) > outboundMax) return this.end('behind');
+      const frame = lengthPrefixed(data);
+      this.#admitted += frame.byteLength;
+      this.#ends.push(this.#admitted);
+      this.#stream.send(frame);
+    }
+
+    /**
+     * The window's bytes waiting behind the frame now draining. That frame, admitted whole, is exempt: a reopen's step 2
+     * past the bound drains while the presence and typing behind it wait (counted against the bound) instead of closing
+     * the bridge into the same reopen again.
+     */
+    #waitingBehindHead(stream: RemoteStream): number {
+      const sent = this.#admitted - stream.queued();
+      let gone = 0;
+      while (gone < this.#ends.length && this.#ends[gone]! <= sent) gone += 1;
+      if (gone > 0) this.#ends.splice(0, gone);
+      return this.#ends.length === 0 ? 0 : this.#admitted - this.#ends[0]!;
     }
 
     #fromMachine(offset: number, bytes: Uint8Array): void {
