@@ -557,6 +557,20 @@ describe('artifacts.downloadAsset of another machine’s asset', () => {
     expect(readdirSync(saveTo)).toEqual(['sales.csv']);
   });
 
+  it('refuses a body shorter than its Content-Length, saving nothing', async () => {
+    const saveTo = scratch('maws-remote-download-');
+    const download = createAssetDownload({
+      call: vi.fn() as never,
+      downloads: () => saveTo,
+      port: { save: vi.fn() },
+      env: { MAWS_E2E: '1', MAWS_E2E_SAVE_PATH: saveTo },
+      local: LOCAL,
+      remote: () => ({ fetch: async () => new Response('abc', { headers: { 'Content-Length': '6' } }) }),
+    });
+    await expect(download.downloadAsset({ artifactId: PAGE, ref: 'assets/data.csv', name: 'short.csv' }, null, MINI)).rejects.toThrow(/3 of 6 bytes/);
+    expect(readdirSync(saveTo)).toEqual([]);
+  });
+
   it('refuses while no link reaches the machine', async () => {
     const download = createAssetDownload({ call: vi.fn() as never, downloads: () => '/tmp', port: { save: vi.fn() }, env: {}, local: LOCAL, remote: () => null });
     await expect(download.downloadAsset({ artifactId: PAGE, ref: 'assets/data.csv' }, null, MINI)).rejects.toMatchObject({ error: { code: 'host_unavailable' } });

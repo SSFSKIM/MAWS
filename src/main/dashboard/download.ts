@@ -11,9 +11,9 @@
 // answered here for any machine (the router's allow-list). An asset of an artifact on another machine (`ctx.target`) is
 // fetched through the scheme's remote responder over that machine's link (`remote`, remote lane B's), whole into a
 // temporary file before any dialog (the machine's 404 is the asset not found; a body short of its length is an error and
-// saves nothing), then saved as a local one is. The machine's own hold is not taken: the one request reads one file.
+// saves nothing, and the file written is checked against the length said besides), then saved as a local one is. The machine's own hold is not taken: the one request reads one file.
 import { createWriteStream } from 'node:fs';
-import { copyFile, mkdtemp, rename, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -98,6 +98,10 @@ export function createAssetDownload(deps: AssetDownloadDeps) {
     try {
       const from = join(dir, 'asset');
       await pipeline(response.body === null ? Readable.from([]) : Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), createWriteStream(from, { mode: 0o600 }));
+      // M5b's milestone review: the file is the length the machine said, or nothing is saved
+      const said = response.headers.get('Content-Length');
+      const wrote = (await stat(from)).size;
+      if (said !== null && Number(said) !== wrote) throw new CommandFailure(ipcError('host_unavailable', `artifacts.downloadAsset: ${machine} sent ${wrote} of ${said} bytes; nothing was saved`));
       const to = await destination(safeDownloadName(name, basename(ref)), client);
       if (to === null) return { path: null };
       await place(from, to);
