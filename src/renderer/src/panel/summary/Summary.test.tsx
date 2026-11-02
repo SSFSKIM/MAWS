@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import type { GitStatus } from '@shared/ipc/schema/git';
-import { bareOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { digest, project, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { queryClient } from '../../ipc/query';
 import { resetLibrary } from '../../library/store';
 import { useLibraryView } from '../../library/view';
@@ -169,6 +169,31 @@ describe('floating session cards', () => {
     await open('Artifacts');
     await userEvent.setup().click(within(region('Artifacts')).getByRole('button', { name: 'All in Library' }));
     expect(useLibraryView.getState()).toMatchObject({ view: 'all', query: '', kind: null, spaceId: null });
+    expect(openTab).toHaveBeenCalledWith({ kind: 'artifacts' });
+  });
+
+  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5): a remote session's card is its machine's:
+  // its project's artifacts read there, its picker offers that machine's projects, and its rows and Library open there.
+  it('reads a remote session’s project on its machine and opens its artifacts and Library there', async () => {
+    const R = addressOf(OTHER_MACHINE, 'project-r' as ProjectId);
+    const S = addressOf(OTHER_MACHINE, 'project-s' as ProjectId);
+    const REMOTE = addressOf(OTHER_MACHINE, bareOf(A));
+    act(() => useSessions.setState((s) => ({
+      projects: new Map(s.projects).set(R, project(R, 2, { name: 'Studio R' })).set(S, project(S, 3, { name: 'Studio S' })),
+      records: new Map(s.records).set(REMOTE, record(REMOTE, { projectId: R })),
+    })));
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
+    render(<QueryClientProvider client={queryClient}><Summary appSessionId={REMOTE} /></QueryClientProvider>);
+    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: bareOf(R) } }]));
+    expect(fake.machines('library.list')).toEqual([OTHER_MACHINE]);
+    await open('Artifacts');
+    const picker = within(region('Artifacts')).getByRole('combobox', { name: 'Artifacts project' }) as HTMLSelectElement;
+    expect(picker.value).toBe(R);
+    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(['Choose a project', 'Studio R', 'Studio S']);
+    await userEvent.setup().click(await within(region('Artifacts')).findByRole('button', { name: 'Input errors plan' }));
+    expect(openTab).toHaveBeenCalledWith({ kind: 'artifact', artifactId: artifact.id, machine: OTHER_MACHINE });
+    await userEvent.setup().click(within(region('Artifacts')).getByRole('button', { name: 'All in Library' }));
+    expect(useLibraryView.getState().machine).toBe(OTHER_MACHINE);
     expect(openTab).toHaveBeenCalledWith({ kind: 'artifacts' });
   });
 

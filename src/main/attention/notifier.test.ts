@@ -40,6 +40,8 @@ const bounces = () => os.focus.mock.calls.filter(([, mode]) => mode === 'request
 const brought = () => os.focus.mock.calls.filter(([, mode]) => mode === 'bring');
 
 import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
+import type { MachineRef } from '@shared/machine/ref';
+import type { RemoteAttentionChange } from '../lane-b/remote-attention';
 import { startNotifier } from './notifier';
 
 const CHARTER = 'app-charter' as AppSessionId;
@@ -48,19 +50,62 @@ const T = '2026-09-28T10:00:00Z';
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V21;
 
 // P5 O3-C (reader R1): the notifier reads the spine through its view alone
-function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: FakeSpineView) => void; actions?: import('./actions').NotificationActions } = {}) {
+function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: FakeSpineView) => void; actions?: import('./actions').NotificationActions; remote?: FakeRemote } = {}) {
   const view = fakeSpineView({
     projects: [project('maws', 0, { name: 'MAWS' })],
     records: [record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }), record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } })],
   });
   opts.before?.(view);
-  const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
+  const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS, clock: Date.parse(STARTED) };
   const emit = vi.fn(() => true);
+  const emitFrom = vi.fn(() => true);
   const navigate = vi.fn();
   const failure = vi.fn();
-  const stop = startNotifier(view, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit });
+  const remote = opts.remote === undefined ? {} : { remote: opts.remote.view, emitFrom, remoteTitle: (machine: MachineRef, app: string) => opts.remote!.titles.get(`${machine}/${app}`) ?? null, now: () => state.clock };
+  const stop = startNotifier(view, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit, ...remote });
   const set = (appSessionId: AppSessionId, items: AttentionItem[], silent: AttentionItem['id'][] = []) => view.setAttention(appSessionId, items, silent);
-  return { view, state, emit, navigate, failure, stop, set };
+  return { view, state, emit, emitFrom, navigate, failure, stop, set };
+}
+
+// P5 O7 M6: other machines' attention as remote lane B's feeds hold it (src/main/lane-b/remote-attention.ts)
+const MINI = 'MiniMachineRef00000000' as MachineRef;
+const STARTED = '2026-09-28T09:00:00Z'; // the notifier's start, by this Mac's clock
+type FakeRemote = ReturnType<typeof fakeRemote>;
+function fakeRemote() {
+  const machines = new Map<MachineRef, { machine: MachineRef; name: string; greyed: boolean; sessions: Map<string, AttentionItem[]> }>();
+  const listeners = new Set<(change: RemoteAttentionChange) => void>();
+  const tell = (change: RemoteAttentionChange) => listeners.forEach((listener) => listener(change));
+  const held = (machine: MachineRef) => machines.get(machine) ?? machines.set(machine, { machine, name: 'mini', greyed: false, sessions: new Map() }).get(machine)!;
+  return {
+    titles: new Map<string, string>(),
+    view: {
+      machines: () => [...machines.values()],
+      machine: (machine: MachineRef) => machines.get(machine) ?? null,
+      onChange: (listener: (change: RemoteAttentionChange) => void) => (listeners.add(listener), () => void listeners.delete(listener)),
+    },
+    /** A feed's snapshot: the machine's items whole, no longer greyed. */
+    snapshot(items: AttentionItem[], machine = MINI) {
+      const m = held(machine);
+      m.greyed = false;
+      m.sessions = new Map();
+      for (const i of items) m.sessions.set(i.appSessionId, [...(m.sessions.get(i.appSessionId) ?? []), i]);
+      tell({ machine, kind: 'snapshot' });
+    },
+    session(app: string, items: AttentionItem[], machine = MINI) {
+      const m = held(machine);
+      if (items.length > 0) m.sessions.set(app, items);
+      else m.sessions.delete(app);
+      tell({ machine, kind: 'session', app });
+    },
+    grey(machine = MINI) {
+      held(machine).greyed = true;
+      tell({ machine, kind: 'greyed' });
+    },
+    gone(machine = MINI) {
+      machines.delete(machine);
+      tell({ machine, kind: 'gone' });
+    },
+  };
 }
 
 const posted = () => os.instances;
@@ -340,3 +385,120 @@ describe('a terminal session’s requests', () => {
     expect(emitted(h.emit, 'attention.notified')).toMatchObject([{ appSessionId: TERMINAL, delivery: 'in-app' }]);
   });
 });
+
+// P5 O7 M6 ("Counting without a record"): an item of a session on another machine is raised as a local one is, once per
+// item for the whole app (main raises it, not a window), keyed by its address; a greyed machine raises none and counts
+// in no badge; a click opens the session on its machine.
+describe('another machine’s items', () => {
+  const REMOTE_APP = 'app-mini';
+  const remoteItem = (kind: AttentionItem['kind'], at = T) => item(REMOTE_APP, kind, at);
+
+  it('raises one notification per remote item, titled by its machine and row, however often its feed says it (a snapshot again after a reconnect, both windows unfocused)', () => {
+    const r = fakeRemote();
+    r.titles.set(`${MINI}/${REMOTE_APP}`, 'Nightly build');
+    const h = harness({ remote: r });
+    r.snapshot([]);
+    const asked = remoteItem('permission');
+    r.session(REMOTE_APP, [asked]);
+    r.session(REMOTE_APP, [asked]);
+    r.grey();
+    r.snapshot([asked]); // the reconnect's snapshot
+    expect(posted().map((n) => n.options)).toEqual([{ title: 'mini · Nightly build', body: `permission for ${REMOTE_APP}`, silent: true }]);
+    posted()[0].fire('show');
+    expect(emitted(h.emitFrom, 'attention.notified')).toEqual([]);
+    expect(h.emitFrom.mock.calls).toEqual([[MINI, 'attention.notified', { appSessionId: REMOTE_APP, attentionId: asked.id, delivery: 'os', at: expect.any(String) }]]);
+  });
+
+  it('titles one whose machine lists no row by the machine alone', () => {
+    const r = fakeRemote();
+    harness({ remote: r });
+    r.session(REMOTE_APP, [remoteItem('question')]);
+    expect(posted()[0].options.title).toBe('mini');
+  });
+
+  it('raises none for a greyed machine, counting its items in no badge, and none again for them at its next snapshot; a new item then is raised', () => {
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    const held = remoteItem('permission', '2026-09-28T08:00:00Z'); // in the first snapshot at startup: silent, as a restored item
+    r.snapshot([held]);
+    expect(posted()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    r.grey();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+    const meanwhile = remoteItem('question');
+    r.session(REMOTE_APP, [held, meanwhile]); // what a greyed machine still holds raises nothing
+    r.view.machine(MINI)!.greyed = true;
+    expect(posted()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+    h.set(CHARTER, [item(CHARTER, 'permission', T)]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    const fresh = remoteItem('plan', '2026-09-28T10:05:00Z');
+    r.snapshot([held, fresh]);
+    expect(posted().map((n) => n.options.body)).toEqual([`permission for ${CHARTER}`, `plan for ${REMOTE_APP}`]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 2);
+  });
+
+  it('retracts a remote notification once its item is answered (here or on another device) or its machine leaves', () => {
+    const r = fakeRemote();
+    harness({ remote: r });
+    const asked = remoteItem('permission');
+    r.session(REMOTE_APP, [asked]);
+    r.session(REMOTE_APP, []);
+    expect(posted()[0].close).toHaveBeenCalledOnce();
+    r.session('app-2', [item('app-2', 'question', T)]);
+    r.gone();
+    expect(posted()[1].close).toHaveBeenCalledOnce();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+  });
+
+  it('opens the session on its machine at a click: the navigation, with its bare ids, is the machine’s', () => {
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    const asked = remoteItem('permission');
+    r.session(REMOTE_APP, [asked]);
+    posted()[0].fire('click');
+    expect(brought()).toEqual([[null, 'bring']]);
+    expect(h.navigate).toHaveBeenCalledExactlyOnceWith({ appSessionId: REMOTE_APP, attentionId: asked.id, source: 'notification' }, MINI);
+  });
+
+  it('tells one in-app from the machine while MAWS is focused, and offers no reply or Allow once (no action crosses here)', () => {
+    const r = fakeRemote();
+    const actions = { canAllow: vi.fn(async () => true), allow: vi.fn(), reply: vi.fn() } as unknown as import('./actions').NotificationActions;
+    const h = harness({ remote: r, focused: true, actions });
+    r.session(REMOTE_APP, [remoteItem('permission')]);
+    expect(posted()).toHaveLength(0);
+    expect(h.emitFrom.mock.calls).toMatchObject([[MINI, 'attention.notified', { appSessionId: REMOTE_APP, delivery: 'in-app' }]]);
+    h.state.focused = false;
+    r.session(REMOTE_APP, [remoteItem('permission'), remoteItem('question')]);
+    expect(posted().map((n) => n.options)).toEqual([{ title: 'mini', body: `question for ${REMOTE_APP}`, silent: true }]);
+    expect(actions.canAllow).not.toHaveBeenCalled();
+  });
+
+  // Fix wave 1: startup silence is this Mac's own clock, never the machine's `createdAt`
+  it('silences a machine’s first snapshot at startup whatever its items’ clocks say, and raises every later item once whatever they say', () => {
+    const r = fakeRemote();
+    harness({ remote: r });
+    const ahead = remoteItem('permission', '2026-09-28T10:00:00Z'); // a machine an hour ahead
+    const behind = remoteItem('question', '2026-09-28T08:00:00Z'); // one an hour behind
+    r.snapshot([ahead, behind]);
+    expect(posted()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    const fresh = item('app-2', 'permission', '2026-09-28T08:00:01Z'); // raised now, stamped an hour behind
+    r.session('app-2', [fresh]);
+    const early = item('app-3', 'question', '2026-09-28T10:00:01Z'); // raised now, stamped an hour ahead
+    r.session('app-3', [early]);
+    expect(posted().map((n) => n.options.body)).toEqual(['permission for app-2', 'question for app-3']);
+    r.snapshot([ahead, behind, fresh, early]); // a reconnect's snapshot re-announces nothing seen
+    expect(posted()).toHaveLength(2);
+  });
+
+  it('raises the first snapshot’s items of a machine first reached after the startup window (unreachable at launch)', async () => {
+    const { REMOTE_STARTUP_SILENCE_MS } = await import('./notifier');
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    h.state.clock += REMOTE_STARTUP_SILENCE_MS + 1;
+    r.snapshot([remoteItem('permission', '2026-09-28T08:00:00Z')]);
+    expect(posted().map((n) => n.options.body)).toEqual([`permission for ${REMOTE_APP}`]);
+  });
+});
+

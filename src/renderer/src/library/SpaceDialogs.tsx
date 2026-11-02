@@ -14,7 +14,7 @@ import { DIALOG_COPY as D, SPACE_COPY } from './copy';
 import { closeLibraryDialog, openLibraryDialog, toastFailure, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
-import { showSpace } from './view';
+import { showSpace, useLibraryView } from './view';
 
 const SPACE_NAME_MAX = 200;
 
@@ -40,7 +40,10 @@ async function unlinkFolder(space: LibrarySpace): Promise<void> {
   if (!result.ok) toastFailure(result.error.message);
 }
 
+// P5 O7 M5a: a Space of another machine's library is only narrowed to here; its management is this Mac's commands.
 export function SpaceMenu({ space, narrowed = false }: { space: LibrarySpace; narrowed?: boolean }) {
+  const remote = useLibraryView((s) => s.machine !== null);
+  if (remote && narrowed) return null;
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -60,24 +63,32 @@ export function SpaceMenu({ space, narrowed = false }: { space: LibrarySpace; na
               {SPACE_COPY.open}
             </DropdownMenu.Item>
           )}
-          <DropdownMenu.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'renameSpace', space })}>
-            {SPACE_COPY.rename}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className={MENU_ITEM} onSelect={() => void linkFolder(space)}>
-            {space.linkedDir ? SPACE_COPY.changeFolder : SPACE_COPY.link}
-          </DropdownMenu.Item>
-          {space.linkedDir && (
-            <DropdownMenu.Item className={MENU_ITEM} onSelect={() => void unlinkFolder(space)}>
-              {SPACE_COPY.unlink}
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Separator className="my-1 h-px bg-border" />
-          <DropdownMenu.Item className={`${MENU_ITEM} text-danger`} onSelect={() => openLibraryDialog({ kind: 'deleteSpace', space })}>
-            {SPACE_COPY.delete}
-          </DropdownMenu.Item>
+          {!remote && <SpaceManagement space={space} />}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+  );
+}
+
+function SpaceManagement({ space }: { space: LibrarySpace }) {
+  return (
+    <>
+      <DropdownMenu.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'renameSpace', space })}>
+        {SPACE_COPY.rename}
+      </DropdownMenu.Item>
+      <DropdownMenu.Item className={MENU_ITEM} onSelect={() => void linkFolder(space)}>
+        {space.linkedDir ? SPACE_COPY.changeFolder : SPACE_COPY.link}
+      </DropdownMenu.Item>
+      {space.linkedDir && (
+        <DropdownMenu.Item className={MENU_ITEM} onSelect={() => void unlinkFolder(space)}>
+          {SPACE_COPY.unlink}
+        </DropdownMenu.Item>
+      )}
+      <DropdownMenu.Separator className="my-1 h-px bg-border" />
+      <DropdownMenu.Item className={`${MENU_ITEM} text-danger`} onSelect={() => openLibraryDialog({ kind: 'deleteSpace', space })}>
+        {SPACE_COPY.delete}
+      </DropdownMenu.Item>
+    </>
   );
 }
 

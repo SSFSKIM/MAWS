@@ -56,8 +56,10 @@ async function servers(input: string | URL | Request, init?: RequestInit): Promi
 
 // A real turn of the event loop (the store and the custody do file I/O), whichever timers are faked.
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
-async function until(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 1_000 && !check(); i++) await turn();
+// Bounded by time, not by turns: under load the file I/O takes more turns (only setTimeout is ever faked here).
+async function until(check: () => boolean, ms = 10_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check() && Date.now() < deadline) await turn();
   expect(check()).toBe(true);
 }
 

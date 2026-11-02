@@ -13,7 +13,10 @@ const registryByEffect = Object.keys(REGISTRY.commands).filter((name) => {
 });
 
 /** Reads that answer the pending request's kind from a fixed table. */
-const pending = (kinds: Record<string, string | null>): EffectReads => ({ pendingKind: async (_session, request) => kinds[request] ?? null });
+const pending = (kinds: Record<string, string | null>, viewed: readonly string[] = []): EffectReads => ({
+  pendingKind: async (_session, request) => kinds[request] ?? null,
+  holdsArtifactId: async (artifactId, grade) => grade === 'view' && viewed.includes(artifactId),
+});
 const none = pending({});
 
 async function grade(name: string, input: Record<string, unknown>, reads: EffectReads = none) {
@@ -138,5 +141,15 @@ describe('the other rows', () => {
   it('takes a text-only prompt edit at its floor and has no rule for a keyed one', async () => {
     expect(await grade('session.ui.promptEdit', { text: 'abc', cursor: 3, by: 'person' })).toBe('converse');
     expect(await grade('session.ui.promptEdit', { text: 'abc', cursor: 3, by: 'person', key: { key: 'Enter' } })).toBe(NO_RULE);
+  });
+});
+
+// P5 O7 M5a: `artifacts.copyAsset {from, ref, to}` is ranked on `to` by the `artifact` rule (`manage`, the write) and reads
+// `from`, which the asker must view: the store checks only that both are live.
+describe('artifacts.copyAsset', () => {
+  const copy = { from: 'art-from', ref: 'assets/a.png', to: 'art-to' };
+  it('takes `manage` when the asker views `from`, and refuses `grade` when they don’t', async () => {
+    expect(await grade('artifacts.copyAsset', copy, pending({}, ['art-from']))).toBe('manage');
+    expect(await grade('artifacts.copyAsset', copy, pending({}, ['art-to']))).toEqual({ refused: 'grade' });
   });
 });

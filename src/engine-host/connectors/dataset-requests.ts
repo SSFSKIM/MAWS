@@ -21,6 +21,13 @@
 // - E3 M2 fix (reviewer finding 2): from the publication's admission (synchronous with its savepoint) to its durable
 //   commit or rollback, the registry owns its end. A reply, withdrawal, deadline or main's going heard meanwhile is
 //   held: the commit then answers its durable record, a rollback the end first heard.
+// - P5 O16 M3b fix wave 4 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): at a handover (`handOver`, when the
+//   drain is armed) every pending request ends `handedOver`, and every later ask is answered so at once: its connector
+//   leg would have to run on a host that is not ready until this one has gone, so it cannot finish here. Its call then
+//   answers, which is what the drain waits for, and the agent retries it on the successor. A publication already
+//   admitted is held as above (its commit answers), and the bound operation is not withdrawn: a cancel would write to a
+//   frozen engine whose answer the successor's stream could receive. Whatever it brings back publishes nothing, since
+//   its request is no longer pending.
 import { randomUUID } from 'node:crypto';
 import type { AppPresence, HostEmit } from '@shared/host/runtime';
 import type { Actor } from '@shared/artifacts/actor';
@@ -48,7 +55,7 @@ export type DatasetRefreshSettlement =
   | { kind: 'published'; answer: ArtifactDatasetResult }
   | { kind: 'stale'; detail: string }
   | { kind: 'refused'; outcome: MawsDatasetRefreshOutcome; refusal: string | null }
-  | { kind: 'timeout' | 'withdrawn' | 'noClient' };
+  | { kind: 'timeout' | 'withdrawn' | 'noClient' | 'handedOver' /* P5 O16 M3b fix wave 4 */ };
 
 /** The connector start that may carry a request (what `connectors.start` received). */
 export interface DatasetRefreshStart {
@@ -82,6 +89,7 @@ export class DatasetRefreshRequests {
   private readonly deadlineMs: number;
   private readonly now: () => number;
   private readonly newId: () => string;
+  private handingOver = false; // P5 O16 M3b fix wave 4: this host is handing its sessions over, for the rest of its life
 
   constructor(private readonly deps: { announce(requestId: string): void; hasClient(): boolean; deadlineMs?: number; now?: () => number; newId?: () => string }) {
     this.deadlineMs = deps.deadlineMs ?? CONNECTOR_OPERATION_DEADLINE_MS;
@@ -91,6 +99,7 @@ export class DatasetRefreshRequests {
 
   ask(ask: DatasetRefreshAsk, signal: AbortSignal): Promise<DatasetRefreshSettlement> {
     if (signal.aborted) return Promise.resolve({ kind: 'withdrawn' });
+    if (this.handingOver) return Promise.resolve({ kind: 'handedOver' }); // P5 O16 M3b fix wave 4
     if (!this.deps.hasClient()) return Promise.resolve({ kind: 'noClient' });
     const requestId = this.newId();
     return new Promise((resolve) => {
@@ -186,9 +195,16 @@ export class DatasetRefreshRequests {
     for (const requestId of [...this.entries.keys()]) this.end(requestId, { kind: 'noClient' });
   }
 
-  // Ended otherwise than by main's reply: the bound operation, if any, is withdrawn (it may still be running). Held
-  // while a commit is in flight, which then answers.
-  private end(requestId: string, settlement: DatasetRefreshSettlement): void {
+  // P5 O16 M3b fix wave 4: the host is handing over: every pending request ends `handedOver`, its operation left
+  // running (a publication already admitted answers as it commits), and every later ask is answered so at once.
+  handOver(): void {
+    this.handingOver = true;
+    for (const requestId of [...this.entries.keys()]) this.end(requestId, { kind: 'handedOver' }, { withdraw: false });
+  }
+
+  // Ended otherwise than by main's reply: the bound operation, if any, is withdrawn (it may still be running), unless
+  // the end says not to. Held while a commit is in flight, which then answers.
+  private end(requestId: string, settlement: DatasetRefreshSettlement, opts: { withdraw: boolean } = { withdraw: true }): void {
     const entry = this.entries.get(requestId);
     if (!entry) return;
     if (entry.committing) {
@@ -196,7 +212,7 @@ export class DatasetRefreshRequests {
       return;
     }
     entry.settle(settlement);
-    entry.cancel?.();
+    if (opts.withdraw) entry.cancel?.();
   }
 }
 

@@ -1,5 +1,6 @@
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
+import { SESSION_SEARCH_LIMIT } from '@shared/ipc/schema/session';
 import type { Db } from './db';
 
 export interface SessionSearchHit { appSessionId: AppSessionId; snippet: string | null }
@@ -90,9 +91,13 @@ export class SessionSearchStore {
     for (const stamp of this.unpersisted.values()) if (this.db.get('SELECT 1 FROM sessions WHERE app_id = ? AND engine_session_id = ? AND transcript_size = ? AND transcript_mtime_ms = ? AND archived = 0 AND transcript_path IS NOT NULL', stamp.appId, stamp.sessionId, stamp.size, stamp.mtimeMs)) return true;
     return false;
   }
-  search(raw: string, limit = 50): SessionSearchHit[] {
+  // `sessions` (P5 O7 M6): only these sessions are searched, applied before the limit in both queries, so the limit is
+  // spent on them (a remote member's viewable set; the endpoint still cuts the answer itself).
+  search(raw: string, limit = SESSION_SEARCH_LIMIT, sessions?: readonly AppSessionId[]): SessionSearchHit[] {
     const query = raw.trim();
-    const titles = this.db.all<SessionSearchHit>(`SELECT s.app_id AS appSessionId, NULL AS snippet FROM sessions s WHERE s.archived = 0 AND instr(lower(${TITLE}), lower(?)) > 0 ORDER BY s.updated_at DESC, s.app_id LIMIT ?`, query, limit);
+    const only = sessions === undefined ? '' : 'AND s.app_id IN (SELECT value FROM json_each(?))';
+    const named = sessions === undefined ? [] : [JSON.stringify(sessions)];
+    const titles = this.db.all<SessionSearchHit>(`SELECT s.app_id AS appSessionId, NULL AS snippet FROM sessions s WHERE s.archived = 0 AND instr(lower(${TITLE}), lower(?)) > 0 ${only} ORDER BY s.updated_at DESC, s.app_id LIMIT ?`, query, ...named, limit);
     if (!query || titles.length === limit) return titles;
     const long = [...query].length >= 3;
     const where = long ? 'session_text MATCH ?' : 'instr(lower(session_text.body), lower(?)) > 0';
@@ -103,10 +108,10 @@ export class SessionSearchStore {
       FROM session_text JOIN session_text_chunks c ON c.id = session_text.rowid
       JOIN session_text_state st ON st.app_id = c.app_id
       JOIN sessions s ON s.app_id = st.app_id AND s.engine_session_id = st.session_id
-      WHERE s.archived = 0 AND ${where} AND instr(lower(${TITLE}), lower(?)) = 0
+      WHERE s.archived = 0 AND ${where} AND instr(lower(${TITLE}), lower(?)) = 0 ${only}
     ) SELECT appSessionId, snippet FROM (
       SELECT *, row_number() OVER (PARTITION BY appSessionId ORDER BY id) AS ordinal FROM matches
-    ) WHERE ordinal = 1 ORDER BY updated_at DESC, appSessionId LIMIT ?`, ...(long ? [] : [query]), long ? `"${query.replaceAll('"', '""')}"` : query, query, limit - titles.length);
+    ) WHERE ordinal = 1 ORDER BY updated_at DESC, appSessionId LIMIT ?`, ...(long ? [] : [query]), long ? `"${query.replaceAll('"', '""')}"` : query, query, ...named, limit - titles.length);
     return [...titles, ...rows];
   }
 }

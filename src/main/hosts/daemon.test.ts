@@ -544,6 +544,17 @@ describe('main’s hosts on the daemon shape', () => {
     expect(specs['engine-host']!.requestBudgetsMs).toBeUndefined();
     expect(specs['pty-host']!.requestBudgetsMs).toBeUndefined();
   });
+
+  // P5 O16 M3c fix wave 2 (D63; concern 1): the engine host's transport alone holds its start budget while `mawsd`
+  // reports its engine host draining (engine-handover.ts), so the relay's held hello stops nothing and fails nothing
+  it('give the engine host’s transport alone the handover wait', () => {
+    const start = daemonStart('private', { paths, modules, execPath: '/app/Electron', env, packaged: false, unitStart: () => {} });
+    const handingOverAt = () => Date.now();
+    const specs = daemonHostSpecs(paths, start, modules, env, undefined, handingOverAt);
+    expect(specs['engine-host']!.detached!.handingOverAt).toBe(handingOverAt);
+    expect(specs['pty-host']!.detached!.handingOverAt).toBeUndefined();
+    expect(specs.machine!.detached!.handingOverAt).toBeUndefined();
+  });
 });
 
 describe('the build check', () => {

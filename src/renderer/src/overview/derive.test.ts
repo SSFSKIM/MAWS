@@ -160,3 +160,16 @@ describe('overview card lines', () => {
     expect(cardFooter(null)).toEqual([]);
   });
 });
+
+// P5 O7 M6 (M6c fix wave 1): another machine's session with no record is in Needs you through its listed row, so the
+// board's Needs-you group carries it as the toolbar counts it; still no other group (a card there needs a record).
+describe('the board across machines', () => {
+  it('a listed session waiting with no record joins the Needs-you group, and no other', () => {
+    const studio = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    const listed = new Map([[studio, { title: 'Studio build' }]]);
+    const recs = new Map([[at('w' as AppSessionId), record(at('w'))]]);
+    const waiting = needsYou(new Map([[studio, [item(studio, 'permission', '2026-09-28T09:00:00Z')]], [at('w' as AppSessionId), [item(at('w'), 'permission', '2026-09-28T10:00:00Z')]]]), recs, { listed });
+    expect(overviewGroups({ records: recs, digests: new Map(), projects: [], rows: waiting, listed, ...where }).map((g) => [g.id, g.sessions])).toEqual([['needs-you', [studio, at('w')]]]);
+    expect(overviewGroups({ records: recs, digests: new Map(), projects: [], rows: waiting, ...where })[0].sessions).toEqual([at('w')]); // no listed rows given: records only, as before
+  });
+});

@@ -1218,17 +1218,18 @@ describe('ipc schema validates both directions', () => {
       // P5 O2 M2 adds host.interest (main-only, below)
       // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
       // P5 O3-D: `host.attachment`, mawsd's signal of an app's attachment (main-only)
+      // P5 O16 M3b: `host.handover`, mawsd's (main-only); P5 O7 M5a: `host.artifactOp`, the same ledger's act on no session (main-only)
       // P5 O17 M3: `host.browserWork`, mawsd's browser-work snapshot (main-only), and the engine host's `host.browserIdle`
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.attachment', 'host.browserWork', 'host.status', 'host.restart', 'host.openLog']);
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.handover', 'host.interest', 'host.op', 'host.artifactOp', 'host.opQuery', 'host.attachment', 'host.browserWork', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
-        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
-        'host.op': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host', 'host.browserWork': 'engine-host',
+        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.handover': 'engine-host', 'host.interest': 'engine-host',
+        'host.op': 'engine-host', 'host.artifactOp': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host', 'host.browserWork': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status', 'host.browserIdle']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.attachment', 'host.browserWork']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.handover', 'host.op', 'host.artifactOp', 'host.opQuery', 'host.attachment', 'host.browserWork']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
     });
 

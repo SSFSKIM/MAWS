@@ -146,7 +146,9 @@ export function requestClassOf(subtype: string): Exclude<RequestClass, 'human'> 
 // One function per subtype. `opts` is the client's (`timeoutMs`, `signal`).
 
 // `onWritten` runs once the request frame reached the pipe, with the minted id (an operation's receipt, M5).
-export type RequestOptions = { timeoutMs?: number; signal?: AbortSignal; onWritten?: (requestId: RequestId) => void };
+// `onIssued`: the request's id, once it is pending and before its write is queued, so a caller can know it before any
+// answer can be read (P5 O16 M3a fix wave 2); `onWritten`: once the write reached the process.
+export type RequestOptions = { timeoutMs?: number; signal?: AbortSignal; onIssued?: (requestId: RequestId) => void; onWritten?: (requestId: RequestId) => void };
 type Fn<S extends OutboundSubtype> = (client: ControlClient, payload: OutboundRequest<S>, opts?: RequestOptions) => Promise<OutboundResponse<S>>;
 const fn =
   <S extends OutboundSubtype>(subtype: S): Fn<S> =>

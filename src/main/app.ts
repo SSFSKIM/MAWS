@@ -49,6 +49,7 @@ import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
 import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
+import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 // C3 end
 // C5 start (emit comes with C3's imports)
@@ -85,6 +86,7 @@ import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P
 import { revealPath } from './settings/reveal';
 import { knownSessionDirectories } from '@shared/sessions/directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
+import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5a: remote.openCopy's refusal
 import { installWidgetBackend } from './widgets/fixture-backend';
 // C11 end
 // E9 start (emit comes with C3's imports, registerMainHandler with C3's, shell with C8c's)
@@ -364,6 +366,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
     register: registerMainHandler,
     dispatchLocal,
+    budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in)
@@ -380,6 +383,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // sessions. It writes no file either.
   // The org rows (made below, over the spine's view) say which of a machine's sessions are lane A: O9's, never placed here.
   let laneOfRow: (machine: MachineRef, session: string) => 'A' | 'B' | null = () => null;
+  const artifactMachines = new ArtifactMachines(); // P5 O7 M5a (src/main/artifacts/machines.ts)
   const remoteLaneB = createRemoteLaneB({
     local,
     layout,
@@ -387,6 +391,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     remote: (ref) => machines.remote(ref),
     onRemote: (listener) => machines.onRemote(listener),
     emit: (machine, name, payload) => void emitFrom(machine, name, payload),
+    artifactMachines, // P5 O7 M5a: which machine an artifact is on, written by the adapter alone
+    openPath: (path) => shell.openPath(path), // P5 O7 M5a: an open copy of another machine's file (A10)
+    env: process.env, // P5 O7 M5a: MAWS_E2E_OPEN_LOG, the open seam
     log: (line) => console.log(`[lane-b] ${line}`),
   });
   // P5 O7 M3: a loopback port of a machine forwarded to this Mac's for the in-app browser (Interfaces §K); the listeners
@@ -399,6 +406,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   registerMainHandler('remote.forward.close', async (input) => {
     const result = await remoteLaneB.forward.close(input);
     if (!result.ok) throw new CommandFailure(result.error);
+  });
+  // P5 O7 M5a (A10): "Open externally" on another machine's file opens a copy here; invoked on this app, or (a checkout
+  // file, its address lowered) on the machine it names, which must be the one the input names
+  registerMainHandler('remote.openCopy', async (input, { target }) => {
+    if (target !== local && target !== input.machine) throw new CommandFailure(ipcError('invalid_input', `remote.openCopy: its source is on ${target}, not ${input.machine}`));
+    const result = await remoteLaneB.artifacts.openCopy(input);
+    if (!result.ok) throw new CommandFailure(result.error);
+    return result.value;
   });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
@@ -791,6 +806,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     downloads: () => app.getPath('downloads'),
     port: clientPort, // Save as…, the Replace question
     env: process.env,
+    local, // P5 O7 M5a: Save As of another machine's artifact reads it over that machine's link
+    remote: (machine) => remoteLaneB.artifacts.files(machine),
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
   // main's dialog under Downloads
@@ -822,7 +839,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(view, { actions: notificationActions({ dispatch: hosts.dispatch, view }), settings: () => settings.state().settings, port: clientPort }); // P5 O3-C (readers R1, R2)
+  startAttention(view, {
+    actions: notificationActions({ dispatch: hosts.dispatch, view }),
+    settings: () => settings.state().settings,
+    port: clientPort,
+    // P5 O7 M6: other machines' items, from remote lane B's attention feeds, titled by their listed rows
+    remote: remoteLaneB.attention,
+    remoteTitle: (machine, app) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === app)?.title ?? null,
+  }); // P5 O3-C (readers R1, R2)
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
   const quitGuard = installQuitGuard(view, { // P5 O3-C (reader R3)
     // C12 start

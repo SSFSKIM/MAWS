@@ -107,7 +107,7 @@ export async function openSpineData(profile: string, { build, lock: given }: { b
 
 // P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts).
 // P5: `need`, a command waits on the engine host (mawsd wakes a parked one for it; main's host is never parked).
-export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void };
+export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void; handoverState?: HostSupervisor['handoverState'] /* O16 panel 1 */ };
 
 export interface SpineDeps {
   profile: string; // <userData>, the daemon's profile (O3 §1)
@@ -169,6 +169,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         register: bus.register,
         fallbackFile: join(profile, 'attention.json'),
         seenNow: (id) => indexSource.seenNow(id), // the ruling (2026-10-30): an error a client shows as it arrives is seen, durably
+        handingOver: () => hosts.handoverState?.('engine-host')?.state === 'draining', // O16 panel 1: a live handover keeps them
       })
     : null;
   // Replay (C4 M5): run in the engine host; the fixtures table lists the checkout's probe journals (none packaged)
@@ -461,7 +462,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // port) and the catalog's machine half (the engine's reads per cwd and the watch of the engine's plugin state, with
   // MAWS's own servers in the machine settings), after the checkouts and stopped before them, in a refused run too (they
   // write nothing)
-  registerLibraryReads(bus.register, { hosts, files: checkouts.files, port: deps.clientPort, env: deps.env });
+  registerLibraryReads(bus.register, { hosts, files: checkouts.files, port: deps.clientPort, env: deps.env, artifactsRoot: join(profile, 'artifacts') });
   const catalog = startCatalogMachine({ hosts, bus, machineSettings: settingsPaths(profile).machine });
   parts.splice(parts.length - 1, 0, ['catalog', () => catalog.stop()]);
 

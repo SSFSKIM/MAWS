@@ -11,6 +11,7 @@ export const VIEWERS_COPY = {
   version: (n: number, latest: boolean) => (latest ? `v${n} · latest` : `v${n}`),
   openExternally: 'Open externally',
   reveal: 'Reveal in Finder',
+  revealOn: (machine: string) => `Reveal in Finder (on ${machine})`, // P5 O7 M5a: greyed, the file is on that machine
   openAsFile: 'Open as file',
   reload: 'Reload',
   comment: 'Comment',

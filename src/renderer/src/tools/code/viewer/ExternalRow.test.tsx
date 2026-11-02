@@ -1,5 +1,6 @@
 // P5 O7 M4: the viewer's Open externally on a lane B session on another machine would open the file on that machine's
-// desktop, so it stays greyed with where the file is, and asks main nothing; a local session's opens as before.
+// desktop. P5 O7 M5a (A10): it opens a copy of the file here instead (`remote.openCopy`), saying where the file is; a
+// local session's opens as before.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -19,8 +20,8 @@ afterEach(() => {
 });
 
 describe('Open externally', () => {
-  it('is greyed with “on <machine>” for a file of another machine’s lane B session, and invokes nothing', () => {
-    const invoke = vi.spyOn(ipc, 'invoke');
+  it('opens a copy here of a file of another machine’s lane B session, saying where the file is', () => {
+    const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
     const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     useMachines.getState().applyRoster([
       { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
@@ -29,11 +30,20 @@ describe('Open externally', () => {
     applyRemoteSession(remoteSessionState(REMOTE));
     render(<OpenExternally appSessionId={REMOTE} path="/r/doc.pdf" />);
     const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally' });
-    expect(button.disabled).toBe(true);
-    expect(button.title).toBe('This file is on mini, not on this Mac');
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe('Opens a copy of this file from mini on this Mac');
     expect(screen.getByText('on mini')).toBeTruthy();
     fireEvent.click(button);
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: REMOTE, path: '/r/doc.pdf' } });
+  });
+
+  it('says why a copy was not opened', async () => {
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: false, message: 'too large to copy from mini' } } as never);
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    render(<OpenExternally appSessionId={REMOTE} path="/r/big.mov" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('too large to copy from mini');
   });
 
   it('opens a local session’s file', () => {

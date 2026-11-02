@@ -15,9 +15,11 @@ import { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import type { BinaryCheck } from './binary-info';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
-import { handshakeResponder, INIT_RESPONSE } from './conformance/session-harness';
+import { handshakeResponder, INIT_RESPONSE, scriptedSession } from './conformance/session-harness';
 import { REQUEST_TIMEOUT_MS } from './controls';
-import { bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { ADOPTION_READ_WAIT_MS, bounded, DEADLINE_SHAPES, E8_DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { REQUEST_TIMEOUT_MS as FORWARD_TIMEOUT_MS } from '@shared/host/host-supervisor'; // P5 O16 M4: a forwarded request's deadline
+import { SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env'; // P5 O16 M4
 import { MemoryAppendBudgetSpent } from './memory-append';
 import { RELAY_URL } from './launch';
 import { ENGINE_BIN, ENGINE_VERSION } from '../../test/support/engine-pin'; // W13
@@ -120,15 +122,15 @@ describe('x2 deadlines fit the bridge', () => {
   });
 
   // E11 (tracker row E10 "host.* commands lack deadline shapes"): the supervisor's four, registered by Supervision
-  it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
+  it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll, the ledger’s op and the handover are bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */, 'host.browserWork': 'immediate' /* P5 O17 */ });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.artifactOp': 'bounded' /* P5 O7 M5a */, 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */, 'host.handover': 'bounded' /* P5 O16 M3b */, 'host.browserWork': 'immediate' /* P5 O17 */ });
     // P5 O3-D M3: `host.attachment` sets the runtime's presence, registered beside it (attachment.ts); P5 O17:
     // `host.browserWork` is browser-work.ts's, registered beside it (M7)
     const attachmentCommands = ['host.attachment', 'host.browserWork'];
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
-    const ledgerCommands = ['host.op', 'host.opQuery'];
+    const ledgerCommands = ['host.artifactOp', 'host.op', 'host.opQuery']; // P5 O7 M5a: host.artifactOp
     expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
     const registered: string[] = [];
     new Supervision({
@@ -1348,5 +1350,60 @@ describe('session.setKeep (P5 O2 M2)', () => {
     expect(store.keeps.get('app-off' as AppSessionId)).toBe(true);
     await expect(host.call('session.setKeep', { appSessionId: 'app-never' as AppSessionId, keep: true })).rejects.toThrow('unknown session app-never');
     expect(store.keeps.has('app-never' as AppSessionId)).toBe(false);
+  });
+});
+
+// P5 O16 M4 ("Stream redelivery"): a successor engine host serves before its adoptions reserve their rows; a stream's
+// reads of a session it holds for adoption wait for the row rather than answer `unknown session` for a live launch
+describe('a stream’s reads of a session held for adoption (P5 O16 M4)', () => {
+  const READS = ['session.status', 'session.events', 'session.queue.list', 'session.pendingItems', 'session.catalog', 'session.pendingRequest'] as const;
+  const inputOf = (name: (typeof READS)[number], appSessionId: AppSessionId) =>
+    (name === 'session.events' ? { appSessionId, afterSeq: null, limit: 10 } : name === 'session.pendingRequest' ? { appSessionId, requestId: 'req-1' } : { appSessionId }) as never;
+  const settles = (promise: Promise<unknown>) => {
+    const state = { settled: false };
+    promise.then(() => void (state.settled = true), () => void (state.settled = true));
+    return state;
+  };
+
+  it('answers the status of the row the adoption reserved, after waiting for it', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const host = engineHost({ table });
+    const id = 'app-adopting' as AppSessionId;
+    table.holdForAdoption([id]);
+    const status = host.call('session.status', { appSessionId: id });
+    const state = settles(status);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(state.settled).toBe(false);
+    const s = scriptedSession({ spec: { appSessionId: id } });
+    table.reserve(id, () => s.session, { adoption: true });
+    expect(await status).toMatchObject({ appSessionId: id, launchId: s.session.status().launchId });
+    s.transport.exit(0);
+    await s.session.exited;
+  });
+
+  it('answers each read of an adoption that gave up `unknown session` as soon as it gives up, not at the wait’s bound', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const host = engineHost({ table });
+    const id = 'app-failing' as AppSessionId;
+    table.holdForAdoption([id]);
+    const reads = READS.map((name) => host.call(name, inputOf(name, id)));
+    const states = reads.map(settles);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(states.map((s) => s.settled)).toEqual(READS.map(() => false)); // every stream read waits
+    const gaveUp = Date.now();
+    table.adoptionFailed(id);
+    for (const read of reads) await expect(read).rejects.toThrow(`unknown session ${id}`);
+    expect(Date.now() - gaveUp).toBeLessThan(ADOPTION_READ_WAIT_MS / 5);
+    await expect(host.call('session.status', { appSessionId: id })).rejects.toThrow(`unknown session ${id}`); // and at once after
+  });
+
+  it('answers a session not held for adoption as before, with no wait', async () => {
+    const host = engineHost();
+    await expect(host.call('session.status', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow('unknown session app-none');
+  });
+
+  it('bounds the wait to cover the host’s environment capture and stay 2 s under the forwarded request’s deadline', () => {
+    expect(ADOPTION_READ_WAIT_MS).toBeGreaterThan(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS);
+    expect(ADOPTION_READ_WAIT_MS).toBeLessThanOrEqual(FORWARD_TIMEOUT_MS - 2_000);
   });
 });

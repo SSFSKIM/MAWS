@@ -246,3 +246,96 @@ describe('the Stop input, read leniently', () => {
     expect(sessionCronsOf({ session_crons: {} }, () => {})).toBe('unreadable');
   });
 });
+
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the reap's three reasons, each work until
+// it clears, so a row they hold is never verified empty.
+describe('the reap’s unknowns (O16 M5)', () => {
+  it('an unhealthy observer is unknown work until it is heard again', () => {
+    const work = state();
+    work.observer(true);
+    expect(work.snapshot()).toEqual({ crons: [], unknown: 'observer_unhealthy' });
+    work.observer(false);
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('an ignored reap is unknown work until the next Stop', () => {
+    const work = state();
+    work.termIgnored();
+    expect(work.snapshot().unknown).toBe('reap_term_ignored');
+    turn(work); // a turn that ended without its Stop does not clear it
+    expect(work.snapshot().unknown).toBe('reap_term_ignored');
+    turn(work, (w) => w.stopped([], []));
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('an unreadable process tree is unknown work until a read succeeds', () => {
+    const work = state();
+    work.descendantsRead(false);
+    expect(work.snapshot().unknown).toBe('descendants_unreadable');
+    work.descendantsRead(true);
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('a cron reason is named first; the reap’s are named once the crons and tasks are known', () => {
+    const work = state('resumed');
+    work.observer(true);
+    expect(work.snapshot().unknown).toBe('resumed');
+    turn(work, (w) => w.stopped([], []));
+    expect(work.snapshot().unknown).toBe('observer_unhealthy');
+  });
+});
+
+// P5 O16 (D32, D38): an adopted row's work state, seeded from the durable records before the journal's fold applies the
+// evidence after them
+describe('an adopted process seeded from its records', () => {
+  it('a clean cron record and a known task list: known, the record\'s crons listed', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [cron('a')], toolSinceStop: false }, []);
+    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: null });
+  });
+
+  it('a cron tool since the record\'s Stop, or no record: the crons stay unknown until the next Stop', () => {
+    for (const record of [{ sessionCrons: [], toolSinceStop: true }, null]) {
+      const work = state('adopted');
+      work.adoptedWith(record, []);
+      expect(work.snapshot().unknown).toBe('adopted');
+      work.stopped([], []);
+      expect(work.snapshot().unknown).toBeNull();
+    }
+  });
+
+  it('tasks unknown (a gap): unknown until a snapshot, however clean the record', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, 'unknown');
+    expect(work.snapshot().unknown).toBe('adopted');
+    work.tasksChanged();
+    expect(work.snapshot().unknown).toBeNull();
+  });
+
+  it('the fold\'s later evidence applies over the seed: a CronCreate journaled after the record makes it dirty', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, []);
+    work.cronTool();
+    expect(work.snapshot().unknown).toBe('dirty');
+  });
+
+  // P5 O16 M3 (D23, D32): a gap in the replay loses what the journal would have told; the crons wait for the next Stop,
+  // the tasks for the next snapshot (the one a re-initialize sends, M0's question 3)
+  it('a gap makes both parts unknown again: the tasks until a snapshot, the crons until the next Stop', () => {
+    const work = state('adopted');
+    work.adoptedWith({ sessionCrons: [cron('a')], toolSinceStop: false }, []);
+    work.tasksChanged();
+    work.gap();
+    expect(work.snapshot()).toEqual({ crons: [cron('a')], unknown: 'host_gap' });
+    work.tasksChanged();
+    expect(work.snapshot().unknown).toBe('host_gap');
+    work.stopped([], []);
+    expect(work.snapshot()).toEqual({ crons: [], unknown: null });
+  });
+
+  it('only an adopted process takes it', () => {
+    const work = state('resumed');
+    work.adoptedWith({ sessionCrons: [], toolSinceStop: false }, []);
+    expect(work.snapshot().unknown).toBe('resumed');
+  });
+});

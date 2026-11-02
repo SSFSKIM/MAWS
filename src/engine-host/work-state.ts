@@ -17,6 +17,10 @@
 // cron record in its state file (`cronRecord`, written at each Stop and each cron tool), and a resume that does not
 // follow a release starts known and empty when the record shows no listed session cron and no cron tool since its Stop;
 // a record that is missing or unreadable keeps the unknown.
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): three more reasons the reap reads, each
+// work until it clears: `observer_unhealthy`, while an observer seen on the process is silent or gone (holder design
+// §3.2 step 1); `reap_term_ignored`, after an idle reap's end_session and SIGTERM were both ignored, until the next Stop;
+// `descendants_unreadable`, while the process tree under the engine cannot be read.
 import type { CronRecord } from '@shared/engine/session-state-store';
 
 export type LaunchKind = 'fresh' | 'resumed_after_release' | 'resumed' | 'adopted';
@@ -33,6 +37,10 @@ export class WorkState {
   private durable: CronRead = []; // the durable crons, from the scheduled-tasks file
   private tasksUnknown: string | null;
   private stopSeen = false; // the turn under way had its Stop
+  // O16 M5: the reap's three
+  private observerUnhealthy = false;
+  private reapTermIgnored = false;
+  private descendantsUnreadable = false;
 
   constructor(kind: LaunchKind) {
     this.crons = kind === 'fresh' || kind === 'resumed_after_release' ? { state: 'known', list: [] } : { state: 'unknown', why: kind, list: [] };
@@ -53,6 +61,22 @@ export class WorkState {
     if (clean && this.crons.state === 'unknown' && this.crons.why === 'resumed') this.crons = { state: 'known', list: [] };
   }
 
+  // P5 O16 (D32, D38): an adopted process's seed, before the journal's fold applies what came after it: the state file's
+  // cron record (no cron tool since its Stop: the listed crons are known, empty or not; a tool since, or no record:
+  // unknown until the next Stop) and the task list the journal last held (`unknown` after a gap, until a snapshot).
+  adoptedWith(record: CronRecord | null, tasks: readonly unknown[] | 'unknown'): void {
+    if (this.crons.state !== 'unknown' || this.crons.why !== 'adopted') return;
+    if (record !== null && !record.toolSinceStop) this.crons = { state: 'known', list: copy(record.sessionCrons) };
+    if (tasks !== 'unknown') this.tasksUnknown = null;
+  }
+
+  // P5 O16 M3 (D23, D32): output the session host's ring dropped before it was read (an adoption's, or a reconnect's,
+  // D45): the crons are unknown until the next Stop and the tasks until the next snapshot, whatever the records said.
+  gap(): void {
+    this.crons = { state: 'unknown', why: 'host_gap', list: this.crons.list };
+    this.tasksUnknown = 'host_gap';
+  }
+
   // What the state file keeps, written at each Stop and each cron tool.
   cronRecord(): CronRecord {
     return { sessionCrons: copy(this.crons.list), toolSinceStop: this.crons.state !== 'known' };
@@ -65,6 +89,7 @@ export class WorkState {
   // A Stop: its `session_crons`, and the scheduled-tasks file read at it.
   stopped(session: CronRead, durable: CronRead): void {
     this.stopSeen = true;
+    this.reapTermIgnored = false; // O16 M5: the engine took a turn to its end after the ignored reap
     this.crons = session === 'unreadable' ? { state: 'unknown', why: 'stop_unreadable', list: [] } : { state: 'known', list: copy(session) };
     this.durableRead(durable);
   }
@@ -78,12 +103,27 @@ export class WorkState {
     if (this.crons.state === 'dirty' && !this.stopSeen) this.crons = { state: 'unknown', why: 'turn_ended_without_stop', list: this.crons.list };
   }
 
+  // O16 M5 start: the gate's observer, the reap's ignored signal and the process tree's read
+  observer(unhealthy: boolean): void {
+    this.observerUnhealthy = unhealthy;
+  }
+
+  termIgnored(): void {
+    this.reapTermIgnored = true;
+  }
+
+  descendantsRead(readable: boolean): void {
+    this.descendantsUnreadable = !readable;
+  }
+  // O16 M5 end
+
   snapshot(): Work {
     const crons = [...copy(this.crons.list), ...(this.durable === 'unreadable' ? [] : copy(this.durable))];
     const unknown = this.crons.state === 'unknown' ? this.crons.why
       : this.crons.state === 'dirty' ? 'dirty'
       : this.durable === 'unreadable' ? 'durable_unreadable'
-      : this.tasksUnknown;
+      : this.tasksUnknown
+        ?? (this.observerUnhealthy ? 'observer_unhealthy' : this.reapTermIgnored ? 'reap_term_ignored' : this.descendantsUnreadable ? 'descendants_unreadable' : null); // O16 M5
     return { crons, unknown };
   }
 }

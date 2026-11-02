@@ -114,7 +114,7 @@ describe('transport frames and journals', () => {
         { frame: { echo: { type: 'keep_alive' } }, raw: '{"echo":{"type":"keep_alive"}}', error: null },
         { frame: { echo: { type: 'control_cancel_request', request_id: 'r1' } }, raw: '{"echo":{"type":"control_cancel_request","request_id":"r1"}}', error: null },
       ]);
-      expect(await stderr).toEqual(['engine says hi']);
+      expect(await stderr).toEqual([{ text: 'engine says hi' }]);
     });
 
     it('rejects a write after the process exited', async () => {

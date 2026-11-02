@@ -15,6 +15,9 @@
 // `machine.sock` serves many clients at once, so a far side's `replaced` refusal (a server of one client) leaves the
 // link down for good.
 //
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The link gives each call its command's budget"): a
+// request the injected budget table names waits its budget and a round trip; every other the link's `requestTimeoutMs`.
+//
 // Main-owned schemas cross unversioned (the O6 document's Constraints, "The wire"): the link joins two profiles of one
 // build, and says so in its log at connect.
 import * as fs from 'node:fs';
@@ -34,6 +37,7 @@ import { readTolerant, tolerantLog } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { MachineRef } from '@shared/machine/ref';
+import { budgetedMs, type CommandBudgets } from './budgets';
 import { LINK_REGISTRY } from './link-surface';
 import type { LinkState, MachineLink } from './manager';
 
@@ -56,6 +60,7 @@ export interface SocketLinkOptions {
   log(line: string): void;
   registry?: WireRegistry; // the link surface unless a test passes a fixture
   timing?: Partial<LinkTiming>;
+  budgets?: CommandBudgets; // P5 O7 M5a: the services' COMMAND_BUDGETS_MS, from the composition root
 }
 
 interface Pending {
@@ -217,11 +222,12 @@ export function createSocketLink(options: SocketLinkOptions): MachineLink {
 
   function request(conn: Connection, name: CommandName, input: unknown, client: ClientRef | null): Promise<CommandResult<CommandName>> {
     const id = String(++nextId);
+    const timeoutMs = budgetedMs(options.budgets, name) ?? timing.requestTimeoutMs;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         conn.pending.delete(id);
-        resolve({ ok: false, error: ipcError('timeout', `machine ${label()} did not answer ${name} within ${timing.requestTimeoutMs / 1000} s`) });
-      }, timing.requestTimeoutMs);
+        resolve({ ok: false, error: ipcError('timeout', `machine ${label()} did not answer ${name} within ${timeoutMs / 1000} s`) });
+      }, timeoutMs);
       conn.pending.set(id, { name, resolve, timer });
       const message: HostMessage = client ? { t: 'req', id, name, input, client: client.id } : { t: 'req', id, name, input };
       if (!conn.port.postMessage(message)) {

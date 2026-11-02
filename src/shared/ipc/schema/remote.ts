@@ -7,10 +7,14 @@
 //   session's stream (`stream`), and every control of the session's port with the remote overlay (`controls`), closed with
 //   a reason where the session on another machine can't take it yet; `reason`, when set, closes every control (the
 //   machine refused this device, the link closed, the session isn't placed yet or can't be).
+// - `remote.attention` (M6): the machine's attention feed, its snapshot and whether the machine is greyed.
+// - `remote.openCopy` (M5a): a file of another machine opened on this Mac as a copy (A10).
 // - `remote.gap`: the stream went on past events it could not deliver (a relaunch's snapshot, a range the machine's
 //   journal lost, an event too large to carry): the transcript draws "Earlier history isn't available" here.
 import * as z from 'zod';
+import { AttentionItemSchema } from '../../graph/attention';
 import { AppSessionIdSchema } from '../../graph/ids';
+import { ExportAtSchema } from './library';
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
 
@@ -68,9 +72,24 @@ export type RemoteSession = z.infer<typeof RemoteSessionSchema>;
 // connections. The renderer names the machine in the input and invokes it on this app (a `client` command).
 const ForwardTargetSchema = z.strictObject({ machine: MachineRefSchema, port: z.number().int().min(1).max(65535) });
 
+// P5 O7 M5a ("Open a copy, and Save As of a remote artifact"; A10): a file on another machine, which "Open externally" opens
+// here as a copy: a file of a session's checkout (its address, lowered at the boundary, and its path there), a library
+// item's stored file (at a revision, its live one when none), or an export the machine wrote (`library.read`'s `export`).
+// Main pages its bytes over the link into `<temp>/maws-remote-copies/<machine>/<sha256 of the source>/<name>` (64 MiB at
+// most) and hands that copy to the OS as `files.openExternal` hands a local file (a document kind, never a program).
+// `opened: false` with the reason when it is not opened (too large, a kind MAWS doesn't open outside, the OS's refusal).
+export const REMOTE_COPY_MAX_BYTES = 64 * 1024 * 1024;
+export const RemoteCopySourceSchema = z.union([
+  z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1) }),
+  z.strictObject({ artifactId: z.uuid(), revision: z.number().int().nonnegative().optional() }),
+  z.strictObject({ artifactId: z.uuid(), export: ExportAtSchema }),
+]);
+export type RemoteCopySource = z.infer<typeof RemoteCopySourceSchema>;
+
 export const commands = {
   'remote.forward.open': { input: ForwardTargetSchema, output: z.strictObject({ localPort: z.number().int().min(1).max(65535) }), owner: 'main' },
   'remote.forward.close': { input: ForwardTargetSchema, output: z.void(), owner: 'main' },
+  'remote.openCopy': { input: z.strictObject({ machine: MachineRefSchema, source: RemoteCopySourceSchema }), output: z.strictObject({ opened: z.boolean(), message: z.string().nullable() }), owner: 'main' },
 } as const satisfies Record<`remote.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -87,4 +106,10 @@ export const events = {
   // after each lands (and once before the first), how far one file of the call has come: `file`, its index in the call's
   // `files`; `sent` of `parts` landed. The composer's chip for that file shows it.
   'remote.upload': z.strictObject({ appSessionId: AppSessionIdSchema, file: z.number().int().nonnegative(), name: z.string(), sent: z.number().int().nonnegative(), parts: z.number().int().positive() }),
+  // P5 O7 M6 ("The feed"): every item of the machine's sessions this member views, as its `attention` feed says them,
+  // replacing the machine's whole partition; each change after it is the session's `attention.changed` from the machine.
+  // `greyed`: the machine is offline (its link `down`), so these are its items as last known, out of the badge; said
+  // again at the link's `down` with the items it holds, and false from the next snapshot on. A machine whose feed ended
+  // for good (the roster dropped it, an endpoint without the feed) is said once with no items.
+  'remote.attention': z.strictObject({ machine: MachineRefSchema, items: z.array(AttentionItemSchema), greyed: z.boolean() }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

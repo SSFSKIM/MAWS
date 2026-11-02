@@ -7,6 +7,7 @@
 import type { ComponentProps, MouseEvent } from 'react';
 import type { ExtraProps } from 'streamdown';
 import { artifactLink, parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
+import { isAddress, machineOf } from '@shared/machine/address';
 import { useActions, useRowSession } from '../context';
 
 const LINE = /(?:#L(\d+)|:(\d+))$/;
@@ -45,11 +46,14 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
     // a click opens it in the row session's panel, a ⌘-click in its main tab; with no session (a Markdown surface outside
     // any Transcript, whose host actions App.tsx gives the tab), the main tab is the one place it can show. Under a
     // plugin's surface (engine-surface/SurfaceTree.tsx) the click is taken before it.
+    // P5 O7 M5a: the session's artifacts are on its machine, said with the ⌘-click (the panel's open reads the session)
+    const machine = session !== null && isAddress(session) ? machineOf(session) : undefined;
     const open = (event: MouseEvent) => {
       if (session !== null && !event.metaKey) {
         if (at) actions.openArtifact(session, artifactId, undefined, at);
         else actions.openArtifact(session, artifactId);
-      } else if (at) openTab(artifactId, at);
+      } else if (machine !== undefined) openTab(artifactId, at, machine);
+      else if (at) openTab(artifactId, at);
       else openTab(artifactId);
     };
     return (

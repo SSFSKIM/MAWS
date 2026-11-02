@@ -18,15 +18,29 @@
 //
 // A feed lives with its channel and its access (the table re-checks it as any subscription), and ends `behind` when the
 // device leaves more than its backlog unread: the device opens it again, as after a reconnect.
+//
+// P5 O7 M6: the machine's `attention` feed is this plane's too, run by attention-feed.ts: it names no session, and cuts
+// what it carries to the member's sessions at every change of access the table tells this plane of.
+//
+// P5 O7 M5a: so is the machine's `artifacts` feed, run by artifacts-feed.ts (artifact and library changes, cut by the
+// `artifact` rule), and a session's `checkout` feed carries its `session.capabilitiesChanged` (O5's tools on it), as it
+// carries `session.changed`.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
+import type { ArtifactRanks } from './artifacts';
+import { ArtifactsFeeds } from './artifacts-feed';
+import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { dispatchAs, type EndpointServices } from './services';
-import type { Plane, Subscription } from './subscriptions';
+import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
 import { withinBounds, type CheckoutBounds } from './targets';
 
 export type PlaneFeedsContext = {
   dispatch: EndpointServices['dispatch'];
   bounds: CheckoutBounds;
+  /** The member's ranks on the machine's sessions, for the `attention` and `artifacts` feeds' cuts (P5 O7 M6, M5a). */
+  ranks: AttentionFeedsContext['ranks'];
+  /** The `artifact` rule's placements, per channel (P5 O7 M5a). */
+  artifacts: ArtifactRanks;
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -36,7 +50,7 @@ export type PlaneFeedsContext = {
 export const HELD_REPOSITORIES = 64;
 
 type Open = {
-  sub: Subscription;
+  sub: SessionSubscription;
   seq: number;
   /** The session's checkout bounds; null while a read of them is out. */
   bounds: readonly string[] | null;
@@ -53,12 +67,18 @@ export class PlaneFeeds implements Plane {
   /** The epoch of every `checkout` feed this endpoint opens: a restarted endpoint's feeds begin again. */
   readonly #epoch = `checkout:${randomBytes(9).toString('base64url')}`;
   readonly #open = new Map<Subscription, Open>();
+  readonly #attention: AttentionFeeds;
+  readonly #artifacts: ArtifactsFeeds;
 
   constructor(ctx: PlaneFeedsContext) {
     this.#ctx = ctx;
+    this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
+    this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, log: ctx.log, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
+    if (sub.message.feed === 'artifacts') return this.#artifacts.open(sub);
+    if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
     const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
@@ -67,18 +87,30 @@ export class PlaneFeeds implements Plane {
 
   close(sub: Subscription): void {
     this.#open.delete(sub);
+    this.#attention.close(sub);
+    this.#artifacts.close(sub);
   }
 
   stop(): void {
     this.#open.clear();
+    this.#attention.stop();
+    this.#artifacts.stop();
   }
 
-  /** A machine event (`onEvent`, owner `machine`): to every feed it concerns. */
+  /** A record changed or a new head came (P5 O7 M6): the machine feeds' cuts, worked out again. */
+  accessChanged(): void {
+    this.#attention.accessChanged();
+    this.#artifacts.accessChanged();
+  }
+
+  /** A machine event (`onEvent`; the engine host's `artifacts.changed` too, P5 O7 M5a): to every feed it concerns. */
   event(owner: string, message: { name: string; payload: unknown }): void {
+    this.#attention.event(owner, message);
+    this.#artifacts.event(owner, message);
     if (owner !== 'machine' || this.#open.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
-    if (name === 'files.changed' || name === 'scm.remote.output') {
+    if (name === 'files.changed' || name === 'scm.remote.output' || name === 'session.capabilitiesChanged') {
       for (const open of this.#open.values()) if (open.sub.session.id === payload.appSessionId) this.#send(open, name, payload);
     } else if (name === 'git.changed' && typeof payload.repoRoot === 'string') {
       const repoRoot = payload.repoRoot;

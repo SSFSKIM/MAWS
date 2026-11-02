@@ -28,7 +28,7 @@ afterEach(() => {
     }
   }
   for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL');
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
+  if (scratch) rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a killed child may still be writing in it (ENOTEMPTY)
   scratch = null;
 });
 

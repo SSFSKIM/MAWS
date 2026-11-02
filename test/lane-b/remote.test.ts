@@ -38,6 +38,9 @@ import { dialDirect } from '../../src/main/machines/remote/carriers';
 import { dispatchOverLink } from '../../src/main/machines/remote/dispatch';
 import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remote/link';
 import type { RemoteTiming } from '../../src/main/machines/remote/timing';
+import type { CommandBudgets } from '../../src/main/machines/budgets';
+import { COMMAND_BUDGETS_MS } from '../../src/services/command-budgets';
+import { validateCommandOutput } from '@shared/ipc/validate';
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { OFFERS } from '../../src/endpoint/offers';
 import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
@@ -49,7 +52,12 @@ import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
 import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
-import { record, status } from '../support/builders';
+import { item, record, status } from '../support/builders';
+import { fakeSpineView } from '../support/fake-spine-view';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { NotificationHandle, NotifyRequest } from '@shared/client/port';
+import { startNotifier } from '../../src/main/attention/notifier';
 import { DaemonClocks } from '../../src/mawsd/clocks';
 import { engineRequests } from '../../src/mawsd/engine-requests';
 
@@ -225,13 +233,15 @@ type Device = {
   /** P5 O7 M3: `remote.forward.open` and `.close`, as main's handlers take them. */
   forward(op: 'open' | 'close', port: number): Promise<CommandResult<CommandName>>;
   tabs(...apps: string[]): void;
+  /** P5 O7 M6: the roster says the machine, as `Machines.onRemote` does once the manager made its link. */
+  roster(): void;
   /** `from`: the page and the session a path-class command is made from (MainContext's `client` and `session`). */
   route(name: string, input: unknown, from?: Partial<MainContext>): Promise<CommandResult<CommandName>>;
   cmd(name: string, input: unknown, from?: Partial<MainContext>): Promise<unknown>;
 };
 type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
-type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B' };
+type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B'; budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */ };
 /** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
 type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions'>; ring?: number };
 
@@ -302,6 +312,7 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       throw new Error('no hub');
     },
     timing: { DIRECT_BUCKET: OPEN.perSource, ...options.link },
+    ...(options.budgets !== undefined && { budgets: options.budgets }),
     log: () => {},
   });
   cleanups.push(() => link.close());
@@ -346,6 +357,9 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       return connect(l, id, keys, member, mac, options);
     },
     forward: (op, port) => (op === 'open' ? adapter.forward.open({ machine, port }) : adapter.forward.close({ machine, port })),
+    roster() {
+      for (const listener of [...remoteListeners]) listener([machine]);
+    },
     tabs(...apps) {
       const list = apps.map((app) => ({ id: `session:${addressOf(machine, app as AppSessionId)}`, kind: 'session', appSessionId: addressOf(machine, app as AppSessionId), pinned: false }));
       tabs = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { panes: [{ tabs: list, activeTabId: list[0]?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
@@ -499,7 +513,7 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     clocks.engineHost(4242);
     const services = l.f.services;
     const dispatch = services.dispatch.bind(services);
-    const requests = engineRequests({ hosts: { forward: (owner, { name, input }) => dispatch(owner, name, input), onState: () => () => {}, parked: () => parks.length > 0 }, clocks, log: () => {} });
+    const requests = engineRequests({ hosts: { forward: (owner, { name, input }) => dispatch(owner, name, input), onState: () => () => {}, parked: () => parks.length > 0, completionGone: () => false /* P5 O16 M3b */ }, clocks, log: () => {} });
     services.dispatch = (owner, name, input, client) => (owner === 'engine-host' ? requests.forward(owner, { name, input }) : dispatch(owner, name, input, client));
     const views = new Map<string, readonly string[]>();
     const seam = services.interest;
@@ -1237,17 +1251,22 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(b.confirmed).toHaveLength(1);
     expect(await b.forward('open', server.port)).toEqual({ ok: true, value: { localPort } }); // kept: no act
 
-    // A drop within the window: the forward is named again on the next channel.
+    // A drop within the window: the forward is named again on the next channel. A request made at the drop's instant may
+    // be reset (§N), so the fetch waits for the next channel.
+    let channel = b.link.peerCapabilities();
     b.carriers.at(-1)!.carrier.close('dropped');
+    await onNewChannel(b, channel);
     expect(await get(localPort, '/two')).toBe('hello from /two');
     expect(b.confirmed).toHaveLength(1);
 
     // A drop past it: the endpoint forgot the forward; one fresh act.
+    channel = b.link.peerCapabilities();
     b.direct.dead = true;
     b.carriers.at(-1)!.carrier.close('dropped');
     await until(() => l.f.endpoint.forwards.list().length === 0, 'the endpoint forgetting the forward', 5000);
     b.direct.dead = false;
     b.link.probe('network');
+    await onNewChannel(b, channel);
     expect(await get(localPort, '/three')).toBe('hello from /three');
     expect(b.confirmed).toHaveLength(2);
     expect(await get(localPort, '/four')).toBe('hello from /four');
@@ -1356,6 +1375,13 @@ const servers: Server[] = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await closeServer(server);
 });
+/** The link up on a channel after `was`: each channel's `h2` list is its own (`peerCapabilities()`), none while there is none. */
+async function onNewChannel(d: Device, was: readonly string[] | null): Promise<void> {
+  await until(() => {
+    const now = d.link.peerCapabilities();
+    return now !== null && now !== was && d.link.state() === 'up';
+  }, `${d.id}'s link up on a new channel`, 10_000);
+}
 /** A dev server on the machine's loopback (this Mac's, in the suite). */
 async function httpServer(): Promise<{ port: number; sockets: Socket[]; server: Server }> {
   const sockets: Socket[] = [];
@@ -1391,3 +1417,283 @@ function dial(port: number): Promise<Socket> {
     socket.once('error', reject);
   });
 }
+
+// ---- P5 O7 M6: attention and search across machines ---------------------------------------------------------------------
+
+/**
+ * The machine's attention service, as its spine answers `attention.list` and emits `attention.changed` (owner `machine`):
+ * a request raised on a session's launch is an item, settled when the request is answered.
+ */
+function machineAttention(l: Lab) {
+  const items = new Map<string, AttentionItem[]>();
+  l.f.spine.handle('attention.list', () => [...items.values()].flat());
+  const set = (app: string, list: AttentionItem[]) => {
+    if (list.length === 0) items.delete(app);
+    else items.set(app, list);
+    l.f.host.emitMachine('attention.changed', { appSessionId: app, items: list, silent: [] });
+  };
+  return {
+    raise(app: string, kind: 'question' | 'permission', requestId: string): AttentionItem {
+      l.host.request(app, kind, requestId);
+      const raised = item(app, kind, new Date().toISOString(), { id: `att-${requestId}` as AttentionItem['id'], request: { requestId: requestId as never, toolUseId: `tu-${requestId}` as never, taskId: null, agentId: null } });
+      set(app, [...(items.get(app) ?? []), raised]);
+      return raised;
+    },
+    settle(app: string, requestId: string): void {
+      set(app, (items.get(app) ?? []).filter((i) => i.request.requestId !== requestId));
+    },
+  };
+}
+
+/** The app's notifier over the device's adapter (this Mac's spine empty): the dock's badge and the notifications raised. */
+function notifierOf(d: Device) {
+  const badges: number[] = [];
+  const raised: Array<{ request: NotifyRequest; closed: boolean }> = [];
+  const stop = startNotifier(fakeSpineView(), {
+    port: {
+      notify: (_client, request) => {
+        const shown = { request, closed: false };
+        raised.push(shown);
+        return { close: () => void (shown.closed = true) } satisfies NotificationHandle;
+      },
+      badge: (_client, count) => void badges.push(count),
+      focus: () => ({ focused: false }) as never,
+    },
+    isFocused: () => false, // both windows unfocused
+    isViewing: () => false,
+    navigate: () => {},
+    failure: () => {},
+    settings: () => SETTINGS_DEFAULTS_V21,
+    emit: () => true,
+    emitFrom: () => true,
+    remote: d.adapter.attention,
+    now: () => Date.now() - 60_000,
+  });
+  cleanups.push(stop);
+  return { badge: () => badges.at(-1), raised };
+}
+
+const attentionSaid = (d: Device) => d.emitted.filter((e) => e.name === 'remote.attention').map((e) => e.payload as { machine: string; items: AttentionItem[]; greyed: boolean });
+const requestsOf = (items: AttentionItem[] | undefined) => (items ?? []).map((i) => i.request.requestId);
+
+describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 }, () => {
+  it('counts and raises a request on a session no tab holds, from the machine’s feed, and clears it everywhere once another device answers', async () => {
+    const l = await lab();
+    const b = await l.device('mac2');
+    const service = machineAttention(l);
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await until(() => attentionSaid(l.a).length === 1, 'the feed’s first snapshot');
+    expect(attentionSaid(l.a)).toEqual([{ machine: l.f.ref, items: [], greyed: false }]);
+
+    service.raise('app-1', 'question', 'req-q');
+    await until(() => itemsOf(l.a, 'app-1')?.length === 1, 'the request on a device with no tab');
+    expect(of(l.a, 'remote.session', 'app-1')).toEqual([]); // nothing streamed: no tab holds it
+    expect(seen.badge()).toBe(1);
+    expect(seen.raised.map((n) => n.request.title)).toEqual(['mini']);
+
+    await opened(b, 'app-1', s.launchId);
+    expect(await b.cmd('session.answer', { appSessionId: 'app-1', requestId: 'req-q', answer: { kind: 'question', answers: { 'Which way?': 'left' } } })).toEqual({ outcome: 'delivered' });
+    service.settle('app-1', 'req-q');
+    await until(() => itemsOf(l.a, 'app-1')?.length === 0, 'the item cleared on the device with no tab');
+    expect(seen.badge()).toBe(0);
+    expect(seen.raised.map((n) => n.closed)).toEqual([true]);
+    expect(attentionSaid(l.a)).toHaveLength(1);
+  });
+
+  it('greys the items when the link is forced down, out of the badge; the next up’s snapshot restores them, raising only what came meanwhile', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100 } });
+    const service = machineAttention(l);
+    l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await until(() => attentionSaid(l.a).length === 1, 'the feed’s first snapshot');
+    service.raise('app-1', 'question', 'req-q');
+    await until(() => seen.badge() === 1, 'the request counted');
+
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => attentionSaid(l.a).at(-1)?.greyed === true, 'the items greyed');
+    expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q']);
+    expect(seen.badge()).toBe(0);
+    service.raise('app-1', 'permission', 'req-p'); // raised on the machine while this Mac can't hear it
+
+    l.a.direct.dead = false;
+    l.a.link.probe('network');
+    await until(() => attentionSaid(l.a).at(-1)?.greyed === false, 'the next snapshot', 15_000);
+    expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q', 'req-p']);
+    expect(seen.badge()).toBe(1);
+    expect(seen.raised.map((n) => n.request.body)).toEqual(['question for app-1', 'permission for app-1']); // the first not again
+    expect(l.a.link.state()).toBe('up');
+  });
+
+  it('empties a session whose share is withdrawn mid-feed on a member’s device, keeping the feed and the other session', async () => {
+    const l = await lab();
+    const service = machineAttention(l);
+    for (const app of ['app-1', 'app-2']) {
+      l.host.add(app);
+      l.place(app);
+      l.f.records.set({ lane: 'B', session: `eng-${app}`, owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, app);
+      service.raise(app, 'permission', `req-${app}`);
+    }
+    const b = await l.device('mac-b', { member: 'B' });
+    const seen = notifierOf(b);
+    b.roster();
+    await until(() => attentionSaid(b).length === 1, 'the member’s snapshot');
+    expect(requestsOf(attentionSaid(b)[0].items)).toEqual(['req-app-1', 'req-app-2']);
+    expect(seen.badge()).toBe(2);
+
+    l.f.records.set({ lane: 'B', session: 'eng-app-1', owners: ['@machine'] }, 'app-1');
+    await until(() => itemsOf(b, 'app-1')?.length === 0, 'the withdrawn session emptied');
+    expect(seen.badge()).toBe(1);
+    service.raise('app-2', 'question', 'req-app-2b');
+    await until(() => itemsOf(b, 'app-2')?.length === 2, 'the other session’s change');
+    expect(attentionSaid(b)).toHaveLength(1); // the same feed: no reopening
+    expect(b.link.state()).toBe('up');
+  });
+
+  it('asks no feed of an endpoint without `rl2.feeds`, saying nothing and surfacing no error', async () => {
+    endpointWithout('rl2.feeds');
+    const l = await lab();
+    machineAttention(l);
+    l.host.add('app-1');
+    l.place('app-1');
+    const seen = notifierOf(l.a);
+    l.a.roster();
+    await sleep(300);
+    expect(attentionSaid(l.a)).toEqual([]);
+    expect(l.a.logs.filter((line) => line.includes('attention'))).toEqual([]);
+    expect(seen.badge()).toBe(0);
+  });
+
+  it('searches the machine over the link (`session.search` to `{machine}`), and answers `host_unavailable` while it is offline', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100, CALL_TIMEOUT_MS: 500 } });
+    l.place('app-1');
+    l.f.spine.handle('session.search', (input) => ({ hits: [{ appSessionId: 'app-1', snippet: `…${(input as { query: string }).query}…` }], indexing: false, incomplete: false }));
+    expect(await l.a.cmd('session.search', { query: 'bisect' })).toEqual({ hits: [{ appSessionId: 'app-1', snippet: '…bisect…' }], indexing: false, incomplete: false });
+
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => l.a.link.state() === 'down', 'the link down');
+    expect(await l.a.route('session.search', { query: 'bisect' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+  });
+
+  // fix wave 1: an endpoint older than M6 offers no `session.search`; main answers it as a machine left out
+  it('answers `session.search` of an endpoint that offers none `host_unavailable`, as an offline machine', async () => {
+    const commands = OFFERS.commands as Record<string, unknown>;
+    const row = commands['session.search'];
+    delete commands['session.search'];
+    cleanups.push(() => void (commands['session.search'] = row));
+    const l = await lab();
+    expect(await l.a.route('session.search', { query: 'bisect' })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: 'session.search: machine mini offers no search' } });
+  });
+});
+
+
+// P5 O7 M5a (M5a's "Proves" for this file): a remote session's artifacts through the real channel and the real endpoint
+// over the harness's artifact store: listed and read, written once across a lost answer, exported within its command's
+// budget, its session's capabilities read and followed, and bytes both ways in the tagged form (never a fake dispatch).
+describe('artifacts across machines (P5 O7 M5a)', { timeout: 30_000 }, () => {
+  const ID = '9a1f0c4e-6b2d-4c8a-9e1f-2b3c4d5e6f70';
+  const STATE = Uint8Array.from({ length: 300 }, (_, i) => (i * 7) % 256);
+
+  it('lists a remote session’s artifacts, reads one and its text, and records each on its machine', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    const row = l.host.artifact(ID, ['app-1'], { kind: 'file', title: 'notes' });
+    l.host.reads.set('artifacts.list', () => ({ artifacts: [row] }));
+    l.f.spine.handle('library.read', () => ({ encoding: 'utf8', content: 'remote notes', bytes: 12, offset: 0, length: 12, truncated: false, mime: 'text/plain', hash: null, utf8: null }));
+    expect(await l.a.cmd('artifacts.list', { filter: { appSessionId: 'app-1' } })).toEqual({ artifacts: [row] });
+    expect(await l.a.cmd('artifacts.get', { artifactId: ID })).toEqual({ artifact: row });
+    expect(await l.a.cmd('library.read', { artifactId: ID })).toMatchObject({ encoding: 'utf8', content: 'remote notes' });
+  });
+
+  it('renames an artifact across a forced drop that lost its answer, applied once; the feed’s reopening says the lost change’s re-read', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    const held = l.host.artifact(ID, ['app-1']);
+    l.a.roster(); // the machine's artifacts feed opens on the roster's link, its opening a re-read
+    await until(() => l.a.emitted.some((e) => e.name === 'artifacts.resync'), 'the artifacts feed open');
+    let cut = 0;
+    l.host.handlers.set('artifacts.update', (input) => {
+      const { artifactId, title } = input as { artifactId: string; title: string };
+      const row = l.host.artifacts.get(artifactId)!.row;
+      Object.assign(row, { title, revision: (row.revision as number) + 1 });
+      l.host.emitHost('artifacts.changed', { artifactId, kind: row.kind, revision: row.revision, change: 'updated' });
+      if (cut++ === 0) {
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        setTimeout(() => carrier.close('dropped'), 20);
+      }
+      return { artifact: row };
+    });
+    const answer = (await l.a.cmd('artifacts.update', { artifactId: ID, title: 'Renamed' })) as { artifact: Record<string, unknown> };
+    expect(answer.artifact).toMatchObject({ id: ID, title: 'Renamed' });
+    expect(l.a.carriers.length).toBeGreaterThan(1);
+    expect(l.host.artifactRuns.filter((run) => run.name === 'artifacts.update')).toHaveLength(1);
+    expect(held.title).toBe('Renamed');
+    // the change went out on the channel whose answers were lost: the feed's opening on the next is a re-read
+    await until(() => l.a.emitted.filter((e) => e.name === 'artifacts.resync').length >= 2, 'the re-read said from the machine at the reopening');
+    l.host.emitHost('artifacts.changed', { artifactId: ID, kind: 'document', revision: 9, change: 'updated' });
+    await until(() => l.a.emitted.some((e) => e.name === 'artifacts.changed' && e.payload.revision === 9), 'a later change said from the machine');
+  });
+
+  it('answers an export that takes longer than the link’s default deadline within its command’s budget', async () => {
+    const l = await lab({ link: { CALL_TIMEOUT_MS: 500 }, budgets: COMMAND_BUDGETS_MS });
+    l.host.artifact(ID, ['app-1']);
+    l.f.spine.handle('artifacts.export', async () => (await sleep(1500), { path: `/m/artifacts/${ID}/exports/3-pdf.pdf`, revision: 3 }));
+    expect(await l.a.cmd('artifacts.export', { artifactId: ID, format: 'pdf' })).toEqual({ path: `/m/artifacts/${ID}/exports/3-pdf.pdf`, revision: 3 });
+    // an unbudgeted read held as long is given up on at the default
+    l.f.spine.handle('library.spaces', async () => (await sleep(1500), { spaces: [] }));
+    expect(await l.a.route('library.spaces', undefined)).toMatchObject({ ok: false, error: { code: 'timeout' } });
+  });
+
+  it('reads a remote session’s capabilities and follows their change on its checkout feed', async () => {
+    const l = await lab();
+    l.host.add('app-1');
+    l.place('app-1');
+    l.f.spine.handle('session.capabilities', () => ({ browser: { available: false, reason: 'no tab engine on mini' } }));
+    expect(await l.a.cmd('session.capabilities', { appSessionId: 'app-1' })).toEqual({ browser: { available: false, reason: 'no tab engine on mini' } });
+    await opened(l.a, 'app-1', 'launch-1');
+    await until(() => l.host.calls.length > 0 && l.a.link.state() === 'up', 'the checkout feed');
+    await sleep(100);
+    l.host.emitMachine('session.capabilitiesChanged', { appSessionId: 'app-1', capabilities: { browser: { available: true } } });
+    await until(() => of(l.a, 'session.capabilitiesChanged', 'app-1').length > 0, 'the change on the checkout feed');
+    expect(of(l.a, 'session.capabilitiesChanged', 'app-1')).toEqual([{ appSessionId: 'app-1', capabilities: { browser: { available: true } } }]);
+  });
+
+  it('carries bytes both ways tagged: a version’s state read as a Uint8Array, a 64 KiB asset sealed, verified and written as sent', async () => {
+    const l = await lab();
+    l.host.artifact(ID, ['app-1']);
+    l.host.reads.set('artifacts.versionState', () => ({ bytes: STATE }));
+    const state = (await l.a.cmd('artifacts.versionState', { artifactId: ID, versionId: 1 })) as { bytes: unknown };
+    expect(state.bytes).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(state.bytes as Uint8Array).equals(Buffer.from(STATE))).toBe(true);
+    expect(validateCommandOutput('artifacts.versionState', state)).toMatchObject({ ok: true }); // the renderer's schema reads it
+
+    const asset = new Uint8Array(randomBytes(64 * 1024));
+    l.host.handlers.set('artifacts.uploadAsset', () => ({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' }));
+    expect(await l.a.cmd('artifacts.uploadAsset', { artifactId: ID, name: 'logo.png', mime: 'image/png', bytes: asset })).toEqual({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' });
+    const [run] = l.host.artifactRuns.filter((r) => r.name === 'artifacts.uploadAsset');
+    expect((run!.input as { bytes: unknown }).bytes).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from((run!.input as { bytes: Uint8Array }).bytes).equals(Buffer.from(asset))).toBe(true);
+  });
+
+  it('refuses both locally `not-offered` against an endpoint that lists no `rl2.bytes`, sending neither', async () => {
+    endpointWithout('rl2.bytes');
+    const l = await lab();
+    l.host.artifact(ID, ['app-1']);
+    l.host.reads.set('artifacts.versionState', () => ({ bytes: STATE }));
+    l.host.handlers.set('artifacts.uploadAsset', () => ({ assetId: '0b1c2d3e-4f50-4617-8899-aabbccddeeff', ref: 'assets/logo.png' }));
+    expect(l.a.link.peerCapabilities()).not.toContain('rl2.bytes');
+    expect(await l.a.route('artifacts.versionState', { artifactId: ID, versionId: 1 })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(await l.a.route('artifacts.uploadAsset', { artifactId: ID, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(randomBytes(64 * 1024)) })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(l.host.calls.filter((c) => c.name === 'artifacts.versionState' || c.name === 'host.artifactOp')).toEqual([]);
+    expect(l.host.artifactRuns).toEqual([]);
+  });
+});

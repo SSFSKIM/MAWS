@@ -85,6 +85,9 @@ export class SessionStatusTracker {
   private readonly onCronRecord: (record: CronRecord) => Promise<void>;
   private recorded: string | null = null; // the cron record last written (or being written), as JSON; null after a failure
   private readonly log: (line: string) => void;
+  // P5 O16 M3 (D24, D38): an adopter's fold applies the journal's evidence in order and writes nothing; the next Stop or
+  // cron tool writes the record as it stands then
+  restoring = false;
 
   constructor(
     private readonly spec: LaunchSpec,
@@ -162,6 +165,9 @@ export class SessionStatusTracker {
   // input with the durable crons read at it
   launched(record: CronRecord | null): void {
     if (this.launchKind === 'resumed') this.work.resumedWith(record);
+    // P5 O16 M3 (D32, D38): an adopted process's seed, before the fold applies the journal's later evidence; its tasks
+    // are known from the journal's snapshots, or the re-initialize's
+    if (this.launchKind === 'adopted') this.work.adoptedWith(record, 'unknown');
     if (this.launchKind !== 'fresh') this.work.durableRead(this.durableCrons());
   }
 
@@ -171,11 +177,36 @@ export class SessionStatusTracker {
 
   stopped(input: Record<string, unknown>): void {
     this.work.stopped(sessionCronsOf(input, this.log), this.durableCrons());
+    // P5 O16 M2 (D48): the Stop's `background_tasks` is a task list too (`id`, `type`, `description`; no `ambient` on the
+    // engines measured, so an entry is ambient only when it says so); absent, the tasks stay as the last snapshot left them
+    if (Array.isArray(input.background_tasks)) {
+      this.backgroundTasks = list(input.background_tasks).map((t) => ({ taskId: String(t.id) as TaskId, taskType: String(t.type), description: String(t.description ?? ''), ambient: t.ambient === true }));
+      this.work.tasksChanged();
+    }
     this.record();
+  }
+
+  // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §F): the reap's three unknowns
+  observer(unhealthy: boolean): void {
+    this.work.observer(unhealthy);
+  }
+
+  termIgnored(): void {
+    this.work.termIgnored();
+  }
+
+  // P5 O16 M3 (D23, D32): a gap in an adopted process's replay
+  gap(): void {
+    this.work.gap();
+  }
+
+  descendantsRead(readable: boolean): void {
+    this.work.descendantsRead(readable);
   }
 
   // The cron record, handed over when it differs from the one last written
   private record(): void {
+    if (this.restoring) return;
     const record = this.work.cronRecord();
     const json = JSON.stringify(record);
     if (json === this.recorded) return;

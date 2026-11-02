@@ -23,7 +23,6 @@ const KIND_PLURALS: Record<ArtifactKind, string> = {
 };
 
 export const LIBRARY_COPY = {
-  otherMachine: 'Artifacts made on another machine aren’t shown here yet', // P5 O6 M4: until O7 gives artifacts a machine
   fallbackTitle: 'Artifact', // an `artifact` tab whose row is not known (yet)
   reading: 'Opening…',
   readFailed: (message: string) => `Couldn’t read this artifact: ${message}`,
@@ -92,6 +91,8 @@ export const LIBRARY_PAGE = {
   allTypes: 'All types',
   newSpace: 'New Space',
   allSpaces: 'All Spaces',
+  // P5 O7 M5a: the machine menu
+  machine: { local: 'This Mac', label: (name: string) => `Library on ${name}`, title: 'Whose library this lists', menu: 'Machines' },
   makeNew: 'Make something new',
   create: 'New',
   addFile: 'Add a file…',

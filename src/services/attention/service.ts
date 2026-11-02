@@ -101,6 +101,10 @@ export interface AttentionServiceDeps {
   // never has. An error raised at or before it was seen and is not raised. Absent: every error is unseen. A call may
   // record the look (the index's), reaching `seen` before it returns.
   seenAt?: (appSessionId: AppSessionId) => number | null;
+  // O16 panel 1 (scalpel-2#1): whether the engine host's leaving ready is a live handover (its drain under way). Its
+  // sessions live on under their session hosts and its successor adopts them with their pending requests under the
+  // same ids, so their items stay. Absent: every departure clears them.
+  handingOver?: () => boolean;
 }
 
 export interface AttentionService {
@@ -326,7 +330,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     deps.onEvent('session.status', ({ appSessionId, status }) => onHeld(appSessionId, status)),
     deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
     deps.onState('engine-host', (host) => {
-      if (host.state === 'ready') return;
+      if (host.state === 'ready' || deps.handingOver?.()) return; // a handover's successor republishes what it adopts
       // A dead host cannot retire its broker or release held messages. Durable errors stay.
       for (const [id, state] of sessions) {
         state.broker = [];

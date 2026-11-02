@@ -15,6 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { RelayHealth } from '@shared/engine/relay-health';
+import { HostCommandError } from '@shared/host/runtime'; // P5 O16 M2
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { LaunchResult } from '@shared/ipc/schema/session';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
@@ -25,8 +26,15 @@ import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './l
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
-import { EngineSession } from './session';
-import type { EngineTransport } from './transport';
+import { AdoptionFailed, EngineSession } from './session';
+import { MAX_LINE_CHARS, type EngineTransport } from './transport';
+import { HostAdoptFailed, HostStartFailed, type StartedHost } from './holder/transport'; // P5 O16 M2; M3: HostAdoptFailed
+import { readCheckpoint } from './holder/checkpoint'; // P5 O16 M3
+import { launchRows, spawnRowOf } from './holder/restore'; // P5 O16 M3
+import type { RosterEntry } from './holder/roster'; // P5 O16 M3
+import { holdsEngine } from './holder/adopt'; // P5 O16 panel fix wave 1
+import { stopUnresolved, UNRESOLVED_STOP } from './holder/stop-held'; // P5 O16 wave 1 verification
+import type { SessionId } from '@shared/graph/ids'; // P5 O16 M3
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
@@ -51,7 +59,9 @@ export interface LauncherDeps {
   spawn: (plan: LaunchPlan) => EngineTransport;
   appVersion: string;
   log: (message: string) => void;
-  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
+  // attaches the session's listeners before it starts; P5 O16 M3c: `historyThrough`, an adopted launch's last journaled
+  // seq, which its stream answers from the journal
+  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number) => void;
   appAttached?: () => boolean; // E10: handed to each session's bridges (P5 O3-D M3: the app's presence)
   rendersAnswered?: () => boolean; // P5 O5 M4: the capture and export bridges' gate (the attachment's answersRenders)
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
@@ -60,6 +70,17 @@ export interface LauncherDeps {
   // P3-HD: the local-scope key of a live launch's cwd, captured beside the probes, before the spawn (bounded, never failing
   // the launch: a failure is an unidentified key); tests inject it
   captureLocalKey?: (cwd: string) => Promise<ConnectorLocalKey>;
+  // P5 O16 M2 (D8, D51): on the detached and daemon shapes, the session host every live launch runs under, started
+  // before its row is reserved; `gateSocket` is the launch's MAWS_HOLDER_SOCKET. Absent (the embedded shape), the
+  // direct spawn; a replay never has one.
+  holder?: {
+    start: (launchId: string) => Promise<StartedHost>;
+    gateSocket: string;
+    // P5 O16 M3: a running session host taken over by this engine host (adoptHosted, with the token beside it), bounded by
+    // `startMs`; and one holding no engine, released (releaseHost)
+    adopt?: (entry: RosterEntry, checkpoint: { frontier: number; above: readonly number[] }, startMs: number) => Promise<{ transport: EngineTransport; fence: number }>;
+    release?: (entry: RosterEntry, startMs: number) => Promise<void>;
+  };
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -80,12 +101,21 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
     if (liveNow && liveNow.lifecycle !== 'exited') return refused('already_live', `process is ${liveNow.lifecycle}`);
+    if (deps.table.isAdopting(spec.appSessionId)) return refused('already_live', 'process is being adopted'); // P5 O16 M3, before a session host starts
+    // P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with this
+    // session's engine and no row (its adoption failed, or a newer host of the session was adopted) is stopped first, so
+    // no second engine runs the session; a resume keeps the conversation, which the engine wrote to its own transcript
+    // wave 1 verification: a stop not done keeps the record; the launch is refused, saying why
+    for (const { holderId, outcome } of await deps.table.stopUnattached(spec.appSessionId)) {
+      deps.log(`${spec.appSessionId}: its unattached session host ${holderId} ${stopUnresolved(outcome) ? 'not stopped' : 'stopped'} before this launch (${outcome})`);
+      if (outcome === 'incomplete' || outcome === 'unverified') return refused('already_live', UNRESOLVED_STOP[outcome]);
+    }
 
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
     let connectorLocalKey: ConnectorLocalKey | undefined; // P3-HD: live launches only
-    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }; // P2-C: the flag's declaration
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean }; // P2-C, P5 O16 M2: the flags' declarations
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -102,17 +132,33 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       captured = env;
       relayHealth = relay ?? undefined;
       connectorLocalKey = localKey; // P3-HD
-      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize }; // P2-C; P5 O16 M2 (D20, D48)
     }
 
     spec = await withParentBudget(spec, artifactScope, deps); // P2-F wave S (S-budget)
 
+    const hosting = spec.replay === null ? (deps.holder ?? null) : null; // P5 O16 M2
     let plan: LaunchPlan;
     try {
-      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: process.pid, ...engine }); // spawned by this host (ipc.ts spawnEngine)
+      // spawned by this host (ipc.ts spawnEngine), or by its session host, whose pid replaces the placeholder below
+      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: hosting ? 0 : process.pid, ...engine, ...(hosting && { holder: { gateSocket: hosting.gateSocket } }) });
     } catch (error) {
       if (error instanceof LaunchSpecConflict) return refused('settings_conflict', error.message);
       throw error;
+    }
+
+    // P5 O16 M2 (D8, D51): the session host starts before the row is reserved, so one that fails answers the launch with
+    // `host_unavailable` naming its log, and nothing is spawned directly. It is the engine's parent: SMNS_MEMBER names it.
+    let host: StartedHost | null = null;
+    if (hosting) {
+      try {
+        host = await hosting.start(plan.launchId);
+      } catch (error) {
+        if (!(error instanceof HostStartFailed)) throw error;
+        deps.log(`${spec.appSessionId}: ${error.message}`);
+        throw new HostCommandError({ code: 'host_unavailable', message: error.message });
+      }
+      plan = { ...plan, env: { ...plan.env, SMNS_MEMBER: String(host.pid) } };
     }
 
     const replay = journal;
@@ -121,35 +167,169 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       projects === null
         ? undefined
         : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
-    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
-    const outcome = deps.table.reserve(spec.appSessionId, () => {
-      const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
-      const session = new EngineSession({
-        spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
-        journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
-        // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
-        statefulMcpServers: () => deps.table.statefulMcpServers,
-        reconnectTrigger: released ? 'process_exit' : 'user',
-        // C12 end
-        // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
-        launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
-        appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
-        rendersAnswered: deps.rendersAnswered, // P5 O5 M4: the capture and export bridges, with no client that renders
-        unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
-        observedFacts: deps.observedFacts, // P2-A
-        artifactScope, // P2-E1
-        artifacts: deps.artifacts, // P3-A (M6)
-        datasetRefresh: deps.datasetRefresh, // E3
-        connectorLocalKey, // P3-HD
+    const hosted = host;
+    const spawn =
+      replay !== null
+        ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser })
+        : hosted !== null
+          ? (hostedPlan: LaunchPlan) => hosted.transport(hostedPlan, { appSessionId: spec.appSessionId, maxLineChars: MAX_LINE_CHARS }) // P5 O16 M2
+          : deps.spawn;
+    let outcome: ReturnType<ProcessTable['reserve']>;
+    try {
+      outcome = deps.table.reserve(spec.appSessionId, () => {
+        const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
+        const session = new EngineSession({
+          spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
+          journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
+          // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
+          statefulMcpServers: () => deps.table.statefulMcpServers,
+          reconnectTrigger: released ? 'process_exit' : 'user',
+          // C12 end
+          // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
+          launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
+          appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
+          rendersAnswered: deps.rendersAnswered, // P5 O5 M4: the capture and export bridges, with no client that renders
+          unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
+          observedFacts: deps.observedFacts, // P2-A
+          artifactScope, // P2-E1
+          artifacts: deps.artifacts, // P3-A (M6)
+          datasetRefresh: deps.datasetRefresh, // E3
+          connectorLocalKey, // P3-HD
+          // P5 O16 M2: the session host, named in the spawn row and the status; released if the session ends unspawned
+          ...(hosted && { holder: { pid: hosted.pid, holderId: hosted.holderId, binary: hosted.binary }, unspawned: () => hosted.abandon() }),
+        });
+        deps.wire(session, plan, spec);
+        return session;
       });
-      deps.wire(session, plan, spec);
-      return session;
-    });
-    if (outcome.status === 'refused') return outcome; // a launch that raced this one to the reservation
+    } catch (error) {
+      hosted?.abandon(); // P5 O16 M2: a host whose launch got no row launches nothing
+      throw error;
+    }
+    if (outcome.status === 'refused') {
+      hosted?.abandon(); // P5 O16 M2
+      return outcome; // a launch that raced this one to the reservation
+    }
     return { status: 'launching', session: outcome.session.status() };
   };
   // the table holds it from its entry (P5 Decision Log 124: no collection lands on its preparation, which has no row yet)
   return (spec, artifactScope) => deps.table.preparing(() => launch(spec, artifactScope));
+}
+
+// P5 O16 M3 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3 and Interfaces §D; D10, D23, D24): `adopt(entry)`
+// beside `launch`, for a session host an earlier engine host launched and left running, whose row `holdForAdoption`
+// holds. Within `ADOPT_MS` of its start: the stored launch spec and the launch's `spawn` row rebuild the plan (the
+// spawn's binary, arguments, directory, ids and route; the environment as this build would build it now, cut to the
+// keys the spawn row names, since its values were never journaled and the host keeps them in memory only); the journal
+// resumed (a torn tail truncated) and the checkpoint read against its last row; the host attached at its fence + 1 and
+// read from the frontier; then the row, an EngineSession that spawns nothing (`adopted`), reserved and started, and its
+// outcome awaited (fix wave 1: the fold, the catch-up, the queue's restore and the re-initialize, until ready). A host
+// that holds no engine is released instead (answered null once the host accepted it). Every failure throws and leaves the
+// host running for the next start: one the session gave up before its first write releases its exited row; one past
+// `ADOPT_MS` is counted failed and left as it is, its session still adopting, never killed for it.
+// P5 O16 panel fix wave 1 (sweep#3): a host whose launch committed with no child recorded yet (the engine host that
+// committed it was lost mid-fork) holds an engine, or is about to: adopted once its child shows (adoptHosted), never
+// released as empty.
+export const ADOPT_MS = 60_000;
+
+export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: RosterEntry) => Promise<AppSessionId | null> {
+  // P5 O16 M4: an adoption that gives up wakes the reads waiting on its hold (ProcessTable.adoptionSettled), which then
+  // answer `unknown session` at once rather than run out their wait; one past its reservation has no hold to wake. Only
+  // a host that holds an engine has the hold (the start's rule, index.ts `adoptAtStart`): a host holding none, which
+  // `adoptable` takes beside the newest host of the same session, ends in its release and says nothing of that hold.
+  return (entry) =>
+    adoptOne(entry).catch((error: unknown) => {
+      if (holdsEngine(entry)) deps.table.adoptionFailed(entry.appSessionId as AppSessionId);
+      throw error;
+    });
+  async function adoptOne(entry: RosterEntry): Promise<AppSessionId | null> {
+    const deadline = Date.now() + adoptMs;
+    const left = () => {
+      const ms = deadline - Date.now();
+      if (ms <= 0) throw new HostAdoptFailed(`not adopted within ${adoptMs / 1000} s`);
+      return ms;
+    };
+    const hosting = deps.holder;
+    if (!hosting?.adopt || !hosting.release) throw new HostAdoptFailed('this engine host runs no session hosts');
+    if (!holdsEngine(entry)) {
+      await hosting.release(entry, left()); // throws if the host refuses it
+      deps.log(`session host ${entry.holderId} (pid ${entry.pid}) held no engine (${entry.state}); released`);
+      return null;
+    }
+    const appSessionId = entry.appSessionId as AppSessionId;
+    assertSafeAppSessionId(appSessionId);
+    const launchId = entry.holderId;
+    const dir = journalDir(deps.userData, appSessionId);
+    const spec = await deps.store.loadLaunchSpec(appSessionId);
+    if (spec === null) throw new HostAdoptFailed('the session has no stored launch spec');
+    const spawned = spawnRowOf(launchRows(dir, launchId));
+    if (spawned === null) throw new HostAdoptFailed(`launch ${launchId} has no spawn row`);
+    const [captured, owedInterrupt, observerLaunch] = await Promise.all([
+      deps.captureEnv(),
+      deps.store.loadOwedInterrupt(appSessionId).catch(() => false),
+      deps.store.loadObserverSeen(appSessionId).catch(() => null),
+    ]);
+    left();
+    const built = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: spawned.bin, engineVersion: spawned.engineVersion, spawnerPid: entry.pid, holder: { gateSocket: hosting.gateSocket } });
+    const keys = new Set(spawned.envKeys);
+    const plan: LaunchPlan = {
+      ...built, bin: spawned.bin, args: spawned.args, cwd: spawned.cwd, launchId, sessionId: spawned.sessionId as SessionId, gateway: spawned.gateway, engineVersion: spawned.engineVersion,
+      env: Object.fromEntries(Object.entries({ ...built.env, SMNS_MEMBER: String(entry.pid) }).filter(([key]) => keys.has(key))),
+      environmentRebuilt: true, // fix wave 1 (D58): never the engine's real environment
+    };
+    ownerOnlyJournalDirectory(dirname(dir));
+    const journal = JournalWriter.resume(dir, launchId, { maxBytes: JOURNAL_MAX_BYTES });
+    const checkpoint = readCheckpoint(dir, launchId, journal.lastSeq);
+    let adopted: { transport: EngineTransport; fence: number };
+    try {
+      adopted = await hosting.adopt(entry, checkpoint, left());
+    } catch (error) {
+      await journal.close().catch(() => {});
+      throw error;
+    }
+    const { transport, fence } = adopted;
+    let outcome: ReturnType<ProcessTable['reserve']>;
+    try {
+      outcome = deps.table.reserve(appSessionId, () => {
+      const session = new EngineSession({
+        spec, plan, spawn: () => transport, journal, store: deps.store, appVersion: deps.appVersion, log: (message) => deps.log(`${appSessionId}: ${message}`),
+        statefulMcpServers: () => deps.table.statefulMcpServers,
+        reconnect: true, reconnectTrigger: 'host_restart', launchKind: 'adopted',
+        appAttached: deps.appAttached,
+        rendersAnswered: deps.rendersAnswered, // P5 O16 M3b fix wave 1: #418's render gate, as a launch's (the merge dropped it here)
+        unsettledPrompts: () => unsettledPrompts(dir, launchId),
+        observedFacts: deps.observedFacts, artifacts: deps.artifacts, datasetRefresh: deps.datasetRefresh,
+        holder: { pid: entry.pid, holderId: launchId, binary: entry.binary },
+        adopted: { fence, frontier: checkpoint.frontier, owedInterrupt, observerSeen: observerLaunch === launchId },
+      });
+      deps.wire(session, plan, spec, journal.lastSeq); // P5 O16 M3c: the launch's events before the adoption, from its journal
+      return session;
+      }, { adoption: true });
+    } catch (error) {
+      transport.detach?.(); // P5 O16 panel fix wave 1: its connection closed, nothing released or signalled
+      await journal.close().catch(() => {}); // the host stays, for the next start
+      throw error;
+    }
+    if (outcome.status === 'refused') throw new HostAdoptFailed(`its row was refused: ${outcome.message}`); // never: the row was held
+    deps.log(`${appSessionId}: attached the session host of launch ${launchId} (pid ${entry.pid}, engine pid ${transport.pid}) at fence ${fence}, replaying from ${checkpoint.frontier + 1}`);
+    const session = outcome.session;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        session.adoption,
+        new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new HostAdoptFailed(`not ready within ${adoptMs / 1000} s; its session goes on adopting`)), Math.max(0, deadline - Date.now())))),
+      ]);
+    } catch (error) {
+      if (error instanceof AdoptionFailed && error.abandoned) {
+        await session.exited;
+        deps.table.release(appSessionId); // its exited row: nothing of it was served
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    deps.log(`${appSessionId}: adopted the session host of launch ${launchId}`);
+    return appSessionId;
+  }
 }
 
 // P2-F wave S (S-budget; the owner's D7, Q12 as ruled 2026-10-11): a side thread takes its parent's numeric

@@ -8,5 +8,6 @@ export const events = ['host.supervisorStatus', 'host.status', 'host.browserIdle
 // M2: and reports its interest, which the renderer never sends.
 // P5 O10 M7: `host.op` and `host.opQuery` are the endpoint's (lane B's operation ledger), sent from `mawsd`, never a window.
 // P5 O3-D: `host.attachment`, `mawsd`'s signal of an app's attachment, which the relay refuses from an app.
+// P5 O16 M3b: `host.handover`, sent by `mawsd` (or a direct shape's main) to an engine host it replaces.
 // P5 O17: `host.browserWork`, `mawsd`'s browser-work snapshot, refused from an app as `host.attachment` is.
-export const mainOnlyCommands = ['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest' /* P5 O2 M2 */, 'host.op', 'host.opQuery', 'host.attachment' /* P5 O3-D */, 'host.browserWork' /* P5 O17 */] as const;
+export const mainOnlyCommands = ['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest' /* P5 O2 M2 */, 'host.op', 'host.artifactOp' /* P5 O7 M5a */, 'host.opQuery', 'host.attachment' /* P5 O3-D */, 'host.handover' /* P5 O16 M3b */, 'host.browserWork' /* P5 O17 */] as const;

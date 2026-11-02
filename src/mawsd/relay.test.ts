@@ -12,7 +12,7 @@ function upstream() {
     snapshot: () => ({ state }),
     parked: () => state === 'stopped',
     wake: () => void (state = 'starting'),
-    welcome: () => (state === 'ready' ? { pid: 7, liveSessions: 0, rows: 0, peer: { minor: 0, build: 'b', capabilities: [] } } : null),
+    welcome: () => (state === 'ready' ? { pid: 7, startedAt: 't', liveSessions: 0, rows: 0, peer: { minor: 0, build: 'b', capabilities: [] } } : null),
     refusal: () => null,
     facts: () => ({ reason: null }),
     onState: (_owner: string, listener: () => void) => (listeners.add(listener), () => listeners.delete(listener)),

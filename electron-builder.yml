@@ -49,3 +49,10 @@ extraResources:
     to: peer-auth
     filter:
       - peer-auth.node
+  # P5 O16 M1 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §H): the session host each lane B process
+  # runs under, a committed Go prebuild (`pnpm build:session-host` rebuilds it), spawned by the engine host from
+  # Resources/session-host/maws-session-host (src/engine-host/holder/files.ts). A signed build signs it with the app.
+  - from: native/session-host/prebuilds/darwin-arm64
+    to: session-host
+    filter:
+      - maws-session-host

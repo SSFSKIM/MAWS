@@ -28,3 +28,4 @@ export { isCertRetirement, isCertificates, isDevice, isEndpointRecord, isGrant, 
 export * from './types.ts';
 export * from './verdict.ts';
 export * from './webauthn.ts';
+export * from './withheld.ts';

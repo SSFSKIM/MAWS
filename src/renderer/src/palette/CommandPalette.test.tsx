@@ -10,7 +10,14 @@ import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { fakeClient } from '../../../../test/support/fake-client';
+import { remoteRow } from '../../../../test/support/builders';
+import { useMachines } from '../stores/machines';
+import { registerRemoteOpener } from '../sessions/remote-openers';
 import { Sidebar } from '../sidebar/Sidebar';
 import { projectNodeId } from '../sidebar/tree';
 import { ipc } from '../ipc/client';
@@ -159,6 +166,72 @@ describe('command palette', () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(projectRow()));
     expect(projectRow()!.getAttribute('aria-expanded')).toBe('true');
     expect(within(projectRow()!).getByRole('treeitem', { name: 'Quota reset recovery' })).toBeTruthy();
+  });
+});
+
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Search"): conversation search asks this Mac and
+// each RL2 machine that is up, and draws each machine's hits under its name; a listed hit with no record is its listed
+// row, opened through its lane's opener; a machine that can't answer is left out with no error.
+describe('conversation search across machines', () => {
+  const THIRD = 'ThirdMachineRef0000000' as MachineRef;
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+  let bridge: unknown;
+  beforeEach(() => {
+    bridge = window.maws;
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-01T00:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-01T00:00:00Z', generation: 1 },
+      { ref: THIRD, name: 'Lab', local: false, state: 'up', since: '2026-11-01T00:00:00Z', generation: 1 },
+    ]);
+    useSessions.setState({ listedMachines: new Set([OTHER_MACHINE, THIRD]), listed: new Map([[onB('b1'), { ...remoteRow(OTHER_MACHINE, 'b1', { title: 'Studio build' }), appId: onB('b1') }]]) });
+  });
+  afterEach(() => {
+    window.maws = bridge as PreloadBridge;
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  });
+
+  it('merges every machine’s hits under its machine and leaves out one that can’t answer, quietly', async () => {
+    const opened: AppSessionId[] = [];
+    offs.push(registerRemoteOpener('B', (listed) => opened.push(listed.appId)));
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    act(() => openConversationSearch('deploy'));
+    render(<CommandPalette />);
+    await vi.waitFor(() => expect(fake.pending('session.search')).toBe(3));
+    expect(fake.machines('session.search')).toEqual([TEST_MACHINE, OTHER_MACHINE, THIRD]);
+    const quota = nine.sessions.find((r) => r.title.text === 'Quota reset recovery')!;
+    await act(async () => {
+      await fake.reply('session.search', { hits: [{ appSessionId: quota.appId.slice(TEST_MACHINE.length + 1), snippet: 'the deploy step' }], indexing: false, incomplete: false });
+      await fake.reply('session.search', { hits: [{ appSessionId: 'b1', snippet: 'deploy to the studio' }, { appSessionId: 'unlisted', snippet: null }], indexing: false, incomplete: false });
+      await fake.fail('session.search', 'Lab is offline', 'host_unavailable');
+    });
+    await vi.waitFor(() => expect(group('Studio')).not.toBeNull());
+    expect(options('This Mac')).toEqual([expect.stringContaining('Quota reset recovery')]);
+    expect(options('Studio')).toEqual([expect.stringContaining('Studio build')]);
+    expect(within(group('Studio')!).getByRole('option').textContent).toContain('deploy to the studio');
+    expect(group('Lab')).toBeNull();
+    expect(group('Studio')!.closest('[data-search-machine]')?.getAttribute('data-search-machine')).toBe(OTHER_MACHINE); // M6d's selector
+    expect(within(dialog()).queryByRole('alert')).toBeNull();
+    await userEvent.click(within(group('Studio')!).getByRole('option'));
+    expect(opened).toEqual([onB('b1')]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps one “Sessions” group while only this Mac has hits', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    act(() => openConversationSearch('quota'));
+    render(<CommandPalette />);
+    await vi.waitFor(() => expect(fake.pending('session.search')).toBe(3));
+    const quota = nine.sessions.find((r) => r.title.text === 'Quota reset recovery')!;
+    await act(async () => {
+      await fake.reply('session.search', { hits: [{ appSessionId: quota.appId.slice(TEST_MACHINE.length + 1), snippet: null }], indexing: false, incomplete: false });
+      await fake.reply('session.search', { hits: [], indexing: false, incomplete: false });
+      await fake.fail('session.search', 'refused', 'timeout');
+    });
+    await vi.waitFor(() => expect(group('Sessions')).not.toBeNull());
+    expect(options('Sessions')).toEqual([expect.stringContaining('Quota reset recovery')]);
+    expect(within(dialog()).getByRole('alert').textContent).toBe('Lab: refused');
   });
 });
 

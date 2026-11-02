@@ -191,6 +191,32 @@ describe('the socket layer handshake (server side)', () => {
     expect(host.exits).toEqual(['idle']);
   });
 
+  // P5 O16 M3b (D11, D33): each exit carries what its connection's hello listed, so the engine host tells a refused
+  // link's `exit idle` from a client that adopts (a handover) apart from E10's idle exit
+  it("hands every exit the capabilities its connection's hello listed, read loosely from a hello it refused", async () => {
+    const host = await start();
+    const refusedLink = await host.connect();
+    refusedLink.send({ t: 'hello', protocol: 4, token: TOKEN, capabilities: ['host.holder', 7], somethingNew: true });
+    expect(await refusedLink.next()).toEqual(refusal('protocol'));
+    refusedLink.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exitFroms.length === 1);
+    expect(host.exitFroms[0]).toEqual({ refused: true, own: false, capabilities: ['host.holder'] }); // a name that is not a string is dropped
+
+    const bare = await host.connect();
+    bare.send(helloV2({ wire: 'wire-2' }));
+    await bare.next();
+    bare.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exitFroms.length === 2);
+    expect(host.exitFroms[1]).toEqual({ refused: true, own: false, capabilities: [] });
+
+    const welcomed = await host.connect();
+    welcomed.send(hello({ capabilities: ['host.holder'] }));
+    expect(await welcomed.next()).toEqual(WELCOME);
+    welcomed.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exitFroms.length === 3);
+    expect(host.exitFroms[2]).toEqual({ refused: false, capabilities: ['host.holder'] });
+  });
+
   it('replaces the connected client only for a hello whose token, protocol and wire check out', async () => {
     const host = await start();
     const first = await host.connect();
@@ -419,7 +445,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     await until(() => host.refusedExits.length === 1);
     expect(host.refusedExits).toEqual(['now']);
     expect(host.exits).toEqual(['now']);
-    expect(host.exitFroms).toEqual([{ refused: true, own: false }]); // the upstream's line, reflected
+    expect(host.exitFroms).toEqual([{ refused: true, own: false, capabilities: [] }]); // the upstream's line, reflected
     expect(host.changes).toEqual([]);
   });
 
@@ -441,7 +467,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     expect(host.log).toHaveBeenCalledWith('refused a hello with its own refusal (wire)');
     client.send({ t: 'exit', when: 'now' });
     await until(() => host.exitFroms.length === 1);
-    expect(host.exitFroms).toEqual([{ refused: true, own: true }]);
+    expect(host.exitFroms).toEqual([{ refused: true, own: true, capabilities: [] }]);
   });
 
   it('closes the connection with nothing written when admit answers close', async () => {

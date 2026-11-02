@@ -11,8 +11,11 @@
 //   (c) G3: kill -9 of the supervisor mid-turn: the crash toast, a new pid in Diagnostics, the session not live;
 //   (d) G3: Settings' Stop all: the old supervisor exits, a fresh one starts and launches;
 //   (e) G3: the idle release (`idle`) and the supervisor's own idle exit, after a keep-quit and after a kill -9 of the app;
-//   (f) an update (another build id): the banner, Restart now, a new pid;
-//   (g) an incompatible update (another wire major, P5 O1 M6): the banner, launches refused, Restart now, a new pid;
+//   (f) an update (another build id): the banner, Restart now, a new pid; P5 O16 M3c: that is an older engine host's
+//       (one without `host.holder`); a capable one hands its live session over at once to a successor that adopts it,
+//       with no banner, and a handover deferred by a tool call in flight ends with no crash toast;
+//   (g) an incompatible update (another wire major, P5 O1 M6): the banner, launches refused, Restart now, a new pid; P5
+//       O16 M3c: an older engine host's again; a capable one hands over on the refused link's exit (D11);
 //   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not;
 //   (i) P3-A M5: a document a session (the test writer standing in for an agent) edits while no window and no main
 //       exist; the next launch lists it at its new revision and opens it through main's relay over the socket's
@@ -35,11 +38,28 @@
 //   (l) the daemon shape only: a kill -9 of `mawsd` mid-turn, which the app's transport replaces, the engine host and the
 //       turn going on;
 //   (m) with the app open and a short idle time, a session with no tab is released and one in a tab, one marked Keep
-//       running and one holding a durable cron (fresh and resumed; P5 Decision Logs 46 and 47) are not.
+//       running and one holding a durable cron (fresh and resumed; P5 Decision Logs 46 and 47) are not; O16 M5: with a
+//       fake observer on the engine host's gate.sock, the release's `arm` arrives, the scene answers `armed` and the
+//       session is released; a `turn` after the arm is answered `proceed` and the session stays live another period;
+//       an observer gone silent holds its session past two periods.
+// P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M2; D28, D31): cases (a), (b), (e) and (m) run their
+// sessions on the stub engine (e2e/support/stub-engine.ts), a real process playing the same fixtures under a real session
+// host, rather than the in-process replay, which spawns nothing; (a) adds a live session whose engine, session host and
+// roster entry it checks and sees end with the session. Every other case keeps the replay.
+// P5 O16 M3c (the same document, M3; D9, D11, D57): the handover's scenes, on the stub engine under real session hosts:
+//   (c′) a kill -9 of the engine host mid-turn: the successor adopts the session, live with the same pid, the rest of
+//        the turn arrives once, and the crash toast says the session was re-adopted ((c)'s replay form stays for the
+//        embedded shape alone);
+//   (o)  the daemon shape only: `mawsd restart --engine-host` mid-turn, with the stub's background child running and a
+//        permission pending: the turn completes, the card shows once, no `user` frame reaches the engine twice (the
+//        stub's own count), the child's pid is unchanged, and the adopted session's subagent listing still updates
+//        (#419: listings update only for sessions some client holds open, which the successor hears again);
+//   (f) and (g) branch on `host.holder` (above): the older host's form is kept with an engine host that stands in for
+//        one before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, detached.ts).
 import { addressed } from './support/address';
 import { openSurface, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -50,15 +70,16 @@ import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { DISCOVERY_WAKE_BOUND_MS } from '../src/mawsd/discovery-wake';
 import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
-import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
+import { invoke, launchReady, replaySpec, toolCallJournal, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
 import { ownTitles } from './support/library'; // P3-L M7
 import { documents, seamReady } from './support/documents'; // P3-A M5
 import { REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
+import { FakeObserver } from '../src/engine-host/holder/fake-observer'; // O16 M5
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
-import { attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
 // P5 O17 M8 start
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine';
@@ -148,6 +169,7 @@ test.beforeEach(() => test.setTimeout(180_000));
 test('(a) the supervisor starts in its own group with its files; an unbusy quit stops it; it outlives a killed app; a stale lock is replaced', async () => {
   if (DAEMON) return startOnTheDaemon();
   await withScratch('start', async (s) => {
+    s.useStub(); // O16 M2b
     const first = await s.launch();
     const status = await s.ready(first.page);
     expect(status).toMatchObject({ transport: 'detached', state: 'ready', matches: 'same', supervisor: { mode: 'detached' } });
@@ -160,10 +182,13 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
     for (const name of ['host.lock', 'host.token', 'host.sock']) expect(statSync(s.file(name)).mode & 0o777, name).toBe(0o600);
     expect(existsSync(s.file('host.log'))).toBe(true);
     expect(lock.socketPath).toBe(s.file('host.sock'));
+    const hosted = await hostedSession(s, first.page); // O16 M2b
 
-    // an unbusy quit stops every session and the supervisor with them (residue 23)
+    // an unbusy quit stops every session and the supervisor with them (residue 23), the session host with its session
     await s.quit(first);
     await expect.poll(() => isAlive(lock.pid), { timeout: 10_000 }).toBe(false);
+    await expect.poll(() => [isAlive(hosted.engine), isAlive(hosted.host)], { timeout: 10_000, message: 'the engine and its session host end with the session' }).toEqual([false, false]);
+    expect(existsSync(hosted.roster), 'the session host removed its roster entry').toBe(false);
     expect(existsSync(s.file('host.lock')), 'the lock is unlinked').toBe(false);
     expect(existsSync(s.file('host.sock')), 'the socket is unlinked').toBe(false);
 
@@ -199,6 +224,7 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
 async function startOnTheDaemon(): Promise<void> {
   const IDLE_MS = 4_000; // `mawsd`'s idle exit, each idle-reading launch's host.configure (its spine's, MAWS_E2E_SUPERVISOR_IDLE_MS)
   await withScratch('start', async (s) => {
+    s.useStub(); // O16 M2b
     const first = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) });
     const status = await s.ready(first.page);
     expect(status).toMatchObject({ transport: 'daemon', state: 'ready', matches: 'same', supervisor: { mode: 'detached' }, daemon: { kind: 'private' }, daemonUnavailable: null });
@@ -219,6 +245,11 @@ async function startOnTheDaemon(): Promise<void> {
     expect(ps(engine.pid, 'command')).toMatch(/^maws-supervisor .* --detached /);
     expect(statSync(s.dir).mode & 0o777).toBe(0o700);
     for (const name of ['host.lock', 'host.token', 'host.sock']) expect(statSync(s.file(name)).mode & 0o777, name).toBe(0o600);
+    // O16 M2b: a live session runs under a session host; stopped, it ends with its host, and the quit below stays unbusy
+    const hosted = await hostedSession(s, first.page);
+    expect(value(await invoke(first.page, 'session.stop', { appSessionId: hosted.id, reason: 'stop' }))).toMatchObject({ exited: true });
+    await expect.poll(() => [isAlive(hosted.engine), isAlive(hosted.host)], { timeout: 10_000, message: 'the engine and its session host end with the session' }).toEqual([false, false]);
+    expect(existsSync(hosted.roster), 'the session host removed its roster entry').toBe(false);
 
     // an unbusy quit leaves the engine host to `mawsd`'s idle clock, which parks it; `mawsd` exits once idle
     await s.quit(first);
@@ -256,6 +287,29 @@ async function startOnTheDaemon(): Promise<void> {
   });
 }
 
+// O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M2): a live session on the stub engine, ready: its engine
+// runs under a session host, the engine's parent in a process group of its own, with its roster entry in the supervisor's
+// `hosts/` (0700, the entry 0600); the spawn row names the stub as `bin` and the host as `holder`.
+async function hostedSession(s: Scratch, page: Page): Promise<{ id: AppSessionId; engine: number; host: number; roster: string }> {
+  const id = `a-hosted-${Date.now()}` as AppSessionId;
+  await s.launchSession(page, id, PERMISSION, { cwd: s.repo });
+  const status = await statusOf(page, id);
+  const engine = status.pid!;
+  const host = status.holder!.pid;
+  expect(status.holder).toMatchObject({ adopted: false });
+  expect(host).not.toBe(engine);
+  expect(Number(ps(engine, 'ppid')), 'the session host is the engine’s parent').toBe(host);
+  expect(Number(ps(host, 'pgid')), 'the session host leads its own process group').toBe(host);
+  expect(ps(host, 'command')).toMatch(/maws-session-host /);
+  const hosts = join(s.dir, 'hosts');
+  expect(statSync(hosts).mode & 0o777).toBe(0o700);
+  const roster = join(hosts, `${status.launchId}.json`);
+  expect(statSync(roster).mode & 0o777).toBe(0o600);
+  const spawn = s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn')!.frame;
+  expect(spawn).toMatchObject({ bin: s.stub!.bin, holder: { pid: host, holderId: status.holder!.holderId } });
+  return { id, engine, host, roster };
+}
+
 test('(b) G2: a kept session streams on while the app is closed; the relaunch reconnects, its undelivered tail reaches main, and it ends as a control run does', async () => {
   const pace = { MAWS_E2E_REPLAY_ROW_MS: ROW_MS };
   const dd = (scope: Locator, term: string) => scope.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
@@ -279,6 +333,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
   // the control: the same fixture at the same pace, the app open throughout
   const control = { order: [] as string[], suffixes: [] as string[], rows: [] as string[], journal: 0 };
   await withScratch('control', async (s) => {
+    s.useStub({ rowMs: Number(ROW_MS) }); // O16 M2b: the session on the stub engine under a session host
     const run = await s.launch(pace);
     await s.ready(run.page);
     const id = await s.record(run.page);
@@ -301,6 +356,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
   });
 
   await withScratch('keep', async (s) => {
+    s.useStub({ rowMs: Number(ROW_MS) }); // O16 M2b
     const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION} with one background task failure inserted before its request, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
     const first = await s.launch({ ...pace, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const firstStatus = await s.ready(first.page);
@@ -447,6 +503,9 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
 });
 
 test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the session, Diagnostics shows the new pid, the session is not live', async () => {
+  // P5 O16 M3c: a replay launch, which no session host holds, so nothing survives the kill; on the daemon shape (c′) is
+  // the case, the replay form kept for the embedded shape alone
+  test.skip(DAEMON, 'the embedded shape’s replay form (pnpm e2e:supervisor); (c′) runs on both shapes');
   await withScratch('crash', async (s) => {
     const run = await s.launch();
     const old = (await s.ready(run.page)).supervisor!.pid;
@@ -508,6 +567,64 @@ test('(c) G3: kill -9 of the supervisor mid-turn: the crash toast names the sess
   });
 });
 
+// ---- P5 O16 M3c: the handover's scenes --------------------------------------------------------------------------------
+
+// The session's own checks after an adoption, then its turn played out: live with the same engine pid and adopted, its
+// request's card once (one request event, one pending item), the answer written once and the turn ended, the prompt
+// written once and no event twice. `requestId`: the request raised before the engine host changed.
+// The successor tells nothing its fold read (D24); the launch's events before the adoption are answered from its
+// journal: the engine asked once (one `in` row), and the launch holds one request event.
+async function adoptedThenCompleted(s: Scratch, page: Page, id: AppSessionId, engine: number, requestId: string): Promise<void> {
+  await expect.poll(() => adoptedOf(page, id), { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+  // its re-initialize first (`starting`, then ready), the turn restored with it
+  await expect.poll(async () => (await statusOf(page, id)).process, { timeout: 30_000, message: 'the adopted session re-initialized' }).toBe('ready');
+  expect(await statusOf(page, id), 'the session live mid-turn, the same engine process').toMatchObject({ process: 'ready', pid: engine, turn: expect.anything() });
+  await new Promise((r) => setTimeout(r, 1_000)); // a duplicate would have landed by now
+  await expect.poll(async () => (await pendingPermissions(page, id)).map((i) => i.request.requestId), { message: 'the card shows once' }).toEqual([requestId]);
+  const asked = s.journal(id).filter((r) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"can_use_tool"'));
+  expect(asked, 'the engine asked once').toHaveLength(1);
+  expect((await eventsOf(page, id)).filter((e) => e.kind === 'permission.requested'), 'one request event across the adoption').toHaveLength(1);
+  value(await invoke(page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  await expect.poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn completes' }).toBe(true);
+  const out = s.journal(id).filter((r) => r.direction === 'out');
+  expect(out.filter((r) => r.frame.type === 'user'), 'the prompt was written once').toHaveLength(1);
+  expect(out.filter((r) => r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"behavior"')), 'the answer was written once').toHaveLength(1);
+  const events = await eventsOf(page, id);
+  expect(new Set(events.map((e) => e.id)).size, 'no event twice').toBe(events.length);
+  expect(events.filter((e) => e.kind === 'turn.ended'), 'the turn ended once').toHaveLength(1);
+  expect(s.journal(id).filter((r) => r.direction === 'meta' && r.frame.event === 'reconnect' && r.frame.trigger === 'host_restart' && r.frame.phase === 'attempting'), 'one adoption: the reconnect row of the host’s restart').toHaveLength(1);
+}
+
+test('(c′) P5 O16 M3: kill -9 of the engine host mid-turn: the successor adopts the session, live with the same pid; the rest of the turn arrives once; the toast says it was re-adopted', async () => {
+  await withScratch('crash-adopted', async (s) => {
+    s.useStub();
+    const run = await s.launch();
+    const before = await s.ready(run.page);
+    const old = before.supervisor!.pid;
+    const id = await s.record(run.page);
+    await showSession(run.page, id);
+    await startTurn(run.page, s, id);
+    const requested = await untilRequested(run.page, id);
+    await expect.poll(async () => (await pendingPermissions(run.page, id)).length, { message: 'the request’s card' }).toBe(1);
+    const engine = (await statusOf(run.page, id)).pid!;
+
+    process.kill(old, 'SIGKILL');
+    // on the daemon shape `mawsd` started the engine host, so main reads no signal; the toast waits for the successor's
+    // adoptions (main holds the exit until they end) and counts the session re-adopted
+    const toast = run.page.getByText(/^The engine host stopped unexpectedly/);
+    await expect(toast).toHaveText(`The engine host stopped unexpectedly${DAEMON ? '' : ' (SIGKILL)'}; its 1 session was re-adopted.`, { timeout: 60_000 });
+    await toast.hover(); // a hovered toast stays
+    const restarted = await s.ready(run.page, (st) => st.supervisor!.pid !== old);
+    expect(restarted.lastExit).toMatchObject({ code: null, signal: DAEMON ? null : 'SIGKILL', interrupted: 0, adopted: 1 });
+    expect(s.lock()?.pid).toBe(restarted.supervisor!.pid);
+    if (DAEMON) expect(restarted.daemon!.pid, 'mawsd serves on').toBe(before.daemon!.pid);
+    await expect(submitOf(run.page), 'the composer reads the turn open').toHaveAttribute('data-submit-state', 'stop');
+    await expect(run.page.getByText('Session process exited (crash)'), 'no crash row: the session never ended').toHaveCount(0);
+    await adoptedThenCompleted(s, run.page, id, engine, requested.requestId);
+    expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
 test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fresh one starts and launches', async () => {
   await withScratch('stopall', async (s) => {
     const run = await s.launch();
@@ -542,6 +659,19 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
   });
 });
 
+// P5 O2 M7: on the daemon shape an idle release is followed by the engine host, parked by `mawsd` once no app and no
+// interest have held it for the idle time, then by the private `mawsd` itself once idle. A failed reading carries the
+// logs (O16 M2b: they tell a lock left behind from a successor's).
+const logsOf = (s: Scratch) => `\nhost.lock: ${JSON.stringify(s.lock())}\nhost.log:\n${s.log().split('\n').slice(-60).join('\n')}\nmawsd.log:\n${s.daemonLog().split('\n').slice(-60).join('\n')}`;
+async function parkedThenGone(s: Scratch, idleMs: number, enginePid: number, daemonPid: number): Promise<void> {
+  await expect.poll(() => isAlive(enginePid), { timeout: idleMs + 15_000, message: 'mawsd parks the engine host' }).toBe(false);
+  expect(existsSync(s.file('host.lock')), `the engine host’s lock is unlinked${existsSync(s.file('host.lock')) ? logsOf(s) : ''}`).toBe(false);
+  expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
+  await expect.poll(() => isAlive(daemonPid), { timeout: idleMs + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
+  expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
+  expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
+}
+
 test('(e) G3: an idle kept session is released as idle and the supervisor exits by itself, after a keep-quit and after a kill -9 of the app', async () => {
   const IDLE_MS = 10_000;
   const env = { MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_E2E_REPLAY_ROW_MS: '1500' };
@@ -571,19 +701,10 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     return waited;
   };
 
-  // P5 O2 M7: on the daemon shape the release is the same, and what goes after it is the engine host, parked by `mawsd`
-  // once no app and no interest have held it for the idle time, then the private `mawsd` itself once idle
-  const parkedThenGone = async (s: Scratch, enginePid: number, daemonPid: number): Promise<void> => {
-    await expect.poll(() => isAlive(enginePid), { timeout: IDLE_MS + 15_000, message: 'mawsd parks the engine host' }).toBe(false);
-    expect(existsSync(s.file('host.lock')), 'the engine host’s lock is unlinked').toBe(false);
-    expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
-    await expect.poll(() => isAlive(daemonPid), { timeout: IDLE_MS + 15_000, message: 'the private mawsd exits once idle' }).toBe(false);
-    expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
-    expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
-  };
   if (DAEMON) {
     await withScratch('idle-keep', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
+      s.useStub({ rowMs: 1500 }); // O16 M2b
       const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
       const status = await s.ready(first.page);
       const id = await s.record(first.page);
@@ -593,11 +714,12 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
       await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn ends while the app is closed' }).toBe(true);
       await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
       lines.push('', 'keep-quit (daemon shape):', `  ${at()} the row was released: journal ${JSON.stringify(released(s, id)!.frame)}`);
-      await parkedThenGone(s, status.supervisor!.pid, status.daemon!.pid);
+      await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
       lines.push(`  ${at()} the engine host parked and mawsd exited by itself`, '  mawsd.log:', ...s.daemonLog().split('\n').filter(Boolean).map((l) => `    ${l}`));
     });
     await withScratch('idle-kill', async (s) => {
       const fixture = turnsJournal(s.root, 'idle', 1);
+      s.useStub({ rowMs: 1500 }); // O16 M2b
       const run = await s.launch(env);
       const status = await s.ready(run.page);
       const id = await s.record(run.page);
@@ -606,13 +728,14 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
       expect(ended(s, id), 'the kill landed mid-turn').toBe(false);
       await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn goes on and ends with no app' }).toBe(true);
       await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000 }).toBe('idle');
-      await parkedThenGone(s, status.supervisor!.pid, status.daemon!.pid);
+      await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
     });
     return;
   }
 
   await withScratch('idle-keep', async (s) => {
     const fixture = turnsJournal(s.root, 'idle', 1);
+    s.useStub({ rowMs: 1500 }); // O16 M2b
     const first = await s.launch({ ...env, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const pid = (await s.ready(first.page)).supervisor!.pid;
     const id = await s.record(first.page);
@@ -645,6 +768,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
 
   await withScratch('idle-kill', async (s) => {
     const fixture = turnsJournal(s.root, 'idle', 1);
+    s.useStub({ rowMs: 1500 }); // O16 M2b
     const run = await s.launch(env);
     const pid = (await s.ready(run.page)).supervisor!.pid;
     const id = await s.record(run.page);
@@ -668,13 +792,18 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
 // A kept session mid-turn at its request, and the app quit with keep; returns the supervisor's pid. On the daemon shape
 // the e2e seams are `mawsd`'s (its environment, from the app that starts it), so the `mawsd` that kept the session is
 // killed with -9 and the next launch starts a fresh one carrying that launch's seams; the engine host serves on.
-async function keptMidTurn(s: Scratch): Promise<{ pid: number; id: AppSessionId }> {
-  const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+// P5 O16 M3c: `env` for the keeping launch (and so its engine host), `fixture` and `prompt` its turn's, `midTurn` what
+// the turn waits for before the quit (the request, by default); `engine`, the session's engine pid (null on a replay)
+// and `requestId`, its request's, when it waited for one.
+interface Kept { pid: number; id: AppSessionId; engine: number | null; requestId: string | null }
+async function keptMidTurn(s: Scratch, o: { env?: Record<string, string>; fixture?: string; prompt?: string; midTurn?: (page: Page, id: AppSessionId) => Promise<void> } = {}): Promise<Kept> {
+  const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep', ...o.env });
   const status = await s.ready(first.page);
   const pid = status.supervisor!.pid;
   const id = await s.record(first.page);
-  await startTurn(first.page, s, id);
-  await untilRequested(first.page, id);
+  await startTurn(first.page, s, id, o.fixture, o.prompt);
+  const requestId = o.midTurn ? (await o.midTurn(first.page, id), null) : (await untilRequested(first.page, id)).requestId;
+  const engine = (await statusOf(first.page, id)).pid;
   await s.quit(first);
   expect(first.quitLines()).toContain(keptQuitLine());
   expect(isAlive(pid)).toBe(true);
@@ -685,12 +814,15 @@ async function keptMidTurn(s: Scratch): Promise<{ pid: number; id: AppSessionId 
     await expect.poll(() => isAlive(daemon)).toBe(false);
     expect(isAlive(pid), 'the engine host outlives mawsd').toBe(true);
   }
-  return { pid, id };
+  return { pid, id, engine, requestId };
 }
 
-test('(f) an update that changed no wire shape: the banner names the kept session; Restart now moves to a new supervisor', async () => {
+// P5 O16 M3c: the kept engine host stands in for one from before O16, whose welcome lists no `host.holder` (detached.ts)
+const OLDER_HOST = { MAWS_E2E_HOST_WITHOUT_HOLDER: '1' };
+
+test('(f) an update that changed no wire shape, met by an engine host without host.holder: the banner names the kept session; Restart now moves to a new supervisor', async () => {
   await withScratch('updated', async (s) => {
-    const { pid } = await keptMidTurn(s);
+    const { pid } = await keptMidTurn(s, { env: OLDER_HOST });
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
     // served, with its exit armed for when its sessions go idle (§Design 6)
     expect(await s.ready(run.page, (st) => st.supervisor!.exitWhenIdle)).toMatchObject({ matches: 'build', supervisor: { pid, liveSessions: 1, exitWhenIdle: true } });
@@ -707,9 +839,176 @@ test('(f) an update that changed no wire shape: the banner names the kept sessio
   });
 });
 
-test('(g) an incompatible update: the banner, launches answer host_unavailable, Restart now moves to a new supervisor', async () => {
+// P5 O16 M3c (D9, D40): an engine host that lists `host.holder`, met by an app (or a `mawsd`) of another build with a
+// session live, is asked to hand over at its first status (fix wave 2, D63: its first quiet report; nothing is in
+// flight): it drains at once, detaches its session and exits, and the successor of the new build adopts it; it is never
+// asked to exit when idle, so no banner. On the embedded shape the app's own host supervisor asks; on the daemon shape
+// `mawsd`'s.
+test('(f) P5 O16 M3: an update with a session live: the engine host hands it over at once, the successor adopts it, no banner', async () => {
+  await withScratch('updated-handover', async (s) => {
+    s.useStub();
+    const { pid, id, engine, requestId } = await keptMidTurn(s);
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
+    expect(moved, 'a supervisor of the app’s own build, nothing armed').toMatchObject({ matches: 'same', supervisor: { exitWhenIdle: false } });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(s.log(), 'host.log: the old host drained at once').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
+    expect(s.log(), 'host.log: and left by the handover').toContain('exiting (handover)');
+    await adoptedThenCompleted(s, run.page, id, engine!, requestId!);
+    await expect(banner(run.page, 'MAWS was updated.'), 'no update banner: the old host hands over, it never waits for idle').toHaveCount(0);
+    expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
+    expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+// P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
+const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
+const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
+const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating the engine host (1 call running).'; // ENGINE_HOST_UPDATE.waiting(1, 'artifact_list')
+
+// After a deferred or waited handover: the successor adopted `id` with the same engine process, the held call was
+// answered once by the old host before it detached, the turn played on to its end, and nothing was told as a crash.
+async function heldCallAdopted(s: Scratch, run: Run, id: AppSessionId, engine: number | null): Promise<void> {
+  const rows = s.journal(id);
+  const answered = rows.findIndex(isToolAnswer);
+  const detached = rows.findIndex((r) => r.direction === 'meta' && r.frame.event === 'host_detach');
+  expect(answered, 'the old host answered the call').toBeGreaterThanOrEqual(0);
+  expect(detached, 'before it detached the session').toBeGreaterThan(answered);
+  await expect.poll(() => adoptedOf(run.page, id), { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+  expect((await statusOf(run.page, id)).pid, 'the same engine process').toBe(engine);
+  await expect.poll(async () => (await statusOf(run.page, id)).turn === null && (await eventsOf(run.page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the turn plays on and ends' }).toBe(true);
+  expect(s.journal(id).filter(isToolAnswer), 'the call answered once').toHaveLength(1);
+}
+
+async function noCrashTold(s: Scratch, run: Run): Promise<void> {
+  await new Promise((r) => setTimeout(r, 2_000)); // a crash notice would have been told by now
+  await expect(run.page.getByText(/stopped unexpectedly/), 'no crash toast: the handover’s exit was deliberate').toHaveCount(0);
+  expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
+  expect(run.maws.consoleErrors()).toEqual([]);
+}
+
+// P5 O16 M3c fix wave 2 (D63): an update waits for quiet. Session A's `maws` tool call is held (the e2e's tool hold,
+// src/engine-host/tool-server/e2e-hold.ts) when an app (or a `mawsd`) of another build meets the kept engine host: the
+// old build serves on, so session B's turn is answered meanwhile, and the update says what it waits for. Once the call
+// finishes, the host's next status is quiet: the handover is asked, drains at once, and the successor adopts both.
+test('(f) P5 O16 M3c: an update waits for a running tool call: the old build serves meanwhile and says so, then hands over; both sessions adopted, no toast', async () => {
+  await withScratch('updated-waits', async (s) => {
+    s.useStub();
+    const hold = join(s.root, 'tool-hold');
+    writeFileSync(hold, '');
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_TOOL_HOLD: hold });
+    const status = await s.ready(first.page);
+    const pid = status.supervisor!.pid;
+    const a = await s.record(first.page);
+    await startTurn(first.page, s, a, toolCallJournal(s.root, 'tool-call', 'artifact_list'), 'turn 1');
+    await expect.poll(() => s.journal(a).some(isToolCall), { timeout: 30_000, message: 'A’s engine called the tool, held' }).toBe(true);
+    const b = await s.record(first.page);
+    await s.launchSession(first.page, b, turnsJournal(s.root, 'b', 2), { cwd: s.repo }); // unpaced: its turn may end before a poll sees it open
+    value(await invoke(first.page, 'session.send', { appSessionId: b, content: 'turn 1' }));
+    await expect.poll(async () => (await eventsOf(first.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s first turn ends' }).toBe(1);
+    const engines = { a: (await statusOf(first.page, a)).pid, b: (await statusOf(first.page, b)).pid };
+    await s.quit(first);
+    expect(first.quitLines()).toContain(DAEMON ? keptQuitLine() : 'quit-guard: 1 mid-turn, auto-answered keep, 2 sessions kept'); // A mid-turn, B idle
+    if (DAEMON) {
+      process.kill(status.daemon!.pid, 'SIGKILL'); // the next launch starts a `mawsd` of its own build (the update's)
+      await expect.poll(() => isAlive(status.daemon!.pid)).toBe(false);
+    }
+
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    const waiting = await s.ready(run.page, (st) => st.supervisor!.pid === pid && st.handover !== undefined, 60_000);
+    expect(waiting, 'served by the old build, nothing armed, what it waits for said').toMatchObject({ matches: 'build', supervisor: { exitWhenIdle: false }, handover: { inFlight: 1, tool: 'artifact_list' } });
+    await expect(banner(run.page, WAITING_FOR_LIST), 'the waiting copy').toHaveCount(1);
+    await expect(banner(run.page, 'MAWS was updated.'), 'not E10’s wait for idle').toHaveCount(0);
+    value(await invoke(run.page, 'session.send', { appSessionId: b, content: 'turn 2' }));
+    await expect.poll(async () => (await eventsOf(run.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s turn is answered by the old build' }).toBe(2);
+    expect(isAlive(pid), 'the old engine host serves on').toBe(true);
+    expect(s.log(), 'host.log: nothing frozen while the call runs').not.toContain('handover armed');
+
+    rmSync(hold); // the call finishes; the host's next status is quiet, and the handover follows
+    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
+    expect(moved).toMatchObject({ matches: 'same' });
+    expect(moved.handover, 'nothing waited for any more').toBeUndefined();
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(s.log(), 'host.log: drained at once').toContain('handover armed: 2 hosted rows frozen, 0 calls in flight');
+    await heldCallAdopted(s, run, a, engines.a);
+    await expect.poll(() => adoptedOf(run.page, b), { timeout: 30_000, message: 'B adopted' }).toBe(true);
+    expect((await statusOf(run.page, b)).pid, 'B’s engine process kept').toBe(engines.b);
+    await expect(banner(run.page, WAITING_FOR_LIST)).toHaveCount(0);
+    await noCrashTold(s, run);
+  });
+});
+
+// P5 O16 M3c (D9, D40; D63 (3)): the owner's `mawsd restart --engine-host` keeps freeze-then-drain: asked while a tool
+// call runs (held), the host freezes and defers, the call finishes on the old host, whose answer reaches the engine
+// before it detaches; its exit raises no crash toast, and the successor adopts the session, whose turn plays on. The app
+// stays attached throughout: its hello is held meanwhile, which `mawsd`'s handover report keeps from failing.
+test('(f) P5 O16 M3: mawsd restart --engine-host while a tool call runs: it defers, the call finishes on the old host, the successor adopts; no crash toast', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  await withScratch('restart-deferred', async (s) => {
+    s.useStub();
+    const hold = join(s.root, 'tool-hold');
+    writeFileSync(hold, '');
+    const run = await s.launch({ MAWS_E2E_TOOL_HOLD: hold });
+    const pid = (await s.ready(run.page)).supervisor!.pid;
+    const id = await s.record(run.page);
+    await startTurn(run.page, s, id, toolCallJournal(s.root, 'tool-call', 'artifact_list'), 'turn 1');
+    await expect.poll(() => s.journal(id).some(isToolCall), { timeout: 30_000, message: 'the engine called the tool, held' }).toBe(true);
+    const engine = (await statusOf(run.page, id)).pid;
+    const asked = await s.mawsd(['restart', '--engine-host']);
+    expect(asked.stdout, `the CLI's answer: ${asked.stdout}${asked.stderr}`).toContain('the engine host defers its handover: 1 calls in flight');
+    expect(isAlive(pid), 'the old engine host serves its drain').toBe(true);
+    expect(s.journal(id).some(isToolAnswer), 'the call is still running').toBe(false);
+    rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
+    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    await heldCallAdopted(s, run, id, engine);
+    await noCrashTold(s, run);
+  });
+});
+
+// P5 O16 M3c fix wave 2 (D63 (5); M3c's concern 1): the short deferral an update can still meet. The kept host is quiet
+// when the update's `mawsd` meets it (A's turn open, its tool call sent and held back by the e2e race's gate,
+// src/engine-host/e2e-handover-race.ts, so not yet in flight), so the handover is asked at once; the ask opens the gate
+// and holds its freeze until the call is in flight and held there (the tool hold) about 25 s, past the app's 15 s welcome bound.
+// Meanwhile `mawsd`'s relay holds the app's hello, and its `daemon.engineHandover` report keeps the app from stopping it
+// or failing `held_lock`; the waiting copy shows. Once the call finishes, the successor adopts; no crash, no toast.
+test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the freeze holds the handover past the app’s welcome bound; the app waits, says why, and the successor adopts', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon): the embedded shape’s app asks the handover itself');
+  await withScratch('updated-short-deferral', async (s) => {
+    const hold = join(s.root, 'tool-hold');
+    writeFileSync(hold, '');
+    s.useStub();
+    const fixture = toolCallJournal(s.root, 'tool-call', 'artifact_list');
+    const sent = async (_page: Page, at: AppSessionId) => void (await expect.poll(() => s.journal(at).some(isToolCall), { timeout: 30_000, message: 'the engine sent the call, gated (not yet in flight)' }).toBe(true));
+    const { pid, id, engine } = await keptMidTurn(s, { env: { MAWS_E2E_TOOL_HOLD: hold, MAWS_E2E_HANDOVER_RACE: '1' }, fixture, prompt: 'turn 1', midTurn: sent });
+
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    await expect.poll(() => s.log().includes('e2e: the handover waits for a call to start before its freeze'), { timeout: 60_000, message: 'host.log: the update asked at the quiet report' }).toBe(true);
+    // the ask opened the race's gate: the call starts between the quiet report and the freeze
+    await expect.poll(() => s.log().includes('handover armed: 1 hosted rows frozen, 1 calls in flight'), { timeout: 30_000, message: 'host.log: frozen with the call in flight' }).toBe(true);
+    const frozenAt = Date.now();
+    const daemon = s.daemonLock()!.pid; // the update's mawsd, holding the app's hello
+    await expect.poll(() => s.log().includes('the handover defers: 1 calls in flight'), { timeout: 30_000, message: 'host.log: the handover defers' }).toBe(true);
+    await expect(banner(run.page, WAITING_FOR_LIST), 'the waiting copy, from mawsd’s report').toHaveCount(1, { timeout: 15_000 });
+    while (Date.now() - frozenAt < 25_000) await new Promise((r) => setTimeout(r, 1_000)); // past the app's 15 s welcome bound
+    expect(isAlive(daemon), 'the app never stopped the mawsd it waits on').toBe(true);
+    const meanwhile = value(await invoke(run.page, 'host.status', undefined));
+    expect(meanwhile.state, 'not crashed: waiting').not.toBe('crashed');
+    expect(meanwhile.reason).toBeNull();
+
+    rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
+    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(isAlive(daemon), 'the same mawsd serves the successor').toBe(true);
+    await heldCallAdopted(s, run, id, engine);
+    await expect(banner(run.page, WAITING_FOR_LIST)).toHaveCount(0);
+    await noCrashTold(s, run);
+  });
+});
+
+test('(g) an incompatible update, met by an engine host without host.holder: the banner, launches answer host_unavailable, Restart now moves to a new supervisor', async () => {
   await withScratch('incompatible', async (s) => {
-    const { pid } = await keptMidTurn(s);
+    const { pid } = await keptMidTurn(s, { env: OLDER_HOST });
     const run = await s.launch({ MAWS_E2E_WIRE_MAJOR: '4' }); // P5 O1 M6: another wire major (OX1), which no hello of this one's crosses
     await expect
       .poll(async () => {
@@ -727,6 +1026,25 @@ test('(g) an incompatible update: the banner, launches answer host_unavailable, 
     expect(fresh).not.toBe(pid);
     await expect.poll(() => isAlive(pid), { timeout: 10_000 }).toBe(false);
     await expect(notice).toHaveCount(0);
+  });
+});
+
+// P5 O16 M3c (D11): across a wire major no command crosses, so the app (or `mawsd`) writes `exit {when: 'idle'}` on the
+// refused link; an engine host that lists `host.holder`, asked so by a client whose hello listed it, hands over (the
+// drain, the detach, the exit), and the client's next retry starts a host of its own build, which adopts the session.
+test('(g) P5 O16 M3: an incompatible update with a session live: the engine host hands it over on the refused link’s exit, the successor adopts it', async () => {
+  await withScratch('incompatible-handover', async (s) => {
+    s.useStub();
+    const { pid, id, engine, requestId } = await keptMidTurn(s);
+    const run = await s.launch({ MAWS_E2E_WIRE_MAJOR: '4' });
+    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
+    expect(moved).toMatchObject({ matches: 'same' });
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(s.log(), 'host.log: the refused client’s exit, read as a handover').toContain('a refused client that adopts asked the exit when idle: handing over');
+    expect(s.log()).toContain('exiting (handover)');
+    await adoptedThenCompleted(s, run.page, id, engine!, requestId!);
+    await expect(banner(run.page, 'cannot talk to the previous supervisor'), 'the incompatible banner is gone with the old host').toHaveCount(0);
+    expect(run.maws.consoleErrors()).toEqual([]);
   });
 });
 
@@ -1040,6 +1358,78 @@ test('(l) P5 O2 M7: a kill -9 of mawsd mid-turn: the app’s transport starts a 
   });
 });
 
+// P5 O16 M3c (M3; D9, D56; acceptance 1's engine-host case): `mawsd restart --engine-host` mid-turn, on the daemon shape
+// alone. The session resumes the seeded record (its fixture carries the record's engine session id, so the record, its
+// transcript and the engine host's binding name one session), shown in a tab so main's interest holds it, on the stub
+// with its background child (`sleep`) and its stdin count. The CLI's restart hands the session over (a pending
+// permission is no call in flight, so the drain settles at once); the successor adopts it: the engine host's pid
+// changes, the session's and the child's do not, the card shows once, the turn completes, and at the stub's exit its
+// own count says the prompt reached it once. #419: the adopted session's subagent listing still updates, since the
+// successor hears main's interest again on its fresh link (mawsd's `sendInterest(true)`), an agent written before the
+// restart and one after each told to the window as the listing changes.
+test('(o) P5 O16 M3: mawsd restart --engine-host mid-turn: the turn completes, the card once, the prompt applied once, the child’s pid unchanged, the subagent listing still updates', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  await withScratch('restart-engine-host', async (s) => {
+    s.useStub({ spawnChild: true, countStdin: true });
+    const run = await s.launch();
+    const { page } = run;
+    const before = await s.ready(page);
+    const [daemonPid, old] = [before.daemon!.pid, before.supervisor!.pid];
+    const id = await s.record(page);
+    await showSession(page, id);
+    await page.evaluate((id) => {
+      const seen: string[][] = [];
+      (window as unknown as { __o16agents: string[][] }).__o16agents = seen;
+      window.maws.on('fs.subagentsChanged', (payload) => {
+        if (payload.appSessionId === id) seen.push(payload.agents.map((agent) => agent.agentId));
+      });
+    }, id);
+    const listings = () => page.evaluate(() => (window as unknown as { __o16agents: string[][] }).__o16agents);
+    await s.launchSession(page, id, s.asOwnSession(PERMISSION), { cwd: s.repo, resume: { sessionId: s.engineId as never, fork: false }, sessionId: null });
+    value(await invoke(page, 'session.send', { appSessionId: id, content: PROMPT }));
+    const requested = await untilRequested(page, id);
+    await expect.poll(async () => (await pendingPermissions(page, id)).length, { message: 'the request’s card' }).toBe(1);
+    const status = await statusOf(page, id);
+    expect(status.engineSessionId, 'the record’s own engine session').toBe(s.engineId);
+    const engine = status.pid!;
+    let child = 0;
+    await expect.poll(() => (child = Number(/^stub-engine child (\d+)$/.exec(s.stderrOf(id).find((l) => l.startsWith('stub-engine child ')) ?? '')?.[1] ?? 0)), { message: 'the stub’s background child' }).toBeGreaterThan(0);
+    expect(Number(ps(child, 'ppid')), 'the child is the engine’s').toBe(engine);
+    // #419's control: the listing updates on this host
+    s.writeAgent('o16before');
+    await expect.poll(async () => (await listings()).some((agents) => agents.includes('o16before')), { timeout: 30_000, message: 'the first agent reaches the window' }).toBe(true);
+
+    // a link mawsd is recycling refuses the restart for that moment ("restarting; it cannot hand over"), so it is asked again
+    let restarted = await s.mawsd(['restart', '--engine-host']);
+    for (let tries = 1; tries < 3 && restarted.status !== 0 && restarted.stderr.includes('cannot hand over'); tries++) {
+      await new Promise((r) => setTimeout(r, 2_000));
+      restarted = await s.mawsd(['restart', '--engine-host']);
+    }
+    expect(restarted, 'mawsd restart --engine-host').toMatchObject({ status: 0 });
+    const said = /^engine host restarted: pid (\d+), 1 sessions adopted$/m.exec(restarted.stdout);
+    expect(said, `the CLI's answer: ${restarted.stdout}${restarted.stderr}`).not.toBeNull();
+    const after = await s.ready(page, (st) => st.supervisor!.pid !== old);
+    expect(after.supervisor!.pid, 'the engine host the CLI named').toBe(Number(said![1]));
+    expect(after.daemon!.pid, 'the same mawsd').toBe(daemonPid);
+    expect(isAlive(old), 'the old engine host is gone').toBe(false);
+    expect(after.lastExit, 'no unexpected exit').toBeNull();
+    expect(s.log()).toContain('exiting (handover)');
+    expect(isAlive(child), 'the background child lives').toBe(true);
+    expect(Number(ps(child, 'ppid')), 'still the same engine’s').toBe(engine);
+    expect((await s.mawsd(['status'])).stdout, 'mawsd status: the session host, adopted').toContain('session hosts  1 (adopted 1, failed 0)');
+    // #419: an agent written after the handover is told with the one before it
+    s.writeAgent('o16after');
+    await expect.poll(async () => (await listings()).some((agents) => agents.includes('o16before') && agents.includes('o16after')), { timeout: 45_000, message: 'the adopted session’s listing updates' }).toBe(true);
+
+    await adoptedThenCompleted(s, page, id, engine, requested.requestId);
+    // the stub's own count, at its exit: the frames it read on stdin, the prompt among them once
+    expect(value(await invoke(page, 'session.stop', { appSessionId: id, reason: 'stop' }))).toMatchObject({ exited: true });
+    await expect.poll(() => s.stderrOf(id).find((l) => l.startsWith('stub-engine stdin ')), { timeout: 15_000, message: 'the stub’s stdin count' }).toMatch(/^stub-engine stdin \d+ frames, 1 user$/);
+    await expect.poll(() => isAlive(child), { timeout: 10_000, message: 'the child ends with the stub' }).toBe(false);
+    expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
 // Acceptance 3 (P5 §2's release rule, M2): with the app open the engine host releases an idle session no client holds
 // interest in, and only that one. A session in a tab is held by main's interest; one marked Keep running by its mark;
 // one whose `<cwd>/.claude/scheduled_tasks.json` lists a durable job its lineage created (P5 Decision Logs 46 and 47;
@@ -1056,6 +1446,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
   await withScratch('interest', async (s) => {
     mkdirSync(join(s.repo, '.claude'), { recursive: true });
     writeFileSync(join(s.repo, '.claude', 'scheduled_tasks.json'), `${JSON.stringify(recorded, null, 2)}\n`);
+    s.useStub(); // O16 M2b: every session of the case on the stub engine under a session host
     const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) });
     const { page } = run;
     await s.ready(page);
@@ -1063,7 +1454,7 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     const stamp = Date.now();
     // a launch of the replay and its prompt, played to its turn's end (unpaced, a turn may open and end between reads)
     const played = async (id: AppSessionId, replay: string, prompt: string) => {
-      await launchReady(page, id, replay, { cwd: s.repo });
+      await s.launchSession(page, id, replay, { cwd: s.repo });
       value(await invoke(page, 'session.send', { appSessionId: id, content: prompt }));
       await expect.poll(async () => (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 30_000, message: `${id}'s turn ends` }).toBe(true);
     };
@@ -1073,13 +1464,13 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
     const untabbed = `m7-untabbed-${stamp}` as AppSessionId;
     await played(untabbed, fixture, 'turn 1');
     const kept = `m7-kept-${stamp}` as AppSessionId;
-    await launchReady(page, kept, fixture, { cwd: s.repo });
+    await s.launchSession(page, kept, fixture, { cwd: s.repo });
     value(await invoke(page, 'session.setKeep', { appSessionId: kept, keep: true })); // before its turn can make it eligible
     value(await invoke(page, 'session.send', { appSessionId: kept, content: 'turn 1' }));
     const durable = `m7-durable-${stamp}` as AppSessionId;
     await played(durable, DURABLE, firstPrompt(DURABLE));
     const resumed = `m7-resumed-${stamp}` as AppSessionId;
-    await launchReady(page, resumed, RESUMED, { cwd: s.repo, resume: { sessionId: engineSessionId as never, fork: false }, sessionId: null });
+    await s.launchSession(page, resumed, RESUMED, { cwd: s.repo, resume: { sessionId: engineSessionId as never, fork: false }, sessionId: null });
     const all = [tabbed, untabbed, kept, durable, resumed];
     await expect.poll(async () => (await Promise.all(all.map((id) => statusOf(page, id)))).every((st) => st.turn === null), { timeout: 30_000, message: 'every turn has ended' }).toBe(true);
 
@@ -1095,7 +1486,112 @@ test('(m) P5 O2 M7: with the app open, an idle session with no tab is released; 
       expect(st.work?.crons.map((c) => c.id), 'the durable job, read from the file').toEqual(['efd35f19']);
       expect(st.keepAlive).toContain('background_tasks');
     }
+
+    // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, acceptance 2): the release armed through the gate. Three
+    // more sessions with no tab, each with a fake observer (the sminos bridge's stand-in) on the engine host's gate.sock,
+    // held by the keep mark until the observer has said hello, then let go together.
+    const gatePath = (await s.ready(page, (st) => typeof st.supervisor?.holder?.gate === 'string')).supervisor!.holder!.gate!;
+    const observers: FakeObserver[] = [];
+    try {
+      const watched = async (name: string, beat: boolean) => {
+        const id = `m7-${name}-${stamp}` as AppSessionId;
+        await s.launchSession(page, id, fixture, { cwd: s.repo });
+        value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: true }));
+        const observer = await FakeObserver.connect(gatePath);
+        observers.push(observer);
+        observer.hello((await statusOf(page, id)).engineSessionId!, { pid: null, childPid: null });
+        await observer.next('welcome', 10_000);
+        if (beat) observer.beat(5_000); // the bridge's heartbeat
+        await expect.poll(async () => (await statusOf(page, id)).reap?.observer, { message: `${name}: the observer in the status` }).toBe('healthy');
+        return { id, observer };
+      };
+      const armed = await watched('armed', true);
+      const turned = await watched('turned', true);
+      const silent = await watched('silent', false);
+      const acknowledged = await watched('acknowledged', true); // kept until its own scene, below
+      for (const { id } of [armed, turned, silent]) value(await invoke(page, 'session.setKeep', { appSessionId: id, keep: false }));
+      // armed: the arm comes before any signal; the release follows the scene's armed
+      const arm = await armed.observer.next('arm', IDLE_MS + 15_000);
+      expect(arm).toMatchObject({ t: 'arm', leaseMs: 10_000 });
+      expect(released(s, armed.id), 'no signal before armed').toBeUndefined();
+      armed.observer.send({ t: 'armed', fence: arm.fence as number });
+      await expect.poll(() => released(s, armed.id)?.frame.reason, { timeout: 20_000, message: 'the armed session is released as idle' }).toBe('idle');
+      // turned: a turn after the arm is answered proceed; the session stays live for another period
+      const turnArm = await turned.observer.next('arm', IDLE_MS + 15_000);
+      turned.observer.send({ t: 'turn', fence: turnArm.fence as number, origin: 'query' });
+      expect(await turned.observer.next('proceed', 5_000)).toEqual({ t: 'proceed', fence: turnArm.fence });
+      await new Promise((r) => setTimeout(r, IDLE_MS));
+      expect(released(s, turned.id), 'the session whose turn proceeded is not released').toBeUndefined();
+      expect((await statusOf(page, turned.id)).process).toBe('ready');
+      // silent: once its silence passes the window the session is held, past two periods
+      await expect.poll(async () => (await statusOf(page, silent.id)).work?.unknown, { timeout: 30_000, message: 'the silent observer holds its session' }).toBe('observer_unhealthy');
+      await new Promise((r) => setTimeout(r, 2 * IDLE_MS + 1_000));
+      expect(released(s, silent.id), 'the session whose observer went silent is not released').toBeUndefined();
+      expect((await statusOf(page, silent.id)).process).toBe('ready');
+      // acknowledged: a turn after the observer's armed, before any signal, is answered proceed and the reap is
+      // cancelled. A healthy observer's armed within the lease less its margin is signalled in the same step, so the
+      // window the design makes real is the renewal (D53, the gate fixture's `armed-renewing-turn-proceed`). An armed
+      // after the lease less its margin and before the lease ends is renewed with the same fence, and the turn lands
+      // while the host awaits the renewal's armed. The renewal is what shows the host took the armed.
+      value(await invoke(page, 'session.setKeep', { appSessionId: acknowledged.id, keep: false }));
+      const ackArm = await acknowledged.observer.next('arm', IDLE_MS + 15_000);
+      const armSeen = Date.now(); // the host's lease runs from its send, a little earlier
+      const leaseMs = ackArm.leaseMs as number;
+      // armed 600 ms before the lease ends: past the lease less reap.ts's LEASE_MARGIN_MS (1 s), 400 ms into the window
+      await new Promise((r) => setTimeout(r, armSeen + leaseMs - 600 - Date.now()));
+      expect(released(s, acknowledged.id), 'no signal before armed').toBeUndefined();
+      acknowledged.observer.send({ t: 'armed', fence: ackArm.fence as number });
+      expect(await acknowledged.observer.next('arm', 2_000), 'the late armed is taken and the arm renewed').toEqual({ t: 'arm', fence: ackArm.fence, leaseMs });
+      acknowledged.observer.send({ t: 'turn', fence: ackArm.fence as number, origin: 'query' });
+      expect(await acknowledged.observer.next('proceed', 5_000)).toEqual({ t: 'proceed', fence: ackArm.fence });
+      expect(await acknowledged.observer.next('disarm', 5_000), 'the reap is cancelled').toEqual({ t: 'disarm', fence: ackArm.fence });
+      await new Promise((r) => setTimeout(r, IDLE_MS));
+      expect(released(s, acknowledged.id), 'the session whose turn proceeded after its armed is not released').toBeUndefined();
+      expect((await statusOf(page, acknowledged.id)).process).toBe('ready');
+    } finally {
+      for (const observer of observers) if (!observer.isClosed) await observer.close();
+    }
     expect(run.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+test('(e′) O16 M2b: the spine released just before an idle release: the release’s events load it again, and no engine host starts in place of the one that parks', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s case (pnpm e2e:supervisor-daemon)');
+  // The race behind case (e)'s flake (hosted run 41217185059), run on purpose. Two clocks start at about the turn's end:
+  // the row's idle release (the idle time) and mawsd's spine release (its quiet period, the idle time unless
+  // MAWS_SPINE_QUIET_MS sets it). Here the spine's is 2 s shorter, so the spine is cold when the release's events reach
+  // mawsd while the engine host, asked to exit when idle, exits. Those events load the spine again. Before #409 that
+  // load's pushes (engine.configure, host.configure, fs.bind and the rest) were held by the link for the exiting host
+  // and started a successor at its park. Since #409 a load the engine host's events alone caused sends a host that is
+  // not ready nothing (spine-seam.ts `wanted`, spine-hosts.ts).
+  const IDLE_MS = 10_000;
+  const SPINE_QUIET_MS = IDLE_MS - 2_000;
+  const released = (s: Scratch, id: string) => s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'exit');
+  const ended = (s: Scratch, id: string) => s.journal(id).some((r) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'completed');
+  const spawns = (s: Scratch) => s.daemonLog().split('\n').filter((l) => l.includes('[hosts] spawned a supervisor'));
+  const at = (line: string) => Date.parse(line.slice(0, line.indexOf(' ')));
+  await withScratch('spine-race', async (s) => {
+    const fixture = turnsJournal(s.root, 'spine-race', 1);
+    s.useStub({ rowMs: 1500 });
+    const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_SPINE_QUIET_MS: String(SPINE_QUIET_MS) });
+    const status = await s.ready(run.page);
+    const id = await s.record(run.page);
+    await startTurn(run.page, s, id, fixture, 'turn 1');
+    const hostsBefore = spawns(s); // both hosts up
+    await s.killApp(run);
+    expect(ended(s, id), 'the kill landed mid-turn').toBe(false);
+    await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn goes on and ends with no app' }).toBe(true);
+    await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
+    await parkedThenGone(s, IDLE_MS, status.supervisor!.pid, status.daemon!.pid);
+    expect(spawns(s), `no host was started after the turn began${logsOf(s)}`).toEqual(hostsBefore);
+
+    // the scene ran the race: the spine released before the row did, and the release's events loaded it again
+    const release = s.log().split('\n').find((l) => l.includes('idle release of '));
+    expect(release, 'host.log: the idle release').toBeDefined();
+    const spine = s.daemonLog().split('\n').filter((l) => l.includes('[spine] '));
+    const quiet = spine.findLast((l) => l.includes('[spine] releasing (quiet)') && at(l) < at(release!));
+    expect(quiet, `the spine released on its quiet before the row's release${logsOf(s)}`).toBeDefined();
+    expect(spine.some((l) => l.includes('[spine] loading (event)') && at(l) >= at(release!)), `the release's events loaded the cold spine${logsOf(s)}`).toBe(true);
   });
 });
 

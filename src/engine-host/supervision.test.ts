@@ -16,16 +16,17 @@ import { scriptedSession } from './conformance/session-harness';
 import { PluginsRunner } from './plugins/runner';
 import { ProcessTable } from './process-table';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
-import { DEFAULT_IDLE_EXIT_MS, RELEASE_WHILE_CONNECTED, SERVER_RELEASE_MS, Supervision, type SupervisorExit, type SupervisorIdentity } from './supervision';
+import { DEFAULT_IDLE_EXIT_MS, RELEASE_WHILE_CONNECTED, SERVER_RELEASE_MS, Supervision, type SupervisionDeps, type SupervisorExit, type SupervisorIdentity } from './supervision';
 
 const T0 = new Date('2026-10-06T10:00:00.000Z');
 const IDLE = 60_000;
 const IDENTITY: SupervisorIdentity = { pid: 4321, startedAt: T0.toISOString(), buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', socketPath: null, logPath: null };
 const DETACHED: SupervisorIdentity = { ...IDENTITY, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log' };
 
-function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 'laptop') {
-  const rows: { lifecycle: 'starting' | 'initializing' | 'ready' | 'exiting' | 'exited' }[] = [];
+function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 'laptop', extra: Pick<SupervisionDeps, 'e2eRace'> = {}) {
+  const rows: { lifecycle: 'starting' | 'initializing' | 'ready' | 'exiting' | 'exited'; status: () => { holder: { pid: number; holderId: string; adopted: boolean } | null }; calls: number; tool: string | null; inFlightThroughDelivery(): number; deliveringTool(): string | null }[] = [];
   const statusListeners = new Set<() => void>();
+  const deliveryListeners = new Set<() => void>(); // P5 O16 M3c fix wave 2
   const rowListeners = new Set<() => void>();
   const releases: { idleMs: number | null; active: boolean; ignoreInterest?: boolean }[] = [];
   const interest: { holder: ClientRef; sessions: readonly string[] }[] = []; // P5 O2 M2
@@ -33,9 +34,17 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
     list: () => rows,
     onChange: (listener: () => void) => (statusListeners.add(listener), () => statusListeners.delete(listener)),
     onRowsChanged: (listener: () => void) => (rowListeners.add(listener), () => rowListeners.delete(listener)),
+    onDeliveryChanged: (listener: () => void) => (deliveryListeners.add(listener), () => deliveryListeners.delete(listener)), // P5 O16 M3c fix wave 2
     setIdleRelease: (policy: { idleMs: number | null; active: boolean; ignoreInterest?: boolean }) => void releases.push({ ...policy }),
     setInterest: (holder: ClientRef, sessions: readonly string[]) => void interest.push({ holder, sessions: [...sessions] }), // P5 O2 M2
+    // P5 O16 M3b: the rows the handover froze (the harness's `draining`), frozen once
+    freezeForHandover: () => {
+      freezes += 1;
+      return draining;
+    },
   };
+  let freezes = 0;
+  const draining: DrainingFake[] = [];
   const plugins = { held: false, idle: new Set<() => void>() };
   const emitted: SupervisorStatus[] = [];
   const lines: string[] = [];
@@ -58,6 +67,7 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
       return true;
     },
     log: (line) => void lines.push(line),
+    ...extra, // P5 O16 M3c fix wave 2
   });
   const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
   const hooks: (() => void)[] = [];
@@ -70,9 +80,19 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
   };
   const exits: SupervisorExit[] = [];
   const start = () => supervision.started(DETACHED, (reason) => void exits.push(reason));
-  const launch = () => {
-    rows.push({ lifecycle: 'ready' });
+  const launch = (hosted = false) => {
+    const row: (typeof rows)[number] = {
+      lifecycle: 'ready', status: () => ({ holder: hosted ? { pid: 7000 + rows.length, holderId: `L${rows.length}`, adopted: false } : null }), // P5 O16 M2: under a session host
+      calls: 0, tool: null, inFlightThroughDelivery: () => row.calls, deliveringTool: () => row.tool, // P5 O16 M3c fix wave 2
+    };
+    rows.push(row);
     for (const listener of rowListeners) listener();
+  };
+  // P5 O16 M3c fix wave 2: a row's calls in flight through delivery, as its session tells them (`delivery`)
+  const deliver = (i: number, calls: number, tool: string | null) => {
+    rows[i]!.calls = calls;
+    rows[i]!.tool = tool;
+    for (const listener of deliveryListeners) listener();
   };
   const exitRow = (i = 0) => {
     rows[i]!.lifecycle = 'exited';
@@ -82,7 +102,38 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
     plugins.held = false;
     for (const listener of plugins.idle) listener();
   };
-  return { supervision, rows, releases, interest, plugins, emitted, lines, shutdown, shutdowns: () => shutdowns, handlers, hooks, call, exits, start, launch, exitRow, pluginsIdle };
+  return { supervision, rows, releases, interest, plugins, emitted, lines, shutdown, shutdowns: () => shutdowns, handlers, hooks, call, exits, start, launch, deliver, exitRow, pluginsIdle, draining, freezes: () => freezes };
+}
+
+// P5 O16 M3b: a frozen row as the drain sees it: its calls in flight, settled one by one (`retire`), and its detach.
+interface DrainingFake {
+  inFlight: number;
+  tool: string | null; // P5 O16 M3c fix wave 2
+  detached: string[];
+  inFlightThroughDelivery(): number;
+  deliveringTool(): string | null;
+  drained(): Promise<void>;
+  detach(reason: 'handover' | 'exit'): Promise<void>;
+  retire(): void;
+}
+function drainingRow(inFlight: number): DrainingFake {
+  let drained: () => void = () => {};
+  const done = new Promise<void>((resolve) => (drained = resolve));
+  const row: DrainingFake = {
+    inFlight, tool: inFlight > 0 ? 'show_pane' : null, detached: [],
+    inFlightThroughDelivery: () => row.inFlight,
+    deliveringTool: () => row.tool,
+    drained: () => (row.inFlight === 0 ? Promise.resolve() : done),
+    detach: async (reason) => void row.detached.push(reason),
+    retire: () => {
+      row.inFlight -= 1;
+      if (row.inFlight === 0) {
+        row.tool = null;
+        drained();
+      }
+    },
+  };
+  return row;
 }
 
 beforeEach(() => {
@@ -332,12 +383,25 @@ describe('host.stopAll', () => {
 });
 
 describe('host.supervisorStatus', () => {
+  // P5 O16 M2: the live rows under a session host, which `mawsd`'s daemon.status counts; none in utility mode
+  it('counts the live rows under a session host in detached mode, and carries no holder in utility mode', async () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    h.launch(false);
+    h.launch(true);
+    expect((await h.call('host.supervisorStatus', undefined)).holder).toEqual({ hosts: 2, adopted: 0, failed: 0, gate: null, handover: 'none', adopting: true /* P5 O16 M3b: no adoptionsEnded told */, inFlight: 0 /* M3c fix wave 2 */ });
+    h.exitRow(0);
+    expect((await h.call('host.supervisorStatus', undefined)).holder?.hosts).toBe(1);
+    expect(harness('utility').supervision.status()).not.toHaveProperty('holder');
+  });
+
   it('answers the status and emits it on every change, never twice the same, and always in the connect burst', async () => {
     const h = harness();
     h.start();
     h.supervision.clientChanged(true);
     const status = await h.call('host.supervisorStatus', undefined);
-    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0, release: { role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS } /* P5 O2 M2 */ });
+    expect(status).toEqual({ mode: 'detached', ...DETACHED, liveSessions: 0, rows: 0, idleExitMs: DEFAULT_IDLE_EXIT_MS, idleExitAt: null, exitWhenIdle: false, orphansKilled: 0, release: { role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS } /* P5 O2 M2 */, holder: { hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'none', adopting: true, inFlight: 0 } /* P5 O16 M2; M3b: adopting; M3c fix wave 2: inFlight */ });
     expect(h.emitted.at(-1)).toEqual(status);
     const count = h.emitted.length;
     h.supervision.clientChanged(true); // nothing changed
@@ -693,5 +757,273 @@ describe('the engine host’s collection, asked again as it runs', () => {
     expect(plugins.busy()).toBe(false);
     h.turn(); // the read's end told the runner idle: an entry
     expect(h.collect).toHaveBeenCalledTimes(2);
+  });
+});
+
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §D, §F): the gate in the status, its path in
+// `holder.gate` and the live rows' counts in `release.gate`, both read at each status; absent without a gate.
+describe('host.supervisorStatus: the gate (O16 M5)', () => {
+  it('carries the gate’s path and counts as the gate reports them, valid on the wire', async () => {
+    let counts = { armed: 0, observed: 1, unhealthy: 0, absent: 2 };
+    let path: string | null = '/u/supervisor/gate.sock';
+    const emitted: SupervisorStatus[] = [];
+    const supervision = new Supervision({
+      mode: 'detached', identity: IDENTITY, role: 'server',
+      table: { list: () => [], onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, interested: () => false, launching: () => false, onHoldChanged: () => () => {} } as never,
+      plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
+      shutdown: async () => ({ stopped: 0, forced: 0 }),
+      emit: (status) => {
+        const checked = validateEventPayload('host.supervisorStatus', status);
+        if (!checked.ok) throw new Error(`invalid host.supervisorStatus: ${JSON.stringify(checked.issues)}`);
+        emitted.push(status);
+        return true;
+      },
+      log: () => {},
+      gate: { path: () => path, counts: () => counts },
+    });
+    expect(supervision.status()).toMatchObject({
+      release: { role: 'server', idleMs: SERVER_RELEASE_MS, gate: { armed: 0, observed: 1, unhealthy: 0, absent: 2 } },
+      holder: { hosts: 0, adopted: 0, failed: 0, gate: '/u/supervisor/gate.sock', handover: 'none' },
+    });
+    counts = { armed: 1, observed: 1, unhealthy: 1, absent: 0 };
+    path = null; // its listen failed
+    expect(supervision.status()).toMatchObject({ release: { gate: counts }, holder: { gate: null } });
+    expect(emitted.length).toBeGreaterThan(0);
+  });
+
+  it('a harness with no gate reports no counts and no path: a detached one its session hosts alone, a utility one no holder', () => {
+    const h = harness();
+    expect(h.supervision.status().release).toEqual({ role: 'laptop', idleMs: DEFAULT_IDLE_EXIT_MS });
+    expect(h.supervision.status().holder).toEqual({ hosts: 0, adopted: 0, failed: 0, gate: null, handover: 'none', adopting: true, inFlight: 0 });
+    expect(harness('utility').supervision.status().holder).toBeUndefined();
+  });
+});
+
+// P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11, D33, D34): the handover, armed by
+// host.handover or by a refused link's `exit idle` from a client that adopts, freezes the hosted rows once, detaches
+// them once every row has drained (fix wave 1: all at once, at the settle), and runs the exit order after its answer
+// is written.
+describe('the handover', () => {
+  it('exit idle on a welcomed link keeps E10’s meaning whatever the hello listed; on a refused link from a client that adopts it hands over', async () => {
+    const welcomed = harness();
+    welcomed.start();
+    welcomed.launch(true);
+    welcomed.supervision.exitAsked('idle', { refused: false, capabilities: ['host.holder'] });
+    expect(welcomed.supervision.status()).toMatchObject({ exitWhenIdle: true, holder: { handover: 'none' } });
+    expect(welcomed.freezes()).toBe(0);
+
+    const bare = harness();
+    bare.start();
+    bare.launch(true);
+    bare.supervision.exitAsked('idle', { refused: true, capabilities: [] }); // an older client: E10's wait
+    expect(bare.supervision.status()).toMatchObject({ exitWhenIdle: true, holder: { handover: 'none' } });
+
+    const adopting = harness();
+    adopting.start();
+    adopting.launch(true);
+    const row = drainingRow(1);
+    adopting.draining.push(row);
+    adopting.supervision.exitAsked('idle', { refused: true, capabilities: ['host.holder'] });
+    expect(adopting.freezes()).toBe(1);
+    expect(adopting.supervision.status()).toMatchObject({ exitWhenIdle: false, holder: { handover: 'draining' } });
+    expect(adopting.emitted.at(-1)?.holder?.handover).toBe('draining');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(adopting.exits).toEqual([]); // a call in flight: deferred, never forced
+    row.retire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(row.detached).toEqual(['handover']);
+    expect(adopting.exits).toEqual(['handover']);
+  });
+
+  it('exit now from any client runs the exit order at once, with no drain', () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    h.supervision.exitAsked('now', { refused: false, capabilities: [] });
+    expect(h.exits).toEqual(['exit']);
+    expect(h.freezes()).toBe(0);
+  });
+
+  it('host.handover answers deferred with the calls in flight after its grace, then the exit follows the drain', async () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    h.launch(true);
+    const busy = drainingRow(2);
+    const idle = drainingRow(0);
+    h.draining.push(busy, idle);
+    const answer = h.call('host.handover', { graceMs: 5_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle.detached).toEqual([]); // fix wave 1: drained, it waits for the drain's settle, so a stop-all can still take it back
+    expect(h.supervision.quiet()).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await answer).toEqual({ state: 'deferred', inFlight: 2, tool: 'show_pane' /* P5 O16 M3c fix wave 2 */ });
+    const again = h.call('host.handover', { graceMs: 0 }); // asked again: the same drain
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await again).toEqual({ state: 'deferred', inFlight: 2, tool: 'show_pane' });
+    expect(h.freezes()).toBe(1);
+    busy.retire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.exits).toEqual([]);
+    busy.retire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(busy.detached).toEqual(['handover']);
+    expect(idle.detached).toEqual(['handover']); // both at the settle
+    expect(h.exits).toEqual(['handover']);
+  });
+
+  it('host.handover answers detaching once the drain settles within its grace, and the exit follows the answer', async () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    const row = drainingRow(1);
+    h.draining.push(row);
+    const answer = h.call('host.handover', {}); // the default grace, 10 s
+    await vi.advanceTimersByTimeAsync(9_000);
+    row.retire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await answer).toEqual({ state: 'detaching' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.exits).toEqual(['handover']);
+  });
+
+  it('with nothing hosted the drain has settled at once: detaching, then the exit', async () => {
+    const h = harness();
+    h.start();
+    expect(await h.call('host.handover', {})).toEqual({ state: 'detaching' });
+    expect(h.exits).toEqual([]); // not before the answer is written
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.exits).toEqual(['handover']);
+  });
+
+  it('is the detached supervisor’s alone', async () => {
+    const h = harness('utility');
+    await expect(h.call('host.handover', {})).rejects.toMatchObject({ ipcError: { code: 'internal' } });
+  });
+
+  // P5 O16 M3c fix wave 2 (D63): what an update's handover waits for, pushed in the status at each change, so the client
+  // that would hand the host over asks at its first quiet report and never polls
+  it('reports the calls in flight through delivery over the hosted rows and the first one’s tool, published at each change', () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    h.launch(true);
+    h.launch(false); // a row with no session host is no handover's
+    expect(h.supervision.status().holder).toMatchObject({ inFlight: 0 });
+    expect(h.supervision.status().holder).not.toHaveProperty('tool');
+    const before = h.emitted.length;
+    h.deliver(1, 2, 'artifact_list');
+    expect(h.emitted.length).toBe(before + 1);
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ inFlight: 2, tool: 'artifact_list' });
+    h.deliver(0, 1, 'show_pane');
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ inFlight: 3, tool: 'show_pane' });
+    h.deliver(2, 4, 'send_file');
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ inFlight: 3 });
+    h.deliver(0, 0, null);
+    h.deliver(1, 0, null);
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ inFlight: 0 });
+    expect(h.emitted.at(-1)?.holder).not.toHaveProperty('tool');
+    const quiet = h.emitted.length;
+    h.deliver(1, 0, null); // nothing changed: nothing published
+    expect(h.emitted.length).toBe(quiet);
+  });
+
+  // P5 O16 M3c fix wave 2 (the re-review's item 6): main reads a handover's close as planned only once the old host said
+  // every row was detached, which it says after the detaches settle, before its exit order closes the link
+  it('says detached once the drain has settled and every row’s detach has ended, and not before', async () => {
+    const h = harness();
+    h.start();
+    h.launch(true);
+    const row = drainingRow(1);
+    let detached: () => void = () => {};
+    row.detach = (reason) => new Promise<void>((resolve) => (detached = () => (row.detached.push(reason), resolve())));
+    h.draining.push(row);
+    void h.call('host.handover', { graceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ handover: 'draining' });
+    expect(h.emitted.at(-1)?.holder?.detached).toBeUndefined();
+    row.retire();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.emitted.at(-1)?.holder?.detached).toBeUndefined(); // settled, its detach still writing
+    detached();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.emitted.at(-1)?.holder).toMatchObject({ handover: 'draining', detached: true });
+  });
+
+  // P5 O16 M3c fix wave 2: the e2e's race (e2e-handover-race.ts) holds the first ask's freeze until a call is in flight,
+  // and the ask's grace counts that wait, so its answer comes within the asker's bound
+  it('under the e2e race, the first ask freezes once a call is in flight, its grace counting the wait', async () => {
+    let started: () => void = () => {};
+    const race = vi.fn((inFlight: () => number) => new Promise<number>((resolve) => (started = () => resolve(inFlight() > 0 ? 4_000 : -1))));
+    const h = harness('detached', 'laptop', { e2eRace: race });
+    h.start();
+    h.launch(true);
+    const row = drainingRow(1);
+    h.draining.push(row);
+    const answer = h.call('host.handover', { graceMs: 10_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.freezes()).toBe(0); // the scene's call has not started
+    expect(h.lines).toContain('e2e: the handover waits for a call to start before its freeze');
+    h.deliver(0, 1, 'artifact_list');
+    started();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.freezes()).toBe(1);
+    await vi.advanceTimersByTimeAsync(6_000); // the grace's rest after the race's 4 s
+    expect(await answer).toEqual({ state: 'deferred', inFlight: 1, tool: 'show_pane' });
+    void h.call('host.handover', { graceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(race).toHaveBeenCalledTimes(1); // the first ask's alone
+  });
+
+  it('says the start’s adoptions are under way until they have ended', () => {
+    const h = harness();
+    expect(h.supervision.status().holder?.adopting).toBe(true);
+    h.supervision.adoptionsEnded(0);
+    expect(h.supervision.status().holder?.adopting).toBe(false);
+  });
+});
+
+// P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host (a failed adoption, D59(6); a
+// losing host, D59(10)) is no live session: the idle exit and the park's exit-when-idle run past it, so the next start
+// reads the roster and retries its adoption; a hold, by contrast, keeps the host.
+describe('an unattached session host and the supervisor’s clocks', () => {
+  function withTable(table: ProcessTable) {
+    const supervision = new Supervision({
+      mode: 'detached', identity: IDENTITY, role: 'laptop', table,
+      plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
+      shutdown: async () => ({ stopped: 0, forced: 0 }),
+      emit: () => true,
+      log: () => {},
+    });
+    const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
+    supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>), { onConnect: () => {} });
+    const exits: SupervisorExit[] = [];
+    supervision.started(DETACHED, (reason) => void exits.push(reason));
+    return { supervision, exits, call: (name: string, input: unknown) => handlers.get(name)!(input, { client: endableClientRef('1') }) };
+  }
+  const unattachedTable = () => {
+    const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: () => true, procStartOf: () => 'then' });
+    table.unattach('app-u' as AppSessionId, { holderId: 'L1', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => 'stopped' });
+    return table;
+  };
+
+  it('the idle exit fires with one standing, and its status counts no live session', async () => {
+    const { supervision, exits } = withTable(unattachedTable());
+    expect(supervision.status()).toMatchObject({ liveSessions: 0, rows: 0 });
+    await vi.advanceTimersByTimeAsync(DEFAULT_IDLE_EXIT_MS);
+    expect(exits).toEqual(['idle']);
+  });
+
+  it('the park’s exit-when-idle leaves with one standing; a hold would keep the host', async () => {
+    const parked = withTable(unattachedTable());
+    parked.supervision.clientChanged(true);
+    await parked.call('host.exitWhenIdle', { armed: true });
+    expect(parked.exits).toEqual(['exitWhenIdle']);
+    const held = new ProcessTable({ ps: async () => '', log: () => {} });
+    held.holdForAdoption(['app-u' as AppSessionId]);
+    const holding = withTable(held);
+    holding.supervision.clientChanged(true);
+    await holding.call('host.exitWhenIdle', { armed: true });
+    expect(holding.exits).toEqual([]);
   });
 });

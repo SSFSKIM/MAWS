@@ -44,6 +44,11 @@
 //   and its byte stream (./remote-pty.ts), across the link's channels; `pty.hostState` of the machine is its link's. A
 //   loopback port of the machine is forwarded to a listener on this Mac's (./remote-forward.ts, `remote.forward.open`
 //   and `.close`, which main's handlers bring here), each connection a stream.
+// - P5 O7 M6: each machine's attention, on one machine-wide feed per link (./remote-attention.ts), which the badge and
+//   the notifier read beside this Mac's (`attention`).
+// - P5 O7 M5a: another machine's artifacts (./remote-artifacts.ts): their reads as calls, their writes as engine-host acts
+//   on no session (the third act shape), the id-to-machine table, the `session.capabilities` substitute, the machine's
+//   `artifacts` feed, and `remote.openCopy` and Save As's bytes, which main's handlers bring here (`artifacts`).
 import type { Socket } from 'node:net';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -60,6 +65,9 @@ import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
+import { ArtifactMachines } from '../artifacts/machines';
+import { createRemoteArtifacts, type RemoteArtifacts } from './remote-artifacts';
+import { createRemoteAttention, type RemoteAttention } from './remote-attention';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
@@ -121,6 +129,14 @@ export interface RemoteLaneBDeps {
   laneOf?(machine: MachineRef, session: string): 'A' | 'B' | null;
   /** P5 O7 M3: a forwarded port's local listener; src/main/forwards.ts's by default. */
   listen?(onConnection: (socket: Socket) => void): Promise<LocalListener>;
+  /** P5 O7 M5a: which machine an artifact is on, written here alone (a table of its own by default). */
+  artifactMachines?: ArtifactMachines;
+  /** P5 O7 M5a: shell.openPath, for `remote.openCopy`'s copy (none opens without it). */
+  openPath?(path: string): Promise<string>;
+  /** P5 O7 M5a: where open copies go (os.tmpdir() by default). */
+  tempDir?(): string;
+  /** P5 O7 M5a: MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's open seam. */
+  env?: NodeJS.ProcessEnv;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -145,7 +161,11 @@ export interface RemoteLaneB {
     listening: RemoteForwards['listening'];
     at: RemoteForwards['at'];
   };
-  /** Every subscription, stream and forwarded port's listener closed: before the links, in the shutdown order. */
+  /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
+  attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
+  /** P5 O7 M5a: `remote.openCopy` (main's handler's) and a remote artifact's files for Save As (src/main/library/files.ts). */
+  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files'>;
+  /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
   spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
@@ -175,7 +195,7 @@ export const NOT_OPEN = 'open the session to drive it';
 
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
- * `base`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
+ * `base`; `session.search` refused `not-offered` (an endpoint older than M6) is answered `host_unavailable`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
  * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
@@ -185,6 +205,11 @@ export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) =
     const result = await base(machine, name, input, ctx);
     const app = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
     if (name === 'session.get' && typeof app === 'string' && remote(machine) !== null) laneB.replay(machine, app);
+    // P5 O7 M6 fix wave 1: an endpoint older than M6 offers no search; to the renderer's merge it is a machine left out, as
+    // an offline one is
+    if (name === 'session.search' && !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'not-offered' && remote(machine) !== null) {
+      return { ok: false, error: ipcError('host_unavailable', `session.search: machine ${remote(machine)!.name} offers no search`) };
+    }
     return result;
   };
 }
@@ -204,6 +229,19 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const machines = new Map<MachineRef, { link: RemoteLink; lanes: Map<string, Lane> }>();
   let revision = 0;
   const sessionOf = (machine: MachineRef, app: string) => machines.get(machine)?.lanes.get(app)?.session;
+  // P5 O7 M6: one machine-wide attention feed per link; once it is fed (fix wave 5), the sessions' streams say no attention of
+  // their own, and when it stops (no feed on the channel) they say theirs again (fix wave 1)
+  const attention = createRemoteAttention({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    emit: deps.emit,
+    timing,
+    unfed: (machine) => {
+      for (const lane of machines.get(machine)?.lanes.values() ?? []) lane.session.replayAttention();
+    },
+    streamItems: (machine) => [...(machines.get(machine)?.lanes.values() ?? [])].flatMap((lane) => lane.session.attentionItems()), // fix wave 3
+    log: deps.log,
+  });
   const checkout = createRemoteCheckout({
     remote: deps.remote,
     emit: deps.emit,
@@ -220,6 +258,21 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // P5 O7 M3: terminals and forwarded ports
   const ptys = createRemotePty({ remote: deps.remote, emit: deps.emit, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
   const forwards = createRemoteForwards({ remote: deps.remote, listen: deps.listen ?? listenLoopback, bounded: (handle, deadline) => bounded(handle, deadline), pendingMs: timing.sendPendingMs, timing, now, log: deps.log });
+  // P5 O7 M5a: artifacts
+  const artifacts = createRemoteArtifacts({
+    remote: deps.remote,
+    onRemote: deps.onRemote,
+    emit: deps.emit,
+    machines: deps.artifactMachines ?? new ArtifactMachines(),
+    bounded: (handle, deadline) => bounded(handle, deadline),
+    pendingMs: timing.sendPendingMs,
+    feedRetryMs: timing.feedRetryMs,
+    openPath: deps.openPath ?? (async () => 'opening a copy is not wired in this process'),
+    ...(deps.tempDir !== undefined && { tempDir: deps.tempDir }),
+    env: deps.env ?? {},
+    now,
+    log: deps.log,
+  });
 
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
@@ -248,6 +301,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         revision: () => (revision = Math.max(revision + 1, now())),
         subscribed: () => checkout.open(link, app), // P5 O7 M4: the checkout feed beside the stream
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
+        attentionFed: () => attention.fed(machine), // fix waves 1, 5: the feed's items are the session's attention once fed
+        attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
@@ -275,7 +330,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   function forget(machine: MachineRef, app: string, lane: Lane): void {
     if (lane.open || lane.sending || lane.sends.length > 0) return;
     const lanes = machines.get(machine)?.lanes;
-    if (lanes?.get(app) === lane) lanes.delete(app);
+    if (lanes?.get(app) !== lane) return;
+    lanes.delete(app);
+    if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
   const interest = createRemoteInterest({
@@ -446,6 +503,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   async function run(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const deadline = now() + timing.sendPendingMs;
+    if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields); // P5 O7 M5a
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
     if (name === 'files.upload') return upload(link, fields);
@@ -472,7 +530,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -496,17 +554,22 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
+    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine) },
+    attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
+      attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
     },
     stop() {
       interest.stop();
       offRemote();
       checkout.stop();
+      attention.stop();
       spawns.stop();
       ptys.stop();
       forwards.stop();
+      artifacts.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
     },

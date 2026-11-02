@@ -9,7 +9,7 @@ import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { displayTitle, NEW_CHAT } from '../sessions/title'; // E3
+import { displayTitle, listedTitle } from '../sessions/title'; // E3; P5 O7 M6: listedTitle
 import { projectLabels } from './project-labels';
 import type { MachineRef } from '@shared/machine/ref';
 import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfListedRecord, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5; P5 O7 M2: rowOfListedRecord
@@ -36,9 +36,8 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     (branchLabel(recordBranch(record))?.toLowerCase().includes(q) ?? false); // P2-D
 }
 
-// P5 O8 M2: a listed row's title, "New chat" while its listing has none (as `displayTitle` reads a record's); the search
-// matches a listed row by its title alone.
-export const listedTitle = (listed: Pick<ListedSession, 'title'>): string => (listed.title.trim() === '' ? NEW_CHAT : listed.title);
+// P5 O8 M2: a listed row's title (`sessions/title.ts`); the search matches a listed row by its title alone.
+export { listedTitle };
 export function listedMatcher(query: string): (listed: ListedSession) => boolean {
   const q = query.trim().toLowerCase();
   return q === '' ? () => true : (listed) => listedTitle(listed).toLowerCase().includes(q);

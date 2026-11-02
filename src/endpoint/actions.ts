@@ -4,7 +4,11 @@
 //
 // The endpoint's checks, in order, the first refusal answering `ack {state: 'refused', reason}`:
 //   1. freshness and replay (freshness.ts: `stale`, `malformed`, `expired`, `replayed`), before anything is read;
-//   2. authorization (M5's gate, which calls `execute` with what it decided);
+//   2. authorization (M5's gate, which calls `execute` with what it decided). The action's fingerprint is taken before
+//      it is decided (P5 O7 M5a fix wave 1), so `execute` hands a lane B, machine, pty host or artifact act to its ledger
+//      with nothing awaited from its decision's continuation, and each asks the decision whether it stands (`stands`)
+//      in the step it is accepted and sent, decided again once when it moved: a right withdrawn after that step finds
+//      the act on its way, never run on a decision that no longer stood;
 //   3. the lane's shape and context: a lane B action carries a lane B context, the engine session it was authorized
 //      against is the one the session runs now (`unavailable`: the machine's index lags it, P5 O7 M2), and its
 //      `launchId` and `engineSessionId` are the session's now (`context`; the engine host rechecks both at its claim);
@@ -33,23 +37,43 @@
 // Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
 // result by the nonce it answers.
 //
+// P5 O7 M5a (M5 "Artifact writes are engine-host acts with no session"): an artifact's write (an engine-host row whose
+// target rule is `artifact`) names no session and is sealed with no context, so it goes to the engine host's ledger as
+// `host.artifactOp` (ARTIFACT_OP): the claim's fields and `target`, the artifact authorization placed (`artifact:<id>`,
+// `artifact:` for the orphan form), which the ledger keeps and `host.opQuery` answers, so a query re-places the artifact
+// (queries.ts); no status is read, the rule having placed the target. Its `input` is the action's `args` as sealed, in the
+// bytes codec's tagged form for a device that carries bytes (the ledger decodes its own copy). An engine host that
+// predates the command answers `unknown_command` (its runtime: a name outside its registry): nothing ran, and the act is
+// `refused {reason: 'unavailable'}`, logged, until the host is replaced. Every `done` result goes to a device that listed
+// `rl2.bytes` tagged (bytes.ts). An artifact act's result tells its sender nothing of a session they don't view
+// (session-safe.ts, P5 O7 M5a2 fix wave 1).
+//
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
 // asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
 import { actionFingerprint, type ActMessage, type RefusalReason } from 'org-protocol';
+import type { ArtifactTarget } from './authorize';
+import { doneMessage } from './bytes';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
 import type { Granted } from './gate';
-import { LaneA } from './lane-a';
+import { DECISION_MOVED, LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
+import type { SessionSafe } from './session-safe';
 
 export const STOP_WAIT_MS = 2000;
 
 /** `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4). */
 export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload']);
+
+/**
+ * P5 O7 M5a: the engine host's ledger command for an act with no session (an artifact's write), and the answer of a host
+ * that predates it, which the act reads as `refused unavailable`.
+ */
+export const ARTIFACT_OP = { name: 'host.artifactOp', predates: 'unknown_command' } as const;
 
 export type ActionsContext = {
   freshness: Freshness;
@@ -62,6 +86,8 @@ export type ActionsContext = {
   offers?: Offers;
   now(): number;
   log(line: string): void;
+  /** P5 O7 M5a2 fix wave 1: what an artifact act's result says of sessions (session-safe.ts). */
+  sessionSafe?: SessionSafe;
 };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
@@ -87,6 +113,11 @@ export function closedLedgerOf(value: unknown): string | null {
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** P5 O7 M5a: the prefix of the target a claim stores for an artifact act, which a query reads back (queries.ts). */
+export const ARTIFACT_TARGET = 'artifact:';
+/** The target an artifact act's claim stores: `artifact:<id>`, `artifact:` for the orphan form. */
+const artifactTarget = ({ artifactId }: ArtifactTarget): string => `${ARTIFACT_TARGET}${artifactId ?? ''}`;
+
 export class Actions {
   readonly #inflight = new Set<Promise<unknown>>();
   /** Lane A's copies, and whose an op is (lane-a.ts). */
@@ -94,6 +125,10 @@ export class Actions {
   /** Every hold out for an action in flight; `stop` lets go of those still out once it has waited. */
   readonly #holds = new Set<() => void>();
   #stopping = false;
+  /** Each received action's fingerprint, taken before its decision (`receive`), read by `execute`. */
+  readonly #fingerprints = new WeakMap<ActMessage, string>();
+  /** Each received action's way back to authorization, taken once (a lane B act whose decision moved under its status read). */
+  readonly #decideAgain = new WeakMap<ActMessage, () => void>();
 
   constructor(private readonly ctx: ActionsContext) {
     this.#laneA = new LaneA({ rl10: ctx.rl10, hold: (reason) => ctx.hold(reason), now: () => ctx.now() });
@@ -103,7 +138,20 @@ export class Actions {
   receive(channel: RemoteChannel, m: ActMessage, authorized: (channel: RemoteChannel, m: ActMessage) => void): void {
     const refusal = this.#stopping ? 'restart' : this.ctx.freshness.check(m.action, channel.device, this.ctx.now());
     if (refusal !== null) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: refusal });
-    authorized(channel, m);
+    const fingerprinted = actionFingerprint(m.action).then(
+      (fingerprint) => {
+        if (channel.closed) return;
+        if (this.#stopping) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'restart' });
+        this.#fingerprints.set(m, fingerprint);
+        this.#decideAgain.set(m, () => authorized(channel, m));
+        authorized(channel, m);
+      },
+      (error: unknown) => {
+        this.ctx.log(`endpoint: an action on channel ${channel.key} could not be fingerprinted: ${(error as Error).message}`);
+        if (!channel.closed) channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'unavailable' });
+      },
+    );
+    this.#track(fingerprinted);
   }
 
   /** An authorized action, handed to its executing side (the gate's `act` executor). */
@@ -156,11 +204,20 @@ export class Actions {
     if (row.executor === 'main') return refuse('no-ledger');
     const who = { member: channel.member, device: channel.device };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
-    const fingerprint = await actionFingerprint(action);
-    if (channel.closed) return;
+    // Taken before the decision (`receive`): nothing is awaited from the decision to the ledger's dispatch.
+    const fingerprint = this.#fingerprints.get(m);
+    if (fingerprint === undefined) return refuse('unavailable');
+    // The gate hands the act on in a later continuation than its decision's, and no executor takes this decision again:
+    // it is asked whether it still stands before any branch, and taken again once when it moved
+    // (P5 O7 M5a's milestone review). Nothing is awaited from here to a branch's `accept()` but its own work, after
+    // which the lane B and artifact branches ask again.
+    if (decision.stands?.() === false) return this.#again(m, refuse);
 
     if (row.executor === 'sminos') {
-      const refusal = await this.#laneA.hand(channel, action, who, fingerprint);
+      // Its own waits (its turn, sminos's admission query) end in the step the copy goes down: a decision that moved
+      // meanwhile is taken again, as lane B's after its status read.
+      const refusal = await this.#laneA.hand(channel, action, who, fingerprint, () => decision.stands?.() !== false);
+      if (refusal === DECISION_MOVED) return this.#again(m, refuse);
       if (refusal !== null) return refuse(refusal);
       accept();
       return;
@@ -170,7 +227,7 @@ export class Actions {
       accept();
       const release = this.#hold();
       try {
-        channel.send({ t: 'done', opId: action.opId, outcome: answered(await this.ctx.own.run(action, who, fingerprint, channel)) });
+        channel.send(doneMessage(channel, action.opId, answered(await this.ctx.own.run(action, who, fingerprint, channel))));
       } finally {
         release();
       }
@@ -186,7 +243,38 @@ export class Actions {
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        channel.send({ t: 'done', opId: action.opId, outcome });
+        channel.send(doneMessage(channel, action.opId, outcome));
+      } finally {
+        release();
+      }
+      return;
+    }
+
+    // P5 O7 M5a: an artifact's write, under the engine host's ledger with the artifact as its target and no session.
+    if (row.target === 'artifact') {
+      if (decision.artifact === undefined) return refuse('malformed');
+      // The gate hands the act on in a later continuation than its decision's, and the engine host's ledger checks no
+      // standing: the decision is asked whether it stands in the step the act is accepted and sent, and taken again,
+      // once, when it moved meanwhile, `unavailable` when it moved again (the lane B branch's rule).
+      if (decision.stands?.() === false) return this.#again(m, refuse);
+      accept();
+      const release = this.#hold();
+      try {
+        const answer = await dispatch('engine-host', ARTIFACT_OP.name, {
+          opId: action.opId,
+          opCreated: action.opCreated,
+          member: who.member,
+          device: who.device,
+          fingerprint,
+          target: artifactTarget(decision.artifact),
+          name: action.action,
+          input: action.args,
+        });
+        if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
+        else if (answer.error.code === ARTIFACT_OP.predates) this.ctx.log(`endpoint: the engine host predates \`${ARTIFACT_OP.name}\`: \`${action.action}\` refused unavailable until it is replaced`);
+        const outcome = answer.ok ? answered(answer.value) : answer.error.code === ARTIFACT_OP.predates ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
+        const told = (await this.#sessionSafe(who.member, action.action, outcome, dispatch))(); // taken, sent or not
+        if (!channel.closed) channel.send(doneMessage(channel, action.opId, told));
       } finally {
         release();
       }
@@ -204,6 +292,9 @@ export class Actions {
     if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
     if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
     if (channel.closed) return;
+    // The status read was awaited: the decision is asked whether it stands in the step the act goes to the ledger, and
+    // taken again, once, when it moved meanwhile (authorize's own rule), `unavailable` when it moved again.
+    if (decision.stands?.() === false) return this.#again(m, refuse);
     accept();
     const release = this.#hold();
     try {
@@ -219,9 +310,34 @@ export class Actions {
         ...(action.requestDigest === undefined ? {} : { requestDigest: action.requestDigest }),
       });
       if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
-      channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
+      channel.send(doneMessage(channel, action.opId, answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code }));
     } finally {
       release();
+    }
+  }
+
+  /** An act whose decision moved before it was handed on: decided again, once, through the gate; then `unavailable`. */
+  #again(m: ActMessage, refuse: (reason: RefusalReason) => void): void {
+    const again = this.#decideAgain.get(m);
+    this.#decideAgain.delete(m);
+    return again === undefined ? refuse('unavailable') : again();
+  }
+
+  /**
+   * P5 O7 M5a2 fix wave 1: an artifact act's outcome as the sender may be told it, its result's sessions they don't view
+   * withheld (session-safe.ts), made as it is sent; one the spine can't place is `unknown` (the device asks by `query`).
+   */
+  async #sessionSafe(member: string, name: string, outcome: unknown, dispatch: EndpointServices['dispatch']): Promise<() => unknown> {
+    if (this.ctx.sessionSafe === undefined || !isObject(outcome) || outcome.state !== 'done') return () => outcome;
+    try {
+      const projected = await this.ctx.sessionSafe.prepare(member, name, outcome.result, dispatch);
+      return () => {
+        const result = projected();
+        return result.ok ? { ...outcome, result: result.output } : { state: 'unknown', reason: 'unavailable' };
+      };
+    } catch (error) {
+      this.ctx.log(`endpoint: the result of \`${name}\` could not be told: ${(error as Error).message}`);
+      return () => ({ state: 'unknown', reason: 'unavailable' });
     }
   }
 

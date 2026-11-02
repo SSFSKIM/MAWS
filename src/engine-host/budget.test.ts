@@ -52,6 +52,10 @@ describe('hard reasons', () => {
     expect(hardReasons(row('a', { work: { crons: [cron], unknown: null } }), NONE)).toEqual(['background_tasks']);
     for (const unknown of ['resumed', 'adopted', 'dirty', 'turn_ended_without_stop', 'stop_unreadable', 'durable_unreadable']) expect(hardReasons(row('a', { work: { crons: [], unknown } }), NONE), unknown).toEqual(['background_tasks']);
     expect(hardReasons(row('a', { work: { crons: [], unknown: null } }), NONE)).toEqual([]);
+    // O16 M5: a process under the engine that is its work holds it too; none, or an older host's status without the count, does not
+    expect(hardReasons(row('a', { work: { crons: [], unknown: null, descendants: 1 } }), NONE)).toEqual(['background_tasks']);
+    expect(hardReasons(row('a', { work: { crons: [], unknown: 'descendants_unreadable', descendants: null } }), NONE)).toEqual(['background_tasks']);
+    expect(hardReasons(row('a', { work: { crons: [], unknown: null, descendants: 0 } }), NONE)).toEqual([]);
     expect(hardReasons(row('a', { work: { crons: [cron], unknown: null }, backgroundTasks: [{ taskId: 't1' as never, taskType: 'local_bash', description: 'x', ambient: false }] }), NONE)).toEqual(['background_tasks']); // once
     expect(hardReasons(row('a', { kept: true }), NONE)).toEqual([]); // the keep mark exempts the idle release only, and is no hard reason
   });

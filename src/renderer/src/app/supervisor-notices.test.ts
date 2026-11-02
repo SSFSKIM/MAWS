@@ -9,7 +9,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { createHostsStore } from '../stores/hosts';
 import { createNoticesStore } from '../stores/notices';
 import { hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
-import { SUPERVISOR_NOTICES } from './copy';
+import { ENGINE_HOST_UPDATE, SUPERVISOR_NOTICES } from './copy';
 import { connectSupervisorNotices, SUPERVISOR_NOTICE_IDS } from './supervisor-notices';
 
 type Refused = (name: CommandName, error: IpcError) => void;
@@ -44,6 +44,33 @@ async function setup(initial: HostStatus = hostStatus(), { restart = true }: { r
   const one = (id: string) => shown().find((n) => n.id === id);
   return { fake, hosts, notices, status, refuse, shown, one };
 }
+
+// P5 O16 M3c fix wave 2 (D63): an update of the engine host that waits for MAWS tool calls says what it waits for, in
+// one copy (ENGINE_HOST_UPDATE.waiting), in the update banner's place; the E10 copy only while an older build's exit
+// when idle is armed (what it promises)
+describe('the update banner while an update waits for tool calls', () => {
+  const waitingFor = (inFlight: number, tool: string | undefined, state: HostStatus['state'] = 'ready') =>
+    hostStatus({ state, matches: state === 'ready' ? 'build' : null, supervisor: state === 'ready' ? supervisorStatus({ buildId: 'old', liveSessions: 2, exitWhenIdle: false }) : null, handover: { inFlight, ...(tool !== undefined && { tool }) } });
+
+  it('names the tool and the calls running, served or deferred, and goes when the wait ends', async () => {
+    const t = await setup();
+    t.status(waitingFor(1, 'artifact_list'));
+    const notice = t.one(SUPERVISOR_NOTICE_IDS.updated)!;
+    expect(notice).toMatchObject({ kind: 'banner', level: 'info', text: ENGINE_HOST_UPDATE.waiting(1, 'artifact_list') });
+    expect(notice.text).toBe('Waiting for artifact_list to finish before updating the engine host (1 call running).');
+    expect(notice.actions.map((a) => a.label)).toEqual(['Restart now']); // served: the old way to move now stays
+    t.status(waitingFor(3, undefined, 'restarting')); // a deferred handover: nothing to restart meanwhile
+    expect(t.one(SUPERVISOR_NOTICE_IDS.updated)).toMatchObject({ text: 'Waiting for MAWS tool calls to finish before updating the engine host (3 calls running).', actions: [] });
+    t.status(hostStatus()); // the successor adopted the sessions
+    expect(t.shown()).toEqual([]);
+  });
+
+  it('an older build served with no exit armed and nothing waited for shows no E10 copy (it hands over, it does not wait for idle)', async () => {
+    const t = await setup();
+    t.status(hostStatus({ matches: 'build', supervisor: supervisorStatus({ buildId: 'old', liveSessions: 2, exitWhenIdle: false }) }));
+    expect(t.shown()).toEqual([]);
+  });
+});
 
 describe('the update banner (supervisor.updated)', () => {
   it('shows while an older build serves live sessions, with Restart now only, which restarts the supervisor', async () => {
@@ -164,6 +191,17 @@ describe('the crash toast (supervisor.crashed)', () => {
     const t = await setup();
     t.status(crashed(AT, null, null, 0));
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The session supervisor stopped unexpectedly; no session was interrupted.');
+  });
+
+  // P5 O16 M3b (D21): a successor that adopted the sessions; the toast keeps its id, its copy names the engine host
+  it('names the sessions the successor re-adopted, and those it did not', async () => {
+    const t = await setup();
+    t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: 137, signal: null, at: AT, interrupted: 0, adopted: 2 } }));
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The engine host stopped unexpectedly (exit 137); its 2 sessions were re-adopted.');
+    t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: null, signal: 'SIGKILL', at: LATER, interrupted: 1, adopted: 1 } }));
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe(
+      'The engine host stopped unexpectedly (SIGKILL); 1 session was re-adopted, 1 was interrupted. Their transcripts are on disk; open one to resume.',
+    );
   });
 
   it('does not repeat an exit the page already knew at its first word (a reload after the crash)', async () => {

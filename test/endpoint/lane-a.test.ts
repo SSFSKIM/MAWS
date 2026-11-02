@@ -7,6 +7,8 @@ import { LaneA } from '../../src/endpoint/lane-a';
 import type { QueryAnswer } from '../../src/endpoint/rl10/link';
 
 const channel = () => ({ closed: false, send: () => true, onClose: () => () => {} }) as unknown as RemoteChannel;
+/** A decision that stands throughout (actions.test.ts drives one that moves). */
+const STANDS = () => true;
 const WHO = { member: 'm-a', device: 'd-a' };
 let n = 0;
 const copy = (opId: string): Action => ({ opId, opCreated: new Date().toISOString(), nonce: `nonce-${++n}` }) as unknown as Action;
@@ -35,18 +37,18 @@ function laneA(max: number) {
 describe('the cap on held lane A copies', () => {
   it('meets a reseal of an op already held too: past the cap it is `busy` and goes nowhere', async () => {
     const { lane, sent, answer } = laneA(2);
-    const first = lane.hand(channel(), copy('op-a'), WHO, 'fp');
+    const first = lane.hand(channel(), copy('op-a'), WHO, 'fp', STANDS);
     await answer();
     expect(await first).toBeNull();
-    expect(await lane.hand(channel(), copy('op-a'), WHO, 'fp')).toBeNull();
-    expect(await lane.hand(channel(), copy('op-a'), WHO, 'fp')).toBe('busy');
+    expect(await lane.hand(channel(), copy('op-a'), WHO, 'fp', STANDS)).toBeNull();
+    expect(await lane.hand(channel(), copy('op-a'), WHO, 'fp', STANDS)).toBe('busy');
     expect(sent).toHaveLength(2);
   });
 
   it('meets it again after sminos answered: first copies waiting on their answers share the last slot, not each take it', async () => {
     const { lane, sent, answer } = laneA(1);
-    const one = lane.hand(channel(), copy('op-1'), WHO, 'fp');
-    const two = lane.hand(channel(), copy('op-2'), WHO, 'fp');
+    const one = lane.hand(channel(), copy('op-1'), WHO, 'fp', STANDS);
+    const two = lane.hand(channel(), copy('op-2'), WHO, 'fp', STANDS);
     await answer();
     await answer();
     expect([await one, await two].sort()).toEqual(['busy', null].sort());

@@ -16,9 +16,12 @@ import type { GradeSpec } from '@shared/ipc/grades';
  * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), none: the machine itself, or
  * `checkout` (P5 O7 M4: a path-class read of a lane B session's checkout: the call's own `session` names the session,
  * placed as an `appSessionId`, and the input's `directory` or `repoRoot` must lie in that session's roots or their
- * repositories: targets.ts).
+ * repositories: targets.ts), or `each-session` (P5 O7 M6: a machine-wide read whose answer is per session, admitted at the
+ * row's own grade, `list`, and cut by `calls.ts` to the sessions the caller holds the registry's declared grade on), or
+ * `artifact` (P5 O7 M5a: an artifact by its id, ranked the highest of its linked sessions' ranks, the machine's owners
+ * holding `manage` on every one: targets.ts, artifacts.ts).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session' | 'artifact';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -39,7 +42,7 @@ export type OfferRow = {
 
 /**
  * The table, the lanes a `sub` may name (M8: `full` or `cards` on either), and the feeds it may name (P5 O7 M4, §R: a
- * session's `checkout` feed; M6 adds the machine's `attention`).
+ * session's `checkout` feed; M6: the machine's `attention`).
  */
 export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[]; feeds: readonly Feed[] };
 
@@ -49,6 +52,13 @@ const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'mac
 /** A read of a lane B session's checkout by a path (`git.*`): the call names its session, the input a directory in it. */
 const checkout: OfferRow = { kind: 'call', executor: 'machine', target: 'checkout' };
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
+/** A machine-wide read answered per session (P5 O7 M6): admitted at `list`, its answer cut per session (calls.ts). */
+const eachSession: OfferRow = { kind: 'call', executor: 'machine', target: 'each-session', grade: 'list' };
+/**
+ * P5 O7 M5a: an artifact's read or write, by the `artifact` rule (targets.ts): the engine host's store, or the machine's
+ * services (`artifacts.export`, the connectors' grants, the library's reads of a stored file).
+ */
+const artifact = (kind: 'call' | 'act', executor: 'engine-host' | 'machine' = 'engine-host'): OfferRow => ({ kind, executor, target: 'artifact' });
 /** A terminal's act on the machine (`shell`, the registry's grade), under the pty host's ledger (`pty.op`). */
 const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
 /** `forward.open`'s args: exactly a port. */
@@ -179,7 +189,48 @@ export const OFFERS: Offers = {
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
     'daemon.status': { kind: 'call', executor: 'machine', target: 'machine' },
     'machine.identity': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M6: the machine's attention items and conversation search, each answering for every session. `list` admits any
+    // member (as `endpoint.listings`); the answer keeps only the sessions the caller holds the registry's grade (`view`) on.
+    'attention.list': eachSession,
+    'session.search': eachSession,
+    // P5 O7 M5a: a remote session's artifacts, by the `artifact` rule: the reads (`view`, O1's) as calls, the writes
+    // (`manage`) as engine-host acts with no session (`host.artifactOp`, the claim naming the artifact: actions.ts);
+    // `artifacts.list` only with the session it lists (`filter.appSessionId`), `copyAsset` on `to` with `view` on `from`
+    // by effect, `create` the orphan form (the machine's owners). Bytes cross in the codec's tagged form, behind `rl2.bytes`.
+    'artifacts.get': artifact('call'),
+    'artifacts.versions': artifact('call'),
+    'artifacts.versionState': artifact('call'),
+    'artifacts.attributions': artifact('call'),
+    'artifacts.readDataset': artifact('call'),
+    'artifacts.datasetFiles': artifact('call'),
+    'artifacts.markViewed': artifact('call'),
+    'artifacts.list': artifact('call'),
+    'artifacts.export': artifact('call', 'machine'),
+    'artifacts.connectorGrants': artifact('call', 'machine'),
+    'library.get': artifact('call', 'machine'),
+    'library.content': artifact('call', 'machine'),
+    'library.read': artifact('call', 'machine'),
+    'artifacts.update': artifact('act'),
+    'artifacts.delete': artifact('act'),
+    'artifacts.duplicate': artifact('act'),
+    'artifacts.saveVersion': artifact('act'),
+    'artifacts.nameVersion': artifact('act'),
+    'artifacts.restore': artifact('act'),
+    'artifacts.pruneVersions': artifact('act'),
+    'artifacts.acceptSuggestion': artifact('act'),
+    'artifacts.rejectSuggestion': artifact('act'),
+    'artifacts.uploadAsset': artifact('act'),
+    'artifacts.copyAsset': artifact('act'),
+    'artifacts.rereadDatasetFile': artifact('act'),
+    'artifacts.create': artifact('act'),
+    // The library's listing, each row kept for a caller who views its artifact (calls.ts, the `each-session` shape over
+    // each row's own sessions; whole for a machine owner), and its Spaces (names and counts), at `list`.
+    'library.list': eachSession,
+    'library.spaces': { kind: 'call', executor: 'machine', target: 'machine', grade: 'list' },
+    // O5's tools on a session (`view`); their changes ride the session's `checkout` feed (plane-feeds.ts).
+    'session.capabilities': laneBMachine('call'),
   },
   subscriptions: ['A', 'B'],
-  feeds: ['checkout'],
+  // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts).
+  feeds: ['checkout', 'attention', 'artifacts'],
 };

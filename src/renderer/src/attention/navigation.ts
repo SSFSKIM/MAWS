@@ -4,6 +4,9 @@
 // and opens the same way (W9: the item it names is no longer kept for a transcript jump nothing built; P2-C M6: an
 // owner-channel item it names opens at its mark in the report, anchor.ts); when main could
 // not post an OS notification (`attention.notified { delivery: 'fallback' }`) the page shows a toast in its place.
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item opens the same three
+// ways through its lane's opener (M2's pane, `sessions/remote-openers.ts`), with or without a record; its toast names its
+// listed row when there is no record. A greyed machine's item is never ⌘⇧J's (`selectNeedsYou` holds none).
 import { isOpen } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -26,13 +29,15 @@ import { useCommentCard } from '../side/card/store'; // P2-E1
 import { askSheet } from '../tools/maws/ask/store';
 import { openAnchor, ownerAnchorOf } from './anchor'; // P2-C
 import { nextNeedsYou } from './derive';
-import { displayTitle } from '../sessions/title';
+import { displayTitle, listedTitle } from '../sessions/title';
+import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { panelInMain } from '../app/regions'; // P3-G
 import { openCardSession } from '../shell/floating'; // P3-G
 
 const openInFocusedPane = (appSessionId: AppSessionId) => {
   const layout = useLayout.getState();
   layout.revealMain(); // P3-G: a maximized or floating panel docks
+  if (openListed(appSessionId)) return; // P5 O7 M6: another machine's session, through its lane's opener
   layout.openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
 };
 
@@ -130,7 +135,8 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
   if (delivery === 'fallback' && requestOnScreen(id, item)) return;
   if (item && !isOpen(item)) return; // settled before its notice arrived
   const record = useSessions.getState().records.get(id);
-  const title = record ? displayTitle(record) : 'A session';
+  const listed = record ? undefined : useSessions.getState().listed.get(id); // P5 O7 M6: another machine's, with no record
+  const title = record ? displayTitle(record) : listed ? listedTitle(listed) : 'A session';
   useNotices.getState().toast({
     id: toastId(attentionId as AttentionId),
     level: 'warning',

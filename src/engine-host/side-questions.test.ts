@@ -121,3 +121,22 @@ describe('SideQuestionLog', () => {
     expect(log.list()[1]).toMatchObject({ state: 'failed', error: 'The session ended' });
   });
 });
+
+// P5 O16 M3 (Interfaces §D; D24): an adopter folds the old manager's journal into a fresh log; a question its answer
+// never reached reads failed once the fold ends, since no operation of this writer's waits for it.
+describe('SideQuestionLog restored from a journal', () => {
+  const out = (id: string, question: string, at: string) => ({ direction: 'out', at, frame: { type: 'control_request', request_id: id, request: { subtype: 'side_question', question } } });
+  const answer = (id: string, at: string, response: unknown, subtype = 'success') => ({ direction: 'in', at, frame: { type: 'control_response', response: { subtype, request_id: id, ...(subtype === 'success' ? { response } : { error: 'boom' }) } } });
+
+  it('enters each question under its request id, settled by the answer the journal holds, and fails the unanswered at adoption', () => {
+    const log = new SideQuestionLog();
+    for (const row of [out('L-1', 'What word?', 't0'), answer('L-1', 't1', { response: 'ZEBRA', synthetic: false }), out('L-2', 'Fail?', 't2'), answer('L-2', 't3', null, 'error'), out('L-3', 'Pending?', 't4'), answer('L-9', 't5', { response: 'stray' })]) log.restore(row);
+    log.adopted('t6');
+    expect(log.list()).toEqual([
+      { id: 'L-1', question: 'What word?', state: 'answered', response: 'ZEBRA', synthetic: false, error: null, askedAt: 't0', answeredAt: 't1' },
+      { id: 'L-2', question: 'Fail?', state: 'failed', response: null, synthetic: false, error: 'boom', askedAt: 't2', answeredAt: 't3' },
+      { id: 'L-3', question: 'Pending?', state: 'failed', response: null, synthetic: false, error: 'The engine host restarted before the answer arrived', askedAt: 't4', answeredAt: 't6' },
+    ]);
+    expect(log.ask('next', 't7').history).toEqual([{ question: 'What word?', response: 'ZEBRA' }]);
+  });
+});

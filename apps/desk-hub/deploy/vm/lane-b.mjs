@@ -23,8 +23,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 export const SOCKET_PROTOCOL = 3;
 const PAGE = 500;
 
-/** A link to machine.sock: `request(name, input)` answers the response's value, or throws its error. */
-export async function reach(dir, { helloMs = 5000 } = {}) {
+/**
+ * A link to machine.sock: `request(name, input)` answers the response's value, or throws its error. `onEvent(name,
+ * payload)`, when given, takes every event line mawsd sends this client (`{t: 'evt'}`: a followed session's stream).
+ */
+export async function reach(dir, { helloMs = 5000, onEvent = null } = {}) {
   const token = readFileSync(join(dir, 'mawsd.token'), 'utf8').trim();
   const socket = createConnection(join(dir, 'machine.sock'));
   const waiting = new Map();
@@ -63,7 +66,11 @@ export async function reach(dir, { helloMs = 5000 } = {}) {
         else welcomed.reject(new Error(`mawsd refused the hello: ${line.slice(0, 200)}`));
         continue;
       }
-      if (message.t !== 'res' || typeof message.id !== 'string') continue; // events, and the port's asks: not this client's
+      if (message.t === 'evt' && typeof message.name === 'string') {
+        onEvent?.(message.name, message.payload);
+        continue;
+      }
+      if (message.t !== 'res' || typeof message.id !== 'string') continue; // the port's asks: not this client's
       waiting.get(message.id)?.resolve(message);
     }
   });

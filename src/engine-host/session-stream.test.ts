@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AttentionItem } from '@shared/graph/attention'; // P5 O16 M3c fix wave 1
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -103,6 +104,20 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     const tail = events.at(-3)!.seq!; // inside the ring
     expect((await stream.snapshot(tail, null)).events).toEqual(events.filter((e) => e.seq! > tail));
     expect(await stream.snapshot(events.at(-1)!.seq!, null)).toEqual({ events: [], lastSeq: events.at(-1)!.seq, complete: true });
+  });
+
+  // P5 O16 M3c: an adopted launch's stream starts at the adoption (the successor's fold tells nothing), so what the
+  // launch journaled before it is the journal's to answer, as an evicted range is
+  it('an adopted launch answers what was journaled before its stream from the journal, and what came after from the ring', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const split = Math.floor(events.length / 2);
+    const through = events[split - 1]!.seq!;
+    const after = events.filter((e) => e.seq! > through);
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, historyThrough: through });
+    stream.events(after);
+    stream.flush();
+    expect(await stream.snapshot(null, null), 'the whole launch').toEqual({ events, lastSeq: events.at(-1)!.seq, complete: true });
+    expect((await stream.snapshot(through, null)).events, 'after the adoption: the ring').toEqual(after);
   });
 
   it('a limit never splits one row\'s events and marks the answer incomplete; lastSeq is the cursor for the next page', async () => {
@@ -250,6 +265,19 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
 
   // E1 M5: a list published between a request's event and its item (a blocking `maws` ask opens its item after the
   // broker re-published for the same frame, which confirmed the call's permission) must not forget the event
+  // P5 O16 M3c fix wave 1: an adopted launch's restored item, whose event the stream never saw, from its fold's read
+  it('answers a live item it never saw the event of from `restored`, and nothing once the item has left the list', async () => {
+    const { launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const restoredEvent = { kind: 'permission.requested', requestId: 'rq-restored' } as unknown as SessionEvent;
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, restored: (id) => (id === 'rq-restored' ? restoredEvent : null) });
+    expect(stream.pendingRequest('rq-restored' as RequestId), 'not a live item yet').toBeNull();
+    const item: AttentionItem = { id: 'a' as never, appSessionId, sessionId: null, kind: 'permission', request: { requestId: 'rq-restored' as RequestId, toolUseId: null, taskId: null, agentId: null }, summary: 's', createdAt: 't', state: 'pending', stateChangedAt: 't', expiresAt: null };
+    stream.brokerItems([item]);
+    expect(stream.pendingRequest('rq-restored' as RequestId)).toBe(restoredEvent);
+    stream.brokerItems([]);
+    expect(stream.pendingRequest('rq-restored' as RequestId)).toBeNull();
+  });
+
   it('keeps a request event whose item has not been listed yet across an earlier list', async () => {
     const run = await replayedSession('pass1', 'permission-roundtrip', (row, { session, ready, fixture, transport }) => {
       const frame = row.frame as { type: string };

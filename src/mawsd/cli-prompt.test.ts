@@ -51,12 +51,14 @@ class FakeEndpoint implements EndpointModule {
 }
 
 // `mawsd <command>` in a fresh terminal (its stdin the terminal, or a pipe from `printf` when `piped` is given), then the
-// command's exit code and `stty -a`, both read in that terminal
+// command's exit code and `stty -a`, both read in that terminal. The shell then waits for a line, which `finish` sends
+// once DONE is read, so its exit cannot drop the output's tail (Linux's pty does at a child's exit: gate-offload
+// Decision Log 20).
 function enrollAtTerminal(command = 'enroll', piped?: string) {
   const home = join(scene.root, 'home');
   mkdirSync(home, { recursive: true });
   const mawsd = `${JSON.stringify(process.execPath)} ${JSON.stringify(MAWSD)} ${command}`;
-  const script = `${piped === undefined ? mawsd : `printf '%s\\n' ${JSON.stringify(piped)} | ${mawsd}`}; echo "EXIT=$?"; stty -a; echo DONE`;
+  const script = `${piped === undefined ? mawsd : `printf '%s\\n' ${JSON.stringify(piped)} | ${mawsd}`}; echo "EXIT=$?"; stty -a; echo DONE; read -r _`;
   const pty = spawn('/bin/sh', ['-c', script], {
     name: 'xterm',
     cols: 200,
@@ -67,7 +69,12 @@ function enrollAtTerminal(command = 'enroll', piped?: string) {
   let output = '';
   pty.onData((data) => void (output += data));
   const exited = new Promise<void>((done) => pty.onExit(() => done()));
-  return { pty, output: () => output, exited };
+  const finish = async () => {
+    await until(() => output.includes('DONE'), 15_000, () => `the command's end:\n${output}`);
+    pty.write('\r');
+    await exited;
+  };
+  return { pty, output: () => output, finish };
 }
 
 // The flags `stty -a` prints, as a set (`echo` or `-echo`, `icanon` or `-icanon` among them, on Linux and macOS alike).
@@ -98,8 +105,7 @@ describe.skipIf(!existsSync(MAWSD))('mawsd enroll at a terminal', () => {
     const answered = modesOf(run.pty); // the command still runs, awaiting the module
     expect(cooked(answered), [...answered].join(' ')).toBe(true);
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
-    await run.exited;
+    await run.finish();
     expect(run.output()).not.toContain('CODE-TYPED-SECRET');
     expect(run.output()).toContain('EXIT=0');
     expect(endpoint.calls).toEqual([['enroll', [], 'CODE-TYPED-SECRET']]);
@@ -114,8 +120,7 @@ describe.skipIf(!existsSync(MAWSD))('mawsd enroll at a terminal', () => {
     expect(during.has('-echo') && during.has('-icanon') && during.has('-isig'), [...during].join(' ')).toBe(true);
     run.pty.write('CODE-PART');
     run.pty.write('\x03');
-    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
-    await run.exited;
+    await run.finish();
     expect(run.output()).not.toContain('CODE-PART');
     expect(run.output()).toContain('EXIT=1');
     expect(endpoint.calls).toEqual([]);
@@ -140,8 +145,7 @@ describe.skipIf(!existsSync(MAWSD))('mawsd endpoint provision at a terminal', ()
     await new Promise((done) => setTimeout(done, PAST_DEFAULT_MS));
     expect(run.output()).not.toContain('EXIT='); // still waiting for the module, past the 10 s a request gets by default
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
-    await run.exited;
+    await run.finish();
     expect(run.output()).not.toContain('TYPED-SECRET');
     expect(run.output()).toContain('EXIT=0');
     expect(endpoint.calls).toEqual([['provision', ['--wait', '30'], 'smns-provision-v2.TYPED-SECRET']]);
@@ -155,8 +159,7 @@ describe.skipIf(!existsSync(MAWSD))('mawsd endpoint provision at a terminal', ()
     await new Promise((done) => setTimeout(done, PAST_DEFAULT_MS));
     expect(run.output()).not.toContain('EXIT=');
     endpoint.release();
-    await until(() => run.output().includes('DONE'), 15_000, () => `the command's end:\n${run.output()}`);
-    await run.exited;
+    await run.finish();
     expect(run.output()).not.toContain('Provisioning code: '); // a pipe is read, not prompted for
     expect(run.output()).toContain('EXIT=0');
     expect(endpoint.calls).toEqual([['provision', ['--json'], 'smns-provision-v2.PIPED-SECRET']]);

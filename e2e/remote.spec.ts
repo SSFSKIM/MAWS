@@ -25,20 +25,30 @@
 //      A runs this launch with no harness confirmation, so the owner's terminal and forward ask nothing: a step-up
 //      would stop the act at a sheet nobody answers;
 //   2. directly: the map sends it to B's listener, so the link comes `up` over the direct carrier; the hover reads
-//      "direct (tailnet)" and the pane shows B's history again; then (M4, under MAWS_E2E_STEP_UP=accept) "+ Session" in
+//      "direct (tailnet)" and the pane shows B's history again; then (M5a) at A's ask B's session makes two artifacts
+//      through its `maws` tools (a text file of B's checkout as a File artifact, and an HTML page), linked to it on B:
+//      the session's Artifacts tool in A lists them and reads the text; a rename in A's Library on B shows in B's own
+//      library (read over B's machine.sock); Export › PDF of the page renders on B and Save As lands it in A's folder
+//      (the save seam, MAWS_E2E_SAVE_PATH); Open externally on an HTML file of B's checkout opens a copy paged to A (the
+//      open-log seam, MAWS_E2E_OPEN_LOG); the Browser tool's notice reads B's own reason; then (M4, under
+//      MAWS_E2E_STEP_UP=accept) "+ Session" in
 //      A's own checkout of the same org project (a `.smns` naming B's project) starts sessions on B through the machine
 //      menu: one with its text as the brief, opening in A's pane with its reply and recording A's member as its
 //      requester; one in a new worktree with a dropped file, which goes up under the worktree's desk-uploads before the
-//      one message that names it.
-// B's spawned sessions run on journals of their own, the next fixtures on B's replay list.
+//      one message that names it; then (M6) B starts a session of its own that A has no tab of and whose first turn asks
+//      a permission: it shows in A's Needs you under its listed row and counts in the dock badge (`app.dock` read in
+//      main), ⌘⇧J (its menu item) opens it in A's pane, and the answer there clears both; conversation search finds a
+//      word of B's transcript under B; its second turn asks again with its tab closed, and B's daemon stopped greys that
+//      item in Needs you and takes it out of the badge.
+// B's spawned sessions and its M6 session run on journals of their own, the next fixtures on B's replay list.
 // No wall-clock bound beyond Playwright's own timeouts: the measured numbers are M7's.
 // Run by `pnpm e2e:remote` (MAWS_REMOTE_E2E=1).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { dirname, join } from 'node:path';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
@@ -47,6 +57,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import { mainTabById, openSurface, surface } from './support/shell';
 import { SideJournal } from './support/side-replay';
@@ -104,6 +115,26 @@ const LINK_ASK = 'Where does the dev server listen?';
 const LINK_TEXT = 'the dev server';
 const devServerUrl = (port: number) => `http://[::]:${port}/`;
 const linkReply = (port: number) => `It serves B’s checkout at [${LINK_TEXT}](<${devServerUrl(port)}>).`;
+// M6: B's own session that asks while A has no tab of it, started on B as B's owner starts one: a permission at its first
+// turn, answered from A, then one at its second turn that still waits when B's daemon stops
+const WAITING_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000b5';
+const WAITING_TITLE = 'B’s waiting session';
+const WAITING_ASK = 'Check the build on B.';
+const WAITING_FIRST = 'first-asked';
+const WAITING_REPLY = 'The build on B is fine.';
+const WAITING_AGAIN = 'Check it once more.';
+const WAITING_SECOND = 'second-asked';
+// M6: a word of B's first session's transcript (its first prompt, FIRST) and of no session's title once B's owner names it
+const SEARCHED = 'hello';
+// M5a: what B's first session makes at A's ask, through its `maws` tools (served by B's engine host, so each artifact is
+// linked to the session): a text file it wrote in B's checkout, delivered as a File artifact, and an HTML page, whose
+// PDF B's render host exports; the title A renames the File artifact to; an HTML file of B's checkout A opens a copy of
+const MAKE_ASK = 'Make the notes and the report.';
+const MADE_REPLY = 'Both are in B’s library.';
+const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the session on B delivered.\n' };
+const RENAMED = 'B notes, renamed on A';
+const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
+const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
 // The repository's own settings, so the runner's global ones (a hooks path, signing, an identity) change nothing B's
@@ -239,6 +270,17 @@ async function paneSaid(page: Page): Promise<string> {
   return `the pane's composers: ${composers.join(', ') || 'none'}; its statuses: ${statuses.join(' | ') || 'none'}; the toasts: ${toasts || 'none'}`;
 }
 const bareOf = (address: string) => address.slice(address.indexOf('/') + 1);
+// A wait whose failure quotes what `said` reads then, at the failure, rather than before the wait.
+async function quoting<T>(wait: Promise<T>, said: () => Promise<string> | string): Promise<T> {
+  return wait.catch(async (error: unknown) => {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await said()}`);
+  });
+}
+// M6: a session's row in A's Needs you (by its address), the heading that counts the live rows, and the dock badge main
+// sets ('' at none)
+const needsYouRow = (page: Page, address: string) => sidebarOf(page).getByRole('list', { name: 'Needs you' }).locator(`button[data-needs-you="${address}"]`);
+const needsYouCount = (page: Page, count: number) => sidebarOf(page).getByRole('heading', { name: `Needs you · ${count}` });
+const dockBadge = (app: ElectronApplication) => app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
 // The files a session's desk-uploads holds on B (its parts' `.staging` directory left out).
 const uploadedFiles = (cwd: string, app: string) => readdirSync(join(cwd, '.claude', 'desk-uploads', app)).filter((name) => !name.startsWith('.'));
 
@@ -319,7 +361,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
   const journals = join(root, 'journals');
   const hooks = join(root, 'no-hooks'); // B's repository's hooks path: none run
   const aCheckout = join(root, A_PROJECT); // A's own checkout of the org project, for "+ Session"
-  for (const dir of [checkout, journals, hooks, aCheckout]) mkdirSync(dir);
+  const savedOnA = join(root, 'saved-on-a'); // M5a: where A's Save As lands (MAWS_E2E_SAVE_PATH, A's second launch)
+  const openLog = join(root, 'a-open.log'); // M5a: what A's main hands the OS to open (MAWS_E2E_OPEN_LOG)
+  for (const dir of [checkout, journals, hooks, aCheckout, savedOnA]) mkdirSync(dir);
   checkoutRepository(checkout, hooks);
   checkoutRepository(aCheckout, hooks); // a repository too: New chat offers Worktree only in git
   let scene: RemoteScene | null = null;
@@ -341,6 +385,14 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     journal.turn(UPLOAD_REPLY); // M4: the message naming the dropped file's path on B
     const devPort = await quietPort();
     journal.turn(linkReply(devPort)); // M3: the reply naming B's dev server
+    // M5a: A's ask in its second launch, answered by two `artifact_create` calls (a rule allows them: nothing asked) that
+    // B's engine host serves, linking each artifact to the session; the tool results are the engine's words, the host's
+    // own answers are what B's store holds
+    const make = journal.prompt();
+    journal.mawsToolCall('artifact_create', { kind: 'file', title: NOTES_ARTIFACT.title, path: NOTES_ARTIFACT.file }, { status: 'created', kind: 'file', title: NOTES_ARTIFACT.title }, { asked: false });
+    journal.mawsToolCall('artifact_create', { kind: 'html', title: REPORT.title, content: REPORT.html }, { status: 'created', kind: 'html', title: REPORT.title }, { asked: false });
+    journal.reply(make, MADE_REPLY);
+    journal.completed(make);
     const fixture = journal.write(journals, 'b-session');
     // M4: the sessions "+ Session" starts on B, the next fixtures on B's list: one whose brief is its first turn, and one
     // in a new worktree, whose journal is written once A's tab names the worktree (its init's directory)
@@ -348,11 +400,20 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     spawned.turn(SPAWN_REPLY);
     const spawnedFixture = spawned.write(journals, 'b-spawned');
     const worktreeFixture = join(journals, 'b-spawned-worktree.jsonl');
+    // M6: the session B starts last, while A has no tab of it: a permission its first turn asks (answered from A), then
+    // one its second turn asks (the replay holds at its `allow` until B's daemon stops)
+    const waiting = new SideJournal(WAITING_SESSION, checkout);
+    const asked = waiting.prompt();
+    waiting.permission(asked, 'Bash', { command: `echo ${WAITING_FIRST}`, description: 'Print a word' }, WAITING_FIRST);
+    waiting.reply(asked, WAITING_REPLY);
+    waiting.completed(asked);
+    waiting.permission(waiting.prompt(), 'Bash', { command: `echo ${WAITING_SECOND}`, description: 'Print a word' }, WAITING_SECOND);
+    const waitingFixture = waiting.write(journals, 'b-waiting');
     scene = await startRemoteScene({
       scratch: join(root, 'scene'),
       aUserData,
       b: {
-        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [fixture, spawnedFixture, worktreeFixture].join(',') },
+        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [fixture, spawnedFixture, worktreeFixture, waitingFixture].join(',') },
         // B's checkout trusted, and the default mode the journal was recorded under (sessions.spec.ts's launchCase)
         prepare: ({ claudeConfigDir }) => {
           writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
@@ -695,9 +756,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // 2. Directly: B's address maps to its listener, so the link comes up over the direct carrier.
     // MAWS_E2E_STEP_UP=accept: the step-up sheet a spawn always asks for is accepted with no sheet and no Touch ID
     // (src/main/device/step-up-sheet.ts's harness confirmation); the signed action is still the device's.
-    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } });
+    // M5a: Save As lands in `savedOnA` with no dialog, and what main would hand the OS is written to `openLog` instead.
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept', MAWS_E2E_SAVE_PATH: savedOnA, MAWS_E2E_OPEN_LOG: openLog } });
     keepMainLines(a);
     const again = a.page;
+    const againApp = a.app;
     await expect
       .poll(async () => {
         const m = await machineOf(again, b.ref);
@@ -714,6 +777,112 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await hoverMachineLine(again, rowAgain, `${B_NAME} · direct (tailnet)`);
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
+
+    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout opens as a copy, and the Browser tool reads B’s reason', async () => {
+      const sessionTab = mainTabById(again, `session:${address}`);
+      const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
+
+      // B's session makes its artifacts at A's ask: the text file it wrote in B's checkout, and a page
+      writeFileSync(join(checkout, NOTES_ARTIFACT.file), NOTES_ARTIFACT.text);
+      await composerOf(again).click();
+      await again.keyboard.type(MAKE_ASK);
+      await again.keyboard.press('Enter');
+      await quoting(expect(main(again).getByText(MADE_REPLY).first(), 'B’s reply once its artifacts are made').toBeVisible({ timeout: 60_000 }), () => `${mainSaid(again)}\nB's log:\n${bLines(/artifact|tool|maws|replay/i)}`);
+      await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+      type Linked = { artifacts: { id: string; title: string; kind: string }[] };
+      const linked = (await b.request<Linked>('artifacts.list', { filter: { appSessionId: app } })).artifacts;
+      expect(linked.map((x) => [x.kind, x.title]).sort(), 'both linked to B’s session in B’s store').toEqual([['file', NOTES_ARTIFACT.title], ['html', REPORT.title]]);
+      const notes = linked.find((x) => x.kind === 'file')!;
+      const report = linked.find((x) => x.kind === 'html')!;
+
+      // The page's transcript row (B's host registered it: `maws.delivery.artifact`) opens it in the session's Artifacts
+      // tool, the way to that tool now (it is no longer a surface of its own to launch); Back is the session's list, read
+      // from B, and the text artifact reads there
+      const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
+      await quoting(expect(pageCall, 'the page’s row in B’s transcript, registered').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
+      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      const tool = surface(again, 'artifacts');
+      const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
+      await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      await pageRecord.getByRole('button', { name: 'Back', exact: true }).click();
+      await tool.getByRole('button', { name: 'This session', exact: true }).click();
+      const toolRow = (id: string) => tool.locator(`button[data-artifact-row][data-artifact-id="${id}"]`);
+      await quoting(expect(toolRow(notes.id), 'the text artifact in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
+      await expect(toolRow(report.id), 'and the page').toBeVisible();
+      await toolRow(notes.id).click();
+      const record = tool.locator(`[data-artifact-record="${notes.id}"]`);
+      await quoting(expect(record, 'the text read from B').toContainText(NOTES_ARTIFACT.text.trim(), { timeout: 60_000 }), async () => `the record: ${await record.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      await record.getByRole('button', { name: 'Back', exact: true }).click();
+
+      // Open library opens B's library; a rename there is B's store's, as B's own library reads it
+      await tool.getByRole('button', { name: 'Open library', exact: true }).click();
+      const library = again.locator('[data-library]');
+      await expect(library.locator('button[data-library-machine]'), 'the library is B’s').toHaveAttribute('data-library-machine', b.ref, { timeout: 30_000 });
+      await expect(library.getByRole('button', { name: `Library on ${B_NAME}` })).toBeVisible();
+      const libraryRow = (id: string) => library.locator(`article[data-artifact-row="${id}"]`);
+      await expect(libraryRow(notes.id)).toHaveAttribute('aria-label', NOTES_ARTIFACT.title, { timeout: 60_000 });
+      await libraryRow(notes.id).getByRole('button', { name: `Actions for ${NOTES_ARTIFACT.title}` }).click();
+      await again.getByRole('menuitem', { name: 'Rename…' }).click();
+      const rename = again.getByRole('dialog', { name: 'Rename artifact' });
+      await rename.getByRole('textbox', { name: 'Title' }).fill(RENAMED);
+      await rename.getByRole('button', { name: 'Rename', exact: true }).click();
+      await expect(rename).toBeHidden();
+      type Rows = { rows: { id: string; title: string }[] };
+      await expect
+        .poll(async () => (await b.request<Rows>('library.list', {})).rows.find((row) => row.id === notes.id)?.title, { timeout: 60_000, message: `B's own library, over its machine.sock, holds the new title\n${mainSaid(again)}` })
+        .toBe(RENAMED);
+      await expect(libraryRow(notes.id), 'and A’s view of B’s library follows').toHaveAttribute('aria-label', RENAMED, { timeout: 60_000 });
+
+      // Export › PDF of B's page: B's render host exports it, and Save As pages it to A's folder (the save seam)
+      await libraryRow(report.id).getByRole('button', { name: `Actions for ${REPORT.title}` }).click();
+      await again.getByRole('menuitem', { name: 'Export', exact: true }).click();
+      await again.getByRole('menuitem', { name: 'PDF', exact: true }).click();
+      const pdf = join(savedOnA, `${REPORT.title}.pdf`);
+      await expect
+        .poll(() => (existsSync(pdf) ? readFileSync(pdf).subarray(0, 5).toString('latin1') : ''), { timeout: 180_000, message: 'the PDF B exported, saved in A’s folder' })
+        .toBe('%PDF-')
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(again)}\n${mainSaid(again)}\nB's log:\n${bLines(/render|export/i)}`);
+        });
+      await expect(again.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
+      console.log(`[e2e:remote] M5a: B's PDF export saved on A, ${readFileSync(pdf).length} bytes`);
+
+      // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
+      writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
+      await sessionTab.click();
+      await openSurface(again, 'Files');
+      const files = surface(again, 'files');
+      const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+      await expect(checkoutRow, `B's checkout in A's Files tool\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
+      await expect(async () => {
+        if ((await checkoutRow.getAttribute('aria-expanded')) !== 'true') await checkoutRow.click();
+        await expect(checkoutRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+      }).toPass({ timeout: 30_000 });
+      const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await pageRow.click();
+      const external = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"] [data-external-row]`);
+      const open = external.getByRole('button', { name: 'Open externally', exact: true });
+      await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
+      await open.click();
+      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`));
+      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the row: ${await external.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const [copy] = opened();
+      expect(copy, 'a copy under this Mac’s copies of B’s files, not B’s path').toContain(`/maws-remote-copies/${b.ref}/`);
+      expect(readFileSync(copy!, 'utf8'), 'holding the file’s bytes').toBe(PAGE_ON_B.content);
+      await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
+      rmSync(dirname(copy!), { recursive: true, force: true });
+
+      // The Browser tool's notice is B's reason the session's agent has no browser there, as B's own front answers it
+      await sessionTab.click();
+      type Capabilities = { browser?: { available: boolean; reason?: string } };
+      const browserOnB = (await b.request<Capabilities>('session.capabilities', { appSessionId: app })).browser;
+      expect(browserOnB?.available, `B's session has no browser on B: ${JSON.stringify(browserOnB)}`).toBe(false);
+      expect(browserOnB?.reason, 'B’s reason names B').toContain(B_NAME);
+      await openSurface(again, 'Browser');
+      await expect(surface(again, 'browser').locator('[data-browser-agent-unavailable]')).toHaveText(`The agent has no browser here: ${browserOnB!.reason}`, { timeout: 30_000 });
+      console.log(`[e2e:remote] M5a: the Browser tool reads B's reason: ${browserOnB!.reason}`);
+    });
 
     // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now:
     // B's listed row then sits under that project's row, no longer under B's machine row, which the steps above read.)
@@ -829,6 +998,94 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(mention, `the message names the upload's path on B: ${JSON.stringify(written)}`).not.toBeNull();
       expect(readFileSync(join(worktree, mention!), 'utf8'), 'the path, from the worktree, holds the dropped bytes').toBe(WORKTREE_FILE.content);
       expect(uploadedFiles(worktree, second), 'under the worktree’s desk-uploads').toHaveLength(1);
+    });
+
+    // M6: B's own session, started on B as B's owner starts one (its journal the last on B's replay list), which A has
+    // no tab of and no record of; sminos lists it, sharing it with A's member, and the endpoint's attention feed then
+    // says what waits on it.
+    let waitingApp = '';
+    let waitingAddress = '';
+    const waitingTurnOver = async () => (await b.request<{ turn: unknown }>('session.status', { appSessionId: waitingApp })).turn === null;
+    const waitingComposer = () => main(again).locator(`[data-composer="${waitingAddress}"]`);
+    await test.step('M6: a permission B’s session asks with no tab of it on A shows in Needs you under its listed row and in the dock badge; ⌘⇧J opens it in A’s pane, and the answer there clears both', async () => {
+      await showProjectList(again);
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'nothing waits before B asks' }).toBe('');
+      waitingApp = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+      waitingAddress = addressOf(b.ref, waitingApp);
+      await b.request('session.intent.patch', { appSessionId: waitingApp, patch: { gateway: 'direct' } });
+      const begun = await b.request<{ status: string }>('session.start', { appSessionId: waitingApp, message: { content: WAITING_ASK, display: WAITING_ASK }, options: {} });
+      expect(begun.status, `B's session starts: ${JSON.stringify(begun)}`).not.toBe('needs_trust');
+      await scene!.sminos.list({ engine: WAITING_SESSION, app: waitingApp, owners: [scene!.member], project: PROJECT, title: WAITING_TITLE, cwd: checkout });
+      // With no record of A's the listed row stands in: the row reads B's name for its project and the listing's title.
+      const row = needsYouRow(again, waitingAddress);
+      await quoting(expect(row, 'B’s permission in A’s Needs you').toHaveAccessibleName(`${B_NAME} · ${WAITING_TITLE} · Approval needed`, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
+      await expect(needsYouCount(again, 1)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the dock badge counts it' }).toBe('1');
+      // ⌘⇧J is the menu item's chord; the item is clicked in main, since a menu accelerator never reaches the menu
+      // through Playwright's keys (support/menu.ts)
+      expect(await againApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('attention.next')?.accelerator ?? null)).toBe('Cmd+Shift+J');
+      await menu(againApp, 'attention.next');
+      await quoting(expect(waitingComposer(), '⌘⇧J opens B’s session in A’s pane').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
+      const card = main(again).getByRole('group', { name: 'Approval needed' });
+      await expect(card, 'the permission card in A’s pane').toBeVisible({ timeout: 60_000 });
+      await expect(card).toContainText(`echo ${WAITING_FIRST}`);
+      await card.getByRole('radio', { name: 'Allow once' }).click();
+      await card.getByRole('button', { name: 'Allow', exact: true }).click();
+      await expect(card).toBeHidden({ timeout: 30_000 });
+      await quoting(expect(main(again).getByText(WAITING_REPLY).first(), 'the turn goes on on B').toBeVisible({ timeout: 60_000 }), () => b.log().slice(-3000));
+      await expect(row, 'answered: gone from Needs you').toHaveCount(0, { timeout: 30_000 });
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'answered: gone from the dock badge' }).toBe('');
+      await expect.poll(waitingTurnOver, { timeout: 30_000 }).toBe(true);
+      // its tab closed again, for its second ask
+      await menu(againApp, 'tab.close');
+      await expect(waitingComposer(), 'B’s session’s tab closed').toHaveCount(0, { timeout: 30_000 });
+      console.log(`[e2e:remote] M6: B's permission (${waitingAddress}) in Needs you and the badge, opened by ⌘⇧J, answered in A's pane, both cleared`);
+    });
+
+    await test.step('M6: conversation search finds a word of B’s transcript, its hit under B', async () => {
+      // B's owner names B's first session as sminos lists it, so its title (its first prompt until now) holds no
+      // SEARCHED: B's index answers it from the transcript's text, with a snippet
+      await b.request('session.update', { appSessionId: app, patch: { title: { text: TITLE, source: 'user' } } });
+      type Searched = { hits: { appSessionId: string; snippet: string | null }[]; indexing: boolean; incomplete: boolean };
+      let onB: Searched | null = null;
+      await quoting(
+        expect
+          .poll(async () => {
+            onB = await b.request<Searched>('session.search', { query: SEARCHED });
+            return (onB.hits.find((hit) => hit.appSessionId === app)?.snippet ?? '').toLowerCase().includes(SEARCHED);
+          }, { timeout: 60_000, message: 'B’s own index finds the word in its first session’s transcript' })
+          .toBe(true),
+        () => `B's own search answered: ${JSON.stringify(onB)}`,
+      );
+      const field = sidebarOf(again).getByRole('searchbox', { name: 'Search projects and sessions' });
+      await field.fill(SEARCHED);
+      await sidebarOf(again).getByRole('button', { name: `Search in conversations for ‘${SEARCHED}’`, exact: true }).click();
+      const palette = again.getByRole('dialog', { name: 'Command palette' });
+      await expect(palette).toBeVisible();
+      // B's hits are a group headed by B's name once a machine other than this Mac has any; its wrapper names B's ref
+      const underB = palette.getByRole('group', { name: B_NAME, exact: true });
+      await quoting(expect(underB.getByRole('option').filter({ hasText: SEARCHED }), 'the hit under B').toHaveCount(1, { timeout: 60_000 }), async () => `the palette: ${await palette.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      expect(await underB.evaluate((el) => el.closest('[data-search-machine]')?.getAttribute('data-search-machine') ?? null), 'the group is B’s').toBe(b.ref);
+      console.log(`[e2e:remote] M6: search for "${SEARCHED}" found under B: ${(await underB.getByRole('option').filter({ hasText: SEARCHED }).innerText()).replace(/\s+/g, ' ')}`);
+      await again.keyboard.press('Escape');
+      await expect(palette).toHaveCount(0);
+      await field.fill('');
+    });
+
+    await test.step('M6: B’s daemon stopped greys what its session asks with its tab closed, and the dock badge drops', async () => {
+      await b.request('session.send', { appSessionId: waitingApp, content: WAITING_AGAIN });
+      const row = needsYouRow(again, waitingAddress);
+      await quoting(expect(row, 'the second ask in A’s Needs you').toHaveAccessibleName(/ · Approval needed$/, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
+      await expect(needsYouCount(again, 1)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the second ask counts in the dock badge' }).toBe('1');
+      const stoppedAt = Date.now();
+      await b.stop();
+      // main greys a machine's items at its link's `down`: drawn after the live rows, out of the count and the badge
+      await quoting(expect(row, 'greyed once B is gone').toHaveAttribute('data-greyed', 'true', { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
+      await expect(row).toHaveAccessibleName(/ · Approval needed, machine offline$/);
+      await expect(needsYouCount(again, 0)).toBeVisible();
+      await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'a greyed item leaves the dock badge' }).toBe('');
+      console.log(`[e2e:remote] M6: B's item greyed and out of the badge ${Date.now() - stoppedAt} ms after B's daemon was told to stop`);
     });
   } finally {
     await a?.cleanup();

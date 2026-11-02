@@ -7,7 +7,7 @@
 // One JSON record per line, appended and fsynced: the claim before the run, then its result, or a tombstone for an op a
 // query answered `not-received`:
 //   { opId, opCreated, at, claim: { member, device, fingerprint, target, name, context?, action? } }
-//   { opId, result }
+//   { opId, result }        (P5 O7 M5a: the result in json-bytes' tagged form, so an answer's bytes read back as bytes)
 //   { opId, opCreated, at, tombstone: true }
 // Every entry binds its `opId` to one operation and one sender: a known id met again under another fingerprint or member
 // is `op-conflict`, and nothing of the stored one is said. Everything is synchronous, so a caller's checks, the claim and
@@ -23,12 +23,13 @@
 // reconciles it with the file as above; a restart is also where a claim left in progress is settled.
 //
 // P5 O7 M4: with `orphanAtOpen` (the services' ledger, `machine.op`; P5 O12 M11: the endpoint's own, whose actions are
-// idempotent), a claim the file holds with no result is the last process's, which is gone, so nothing in this one can
+// idempotent; P5 O16 M3c: the engine host's `host.op`, for a claim its predecessor left, killed or past its handover's
+// exit bound), a claim the file holds with no result is the last process's, which is gone, so nothing in this one can
 // finish it: it is orphaned, and a query answers it `expired`, the RL4 state for an op whose outcome the executor can no
 // longer say (a device settles it unknown and stops asking). It is never run again (its id still answers `in-progress` to
 // a new act), and its outcome, if it arrives later (a run that outlived the process, read back by its owner and given to
 // `finish`), replaces it: a query then answers `done`. Nothing of this is written; each open derives it from the file.
-// Without the option (the engine host's `host.op`, O16 M3c's to settle) such a claim stays `in-progress`.
+// Without the option such a claim stays `in-progress`.
 //
 // What the file holds may have reached only the page cache (an fsync that failed in the last process), and a restart
 // does not flush it: the open fsyncs the file and its directory before it serves a record, and one that can't stays
@@ -38,6 +39,7 @@ import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { KEPT_S, OP_HORIZON_S } from 'org-protocol';
+import { fromWire, toWire } from './json-bytes';
 
 /** Who sent an operation and what it is: the binding a query is authorized against. `target` is the executor's own word
  * for what the op acts on (the engine host's appSessionId; null for the machine itself). */
@@ -151,7 +153,7 @@ export class OpLedger {
     if (entry === undefined || entry.claim === null || entry.result !== undefined) return;
     entry.result = { value: result };
     try {
-      this.#append({ opId, result });
+      this.#append({ opId, result: toWire(result) });
     } catch (error) {
       this.#failed('the result of an operation could not be kept', error);
     }
@@ -244,7 +246,7 @@ export class OpLedger {
     const { opId } = record;
     if ('result' in record) {
       const entry = this.#entries.get(opId);
-      if (entry?.claim != null && entry.result === undefined) entry.result = { value: record.result };
+      if (entry?.claim != null && entry.result === undefined) entry.result = { value: fromWire(record.result) };
       return true;
     }
     if (!isText(record.opCreated) || typeof record.at !== 'number') return false;
@@ -276,7 +278,7 @@ export class OpLedger {
       if (entry.claim === null) out.push(JSON.stringify({ opId, opCreated: entry.opCreated, at: entry.at, tombstone: true }));
       else {
         out.push(JSON.stringify({ opId, opCreated: entry.opCreated, at: entry.at, claim: entry.claim }));
-        if (entry.result !== undefined) out.push(JSON.stringify({ opId, result: entry.result.value }));
+        if (entry.result !== undefined) out.push(JSON.stringify({ opId, result: toWire(entry.result.value) }));
       }
     }
     const temporary = `${this.#path}.${randomBytes(6).toString('base64url')}.tmp`;

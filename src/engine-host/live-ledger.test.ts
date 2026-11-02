@@ -13,7 +13,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const OWNER = { pid: 500, procStart: 'T500' };
-const ROW = { appSessionId: 'app-1', pid: 600, procStart: 'T600', launchId: 'L1' };
+const ROW = { appSessionId: 'app-1', pid: 600, procStart: 'T600', launchId: 'L1', holderId: null };
 
 describe('the orphan ledger', () => {
   it('writes its owner and rows through a temporary file and a rename', () => {
@@ -33,6 +33,16 @@ describe('the orphan ledger', () => {
     clearLive(dir, { pid: 501, procStart: 'T501' });
     expect(readLive(dir)).toBeNull();
     expect(() => clearLive(dir, OWNER)).not.toThrow(); // nothing to clear
+  });
+
+  // P5 O16 M2: a row names its session host; a ledger an older build wrote, without the field, reads as a direct spawn's
+  it('keeps each row\'s session host, and reads a row without one as null', () => {
+    writeLive(dir, OWNER, [{ ...ROW, holderId: 'L1' }]);
+    expect(readLive(dir)?.rows).toEqual([{ ...ROW, holderId: 'L1' }]);
+    const older: Partial<typeof ROW> = { ...ROW };
+    delete older.holderId;
+    writeFileSync(join(dir, 'live.json'), JSON.stringify({ owner: OWNER, rows: [older] }));
+    expect(readLive(dir)?.rows).toEqual([ROW]);
   });
 
   it('reads an unreadable ledger as none', () => {
@@ -67,7 +77,7 @@ describe('sweepOrphans', () => {
     };
     return { alive, signals, lines, slept, deps };
   }
-  const row = (n: number, procStart: string) => ({ appSessionId: `app-${n}`, pid: n, procStart, launchId: `L${n}` });
+  const row = (n: number, procStart: string) => ({ appSessionId: `app-${n}`, pid: n, procStart, launchId: `L${n}`, holderId: null });
 
   it('with the owner dead, stops each row alive with its recorded start, SIGTERM first and SIGKILL past 5 s; a dead and a reused pid are left alone', async () => {
     const { alive, signals, slept, deps, lines } = world({
@@ -93,6 +103,22 @@ describe('sweepOrphans', () => {
     unreadable.deps.procStartOf = (pid) => (pid === 500 ? null : 'T603');
     expect(await sweepOrphans(dir, unreadable.deps)).toBe(0);
     expect(unreadable.signals).toEqual([]);
+  });
+
+  // P5 O16 M3 (D10): a row whose session host lives is that host's (an adoption takes it); a dead host's child that
+  // lives is an orphan whoever wrote the ledger, named by the roster's child identity
+  it('skips the rows of live session hosts and sweeps the live children of dead ones, the ledger or no ledger', async () => {
+    const { signals, deps, lines } = world({ 603: { start: 'T603', endsOn: 'SIGTERM' }, 604: { start: 'T604', endsOn: 'SIGTERM' }, 605: { start: 'T605', endsOn: 'SIGTERM' } });
+    writeLive(dir, OWNER, [{ ...row(603, 'T603'), holderId: 'L603' }, { ...row(604, 'T604'), holderId: 'L604' }]);
+    const deadChild = { ...row(605, 'T605'), holderId: 'L605' };
+    expect(await sweepOrphans(dir, deps, { liveHolders: new Set(['L603']), deadHostChildren: [deadChild, { ...row(604, 'T604'), holderId: 'L604' }] })).toBe(2);
+    expect(signals).toEqual([[604, 'SIGTERM'], [605, 'SIGTERM']]); // 604 once, though both name it
+    expect(lines).toContain('orphan sweep skips app-603 (pid 603): its session host L603 is alive');
+    expect(lines).toContain('orphan app-605 (pid 605, launch L605) of the dead session host L605: SIGTERM');
+
+    rmSync(join(dir, 'live.json'));
+    const fresh = world({ 605: { start: 'T605', endsOn: 'SIGTERM' } });
+    expect(await sweepOrphans(dir, fresh.deps, { deadHostChildren: [deadChild] })).toBe(1);
   });
 
   it('with the owner alive, sweeps nothing: its engines are its own', async () => {
@@ -184,8 +210,8 @@ describe('sweepOrphans', () => {
       const polite = await orphan('echo up; exec sleep 30');
       const stubborn = await orphan("trap '' TERM; echo up; sleep 30 & wait; sleep 30");
       writeLive(dir, { pid: 999_999, procStart: 'gone' }, [
-        { appSessionId: 'app-1', pid: polite.pid, procStart: polite.procStart, launchId: 'L1' },
-        { appSessionId: 'app-2', pid: stubborn.pid, procStart: stubborn.procStart, launchId: 'L2' },
+        { appSessionId: 'app-1', pid: polite.pid, procStart: polite.procStart, launchId: 'L1', holderId: null },
+        { appSessionId: 'app-2', pid: stubborn.pid, procStart: stubborn.procStart, launchId: 'L2', holderId: null },
       ]);
       const started = Date.now();
       expect(await sweepOrphans(dir, real(400))).toBe(2);

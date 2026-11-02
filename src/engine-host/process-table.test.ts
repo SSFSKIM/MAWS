@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: RequestId
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
-import { parsePsTree, ProcessTable } from './process-table';
+import { HANDING_OVER, parsePsTree, ProcessTable } from './process-table';
+import { stopHeldHost, type HeldStopOutcome } from './holder/stop-held'; // P5 O16 wave 1 verification; re-verification: stopHeldHost
+import type { RosterEntry } from './holder/roster'; // P5 O16 wave 1 re-verification
 import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
@@ -12,6 +14,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'; // P5 O2 branch revie
 import { tmpdir } from 'node:os'; // P5 O2 branch review
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { EngineSession } from './session';
+import { HandoverDrain } from './handover'; // P5 O16 M3b fix wave 1
 import type { LiveRow } from './live-ledger'; // E10
 // C12 start
 import { readFileSync } from 'node:fs';
@@ -20,6 +23,13 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 // C12 end
 
 const flush = () => new Promise((r) => setImmediate(r));
+async function until(check: () => boolean, what: string, ms = 5_000): Promise<void> { // P5 O16 M3b fix wave 1
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -165,6 +175,347 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
     expect(table.list().every((row) => row.lifecycle === 'exited')).toBe(true);
     expect(() => table.reserve('after' as AppSessionId, create)).toThrow(/shutting down/);
+  });
+
+  // P5 O16 M3b (D9): the handover's one synchronous step and the detached exit order's shutdown
+  it('freezes every live hosted row at the handover, refuses every launch after it, and the detach shutdown leaves hosted rows running', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const hosted = scriptedSession({ spec: { appSessionId: 'app-hosted' as AppSessionId }, transport: { holder: { pid: 4100, holderId: 'L1', fence: 1 } } });
+    const direct = scriptedSession({ spec: { appSessionId: 'app-direct' as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) });
+    for (const s of [hosted, direct]) table.reserve(s.session.status().appSessionId, () => s.session);
+    await hosted.session.start();
+    await direct.session.start();
+    expect(table.freezeForHandover()).toEqual([hosted.session]); // the direct row is the exit order's ladder's
+    const create = vi.fn(() => scriptedSession().session);
+    expect(() => table.reserve('late' as AppSessionId, create)).toThrow(HANDING_OVER);
+    expect(() => table.reserve('adopted' as AppSessionId, create, { adoption: true })).toThrow(HANDING_OVER);
+    expect(create).not.toHaveBeenCalled();
+    const shutdown = table.shutdown({ graceMs: 5_000, mode: 'detach' });
+    await flush();
+    direct.transport.exit(0); // exits on end_session
+    expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
+    expect(hosted.transport.calls).toEqual(['detach:ack']);
+    expect(hosted.session.lifecycle).toBe('ready');
+    expect(direct.session.lifecycle).toBe('exited');
+  });
+
+  // P5 O16 M3b fix wave 1 (Interfaces §D: a stop-all and a quit stay deliberate): a stop after the freeze takes the row
+  // back from the handover and runs the real ladder; nothing is left to a successor
+  it('a stop-all after the freeze stops every frozen row through the ladder: the engine exits, nothing detached', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const hosted = scriptedSession({ spec: { appSessionId: 'app-hosted' as AppSessionId }, transport: { holder: { pid: 4100, holderId: 'L1', fence: 1 } }, responder: handshakeResponder({ end_session: () => null }) });
+    table.reserve('app-hosted' as AppSessionId, () => hosted.session);
+    await hosted.session.start();
+    const drain = new HandoverDrain(table.freezeForHandover(), { log: () => {}, settled: () => {} });
+    const shutdown = table.shutdown({ graceMs: 5_000, mode: 'stop' });
+    await until(() => hosted.transport.requestsOf('end_session').length === 1, 'the ladder’s end_session');
+    hosted.transport.exit(0);
+    expect(await shutdown).toEqual({ stopped: 1, forced: 0 });
+    expect(hosted.session.lifecycle).toBe('exited');
+    expect(hosted.session.status().exit).toMatchObject({ reason: 'quit' });
+    expect(hosted.transport.calls).not.toContain('detach:ack');
+    expect(hosted.journal.rows.some((row) => (row.frame as { event?: string }).event === 'host_detach')).toBe(false);
+    expect(drain.settled).toBe(true); // the row left the drain; nothing waits for a successor
+  });
+
+  it('a user’s stop of a frozen row during the drain stops it through the ladder and takes it out of the handover; the rest still detach', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const rows = ['app-a', 'app-b'].map((id, i) => scriptedSession({ spec: { appSessionId: id as AppSessionId }, transport: { holder: { pid: 4100 + i, holderId: `L${i}`, fence: 1 } }, responder: handshakeResponder({ end_session: () => null }) }));
+    for (const row of rows) table.reserve(row.session.status().appSessionId, () => row.session);
+    for (const row of rows) await row.session.start();
+    const [a, b] = rows as [typeof rows[0], typeof rows[0]];
+    let settled = false;
+    new HandoverDrain(table.freezeForHandover(), { log: () => {}, settled: () => void (settled = true) });
+    const stopped = a.session.stop('stop');
+    await until(() => a.transport.requestsOf('end_session').length === 1, 'the ladder’s end_session');
+    a.transport.exit(0);
+    await stopped;
+    expect(a.session.status().exit).toMatchObject({ reason: 'stop' });
+    await until(() => settled, 'the drain');
+    await until(() => b.transport.calls.includes('detach:ack'), 'the other row’s detach');
+    expect(a.transport.calls).not.toContain('detach:ack');
+    expect(b.session.lifecycle).toBe('ready');
+  });
+
+  // P5 O16 M3 (D10): a row held for an adoption from before the first client is answered: live, holding the host as a
+  // launch does, refusing a launch of its id; the adoption's own reservation takes it, a failed one releases it
+  it('holds a row for an adoption: a launch of its id is refused, only the adoption reserves it, and its end releases the hold', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    let rowsChanged = 0;
+    table.onRowsChanged(() => void (rowsChanged += 1));
+    table.holdForAdoption(['app-s' as AppSessionId, 'app-t' as AppSessionId]);
+    expect([table.adoptingCount, table.launching(), table.isAdopting('app-s' as AppSessionId), rowsChanged]).toEqual([2, true, true, 1]);
+    const create = vi.fn(() => scriptedSession().session);
+    expect(table.reserve('app-s' as AppSessionId, create)).toEqual({ status: 'refused', reason: 'already_live', message: 'process is being adopted' });
+    expect(create).not.toHaveBeenCalled();
+    const s = scriptedSession();
+    expect(table.reserve('app-s' as AppSessionId, () => s.session, { adoption: true })).toMatchObject({ status: 'launching' });
+    expect(table.adoptingCount).toBe(1);
+    table.adoptionEnded('app-s' as AppSessionId); // reserved already: nothing to release
+    table.adoptionEnded('app-t' as AppSessionId); // failed: released
+    expect([table.adoptingCount, table.launching()]).toEqual([0, false]);
+    s.transport.exit(0);
+    await s.session.exited;
+  });
+
+  // P5 O16 panel fix wave 1 (scalpel-1#1): a stop-all during the start's adoptions, before they reserve their rows. The
+  // stop-all closes reservation, so a held session never becomes a row the ladder could stop: its engine is stopped
+  // through the hold's own stop (one given up included: a failed adoption leaves its engine running) and counted with the
+  // rows'. An exit that detaches leaves the holds for the successor; a stop-all asked again awaits the same stops.
+  it('a stop-all stops the sessions held for adoption and counts them; a detaching exit leaves them', async () => {
+    const S = 'app-s' as AppSessionId;
+    const T = 'app-t' as AppSessionId;
+    const asked: AppSessionId[] = [];
+    const detaching = new ProcessTable({ ps: async () => '' });
+    detaching.holdForAdoption([S], async (id) => {
+      asked.push(id);
+      return 'stopped';
+    });
+    expect(await detaching.shutdown({ graceMs: 0, mode: 'detach' })).toEqual({ stopped: 0, forced: 0 });
+    expect(asked).toEqual([]);
+
+    let finish!: () => void;
+    const finishing = new Promise<void>((resolve) => (finish = resolve));
+    const table = new ProcessTable({ ps: async () => '' });
+    table.holdForAdoption([S, T], async (id) => {
+      asked.push(id);
+      await finishing;
+      return id === S ? 'stopped' : 'forced';
+    });
+    table.adoptionFailed(T); // given up, its hold kept until every adoption has ended
+    const row = scriptedSession({ spec: { appSessionId: 'app-row' as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) });
+    table.reserve('app-row' as AppSessionId, () => row.session);
+    await row.session.start();
+    const first = table.shutdown({ graceMs: 0 });
+    expect(() => table.reserve(S, () => scriptedSession().session, { adoption: true })).toThrow(/shutting down/); // no row can come
+    const again = table.shutdown({ graceMs: 0 });
+    await until(() => row.transport.requestsOf('end_session').length > 0, 'the row’s ladder');
+    row.transport.exit(0);
+    finish();
+    expect(await first).toEqual({ stopped: 2, forced: 1 });
+    expect(await again).toEqual({ stopped: 2, forced: 1 }); // each stop under way awaited, as a row's ladder is, never asked twice
+    expect(asked).toEqual([S, T]);
+    expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // idempotent once they ended
+  });
+
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host, one the start left running
+  // with its engine and no row (a failed adoption, D59(6); a losing host, D59(10)). Not live for supervision; a stop-all
+  // stops it and counts it; a reservation under its id is refused until it is stopped; a gone one is dropped on consult.
+  describe('an unattached session host', () => {
+    const U = 'app-u' as AppSessionId;
+    const KEY = { pid: 4242, procStart: 'then' };
+    const tableWith = (alive: { now: boolean }) => new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === KEY.pid && alive.now, procStartOf: () => 'then' });
+
+    it('is no row, no hold and no launch: nothing holds the host for it', () => {
+      const table = tableWith({ now: true });
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => 'stopped' });
+      expect([table.list().length, table.adoptingCount, table.launching(), table.isAdopting(U), table.unattachedHosts(U).map((h) => h.holderId)]).toEqual([0, 0, false, false, ['L1']]);
+    });
+
+    it('a stop-all stops it and counts it; a detaching exit leaves it', async () => {
+      const alive = { now: true };
+      const asked: string[] = [];
+      const stop = async () => {
+        asked.push('L1');
+        alive.now = false;
+        return 'forced' as const;
+      };
+      const detaching = tableWith(alive);
+      detaching.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop });
+      expect(await detaching.shutdown({ graceMs: 0, mode: 'detach' })).toEqual({ stopped: 0, forced: 0 });
+      expect(asked).toEqual([]);
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop });
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 1 });
+      expect(asked).toEqual(['L1']);
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // stopped, and gone: not asked again
+    });
+
+    it('a reservation under its id is refused until it is stopped, each stopped once, then admitted', async () => {
+      const alive = { now: true };
+      let stops = 0;
+      let finish!: () => void;
+      const finishing = new Promise<void>((resolve) => (finish = resolve));
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => {
+        stops += 1;
+        await finishing;
+        alive.now = false;
+        return 'stopped';
+      } });
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      const first = table.stopUnattached(U);
+      const second = table.stopUnattached(U);
+      finish();
+      expect(await first).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect(await second).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect(stops).toBe(1);
+      expect(table.unattachedHosts(U)).toEqual([]);
+      const s = scriptedSession({ spec: { appSessionId: U } });
+      expect(table.reserve(U, () => s.session)).toMatchObject({ status: 'launching' });
+      s.transport.exit(0);
+      await s.session.exited;
+    });
+
+    // wave 1 verification: a stop whose outcome is not known (a committed spawn the host still waits for, a process whose
+    // start time cannot be read) is not done: the record and the reserve guard stay, the next consult asks again, and a
+    // stop-all counts it in neither; a hold's unresolved stop is asked again the same way
+    it('an unresolved stop keeps the record and the guard, is asked again, and a stop-all counts it in neither', async () => {
+      const alive = { now: true };
+      const answers: HeldStopOutcome[] = ['incomplete', 'unverified', 'stopped'];
+      let stops = 0;
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => {
+        const answer = answers[stops++]!;
+        if (answer === 'stopped') alive.now = false;
+        return answer;
+      } });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'incomplete' }]);
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']);
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // 'unverified': in neither
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']);
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect([stops, table.unattachedHosts(U)]).toEqual([3, []]);
+
+      const held = new ProcessTable({ ps: async () => '', log: () => {} });
+      const heldAnswers: HeldStopOutcome[] = ['incomplete', 'forced'];
+      let heldStops = 0;
+      held.holdForAdoption([U], async () => heldAnswers[heldStops++]!);
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 1 }); // asked again, now done
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(heldStops).toBe(2);
+    });
+
+    // wave 1 re-verification: a record is dropped only when every process it guards is verified gone, its host and its
+    // engine (killed with ESRCH, or its start read and another's). A host gone past its grace with its engine alive and
+    // unreadable stays, guards the launch, is asked again at each consult (no signal to the unverified pid), and goes once
+    // its engine is verified gone.
+    it('a host gone with its engine alive and unverifiable keeps the record until the engine is verified gone', async () => {
+      const HOST = { pid: 4242, procStart: 'then' };
+      const CHILD = { pid: 5151, procStart: 'child-start' };
+      const world: Record<number, { alive: boolean; start: string | null }> = { [HOST.pid]: { alive: true, start: HOST.procStart }, [CHILD.pid]: { alive: true, start: CHILD.procStart } };
+      const isAlive = (pid: number) => world[pid]?.alive ?? false;
+      const procStartOf = (pid: number) => (world[pid]?.alive ? (world[pid]!.start ?? null) : null);
+      const signals: string[] = [];
+      const entry: RosterEntry = {
+        protocol: 1, holderId: 'L1', pid: HOST.pid, procStart: HOST.procStart, startedAt: '2026-11-01T10:00:00.000Z', socket: '/x/h.sock', binary: '/x/maws-session-host',
+        appSessionId: U, engineSessionId: 'eng', state: 'running', child: CHILD, fence: 1, exit: null,
+      };
+      const deps = { hostsDir: '/nonexistent/hosts', isAlive, procStartOf, signal: (pid: number, name: string) => void signals.push(`${name} ${pid}`), log: () => {}, graceMs: 300,
+        sleep: async () => {
+          world[HOST.pid]!.alive = false; // the host leaves after its grace
+          world[CHILD.pid]!.start = null; // its engine outlives it, and `ps` no longer answers for it
+        } };
+      const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive, procStartOf });
+      table.unattach(U, { holderId: 'L1', host: HOST, child: () => CHILD, stop: () => stopHeldHost(entry, deps) });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'unverified' }]);
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']); // the host is gone; its engine is not
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'unverified' }]); // asked again
+      expect(signals).toEqual([`SIGTERM ${HOST.pid}`]); // the unverified pid never signalled
+      world[CHILD.pid]!.start = 'another'; // its pid now another process's: verified gone
+      expect(table.unattachedHosts(U)).toEqual([]);
+      const s = scriptedSession({ spec: { appSessionId: U } });
+      expect(table.reserve(U, () => s.session)).toMatchObject({ status: 'launching' });
+      s.transport.exit(0);
+      await s.session.exited;
+
+      // a host that left on its own, its engine still running (known from the roster): kept, not dropped with its host
+      const kept = new ProcessTable({ ps: async () => '', log: () => {}, isAlive, procStartOf });
+      world[CHILD.pid] = { alive: true, start: CHILD.procStart };
+      kept.unattach(U, { holderId: 'L2', host: HOST, child: () => CHILD, stop: async () => 'forced' });
+      expect(kept.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L2']);
+      world[CHILD.pid]!.alive = false; // ESRCH
+      expect(kept.unattachedHosts(U)).toEqual([]);
+    });
+
+    it('a gone one is dropped on consult and never stopped', async () => {
+      const alive = { now: true };
+      let stops = 0;
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => ((stops += 1), 'stopped' as const) });
+      alive.now = false; // its host exited on its own
+      expect(table.unattachedHosts(U)).toEqual([]);
+      table.unattach(U, { holderId: 'L2', host: KEY, child: () => null, stop: async () => ((stops += 1), 'stopped' as const) });
+      expect(await table.stopUnattached(U)).toEqual([]);
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(stops).toBe(0);
+    });
+  });
+
+  // P5 O16 M4 ("Stream redelivery"): a read of a session held for adoption waits for its row, or for its adoption's end
+  describe('a read of a session held for adoption (adoptionSettled)', () => {
+    const S = 'app-s' as AppSessionId;
+    const settledBy = async (wait: Promise<void> | null) => {
+      let settled = false;
+      void wait?.then(() => void (settled = true));
+      for (let i = 0; i < 5; i++) await Promise.resolve(); // microtasks only: some cases fake the timers
+      return settled;
+    };
+
+    it('has nothing to wait for when the session is not held', () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+    });
+
+    it('waits until the hold becomes the row', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      expect(await settledBy(wait)).toBe(false);
+      const s = scriptedSession();
+      let rowAtWake: unknown = null;
+      void wait!.then(() => void (rowAtWake = table.get(S)));
+      table.reserve(S, () => s.session, { adoption: true });
+      await settledBy(wait);
+      expect(rowAtWake).toBe(s.session); // woken with the row there
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+      s.transport.exit(0);
+      await s.session.exited;
+    });
+
+    it('wakes the reads of an adoption that gave up at once, and has none wait for it after, its hold kept', async () => {
+      vi.useFakeTimers();
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.adoptionFailed(S);
+      expect(await settledBy(wait)).toBe(true); // woken, not run out: no timer advanced
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+      expect(table.isAdopting(S)).toBe(true); // a launch of its id is still refused until every adoption ended
+      table.adoptionEnded(S);
+      expect(table.isAdopting(S)).toBe(false);
+    });
+
+    it('wakes them when the adoptions end', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.adoptionEnded(S);
+      expect(await settledBy(wait)).toBe(true);
+    });
+
+    it('answers a read past its bound', async () => {
+      vi.useFakeTimers();
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(await settledBy(wait)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await settledBy(wait)).toBe(true);
+    });
+
+    it('has none wait once a handover froze the host, and wakes those waiting', async () => {
+      const table = new ProcessTable({ ps: async () => '' });
+      table.holdForAdoption([S]);
+      const wait = table.adoptionSettled(S, 5_000);
+      table.freezeForHandover();
+      expect(await settledBy(wait)).toBe(true);
+      expect(table.adoptionSettled(S, 5_000)).toBeNull();
+    });
   });
 
   it('release frees an exited row only: a live one stays reserved, an exited one leaves the table (archive, whole-branch review)', async () => {
@@ -710,7 +1061,9 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(0);
     return { table, s, logs };
   }
-  const lifecycle = (x: Scripted) => x.session.lifecycle;
+  // O16 M5: an idle release goes through the row's reap, which leaves the process state alone and writes end_session
+  // first (holder/reap-session.test.ts): a row it released reads `released` here
+  const lifecycle = (x: Scripted) => (x.transport.requestsOf('end_session').length > 0 ? 'released' : x.session.lifecycle);
 
   it('stops a ready row with no hard reason once the idle time has passed since the release became active, as reason idle', async () => {
     const { table, s, logs } = await idleTable(['a']);
@@ -718,8 +1071,8 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
-    expect(logs).toEqual(['idle release of a: idle for 60000 ms with no interest held']); // P5 O2 M2: re-keyed on interest
+    expect(lifecycle(s.a!)).toBe('released');
+    expect(logs).toEqual(['idle release of a: idle for 60000 ms with no interest held', 'idle reap of a: signalled (no observer was ever seen on the process)']); // P5 O2 M2: re-keyed on interest; O16 M5: through the reap
     expect(s.a!.transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']); // `idle` never goes on the wire
     s.a!.transport.exit(0);
     await s.a!.session.exited;
@@ -739,7 +1092,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a hard reason that comes and goes inside the idle time restarts the clock', async () => {
@@ -752,7 +1105,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a row the engine says is working is not idle (running), even with no hard reason', async () => {
@@ -765,7 +1118,7 @@ describe('process table (E10): the idle-row release', () => {
     expect(lifecycle(s.a!)).toBe('ready');
     s.a!.transport.push(engineState('idle', 'st-2'));
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('releases nothing while inactive (a client connected), however long the row has been idle; activation starts the clock', async () => {
@@ -777,7 +1130,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a client connecting cancels the clock; one leaving again starts it afresh; a new idle time keeps the activation', async () => {
@@ -793,7 +1146,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('never releases with no idle time (never)', async () => {
@@ -811,7 +1164,7 @@ describe('process table (E10): the idle-row release', () => {
     await vi.advanceTimersByTimeAsync(0);
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect([s.a, s.b, s.c].map((x) => lifecycle(x!))).toEqual(['exiting', 'ready', 'ready']);
+    expect([s.a, s.b, s.c].map((x) => lifecycle(x!))).toEqual(['released', 'ready', 'ready']);
     s.a!.transport.exit(0);
     await s.a!.session.exited;
     for (const x of [s.b!, s.c!]) {
@@ -841,7 +1194,7 @@ describe('process table (E10): the orphan ledger', () => {
       await s.session.start();
       return s;
     };
-    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId });
+    const row = (s: Scripted, pid: number): LiveRow => ({ appSessionId: s.session.status().appSessionId, pid, procStart: `T${pid}`, launchId: s.session.status().launchId, holderId: null });
     return { table, procStartOf, logs, writes, launch, row, record: () => table.recordLive((rows) => void writes.push([...rows])) };
   }
 
@@ -870,6 +1223,16 @@ describe('process table (E10): the orphan ledger', () => {
     expect(writes.at(-1)).toEqual([row(b, 702)]);
     expect(writes).toHaveLength(count + 1);
     expect(procStartOf.mock.calls.map(([pid]) => pid)).toEqual([701, 702]); // once per process
+  });
+
+  // P5 O16 M2 (Interfaces §B): a row under a session host names it
+  it('names the session host a row runs under', async () => {
+    const { table, writes, record } = ledgerTable();
+    const s = scriptedSession({ spec: { appSessionId: 'h' as AppSessionId }, transport: { pid: 703 }, session: { holder: { pid: 99, holderId: 'L-h', binary: '/bin/host' } } });
+    table.reserve('h' as AppSessionId, () => s.session);
+    await s.session.start();
+    record();
+    expect(writes.at(-1)).toEqual([{ appSessionId: 'h', pid: 703, procStart: 'T703', launchId: s.session.status().launchId, holderId: 'L-h' }]);
   });
 
   it('records a start time it cannot read as empty, and a failed write is logged and retried at the next change', async () => {
@@ -922,7 +1285,9 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(0);
     return { table, s, logs };
   }
-  const lifecycle = (x: Scripted) => x.session.lifecycle;
+  // O16 M5: an idle release goes through the row's reap, which leaves the process state alone and writes end_session
+  // first (holder/reap-session.test.ts): a row it released reads `released` here
+  const lifecycle = (x: Scripted) => (x.transport.requestsOf('end_session').length > 0 ? 'released' : x.session.lifecycle);
   // One human turn, its frames pushed between the engine's `started` and its result.
   async function humanTurn(x: Scripted, frames: unknown[]): Promise<void> {
     const { messageUuid } = await x.session.send('go');
@@ -965,7 +1330,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(budgetOf(s.a!)).toMatchObject({ over: true, release: 'a', blocked: [] });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a session whose last Stop listed a session cron is never released; a Stop listing none starts its clock', async () => {
@@ -978,42 +1343,42 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('ready');
     expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
     await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a cron tool (a subagent’s included) in a turn that ended without Stop holds the session until the next Stop', async () => {
     const { table, s } = await releaseTable(['a']);
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await humanTurn(s.a!, [assistantTool('CronCreate', 'toolu-agent')]); // interrupted: no Stop
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'turn_ended_without_stop' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'turn_ended_without_stop', descendants: 0 });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a --resume after an exit that was not a release holds the session until its first Stop (a resurrected session-only cron can fire before it)', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a resume after a release starts known: nothing holds it', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { launchKind: 'resumed_after_release' } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   // P5 Decision Log 46: the durable crons, in the project's scheduled-tasks file, which no Stop lists
@@ -1032,28 +1397,28 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(s.a!.session.status()).toMatchObject({ work: { crons: [job] }, keepAlive: ['background_tasks'] });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await humanTurn(s.a!, [stop([])]); // the Stop lists no durable job; the file still holds it
-    expect(s.a!.session.status().work).toEqual({ crons: [job], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [job], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
     files.set('/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob('someone-else')] })); // CronDelete
     await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a scheduled-tasks file that exists but cannot be read holds the session until a read succeeds', async () => {
     const files = new Map([['/p/.claude/scheduled_tasks.json', '{"tasks": [']]);
     const { table, s } = await releaseTable(['a'], resumeOf('resumed_after_release', files));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     files.delete('/p/.claude/scheduled_tasks.json');
     await humanTurn(s.a!, [stop([])]);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   // P5 Decision Log 49: the cron record beside the state file bounds a resume's unknown
@@ -1077,7 +1442,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // the older, cleaner record was removed
     // a resume while the record is unconfirmed is unknown, not known-empty
     const resumed = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
-    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     // storage recovers: the next Stop, identical to the failed one, is written
     store.cronRecordWriteError = null;
     await humanTurn(s.a!, [stop([cron], 'stop-3')]);
@@ -1092,10 +1457,10 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
 
   it('a resume whose record shows no listed cron and no cron tool since starts known and empty, and is released', async () => {
     const { table, s } = await releaseTable(['a'], resumeWithRecord({ sessionCrons: [], toolSinceStop: false }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it.each<[string, CronRecord | null]>([
@@ -1104,7 +1469,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     ['no record', null],
   ])('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
     const { table, s } = await releaseTable(['a'], resumeWithRecord(record));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
@@ -1116,7 +1481,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
       throw new Error('state file unreadable');
     };
     const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed', descendants: 0 });
     expect(s.a!.logs).toContainEqual(expect.stringContaining('cron record not loaded'));
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
@@ -1139,11 +1504,11 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
       const beforeClear = '66666666-6666-4666-8666-666666666666'; // the id the job keeps after a /clear moved the session on
       const files = new Map([['/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob(beforeClear)] })]]);
       const { table, s } = await releaseTable(['a'], () => ({ spec: resumeOf('resumed', files)().spec, session: { launchKind: 'resumed', scheduledTasksFile: tasksFile(files), store } }));
-      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
       expect(s.a!.logs).toContainEqual(expect.stringContaining('engine session ids not loaded'));
       table.setIdleRelease({ idleMs: IDLE_MS, active: true });
       await humanTurn(s.a!, [stop([])]); // a Stop re-reads the file on the same lost lineage
-      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable', descendants: 0 });
       await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
       expect(lifecycle(s.a!)).toBe('ready');
       expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a' }] });
@@ -1152,16 +1517,28 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     }
   });
 
-  it('an adopted process holds the session until a task snapshot and a Stop have both arrived', async () => {
+  // P5 O16 M2 (D48): a Stop that carries `background_tasks` reads the tasks too; one without them leaves them unknown
+  it('an adopted process holds the session until its tasks and its crons have both been read', async () => {
     const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
-    await humanTurn(s.a!, [stop([])]);
-    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted' }); // the tasks are not read yet
+    const withoutTasks = stop([]);
+    delete (withoutTasks.request.input as { background_tasks?: unknown }).background_tasks;
+    await humanTurn(s.a!, [withoutTasks]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted', descendants: 0 }); // the tasks are not read yet
     await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
     expect(lifecycle(s.a!)).toBe('ready');
     s.a!.transport.push(tasks([], 'b-1'));
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
+  });
+
+  it('an adopted process\'s Stop with its background_tasks reads both at once (D48)', async () => {
+    const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await humanTurn(s.a!, [stop([])]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null, descendants: 0 });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('released'); // O16 M5: through the reap
   });
 
   it('interest holds a row; its end (a set without it, or the holder gone) starts the clock', async () => {
@@ -1175,12 +1552,12 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
     app.end(); // the client's connection ended
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.b!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.b!)).toBe('exiting');
+    expect(lifecycle(s.b!)).toBe('released');
   });
 
   it('interest is the union of its holders; a holder already gone holds nothing', async () => {
@@ -1198,7 +1575,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     expect(lifecycle(s.a!)).toBe('ready');
     table.setInterest(second, []);
     await vi.advanceTimersByTimeAsync(IDLE_MS);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('a server’s idle time (24 hours) on the same rule; a due time passed while the machine slept releases soon after it wakes', async () => {
@@ -1208,12 +1585,12 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(SERVER_RELEASE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
     // b's mark clears; then the wall clock jumps past its due time while no timer runs (the machine slept)
     s.b!.session.setKept(false);
     vi.setSystemTime(Date.now() + 2 * SERVER_RELEASE_MS);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(lifecycle(s.b!)).toBe('exiting');
+    expect(lifecycle(s.b!)).toBe('released');
   });
 
   it('a kept session is never idle-released, though the memory budget may still release it; clearing the mark starts the clock', async () => {
@@ -1228,7 +1605,7 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect(lifecycle(s.a!)).toBe('exiting');
+    expect(lifecycle(s.a!)).toBe('released');
   });
 
   it('under an armed exit-when-idle interest is ignored, its clock starting at the arming, and the keep mark is honoured', async () => {
@@ -1241,8 +1618,8 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
     await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
-    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
-    expect(logs).toEqual(['idle release of a: idle for 600000 ms with no interest held (exit-when-idle armed: interest ignored)']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['released', 'ready']);
+    expect(logs).toEqual(['idle release of a: idle for 600000 ms with no interest held (exit-when-idle armed: interest ignored)', 'idle reap of a: signalled (no observer was ever seen on the process)']); // O16 M5: the reap's step reads the interest as ignored too
   });
 });
 // P5 O2 M2 end

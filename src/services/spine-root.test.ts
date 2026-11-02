@@ -18,6 +18,7 @@ import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
+import { item } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
 import { Index } from './index/index';
@@ -67,7 +68,7 @@ const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.
 // its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the
 // machine half's and the visible set's changes are the spine's own emits (the parts that hold them emit them), so the
 // front's own is the client port's request alone.
-const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged', 'browserEngine.request']; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd; P5 O17 M4: mawsd's request to a tab engine
+const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged', 'daemon.engineHandover' /* P5 O16 M3c fix wave 2: the daemon's own */, 'browserEngine.request']; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd; P5 O17 M4: mawsd's request to a tab engine
 // Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
 // src/services/ (P5 O3-E: the checkouts' root's `git.changed`, `files.changed` and `scm.remote.output` included). A part
 // emits through a function it was handed, always with the event's name written.
@@ -538,6 +539,31 @@ describe('the spine and the checkouts composed under plain Node', () => {
   // P5 O4 M2: on the daemon shape a dispatch to a parked engine host starts it, and the discovery wake waits only for a
   // host it woke itself (src/mawsd/discovery-wake.ts): a load asks a host that does not stream nothing (CI run
   // 41205847879, where sign-in's listing at the load spawned the host before the wake)
+  // O16 panel 1 (scalpel-2#1): the root wires the attention service's `handingOver` to its hosts' `handoverState` (on
+  // mawsd, the adapter's, which reads the daemon's supervisor): a host that leaves ready while its handover drains keeps
+  // its sessions' broker items; once no handover is under way, its leaving clears them
+  it('keeps the broker items while the engine host leaves ready in a draining handover, and clears them when it leaves with none', async () => {
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    const appSessionId = 'app-handover' as AppSessionId;
+    host.emit('session.brokerItems', { appSessionId, items: [item(appSessionId, 'permission', '2026-11-01T00:00:00.000Z')] });
+    const kinds = async () => {
+      const listed = await bus.invoke('attention.list', undefined);
+      if (!listed.ok) throw new Error(listed.error.message);
+      return listed.value.filter((entry) => entry.appSessionId === appSessionId).map((entry) => entry.kind);
+    };
+    expect(await kinds()).toEqual(['permission']);
+    host.handover = { state: 'draining', inFlight: 0 };
+    host.leave();
+    expect(await kinds(), 'kept through the handover').toEqual(['permission']);
+    host.handover = null;
+    await host.ready();
+    host.leave();
+    expect(await kinds(), 'cleared by a departure with no handover').toEqual([]);
+  });
+
   it('asks an engine host that does not stream nothing at its load', async () => {
     const host = new FakeSpineHost();
     compose(await openSpineData(profile, { build: BUILD }), host, fakeBus());

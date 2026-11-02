@@ -53,10 +53,11 @@ const setupOf = async (page: Page, id: string) => ((await page.evaluate(() => (w
 const untilPhase = (page: Page, id: string, phase: string) => expect.poll(async () => (await setupOf(page, id)).map((e) => e.phase), { timeout: 20_000 }).toContain(phase);
 
 type Row = { direction: string; frame: Record<string, unknown> & { event?: string; cwd?: string; args?: string[]; request?: { subtype?: string; workspaceTrust?: unknown } } };
-// Every journal row of a session, oldest file first.
+// Every journal row of a session, oldest file first (its `.jsonl` files alone).
 function journal(maws: MawsLaunch, appSessionId: string): Row[] {
   const dir = join(maws.userData, 'engine-host', 'journal', appSessionId);
   return readdirSync(dir)
+    .filter((file) => file.endsWith('.jsonl')) // P5 O16: a hosted launch's host map (`<launchId>.hseq`) sits beside its journal
     .sort()
     .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row));
 }

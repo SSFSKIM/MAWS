@@ -22,7 +22,8 @@ import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue, Prepared } from './queue'; // P4-A3: Prepared
-import { AskAnswerMismatch } from './tool-server/ask';
+import { AskAnswerMismatch, pendingAskOf } from './tool-server/ask';
+import { toolCallOf } from '@shared/maws/rpc'; // P5 O16 M3
 import type { ArtifactCaptureRequest, CaptureBridge } from './tool-server/artifacts';
 import { askAttentionItem, AskTable, type AskCancelReason } from './tool-server/asks';
 import { HostBridge } from './tool-server/bridge';
@@ -37,6 +38,8 @@ import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
 import { withLinkedReads, type Admission, type ReadAnswer } from './linked-reads'; // P4-A3
 import type { SendContent } from '@shared/engine/session-state-store'; // P4-A3
 import type { McpToolDefinition } from './tool-server/server';
+import { toolHoldFor } from './tool-server/e2e-hold'; // P5 O16 M3c
+import { E2E_HANDOVER_RACE } from './e2e-handover-race'; // P5 O16 M3c fix wave 2
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -113,6 +116,8 @@ export class SessionMaws {
       log: host.log,
       onChange: () => host.touch(),
       fromSubagent: host.fromSubagent && ((toolUseId) => host.fromSubagent!(toolUseId)), // P2-C3
+      hold: toolHoldFor(process.env), // P5 O16 M3c: the e2e's hold, under MAWS_E2E only
+      gate: E2E_HANDOVER_RACE?.gate, // fix wave 2: the e2e's race (../e2e-handover-race.ts), under MAWS_E2E only
     });
     // E1 end
   }
@@ -189,6 +194,25 @@ export class SessionMaws {
     this.provisional.observe(events);
   }
 
+  // P5 O16 M3 (Interfaces §D's table): the `maws` requests an earlier engine host left unanswered. A call of any tool but
+  // `ask` is answered with the orphan text (never run again); an `ask` call is re-raised from its own arguments under its
+  // request id (`accept`), so the human's answer settles the engine's call; an async ask the old manager acknowledged
+  // and the human has not answered is open again, its answers to go as a steer.
+  orphaned(req: ControlRequestFrame): void {
+    this.toolServer.orphaned(req);
+  }
+
+  restoreAsyncAsk(req: ControlRequestFrame, openedAt: string): void {
+    const params = ((req.request as { message?: { params?: unknown } }).message?.params ?? {}) as Record<string, unknown>;
+    const { args, toolUseId } = toolCallOf(params);
+    const ask = pendingAskOf(args, { toolUseId, requestId: req.request_id as RequestId, fromSubagent: false }, openedAt);
+    if (typeof ask === 'string') {
+      this.host.log(`the async ask of ${req.request_id} could not be restored: ${ask}`);
+      return;
+    }
+    this.askTable.open({ ...ask, blocking: false }, { blocking: false });
+  }
+
   // The engine withdrew a tool call.
   cancel(requestId: RequestId): void {
     this.toolServer.cancel(requestId);
@@ -202,6 +226,16 @@ export class SessionMaws {
   // What process exit would lose here (`EngineSessionStatus.pendingRequests`): tool calls in flight and async asks.
   get pending(): number {
     return this.toolServer.inFlight + this.askTable.asyncCount;
+  }
+
+  // P5 O16 M3b: what the handover's drain waits for (the tool server's calls but `ask`, through their answers' delivery)
+  inFlightThroughDelivery(): number {
+    return this.toolServer.inFlightThroughDelivery();
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): the tool of the first of those calls
+  deliveringTool(): string | null {
+    return this.toolServer.deliveringTool();
   }
 
   // E1: a window's answer to a `show_pane` (`maws.pane.answer`); the first one wins.

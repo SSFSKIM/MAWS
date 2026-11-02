@@ -8,6 +8,23 @@ let index: Index;
 beforeEach(() => { dir = tempDir(); index = new Index(join(dir.path, 'index.sqlite')); });
 afterEach(() => { index.close(); dir.dispose(); });
 describe('conversation search', () => {
+  // P5 O7 M6: a remote member's search names the sessions it views, so 50 title hits of other sessions can't spend the
+  // limit before a viewed session's transcript match.
+  it('searches only the named sessions, before the limit, in titles and transcripts alike', () => {
+    const shared = index.sessions.upsertFromSummary(summary({ customTitle: 'Shared notes' })).record;
+    index.sessionSearch.replace(shared.appId, shared.engineSessionId!, 100, 1000, 'a needle inside the shared conversation');
+    const titled = index.sessions.upsertFromSummary(summary({ customTitle: 'needle in a viewed title' })).record;
+    const others = Array.from({ length: 50 }, (_, n) => index.sessions.upsertFromSummary(summary({ customTitle: `needle private ${n}` })).record);
+    expect(index.sessionSearch.search('needle').map((hit) => hit.appSessionId)).not.toContain(shared.appId);
+    const named = index.sessionSearch.search('needle', undefined, [shared.appId, titled.appId]);
+    expect(named.map((hit) => hit.appSessionId)).toEqual([titled.appId, shared.appId]);
+    expect(named[1].snippet).toContain('needle inside the shared conversation');
+    expect(index.sessionSearch.search('needle', undefined, [])).toEqual([]);
+    // A short query takes the substring path: the same restriction.
+    expect(index.sessionSearch.search('ne', undefined, [shared.appId]).map((hit) => hit.appSessionId)).toEqual([shared.appId]);
+    expect(others).toHaveLength(50);
+  });
+
   it('searches only the displayed override text, not its JSON keys or source', () => {
     const record = index.sessions.upsertFromSummary(summary({ customTitle: 'Old title' })).record;
     index.sessions.update(record.appId, { title: { text: 'Release notes', source: 'user' } });

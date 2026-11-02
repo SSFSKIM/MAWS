@@ -60,6 +60,10 @@ export class BrokerAnswerMismatch extends Error {
 
 interface Entry extends BrokerItem {
   answering: boolean;
+  // P5 O16 M3a fix wave 1 (D49): restored from an old manager's journal and not listed by the adopted re-initialize's
+  // answer, so the engine may no longer hold it; its answer is written and settles it at once (D48 Q3: the engine drops
+  // an unknown id silently, so no frame would ever confirm it)
+  stale?: boolean;
 }
 
 type Frame = Record<string, unknown> & { type?: unknown };
@@ -69,9 +73,44 @@ export class PermissionBroker {
   private readonly tombstones = new Map<string, RetiredReason>(); // retired items keep their id and reason only, the last TOMBSTONE_LIMIT (the process never exits on its own)
   private lostAtAccept = 0;
   private readonly now: () => string;
+  private restoringAt: string | null = null; // P5 O16 M3: a journal row being folded (its time), when nothing is told
+  private redeliveryFrom: string | null = null; // P5 O16 M3a fix wave 1: the adopted re-initialize, whose answer lists what the engine holds
 
   constructor(private readonly deps: BrokerDeps) {
-    this.now = deps.now ?? (() => new Date().toISOString());
+    const now = deps.now ?? (() => new Date().toISOString());
+    this.now = () => this.restoringAt ?? now();
+  }
+
+  // P5 O16 M3 (Interfaces §D; D24): one row of a launch's journal, folded by an adopter before it consumes anything: the
+  // requests and their answers as the old manager journaled them, so the items the human had not answered are pending
+  // here again (the engine's redelivery at the re-initialize is a re-delivery, ignored by id), with no meta row written
+  // and no attention published. An answer the journal holds delivered its item, as its flushed row did live.
+  restore(row: { direction: string; at: string; frame: unknown }): void {
+    this.restoringAt = row.at;
+    try {
+      const f = (row.frame ?? {}) as Frame & { request_id?: unknown; response?: { request_id?: unknown } };
+      if (row.direction === 'in') {
+        if (f.type === 'control_request') {
+          const parsed = ControlRequestFrameSchema.safeParse(f);
+          if (parsed.success) this.accept(parsed.data);
+        }
+        this.observe(f);
+      } else if (row.direction === 'out' && f.type === 'control_response') {
+        const entry = this.items.get(String(f.response?.request_id));
+        if (entry?.attention.state === 'pending') {
+          entry.deliveredAt = row.at;
+          this.setState(entry, 'delivered', row.at);
+        }
+      }
+    } finally {
+      this.restoringAt = null;
+    }
+  }
+
+  // P5 O16 M3a fix wave 1 (D49): the adopted re-initialize `requestId`; its answer's `pending_*_requests` name the
+  // requests the engine still holds, and every pending item held before the answer that they omit becomes stale.
+  awaitRedelivery(requestId: string): void {
+    this.redeliveryFrom = requestId;
   }
 
   // Pending items and delivered ones: what process exit would lose (`EngineSessionStatus.pendingRequests`).
@@ -118,7 +157,7 @@ export class PermissionBroker {
       this.lostAtAccept += 1;
       return;
     }
-    if (shaped.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(req.request.dialog_kind))) {
+    if (shaped.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(req.request.dialog_kind)) && this.restoringAt === null) {
       this.deps.meta({ event: 'notice', level: 'warning', key: `dialog:undeclared:${requestId}`, text: `The engine asked for a "${String(req.request.dialog_kind)}" dialog, which MAWS did not declare; it stays pending.` });
     }
     this.emit();
@@ -152,6 +191,7 @@ export class PermissionBroker {
     }
     entry.answering = false;
     flushed(); // a client that does not call `flushed` (tests' fakes) still ends delivered
+    if (entry.stale === true && this.retire(entry, 'answered', this.now())) this.emit(); // D49: settled on the write
     if (wire.grants.length > 0) this.deps.onGrant?.(wire.grants);
     return 'delivered';
   }
@@ -172,6 +212,8 @@ export class PermissionBroker {
         changed = this.confirm(f.tool_use_id, at);
         break;
       case 'control_request': {
+        const redelivered = this.items.get(String(f.request_id));
+        if (redelivered?.stale === true && this.restoringAt === null) redelivered.stale = false; // D49: the engine delivered it again, so it holds it
         const request = (f.request ?? {}) as { subtype?: unknown; tool_use_id?: unknown; input?: { tool_use_id?: unknown }; message?: unknown };
         if (request.subtype === 'hook_callback') changed = this.confirm(request.tool_use_id ?? request.input?.tool_use_id, at);
         // E1 M5: an SDK MCP server's `tools/call` names the tool use it runs, so the engine acted on the allow; a
@@ -203,13 +245,21 @@ export class PermissionBroker {
         // An initialize (or any) response may carry the engine's still-open requests (SPEC 45 ControlResponseEnvelope,
         // `pending_permission_requests` / `pending_user_dialog_requests` on the envelope): re-accept what we do not hold.
         const envelope = (f.response ?? {}) as Record<string, unknown>;
+        const listed = new Set<string>();
         for (const key of ['pending_permission_requests', 'pending_user_dialog_requests']) {
           const list = envelope[key];
           if (!Array.isArray(list)) continue;
           for (const raw of list) {
             const parsed = ControlRequestFrameSchema.safeParse(raw);
-            if (parsed.success) this.accept(parsed.data);
+            if (!parsed.success) continue;
+            listed.add(parsed.data.request_id);
+            this.accept(parsed.data);
           }
+        }
+        // P5 O16 M3a fix wave 1 (D49): the adopted re-initialize's answer: what it omits the engine may no longer hold
+        if (this.redeliveryFrom !== null && envelope.request_id === this.redeliveryFrom) {
+          this.redeliveryFrom = null;
+          for (const entry of this.items.values()) if (entry.attention.state === 'pending' && !listed.has(String(entry.attention.request.requestId))) entry.stale = true;
         }
         return; // accept emitted already
       }
@@ -271,6 +321,7 @@ export class PermissionBroker {
   }
 
   private emit(): void {
+    if (this.restoringAt !== null) return; // P5 O16 M3: a fold tells nothing; the adopter publishes the list once
     this.deps.onAttention(this.snapshot());
   }
 }

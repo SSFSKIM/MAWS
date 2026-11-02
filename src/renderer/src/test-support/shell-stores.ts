@@ -62,6 +62,7 @@ export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): voi
     requests: new Map(),
     unreadable: new Map(),
     drafts: new Map(),
+    greyed: new Set(), // P5 O7 M6
   });
 }
 

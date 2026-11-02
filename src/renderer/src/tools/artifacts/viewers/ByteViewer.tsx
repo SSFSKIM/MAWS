@@ -34,6 +34,10 @@
 // only while the body is visible and the window's document is (the page never says). The header's Connectors action,
 // there once the page declared a tool or the artifact holds a grant, opens the owner's sheet (grant, revoke, Start);
 // a declaration never opens it. The tab's grants are read on mount and on every committed grant change.
+//
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5; A10): another machine's artifact is read on its
+// machine (the client sends every artifact-keyed command there, artifacts/machines.ts); Open externally opens a copy of
+// its stored file paged here (`remote.openCopy`), and Reveal in Finder is greyed, naming the machine.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -43,12 +47,14 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
+import { useArtifactMachine } from '../../../artifacts/use-artifact-machine';
 import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactEditor, ArtifactEditorProps, ArtifactEditorTarget } from '../../../artifacts/registry';
 import { startArtifactSession } from '../../../artifacts/session-context';
 import { ipc } from '../../../ipc/client';
+import { openArtifactCopy } from '../../../lane-b/open-copy';
 import { toastFailure } from '../../../library/dialogs';
 import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
 import { useLibraryRow } from '../../../library/store';
@@ -57,6 +63,8 @@ import { focusEditorHostAction, useEditorHost, type EditorHostAction, type Edito
 import { sendToSubject, useSendToAction } from '../../../delivery/header'; // P4-B5
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import type { OpenCard } from '../../../side/card/store';
+import { useMachines } from '../../../stores/machines';
+import { machineName } from '../../../stores/org-projects';
 import { useSessions } from '../../../stores/sessions';
 import { openCommentComposer } from '../../code/anchor/anchor';
 import { openFile } from '../../code/open-file';
@@ -418,6 +426,8 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   const sessionRecord = useSessions((s) => (session === null ? undefined : s.records.get(session)));
   const drawnKind = useViewer((s) => (content && body === 'file' ? (s.entries.get(fileTabId(artifactId, content.revision, reloads))?.kind ?? null) : null));
   const at = revision === undefined ? {} : { revision };
+  const machine = useArtifactMachine(artifactId); // P5 O7 M5a: another machine's artifact, else null
+  const machineShown = useMachines((s) => (machine === null ? null : machineName(s.machines, machine, ipc.localMachine)));
   const actions: EditorHostAction[] = [];
   if (commentable) {
     actions.push({ id: COMMENT_ACTION, label: VIEWERS_COPY.comment, icon: CommentIcon, pressed: picking, onSelect: () => state.view.setState({ pickingIn: picking ? null : frameKey }) });
@@ -430,9 +440,11 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   }
   actions.push({ id: 'reload', label: VIEWERS_COPY.reload, icon: ReloadIcon, onSelect: onReload });
   if (content && opensExternally(content.name)) {
-    actions.push({ id: 'external', label: VIEWERS_COPY.openExternally, icon: OpenExternallyIcon, onSelect: () => void answered(ipc.invoke('library.openExternally', { artifactId, ...at })) });
+    const open = () => (machine === null ? ipc.invoke('library.openExternally', { artifactId, ...at }) : openArtifactCopy(machine, artifactId, revision, ipc));
+    actions.push({ id: 'external', label: VIEWERS_COPY.openExternally, icon: OpenExternallyIcon, onSelect: () => void answered(open()) });
   }
-  if (content) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, onSelect: () => void answered(ipc.invoke('library.reveal', { artifactId, ...at })) });
+  if (content && machineShown !== null) actions.push({ id: 'reveal', label: VIEWERS_COPY.revealOn(machineShown), icon: RevealIcon, disabled: true, onSelect: () => {} });
+  else if (content) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, onSelect: () => void answered(ipc.invoke('library.reveal', { artifactId, ...at })) });
   if (content && session !== null && drawnKind !== null && OPENS_AS_FILE.has(drawnKind) && underSession(content.path, sessionRecord)) {
     actions.push({ id: 'file', label: VIEWERS_COPY.openAsFile, icon: OpenAsFileIcon, onSelect: () => openFile(session, content.path) });
   }

@@ -31,6 +31,14 @@
 // its predecessor's orphans are swept), every change of the live rows that have a process (a launch's pid known, an
 // exit) is handed to the writer as `{appSessionId, pid, procStart, launchId}`, so a successor of a supervisor that died
 // can stop the engines it left. Each process's start time is read once (`ps`), at its first entry.
+//
+// O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F): both releases, the idle clock's and
+// the budget's, end a process through its row's reap (holder/reap.ts), one per row from the reservation, over the row's
+// channel on the engine host's gate (holder/gate.ts; none in a harness: every observer absent). The reap signals only once
+// the row is verified empty, reading the process tree under the engine afresh (holder/descendants.ts) in the step that
+// signals; a budget reap that ends without a signal clears `releasing`, so the next evaluation may pick another. The
+// memory sample's `ps` reads that tree too, each live row's count of work under its engine kept in its status
+// (`work.descendants`), and a child of the engine the row cannot yet name asks its `mcp_status` once.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -41,7 +49,11 @@ import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type Bu
 import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M2
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
-import { procStartOf as psProcStart } from './supervisor-files'; // E10
+import { isAlive as pidAlive, procStartOf as psProcStart } from './supervisor-files'; // E10; P5 O16 panel fix wave 1 follow-up: isAlive
+import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
+import type { Gate, GateChannel } from './holder/gate'; // O16 M5
+import { Reap, type ReapReason } from './holder/reap'; // O16 M5
+import { processState, stopUnresolved, type HeldStopOutcome, type ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart); re-verification: processState
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -78,8 +90,26 @@ export function parsePsTree(output: string): { sample(pid: number): { rssKiB: nu
 // C12: the budget state's identity for its event, without `sampledAt` (a sample that moved nothing else is not news)
 const signatureOf = (state: BudgetState): string => JSON.stringify({ ...state, sampledAt: null });
 
+// O16 M5: with each process's state, start time and command line, which the descendant veto reads (parsePsTree reads the
+// first three)
 const runPs = (): Promise<string> =>
-  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { timeout: 5_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+  new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { env: PS_TREE_ENV, timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+
+// O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
+const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
+
+// P5 O16 M3b (D9): the launch refusal while the engine host hands its sessions over
+export const HANDING_OVER = 'the engine host is handing over; try again in a moment';
+
+// P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with its engine and
+// no row: its adoption failed (D59(6)), or a newer host of its session was adopted (D59(10)). Its host, by pid and start
+// time, its engine as the roster names it now (null: none known), and how to stop it (holder/stop-held.ts).
+export interface UnattachedHost {
+  holderId: string;
+  host: ProcStartKey;
+  child(): ProcStartKey | null;
+  stop(): Promise<HeldStopOutcome>;
+}
 
 export class ProcessTable {
   private readonly rows = new Map<AppSessionId, EngineSession>();
@@ -89,6 +119,7 @@ export class ProcessTable {
   private sampler: ReturnType<typeof setInterval> | null = null;
   private sampling = false;
   private shuttingDown = false;
+  private handingOver = false; // P5 O16 M3b: the handover froze the hosted rows; admission is closed for good
   // C12 start: the budget's policy (on at 25% of physical memory until main's first engine.policy.set) and its state
   private policy: BudgetPolicy;
   private stateful: ReadonlySet<string> = new Set();
@@ -109,18 +140,40 @@ export class ProcessTable {
   // E10 start: the idle-row release (P5 O2 M2: its rule in idle-release.ts) and the row set's listeners
   private readonly idle: IdleRelease;
   private readonly rowsListeners = new Set<() => void>();
+  private readonly deliveryListeners = new Set<() => void>(); // P5 O16 M3c fix wave 2
   private readonly holdListeners = new Set<() => void>(); // P5 Decision Log 124
   private launches = 0; // P5 Decision Log 124: launches from their entry until they have reserved their row or refused
+  private readonly adopting = new Set<AppSessionId>(); // P5 O16 M3: rows held for an adoption under way
+  private readonly adoptionReads = new Map<AppSessionId, Set<() => void>>(); // P5 O16 M4: the reads waiting on each hold
+  private readonly adoptionsFailed = new Set<AppSessionId>(); // P5 O16 M4: held still, their adoption given up
+  private stopHeld: ((appSessionId: AppSessionId) => Promise<HeldStopOutcome>) | null = null; // P5 O16 panel fix wave 1
+  private readonly heldStops = new Map<AppSessionId, { outcome: Promise<HeldStopOutcome>; ended: boolean }>(); // and each one asked
+  // P5 O16 panel fix wave 1 follow-up: the unattached session hosts by session, each with its stop once asked
+  private readonly unattached = new Map<AppSessionId, { host: UnattachedHost; stopping: Promise<HeldStopOutcome> | null }[]>();
+  private readonly isAlive: (pid: number) => boolean;
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
   private readonly procStarts = new WeakMap<EngineSession, string>();
   private ledgerWritten: string | null = null; // the rows last written, so an unchanged set is not rewritten
   // E10 end
+  // O16 M5 start: each row's reap and gate channel, the gate, the synchronous tree read, a budget release's numbers
+  private readonly reaps = new WeakMap<EngineSession, { reap: Reap; channel: GateChannel; infrastructure: Infrastructure }>();
+  private readonly gate: Gate | null;
+  private readonly psSync: () => string;
+  private lastPs = '';
+  private reads = 0; // each tree read numbered at its start, so a late one cannot undo a newer one's bindings (D52)
+  private readonly budgetReleases = new WeakMap<EngineSession, { limitKiB: number; totalKiB: number }>();
+  // O16 M5 end
 
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */ } = {}) {
+  // O16 M5: `gate`, the engine host's (absent: no observer, ever); `psSync`, the reap's step's tree read (by default `ps`
+  // itself, or, when a test injects the sampler's `ps`, that sampler's last output: the test's process world)
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */; gate?: Gate; psSync?: () => string /* O16 M5 */; isAlive?: (pid: number) => boolean /* P5 O16 panel fix wave 1 follow-up */ } = {}) {
     this.ps = opts.ps ?? runPs;
+    this.gate = opts.gate ?? null; // O16 M5
+    this.psSync = opts.psSync ?? (opts.ps ? () => this.lastPs : readTreeSync); // O16 M5
     this.procStartOf = opts.procStartOf ?? psProcStart; // E10
+    this.isAlive = opts.isAlive ?? pidAlive; // P5 O16 panel fix wave 1 follow-up
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
     // C12 start
@@ -129,27 +182,38 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
-    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged() }); // P5 O2 M2
+    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */ }); // P5 O2 M2
   }
 
   private readonly log: (message: string) => void;
 
   // Creates and starts a session unless the id holds one that has not exited. `create` runs only when accepted.
-  reserve(appSessionId: AppSessionId, create: () => EngineSession): ReserveOutcome {
+  // P5 O16 M3: an id held for an adoption is live: only the adoption itself (`adoption`) reserves it.
+  reserve(appSessionId: AppSessionId, create: () => EngineSession, opts: { adoption?: boolean } = {}): ReserveOutcome {
+    if (this.handingOver) throw new Error(HANDING_OVER); // P5 O16 M3b (D9): the existing `internal` refusal, its own words
     if (this.shuttingDown) throw new Error('engine host is shutting down');
+    if (this.adopting.has(appSessionId) && opts.adoption !== true) return { status: 'refused', reason: 'already_live', message: 'process is being adopted' };
     const existing = this.rows.get(appSessionId);
     if (existing) {
       const state = existing.status().process;
       if (state !== 'exited') return { status: 'refused', reason: 'already_live', message: `process is ${state}` };
     }
+    // P5 O16 panel fix wave 1 follow-up: a launch stops the session's unattached host first (the launcher's
+    // stopUnattached); one still standing here would be a second engine on the session
+    if (opts.adoption !== true && this.unattachedHosts(appSessionId).length > 0) return { status: 'refused', reason: 'already_live', message: 'process is unattached: its session host still runs it' };
     const session = create();
     this.rows.set(appSessionId, session);
+    this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
+    this.wakeAdoptionReads(appSessionId); // P5 O16 M4: its reads read the row
+    this.attachReap(session); // O16 M5
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
+      if (status.process === 'exited') this.detachReap(session); // O16 M5
       this.idle.track(session, this.rows.get(status.appSessionId) === session ? status : null); // E10; P5 O2 M2
       this.trackLive(session, status); // E10
       for (const listener of this.listeners) listener(status);
     });
+    session.on('delivery', () => this.tell(this.deliveryListeners, 'delivery')); // P5 O16 M3c fix wave 2
     this.rowsChanged(); // E10
     void session.start();
     return { status: 'launching', session };
@@ -176,11 +240,22 @@ export class ProcessTable {
   }
 
   private rowsChanged(): void {
-    for (const listener of this.rowsListeners) {
+    this.tell(this.rowsListeners, 'rows');
+  }
+
+  // P5 O16 M3c fix wave 2 (D63): told whenever a row's calls in flight through delivery (or the first one's tool)
+  // change, which its status does not carry: the supervisor's status reports them, so an update waits for quiet
+  onDeliveryChanged(listener: () => void): () => void {
+    this.deliveryListeners.add(listener);
+    return () => this.deliveryListeners.delete(listener);
+  }
+
+  private tell(listeners: ReadonlySet<() => void>, what: string): void {
+    for (const listener of listeners) {
       try {
         listener();
       } catch (error) {
-        this.log(`rows listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.log(`${what} listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -212,7 +287,7 @@ export class ProcessTable {
         if (procStart === '') this.log(`the orphan ledger records ${status.appSessionId} (pid ${status.pid}) with no start time (ps could not read it): a successor's sweep will not stop it`);
         this.procStarts.set(session, procStart);
       }
-      rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId });
+      rows.push({ appSessionId: status.appSessionId, pid: status.pid, procStart, launchId: status.launchId, holderId: status.holder?.holderId ?? null /* P5 O16 M2 */ });
     }
     const signature = JSON.stringify(rows);
     if (signature === this.ledgerWritten) return;
@@ -249,7 +324,123 @@ export class ProcessTable {
   }
 
   launching(): boolean {
-    return this.launches > 0;
+    return this.launches > 0 || this.adopting.size > 0; // P5 O16 M3: an adoption under way holds the host as a launch does
+  }
+
+  // P5 O16 M3 (D10): the rows of the session hosts an engine host found live at its start, held from before its first
+  // client is answered until each adoption reserves its row or fails (`adoptionEnded`): each counts as a live session,
+  // and a launch of its id is refused.
+  // P5 O16 panel fix wave 1 (scalpel-1#1): `stop`, how a stop-all ends a held session's engine (holder/stop-held.ts);
+  // none (a harness) leaves it to its adoption.
+  holdForAdoption(appSessionIds: readonly AppSessionId[], stop?: (appSessionId: AppSessionId) => Promise<HeldStopOutcome>): void {
+    if (stop) this.stopHeld = stop;
+    for (const id of appSessionIds) this.adopting.add(id);
+    this.rowsChanged();
+    this.holdChanged();
+  }
+
+  adoptionEnded(appSessionId: AppSessionId): void {
+    this.adoptionsFailed.delete(appSessionId);
+    this.wakeAdoptionReads(appSessionId);
+    if (!this.adopting.delete(appSessionId)) return;
+    this.rowsChanged();
+    this.holdChanged();
+  }
+
+  isAdopting(appSessionId: AppSessionId): boolean {
+    return this.adopting.has(appSessionId);
+  }
+
+  // P5 O16 M4 (the VM run's stream redelivery and the kept stream's stall): a successor serves before its adoptions
+  // reserve their rows, and a read of a held session would answer `unknown session` for a launch that is live, which a
+  // stream reader takes for a session not running (its cursor then lost, or its catch-up failed). A read of a session
+  // held for adoption waits until the hold becomes its row (`reserve`, which comes after the adopter's spec, environment
+  // and host attach, never after the re-initialize) or its adoption ends, at most `ms`. Null when there is nothing to
+  // wait for: no hold (every session not being adopted answers as before), an adoption already given up
+  // (`adoptionFailed`: the read answers `unknown session` at once), or admission closed (a handover's freeze or the exit
+  // order: no reservation can come).
+  adoptionSettled(appSessionId: AppSessionId, ms: number): Promise<void> | null {
+    if (!this.adopting.has(appSessionId) || this.adoptionsFailed.has(appSessionId) || this.handingOver || this.shuttingDown) return null;
+    return new Promise<void>((resolve) => {
+      let waiters = this.adoptionReads.get(appSessionId);
+      if (waiters === undefined) this.adoptionReads.set(appSessionId, (waiters = new Set()));
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        if (waiters.size === 0 && this.adoptionReads.get(appSessionId) === waiters) this.adoptionReads.delete(appSessionId);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+    });
+  }
+
+  // P5 O16 M4: the adoption gave up before its row was reserved. Its hold stays until every adoption has ended (a launch
+  // of the id is refused meanwhile, as before); its reads answer now, and from here on at once.
+  adoptionFailed(appSessionId: AppSessionId): void {
+    if (!this.adopting.has(appSessionId)) return;
+    this.adoptionsFailed.add(appSessionId);
+    this.wakeAdoptionReads(appSessionId);
+  }
+
+  private wakeAdoptionReads(appSessionId?: AppSessionId): void {
+    const ids = appSessionId === undefined ? [...this.adoptionReads.keys()] : [appSessionId];
+    for (const id of ids) for (const done of [...(this.adoptionReads.get(id) ?? [])]) done();
+  }
+
+  get adoptingCount(): number {
+    return this.adopting.size;
+  }
+
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling) -------------------------------------------------------------
+  // An unattached session host is no row and no hold: nothing reads it as live (the supervisor's idle exit, the park and
+  // `liveSessions` run past it, so the next start reads the roster and retries its adoption, D59(6)). It is consulted
+  // where it would otherwise outlive a deliberate act: a launch or reservation of its session (stopped first, so no second
+  // engine runs the session), a forget (stopped, then forgotten) and a stop-all (stopped and counted). Its liveness is
+  // read at each consult (its pid and start time, no watcher): one whose host and engine are verified gone is dropped.
+  unattach(appSessionId: AppSessionId, host: UnattachedHost): void {
+    const entries = this.unattached.get(appSessionId) ?? [];
+    if (entries.some((entry) => entry.host.holderId === host.holderId)) return; // recorded once (wave 1 verification)
+    this.unattached.set(appSessionId, [...entries, { host, stopping: null }]);
+  }
+
+  // The session's unattached hosts that still guard a process; the ones verified gone dropped.
+  unattachedHosts(appSessionId: AppSessionId): UnattachedHost[] {
+    return this.liveUnattached(appSessionId).map((entry) => entry.host);
+  }
+
+  // Wave 1 re-verification: a record is dropped only when every process it guards is verified gone (stop-held.ts
+  // `processState`): its host, and its engine when one is known. A host gone past its grace with its engine alive and
+  // its start unreadable (`unverified`) stays, so the guard holds and each consult asks its stop again.
+  private liveUnattached(appSessionId: AppSessionId): { host: UnattachedHost; stopping: Promise<HeldStopOutcome> | null }[] {
+    const known = { isAlive: this.isAlive, procStartOf: this.procStartOf };
+    const guards = (entry: { host: UnattachedHost }) => [entry.host.host, entry.host.child()].some((p) => processState(p, known) !== 'gone');
+    const entries = (this.unattached.get(appSessionId) ?? []).filter((entry) => entry.stopping !== null || guards(entry));
+    if (entries.length > 0) this.unattached.set(appSessionId, entries);
+    else this.unattached.delete(appSessionId);
+    return entries;
+  }
+
+  // Stops the session's unattached hosts, each once (a stop under way is awaited), and drops each once stopped. Wave 1
+  // verification: a stop not done (`incomplete`, `unverified`) keeps its record, so the reserve guard stays and the next
+  // consult asks again.
+  async stopUnattached(appSessionId: AppSessionId): Promise<{ holderId: string; outcome: HeldStopOutcome }[]> {
+    return Promise.all(this.liveUnattached(appSessionId).map(async (entry) => {
+      entry.stopping ??= entry.host.stop().catch((error: unknown): HeldStopOutcome => {
+        this.log(`${appSessionId}: its unattached session host ${entry.host.holderId} was not stopped: ${error instanceof Error ? error.message : String(error)}`);
+        return 'gone';
+      }).then((outcome) => {
+        if (stopUnresolved(outcome)) {
+          entry.stopping = null; // asked again at the next consult
+          return outcome;
+        }
+        const left = (this.unattached.get(appSessionId) ?? []).filter((other) => other !== entry);
+        if (left.length > 0) this.unattached.set(appSessionId, left);
+        else this.unattached.delete(appSessionId);
+        return outcome;
+      });
+      return { holderId: entry.host.holderId, outcome: await entry.stopping };
+    }));
   }
 
   async preparing<T>(launch: () => Promise<T>): Promise<T> {
@@ -277,6 +468,99 @@ export class ProcessTable {
       }
     }
   }
+
+  // O16 M5 start --------------------------------------------------------------------------------------------------------
+  private reapOf(session: EngineSession): Reap | undefined {
+    return this.reaps.get(session)?.reap;
+  }
+
+  // The row's gate channel (keyed by its lineage, its pid a cross-check) and its reap, from the reservation to the exit.
+  private attachReap(session: EngineSession): void {
+    const channel = this.gate?.channel({ lineage: () => session.engineSessionIds(), pid: () => session.pid, seen: () => session.observerSeen(), seenBefore: session.observerSeenBefore /* P5 O16 M3 */ }) ?? NO_OBSERVER;
+    const id = session.status().appSessionId;
+    const reap = new Reap(id, {
+      gate: channel,
+      current: () => this.currentStatus(session),
+      stateful: () => this.stateful,
+      interest: () => this.idle.held(id),
+      descendants: () => this.descendantsNow(session),
+      reap: (reason: ReapReason) => {
+        if (reason === 'idle') return session.reap('idle');
+        const release = this.budgetReleases.get(session) ?? { limitKiB: this.policy.limitKiB, totalKiB: this.budget.totalKiB };
+        this.lastRelease = { appSessionId: id, at: new Date().toISOString(), totalKiB: release.totalKiB };
+        this.budget = { ...this.budget, lastRelease: this.lastRelease };
+        this.emitBudget(false);
+        return session.reap('budget', release);
+      },
+      now: () => Date.now(),
+      log: (line) => this.log(line),
+      cancelled: (reason) => (reason === 'idle' ? this.idle.restart(session) : this.budgetReapEnded(session)),
+      ignored: (reason) => {
+        if (reason === 'budget') this.budgetReapEnded(session);
+        this.idle.restart(session);
+      },
+      changed: (view) => session.noteReap(view),
+    });
+    this.reaps.set(session, { reap, channel, infrastructure: new Infrastructure() });
+    session.noteReap({ state: reap.state, observer: reap.observer }, false);
+  }
+
+  // A budget reap ended without the exit: the marker clears, so the next evaluation may pick another.
+  private budgetReapEnded(session: EngineSession): void {
+    if (this.releasing !== session) return;
+    this.releasing = null;
+    this.budget = { ...this.budget, releasing: null };
+    this.emitBudget(false);
+  }
+
+  private detachReap(session: EngineSession, flush = false): void {
+    const held = this.reaps.get(session);
+    if (!held) return;
+    held.reap.dispose();
+    held.channel.close(flush);
+  }
+
+  // The work under the session's engine now (the reap's step): a fresh synchronous read of the tree, kept in the status.
+  private descendantsNow(session: EngineSession): number | 'unreadable' {
+    const pid = session.pid;
+    if (pid === null) return 0;
+    let count: number | 'unreadable';
+    try {
+      const read = ++this.reads;
+      count = this.countUnder(session, pid, parseTree(this.psSync()), read) ?? 0; // synchronous: never older than another
+    } catch (error) {
+      this.log(`the process tree under ${session.status().appSessionId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      count = 'unreadable';
+    }
+    session.noteDescendants(count);
+    return count;
+  }
+
+  // Registered infrastructure, bound by identity across the row's reads (D52): the bridge child the row's observer named,
+  // and the launch's stdio MCP servers, asked of the engine once when the tree first shows it a child the row cannot name.
+  // Null for a read that began before the newest the row applied: the caller keeps the newer count.
+  private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>, read: number): number | null {
+    const held = this.reaps.get(session);
+    const childPid = held?.channel.childPid ?? null;
+    const commands = session.mcpCommands();
+    const count = (held?.infrastructure ?? new Infrastructure()).count(tree, pid, { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: commands ?? [] }, read);
+    if (count !== null && count > 0 && commands === null) void session.readMcpCommands();
+    return count;
+  }
+
+  // The gate's counts over the live rows (the supervisor's status, `release.gate`): rows whose reap holds a fence, and
+  // rows by their observer's state.
+  gateCounts(): { armed: number; observed: number; unhealthy: number; absent: number } {
+    const counts = { armed: 0, observed: 0, unhealthy: 0, absent: 0 };
+    for (const session of this.rows.values()) {
+      const reap = this.reapOf(session);
+      if (!reap || session.lifecycle === 'exited') continue;
+      if (reap.state === 'arming' || reap.state === 'armed' || reap.state === 'signalled') counts.armed += reap.observer === 'absent' ? 0 : 1;
+      counts[reap.observer === 'healthy' ? 'observed' : reap.observer] += 1;
+    }
+    return counts;
+  }
+  // O16 M5 end --------------------------------------------------------------------------------------------------------
 
   private currentStatus(session: EngineSession): EngineSessionStatus | null {
     const status = session.status();
@@ -316,16 +600,25 @@ export class ProcessTable {
     const live = this.list().filter((s) => s.pid !== null && s.status().process !== 'exited');
     this.sampling = true;
     try {
-      const tree = live.length > 0 ? parsePsTree(await this.ps()) : null;
+      const read = ++this.reads; // O16 M5: numbered before its ps, which a step's read may overtake
+      const output = live.length > 0 ? await this.ps() : null;
+      const tree = output === null ? null : parsePsTree(output);
+      const processes = output === null ? null : parseTree(output); // O16 M5
+      if (output !== null) this.lastPs = output; // O16 M5
       const sampledAt = new Date().toISOString();
       for (const session of live) {
         const sample = tree!.sample(session.pid!);
         session.recordMemory({ rssKiB: sample?.rssKiB ?? null, treeRssKiB: sample?.treeRssKiB ?? null, sampledAt });
+        if (session.pid !== null && session.status().process !== 'exited') { // O16 M5: a read a newer one overtook changes nothing
+          const count = this.countUnder(session, session.pid, processes!, read);
+          if (count !== null) session.noteDescendants(count);
+        }
       }
       this.sampledAt = sampledAt; // C12
       this.evaluateBudget(true); // C12
     } catch (error) {
       this.log(`memory sample failed: ${error instanceof Error ? error.message : String(error)}`);
+      for (const session of live) if (session.status().process !== 'exited') session.noteDescendants('unreadable'); // O16 M5: never zero
     } finally {
       this.sampling = false;
     }
@@ -385,9 +678,11 @@ export class ProcessTable {
     if (sample) this.previousOverWithoutCandidate = verdict.over && verdict.candidates === 0;
     if (verdict.release !== null) {
       const session = sessions[statuses.findIndex((s) => s.appSessionId === verdict.release)]!;
-      this.releasing = session;
-      this.lastRelease = { appSessionId: verdict.release, at: new Date().toISOString(), totalKiB: verdict.totalKiB };
-      session.stop('budget', { release: { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB } }).catch((error: unknown) => this.log(`release of ${verdict.release} failed: ${error instanceof Error ? error.message : String(error)}`));
+      // O16 M5: through the row's reap, which signals (and records `lastRelease`) only once verified empty and armed. The
+      // row is marked releasing only when the reap took this request: one held at once, or a reap of its own under way
+      // (an idle one), leaves the evaluation free to pick it, or another, at the next sample.
+      this.budgetReleases.set(session, { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB });
+      if (this.reapOf(session)?.due('budget') === true) this.releasing = session;
     }
     this.publishBudget(verdict, verdict.release !== null);
   }
@@ -460,20 +755,87 @@ export class ProcessTable {
   }
   // C12 end -----------------------------------------------------------------------------------------------------------
 
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D34): the handover's one synchronous step.
+  // Admission closes (a launch, an adoption's reservation included, is refused with HANDING_OVER), the idle release
+  // stops, and every live row under a session host is frozen: it consumes nothing more of its transport, so what the
+  // engine says from here on stays in the host's ring for the successor. Answers the frozen rows, for the drain. A live
+  // row with no session host (a direct launch, or one not yet spawned) is left to the exit order's ladder.
+  // Fix wave 1: a row whose stop or release is under way is not frozen (it is ending; the exit order awaits it), and each
+  // frozen row's reap is cancelled and its gate channel closed, so no fence armed here can answer the engine's `turn`
+  // with `stop` once the successor carries the session (its observer says hello to the successor's gate).
+  freezeForHandover(): EngineSession[] {
+    this.handingOver = true;
+    this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
+    this.idle.close();
+    const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted && !session.ending);
+    for (const session of hosted) {
+      session.freeze();
+      this.reapOf(session)?.cancel('the row is handed over');
+      this.detachReap(session, true); // its disarm delivered before the channel closes
+    }
+    return hosted;
+  }
+
   // engine.shutdown: every live process through the ladder in parallel with reason `quit` (the end_session wait capped
   // at 3 s); `stopped` counts the exits before SIGKILL, `forced` the SIGKILLs. Idempotent: a process already exited
   // counts in neither, one already in its ladder is awaited on that ladder.
-  async shutdown(opts: { graceMs: number }): Promise<{ stopped: number; forced: number }> {
+  // P5 O16 M3b: `detach` (a detached host's exit order for every reason but a stop-all) detaches each live row under a
+  // session host instead, leaving it and its engine running for the successor to adopt; it counts in neither. Fix wave 1:
+  // `stop` stops every row, one frozen for a handover included (its stop takes it back from the handover: Interfaces §D,
+  // a stop-all stays deliberate).
+  // P5 O16 panel fix wave 1 (scalpel-1#1): `stop` stops every session held for adoption too, whose reservation the closed
+  // admission now refuses, through the hold's stop, and counts it as a row's (`gone`, in neither): one under way is
+  // awaited, never asked twice. `detach` leaves the holds, as it leaves the hosted rows, for the successor. Follow-up: so
+  // are the unattached hosts, stopped and counted the same way, left the same way.
+  async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
+    this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
     this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
     const live = this.list().filter((s) => s.status().process !== 'exited');
-    const results = await Promise.all(live.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) })));
+    // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped
+    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending) : [];
+    const stopping = live.filter((session) => !detaching.includes(session));
+    // P5 O16 panel fix wave 1: the holds' stops; follow-up: the unattached hosts' too
+    const held: Promise<HeldStopOutcome[]>[] = opts.mode === 'detach' ? [] : [
+      ...this.stopHolds().map(async (outcome) => [await outcome]),
+      ...[...this.unattached.keys()].map(async (id) => (await this.stopUnattached(id)).map((stop) => stop.outcome)),
+    ];
+    const [results, heldOutcomes] = await Promise.all([
+      Promise.all(stopping.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) }))),
+      Promise.all(held),
+      Promise.all(detaching.map((session) => session.detach('exit'))),
+    ]);
     let stopped = 0;
     let forced = 0;
     for (const { session } of results) {
       if (session.forcedKill) forced += 1;
       else stopped += 1;
     }
+    for (const outcome of heldOutcomes.flat()) {
+      if (outcome === 'stopped') stopped += 1;
+      if (outcome === 'forced') forced += 1;
+    }
     return { stopped, forced };
+  }
+
+  // P5 O16 panel fix wave 1 (scalpel-1#1): each held session's stop, started once; one that ended is not asked again.
+  private stopHolds(): Promise<HeldStopOutcome>[] {
+    const stop = this.stopHeld;
+    if (stop === null) return [];
+    return [...this.adopting].flatMap((id) => {
+      let held = this.heldStops.get(id);
+      if (held?.ended) return [];
+      if (held === undefined) {
+        const outcome = stop(id).catch((error: unknown): HeldStopOutcome => {
+          this.log(`${id}: held for adoption, not stopped: ${error instanceof Error ? error.message : String(error)}`);
+          return 'gone';
+        });
+        this.heldStops.set(id, (held = { outcome, ended: false }));
+        const entry = held;
+        // wave 1 verification: a stop not done is asked again by the next stop-all
+        void outcome.then((answer) => (stopUnresolved(answer) ? void this.heldStops.delete(id) : void (entry.ended = true)));
+      }
+      return [held.outcome];
+    });
   }
 }

@@ -12,6 +12,7 @@ import { app, powerMonitor } from 'electron';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession } from '../org/session';
+import type { CommandBudgets } from './budgets';
 import { emit, emitFrom } from '../ipc/events';
 import type { MainContext, MainHandler, RemoteDispatch } from '../ipc/router';
 import { configuredMachines } from './config';
@@ -31,6 +32,7 @@ export interface MachinesDeps {
   build: string; // this app's build, said in a link's hello
   session: OrgSession; // the org session the RL2 links read: signed out until O8's sign-in, or MAWS_DEV_ORG's in development
   linkDeps?: Partial<RemoteLinkDeps>; // P5 O7 M2: what every RL2 link takes in place of its defaults (the dev session's directMap as `dialDirect`)
+  budgets: CommandBudgets; // P5 O7 M5a: each command's budget on every link (the services' COMMAND_BUDGETS_MS)
   register(name: 'machines.list', handler: MainHandler<'machines.list'>): void;
   dispatchLocal(name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
 }
@@ -45,7 +47,7 @@ export interface Machines {
 export function startMachines(deps: MachinesDeps): Machines {
   const { local, localName, userData, packaged, env, build, dispatchLocal } = deps;
   const log = (line: string) => console.log(`[machines] ${line}`);
-  const remote = createRemoteSource({ session: deps.session, local, userData, log, ...(deps.linkDeps === undefined ? {} : { linkDeps: deps.linkDeps }) });
+  const remote = createRemoteSource({ session: deps.session, local, userData, log, linkDeps: { budgets: deps.budgets, ...deps.linkDeps } });
   const manager = createConnectionManager({
     local,
     localName,
@@ -53,7 +55,7 @@ export function startMachines(deps: MachinesDeps): Machines {
     knownMachinesFile: join(userData, KNOWN_MACHINES_FILE),
     configured: configuredMachines({ packaged, env, log }),
     emitFrom,
-    connect: (profile) => createSocketLink({ profile, build, log }),
+    connect: (profile) => createSocketLink({ profile, build, log, budgets: deps.budgets }),
     remote,
     log,
   });

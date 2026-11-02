@@ -3,6 +3,9 @@
 // found with the sidebar search's own rule (title, project name, directory), so the two agree. ⏎ opens a session in
 // the focused pane and ⌘⏎ in the split; a project is revealed in the sidebar; an action runs through `runAction`.
 // Actions with no handler are listed greyed with what they wait for.
+// P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Search"): "Conversations" asks this Mac and each
+// RL2 machine that is up (`search.ts`) and draws each machine's hits under its name ("Sessions" while only this Mac has
+// any); another machine's hit with no record is its listed row. A listed session opens through its lane's opener.
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
@@ -14,20 +17,24 @@ import type { ProjectRecord } from '@shared/ipc/schema';
 import { ACTION_IDS, ACTIONS, effectiveChord, type ActionId } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, listedGlyph } from '../attention/glyph';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime';
 import { sessionMatcher } from '../sidebar/derive';
 import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { ipc } from '../ipc/client';
 import { useNow } from '../app/use-now';
-import { sessionAge } from '../sidebar/derive';
-import type { CommandOutput } from '@shared/ipc/schema';
-import { displayTitle } from '../sessions/title';
+import { formatAge, sessionAge } from '../sidebar/derive';
+import { displayTitle, listedTitle } from '../sessions/title';
+import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
+import { useMachines } from '../stores/machines'; // P5 O7 M6
+import { machineName } from '../stores/org-projects'; // P5 O7 M6
+import type { MachineRef } from '@shared/machine/ref';
 import { conversationSnippet } from './snippet';
+import { searchConversations, searchedMachines, type ConversationSearch } from './search'; // P5 O7 M6
 
 export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
 export const openPalette = (query = '') => usePalette.setState({ open: true, scope: 'all', query });
@@ -70,6 +77,24 @@ const UNAVAILABLE: Partial<Record<ActionId, string>> = {
 
 // Bound item registration and subscriptions; filtering still searches the complete index.
 const RESULT_LIMIT = 50;
+
+// P5 O7 M6: one machine's hits as the palette draws them, each a record (not archived) or, wanting one, a listed row.
+type HitEntry = { appId: AppSessionId; snippet: string | null } & ({ kind: 'record'; record: SessionRecord } | { kind: 'listed'; listed: ListedSession });
+interface HitGroup { machine: MachineRef; entries: HitEntry[] }
+
+function hitGroups(search: ConversationSearch, records: ReadonlyMap<AppSessionId, SessionRecord>, listed: ReadonlyMap<AppSessionId, ListedSession>): HitGroup[] {
+  return search.groups
+    .map(({ machine, hits }) => ({
+      machine,
+      entries: hits.flatMap(({ appSessionId: appId, snippet }): HitEntry[] => {
+        const record = records.get(appId);
+        if (record) return record.archived ? [] : [{ appId, snippet, kind: 'record', record }];
+        const row = listed.get(appId);
+        return row ? [{ appId, snippet, kind: 'listed', listed: row }] : [];
+      }),
+    }))
+    .filter((group) => group.entries.length > 0);
+}
 
 const ITEM =
   'flex h-(--row-h) cursor-default items-center gap-2 rounded-sm px-2 text-ui data-[disabled=true]:text-fg-faint data-[selected=true]:bg-bg-hover';
@@ -115,32 +140,41 @@ function Palette({ run }: { run(id: ActionId): void }) {
   const query = usePalette((s) => s.query);
   const scope = usePalette((s) => s.scope);
   const setQuery = (query: string) => usePalette.setState({ query });
-  const [content, setContent] = useState<{ query: string; hits: CommandOutput<'session.search'>['hits']; indexing?: boolean; incomplete?: boolean; error?: string } | null>(null);
+  const [content, setContent] = useState<{ query: string } & ConversationSearch | null>(null);
   useEffect(() => {
     if (scope !== 'sessions') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const search = () => {
-      void ipc.invoke('session.search', { query }).then((result) => {
+      // P5 O7 M6: this Mac and each RL2 machine up at the time of asking (an indexing machine's retry asks again)
+      const machines = searchedMachines(useSessions.getState().listedMachines, useMachines.getState().machines);
+      void searchConversations(ipc, query, machines).then((result) => {
         if (cancelled) return;
-        setContent(result.ok ? { query, ...result.value } : { query, hits: [], error: result.error.message });
-        if (result.ok && result.value.indexing) timer = setTimeout(search, 1000);
-      }).catch((error: unknown) => { if (!cancelled) setContent({ query, hits: [], error: String(error) }); });
+        setContent({ query, ...result });
+        if (result.indexing) timer = setTimeout(search, 1000);
+      });
     };
     timer = setTimeout(search, 150);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [query, scope]);
   const [selected, setSelected] = useState('');
   const records = useSessions((s) => s.records);
+  const listed = useSessions((s) => s.listed); // P5 O7 M6
   const projects = useSessions((s) => s.projects);
+  const machines = useMachines((s) => s.machines); // P5 O7 M6
   const entries = paletteEntries(query, { records, projects });
   const searching = scope === 'sessions' && content?.query !== query;
-  const hits = scope === 'sessions' && !searching ? content?.hits ?? [] : [];
-  const sessions = scope === 'all' ? entries.sessions : hits.flatMap((hit) => { const record = records.get(hit.appSessionId); return record && !record.archived ? [record] : []; });
+  const answered = scope === 'sessions' && !searching && content !== null ? content : null;
+  const groups = answered === null ? [] : hitGroups(answered, records, listed);
+  const local = ipc.localMachine;
+  // "Sessions" while only this Mac has hits, as before machines; each machine's name once another's are drawn
+  const headingOf = (machine: MachineRef) => (groups.every((g) => g.machine === local) ? 'Sessions' : machineName(machines, machine, local));
+  const errorOf = ({ machine, message }: ConversationSearch['errors'][number]) => (machine === local ? message : `${machineName(machines, machine, local)}: ${message}`);
   const close = () => usePalette.setState({ open: false });
 
   const openSession = (appSessionId: AppSessionId, split: boolean) => {
     close();
+    if (!split && openListed(appSessionId)) return; // P5 O7 M6: another machine's listed session, through its lane's opener
     useLayout.getState().openSession(appSessionId, { split });
   };
   const reveal = (projectId: ProjectId) => {
@@ -170,22 +204,33 @@ function Palette({ run }: { run(id: ActionId): void }) {
           {value === 'all' ? 'All' : 'Conversations'}
         </button>)}
       </div>
-      {scope === 'sessions' && content?.query === query && content.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Indexing conversations… Results will update.</p>}
-      {scope === 'sessions' && content?.query === query && content.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
+      {answered?.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Indexing conversations… Results will update.</p>}
+      {answered?.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
       {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
-      {scope === 'sessions' && content?.query === query && content.error && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{content.error}</p>}
-      {(scope === 'sessions' ? sessions.length >= RESULT_LIMIT : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
+      {answered?.errors.map((error) => <p key={error.machine} role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{errorOf(error)}</p>)}
+      {(scope === 'sessions' ? groups.some((g) => g.entries.length >= RESULT_LIMIT) : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
       <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
         <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
-        {sessions.length > 0 && (
+        {scope === 'all' && entries.sessions.length > 0 && (
           <Command.Group heading="Sessions" className={GROUP}>
-            {sessions.slice(0, RESULT_LIMIT).map((record) => (
-              <SessionItem key={record.appId} record={record} snippet={hits.find((hit) => hit.appSessionId === record.appId)?.snippet} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
+            {entries.sessions.slice(0, RESULT_LIMIT).map((record) => (
+              <SessionItem key={record.appId} record={record} project={record.projectId ? (projects.get(record.projectId) ?? null) : null} onOpen={openSession} />
             ))}
           </Command.Group>
         )}
+        {groups.map((group) => (
+          <Command.Group key={group.machine} heading={headingOf(group.machine)} data-search-machine={group.machine} className={GROUP}>
+            {group.entries.slice(0, RESULT_LIMIT).map((entry) =>
+              entry.kind === 'record' ? (
+                <SessionItem key={entry.appId} record={entry.record} snippet={entry.snippet} project={entry.record.projectId ? (projects.get(entry.record.projectId) ?? null) : null} onOpen={openSession} />
+              ) : (
+                <ListedItem key={entry.appId} listed={entry.listed} snippet={entry.snippet} onOpen={openSession} />
+              ),
+            )}
+          </Command.Group>
+        ))}
         {scope === 'all' && entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
             {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
@@ -217,6 +262,20 @@ function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | 
       <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
       <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now)}</span>
+    </Command.Item>
+  );
+}
+
+// P5 O7 M6: another machine's session the search found with no record, drawn from its listing as the sidebar's listed row
+function ListedItem({ listed, snippet, onOpen }: { listed: ListedSession; snippet: string | null; onOpen(id: AppSessionId, split: boolean): void }) {
+  const now = useNow();
+  const pending = useAttention((s) => selectPendingOf(s, listed.appId));
+  const issued = Date.parse(listed.issued);
+  return (
+    <Command.Item value={`session:${listed.appId}`} onSelect={() => onOpen(listed.appId, false)} className={`${ITEM} ${snippet ? 'h-auto min-h-(--row-h) py-1.5' : ''}`}>
+      <GlyphMark glyph={listedGlyph(listed.state, pending)} className="w-4 shrink-0" />
+      <span className="min-w-0 flex-1"><span className="block truncate">{listedTitle(listed)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
+      <span className="ml-auto shrink-0 text-ui-sm text-fg-faint">{Number.isFinite(issued) ? formatAge(now - issued) : null}</span>
     </Command.Item>
   );
 }

@@ -84,7 +84,8 @@ export function Toolbar() {
   const tab = useLayout((s) => activeTab(s.main));
   const records = useSessions((s) => s.records);
   const recordsVersion = useSessions((s) => s.recordsVersion);
-  const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }).filter((row) => row.tier === 1).length);
+  const listed = useSessions((s) => s.listed); // P5 O7 M6: another machine's listed rows count
+  const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion, listed }).filter((row) => row.tier === 1).length);
   const overviewOpen = useLayout((s) => s.overviewOpen);
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
   const split = useLayout((s) => currentSet(s.main).panes.length === 2);

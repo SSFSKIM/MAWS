@@ -48,3 +48,9 @@ export const TITLE_SOURCES = ['user', 'generated', 'tool', 'none'] as const;
 export const SESSION_STATES = ['idle', 'running', 'requires_action'] as const; // system/session_state_changed
 export const COMMAND_LIFECYCLE_STATES = ['queued', 'started', 'completed', 'cancelled', 'discarded', 'refused'] as const;
 export const PLAN_OUTCOMES = ['implement', 'clear_and_implement', 'keep_planning'] as const; // §4.2 plan approval
+// P5 O16 M3b (D58a): why a process ended, beside its exit reason (an additive field, never a new reason): an adopted
+// engine whose re-initialize after the handover failed (`detail`, D58's cause) was ended through the ladder; its exit
+// reads `crash`, and the session service resumes it at once, so the transcript tells it as a notice, not an end
+export const HANDOVER_REINIT_FAILED = 'handover-reinit-failed';
+export const ExitCauseSchema = z.strictObject({ kind: z.literal(HANDOVER_REINIT_FAILED), detail: z.string() });
+export type ExitCause = z.infer<typeof ExitCauseSchema>;

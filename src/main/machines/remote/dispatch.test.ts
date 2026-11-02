@@ -1,9 +1,10 @@
 // The router's path to an RL2 machine (P5 O7 M1, "The router's path", Interfaces §F).
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
+import { RTT_MARGIN_MS, type CommandBudgets } from '../budgets';
 import { dispatchOverLink } from './dispatch';
-import type { CallResult } from './link';
+import type { CallOptions, CallResult } from './link';
 
 function link(answer: CallResult) {
   const calls: Array<[string, unknown, ...unknown[]]> = [];
@@ -56,5 +57,46 @@ describe('dispatch over an RL2 link', () => {
     expect((await mapped('timeout')).error).toMatchObject({ code: 'timeout' });
     expect((await mapped('invalid_input')).error).toMatchObject({ code: 'invalid_input' });
     expect((await mapped('grade')).error).toEqual({ code: 'internal', message: 'session.status: refused grade by machine mini', issues: { refusal: 'grade' } });
+  });
+
+  // P5 O7 M5a ("The link gives each call its command's budget"): a cold machine's export outlasts the link's 10 s.
+  describe('a command’s budget', () => {
+    afterEach(() => void vi.useRealTimers());
+    /** A link that answers after `answerMs`, unless the call's deadline (the link's 10 s by default) passes first. */
+    function slow(answerMs: number, budgets: CommandBudgets) {
+      const calls: unknown[][] = [];
+      return {
+        calls,
+        name: 'mini',
+        budgets,
+        call: (name: string, input: unknown, options?: CallOptions) => {
+          calls.push([name, input, ...(options === undefined ? [] : [options])]);
+          return new Promise<CallResult>((resolve) => {
+            const late = setTimeout(() => resolve({ ok: true, output: { path: '/e.pdf', revision: 3 } }), answerMs);
+            setTimeout(() => (clearTimeout(late), resolve({ ok: false, error: { code: 'timeout' } })), options?.timeoutMs ?? 10_000);
+          });
+        },
+      };
+    }
+    const EXPORT = 'artifacts.export' as CommandName;
+    const input = { artifactId: '00000000-0000-4000-8000-000000000001', format: 'pdf' };
+
+    it('waits a budgeted name past 10 s, for its budget and a round trip', async () => {
+      vi.useFakeTimers();
+      const l = slow(20_000, { 'artifacts.export': 120_000 });
+      const answer = dispatchOverLink(l, EXPORT, input);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await answer).toEqual({ ok: true, value: { path: '/e.pdf', revision: 3 } });
+      expect(l.calls).toEqual([['artifacts.export', input, { timeoutMs: 120_000 + RTT_MARGIN_MS }]]);
+    });
+
+    it('times an unbudgeted name out at the link’s 10 s', async () => {
+      vi.useFakeTimers();
+      const l = slow(20_000, { 'artifacts.export': 120_000 });
+      const answer = dispatchOverLink(l, STATUS, { appSessionId: 'a' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await answer).toMatchObject({ ok: false, error: { code: 'timeout' } });
+      expect(l.calls).toEqual([['session.status', { appSessionId: 'a' }]]);
+    });
   });
 });

@@ -80,6 +80,9 @@ export const DaemonStatusSchema = z.strictObject({
   logPath: localOnly(z.string()),
   endpoint: z.strictObject({ present: z.boolean(), detail: z.unknown() }), // detail: the module's status() (O10), under the same rule
   spine: DaemonSpineSchema.optional(), // P5 O3-D: absent from a daemon before O3-D
+  // P5 O16 M2: the engine host's session hosts (its supervisor status's `holder`): live, re-attached by a successor and
+  // left unadopted; absent while the engine host is parked or did not answer, and from a daemon before O16
+  sessionHosts: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int() }).optional(),
   artifacts: DaemonArtifactsSchema.optional(), // P5 O5 M2: absent from a daemon before it
   render: DaemonRenderSchema.optional(), // P5 O5 M4: absent from a daemon before it
 });
@@ -110,6 +113,14 @@ const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) 
 export const commands = {
   'daemon.status': machine(z.void(), DaemonStatusSchema),
   'daemon.restart': machine(z.void(), z.void()), // answers, then the daemon exits 75 (its unit restarts it)
+  // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40): `mawsd restart --engine-host`, the
+  // engine host asked to hand its sessions over to a successor of this build. `detaching`: answered once the successor
+  // is ready and its adoptions have ended (bounded), with its pid and how many sessions it adopted (absent past the
+  // bounds); `deferred`: answered at once, with the calls still in flight (the successor follows the drain).
+  'daemon.restartEngineHost': machine(
+    z.void(),
+    z.strictObject({ state: z.enum(['detaching', 'deferred']), inFlight: z.number().int().nonnegative(), pid: z.number().int().optional(), adopted: z.number().int().nonnegative().optional() }),
+  ),
   // the CLI's `mawsd endpoint …` (and its aliases `enroll`, `keys`), passed to the endpoint module's `cli`; `secret` is the
   // enrollment code from stdin or a prompt, never argv, never logged
   'daemon.endpoint': machine(
@@ -131,4 +142,16 @@ export const commands = {
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
-export const events = {} as const satisfies Record<`daemon.${string}`, z.ZodType>;
+// P5 O16 M3c fix wave 2 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, D63; M3c's concern 1): `mawsd`'s engine
+// host update under way, posted on machine.sock to every ready client at each change and again every
+// ENGINE_HANDOVER_RESEND_MS while one is, so a client that attached meanwhile learns it and a client can bound its
+// freshness; `none` once it ended (the old host's exit, the successor's welcome, a failed ask's recycle). `waiting`: the
+// old build served until its MAWS tool calls are quiet; `draining`: its handover asked, the old host not yet gone, during
+// which `mawsd`'s relay holds an app's hello. `inFlight` and `tool`: the calls it waits for. `at`: when it was posted.
+// Main learns it from this event alone (never `daemon.status`, which wakes a parked engine host).
+export const EngineHandoverSchema = z.strictObject({ state: z.enum(['waiting', 'draining', 'none']), inFlight: z.number().int().nonnegative(), tool: z.string().optional(), at: z.string() });
+export type EngineHandover = z.infer<typeof EngineHandoverSchema>;
+
+export const events = {
+  'daemon.engineHandover': EngineHandoverSchema, // P5 O16 M3c fix wave 2
+} as const satisfies Record<`daemon.${string}`, z.ZodType>;

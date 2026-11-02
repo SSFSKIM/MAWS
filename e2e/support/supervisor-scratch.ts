@@ -8,21 +8,28 @@
 // every launch runs on the daemon shape: main reaches the engine host through a private `mawsd` on the profile, whose
 // lock and sockets are under `<profile>/mawsd/`; the engine host keeps the supervisor's files. `ready` then waits for
 // main to know the daemon too, and every `mawsd` the case saw is killed with the supervisors.
-import { type ChildProcess } from 'node:child_process';
+// P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md; D28, D31): a case that calls `useStub` runs its
+// sessions on the stub engine, a real process each under a real session host, instead of the in-process replay:
+// every launch of the app names the stub (MAWS_E2E_ENGINE_BIN), and `launchSession` (and so `startTurn`) launches live
+// sessions that play their fixture on it. Every other case keeps the replay.
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { DAEMON_FILES, daemonPaths } from '@shared/daemon/files';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './launch';
 import { killScratchProcesses } from './processes';
 import { tmpSocketDirOf } from './supervisor-socket';
+import { stubLaunchReady, writeStubEngine, type StubEngine, type StubSceneOptions } from './stub-engine'; // P5 O16 M2b
+import { createRedactor } from '../../test/live/support/public-evidence.mjs'; // P5 O16 M3c
 
 // C3's permission round trip: a prompt, ~44 `in` rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
 // answered, ~40 more rows to the turn's result (seq 93), then a hold at the next prompt. Unpaced, the turn stays open at
@@ -86,6 +93,7 @@ export class Scratch {
   readonly engineId = randomUUID();
   readonly supervisors = new Set<number>(); // every supervisor pid this case saw
   readonly daemons = new Set<number>(); // every `mawsd` pid this case saw (the daemon shape)
+  stub: StubEngine | null = null; // P5 O16 M2b: the case's engine, once `useStub` wrote it
   private readonly runs: Run[] = [];
   private readonly sockets = new Set<string>();
 
@@ -145,6 +153,81 @@ export class Scratch {
     return existsSync(this.daemonFile(DAEMON_FILES.log)) ? readFileSync(this.daemonFile(DAEMON_FILES.log), 'utf8') : '';
   }
 
+  // P5 O16 M3c: a failed stub case's engine-host and `mawsd` logs, every generation, redacted and each cut to its last
+  // 256 KiB, into the test's output (a relaunch's own evidence excludes a profile's earlier logs, and a stub case's
+  // story spans its relaunches); the stub is the test's own engine, so nothing in them is the runner's
+  keepLogs(outputDir: string): void {
+    const redact = createRedactor(process.env);
+    const sources: [string, string][] = [
+      [this.file('host.log.1'), 'scratch-host.previous.log'], [this.file('host.log'), 'scratch-host.log'],
+      [this.daemonFile(`${DAEMON_FILES.log}.1`), 'scratch-mawsd.previous.log'], [this.daemonFile(DAEMON_FILES.log), 'scratch-mawsd.log'],
+    ];
+    mkdirSync(outputDir, { recursive: true });
+    for (const [from, name] of sources) {
+      if (!existsSync(from)) continue;
+      const text = readFileSync(from, 'utf8');
+      writeFileSync(join(outputDir, name), redact(text.length > 256 * 1024 ? text.slice(text.indexOf('\n', text.length - 256 * 1024) + 1) : text));
+    }
+  }
+
+  // P5 O16 M2b: the case's sessions on the stub engine from here on, `rowMs` the pace of its `in` rows (the value the
+  // case gives MAWS_E2E_REPLAY_ROW_MS); call before the first launch that should name it
+  useStub(opts: StubSceneOptions = {}): StubEngine {
+    this.stub = writeStubEngine(this.root, opts);
+    return this.stub;
+  }
+
+  // P5 O16 M3c: `fixture` as the seeded transcript's own session (its recorded session id replaced by this case's engine
+  // id), for a resume of the record: the record, its transcript and its binding keep one engine session id
+  asOwnSession(fixture: string): string {
+    const text = readFileSync(join(REPO_ROOT, fixture), 'utf8');
+    const recorded = text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow).find((r) => r.direction === 'in' && typeof r.frame.session_id === 'string')!.frame.session_id as string;
+    const path = join(this.root, `own-${randomUUID()}.jsonl`);
+    writeFileSync(path, text.replaceAll(recorded, this.engineId));
+    return path;
+  }
+
+  // P5 O16 M3c: a subagent transcript of the seeded session (`<sessionId>/subagents/agent-<id>.jsonl` beside the
+  // transcript), as the engine writes one when the model starts an agent
+  writeAgent(agentId: string): void {
+    const dir = join(this.userData, 'claude-config', 'projects', this.repo.replace(/[^a-zA-Z0-9]/g, '-'), this.engineId, 'subagents');
+    mkdirSync(dir, { recursive: true });
+    const row = { parentUuid: null, isSidechain: true, type: 'user', message: { role: 'user', content: `agent ${agentId}'s task` }, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd: this.repo, sessionId: this.engineId, agentId, version: '2.1.283' };
+    writeFileSync(join(dir, `agent-${agentId}.jsonl`), `${JSON.stringify(row)}\n`);
+  }
+
+  // P5 O16 M3c: `mawsd <args> --profile <profile>`, the built CLI under this checkout's Electron as Node, as an owner
+  // runs it against the profile's daemon (src/mawsd/cli.ts)
+  mawsd(args: string[], timeoutMs = 150_000): Promise<{ status: number | null; stdout: string; stderr: string }> {
+    const electron = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+    const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
+    return new Promise((done, failed) => {
+      const run = spawn(electron, ['--disable-sigusr1', script, ...args, '--profile', this.userData], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', MAWS_E2E: '1' }, stdio: ['ignore', 'pipe', 'pipe'], argv0: 'mawsd' });
+      let [stdout, stderr] = ['', ''];
+      run.stdout!.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
+      run.stderr!.on('data', (chunk: Buffer) => void (stderr += chunk.toString()));
+      const timer = setTimeout(() => {
+        run.kill('SIGKILL');
+        failed(new Error(`mawsd ${args.join(' ')} did not end within ${timeoutMs} ms: ${stdout}${stderr}`));
+      }, timeoutMs);
+      run.once('exit', (status) => {
+        clearTimeout(timer);
+        done({ status, stdout, stderr });
+      });
+    });
+  }
+
+  // P5 O16 M3c: the session's journaled stderr lines, oldest first (the stub's directives print theirs there)
+  stderrOf(id: string): string[] {
+    return this.journal(id).filter((r) => r.direction === 'stderr').map((r) => String(r.frame.text ?? ''));
+  }
+
+  // A session of `fixture` launched and ready: live on the stub engine under `useStub`, else the in-process replay.
+  async launchSession(page: Page, id: string, fixture: string, over: Partial<LaunchSpec> = {}): Promise<void> {
+    if (this.stub !== null) await stubLaunchReady(page, this.stub, id, fixture, over);
+    else await launchReady(page, id, fixture, over);
+  }
+
   // `root`: another checkout whose built app runs on this profile instead of this one's (launch.ts). The app's output is
   // read from the moment the launch resolves (`onLaunched`), so main's lines from its start (its first connect) are kept.
   async launch(env: Record<string, string> = {}, root?: string): Promise<Run> {
@@ -153,7 +236,7 @@ export class Scratch {
       app.process().stdout?.on('data', (chunk) => (text += String(chunk)));
       app.process().stderr?.on('data', (chunk) => (text += String(chunk)));
     };
-    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...env } }));
+    const maws = await onLaunched(read, () => launchMaws({ userData: this.userData, keepConfigHome: true, root, ...(this.stub && { syntheticEngineBin: this.stub.bin }) /* P5 O16 M3c: the stub is the test's own engine, so its logs are kept as a replay's are */, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: HOST_MODE, MAWS_ENGINE_REPLAY: '1', ...(this.stub && { MAWS_E2E_ENGINE_BIN: this.stub.bin }), ...env } }));
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
     const run: Run = { maws, page: maws.page, child, output: () => text, quitLines: () => text.split('\n').filter((l) => l.startsWith('quit-guard:')), exited };
@@ -246,6 +329,7 @@ export async function withScratch(name: string, body: (s: Scratch) => Promise<vo
     await body(s);
   } catch (error) {
     failed = true;
+    if (s.stub !== null) s.keepLogs(test.info().outputPath('scratch')); // P5 O16 M3c
     throw error;
   } finally {
     // a cleanup failure is the case's failure only when the body passed; otherwise it is logged and the body's error stands
@@ -259,15 +343,22 @@ export async function withScratch(name: string, body: (s: Scratch) => Promise<vo
 // ---- the session ------------------------------------------------------------------------------------------------------
 
 export const statusOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.status', { appSessionId: id }));
+// P5 O16 M3c fix wave 3: whether a successor adopted `id`; a session it has not adopted yet is unknown to it, which a poll
+// reads as not yet (hosted run o16m3cfw3-2: the status was asked once the successor served, before its adoption)
+export async function adoptedOf(page: Page, id: AppSessionId): Promise<boolean | undefined> {
+  const status = await invoke(page, 'session.status', { appSessionId: id });
+  if (!status.ok && status.error.message.includes('unknown session')) return undefined;
+  return value(status).holder?.adopted;
+}
 export const eventsOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null })).events;
 export const suffix = (eventId: string) => eventId.split(':').slice(-2).join(':'); // `seq:i`: ids embed the session and launch
 export const attentionOf = async (page: Page, id: AppSessionId, kind: AttentionItem['kind']): Promise<AttentionItem[]> =>
   value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && i.kind === kind);
 export const pendingPermissions = (page: Page, id: AppSessionId) => attentionOf(page, id, 'permission');
 
-// A replayed launch of the record and its prompt, written once the launch is ready.
+// A launch of the record (replayed, or on the stub under `useStub`) and its prompt, written once the launch is ready.
 export async function startTurn(page: Page, s: Scratch, id: AppSessionId, fixture = PERMISSION, prompt = PROMPT): Promise<void> {
-  await launchReady(page, id, fixture, { cwd: s.repo });
+  await s.launchSession(page, id, fixture, { cwd: s.repo });
   value(await invoke(page, 'session.send', { appSessionId: id, content: prompt }));
   await expect.poll(async () => (await statusOf(page, id)).turn !== null, { message: 'the turn is open' }).toBe(true);
 }

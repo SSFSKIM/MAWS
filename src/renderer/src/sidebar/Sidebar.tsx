@@ -23,7 +23,7 @@ import { useMachines } from '../stores/machines';
 import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { ProjectFilter } from './ProjectFilter';
 import type { SidebarSort } from '../overview/derive';
-import { selectNeedsYou, useAttention } from '../stores/attention';
+import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
@@ -80,7 +80,8 @@ function SidebarBody() {
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
   const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
-  const rows = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }));
+  const rows = useAttention((s) => selectNeedsYou(s, { records, recordsVersion, listed: listedSessions }));
+  const greyedRows = useAttention((s) => selectGreyedNeedsYou(s, { records, recordsVersion, listed: listedSessions })); // P5 O7 M6
   // P5 O6 M5: every machine's projects, grouped by org project; a machine's sessions with no checkout under its own row
   const projects = useSessions((s) => s.projects);
   const machines = useMachines((s) => s.machines);
@@ -342,7 +343,7 @@ function SidebarBody() {
               }}
               className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
             >
-              <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
+              <NeedsYou rows={rows} greyed={greyedRows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
               <SectionHeading title="Projects">
                 <ProjectFilter projects={allKnownProjects} index={index} current={selectedKey} selected={projectFilter} onChange={setProjectFilter} />
                 <SortMenu sort={sidebar.sort} />

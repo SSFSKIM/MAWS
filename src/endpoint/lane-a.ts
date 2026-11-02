@@ -61,6 +61,12 @@ export function outcomeFor(outcome: unknown): unknown {
   return outcome;
 }
 
+/**
+ * `hand`'s answer when the decision the copy was admitted on moved while it waited (its turn, sminos's admission query):
+ * nothing was sent and no copy kept; the act is decided again (actions.ts).
+ */
+export const DECISION_MOVED: unique symbol = Symbol('the decision moved');
+
 export class LaneA {
   /** Held copies by nonce, oldest first. */
   readonly #copies = new Map<string, Copy>();
@@ -69,9 +75,12 @@ export class LaneA {
 
   constructor(private readonly ctx: LaneAContext) {}
 
-  /** A copy handed down (null), or why not. */
-  hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string): Promise<RefusalReason | null> {
-    return this.#turn(action.opId, () => this.#hand(channel, action, who, fingerprint));
+  /**
+   * A copy handed down (null), or why not: DECISION_MOVED when its decision no longer `stands` once its waits are over,
+   * asked in the step its `rpc` would go.
+   */
+  hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean): Promise<RefusalReason | null | typeof DECISION_MOVED> {
+    return this.#turn(action.opId, () => this.#hand(channel, action, who, fingerprint, stands));
   }
 
   /** sminos's result: `done` to the open channels of the copies it answers. */
@@ -92,7 +101,7 @@ export class LaneA {
     for (const [nonce, copy] of this.#copies) this.#letGo(nonce, copy);
   }
 
-  async #hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string): Promise<RefusalReason | null> {
+  async #hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean): Promise<RefusalReason | null | typeof DECISION_MOVED> {
     const now = this.ctx.now();
     this.#expire(now);
     if (this.#copies.has(action.nonce)) return 'replayed';
@@ -109,6 +118,9 @@ export class LaneA {
       if (this.#copies.size >= max) return 'busy';
     }
     if (channel.closed) return 'unavailable';
+    // The sender's standing may have moved while it waited (P5 O7 M5a's milestone review): asked here, nothing awaited
+    // between this and the `rpc`, which checks the launch again but not the standing.
+    if (!stands()) return DECISION_MOVED;
     // Sent through `rpc`, which checks the launch again: it may have moved while sminos was asked.
     const sent = this.ctx.rl10.rpc(action, who, fingerprint);
     if (!sent.ok) return sent.reason;

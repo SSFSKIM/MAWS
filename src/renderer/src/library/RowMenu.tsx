@@ -11,6 +11,7 @@ import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LibraryRow } from '@shared/ipc/schema/library';
+import { useArtifactMachine } from '../artifacts/use-artifact-machine';
 import { ipc } from '../ipc/client';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
@@ -33,8 +34,11 @@ const reportFailure = async (pending: Promise<{ ok: true } | { ok: false; error:
   if (!result.ok) toastFailure(result.error.message);
 };
 
+// P5 O7 M5a: a row of another machine's library moves between that machine's Spaces (the act goes there); a new Space
+// would be this Mac's, so it is not offered there.
 function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
-  const spaces = useLibrarySpaces().value ?? [];
+  const machine = useArtifactMachine(row.id);
+  const spaces = useLibrarySpaces(machine ?? undefined).value ?? [];
   const ref: ArtifactRef = { id: row.id, title: row.title };
   return (
     <>
@@ -68,11 +72,15 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
                 {R.noSpace}
               </M.RadioItem>
             </M.RadioGroup>
-            <M.Separator className="my-1 h-px bg-border" />
-            <M.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'newSpace', moveArtifact: ref })}>
-              <span className="w-3.5" />
-              {R.newSpace}
-            </M.Item>
+            {machine === null && (
+              <>
+                <M.Separator className="my-1 h-px bg-border" />
+                <M.Item className={MENU_ITEM} onSelect={() => openLibraryDialog({ kind: 'newSpace', moveArtifact: ref })}>
+                  <span className="w-3.5" />
+                  {R.newSpace}
+                </M.Item>
+              </>
+            )}
           </M.SubContent>
         </M.Portal>
       </M.Sub>

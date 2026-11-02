@@ -152,6 +152,11 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // control of a page above all: a remote session's agent never drives this Mac's browser) stays refused for another
   // machine until it is listed on purpose.
   const BROWSER_TOOL_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['browser.tabs.list', 'browser.tabs.open', 'browser.tabs.select']);
+  // P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): a file of another machine lands on this Mac, by main's
+  // handlers with that machine as `ctx.target`, which read it over the machine's link: Save As of its artifact (an export
+  // the renderer made there, or the stored file) and an open copy (`remote.openCopy`, invoked on the machine a checkout
+  // file's address names).
+  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
@@ -183,7 +188,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
-    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name)) {
+    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name) && !SAVED_HERE_FOR_ANY_MACHINE.has(name)) {
       if (gradeOf(name) === 'client' && !ANSWERED_BY_ITS_LINK.has(name)) {
         if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
         return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };
