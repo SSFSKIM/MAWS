@@ -969,6 +969,152 @@ test('O17 scene 4, an engine’s exit and an engine-host restart: the exit close
   }
 });
 
+// P5 O17 M7: scene 6's two arrival orders (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8's scene 6, the review's
+// test; M7's Proves pins both at unit level) on the built product with no app. `mawsd restart --engine-host` hands the
+// session to a successor, which adopts it (O16) while `mawsd` tells it the held set: the snapshot held until after the
+// adoption, or the adoption held until after the snapshot, by a MAWS_E2E-only file the engine host reads
+// (src/engine-host/browser-work.ts's e2eHoldFor: MAWS_E2E_BROWSER_WORK_HOLD on a snapshot's application,
+// MAWS_E2E_ADOPTION_HOLD on its start's adoptions). The session holds a headless tab and is kept (Keep running) until the
+// restart is over, so the short idle time here closes nothing before it; then its keep is cleared and a turn's Stop clears
+// the adoption's own `unknown`, so only the browser hold is left between it and its idle release. The spec names the
+// matrix group (`e2e:cross-build`) for scene 6, whose pre-O17 app plays no part in the fence since R5 (`mawsd` and the
+// engine host alone hold it), so the orders are staged here, where `mawsd` runs with no app.
+const SCENE6_IDLE_MS = 5_000; // the engine host's idle time (MAWS_E2E_SUPERVISOR_IDLE_MS)
+const SCENE6_BOUND_MS = 2 * 10_000 + SCENE6_IDLE_MS + 30_000; // O16's descendant veto reads the connector for up to two memory samples after the adoption
+const FIRST_SNAPSHOT_HOLDING_ONE = 'browser work: the first snapshot on this link holds 1 session(s)';
+const hostLogOf = (scene: HeadlessScene) => {
+  const path = join(scene.userData, 'supervisor', 'host.log');
+  return existsSync(path) ? readFileSync(path, 'utf8') : '';
+};
+const linesOf = (text: string, line: string) => text.split('\n').filter((l) => l.includes(line)).length;
+const idleAsked = (id: AppSessionId) => `idle release of ${id}: due, held by its headless browser work alone; its tabs are asked to close`;
+const idleReleased = (id: AppSessionId) => `idle release of ${id}: idle for ${SCENE6_IDLE_MS} ms with no interest held`;
+
+interface Scene6 {
+  scene: HeadlessScene;
+  id: AppSessionId;
+  engine: number;
+  cua: ConnectorControl;
+  hold: string; // the file whose presence holds the scene's step
+  close(): Promise<void>;
+}
+async function scene6(holdKey: 'MAWS_E2E_BROWSER_WORK_HOLD' | 'MAWS_E2E_ADOPTION_HOLD', url: string): Promise<Scene6> {
+  const holds = realpathSync(mkdtempSync(join(tmpdir(), 'o17-scene6-')));
+  const hold = join(holds, 'hold');
+  const scene = await startHeadlessScene({ engine: { lifeMs: 600_000 }, env: { MAWS_RENDER_QUIET_MS: String(LONG_QUIET_MS), MAWS_E2E_SUPERVISOR_IDLE_MS: String(SCENE6_IDLE_MS), [holdKey]: hold } });
+  const close = async () => {
+    rmSync(holds, { recursive: true, force: true });
+    await scene.stop();
+  };
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    expect(await scene.daemon.request('session.setKeep', { appSessionId: id, keep: true })).toEqual({ kept: true });
+    const cua = await scene.connector(repo);
+    await answered('cua’s creation sequence', cua.sequence(url));
+    await expect.poll(() => workHold(scene, id), { message: 'the engine host holds the session for its tab' }).toBe('held');
+    return { scene, id, engine: (await scene.sessionStatus(id)).pid!, cua, hold, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
+}
+// The holds the live statuses of the session's engine gave, read every 100 ms until `stop()`, sorted
+function sampleHolds(scene: HeadlessScene, id: AppSessionId, engine: number): { stop(): Promise<string[]> } {
+  const seen = new Set<string>();
+  let sampling = true;
+  const sampler = (async () => {
+    while (sampling) {
+      const status = await scene.sessionStatus(id).catch(() => null);
+      if (status !== null && status.process !== 'exited' && status.pid === engine) seen.add(String(status.work?.holds?.browser));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  })();
+  return {
+    async stop() {
+      sampling = false;
+      await sampler;
+      return [...seen].sort();
+    },
+  };
+}
+// Its keep cleared and a turn played on the successor: the turn's Stop clears the adoption's `unknown`, so its idle
+// clock runs once O16's descendant veto has read the connector as registered
+async function clearedForIdle(scene: HeadlessScene, id: AppSessionId): Promise<void> {
+  expect(await scene.daemon.request('session.setKeep', { appSessionId: id, keep: false })).toEqual({ kept: false });
+  await scene.daemon.request('session.send', { appSessionId: id, content: 'a turn on the successor' });
+  await expect.poll(async () => { const st = await scene.sessionStatus(id); return st.turn === null && st.work?.unknown === null; }, { timeout: 60_000, message: 'the turn ended and its Stop cleared the adoption’s unknown' }).toBe(true); // prettier-ignore
+}
+
+test('O17 scene 6, adoption then snapshot: the successor adopts the session before mawsd’s first snapshot applies; it reads unknown, never absent, and nothing releases it, its idle time past, until the snapshot', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(300_000);
+  const pages = await startHeadlessPages();
+  const s = await scene6('MAWS_E2E_BROWSER_WORK_HOLD', pages.url('/'));
+  const { scene, id, engine } = s;
+  try {
+    writeFileSync(s.hold, ''); // every snapshot's application waits from here
+    const holds = sampleHolds(scene, id, engine);
+    const restarted = await scene.daemon.cli(['restart', '--engine-host']);
+    expect(restarted.status, restarted.stderr || restarted.stdout).toBe(0);
+    expect(restarted.stdout, 'the successor adopted the session with the snapshot held').toMatch(/^engine host restarted: pid \d+, 1 sessions adopted$/m);
+    await expect.poll(async () => { const st = await scene.sessionStatus(id).catch(() => null); return st?.pid === engine ? st.work?.holds?.browser : null; }, { timeout: 30_000, message: 'adopted, the same engine, unknown before any snapshot' }).toBe('unknown'); // prettier-ignore
+    expect(linesOf(hostLogOf(scene), FIRST_SNAPSHOT_HOLDING_ONE), 'no snapshot applied on the successor’s link yet').toBe(0);
+
+    await clearedForIdle(scene, id);
+    await expect.poll(() => hostLogOf(scene), { timeout: SCENE6_BOUND_MS, message: 'its idle time ran out with only the browser hold, unknown, left' }).toContain(idleAsked(id));
+    await expect.poll(async () => (await scene.render()).browserTabs ?? 0, { message: 'mawsd closed its tab for host.browserIdle' }).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, SCENE6_IDLE_MS)); // another idle time
+    const meanwhile = await scene.sessionStatus(id);
+    expect({ process: meanwhile.process, pid: meanwhile.pid, browser: meanwhile.work?.holds?.browser }, 'released by nothing until the snapshot').toEqual({ process: 'ready', pid: engine, browser: 'unknown' });
+    expect(hostLogOf(scene), 'no idle release').not.toContain(idleReleased(id));
+    expect(await holds.stop(), 'the hold through the restart: held, then unknown, never absent').toEqual(['held', 'unknown']);
+
+    rmSync(s.hold);
+    await expect.poll(() => hostLogOf(scene), { timeout: 30_000, message: 'the snapshots apply in order (held, then none): released as idle' }).toContain(idleReleased(id));
+    await expect.poll(async () => (await scene.sessionStatus(id)).process, { timeout: 20_000 }).toBe('exited');
+    expect(linesOf(hostLogOf(scene), FIRST_SNAPSHOT_HOLDING_ONE), 'the successor’s first snapshot named the session').toBe(1);
+    s.cua.close();
+  } finally {
+    await s.close();
+    await pages.close();
+  }
+});
+
+test('O17 scene 6, snapshot then adoption: mawsd’s first snapshot applies on the successor before its adoption finishes; the adopted session takes the kept set’s verdict, held, never unknown, and is released when idle', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(300_000);
+  const pages = await startHeadlessPages();
+  const s = await scene6('MAWS_E2E_ADOPTION_HOLD', pages.url('/'));
+  const { scene, id, engine } = s;
+  try {
+    writeFileSync(s.hold, ''); // the successor's start-time adoptions wait from here
+    const holds = sampleHolds(scene, id, engine);
+    const restarting = scene.daemon.cli(['restart', '--engine-host']); // answered once the adoptions have ended
+    await expect.poll(() => linesOf(hostLogOf(scene), FIRST_SNAPSHOT_HOLDING_ONE), { timeout: 60_000, message: 'the successor applied mawsd’s first snapshot, naming the session' }).toBe(1);
+    expect(hostLogOf(scene), 'before its adoption').not.toMatch(/adoption: \d+ of 1 live session host\(s\) adopted/);
+    rmSync(s.hold);
+    const restarted = await restarting;
+    expect(restarted.status, restarted.stderr || restarted.stdout).toBe(0);
+    expect(restarted.stdout).toMatch(/^engine host restarted: pid \d+, 1 sessions adopted$/m);
+    await expect.poll(async () => { const st = await scene.sessionStatus(id).catch(() => null); return st?.pid === engine ? st.work?.holds?.browser : null; }, { timeout: 30_000, message: 'adopted, the same engine, held by the kept set' }).toBe('held'); // prettier-ignore
+    await new Promise((resolve) => setTimeout(resolve, 1_000)); // a few more statuses of the adopted row
+    expect(await holds.stop(), 'the hold through the restart: held throughout, never unknown or absent').toEqual(['held']);
+    expect((await scene.render()).browserTabs, 'its tab kept').toBe(1);
+
+    await clearedForIdle(scene, id);
+    await expect.poll(() => hostLogOf(scene), { timeout: SCENE6_BOUND_MS, message: 'at its idle time the engine host asks for its tabs' }).toContain(idleAsked(id));
+    await expect.poll(scene.mawsdLog, { message: 'mawsd closes its tab' }).toContain(`[browser] ${id}: headless → cold (idle for the machine’s whole idle time)`);
+    await expect.poll(() => hostLogOf(scene), { timeout: 30_000, message: 'the hold cleared: released as idle at once' }).toContain(idleReleased(id));
+    await expect.poll(async () => (await scene.sessionStatus(id)).process, { timeout: 20_000 }).toBe('exited');
+    expect((await scene.render()).browserTabs ?? 0).toBe(0);
+    s.cua.close();
+  } finally {
+    await s.close();
+    await pages.close();
+  }
+});
+
 test('O17 scene 5, O5 M5’s scene 3 extended: A’s relay works while A’s engine-side peer reaches neither B’s render-host socket nor, once the app attaches, B’s app socket', async () => {
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
   test.setTimeout(240_000);

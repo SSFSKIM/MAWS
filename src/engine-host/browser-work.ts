@@ -78,13 +78,17 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
 }
 
 // M8's scene 6 (e2e only): under MAWS_E2E=1 with `key` naming a file, a wait while that file exists (read every 100 ms, at
-// most E2E_HOLD_MAX_MS), as the tool server's hold (tool-server/e2e-hold.ts); outside MAWS_E2E, or with no file, none
+// most E2E_HOLD_MAX_MS), as the tool server's hold (tool-server/e2e-hold.ts); outside MAWS_E2E, or with no file, none.
+// Waits end in the order they began: two snapshots held together (`mawsd` sends the next once the first's forward has
+// timed out) apply in the order they came, as without the hold
 export const E2E_HOLD_MAX_MS = 120_000;
 export function e2eHoldFor(env: NodeJS.ProcessEnv, key: 'MAWS_E2E_BROWSER_WORK_HOLD' | 'MAWS_E2E_ADOPTION_HOLD', deps = { exists: existsSync, sleep: (ms: number): Promise<unknown> => sleep(ms), now: () => Date.now() }): (() => Promise<void>) | undefined {
   const path = env.MAWS_E2E === '1' ? env[key] : undefined;
   if (!path) return undefined;
-  return async () => {
+  const wait = async () => {
     const until = deps.now() + E2E_HOLD_MAX_MS;
     while (deps.exists(path) && deps.now() < until) await deps.sleep(100);
   };
+  let last: Promise<void> = Promise.resolve();
+  return () => (last = last.then(wait));
 }

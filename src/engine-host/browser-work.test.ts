@@ -193,6 +193,20 @@ describe('the link\'s first snapshot, logged, and the e2e\'s hold on it (P5 O17 
     await wait();
     expect(slept).toBe(3);
   });
+
+  it('waits under one hold end in the order they began, so snapshots held together apply in the order they came', async () => {
+    let exists = true;
+    const sleeping: (() => void)[] = [];
+    const wait = e2eHoldFor({ MAWS_E2E: '1', MAWS_E2E_BROWSER_WORK_HOLD: '/x/hold' }, 'MAWS_E2E_BROWSER_WORK_HOLD', { exists: () => exists, sleep: () => new Promise<void>((resolve) => sleeping.push(resolve)), now: () => 0 })!;
+    const ended: string[] = [];
+    const first = wait().then(() => ended.push('first'));
+    const second = wait().then(() => ended.push('second'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    exists = false;
+    while (sleeping.length > 0) sleeping.pop()!(); // the later wait's sleep ends first
+    await Promise.all([first, second]);
+    expect(ended).toEqual(['first', 'second']);
+  });
 });
 
 describe('host.browserIdle through the real wiring (P5 O17 M7, D20)', () => {
