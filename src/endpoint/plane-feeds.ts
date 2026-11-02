@@ -24,11 +24,11 @@
 //
 // P5 O7 M5a: so is the machine's `artifacts` feed, run by artifacts-feed.ts (artifact and library changes, cut by the
 // `artifact` rule), and a session's `checkout` feed carries its `session.capabilitiesChanged` (O5's tools on it), as it
-// carries `session.changed`.
+// carries `session.changed`. P5 O7 M5c: the `artifacts` feed carries O4's surfaces' events (artifacts-feed.ts).
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { ArtifactRanks } from './artifacts';
-import { ArtifactsFeeds } from './artifacts-feed';
+import { ArtifactsFeeds, type ArtifactsFeedsContext } from './artifacts-feed';
 import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
@@ -41,6 +41,8 @@ export type PlaneFeedsContext = {
   ranks: AttentionFeedsContext['ranks'];
   /** The `artifact` rule's placements, per channel (P5 O7 M5a). */
   artifacts: ArtifactRanks;
+  /** P5 O7 M5c: the leases each channel holds (the `artifacts` feed's watch updates). */
+  leases: ArtifactsFeedsContext['leases'];
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -73,7 +75,7 @@ export class PlaneFeeds implements Plane {
   constructor(ctx: PlaneFeedsContext) {
     this.#ctx = ctx;
     this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
-    this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, log: ctx.log, backlogBytes: ctx.backlogBytes });
+    this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, leases: ctx.leases, log: ctx.log, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
@@ -95,6 +97,11 @@ export class PlaneFeeds implements Plane {
     this.#open.clear();
     this.#attention.stop();
     this.#artifacts.stop();
+  }
+
+  /** P5 O7 M5c: the members' rights were read again (a `caps` refresh): the `artifacts` feeds' ranks read again. */
+  rightsMoved(): void {
+    this.#artifacts.rightsMoved();
   }
 
   /** A record changed or a new head came (P5 O7 M6): the machine feeds' cuts, worked out again. */

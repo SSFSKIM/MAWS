@@ -87,6 +87,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A `document` open's fields: the artifact (a UUID, as the store's document channel takes it), the mode, the suggestions' document. */
 const isDocumentOpen = (input: unknown): boolean =>
   isFields(input, ['artifactId', 'mode', 'doc']) && typeof input.artifactId === 'string' && UUID.test(input.artifactId) && (input.mode === 'edit' || input.mode === 'view') && (input.doc === undefined || input.doc === 'suggestions');
+/** P5 O7 M5c: `client.windowShown`'s input: exactly whether the device shows a page holding a lease on this machine. */
+const isWindowShown = (input: unknown): boolean => isFields(input, ['shown']) && typeof input.shown === 'boolean';
+/** P5 O7 M5c: the owner's connector and grant management on the machine (`machine-admin`, a step-up each), under `machine.op`. */
+const machineAdmin: OfferRow = { kind: 'act', executor: 'machine', target: 'machine' };
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
@@ -259,6 +263,38 @@ export const OFFERS: Offers = {
     // the open's URL), and its document channel, `view` by effect, an `edit` open taking `manage` (by-effect.ts).
     'artifacts.fetch': { kind: 'stream', stream: 'http', executor: 'endpoint', target: 'artifact', grade: 'view', accepts: isHttpOpen },
     'documents.open': { kind: 'stream', stream: 'document', executor: 'endpoint', target: 'artifact', grade: { floor: 'view', byEffect: true }, accepts: isDocumentOpen },
+    // P5 O7 M5c (A13, A14): O4's surfaces. A page's lease on the `artifact` rule, `view` by effect (by-effect.ts): its reads
+    // as calls, the two that run the owner's connector tools (`converse`) as `machine.op` acts; a lease is named by its id
+    // after its open, which the channel's own table places (leases.ts), and re-authorized while it lives.
+    'connectors.open': artifact('call', 'machine'),
+    'connectors.declare': artifact('call', 'machine'),
+    'connectors.watch': artifact('call', 'machine'),
+    'connectors.unwatch': artifact('call', 'machine'),
+    'connectors.visibility': artifact('call', 'machine'),
+    'connectors.close': artifact('call', 'machine'),
+    'connectors.call': artifact('act', 'machine'),
+    'connectors.refresh': artifact('act', 'machine'),
+    // Send to: the target's state at `view`, the receipts at `list` cut per row to the artifacts the member views (calls.ts),
+    // a send and its cancel at `manage` (a cancel names its run, which the channel's own send placed).
+    'delivery.status': artifact('call', 'machine'),
+    'delivery.receipts': { kind: 'call', executor: 'machine', target: 'machine', grade: 'list' },
+    'delivery.send': artifact('act', 'machine'),
+    'delivery.cancel': artifact('act', 'machine'),
+    // The owner's connections, sign-ins and grants: `machine-admin`, as O4 graded them.
+    'connectors.servers': machineAdmin,
+    'connectors.connect': machineAdmin,
+    'connectors.reconnect': machineAdmin,
+    'connectors.disconnect': machineAdmin,
+    'connectors.signIn': machineAdmin,
+    'connectors.signInCancel': machineAdmin,
+    'artifacts.grantConnectorTool': machineAdmin,
+    'artifacts.revokeConnectorTool': machineAdmin,
+    // A consent's redirect relayed from this device's loopback listener (`list`), run by the flow its own channel armed
+    // for the port (the machine keys it by the asker's ref, which the call carries).
+    'connectors.callback': { kind: 'call', executor: 'machine', target: 'machine' },
+    // The device's window report, the endpoint's own call (no registry name: `connectors.windowShown` is main-only),
+    // answered under the channel's ref (calls.ts).
+    'client.windowShown': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list', accepts: isWindowShown },
   },
   subscriptions: ['A', 'B'],
   // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts).

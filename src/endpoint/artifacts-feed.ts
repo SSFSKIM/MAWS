@@ -20,11 +20,21 @@
 // longer stands. What waits behind it waits undecided. A placement the machine can't read (the store or the spine away)
 // ends the feed `unavailable`, and more than the backlog bound waiting ends it `behind`: the device opens it again, as
 // after a reconnect, and reads its lists afresh (`Subscription.ev`'s `{omitted: 'too-large'}` is a lost feed to it too).
+//
+// P5 O7 M5c (§R; M5 "O4's surfaces: leases, the window, delivery on the machine"): it carries O4's surfaces' events too,
+// each decided by the same steps: a `connectors.watchUpdate` only for a lease this channel holds (leases.ts), as long as
+// the lease is still held and its artifact viewable (the `artifact` rule, as an `artifacts.changed` of it), so an update
+// in flight when the last share is withdrawn reaches no one, and with the call's session left out (`via.sessionId`,
+// session-safe.ts); a `delivery.receipt` for a member who views its artifact; `connectors.serversChanged` and
+// `connectors.signInChanged` for a member holding `machine-admin` (the owner's sheet). A refresh of the members' rights
+// (`rightsMoved`) reads every feed's ranks again, its queued event held meanwhile.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import { holdsArtifact, type ArtifactRanks, type CachedPlacement } from './artifacts';
 import type { SessionRanks } from './authorize';
+import type { Leases } from './leases';
 import { dispatchAs, type EndpointServices } from './services';
+import { withoutVia } from './session-safe';
 import type { Subscription } from './subscriptions';
 
 export type ArtifactsFeedsContext = {
@@ -33,13 +43,22 @@ export type ArtifactsFeedsContext = {
   ranks(member: string): Promise<SessionRanks>;
   /** The `artifact` rule's placements, per channel. */
   artifacts: ArtifactRanks;
+  /** P5 O7 M5c: the leases each channel holds, by which a watch's update names its artifact. */
+  leases: Pick<Leases, 'lease'>;
   log(line: string): void;
   /** The most a feed's waiting events may hold before it ends `behind`. */
   backlogBytes?: number;
 };
 
-/** An event waiting to go: its artifact (null: `library.changed`, which names none and always goes). */
-type Item = { name: string; payload: unknown; artifactId: string | null; bytes: number };
+/**
+ * An event waiting to go: its artifact (null: `library.changed`, which names none and always goes). P5 O7 M5c: `leaseId`, a
+ * watch's update, which goes only while the channel holds the lease on that artifact; `admin`, an owner's sheet's event,
+ * which goes only to a member holding `machine-admin` (its `artifactId` null).
+ */
+type Item = { name: string; payload: unknown; artifactId: string | null; bytes: number; leaseId?: string; admin?: true };
+
+/** P5 O7 M5c: the machine's events of the owner's Connectors sheet, for a member holding `machine-admin`. */
+const ADMIN_EVENTS: ReadonlySet<string> = new Set(['connectors.serversChanged', 'connectors.signInChanged']);
 
 type Feed = {
   sub: Subscription;
@@ -96,21 +115,40 @@ export class ArtifactsFeeds {
     for (const feed of this.#feeds.values()) this.#settle(feed);
   }
 
-  /** The machine's events: an artifact's change (the engine host's), the library's (the spine's). */
+  /** P5 O7 M5c: the members' rights were read again (a `caps` refresh): every feed's ranks read again, what it queued held. */
+  rightsMoved(): void {
+    for (const feed of this.#feeds.values()) void this.#readRanks(feed);
+  }
+
+  /**
+   * The machine's events: an artifact's change (the engine host's), the library's (the spine's); P5 O7 M5c: a watch's
+   * update, a delivery's receipt, the owner's sheet's rows and sign-ins (the spine's).
+   */
   event(owner: string, message: { name: string; payload: unknown }): void {
     if (this.#feeds.size === 0) return;
-    const { name, payload } = message;
+    const { name } = message;
+    let { payload } = message;
     let artifactId: string | null;
+    let leaseId: string | undefined;
+    let admin = false;
     if (owner === 'engine-host' && name === 'artifacts.changed' && isObject(payload) && isId(payload.artifactId)) artifactId = payload.artifactId;
     else if (owner === 'machine' && name === 'library.changed') artifactId = null;
-    else {
+    else if (owner === 'machine' && name === 'delivery.receipt' && isObject(payload) && isId(payload.artifactId)) artifactId = payload.artifactId;
+    else if (owner === 'machine' && ADMIN_EVENTS.has(name)) [artifactId, admin] = [null, true];
+    else if (owner === 'machine' && name === 'connectors.watchUpdate' && isObject(payload) && isId(payload.leaseId)) {
+      [artifactId, leaseId] = [null, payload.leaseId];
+      payload = { ...payload, update: withoutVia(payload.update) };
+    } else {
       // A relink (dropped from the cache before this) or a moved record: what is queued is checked again.
       if (owner === 'machine' && name === 'session.changed') this.accessChanged();
       return;
     }
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? null));
     for (const feed of this.#feeds.values()) {
-      feed.waiting.push({ name, payload, artifactId, bytes });
+      // A watch's update goes to the channel that holds the lease alone, on the artifact the lease was opened on.
+      const held = leaseId === undefined ? null : this.#ctx.leases.lease(feed.sub.channel.client, leaseId);
+      if (leaseId !== undefined && held === null) continue;
+      feed.waiting.push({ name, payload, artifactId: held ?? artifactId, bytes, ...(leaseId === undefined ? {} : { leaseId }), ...(admin ? { admin: true as const } : {}) });
       feed.waitingBytes += bytes;
       if (feed.waitingBytes + feed.sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) {
         feed.sub.end('behind');
@@ -186,6 +224,12 @@ export class ArtifactsFeeds {
    * begun for a placement dropped since). A machine owner hears of every artifact, its placement unread.
    */
   #stands(feed: Feed, item: Item): 'stands' | 'withdrawn' | 'unknown' {
+    // P5 O7 M5c: a watch's update only while its channel holds the lease, on its artifact.
+    if (item.leaseId !== undefined && this.#ctx.leases.lease(feed.sub.channel.client, item.leaseId) !== item.artifactId) return 'withdrawn';
+    if (item.admin === true) {
+      if (feed.ranks === null) return 'unknown';
+      return feed.ranks.holdsRight('machine-admin') ? 'stands' : 'withdrawn';
+    }
     if (item.artifactId === null) return 'stands';
     const ranks = feed.ranks;
     if (ranks === null) return 'unknown';

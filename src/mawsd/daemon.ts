@@ -1254,6 +1254,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       },
     },
     artifacts: { fetch: (request) => artifacts.fetch(request) }, // P5 O5 M2
+    clientPort: { serve: (ref, target) => front.serveRemote(ref, target) }, // P5 O7 M5c
     log: (line) => log(`[endpoint] ${line}`),
   };
 

@@ -48,6 +48,11 @@
 // `rl2.bytes` tagged (bytes.ts). An artifact act's result tells its sender nothing of a session they don't view
 // (session-safe.ts, P5 O7 M5a2 fix wave 1).
 //
+// P5 O7 M5c: a `machine` act on the `artifact` rule (a lease's `connectors.call` and `refresh`, Send to's `delivery.send`
+// and `cancel`) is claimed with the artifact authorization placed (the claim's `target`, `artifact:<id>`), so a query
+// re-places it as an artifact write's is; a `delivery.send` handed on is kept with its artifact for its cancel (leases.ts);
+// and its result tells the sender nothing of a session (session-safe.ts: a call's `via.sessionId`).
+//
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
 // asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
@@ -58,6 +63,7 @@ import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
 import type { Granted } from './gate';
+import type { Leases } from './leases';
 import { DECISION_MOVED, LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
@@ -88,6 +94,8 @@ export type ActionsContext = {
   log(line: string): void;
   /** P5 O7 M5a2 fix wave 1: what an artifact act's result says of sessions (session-safe.ts). */
   sessionSafe?: SessionSafe;
+  /** P5 O7 M5c: the runs each channel sent, for their cancel (leases.ts). */
+  leases?: Pick<Leases, 'sent'>;
 };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
@@ -235,15 +243,21 @@ export class Actions {
     }
 
     if (row.executor === 'machine' || row.executor === 'pty-host') {
+      // P5 O7 M5c: an artifact act's claim names the artifact authorization placed.
+      const onArtifact = row.executor === 'machine' && row.target === 'artifact';
+      if (onArtifact && decision.artifact === undefined) return refuse('malformed');
       accept();
+      if (action.action === 'delivery.send' && decision.artifact?.artifactId != null && isObject(action.args) && typeof action.args.runId === 'string') this.ctx.leases?.sent(channel, action.args.runId, decision.artifact.artifactId);
       const release = this.#hold();
       try {
         const kept = row.executor === 'pty-host' || KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
-        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args, ...kept };
+        const target = onArtifact ? { target: artifactTarget(decision.artifact!) } : {};
+        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input: action.args, ...kept };
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        channel.send(doneMessage(channel, action.opId, outcome));
+        const told = onArtifact ? (await this.#sessionSafe(who.member, action.action, outcome, dispatch))() : outcome;
+        if (!channel.closed) channel.send(doneMessage(channel, action.opId, told));
       } finally {
         release();
       }

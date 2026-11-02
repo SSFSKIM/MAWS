@@ -40,6 +40,8 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
     },
     interest: { report: () => {}, drop: () => {} },
     artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
+    // P5 O7 M5c: a port that asks no device (client-port.test.ts serves the real front's instead)
+    clientPort: { serve: () => ({ answer: () => {}, close: () => {} }) },
     log: (line) => void lines.push(line),
     lines,
     holds,
