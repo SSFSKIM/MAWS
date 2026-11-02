@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { listenLoopback } from './oauth-callback';
 import { ALREADY_CONNECTED, createSignIn, startSignIn, type SignInDeps, type SignInHost } from './sign-in';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M5c
+import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 
 const SESSION = 'app-session-1';
 const GLOBAL = '/cfg/.claude.json';
@@ -41,6 +43,8 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
       onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
+      relayed: createRelayedCallbacks(), // P5 O7 M5c
+      machine: 'this-mac',
     });
     stop = () => service.stop();
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
@@ -483,6 +487,8 @@ describe('the sign-in service', () => {
       onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
+      relayed: createRelayedCallbacks(), // P5 O7 M5c
+      machine: 'this-mac',
     });
     stop = () => service.stop();
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
@@ -520,6 +526,8 @@ describe('the sign-in service loaded after its sessions', () => {
       onHostStreaming: (listener) => (streaming.add(listener), () => streaming.delete(listener)),
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
+      relayed: createRelayedCallbacks(), // P5 O7 M5c
+      machine: 'this-mac',
     });
     stop = () => service.stop();
     const start = () => (handlers.get('connectors.signIn')!({ name: 'linear', scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, { client: null }) as { opId: string }).opId;
@@ -568,5 +576,89 @@ describe('the sign-in service loaded after its sessions', () => {
     t.streamed();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sessions).toHaveBeenCalledOnce();
+  });
+});
+
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; A15): a remote
+// asker's sign-in names its device's loopback port (`callback`). Nothing binds here: the engine is given the device's
+// redirect, the device relays the browser's return as `connectors.callback`, answered through this operation's own
+// handler. An engine that keeps its own listener on this machine cannot be relayed, and the sign-in ends saying where to
+// sign in.
+describe('a remote asker’s sign-in through the relayed callback (P5 O7 M5c)', () => {
+  const PORT = 61_234;
+  const REDIRECT = `http://127.0.0.1:${PORT}/callback`;
+  const noBind: SignInDeps['listen'] = async () => {
+    throw new Error('a remote asker’s sign-in bound this machine’s loopback');
+  };
+  const remote = () => {
+    const relayed = createRelayedCallbacks();
+    const asked: unknown[] = [];
+    const opened: string[] = [];
+    const t = make({ listen: noBind, relayed, machine: 'mini', port: { openExternal: async (client, target) => (asked.push(client), opened.push((target as { url: string }).url), { opened: true }) } });
+    const device = endableClientRef('remote:device-a');
+    const relay = (url: string, client = device) => relayed.answer(client, { port: PORT, method: 'GET', url });
+    const begin = (name = 'linear') => t.signIn.start({ name, scope: 'user', cwd: null, path: GLOBAL, appSessionId: SESSION }, device, { port: PORT }).opId;
+    return { ...t, opened, relayed, device, relay, begin, asked };
+  };
+
+  it('gives the engine the device’s redirect, opens consent on the device, and submits the relayed return', async () => {
+    const t = remote();
+    const opId = t.begin();
+    await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    expect(t.host.asked.find((a) => a.name === 'session.mcpAuthenticate')!.input).toMatchObject({ redirectUri: REDIRECT });
+    expect(t.asked).toEqual([t.device]);
+    expect(t.relay('/callback?code=x&state=someone-else')).toMatchObject({ status: 400, body: 'This is not the sign-in MAWS is waiting for.' });
+    expect(t.last(opId).state).toBe('waiting_callback');
+    expect(t.relay('/callback?code=the-code&state=engine-state')).toMatchObject({ status: 200, body: 'MAWS received the sign-in. You can close this tab and return to MAWS.' });
+    await t.ended(opId);
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'submitting', 'watching_status', 'done']);
+    expect(t.host.asked.find((a) => a.name === 'session.mcpOAuthCallback')!.input).toEqual({ appSessionId: SESSION, serverName: 'linear', callbackUrl: `${REDIRECT}?code=the-code&state=engine-state` });
+    expect(t.relayed.armed()).toBe(0);
+    expect(t.relay('/callback?code=the-code&state=engine-state')).toEqual({ status: 404, body: '' });
+  });
+
+  it('answers a second sign-in naming a port this client has armed with its receipt, then a failure, leaving the first as it was', async () => {
+    const t = remote();
+    const first = t.begin('linear');
+    await t.until(() => t.last(first)?.state === 'waiting_callback', 'waiting_callback');
+    const second = t.begin('notion');
+    expect(typeof second).toBe('string');
+    await t.ended(second);
+    expect(t.states(second)).toEqual(['starting', 'failed']);
+    expect(t.last(second)).toMatchObject({ reason: 'engine', message: 'another sign-in from this device is waiting on the same callback port' });
+    expect(t.host.asked.filter((a) => a.name === 'session.mcpAuthenticate')).toHaveLength(1);
+    expect(t.last(first).state).toBe('waiting_callback');
+    expect(t.relay('/callback?code=c&state=engine-state')).toMatchObject({ status: 200 }); // the first's, still armed
+    await t.ended(first);
+    expect(t.last(first)).toMatchObject({ state: 'done' });
+  });
+
+  it('ends at once after its receipt, saying where to sign in, when the engine keeps its own listener on this machine', async () => {
+    const t = remote();
+    t.host.authenticate = () => ({ ok: true, answer: { authUrl: AUTH(null), requiresUserAction: true, callbackExpected: true, redirectScheme: 'localhost', state: 's', callbackPort: 5555 } });
+    const opId = t.begin();
+    await t.ended(opId);
+    expect(t.states(opId)).toEqual(['starting', 'waiting_browser', 'failed']);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'sign in on mini' });
+    expect(t.opened).toEqual([]); // no consent opened on a device whose browser could never return to it
+    expect(t.relayed.armed()).toBe(0);
+  });
+
+  it('fails a sign-in whose asker’s channel ended before the return, and leaves one past its return to finish', async () => {
+    const t = remote();
+    const opId = t.begin();
+    await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    t.device.end();
+    await t.ended(opId);
+    expect(t.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: 'the connection to mini ended before the sign-in returned' });
+    expect(t.relayed.armed()).toBe(0);
+
+    const later = remote();
+    const past = later.begin();
+    await later.until(() => later.last(past)?.state === 'waiting_callback', 'waiting_callback');
+    expect(later.relay('/callback?code=c&state=engine-state')).toMatchObject({ status: 200 });
+    later.device.end();
+    await later.ended(past);
+    expect(later.last(past)).toMatchObject({ state: 'done' });
   });
 });

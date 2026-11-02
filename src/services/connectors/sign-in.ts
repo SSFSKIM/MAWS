@@ -36,6 +36,15 @@
 // the client port on the client that asked (OX4; `noClient` when it has gone), and a sign-in in flight keeps the part
 // busy, so a release waits for it (CALLBACK_MS bounds it).
 //
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; A15): a remote
+// asker names its device's loopback port (`callback`). The operation arms the relayed receiver for that client and port
+// at its start (./relayed-callback.ts; a port this client has armed is refused: the receipt, then a failure, nothing
+// else changed), the engine is given the device's redirect and nothing binds here, and the device relays the browser's
+// return as `connectors.callback`, answered by this operation's own handler. An engine that keeps its own `localhost`
+// listener (`redirectScheme` other than `custom`) cannot be relayed: the operation ends before any browser opens,
+// "sign in on <machine>". An asker whose channel ends before the return ends the operation (no return can reach it under
+// another ref); one past its return finishes.
+//
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
@@ -48,6 +57,7 @@ import type { ServicesBus } from '@shared/spine/bus';
 import { Work, type Settling } from '../work';
 import { entryRefusal } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
+import { createRelayedCallbacks, type RelayedCallbacks, type RelayedReceiver } from './relayed-callback'; // P5 O7 M5c
 
 export const CALLBACK_MS = 5 * 60_000;
 export const POLL_MS = 2_000;
@@ -75,6 +85,10 @@ export interface SignInDeps {
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
   check(entry: ConnectorConfiguration & { path: string; appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null
+  // P5 O7 M5c: a remote asker's relayed receivers (the spine's one registry, shared with the connectors' Connect), and
+  // this machine's name, for a sign-in that must be made here. Absent: a registry of its own, and "this machine".
+  relayed?: Pick<RelayedCallbacks, 'arm'>;
+  machine?: string;
   callbackMs?: number;
   pollMs?: number;
   settleMs?: number;
@@ -93,7 +107,8 @@ export interface ConnectorConfiguration {
 export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
 
 export interface SignIn extends Settling {
-  start(input: ConnectorConfiguration & { path: string; appSessionId: string }, client: ClientRef | null): { opId: string };
+  // P5 O7 M5c: `callback`, a remote asker's loopback port (./relayed-callback.ts)
+  start(input: ConnectorConfiguration & { path: string; appSessionId: string }, client: ClientRef | null, callback?: { port: number }): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -107,6 +122,7 @@ const PAGE = {
   declined: 'The sign-in was declined. You can close this tab and return to MAWS.',
   waiting: 'This is not the sign-in MAWS is waiting for.',
 };
+const PORT_BUSY = 'another sign-in from this device is waiting on the same callback port'; // P5 O7 M5c
 
 interface Operation {
   opId: string;
@@ -116,6 +132,7 @@ interface Operation {
   appSessionId: string;
   client: ClientRef | null; // who asked: the browser the authorization URL opens in
   state: State;
+  receiver: RelayedReceiver | null; // P5 O7 M5c: a remote asker's, armed at the start; null: this machine's loopback
   listener: LoopbackListener | null;
   timers: Set<NodeJS.Timeout>;
   ended(): void; // P5 O4 D17: its end, for the part's settling
@@ -127,6 +144,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const settleMs = deps.settleMs ?? SETTLE_MS;
   const configMs = deps.configMs ?? CONFIG_MS;
   const configPollMs = deps.configPollMs ?? CONFIG_POLL_MS;
+  const relayed = deps.relayed ?? createRelayedCallbacks(); // P5 O7 M5c
+  const machine = deps.machine ?? 'this machine';
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const operations = new Map<string, Operation>(); // live ones, by opId
   const flows = new Work(); // P5 O4 D17: each live operation, until it ends
@@ -155,6 +174,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       op.timers.clear();
       void op.listener?.close();
       op.listener = null;
+      op.receiver?.release(); // P5 O7 M5c: this operation's arming alone, listened on or not
       operations.delete(op.opId);
       op.ended();
       if (byConnector.get(op.connector) === op.opId) byConnector.delete(op.connector);
@@ -248,7 +268,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       return { status: 200, body: declined ? PAGE.declined : PAGE.signedIn };
     };
     try {
-      op.listener = await deps.listen(handle);
+      op.listener = await (op.receiver?.listen ?? deps.listen)(handle); // P5 O7 M5c: binds nothing for a remote asker
     } catch (error) {
       return fail(op, 'engine', `MAWS could not listen for the sign-in's return: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -274,6 +294,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
       move(op, (waiting = 'waiting_callback'));
       endWait = later(op, callbackMs, () => fail(op, 'timeout'));
     } else {
+      // P5 O7 M5c: the engine listens on this machine's loopback, which a remote asker's browser cannot reach
+      if (op.receiver !== null) return fail(op, 'engine', `sign in on ${machine}`);
       // the engine's own listener receives the redirect; MAWS's is not needed
       void op.listener?.close();
       op.listener = null;
@@ -296,20 +318,40 @@ export function createSignIn(deps: SignInDeps): SignIn {
   });
 
   return {
-    start({ name, scope, cwd, path, appSessionId }, client) {
+    start({ name, scope, cwd, path, appSessionId }, client, callback) {
       const connector = connectorKey({ name, scope, cwd });
+      // P5 O7 M5c: the remote asker's arming first, so a port it has armed already refuses this one and changes nothing
+      // else: the receipt, then the failure; an asker gone before the return ends the operation
+      const opId = randomUUID();
+      let refused = false;
+      let receiver: RelayedReceiver | null = null;
+      if (callback !== undefined) {
+        receiver = client === null ? null : relayed.arm(client, callback.port, () => {
+          const op = operations.get(opId);
+          if (op) fail(op, 'engine', `the connection to ${machine} ended before the sign-in returned`);
+        });
+        refused = receiver === null;
+      }
       // the connector's running sign-in, and the one driving this session's engine flow for the name
-      for (const previous of new Set([byConnector.get(connector), byFlow.get(flowKey({ appSessionId, name }))])) {
-        const op = previous === undefined ? undefined : operations.get(previous);
-        if (op) move(op, 'cancelled');
+      if (!refused) {
+        for (const previous of new Set([byConnector.get(connector), byFlow.get(flowKey({ appSessionId, name }))])) {
+          const op = previous === undefined ? undefined : operations.get(previous);
+          if (op) move(op, 'cancelled');
+        }
       }
       let ended!: () => void;
       void flows.track(new Promise<void>((resolve) => (ended = resolve)));
-      const op: Operation = { opId: randomUUID(), name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', listener: null, timers: new Set(), ended };
+      const op: Operation = { opId, name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', receiver, listener: null, timers: new Set(), ended };
       operations.set(op.opId, op);
-      byConnector.set(connector, op.opId);
-      byFlow.set(flowKey(op), op.opId);
+      if (!refused) {
+        byConnector.set(connector, op.opId);
+        byFlow.set(flowKey(op), op.opId);
+      }
       deps.emit({ opId: op.opId, name, state: 'starting', reason: null, message: null, where: null });
+      if (refused) {
+        queueMicrotask(() => fail(op, 'engine', PORT_BUSY));
+        return { opId: op.opId };
+      }
       queueMicrotask(() => void run(op).catch((error: unknown) => {
         log(`sign-in to ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
         fail(op, 'engine', error instanceof Error ? error.message : String(error));
@@ -347,6 +389,8 @@ export interface SignInServiceDeps {
   onHostStreaming(listener: () => void): () => void;
   port: Pick<ClientPort, 'openExternal'>;
   listen: ListenLoopback;
+  relayed: Pick<RelayedCallbacks, 'arm'>; // P5 O7 M5c: the spine's registry, shared with the connectors
+  machine: string; // P5 O7 M5c: this machine's name
 }
 
 // `connectors.signIn` and `connectors.signInCancel`, over the sessions the spine hears ready from the engine host.
@@ -394,13 +438,15 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
   const signIn = createSignIn({
     host: deps.host,
     listen: deps.listen,
+    relayed: deps.relayed,
+    machine: deps.machine,
     port: deps.port,
     emit: (event) => void deps.bus.emit('connectors.signInChanged', event),
     ready: (appSessionId) => ready.has(appSessionId),
     onSessionGone: (listener) => (goneListeners.add(listener), () => goneListeners.delete(listener)),
     check,
   });
-  deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client));
+  deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client, callback));
   deps.bus.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     busy: () => signIn.busy(),

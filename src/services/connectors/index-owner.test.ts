@@ -8,6 +8,7 @@ import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/co
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import { composeConnectors, type ConnectorsComposition } from '.';
+import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorOAuthProvider } from './oauth-provider';
 import { project, record } from '../../../test/support/builders';
@@ -185,6 +186,31 @@ describe('MAWS’s own OAuth beside route D', () => {
     expect(bus.emittedOf('connectors.serversChanged').slice(before)).toEqual([{ artifactId: ART }]);
     service.stop();
     expect(changeListeners.size).toBe(0);
+  });
+
+  // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): a remote
+  // asker's Connect arms the registry the root gave for its client and port, the provider takes the relayed receiver,
+  // and `connectors.callback` (main-only: the endpoint's dispatch, under the asking channel's ref) is answered through it
+  it('arms a Connect’s callback port in the root’s registry and answers connectors.callback under the asking client alone', async () => {
+    const relayed = createRelayedCallbacks();
+    start({ relayed });
+    const rows = (await invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] })) as { servers: { handle: string }[] };
+    let listen: ((handle: (request: { method: string; url: string }) => { status: number; body: string }) => Promise<unknown>) | undefined;
+    (provider.connect as ReturnType<typeof vi.fn>).mockImplementation(async (_source: unknown, _signal: unknown, _client: unknown, given: typeof listen) => {
+      listen = given;
+      await given!((request) => ({ status: 200, body: `flow ${request.url}` }));
+      return new Promise(() => {}); // the consent is still open
+    });
+    (provider.state as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'needsConnect' });
+    expect(await invoke('connectors.connect', { artifactId: ART, sourceHandle: rows.servers[0]!.handle, callback: { port: 61_234 } })).toEqual({ accepted: true });
+    for (let i = 0; i < 20 && !listen; i++) await vi.advanceTimersByTimeAsync(0);
+    expect(relayed.armed()).toBe(1);
+    expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ server: 'notes' }), expect.any(AbortSignal), me, expect.any(Function));
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c' }, me);
+    expect(asked).toEqual({ ok: true, value: { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }, body: 'flow /callback?code=c' } });
+    expect(await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c' }, endableClientRef('remote:other'))).toEqual({ ok: true, value: { status: 404, body: '' } });
+    expect(await bus.invoke('connectors.callback', { port: 61_234, method: 'GET', url: '/callback' }, me)).toMatchObject({ ok: false }); // main's alone
   });
 
   it('without route D (H’s engine-only service) neither OAuth nor the owner’s server commands exist', () => {

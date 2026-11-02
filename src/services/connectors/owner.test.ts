@@ -10,6 +10,7 @@ import { validateCommandOutput } from '@shared/ipc/validate';
 import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import type { ConnectorOAuthSaved } from './oauth-store';
+import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 import { createConnectorOwner, OWNER_ACTION_DEADLINE_MS, OWNER_QUERY_DEADLINE_MS, type ConnectorOwner, type ConnectorOwnerDeps } from './owner';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -106,6 +107,7 @@ beforeEach(() => {
       },
     },
     oauth: provider,
+    relayed: createRelayedCallbacks(), // P5 O7 M5c
     grants: async () => grants,
     serversChanged: (artifactId) => void sent.push({ artifactId }),
     log: () => {},
@@ -178,7 +180,7 @@ describe('the owner’s server rows', () => {
     const asker = { id: 'page:1.1', onGone: () => () => {} } as never;
     expect(owner.connect(ART, handleOf(answer, 'notes'), asker)).toEqual({ accepted: true });
     await settle();
-    expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_B }), expect.any(AbortSignal), asker); // P5 O1 M3: the consent's client
+    expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_B }), expect.any(AbortSignal), asker, undefined); // P5 O1 M3: the consent's client; P5 O7 M5c: a local asker, no relayed receiver
     expect(discovered).toEqual([{ sourceId: SRC_B, directory: '/space' }]);
   });
 
@@ -323,7 +325,7 @@ describe('the owner’s Connect', () => {
     expect((await rows()).servers[0]).toMatchObject({ connection: { state: 'needsReconnect' }, last: { action: 'connect', ok: false, why: 'needsReconnect' } });
     expect(owner.reconnect(ART, handleOf(await rows(), 'notes'), null)).toEqual({ accepted: true });
     await settle();
-    expect(provider.reconnect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_A }), expect.any(AbortSignal), null);
+    expect(provider.reconnect).toHaveBeenCalledWith(expect.objectContaining({ sourceId: SRC_A }), expect.any(AbortSignal), null, undefined);
     expect(discovered).toHaveLength(1);
   });
 

@@ -7,10 +7,10 @@ export const SPINE_COMMANDS = [
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'attention.acknowledge', 'attention.list', 'attention.request',
   'catalog.engine', 'catalog.engineRefresh', // P5 O4 M3: the catalog's machine half (LIBRARY_CATALOG_COMMANDS below)
-  'connectors.adoptGrant', 'connectors.call', 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
+  'connectors.adoptGrant', 'connectors.call', 'connectors.callback' /* P5 O7 M5c */, 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
   'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.unwatch',
   'connectors.visibility', 'connectors.watch', 'connectors.windowShown',
-  'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.status',
+  'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.send' /* P5 O7 M5c: on the machine */, 'delivery.status',
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C, D4): the checkouts, the root's last
   // parts (CHECKOUTS_COMMANDS below), interleaved here in sorted order
   'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
@@ -54,13 +54,14 @@ export const CHECKOUTS_COMMANDS = [
 
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C): what the connectors, their sign-in and
 // delivery register through the spine's bus, in every run (a refused one too): the 21 retagged commands and the three
-// new main-only ones (`connectors.windowShown`, `connectors.adoptGrant`, `delivery.deliver`), sorted
+// new main-only ones (`connectors.windowShown`, `connectors.adoptGrant`, `delivery.deliver`); P5 O7 M5c: `delivery.send`,
+// retagged, and the main-only `connectors.callback`; sorted
 export const CONNECTORS_COMMANDS = [
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
-  'connectors.adoptGrant', 'connectors.call', 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
+  'connectors.adoptGrant', 'connectors.call', 'connectors.callback' /* P5 O7 M5c */, 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
   'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.unwatch',
   'connectors.visibility', 'connectors.watch', 'connectors.windowShown',
-  'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.status',
+  'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.send' /* P5 O7 M5c: on the machine */, 'delivery.status',
 ];
 
 // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C): the library's reads of a stored file (4

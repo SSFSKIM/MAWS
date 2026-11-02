@@ -15,6 +15,7 @@ import { serveSocketClients, type SupervisorIdentity } from '@shared/host/socket
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { MachineRef } from '@shared/machine/ref';
 import { createServicesFront, type ServicesFront } from '../../src/mawsd/front';
+import { createRelayedCallbacks } from '../../src/services/connectors/relayed-callback'; // P5 O7 M5c
 import { composeConnectors } from '../../src/services/connectors';
 import { startSignIn } from '../../src/services/connectors/sign-in';
 import { project, record } from '../support/builders';
@@ -50,12 +51,14 @@ async function lab() {
   const host = new FakeConnectorHost();
   host.grants.set(JSON.stringify([ROWS.server, ROWS.tool]), 'read');
   const view = fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
+  const relayed = createRelayedCallbacks(); // P5 O7 M5c: one registry for both, as the spine's root shares it
   const connectors = composeConnectors({
     hosts: { dispatch: host.dispatch as never, onEvent: host.onEvent as never, onState: host.onState as never, onStreaming: host.onStreaming as never, streaming: host.streaming as never },
     bus: front.bus,
     view,
     realpath: (p) => p,
     port: front.port,
+    relayed,
     log: () => {},
   });
   // the engine's own MCP sign-in: a server needing auth, whose authorization URL waits for the browser
@@ -77,6 +80,8 @@ async function lab() {
     onHostStreaming: () => () => {},
     port: front.port,
     listen: async () => ({ port: 53_100, close: async () => {} }),
+    relayed,
+    machine: 'this-mac',
   });
   status!({ appSessionId: SESSION, status: { process: 'ready', cwd: '/repo' } });
   const server: Server = createServer();

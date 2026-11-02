@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoopbackReply, LoopbackRequest } from './oauth-callback';
 import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, untilEnded, type ConnectorOAuthFlowDeps } from './oauth-flow';
 import type { ConnectorOAuthGrant } from '@shared/connectors/oauth-types';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M5c
+import { createRelayedCallbacks, type RelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 
 const MCP = 'https://mcp.example.com';
 const AS = 'https://auth.example.com';
@@ -689,5 +691,82 @@ describe('untilEnded', () => {
     const opener = vi.fn(async () => 'opened');
     expect(await untilEnded(opener, new AbortController().signal)).toBe('opened');
     expect(opener).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; A15): a Connect whose
+// asker is a remote device takes the relayed receiver (./relayed-callback.ts) for the port the device named: nothing binds
+// here, the authorization registers the device's loopback, and the device's relayed requests run through this flow's own
+// handler, answered as the local listener writes them.
+describe('connect through the relayed receiver (P5 O7 M5c)', () => {
+  const PORT = 61_234;
+  const device = endableClientRef('remote:device-a');
+  const relayedConnect = (h: Harness, relayed: RelayedCallbacks, signal = new AbortController().signal) => {
+    const receiver = relayed.arm(device, PORT)!;
+    return h.flow.connect({ requestUrl: REQUEST_URL, signal, client: device, listen: receiver.listen });
+  };
+  const relay = (relayed: RelayedCallbacks, url: string, method = 'GET') => relayed.answer(device, { port: PORT, method, url });
+
+  it('registers the device’s port, binds nothing here, and completes on a relayed request that arrives later', async () => {
+    const h = new Harness();
+    const relayed = createRelayedCallbacks();
+    const pending = relayedConnect(h, relayed);
+    const authorization = await h.browserOpened();
+    expect(authorization.searchParams.get('redirect_uri')).toBe(`http://127.0.0.1:${PORT}/callback`);
+    expect(JSON.parse(h.posts('/register')[0]!.body)).toMatchObject({ redirect_uris: [`http://127.0.0.1:${PORT}/callback`] });
+    expect(h.openedFor).toEqual([device]);
+    expect(h.events).not.toContain('listen'); // this machine's loopback is never bound for a remote asker
+
+    // an answered request does not end the wait: the handler's own 404 for another path, then the real callback
+    expect(relay(relayed, '/favicon.ico')).toMatchObject({ status: 404, body: 'Not found.' });
+    const answers = [relay(relayed, '/callback?code=code-1&state=state-abc')];
+    expect(answers[0]).toMatchObject({ status: 200, body: 'MAWS is connected. You can close this window.' });
+    const grant = await pending;
+    expect(grant.redirectUri).toBe(`http://127.0.0.1:${PORT}/callback`);
+    const verifier = h.form(h.posts('/token')[0]!).code_verifier!;
+    expect(verifier.length).toBeGreaterThan(20);
+    expect(JSON.stringify(answers)).not.toContain(verifier); // PKCE's verifier never leaves the machine
+    expect(relayed.armed()).toBe(0); // the flow's cleanup released its registration
+    expect(relay(relayed, '/callback?code=code-1&state=state-abc')).toEqual({ status: 404, body: '' });
+  });
+
+  // Each refusal the local handler makes, made over the relay with the same status and body, and nothing exchanged
+  it.each<[string, string[], string | null, object?]>([
+    ['a denied consent', ['/callback?error=access_denied&state=state-abc'], 'denied'],
+    ['a duplicate state', ['/callback?code=c&state=state-abc&state=state-abc'], 'state'],
+    ['a wrong issuer', [`/callback?code=c&state=state-abc&iss=${encodeURIComponent('https://evil.example.com')}`], 'state', { ...METADATA, authorization_response_iss_parameter_supported: true }],
+    ['a replayed callback', ['/callback?code=c&state=wrong', '/callback?code=c&state=state-abc'], 'state'],
+    ['a POST', ['/callback?code=c&state=state-abc'], null],
+  ])('answers %s as the local handler answers it', async (_what, paths, code, metadata) => {
+    const method = _what === 'a POST' ? 'POST' : 'GET';
+    const local = new Harness();
+    const remote = new Harness();
+    if (metadata) local.script.metadata = remote.script.metadata = metadata;
+    const relayed = createRelayedCallbacks();
+    const localPending = connect(local);
+    const remotePending = relayedConnect(remote, relayed);
+    await Promise.all([local.browserOpened(), remote.browserOpened()]);
+    for (const path of paths) {
+      const here = local.deliver(path, method);
+      const there = relay(relayed, path, method);
+      expect({ status: there.status, body: there.body }).toEqual(here);
+    }
+    if (code === null) {
+      expect(relayed.armed()).toBe(1); // a POST settles nothing: the flow still waits
+      return;
+    }
+    expect(await failureOf(remotePending)).toMatchObject({ code });
+    expect(await failureOf(localPending)).toMatchObject({ code });
+    expect(remote.posts('/token')).toHaveLength(0); // nothing exchanged, so nothing sealed
+    expect(relayed.armed()).toBe(0);
+  });
+
+  it('fails as a listener that could not bind when its arming was released before the flow listened', async () => {
+    const h = new Harness();
+    const relayed = createRelayedCallbacks();
+    const receiver = relayed.arm(device, PORT)!;
+    receiver.release();
+    expect(await failureOf(h.flow.connect({ requestUrl: REQUEST_URL, signal: new AbortController().signal, client: device, listen: receiver.listen }))).toMatchObject({ code: 'listener' });
+    expect(h.posts('/register')).toHaveLength(0);
   });
 });

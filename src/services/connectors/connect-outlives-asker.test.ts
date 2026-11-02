@@ -22,6 +22,7 @@ import type { LoopbackReply, LoopbackRequest } from './oauth-callback';
 import { CONNECT_CALLBACK_TIMEOUT_MS } from './oauth-flow';
 import type { ConnectorOAuthProvider } from './oauth-provider';
 import { productionConnectorOAuth } from './root';
+import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 import { createConnectorOwner, type ConnectorOwner } from './owner';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -108,6 +109,7 @@ beforeEach(() => {
         : { ok: false, failure: 'unavailable', reason: 'unauthorized' }),
     },
     oauth: provider,
+    relayed: createRelayedCallbacks(), // P5 O7 M5c
     grants: async () => [],
     serversChanged: (artifactId) => void sent.push(artifactId),
     track: (action) => {

@@ -207,7 +207,7 @@ export const CONNECTORS_CLIENT_CAPABILITY = 'machine.connectors';
 // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `mawsd`'s welcome lists it when its
 // spine serves `delivery.send` (the export and the delivery on the machine), so main sends it there; main's own send (the
 // export here, then `delivery.deliver`) stays the shim for a `mawsd` whose welcome lacks it. In the wire's union from the
-// contracts on; `daemon`'s list below gains it with the service that serves the command (each peer lists only what it
+// contracts on; `daemon`'s list below has it since the spine's delivery serves the command (each peer lists only what it
 // implements).
 export const MACHINE_DELIVERY_CAPABILITY = 'machine.delivery';
 // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11): on the engine host's welcome, that it
@@ -230,7 +230,7 @@ export const PEER_CAPABILITIES = {
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
-  daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render)
+  daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_DELIVERY_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render; P5 O7 M5c: machine.delivery, its spine serving delivery.send)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
   renderClient: [RENDER_CLIENT_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock
 } as const satisfies Record<string, readonly string[]>;

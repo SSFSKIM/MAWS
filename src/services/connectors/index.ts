@@ -37,6 +37,10 @@
 // - D10: the part's stop ends this load's work in the engine host: route D's pending operations withdrawn and every
 //   connection the provider issued a credential for closed (`connectors.directClose`), since the host's connection, and
 //   so its credential floors, outlive the load; the provider numbers its epochs from a counter of the process's.
+// - P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; A15): a remote
+//   asker's Connect, Reconnect or sign-in names its device's loopback port (`callback`), and its consent's redirect comes
+//   back as `connectors.callback`, dispatched under the asking channel's ref: the relayed receivers (./relayed-callback.ts),
+//   one registry the root shares with the engine's sign-in, answer it through the flow that channel armed for the port.
 import { realpathSync } from 'node:fs';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import type { ClientPort } from '@shared/client/port';
@@ -55,6 +59,7 @@ import { createEngineRoute } from './engine-route';
 import type { ListenLoopback } from './oauth-callback';
 import type { ConnectorOAuthProvider, ConnectorOAuthProviderDeps } from './oauth-provider'; // P3-HD M3c2
 import { createConnectorOwner } from './owner'; // P3-HD M3c2
+import { createRelayedCallbacks, type RelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
 import { createOwnerDelivery, type OwnerDelivery } from './owner-delivery'; // P4-B5
 import { productionConnectorOAuth } from './root';
 import type { ConnectorGrantAuthority, ConnectorRoute } from './route';
@@ -68,6 +73,7 @@ export interface ConnectorsDeps {
   custody: ConnectorOAuthSealer; // fileKeyCustody(join(profile, 'connectors', 'oauth'))
   directory: string; // <profile>/connectors/oauth
   listen: ListenLoopback;
+  relayed: RelayedCallbacks; // P5 O7 M5c: shared with the engine's sign-in (./sign-in.ts)
   log?: (line: string) => void;
 }
 
@@ -79,7 +85,7 @@ export interface ConnectorsPart extends Settling {
 
 // The service's composition with its routes chosen: production's is `startConnectors` (route D over the machine's key
 // file); a test supplies its own route D and provider, or none (route E alone, H's engine-only service).
-export interface ConnectorsComposition extends Pick<ConnectorsDeps, 'hosts' | 'bus' | 'view' | 'port' | 'log'> {
+export interface ConnectorsComposition extends Pick<ConnectorsDeps, 'hosts' | 'bus' | 'view' | 'port' | 'log'>, Partial<Pick<ConnectorsDeps, 'relayed'>> {
   realpath?: (path: string) => string | null;
   // P3-HD (Decision Log 14): route D's factory, which the service composes after route E. Absent: there is no route D.
   direct?: (deps: DirectRouteDeps) => DirectRoute;
@@ -101,7 +107,7 @@ export function startConnectors({ custody, directory, listen, ...deps }: Connect
   return composeConnectors({ ...deps, direct: createDirectRoute, oauth: (own) => productionConnectorOAuth({ ...own, custody, directory, listen }) });
 }
 
-export function composeConnectors({ hosts, bus, view, realpath = canonical, port, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsComposition): ConnectorsPart {
+export function composeConnectors({ hosts, bus, view, realpath = canonical, port, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth, relayed = createRelayedCallbacks() }: ConnectorsComposition): ConnectorsPart {
   const { register } = bus;
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const host = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
@@ -173,13 +179,16 @@ export function composeConnectors({ hosts, bus, view, realpath = canonical, port
   register('artifacts.grantConnectorTool', ({ artifactId, tool }) => broker.grantTool(artifactId, tool));
   register('artifacts.revokeConnectorTool', async ({ artifactId, server, tool }) => ({ revoked: await broker.revokeTool(artifactId, { server, tool }) }));
   // P3-HD M3c2: the owner's per-server rows and actions (./owner.ts), where route D exists; trusted, never a page's
-  const owner = direct ? createConnectorOwner({ direct, oauth, grants: grants.list, log, serversChanged: (artifactId) => void bus.emit('connectors.serversChanged', { artifactId }), track: (action) => working.track(action) }) : null;
+  const owner = direct ? createConnectorOwner({ direct, oauth, relayed, grants: grants.list, log, serversChanged: (artifactId) => void bus.emit('connectors.serversChanged', { artifactId }), track: (action) => working.track(action) }) : null;
   if (owner) {
     register('connectors.servers', ({ artifactId, tools }, { client }) => owner.servers(artifactId, tools, client));
-    register('connectors.connect', ({ artifactId, sourceHandle }, { client }) => owner.connect(artifactId, sourceHandle, client));
-    register('connectors.reconnect', ({ artifactId, sourceHandle }, { client }) => owner.reconnect(artifactId, sourceHandle, client));
+    register('connectors.connect', ({ artifactId, sourceHandle, callback }, { client }) => owner.connect(artifactId, sourceHandle, client, callback));
+    register('connectors.reconnect', ({ artifactId, sourceHandle, callback }, { client }) => owner.reconnect(artifactId, sourceHandle, client, callback));
     register('connectors.disconnect', ({ connectionId }) => owner.disconnect(connectionId));
   }
+  // P5 O7 M5c: a remote asker's consent redirect, relayed by its device, run by the flow its own channel armed for the
+  // port (the Connect's here, or the engine sign-in's); `{status: 404, body: ''}` when none is armed
+  register('connectors.callback', (request, { client }) => relayed.answer(client, request));
   // P5 O4 M2 (U7, D23): a grant the app opened from Electron's safeStorage, re-sealed under the machine's key
   register('connectors.adoptGrant', async ({ connectionId, record }) => (oauth ? oauth.adopt(connectionId, record) : { adopted: false as const, reason: 'unavailable' as const }));
 
