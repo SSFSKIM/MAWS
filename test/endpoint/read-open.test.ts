@@ -252,6 +252,20 @@ describe('the http read open', () => {
     expect(ofStream(a, id).at(-1)).toMatchObject({ t: 'streamClose', reason: 'closed' });
   });
 
+  it('sends a bridged html page larger than a chunk in order, every piece at the offset after the one before, under ample credit', async () => {
+    const { f, store } = await start();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const page = `<!doctype html><html><head><title>t</title></head><body>${randomBytes(300 * 1024).toString('hex')}</body></html>`;
+    store.put(x, 'index.html', page);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id, answer } = await openHttp(a, { url: url(x) }, 4 * 1024 * 1024);
+    await until(() => closeOf(a, id), 'the close');
+    const length = Number((answer.http as { headers: Record<string, string> }).headers['content-length']);
+    expect(body(a, id).byteLength).toBe(length);
+    expect(body(a, id).toString().endsWith(page.slice(-1024))).toBe(true);
+  });
+
   it('queues no more of a buffer-backed html page than the device’s credit (one 2 MiB source chunk, 1 KiB of credit), the rest read on as credit comes', async () => {
     const services = fakeServices();
     try {

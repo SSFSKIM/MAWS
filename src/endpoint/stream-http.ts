@@ -97,8 +97,12 @@ class HttpStream extends Stream {
     );
   }
 
+  /**
+   * A piece was sent: the next is queued once the window's turn is over (a piece queued from inside the turn would be sent
+   * by a nested turn, ahead of the one being sent).
+   */
   protected override drained(): void {
-    this.pull();
+    queueMicrotask(() => this.pull());
   }
 
   protected override credited(): void {
