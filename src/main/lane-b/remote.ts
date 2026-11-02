@@ -164,7 +164,7 @@ export interface RemoteLaneB {
   /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
   attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
   /** P5 O7 M5a: `remote.openCopy` (main's handler's) and a remote artifact's files for Save As (src/main/library/files.ts). */
-  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files'>;
+  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets'>; // P5 O7 M5b: scheme, assets
   /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
@@ -554,7 +554,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
-    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine) },
+    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);

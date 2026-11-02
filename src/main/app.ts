@@ -755,6 +755,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
     artifactsSocket: launch.mode === 'daemon' ? daemonPaths(profile).artifactsSocket : null, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
     authors: exportAuthors, // P5 O5 M3
+    remote: remoteLaneB.artifacts.scheme, // P5 O7 M5b: another machine's artifact pages, over its link
   });
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
@@ -817,6 +818,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     downloads: () => app.getPath('downloads'),
     port: clientPort,
     env: process.env,
+    local, // P5 O7 M5b: another machine's asset is fetched over that machine's link
+    remote: (machine) => remoteLaneB.artifacts.assets(machine),
   });
   // P3-E end
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a window's holds over a dashboard's snapshots, each

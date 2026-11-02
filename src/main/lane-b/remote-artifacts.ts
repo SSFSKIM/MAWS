@@ -21,6 +21,9 @@
 //   unavailable with the reason, as M2 substitutes `attention.request`, so the reader always holds a reading. Its changes
 //   come on the session's checkout feed (./remote-checkout.ts).
 // - The machine's `artifacts` feed (./remote-artifact-feed.ts), and open-a-copy and Save As's bytes (./remote-copy.ts).
+// - P5 O7 M5b ("The `http` stream"): the scheme's remote responder (../artifacts/remote-scheme.ts), which main's chain asks
+//   for a page of an artifact the table places on an RL2 machine (`scheme`), and through which a dashboard's Download
+//   fetches another machine's asset (`assets`, for `artifacts.downloadAsset`; the artifact recorded as it goes).
 import { tmpdir } from 'node:os';
 import { toWire } from '@shared/host/json-bytes';
 import { ipcError, type IpcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -29,10 +32,13 @@ import { REMOTE_INLINE_MAX_BYTES, type RemoteCopySource } from '@shared/ipc/sche
 import { SESSION_CAPABILITY_TOOLS } from '@shared/ipc/schema/session-capabilities';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactMachines } from '../artifacts/machines';
+import { assetUrl, createRemoteScheme } from '../artifacts/remote-scheme';
+import type { RemoteAssets } from '../dashboard/download';
 import { CommandFailure } from '../ipc/router';
 import type { RemoteLibraryFiles } from '../library/files';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
+import type { SchemeResponder } from '../../render/scheme';
 import { createRemoteArtifactFeed } from './remote-artifact-feed';
 import { fetchToFile, openCopy, type ArtifactSource } from './remote-copy';
 import { readInPages } from './remote-files-read';
@@ -83,6 +89,10 @@ export interface RemoteArtifacts {
   openCopy(input: CommandInput<'remote.openCopy'>): Promise<CommandResult<'remote.openCopy'>>;
   /** A remote artifact's stored files and exports, for Save As (../library/files.ts); null while no link reaches it. */
   files(machine: MachineRef): RemoteLibraryFiles | null;
+  /** P5 O7 M5b: the scheme's remote responder, main's chain's second (../artifacts/index.ts). */
+  scheme: SchemeResponder;
+  /** P5 O7 M5b: a remote artifact's assets, for `artifacts.downloadAsset` (../dashboard/download.ts); null while no link reaches it. */
+  assets(machine: MachineRef): RemoteAssets | null;
   stop(): void;
 }
 
@@ -94,6 +104,7 @@ const idOf = (value: unknown): string | null => (isObject(value) && typeof value
 export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifacts {
   const tempDir = deps.tempDir ?? tmpdir;
   const feed = createRemoteArtifactFeed({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, machines: deps.machines, retryMs: deps.feedRetryMs, log: deps.log });
+  const scheme = createRemoteScheme({ machines: deps.machines, remote: deps.remote, log: deps.log }); // P5 O7 M5b
 
   /** The artifacts an answer names, each on the machine that answered. */
   function recordAnswer(machine: MachineRef, name: CommandName, value: unknown): void {
@@ -203,6 +214,19 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
         },
       };
     },
-    stop: () => feed.stop(),
+    scheme: scheme.respond,
+    assets(machine) {
+      if (deps.remote(machine) === null) return null;
+      return {
+        fetch: (artifactId, ref) => {
+          deps.machines.record(artifactId, machine);
+          return scheme.fetch(machine, new Request(assetUrl(artifactId, ref)));
+        },
+      };
+    },
+    stop: () => {
+      feed.stop();
+      scheme.stop();
+    },
   };
 }

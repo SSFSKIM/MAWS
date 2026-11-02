@@ -10,6 +10,9 @@
 //   request, so the app follows the daemon it is attached to); the render host proxies alone (`serveArtifactsThrough`,
 //   M3). Chromium never sees the socket: the scheme keeps its privileges, and each artifact its own origin.
 // The presenter's live embeds answer first in the app either way (`first`), since they are the app's own.
+// P5 O7 M5b (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5's "The `http` stream"): the app's `first` is a
+// chain (`inOrder`): the presenter's embeds, then the remote responder (src/main/artifacts/remote-scheme.ts: an artifact
+// of another machine's session, fetched over its RL2 link), then the local path above.
 import { protocol, type Session } from 'electron';
 import { ARTIFACT_SCHEME } from '@shared/artifacts/scheme';
 import { answerFirst, artifactResolver, type ContentLookup, type SchemeHandler, type SchemeResponder } from '../services/artifacts/scheme/artifact-handler';
@@ -36,6 +39,17 @@ export function artifactSchemeHandler(content: ContentLookup, first?: SchemeResp
     const at = endpoint();
     return at === null ? files(request) : fetchOverSocket(at.socketPath, request);
   });
+}
+
+// P5 O7 M5b: responders asked in turn, the first answer taken; none answering is null ("not mine"), the next path's.
+export function inOrder(...responders: ReadonlyArray<SchemeResponder | undefined>): SchemeResponder {
+  return async (request) => {
+    for (const responder of responders) {
+      const answer = await responder?.(request);
+      if (answer) return answer;
+    }
+    return null;
+  };
 }
 
 // The handler on a session: the window's default session and the capture partition get the same one.
