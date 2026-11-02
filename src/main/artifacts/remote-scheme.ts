@@ -15,14 +15,18 @@
 //   (src/render/policies.ts, src/services/artifacts/scheme/scheme-handler.ts).
 // - Each request is one `http` read open (`{url, method, range?}`, no `op`), at most HTTP_STREAMS_PER_LINK open per link at
 //   once, the rest queued in arrival order. Its `Response` is answered with the status and headers the endpoint sent, the
-//   body the stream's bytes, which this side's credit bounds: the endpoint may send HTTP_STREAM_CREDIT bytes ahead, and each
-//   chunk is refunded as the frame pulls it, so nothing here buffers past the credit.
+//   body the stream's bytes, which this side's credit bounds: the endpoint may send HTTP_STREAM_CREDIT bytes ahead (the
+//   device's stream table closes one that sends past it), and each chunk is refunded as the frame pulls it. b3's review:
+//   a slot is held until its body is read out or let go, not only while its stream is open, so the bytes a link's
+//   bodies hold here are at most HTTP_STREAMS_PER_LINK × HTTP_STREAM_CREDIT (8 MiB), plus what Electron's adapter has
+//   read ahead of the frame per body (`Readable.fromWeb`, about one 64 KiB chunk; electron lib/browser/api/protocol.ts).
 // - A body is checked against its `Content-Length`: a stream that ends short of it, runs past it, skips an offset or closes
 //   with any word but `closed` errors the body, which the frame shows as a failed load.
 // - A paused media pane holds its stream under spent credit (the architect's ruling on b3's review, 2026-11-02): while a
 //   request waits for a slot, a stream whose frame hasn't taken a byte for IDLE_MS (and isn't waiting on the machine for
-//   more) gives its slot up, the oldest first. Its body ends normally with what came, and the stream closes; the media
-//   element asks again with a Range when it plays on. An idle stream keeps its slot while nothing waits.
+//   more) gives its slot up, the oldest first, a finished body the frame hasn't read out as well. Its body ends normally
+//   where the frame stopped (what it held unread let go), and its stream closes; the media element asks again with a Range
+//   when it plays on. An idle stream keeps its slot while nothing waits.
 // - Every request ends: `503` "<machine> is offline" while the link is down (at the request, or before the answer came),
 //   `504` when nothing opened within OPEN_TIMEOUT_MS of the request, a refusal as the HTTP status it means (REFUSAL_STATUS),
 //   and the app's stop ends whatever is still in flight. A stream lost with its channel before its answer is opened again
@@ -225,6 +229,7 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
         const empty = method === 'HEAD' || NO_BODY.has(status);
         const length = empty ? null : lengthOf(headers);
         if (length === undefined) return fail(502, `${name} answered a length this app can’t read`);
+        // the body's end, however it comes (read out, let go, failed, given way), frees the slot
         if (!empty) body = new Body(length, (bytes) => at?.credit(bytes), () => {
           at?.close('closed');
           finish();
@@ -242,11 +247,8 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
           holder = {
             idleSince: () => held.idleSince(),
             giveWay: () => {
-              deps.log(`artifacts: a stream of ${name} unread for ${idleMs} ms gave its slot to a waiting request`);
+              deps.log(`artifacts: a body of ${name} unread for ${idleMs} ms gave its slot to a waiting request`);
               held.cut();
-              at?.close('closed');
-              stream = null;
-              finish();
             },
           };
           slotsOf(link).holders.add(holder);
@@ -255,8 +257,8 @@ export function createRemoteScheme(deps: RemoteSchemeDeps): RemoteScheme {
       const onClosed = (reason: string) => {
         stream = null;
         if (answered) {
-          body?.end(reason);
-          return finish();
+          if (body === null) return finish();
+          return body.end(reason); // the slot stays held until the body is read out
         }
         // lost with its channel before the answer: asked again on the next, while the link lives
         if (reason === 'carrier' && link.state() !== 'down' && link.ended() === null) return open();
@@ -311,7 +313,8 @@ function lengthOf(headers: Record<string, string>): number | null | undefined {
 
 /**
  * A response's body over one stream: the stream's chunks handed to the frame's reads one at a time, each refunded to the
- * endpoint as it is handed (so the bytes held here never pass the credit), checked against the length said.
+ * endpoint as it is handed (so the bytes held here never pass the credit), checked against the length said. `over` is
+ * told once, at the body's end however it comes: read out, let go by the frame, failed, or cut (given way).
  */
 class Body {
   readonly stream: ReadableStream<Uint8Array>;
@@ -319,30 +322,31 @@ class Body {
   readonly #chunks: Uint8Array[] = [];
   #received = 0;
   #wanted = false;
-  #done = false;
+  /** The stream finished whole: what is held is all there is. */
+  #ended = false;
+  #over = false;
   /** When the frame last took a chunk (or the answer came). */
   #moved = Date.now();
   readonly length: number | null;
   readonly refund: (bytes: number) => void;
-  /** The body ended short of whole: failed, or cancelled by its reader. */
-  readonly cancelled: () => void;
+  readonly over: () => void;
 
-  constructor(length: number | null, refund: (bytes: number) => void, cancelled: () => void) {
+  constructor(length: number | null, refund: (bytes: number) => void, over: () => void) {
     this.length = length;
     this.refund = refund;
-    this.cancelled = cancelled;
+    this.over = over;
     this.stream = new ReadableStream<Uint8Array>(
       {
         start: (controller) => void (this.#controller = controller),
         pull: () => {
           const next = this.#chunks.shift();
-          if (next === undefined) this.#wanted = true;
-          else this.#hand(next);
+          if (next !== undefined) this.#hand(next);
+          else if (!this.#ended) this.#wanted = true;
+          this.#closeIfOut();
         },
         cancel: () => {
-          this.#done = true;
           this.#chunks.length = 0;
-          this.cancelled();
+          this.#finish();
         },
       },
       { highWaterMark: 0 },
@@ -350,7 +354,7 @@ class Body {
   }
 
   data(offset: number, bytes: Uint8Array): void {
-    if (this.#done) return;
+    if (this.#over || this.#ended) return;
     if (offset !== this.#received) return this.fail(new Error(`a chunk at ${offset} after ${this.#received} bytes`));
     this.#received += bytes.byteLength;
     if (this.length !== null && this.#received > this.length) return this.fail(new Error(`${this.#received} bytes past a Content-Length of ${this.length}`));
@@ -360,35 +364,34 @@ class Body {
     } else this.#chunks.push(bytes);
   }
 
-  /** The stream closed with `reason`: the body is whole, or it failed. */
+  /** The stream closed with `reason`: the body is whole (and ends once read out), or it failed. */
   end(reason: string): void {
-    if (this.#done) return;
+    if (this.#over || this.#ended) return;
     if (reason !== 'closed') return this.fail(new Error(`the stream closed (${reason}) after ${this.#received} bytes`));
     if (this.length !== null && this.#received !== this.length) return this.fail(new Error(`${this.#received} bytes of a Content-Length of ${this.length}`));
-    this.#done = true;
-    for (const chunk of this.#chunks.splice(0)) this.#controller.enqueue(chunk);
-    this.#controller.close();
+    this.#ended = true;
+    this.#wanted = false;
+    this.#closeIfOut();
   }
 
-  /** Since when the frame hasn't read: null while it waits for bytes (the machine is the slow side) or once ended. */
+  /** Since when the frame hasn't read: null while it waits for bytes (the machine is the slow side) or once over. */
   idleSince(): number | null {
-    return this.#done || this.#wanted ? null : this.#moved;
+    return this.#over || this.#wanted ? null : this.#moved;
   }
 
-  /** A normal end here with what came: the stream gave its slot up, and the frame asks for the rest by its Range. */
+  /** A normal end where the frame stopped, what it held unread let go: the body gave its slot up, and the frame asks for the rest by its Range. */
   cut(): void {
-    if (this.#done) return;
-    this.#done = true;
-    for (const chunk of this.#chunks.splice(0)) this.#controller.enqueue(chunk);
+    if (this.#over) return;
+    this.#chunks.length = 0;
     this.#controller.close();
+    this.#finish();
   }
 
   fail(error: Error): void {
-    if (this.#done) return;
-    this.#done = true;
+    if (this.#over) return;
     this.#chunks.length = 0;
     this.#controller.error(error);
-    this.cancelled();
+    this.#finish();
   }
 
   #hand(chunk: Uint8Array): void {
@@ -396,7 +399,19 @@ class Body {
     this.#controller.enqueue(chunk);
     this.refund(chunk.byteLength);
   }
-}
 
+  /** A whole body read out ends. */
+  #closeIfOut(): void {
+    if (this.#over || !this.#ended || this.#chunks.length > 0) return;
+    this.#controller.close();
+    this.#finish();
+  }
+
+  #finish(): void {
+    if (this.#over) return;
+    this.#over = true;
+    this.over();
+  }
+}
 /** The asset `ref` of `artifactId` (`assets/<name>`), as the scheme names it. */
 export const assetUrl = (artifactId: string, ref: string): string => artifactUrl(artifactId, 'live', ref);

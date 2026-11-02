@@ -426,13 +426,12 @@ describe('the cap and the bounds', () => {
     for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) {
       s.link.answer(s.link.opens()[n]!.id, 200, { 'content-length': '10', 'accept-ranges': 'bytes' }, ['0123'], '');
       readers.push((await media[n]!).body!.getReader());
+      expect(Buffer.from((await readers[n]!.read()).value!).toString()).toBe('0123'); // played the first bytes, then paused
     }
     const image = s.handler(new Request(url(PAGE, 'assets/next.png')));
     await s.opened(HTTP_STREAMS_PER_LINK);
-    // the element reads what came before the end, then asks for the rest by its offset
-    const got: string[] = [];
-    for (let next = await readers[0]!.read(); !next.done; next = await readers[0]!.read()) got.push(Buffer.from(next.value).toString());
-    expect(got.join('')).toBe('0123');
+    // the body ends where the element stopped, and it asks for the rest by its offset
+    expect((await readers[0]!.read()).done).toBe(true);
     s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
     expect(await (await image).text()).toBe('png');
     const resume = s.handler(new Request(url(PAGE, 'assets/0.mp4'), { headers: { Range: 'bytes=4-' } }));
@@ -441,6 +440,41 @@ describe('the cap and the bounds', () => {
     s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK + 1]!.id, 206, { 'content-range': 'bytes 4-9/10', 'content-length': '6' }, ['456789']);
     const resumed = await resume;
     expect([resumed.status, await resumed.text()]).toEqual([206, '456789']);
+  });
+
+  // b3's review: a body the machine finished but the frame hasn't read still holds its bytes here, so it keeps its slot
+  // (and its share of the link's budget) until it is read to its end or let go; it gives way as an idle stream does.
+  it('keeps the slot of a finished body until the frame reads it out, so unread bodies make the next request wait', async () => {
+    const s = scene();
+    const pages = Array.from({ length: HTTP_STREAMS_PER_LINK }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.png`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) s.link.answer(s.link.opens()[n]!.id, 200, { 'content-length': '3' }, ['abc']); // whole, unread
+    const responses = await Promise.all(pages);
+    const next = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(s.link.opens()).toHaveLength(HTTP_STREAMS_PER_LINK); // the ninth waits behind what is held here
+    expect(await responses[0]!.text()).toBe('abc'); // one read out: its slot goes to the ninth
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await next).text()).toBe('png');
+    await responses[1]!.body!.cancel(); // a body let go frees its slot too
+    const after = s.handler(new Request(url(PAGE, 'assets/after.png')));
+    await s.opened(HTTP_STREAMS_PER_LINK + 1);
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK + 1]!.id, 200, {}, ['after']);
+    expect(await (await after).text()).toBe('after');
+  });
+
+  it('lets a finished, unread body give way as an idle stream does, letting go of what it held', async () => {
+    const s = scene({ idleMs: 60 });
+    const pages = Array.from({ length: HTTP_STREAMS_PER_LINK }, (_, n) => s.handler(new Request(url(PAGE, `assets/${n}.mp4`))));
+    await s.opened(HTTP_STREAMS_PER_LINK - 1);
+    for (let n = 0; n < HTTP_STREAMS_PER_LINK; n += 1) s.link.answer(s.link.opens()[n]!.id, 200, { 'content-length': '3' }, ['abc']);
+    const responses = await Promise.all(pages);
+    const next = s.handler(new Request(url(PAGE, 'assets/next.png')));
+    await s.opened(HTTP_STREAMS_PER_LINK);
+    s.link.answer(s.link.opens()[HTTP_STREAMS_PER_LINK]!.id, 200, {}, ['png']);
+    expect(await (await next).text()).toBe('png');
+    expect(await responses[0]!.text()).toBe(''); // a normal end; the media element asks again by its Range
   });
 
   it('ends every request in flight when stopped', async () => {
