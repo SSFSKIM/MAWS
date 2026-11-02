@@ -38,13 +38,12 @@ import { SESSION_CAPABILITY_TOOLS } from '@shared/ipc/schema/session-capabilitie
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactMachines } from '../artifacts/machines';
 import { createRemoteDocuments, DOCUMENT_OPEN_MS } from '../artifacts/remote-open';
-import { assetUrl, createRemoteScheme } from '../artifacts/remote-scheme';
+import { assetUrl, createRemoteScheme, type RemoteResponder } from '../artifacts/remote-scheme';
 import type { RemoteAssets } from '../dashboard/download';
 import { CommandFailure } from '../ipc/router';
 import type { RemoteLibraryFiles } from '../library/files';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
-import type { SchemeResponder } from '../../render/scheme';
 import { createRemoteArtifactFeed } from './remote-artifact-feed';
 import { fetchToFile, openCopy, type ArtifactSource } from './remote-copy';
 import { readInPages } from './remote-files-read';
@@ -100,7 +99,7 @@ export interface RemoteArtifacts {
   /** A remote artifact's stored files and exports, for Save As (../library/files.ts); null while no link reaches it. */
   files(machine: MachineRef): RemoteLibraryFiles | null;
   /** P5 O7 M5b: the scheme's remote responder, main's chain's second (../artifacts/index.ts). */
-  scheme: SchemeResponder;
+  scheme: RemoteResponder;
   /** P5 O7 M5b: a remote artifact's assets, for `artifacts.downloadAsset` (../dashboard/download.ts); null while no link reaches it. */
   assets(machine: MachineRef): RemoteAssets | null;
   stop(): void;
