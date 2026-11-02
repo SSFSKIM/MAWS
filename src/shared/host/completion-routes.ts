@@ -6,28 +6,30 @@
 // held while its raiser reconnects, and is refused once its raiser is gone; one whose raiser this process never saw goes
 // on the first open link the caller prefers, else is held for a reconnecting process, else refused.
 //
-// P5 O16 panel fix (scalpel-4#5): a process is its incarnation (`ProcessKey`: its pid and the start it declared), never
+// P5 O16 panel fix (scalpel-4#5): a process is its incarnation (`StartedAtKey`: its pid and the start it declared), never
 // its pid alone, so a later process that reuses a gone one's pid is another process and never takes its completions.
 
-// A process incarnation: its pid with the start it declared (a welcome's and a status's `startedAt`, the lock's), or for a
-// utility host, its spawn's own mark
-export type ProcessKey = string;
-export const processKey = (pid: number, startedAt: string): ProcessKey => `${pid}@${startedAt}`;
-export const pidOfProcess = (incarnation: ProcessKey): number => Number.parseInt(incarnation, 10);
+// A process incarnation as a host declares it: its pid with its lock's `startedAt` (a welcome's and a status's), or for a
+// utility host, its spawn's own mark. A string, to key the maps below. Not holder/stop-held.ts's `ProcStartKey` (a pid
+// with `ps`'s start time, read off the machine the process runs on): a welcome or a status carries no procStart, and
+// main cannot read one for a host it reaches through a relay or on another machine.
+export type StartedAtKey = string;
+export const startedAtKey = (pid: number, startedAt: string): StartedAtKey => `${pid}@${startedAt}`;
+export const pidOfStartedAtKey = (incarnation: StartedAtKey): number => Number.parseInt(incarnation, 10);
 
-export type CompletionRoute<L> = { link: L; process: ProcessKey } | { hold: ProcessKey } | null;
+export type CompletionRoute<L> = { link: L; process: StartedAtKey } | { hold: StartedAtKey } | null;
 
 export class CompletionRoutes<L extends object> {
-  private readonly issuers = new Map<string, ProcessKey>(); // requestId -> the raising incarnation, newest last
-  private readonly processes = new WeakMap<L, ProcessKey>();
-  private readonly open = new Map<ProcessKey, L>();
-  private readonly reconnecting = new Set<ProcessKey>();
+  private readonly issuers = new Map<string, StartedAtKey>(); // requestId -> the raising incarnation, newest last
+  private readonly processes = new WeakMap<L, StartedAtKey>();
+  private readonly open = new Map<StartedAtKey, L>();
+  private readonly reconnecting = new Set<StartedAtKey>();
 
   constructor(private readonly kept = 1_024) {}
 
   // A link to `incarnation` was welcomed (or, a utility host's, spawned). Any other process still reconnecting is gone:
   // one process serves the owner's lock at a time. Answers the processes that became gone.
-  opened(link: L, incarnation: ProcessKey): ProcessKey[] {
+  opened(link: L, incarnation: StartedAtKey): StartedAtKey[] {
     this.processes.set(link, incarnation);
     this.open.set(incarnation, link);
     const gone = [...this.reconnecting].filter((other) => other !== incarnation);
@@ -37,7 +39,7 @@ export class CompletionRoutes<L extends object> {
   }
 
   // A link closed: its process reconnects until it is known gone. Answers its process (null for a link never opened).
-  closed(link: L): ProcessKey | null {
+  closed(link: L): StartedAtKey | null {
     const incarnation = this.processes.get(link);
     if (incarnation === undefined) return null;
     if (this.open.get(incarnation) === link) {
@@ -47,13 +49,13 @@ export class CompletionRoutes<L extends object> {
     return incarnation;
   }
 
-  gone(incarnation: ProcessKey): void {
+  gone(incarnation: StartedAtKey): void {
     this.open.delete(incarnation);
     this.reconnecting.delete(incarnation);
   }
 
   // Every process not open is gone (the owner unreachable, crashed); answers them.
-  allReconnectingGone(): ProcessKey[] {
+  allReconnectingGone(): StartedAtKey[] {
     const gone = [...this.reconnecting];
     this.reconnecting.clear();
     return gone;

@@ -3,11 +3,11 @@
 // while the successor raises its own), each completion to its own raiser, and a gone raiser's late completion refused
 // while the other's still routes.
 import { describe, expect, it } from 'vitest';
-import { CompletionRoutes, processKey } from './completion-routes';
+import { CompletionRoutes, startedAtKey } from './completion-routes';
 
 const link = (name: string) => ({ name });
 // a process by its pid, started at `start` (a welcome's `startedAt`)
-const P = (pid: number, start = 't0') => processKey(pid, start);
+const P = (pid: number, start = 't0') => startedAtKey(pid, start);
 
 describe('completion routes', () => {
   it('a draining host and a ready successor: each completion reaches its own raiser; a gone raiser’s is refused, the other’s still routes', () => {

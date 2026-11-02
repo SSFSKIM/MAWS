@@ -53,7 +53,7 @@ import { isAlive as pidAlive, isSameProcess, procStartOf as psProcStart } from '
 import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
-import type { HeldStopOutcome, ProcessKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcessKey
+import type { HeldStopOutcome, ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart)
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -106,7 +106,7 @@ export const HANDING_OVER = 'the engine host is handing over; try again in a mom
 // time, and how to stop it (holder/stop-held.ts).
 export interface UnattachedHost {
   holderId: string;
-  host: ProcessKey;
+  host: ProcStartKey;
   stop(): Promise<HeldStopOutcome>;
 }
 

@@ -25,16 +25,18 @@ export interface HeldStopDeps {
   graceMs?: number; // HOST_EXIT_GRACE_MS + HELD_STOP_MARGIN_MS
 }
 
-// A process by pid and start time (the roster's, the orphan ledger's shape), never by pid alone.
-export type ProcessKey = { pid: number; procStart: string };
+// A process by pid and `ps`'s start time (procStart: the roster's, the orphan ledger's shape), never by pid alone. Not
+// shared/host/completion-routes.ts's `StartedAtKey` (a pid with the start its lock declares), which a client keys by
+// from a welcome or a status; this one is checked against the live process (`isSameProcess`).
+export type ProcStartKey = { pid: number; procStart: string };
 
 // `stopped` when the engine (or the spawn the host was forking) ended within the grace, `forced` when its group was
 // killed, `gone` when neither the host nor an engine was running.
 export async function stopHeldHost(entry: RosterEntry, deps: HeldStopDeps): Promise<HeldStopOutcome> {
-  const same = (p: ProcessKey | null): p is ProcessKey => p !== null && p.procStart !== '' && deps.isAlive(p.pid) && deps.procStartOf(p.pid) === p.procStart;
+  const same = (p: ProcStartKey | null): p is ProcStartKey => p !== null && p.procStart !== '' && deps.isAlive(p.pid) && deps.procStartOf(p.pid) === p.procStart;
   const current = () => readRoster(deps.hostsDir, () => {}).find((e) => e.holderId === entry.holderId) ?? null;
-  const childNow = (): ProcessKey | null => current()?.child ?? entry.child;
-  const host: ProcessKey = { pid: entry.pid, procStart: entry.procStart };
+  const childNow = (): ProcStartKey | null => current()?.child ?? entry.child;
+  const host: ProcStartKey = { pid: entry.pid, procStart: entry.procStart };
   const name = `session host ${entry.holderId} (pid ${entry.pid}) of ${entry.appSessionId ?? 'no session'}, held for adoption`;
   const hostLive = same(host);
   const child = childNow();
