@@ -10,7 +10,14 @@
 import { HOST_EXIT_GRACE_MS } from './protocol';
 import { readRoster, type RosterEntry } from './roster';
 
-export type HeldStopOutcome = 'stopped' | 'forced' | 'gone';
+// `incomplete` and `unverified`: the stop is not done (see stopHeldHost); its record and the launch guard stay
+export type HeldStopOutcome = 'stopped' | 'forced' | 'gone' | 'incomplete' | 'unverified';
+export const stopUnresolved = (outcome: HeldStopOutcome): boolean => outcome === 'incomplete' || outcome === 'unverified';
+// What a launch's or a forget's `already_live` refusal says of an unresolved stop
+export const UNRESOLVED_STOP: Record<'incomplete' | 'unverified', string> = {
+  incomplete: 'its previous session host is still starting its engine; try again in a moment',
+  unverified: 'its previous session host could not be verified (its start time is unreadable); try again in a moment',
+};
 
 export const HELD_STOP_MARGIN_MS = 1_000; // past the host's own grace, before the child's SIGKILL
 const POLL_MS = 100;
@@ -31,18 +38,32 @@ export interface HeldStopDeps {
 export type ProcStartKey = { pid: number; procStart: string };
 
 // `stopped` when the engine (or the spawn the host was forking) ended within the grace, `forced` when its group was
-// killed, `gone` when neither the host nor an engine was running.
+// killed, `gone` when neither the host nor an engine was running. Wave 1 verification: two outcomes say the stop is not
+// done, so its caller keeps the record and refuses what would start a second engine. `incomplete`: the host lives past
+// the grace with no child known, a committed spawn whose fork it still waits for (native `awaitSpawn`), so a child may
+// yet appear. `unverified`: a process alive whose start time cannot be read (a `ps` timed out, under load) is neither
+// signalled nor taken for gone. A process is gone only when verified so: `kill(pid, 0)` refused (ESRCH), or its start
+// read and another's.
 export async function stopHeldHost(entry: RosterEntry, deps: HeldStopDeps): Promise<HeldStopOutcome> {
-  const same = (p: ProcStartKey | null): p is ProcStartKey => p !== null && p.procStart !== '' && deps.isAlive(p.pid) && deps.procStartOf(p.pid) === p.procStart;
+  const check = (p: ProcStartKey | null): 'same' | 'gone' | 'unverifiable' => {
+    if (p === null || !deps.isAlive(p.pid)) return 'gone';
+    const start = deps.procStartOf(p.pid);
+    if (start === null || p.procStart === '') return 'unverifiable';
+    return start === p.procStart ? 'same' : 'gone'; // another process under the pid
+  };
   const current = () => readRoster(deps.hostsDir, () => {}).find((e) => e.holderId === entry.holderId) ?? null;
   const childNow = (): ProcStartKey | null => current()?.child ?? entry.child;
   const host: ProcStartKey = { pid: entry.pid, procStart: entry.procStart };
   const name = `session host ${entry.holderId} (pid ${entry.pid}) of ${entry.appSessionId ?? 'no session'}, held for adoption`;
-  const hostLive = same(host);
+  const hostState = check(host);
   const child = childNow();
-  const childLive = same(child);
-  const engine = childLive || (hostLive && child === null && (current()?.state ?? entry.state) === 'committed');
-  if (!hostLive && !childLive) return 'gone';
+  const childState = check(child);
+  if (hostState === 'unverifiable' || childState === 'unverifiable') {
+    deps.log(`${name}: ${hostState === 'unverifiable' ? 'the host' : `its engine pid ${child!.pid}`} lives and its start time cannot be read; not signalled`);
+    return 'unverified';
+  }
+  const engine = childState === 'same' || (hostState === 'same' && child === null && (current()?.state ?? entry.state) === 'committed');
+  if (hostState === 'gone' && childState === 'gone') return 'gone';
   const signal = (pid: number, sig: 'SIGTERM' | 'SIGKILL') => {
     try {
       deps.signal(pid, sig);
@@ -50,17 +71,26 @@ export async function stopHeldHost(entry: RosterEntry, deps: HeldStopDeps): Prom
       deps.log(`${name}: ${sig} to ${pid} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
-  deps.log(`${name}: stop all ends it, SIGTERM to ${hostLive ? 'the host' : `its engine pid ${child!.pid} (the host is gone)`}`);
-  signal(hostLive ? host.pid : child!.pid, 'SIGTERM');
+  deps.log(`${name}: stop all ends it, SIGTERM to ${hostState === 'same' ? 'the host' : `its engine pid ${child!.pid} (the host is gone)`}`);
+  signal(hostState === 'same' ? host.pid : child!.pid, 'SIGTERM');
   const graceMs = deps.graceMs ?? HOST_EXIT_GRACE_MS + HELD_STOP_MARGIN_MS;
-  // polled with isAlive alone (no `ps` per poll on the event loop); the start time is read again before the SIGKILL
+  // polled with isAlive alone (no `ps` per poll on the event loop); the start time is read again after the grace
   const running = () => deps.isAlive(host.pid) || [child, current()?.child ?? null].some((c) => c !== null && deps.isAlive(c.pid));
   for (let waited = 0; waited < graceMs && running(); waited += POLL_MS) await deps.sleep(Math.min(POLL_MS, graceMs - waited));
   const left = childNow();
-  if (same(left)) {
-    deps.log(`${name}: its engine pid ${left.pid} still running after ${graceMs} ms: SIGKILL`);
-    signal(left.pid, 'SIGKILL');
+  const leftState = check(left);
+  if (leftState === 'unverifiable') {
+    deps.log(`${name}: its engine pid ${left!.pid} lives past ${graceMs} ms and its start time cannot be read; not killed`);
+    return 'unverified';
+  }
+  if (leftState === 'same') {
+    deps.log(`${name}: its engine pid ${left!.pid} still running after ${graceMs} ms: SIGKILL`);
+    signal(left!.pid, 'SIGKILL');
     return 'forced';
+  }
+  if (left === null && hostState === 'same' && check(host) !== 'gone') {
+    deps.log(`${name}: the host still waits for its spawn after ${graceMs} ms, no child known; its stop is not done`);
+    return 'incomplete';
   }
   return engine ? 'stopped' : 'gone';
 }

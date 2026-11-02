@@ -53,7 +53,7 @@ import { isAlive as pidAlive, isSameProcess, procStartOf as psProcStart } from '
 import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
-import type { HeldStopOutcome, ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart)
+import { stopUnresolved, type HeldStopOutcome, type ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart)
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -398,7 +398,9 @@ export class ProcessTable {
   // engine runs the session), a forget (stopped, then forgotten) and a stop-all (stopped and counted). Its liveness is
   // read at each consult (its pid and start time, no watcher): one whose host is gone is dropped.
   unattach(appSessionId: AppSessionId, host: UnattachedHost): void {
-    this.unattached.set(appSessionId, [...(this.unattached.get(appSessionId) ?? []), { host, stopping: null }]);
+    const entries = this.unattached.get(appSessionId) ?? [];
+    if (entries.some((entry) => entry.host.holderId === host.holderId)) return; // recorded once (wave 1 verification)
+    this.unattached.set(appSessionId, [...entries, { host, stopping: null }]);
   }
 
   // The session's unattached hosts whose process still runs; the gone ones dropped.
@@ -413,16 +415,23 @@ export class ProcessTable {
     return entries;
   }
 
-  // Stops the session's unattached hosts, each once (a stop under way is awaited), and drops each once stopped.
+  // Stops the session's unattached hosts, each once (a stop under way is awaited), and drops each once stopped. Wave 1
+  // verification: a stop not done (`incomplete`, `unverified`) keeps its record, so the reserve guard stays and the next
+  // consult asks again.
   async stopUnattached(appSessionId: AppSessionId): Promise<{ holderId: string; outcome: HeldStopOutcome }[]> {
     return Promise.all(this.liveUnattached(appSessionId).map(async (entry) => {
       entry.stopping ??= entry.host.stop().catch((error: unknown): HeldStopOutcome => {
         this.log(`${appSessionId}: its unattached session host ${entry.host.holderId} was not stopped: ${error instanceof Error ? error.message : String(error)}`);
         return 'gone';
-      }).finally(() => {
+      }).then((outcome) => {
+        if (stopUnresolved(outcome)) {
+          entry.stopping = null; // asked again at the next consult
+          return outcome;
+        }
         const left = (this.unattached.get(appSessionId) ?? []).filter((other) => other !== entry);
         if (left.length > 0) this.unattached.set(appSessionId, left);
         else this.unattached.delete(appSessionId);
+        return outcome;
       });
       return { holderId: entry.host.holderId, outcome: await entry.stopping };
     }));
@@ -817,7 +826,8 @@ export class ProcessTable {
         });
         this.heldStops.set(id, (held = { outcome, ended: false }));
         const entry = held;
-        void outcome.then(() => void (entry.ended = true));
+        // wave 1 verification: a stop not done is asked again by the next stop-all
+        void outcome.then((answer) => (stopUnresolved(answer) ? void this.heldStops.delete(id) : void (entry.ended = true)));
       }
       return [held.outcome];
     });

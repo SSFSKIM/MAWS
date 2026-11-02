@@ -174,6 +174,25 @@ describe('session.forget', () => {
     return { table, order };
   }
 
+  // wave 1 verification: a stop not done (the old host still waits for its spawn; its process cannot be verified) keeps
+  // the record and its guard: the launch and the forget are refused `already_live`, saying why, and nothing is erased
+  for (const [outcome, why] of [['incomplete', 'still starting'], ['unverified', 'could not be verified']] as const) {
+    it(`a launch and a forget of an unattached session whose stop is ${outcome} are refused already_live, nothing launched or erased`, async () => {
+      const id = `app-unattached-${outcome}` as AppSessionId;
+      const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242, procStartOf: () => 'then' });
+      table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, stop: async () => outcome });
+      const host = engineHost({ table });
+      const launched = await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+      expect(launched).toMatchObject({ status: 'refused', reason: 'already_live', message: expect.stringContaining(why) });
+      expect(table.get(id)).toBeUndefined();
+      const journal = join(userData, 'engine-host', 'journal', id);
+      await mkdir(journal, { recursive: true });
+      await expect(host.handlers.get('session.forget')!({ appSessionId: id })).rejects.toThrow(new RegExp(`^already_live: .*${why}`));
+      expect(existsSync(journal)).toBe(true);
+      expect(host.emitted.filter((e) => e.name === 'session.forgotten')).toEqual([]);
+    });
+  }
+
   it('a launch of an unattached session stops its host first, then launches', async () => {
     const id = 'app-unattached-launch' as AppSessionId;
     const { table, order } = unattached(id);

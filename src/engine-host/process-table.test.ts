@@ -3,6 +3,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: Reques
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { HANDING_OVER, parsePsTree, ProcessTable } from './process-table';
+import type { HeldStopOutcome } from './holder/stop-held'; // P5 O16 wave 1 verification
 import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
@@ -353,6 +354,37 @@ describe('process table: change notification, shutdown and reservations', () => 
       expect(table.reserve(U, () => s.session)).toMatchObject({ status: 'launching' });
       s.transport.exit(0);
       await s.session.exited;
+    });
+
+    // wave 1 verification: a stop whose outcome is not known (a committed spawn the host still waits for, a process whose
+    // start time cannot be read) is not done: the record and the reserve guard stay, the next consult asks again, and a
+    // stop-all counts it in neither; a hold's unresolved stop is asked again the same way
+    it('an unresolved stop keeps the record and the guard, is asked again, and a stop-all counts it in neither', async () => {
+      const alive = { now: true };
+      const answers: HeldStopOutcome[] = ['incomplete', 'unverified', 'stopped'];
+      let stops = 0;
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => {
+        const answer = answers[stops++]!;
+        if (answer === 'stopped') alive.now = false;
+        return answer;
+      } });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'incomplete' }]);
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']);
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // 'unverified': in neither
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']);
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect([stops, table.unattachedHosts(U)]).toEqual([3, []]);
+
+      const held = new ProcessTable({ ps: async () => '', log: () => {} });
+      const heldAnswers: HeldStopOutcome[] = ['incomplete', 'forced'];
+      let heldStops = 0;
+      held.holdForAdoption([U], async () => heldAnswers[heldStops++]!);
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 1 }); // asked again, now done
+      expect(await held.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(heldStops).toBe(2);
     });
 
     it('a gone one is dropped on consult and never stopped', async () => {

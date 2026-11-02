@@ -26,6 +26,7 @@ import * as controls from './controls';
 import { createAdopter, createLauncher, type LauncherDeps } from './launcher';
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import type { Gate } from './holder/gate'; // O16 M5
+import { stopUnresolved, UNRESOLVED_STOP } from './holder/stop-held'; // P5 O16 wave 1 verification
 import { registerOps } from './ops'; // P5 O10 M7
 import { pendingCounts } from './pending-counts'; // P5 O10
 import { SUPERVISOR_FILES } from './supervisor-files'; // P5 O10 M7
@@ -725,7 +726,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     if (table.isAdopting(id)) throw new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' });
     // follow-up (the architect's ruling): an unattached session host of the session (no row, its engine running) is
     // stopped first, then the session forgotten, its `session.forgotten` clearing what it left
-    for (const { holderId, outcome } of await table.stopUnattached(id)) log(`${id}: its unattached session host ${holderId} stopped before the forget (${outcome})`);
+    // wave 1 verification: a stop not done keeps the record; the forget is refused, erasing nothing
+    for (const { holderId, outcome } of await table.stopUnattached(id)) {
+      log(`${id}: its unattached session host ${holderId} ${stopUnresolved(outcome) ? 'not stopped' : 'stopped'} before the forget (${outcome})`);
+      if (outcome === 'incomplete' || outcome === 'unverified') throw new HostCommandError({ code: 'internal', message: `already_live: ${UNRESOLVED_STOP[outcome]}` });
+    }
     // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
     // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
     if (session) await session.exited;

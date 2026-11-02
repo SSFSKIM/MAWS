@@ -33,6 +33,7 @@ import { readCheckpoint } from './holder/checkpoint'; // P5 O16 M3
 import { launchRows, spawnRowOf } from './holder/restore'; // P5 O16 M3
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import { holdsEngine } from './holder/adopt'; // P5 O16 panel fix wave 1
+import { stopUnresolved, UNRESOLVED_STOP } from './holder/stop-held'; // P5 O16 wave 1 verification
 import type { SessionId } from '@shared/graph/ids'; // P5 O16 M3
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
@@ -104,7 +105,11 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     // P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with this
     // session's engine and no row (its adoption failed, or a newer host of the session was adopted) is stopped first, so
     // no second engine runs the session; a resume keeps the conversation, which the engine wrote to its own transcript
-    for (const { holderId, outcome } of await deps.table.stopUnattached(spec.appSessionId)) deps.log(`${spec.appSessionId}: its unattached session host ${holderId} stopped before this launch (${outcome})`);
+    // wave 1 verification: a stop not done keeps the record; the launch is refused, saying why
+    for (const { holderId, outcome } of await deps.table.stopUnattached(spec.appSessionId)) {
+      deps.log(`${spec.appSessionId}: its unattached session host ${holderId} ${stopUnresolved(outcome) ? 'not stopped' : 'stopped'} before this launch (${outcome})`);
+      if (outcome === 'incomplete' || outcome === 'unverified') return refused('already_live', UNRESOLVED_STOP[outcome]);
+    }
 
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
