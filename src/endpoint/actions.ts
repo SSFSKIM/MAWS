@@ -58,7 +58,7 @@ import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
 import type { Granted } from './gate';
-import { LaneA } from './lane-a';
+import { DECISION_MOVED, LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
 import { dispatchAs, type EndpointServices } from './services';
@@ -214,7 +214,10 @@ export class Actions {
     if (decision.stands?.() === false) return this.#again(m, refuse);
 
     if (row.executor === 'sminos') {
-      const refusal = await this.#laneA.hand(channel, action, who, fingerprint);
+      // Its own waits (its turn, sminos's admission query) end in the step the copy goes down: a decision that moved
+      // meanwhile is taken again, as lane B's after its status read.
+      const refusal = await this.#laneA.hand(channel, action, who, fingerprint, () => decision.stands?.() !== false);
+      if (refusal === DECISION_MOVED) return this.#again(m, refuse);
       if (refusal !== null) return refuse(refusal);
       accept();
       return;
