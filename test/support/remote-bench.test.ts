@@ -5,12 +5,12 @@
 // every resource is ended on a failure mid-way; no command is a sminos call, or names SMINOS_RL10, or names
 // MAWS_USER_DATA outside the scratch daemon's own start; every path a command names is the scratch profile's but the
 // runtime's; the profile is removed only once no bench process is left; and the mini's quiet window refuses every call.
-import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, envLine, guardedLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -150,6 +150,17 @@ function benchDeps(fake: ReturnType<typeof fakeRunner>, startAt: number) {
   return { deps, said, deadlines };
 }
 
+/**
+ * What the VM's teardown sends from its daemon's stop on: the daemon stopped by its pid, the check that it no longer runs,
+ * its hosts told to exit through their own sockets (the agent's stop-hosts), the profile's processes reaped by pid and
+ * start, and the process check.
+ */
+function scratchEnd(calls: Call[], m: BenchMachine): string[] {
+  const lines = calls.map((c) => c.argv.at(-1)!);
+  return lines.slice(lines.lastIndexOf(stopLine(m))).map((line) => (line === stopLine(m) ? 'stop' : line === scratchDaemonLine(m) ? 'daemon' : /bench-agent\.cjs'? stop-hosts /.test(line) ? 'stop-hosts' : line === reapLine(m) ? 'reap' : /^pgrep -f -- /.test(line) ? 'check' : line));
+}
+const SCRATCH_END = ['stop', 'daemon', 'stop-hosts', 'reap', 'check'];
+
 async function fullRun(machine: BenchMachine, script: Script, startAt = 0, bundle: HeadBundle | null = BUNDLE, options: { endless?: boolean } = {}) {
   const fake = fakeRunner(script, options);
   const { deps, said, deadlines } = benchDeps(fake, startAt);
@@ -204,7 +215,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       'quiet window 6:45–07:00 is not two UTC times HH:MM',
     ]);
     const long = `/Users/kimmi/.local/share/maws-bench/${'p'.repeat(50)}`;
-    expect(machineProblems({ ...MINI(file), profile: long, head: `${long}/head` })).toEqual([`profile ${long} is too long for its sockets, which would fall back out of it`]);
+    expect(machineProblems({ ...MINI(file), profile: long, head: `${long}/head` })).toEqual([`profile ${long} is too long for its sockets: RL10's, bound under its temporary name first, would pass 103 bytes and fall back out of it`]);
     expect(() => new BenchRun({ ...VM(file), profile: '/home/dev/.config/MAWS', head: '/home/dev/.config/MAWS/head' }, { runner: fakeRunner(() => undefined).runner, engineVersion: ENGINE_VERSION, say: () => undefined })).toThrow(/a default profile/);
   });
 
@@ -220,7 +231,8 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       expect(enrolls[0]!.stdinFile).toBe(file);
       expect(enrolls[0]!.stdin).toBe(`${CODE}\n`); // what crossed was the file, as the child reads it
       expect(enrolls[0]!.argv.slice(0, m.transport.kind === 'ssh' ? 5 : 5)).toEqual(m.transport.kind === 'ssh' ? ['ssh', '-T', '-o', 'BatchMode=yes', 'mini'] : ['devcloud', 'vm', 'ssh', 'o7-accept', '--']);
-      expect(enrolls[0]!.argv.at(-1)).toContain(`enroll --profile ${quote(m.profile)} --label ${m.label} --name ${m.name} --wait 900 --json`);
+      expect(enrolls[0]!.argv.at(-1)).toContain(`enroll --profile ${quote(m.profile)} --label ${m.label} --name ${m.name} --json`);
+      expect(enrolls[0]!.argv.at(-1)).not.toContain('--wait'); // it returns once the machine has posted its key
       expect(calls.filter((c) => c.stdinFile === file)).toHaveLength(1);
       expect(existsSync(file)).toBe(false);
       expect(said).toContain(`[bench] ${m.name}: the machine's key id, to compare: KEYID-for-compare`);
@@ -277,7 +289,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(start).toBe(startLine(VM(file), '"$(cat /home/dev/maws-bench/vm-bench/bench/pack-path)/runtime/bin/node" "$(cat /home/dev/maws-bench/vm-bench/bench/pack-path)/out/main/mawsd.js"'));
     for (const part of ['MAWS_USER_DATA=/home/dev/maws-bench/vm-bench', 'MAWS_MAWSD_LABEL=dev.maws.bench.vm', 'CLAUDE_CONFIG_DIR=/home/dev/maws-bench/vm-bench/claude-config', 'MAWS_E2E=1', 'MAWS_E2E_ENGINE_BIN=/home/dev/maws-bench/vm-bench/bench/latency-engine', 'MAWS_ENDPOINT_DIRECT=1', 'MAWS_ENDPOINT_PORT=47902', 'run --private --dir /home/dev/maws-bench/vm-bench/mawsd']) expect(start).toContain(part);
     expect(at(/^ps -o args= -p /)).toBeGreaterThan(at(/mawsd\.js"? status/));
-    expect(lines.at(-1)).toBe(stopLine(VM(file)));
+    expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(lines.some((line) => line.includes('rm -rf /home/dev/maws-bench/vm-bench') && !line.includes('rm -rf /home/dev/maws-bench/vm-bench/head'))).toBe(false); // the profile is kept until the bench is done
     const unprepared = await fullRun(VM(codeFile()), (command, call) => (/prepared-commit 2>\/dev\/null\)" = /.test(command) ? { code: 1, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
     expect(String(unprepared.failure)).toMatch(/not prepared at aaaaaaaaa: run prepare-vm before the sitting/);
@@ -303,9 +315,9 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
   it('waits out exit 4 to the code’s TTL and fails, the file removed and every resource ended', async () => {
     const file = codeFile();
     const { failure, calls, said } = await fullRun(VM(file), machineScript({}));
-    expect(String(failure)).toMatch(/not listed in the org within the code's 900 s/);
+    expect(String(failure)).toMatch(/not listed in the org within the code's 900 s of its key shown/);
     expect(existsSync(file)).toBe(false);
-    expect(calls.at(-1)!.argv.at(-1)).toBe(stopLine(VM(file)));
+    expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(said.at(-1)).toMatch(/torn down/);
   });
 
@@ -316,7 +328,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(String(failure)).not.toContain('SECRET');
     expect(leaks(calls, started, said)).toEqual([]);
     expect(existsSync(file)).toBe(false);
-    expect(calls.at(-1)!.argv.at(-1)).toBe(stopLine(VM(file)));
+    expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(started).toHaveLength(0); // the agent's serve never started, so nothing of it to end
   });
 
@@ -331,8 +343,9 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(started[0]!.ended).toBe(true);
   });
 
-  // Every absolute path a command names: after a start, a space, a quote, `=` or `(` (a pgrep pattern's `[/]…` is not one).
-  const pathsOf = (command: string) => [...command.matchAll(/(?<=^|[\s'"=(])\/[^\s'"`;&|)]*/g)].map((match) => match[0].replace(/\/+$/, ''));
+  // Every absolute path a command names: after a start, a space, a quote, `=` or `(` (a pgrep pattern's `[/]…` is not one,
+  // nor the reap's `"/$rel"`, the profile it builds at run time, which its own test reads).
+  const pathsOf = (command: string) => [...command.matchAll(/(?<=^|[\s'"=(])\/[^\s'"`;&|)]*/g)].map((match) => match[0].replace(/\/+$/, '')).filter((path) => path !== '/$rel');
   for (const [label, machine, allowed] of [['the mini', MINI, []], ['the VM', VM, ['/dev/null']]] as const) {
     it(`${label}: every path a command names is under the scratch profile, but the runtime it runs, which nothing writes`, async () => {
       const file = codeFile();
@@ -351,7 +364,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
   it('removes the profile, its head and any tarball with it, only once no bench process is left on the machine: refused, said and kept while one lives', async () => {
     for (const machine of [VM, MINI]) {
       let pids = '4242\n4243\n';
-      const fake = fakeRunner((command) => (/pgrep -f -- /.test(command) ? { code: pids === '' ? 1 : 0, stdout: pids, stderr: '' } : undefined));
+      const fake = fakeRunner((command) => (/^pgrep -f -- /.test(command) ? { code: pids === '' ? 1 : 0, stdout: pids, stderr: '' } : undefined));
       const said: string[] = [];
       const run = new BenchRun(machine(codeFile()), { runner: fake.runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line), sleep: async () => undefined, now: () => 0 });
       expect(await run.removeProfile()).toBe(false);
@@ -600,6 +613,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     try {
       const started = spawnSync('sh', ['-c', startLine(m, `${quote(process.execPath)} ${quote(script)}`)], { encoding: 'utf8', timeout: 10_000 });
       expect(started.status).toBe(0);
+      expect(statSync(`${m.profile}/mawsd`).mode & 0o777).toBe(0o700); // the daemon's makePrivateDirectory refuses anything more open
       pid = Number(readFileSync(`${m.profile}/bench/mawsd.pid`, 'utf8').trim());
       // the recorded pid is the daemon itself, not a shell waiting on it
       const args = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' }).stdout;
@@ -612,10 +626,10 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       writeFileSync(`${m.profile}/bench/mawsd.pid`, `${pid}\n`);
       expect(spawnSync('sh', ['-c', stopLine(m)], { encoding: 'utf8', timeout: 20_000 }).status).toBe(0);
       await expect.poll(() => alive(pid), { timeout: 5_000 }).toBe(false);
-      // stopped, or never started: nothing to do
+      // stopped: nothing to do; no pid recorded: exit 3, which the runner reads as unverified
       expect(spawnSync('sh', ['-c', stopLine(m)], { encoding: 'utf8', timeout: 20_000 }).status).toBe(0);
       rmSync(`${m.profile}/bench/mawsd.pid`);
-      expect(spawnSync('sh', ['-c', stopLine(m)], { encoding: 'utf8', timeout: 20_000 }).status).toBe(0);
+      expect(spawnSync('sh', ['-c', stopLine(m)], { encoding: 'utf8', timeout: 20_000 }).status).toBe(3);
     } finally {
       if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL');
     }
@@ -652,7 +666,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     await run.stage();
     run.serve(() => undefined);
     await expect(run.teardown()).rejects.toThrow(/the bench agent's transport did not exit 10 s after it was killed/);
-    expect(fake.calls.at(-1)!.argv.at(-1)).toBe(stopLine(VM('/tmp/code')));
+    expect(scratchEnd(fake.calls, VM('/tmp/code'))).toEqual(SCRATCH_END);
     expect(said.at(-1)).toMatch(/not torn down/);
   });
 
@@ -801,7 +815,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     await run.stage();
     run.serve(() => undefined);
     await expect(run.teardown()).rejects.toThrow(/the bench agent exited 1: its cleanup on the machine is unverified/);
-    expect(fake.calls.at(-1)!.argv.at(-1)).toBe(stopLine(VM('/tmp/code'))); // the daemon's stop still attempted
+    expect(scratchEnd(fake.calls, VM('/tmp/code'))).toEqual(SCRATCH_END); // the daemon's stop and the hosts' end still attempted
     expect(said.some((line) => /torn down;/.test(line))).toBe(false);
     // killed after outliving its stdin's end: unverified too
     const late = await fullRun(VM(codeFile()), machineScript({ listedAfter: 0 }), 0, BUNDLE, { endless: true });
@@ -818,4 +832,173 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     new BenchRun(VM(codeFile()), benchDeps(vm, 0).deps).serve(() => undefined);
     expect(JSON.parse(/serve '(\{.*\})'$/.exec(vm.started[0]!.argv.at(-1)!)![1]!).deadline).toBe(SERVE_MAX_MS);
   });
+
+  // ---- the milestone review's fixes ---------------------------------------------------------------------------------
+
+  it('makes the profile’s directories 0700, the daemon’s included, a rerun’s more open one closed: the daemon refuses anything else', () => {
+    const { m } = realTree();
+    mkdirSync(`${m.profile}/mawsd`, { mode: 0o755 });
+    chmodSync(`${m.profile}/mawsd`, 0o755); // a profile an earlier run made
+    const dirs = SCRATCH_DIRS.map((d) => `${m.profile}/${d}`);
+    expect(sh(guardedLine(m, dirs, makeScratchDirs(m))).status).toBe(0);
+    for (const dir of [...dirs, `${m.profile}/bench/pack`]) expect((statSync(dir).mode & 0o777).toString(8), dir).toBe('700');
+  });
+
+  it('refuses a profile whose longest socket, RL10’s under its temporary name, would pass 103 bytes: the reviewer’s 70-byte profile', () => {
+    const root = '/Users/kimmi/.local/share/maws-bench'; // 36 bytes
+    const at = (bytes: number) => `${root}/${'p'.repeat(bytes - root.length - 1)}`;
+    expect(at(70)).toHaveLength(70);
+    expect(machineProblems({ ...MINI('/tmp/code'), profile: at(70), head: `${at(70)}/head` })).toEqual([`profile ${at(70)} is too long for its sockets: RL10's, bound under its temporary name first, would pass 103 bytes and fall back out of it`]);
+    expect(machineProblems({ ...MINI('/tmp/code'), profile: at(69), head: `${at(69)}/head` })).toEqual([]); // <profile>/mawsd/endpoint/rl10.sock.XXXXXXXX is 103
+  });
+
+  it('the VM: the daemon’s stop is registered before its launch, so a launch whose transport is lost is still stopped, and teardown fails when the machine cannot say', async () => {
+    const isStart = (command: string) => /nohup/.test(command);
+    // the start's transport lost (exit 255) after the daemon may have started: the stop still runs, and it stops it
+    const lost = await fullRun(VM(codeFile()), (command, call) => (isStart(command) ? { code: 255, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(lost.failure)).toMatch(/starting the scratch mawsd failed \(exit 255\)/);
+    expect(scratchEnd(lost.calls, VM('/tmp/code'))).toEqual(SCRATCH_END);
+    expect(lost.teardownFailure).toBeNull();
+    // and the machine unreachable after it: the stop cannot say, so teardown fails, never torn down
+    let down = false;
+    const unreachable = await fullRun(VM(codeFile()), (command, call) => {
+      if (isStart(command)) down = true;
+      return down ? { code: 255, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call);
+    });
+    expect(String(unreachable.teardownFailure)).toMatch(/ending the scratch mawsd failed: vm-bench: stopping the scratch mawsd failed \(exit 255\)/);
+    expect(unreachable.said.some((line) => /torn down;/.test(line))).toBe(false);
+    // no pid recorded: unverified, so teardown fails too
+    const unrecorded = await fullRun(VM(codeFile()), (command, call) => (/^pid=\$\(cat /.test(command) ? { code: 3, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(unrecorded.teardownFailure)).toMatch(/no pid of the scratch mawsd is recorded: whether it runs is unverified/);
+  });
+
+  it('shows the machine’s key as soon as the machine posts it, before it waits for the listing, the wait counted from then within the code’s TTL', async () => {
+    let clock = 0;
+    let keyReads = 0;
+    let keyShownAt: number | null = null;
+    const order: string[] = [];
+    const fake = fakeRunner((command) => {
+      if (/ enroll /.test(command)) {
+        order.push('enroll');
+        clock += 100_000; // the enroll's own round trip, which the listing's wait no longer spends
+        return { code: 4, stdout: JSON.stringify({ enrollment: 'hub-confirmed', name: 'vm-bench', org: 'org-1' }), stderr: '' };
+      }
+      if (/ keys /.test(command)) {
+        order.push('keys');
+        keyReads += 1;
+        if (keyReads < 3) return ok(JSON.stringify({ key: null })); // not posted yet
+        keyShownAt ??= clock;
+        return ok(JSON.stringify({ key: { keyId: 'KEYID-for-compare' } }));
+      }
+      if (/ endpoint status /.test(command)) {
+        order.push('status');
+        const listed = keyShownAt !== null && clock >= keyShownAt + (ENROLL_WAIT_S - 10) * 1000; // the owner types y late
+        return ok(JSON.stringify({ enrollment: listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', name: 'vm-bench', org: 'org-1' }));
+      }
+      return undefined;
+    });
+    const said: string[] = [];
+    const run = new BenchRun(VM(codeFile()), { runner: fake.runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line), sleep: async (ms) => void (clock += ms), now: () => clock });
+    await run.enroll();
+    const afterEnroll = order.slice(order.indexOf('enroll') + 1);
+    expect(afterEnroll.slice(0, 3)).toEqual(['keys', 'keys', 'keys']); // the key read until posted, before any listing read
+    expect(afterEnroll.slice(3).every((step) => step === 'status')).toBe(true);
+    const shown = said.indexOf('[bench] vm-bench: the machine\'s key id, to compare: KEYID-for-compare');
+    expect(shown).toBeGreaterThan(said.findIndex((line) => /enroll exited 4/.test(line)));
+    expect(said.at(-1)).toBe('[bench] vm-bench: listed in org-1');
+    // a key never posted: the owner has nothing to compare, so nothing waits for their y
+    const silent = fakeRunner((command) => (/ keys /.test(command) ? ok(JSON.stringify({ key: null })) : machineScript({})(command, { argv: [] })));
+    await expect(new BenchRun(VM(codeFile()), benchDeps(silent, 0).deps).enroll()).rejects.toThrow(/posted no key to compare within 60 s/);
+    expect(silent.calls.some((c) => / endpoint status /.test(c.argv.at(-1)!) && c !== silent.calls[0])).toBe(false);
+  });
+
+  it('removes the profile only once its hosts are ended: told through their own sockets, then by pid and start time where they name the profile, then checked', async () => {
+    for (const machine of [VM, MINI]) {
+      const fake = fakeRunner(() => undefined);
+      const run = new BenchRun(machine(codeFile()), benchDeps(fake, 0).deps);
+      expect(await run.removeProfile()).toBe(true);
+      const lines = fake.calls.map((c) => c.argv.at(-1)!);
+      const steps = lines.map((line) => (line === scratchDaemonLine(machine('/tmp/code')) ? 'daemon' : /bench-agent\.cjs'? stop-hosts /.test(line) ? 'stop-hosts' : line === reapLine(machine('/tmp/code')) ? 'reap' : /^pgrep -f -- /.test(line) ? 'check' : /rm -rf/.test(line) ? 'remove' : line === stopLine(machine('/tmp/code')) ? 'stop' : line));
+      expect(steps).toEqual([...(machine === VM ? ['stop'] : []), 'daemon', 'stop-hosts', 'reap', 'check', 'remove']);
+    }
+    // the mini's scratch mawsd still runs (mini-ops stops it): refused, nothing signalled, nothing removed
+    const live = fakeRunner((command) => (command === scratchDaemonLine(MINI('/tmp/code')) ? { code: 6, stdout: '', stderr: '' } : undefined));
+    const { deps, said } = benchDeps(live, 0);
+    expect(await new BenchRun(MINI(codeFile()), deps).removeProfile()).toBe(false);
+    expect(said.at(-1)).toMatch(/refused to remove the scratch profile: its scratch mawsd still runs; mini-ops stops it \(pid=/);
+    expect(live.calls.some((c) => /rm -rf|stop-hosts/.test(c.argv.at(-1)!) || c.argv.at(-1) === reapLine(MINI('/tmp/code')))).toBe(false); // its hosts not even told
+    // a VM's teardown whose reap leaves a process: teardown fails, the profile kept
+    const stuck = await fullRun(VM(codeFile()), (command, call) => (/^pgrep -f -- /.test(command) ? ok('4242\n') : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(stuck.teardownFailure)).toMatch(/1 process naming the scratch profile still runs \(pid 4242\)/);
+    expect(stuck.calls.some((c) => /rm -rf \/home\/dev\/maws-bench\/vm-bench$/.test(c.argv.at(-1)!))).toBe(false);
+  });
+
+  // Real processes on this Mac: fake hosts with a production host's binary and argv shape.
+  const HOST = `const ignore = process.argv[2] === 'ignore-term'; process.on('SIGTERM', () => { if (!ignore) process.exit(0); }); setInterval(() => {}, 1000); process.stdout.write('up\\n');`;
+  function startHost(script: string, args: string[], children: ChildProcess[]): Promise<ChildProcess> {
+    const child = spawn(process.execPath, [script, ...args], { stdio: ['ignore', 'pipe', 'ignore'] });
+    children.push(child);
+    return new Promise((resolve) => child.stdout!.once('data', () => resolve(child)));
+  }
+  const alive = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
+  /** A short real profile (its sockets' bound holds) under /tmp's real path, and a mini-shaped machine on this Mac. */
+  function shortTree() {
+    const base = realpathSync(mkdtempSync('/tmp/brp-'));
+    scratch.push(base);
+    mkdirSync(`${base}/r/p/bench`, { recursive: true });
+    const m: BenchMachine = { ...MINI('/tmp/code'), scratchRoot: `${base}/r`, profile: `${base}/r/p`, head: `${base}/r/p/head`, node: process.execPath, runtime: 'node', stageHead: 'present' };
+    writeFileSync(`${base}/host.mjs`, HOST);
+    return { base, m, script: `${base}/host.mjs` };
+  }
+
+  it('reaps only processes that name the profile, each by its pid and start time, never a production host of the same binary and argv shape, nor the scratch mawsd', async () => {
+    const { base, m, script } = shortTree();
+    const children: ChildProcess[] = [];
+    try {
+      const scratchHost = await startHost(script, ['--detached', `${m.profile}/supervisor`], children);
+      const stubborn = await startHost(script, ['ignore-term', '--hosts', `${m.profile}/supervisor/hosts`], children);
+      const production = await startHost(script, ['--detached', `${base}/Library/Application Support/MAWS/supervisor`], children);
+      const sibling = await startHost(script, ['--detached', `${m.profile}2/supervisor`], children); // a profile this one's path prefixes
+      // the scratch mawsd runs: refused before any signal
+      const daemon = await startHost(script, ['run', '--private', '--dir', `${m.profile}/mawsd`], children);
+      expect(sh(scratchDaemonLine(m)).status).toBe(6);
+      expect(sh(reapLine(m)).status).toBe(6);
+      expect([scratchHost, stubborn, production, sibling, daemon].every(alive)).toBe(true);
+      daemon.kill('SIGKILL');
+      await expect.poll(() => alive(daemon)).toBe(false);
+      expect(sh(scratchDaemonLine(m)).status).toBe(0);
+      // the reaper's own command line never names the profile, so it is never one of its targets
+      expect(reapLine(m)).not.toContain(m.profile);
+      expect(sh(reapLine(m)).status).toBe(0);
+      await expect.poll(() => alive(scratchHost)).toBe(false);
+      await expect.poll(() => alive(stubborn), { timeout: 15_000 }).toBe(false); // SIGKILL after SIGTERM was ignored
+      expect(stubborn.signalCode).toBe('SIGKILL');
+      expect(alive(production)).toBe(true);
+      expect(alive(sibling)).toBe(true);
+    } finally {
+      for (const child of children) if (alive(child)) child.kill('SIGKILL');
+    }
+  }, 30_000);
+
+  it('the mini’s removal on this Mac: a scratch host is ended and the profile removed; the production host beside it is untouched', async () => {
+    const { base, m, script } = shortTree();
+    const children: ChildProcess[] = [];
+    // the mini's transport is this Mac's sh: every command runs as the machine would run it, its perl deadline included
+    const local = processRunner();
+    const runner: CommandRunner = { run: (argv, options) => local.run(['sh', '-c', argv.at(-1)!], options), start: () => { throw new Error('no agent is served'); } };
+    const said: string[] = [];
+    try {
+      const scratchHost = await startHost(script, ['--detached', `${m.profile}/supervisor`], children);
+      const production = await startHost(script, ['--detached', `${base}/Library/Application Support/MAWS/supervisor`], children);
+      const run = new BenchRun(m, { runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line) });
+      expect(await run.removeProfile()).toBe(true);
+      expect(alive(scratchHost) && scratchHost.exitCode === null).toBe(false);
+      expect(alive(production)).toBe(true);
+      expect(existsSync(m.profile)).toBe(false);
+      // no agent was ever copied there: its hosts' own stop could not run, which is said, and the reap ended the host
+      expect(said.some((line) => /the hosts’ own stop exited 1/.test(line))).toBe(true);
+    } finally {
+      for (const child of children) if (alive(child)) child.kill('SIGKILL');
+    }
+  }, 60_000);
 });

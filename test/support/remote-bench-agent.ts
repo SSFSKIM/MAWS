@@ -1,7 +1,7 @@
 // The live bench's agent on a bench machine (P5 O7 M7, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M7's
 // "The live bench" and its Decision Log entries of 2026-11-02): bundled to CommonJS on the MacBook by the live mode
 // (e2e/remote-latency-live.spec.ts), copied under the scratch profile by the runner (test/support/remote-bench.ts) and
-// run there under the production mawsd's node runtime, which it only reads. Two commands, each given one JSON word of
+// run there under the production mawsd's node runtime, which it only reads. Three commands, each given one JSON word of
 // `AgentArgs`:
 //
 //   prepare  the latency stub's wrapper (`<bench>/latency-engine`, the stub from M7's head checkout and its samples file
@@ -16,7 +16,11 @@
 //            ends when its transport does: stdin's end or its parent's loss cancels a start still running, waits for it
 //            and for any input in hand, stops the session (recorded once it is created, so a start cut short at any step
 //            still stops it), closes the fake sminos and ends any stub of this bench still running (killed when it
-//            outlives that, then checked), then exits.
+//            outlives that, then checked), then exits;
+//   stop-hosts  the scratch daemon's engine host and pty host, as their own locks name them, told to exit now through
+//            their own sockets under the profile (the hello with the host's token, its answer, `{t: 'exit', when: 'now'}`),
+//            each waited for; `{hostsLeft}` printed, exit 1 when one is left (the runner then ends it by its pid and start
+//            time, and checks).
 //
 // Every path it writes or opens is under the scratch profile (`agentPaths`), except the head checkout's stub, which it
 // names for the wrapper and never opens, and the node runtime it runs on. It starts no `claude` (the daemon runs under
@@ -27,6 +31,9 @@ import { isAbsolute } from 'node:path';
 import { daemonPaths } from '@shared/daemon/files';
 import { connect } from 'node:net';
 import { reachMachine } from '../../src/mawsd/machine-client';
+import { isAlive, isSameProcess, procStartOf, readLock } from '../../src/engine-host/supervisor-files';
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { goneFrame, helloFrame, memberFrame, projectFrames, restatedFrame } from './sminos-frames';
 
 export interface AgentArgs {
@@ -339,6 +346,106 @@ export function bindLifetime(agent: { end(): Promise<void>; input(line: string):
   };
 }
 
+// --- stop-hosts ----------------------------------------------------------------------------------------------------------
+
+/** A detached host of the scratch daemon's as its lock names it (src/engine-host/supervisor-files.ts's LockFile). */
+export interface HostLock {
+  pid: number;
+  procStart: string;
+  socketPath: string;
+}
+export interface StopHostsDeps {
+  lock(dir: string): HostLock | null;
+  token(dir: string): string;
+  /** whether the lock's process is still that process: its pid alive with the start it recorded */
+  alive(lock: HostLock): boolean;
+  askExit(socket: string, token: string): Promise<void>;
+  sleep(ms: number): Promise<void>;
+}
+
+/** The scratch daemon's detached hosts, each in its own directory under the profile (its lock, token and socket there). */
+export const scratchHosts = (a: AgentArgs) => [
+  { name: 'the engine host', dir: `${a.profile}/supervisor` },
+  { name: 'the pty host', dir: `${a.profile}/mawsd/pty-host` },
+];
+const HOST_EXIT_MS = 20_000;
+
+/**
+ * Each host its lock names still running told to exit now through its own socket, and waited for up to `waitMs`; a lock
+ * whose socket is not under the profile is never connected to. The names of those still running.
+ */
+export async function stopHosts(a: AgentArgs, deps: StopHostsDeps, waitMs = HOST_EXIT_MS): Promise<string[]> {
+  const asked: { name: string; lock: HostLock }[] = [];
+  const left: string[] = [];
+  for (const { name, dir } of scratchHosts(a)) {
+    const lock = deps.lock(dir);
+    if (lock === null || !deps.alive(lock)) continue;
+    if (!lock.socketPath.startsWith(`${a.profile}/`)) {
+      left.push(name);
+      continue;
+    }
+    try {
+      await deps.askExit(lock.socketPath, deps.token(dir));
+      asked.push({ name, lock });
+    } catch {
+      left.push(name); // unreachable, or its token refused: the runner's reap decides
+    }
+  }
+  for (const until = Date.now() + waitMs; asked.some(({ lock }) => deps.alive(lock)) && Date.now() < until; ) await deps.sleep(100);
+  for (const { name, lock } of asked) if (deps.alive(lock)) left.push(name);
+  return scratchHosts(a).map((host) => host.name).filter((name) => left.includes(name));
+}
+
+/**
+ * A host told to exit now through its socket: the hello with its token, its answer waited for (a welcome, or a refusal
+ * of the wire, after which the host still honours one exit), then `{t: 'exit', when: 'now'}`. A refused token rejects.
+ */
+export function askExit(socket: string, token: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const connection = connect(socket);
+    let buffer = '';
+    let answered = false;
+    const deadline = setTimeout(() => {
+      connection.destroy();
+      reject(new Error(`no answer on ${socket} within 10 s`));
+    }, 10_000);
+    connection.on('error', (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    connection.on('close', () => {
+      clearTimeout(deadline);
+      if (answered) resolve();
+      else reject(new Error(`${socket} closed before its answer`));
+    });
+    connection.once('connect', () => void connection.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'remote-bench-agent', capabilities: [], appPid: process.pid })}\n`));
+    connection.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const at = buffer.indexOf('\n');
+      if (answered || at < 0) return;
+      const answer = JSON.parse(buffer.slice(0, at)) as { t?: string; reason?: string };
+      if (answer.t === 'refuse' && answer.reason === 'token') {
+        clearTimeout(deadline);
+        connection.destroy();
+        return reject(new Error(`${socket} refused its token`));
+      }
+      answered = true;
+      connection.end(`${JSON.stringify({ t: 'exit', when: 'now' })}\n`);
+    });
+  });
+}
+
+/** stop-hosts' deps over the hosts' own files and this machine's processes. */
+export function hostDeps(): StopHostsDeps {
+  return {
+    lock: (dir) => readLock(dir),
+    token: (dir) => readFileSync(`${dir}/host.token`, 'utf8').trim(),
+    alive: (lock) => isSameProcess(lock, { isAlive, procStartOf }),
+    askExit,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
+}
+
 // --- the process ---------------------------------------------------------------------------------------------------------
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -401,12 +508,18 @@ export function openSminos(info: { socket: string; token: string }): Promise<Smi
   });
 }
 
-/** The bundle's entry: `prepare <args>` or `serve <args>`. */
+/** The bundle's entry: `prepare <args>`, `serve <args>` or `stop-hosts <args>`. */
 export async function main(argv: readonly string[]): Promise<void> {
   const [command, word] = argv;
   const a = parseAgentArgs(word);
   const out = (message: object) => void process.stdout.write(`${JSON.stringify(message)}\n`);
   if (command === 'prepare') return prepare(a, process.execPath, process.versions.electron !== undefined);
+  if (command === 'stop-hosts') {
+    const left = await stopHosts(a, hostDeps());
+    out({ hostsLeft: left });
+    process.exitCode = left.length === 0 ? 0 : 1;
+    return;
+  }
   if (command !== 'serve') throw new Error(`the agent has no command ${command}`);
   const agent = new BenchAgent(a, {
     async machine() {

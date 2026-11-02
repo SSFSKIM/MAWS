@@ -16,19 +16,22 @@
 //      volume has room (`stageHead: 'present'`: mini-ops put it there); then mini-ops starts the daemon under the
 //      production mawsd's runtime, the MAWS binary run as Node as production runs it (no firewall dialog for a new
 //      binary), and the runner prints that command and waits until it answers;
-//   2. the bench agent (e2e/support/remote-bench-agent.ts, bundled here and copied over): it writes the latency stub's
+//   2. the bench agent (test/support/remote-bench-agent.ts, bundled here and copied over): it writes the latency stub's
 //      wrapper and the scratch engine store's trust first (`prepare`, before the daemon starts), then (`serve`) starts
 //      the stub's session over the scratch machine.sock and, once told the owner's member, lists it through the
 //      harness's fake sminos on the scratch RL10 socket (e2e:remote's pattern), streaming the stub's samples back;
 //   3. enroll: the code file streamed by its descriptor into `<transport> '<mawsd> enroll --profile … --label … --name
-//      <name> --wait 900 --json'` (mawsd reads stdin without a TTY), exit 4 waited out by polling `endpoint status` until
-//      org-listed or the code's TTL; the machine's key id shown for the owner to compare; the code file removed
-//      whatever the outcome;
+//      <name> --json'` (mawsd reads stdin without a TTY; no `--wait`, so it returns once the machine has posted its key),
+//      the code file removed whatever the outcome; the machine's key id shown as soon as `mawsd keys` reads it, for the
+//      owner to compare with their terminal's before they type y; exit 4 then waited out by polling `endpoint status`
+//      until org-listed, within the code's TTL of the key shown;
 //   4. teardown, on every path: the agent ended (its stdin's end stops its session and ends its stubs; killed when it
-//      outlives that, its exit waited for), the VM's daemon stopped by its pid once that pid is shown to be the daemon's;
-//      every step attempted, the first failure thrown; the profile kept until the bench is done (`removeProfile`), so a
-//      rerun reuses the enrollment, and then removed only once no process on the machine names it (pgrep, failing
-//      closed), else refused and kept.
+//      outlives that, its exit waited for); on the VM the daemon stopped by its pid once that pid is shown to be the
+//      daemon's (registered before its launch: no pid recorded is unverified), then its hosts told to exit through their
+//      own sockets, any process still naming the profile ended by its pid and start time, and the process check; every
+//      step attempted, the first failure thrown; the profile kept until the bench is done (`removeProfile`), so a rerun
+//      reuses the enrollment, and then removed only once the same end leaves no process on the machine naming it (pgrep,
+//      failing closed; on the mini, once mini-ops has stopped its daemon), else refused and kept.
 //
 // The machine's bounds (the desk track's conditions of 2026-11-02): every command writes and opens only under the
 // scratch profile (normalized and strictly under the machine's scratch root, its path checked for symlinks before any
@@ -128,8 +131,17 @@ export const productionProblem = (command: string): string | null => {
   return hit === undefined ? null : `it names the production mawsd's ${hit === PRODUCTION[0] ? 'profile (Library/Application Support/MAWS)' : hit === PRODUCTION[1] ? 'app.asar entry' : 'unit mode (--unit)'}`;
 };
 const SOCKET_PATH_MAX_BYTES = 103; // src/engine-host/supervisor-files.ts's, so a socket never falls back out of the profile
-const LONGEST_SOCKET = 'mawsd/engine-host.sock';
+/**
+ * The longest path the scratch daemon binds a socket at: RL10's, bound first as `<path>.<8 characters>` and renamed into
+ * place (src/endpoint/rl10/server.ts's TEMPORARY_EXTRA), 34 bytes past the profile; every other socket it, its hosts and
+ * their session hosts bind is shorter (the pty host's +24, a session host's +31). cua's per-session sockets are longer and
+ * fall back past the limit, but the bench opens no browser session.
+ */
+const LONGEST_SOCKET = 'mawsd/endpoint/rl10.sock';
+const TEMPORARY_SUFFIX_BYTES = 9;
 export const ENROLL_WAIT_S = 900; // the code's TTL
+/** How long the enroll's return may come before the machine's key reads back. */
+const KEY_WITHIN_MS = 60_000;
 const STATUS_EVERY_MS = 5_000;
 const START_WITHIN_MS = 10 * 60_000; // mini-ops' start, or the VM's pack's mawsd, answering
 /** Variables the runner never passes on: sminos picks its endpoint from them, so they belong to the fake and the scratch daemon. */
@@ -174,7 +186,7 @@ export function machineProblems(m: BenchMachine): string[] {
   if (!Number.isSafeInteger(m.port) || m.port < 1024 || m.port > 65535) problems.push(`port ${m.port} is not a free-range port`);
   if (!/^[0-9a-f]{40}$/.test(m.commit)) problems.push(`commit ${m.commit} is not a full sha`);
   if (m.stage === 'runner' && m.transport.kind !== 'devcloud') problems.push('the runner stages only a devcloud VM; the mini is mini-ops’');
-  if (Buffer.byteLength(`${m.profile}/${LONGEST_SOCKET}`) > SOCKET_PATH_MAX_BYTES) problems.push(`profile ${m.profile} is too long for its sockets, which would fall back out of it`);
+  if (Buffer.byteLength(`${m.profile}/${LONGEST_SOCKET}`) + TEMPORARY_SUFFIX_BYTES > SOCKET_PATH_MAX_BYTES) problems.push(`profile ${m.profile} is too long for its sockets: RL10's, bound under its temporary name first, would pass ${SOCKET_PATH_MAX_BYTES} bytes and fall back out of it`);
   for (const [what, path] of [['scratch root', m.scratchRoot], ['profile', m.profile], ['head', m.head]] as const) if (SHELL_CHARACTERS.test(path)) problems.push(`${what} ${path} holds a quote, a space or a shell character`);
   for (const window of quietWindows(m)) if (!window.every((hm) => /^([01]\d|2[0-3]):[0-5]\d$/.test(hm))) problems.push(`quiet window ${window.join('–')} is not two UTC times HH:MM`);
   return problems;
@@ -248,12 +260,20 @@ const pidPath = (m: BenchMachine) => `${benchDir(m)}/mawsd.pid`;
 /** The profile's own directories, made before anything runs and checked for symlinks before anything is written. */
 export const SCRATCH_DIRS = ['bench', 'home', 'tmp', 'cache', 'config', 'data', 'state', 'pnpm-store', 'npm-cache', 'mawsd', 'sminos', 'shell-home', 'claude-usage', 'claude-config'] as const;
 const scratchDirs = (m: BenchMachine) => [...SCRATCH_DIRS.map((d) => `${m.profile}/${d}`), packDir(m)];
+/**
+ * The line that makes the profile's directories 0700, an existing more open one (an earlier run's) closed: the daemon's
+ * makePrivateDirectory refuses `<profile>/mawsd` otherwise, and nothing else needs them open.
+ */
+export function makeScratchDirs(m: BenchMachine): string {
+  const dirs = scratchDirs(m).map(quote).join(' ');
+  return `mkdir -p -m 700 ${dirs} && chmod 700 ${dirs}`;
+}
 /** The scratch daemon's program, on the VM its pack's runtime and entry (read from where the pack was recorded). */
 const mawsdEntry = (m: BenchMachine) => (m.stage === 'runner' ? `"$(cat ${quote(packPath(m))})/runtime/bin/node" "$(cat ${quote(packPath(m))})/out/main/mawsd.js"` : `${runtimeWords(m)} ${quote(`${m.head}/out/main/mawsd.js`)}`);
 /** A command of the scratch daemon's (status, keys, enroll), in the profile's scratch environment. */
 const mawsd = (m: BenchMachine) => `${scratchEnv(m)} ${mawsdEntry(m)}`;
 /** The bench agent's command, on the machine's runtime. */
-const agent = (m: BenchMachine, command: 'prepare' | 'serve', engineVersion: string, deadline?: number) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion, deadline))}`;
+const agent = (m: BenchMachine, command: 'prepare' | 'serve' | 'stop-hosts', engineVersion: string, deadline?: number) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion, deadline))}`;
 const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quote(m.label)}`;
 
 /**
@@ -321,17 +341,46 @@ const scratchEnv = (m: BenchMachine) => envLine(profileEnv(m));
 export function startLine(m: BenchMachine, entry: string): string {
   const out = `${benchDir(m)}/mawsd.out`;
   const daemon = `${envLine(daemonEnv(m))} nohup ${entry} run --private --dir ${quote(`${m.profile}/mawsd`)} < /dev/null > ${quote(out)} 2>&1`;
-  return `${guardedLine(m, [...scratchDirs(m), out, pidPath(m)], '')}mkdir -p ${scratchDirs(m).map(quote).join(' ')} || exit 1; cd ${quote(benchDir(m))} || exit 1; ( if command -v setsid > /dev/null 2>&1; then exec setsid ${daemon}; else exec ${daemon}; fi ) & echo $! > ${quote(pidPath(m))}`;
+  return `${guardedLine(m, [...scratchDirs(m), out, pidPath(m)], '')}${makeScratchDirs(m)} || exit 1; cd ${quote(benchDir(m))} || exit 1; ( if command -v setsid > /dev/null 2>&1; then exec setsid ${daemon}; else exec ${daemon}; fi ) & echo $! > ${quote(pidPath(m))}`;
 }
 
 /**
  * The line that stops the scratch daemon by its recorded pid, signalling it only when that pid's command line names the
- * profile's daemon directory (a pid reused by another process is never signalled): exit 0 when it has stopped or never ran,
- * 4 when the pid is another process's, 5 when it outlived SIGKILL.
+ * profile's daemon directory (a pid reused by another process is never signalled): exit 0 when it has stopped, 3 when no
+ * pid is recorded (whether it runs is unknown), 4 when the pid is another process's, 5 when it outlived SIGKILL.
  */
 export function stopLine(m: BenchMachine): string {
   const dir = `${m.profile}/mawsd`;
-  return `pid=$(cat ${quote(pidPath(m))} 2>/dev/null) || exit 0; case "$pid" in ''|*[!0-9]*) exit 4;; esac; args=$(ps -o args= -p "$pid" 2>/dev/null) || exit 0; case "$args" in *"--dir ${dir}"*) ;; *) exit 4;; esac; kill "$pid" 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || exit 0; sleep 1; done; kill -9 "$pid" 2>/dev/null; sleep 1; if kill -0 "$pid" 2>/dev/null; then exit 5; fi; exit 0`;
+  return `pid=$(cat ${quote(pidPath(m))} 2>/dev/null) || exit 3; case "$pid" in ''|*[!0-9]*) exit 4;; esac; args=$(ps -o args= -p "$pid" 2>/dev/null) || exit 0; case "$args" in *"--dir ${dir}"*) ;; *) exit 4;; esac; kill "$pid" 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || exit 0; sleep 1; done; kill -9 "$pid" 2>/dev/null; sleep 1; if kill -0 "$pid" 2>/dev/null; then exit 5; fi; exit 0`;
+}
+
+/** A pgrep pattern for the profile that its own command line doesn't match: `[/]…`, the rest escaped. */
+const profilePattern = (m: BenchMachine) => `[${m.profile[0]}]${m.profile.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
+
+/** The processes naming the profile (pgrep's pids in `$pids`, exit 3 when it fails), and exit 6 when the scratch mawsd is one. */
+const scratchProcesses = (m: BenchMachine) => [
+  `rel=${quote(m.profile.slice(1))}; prof="/$rel"`,
+  `pids=$(pgrep -f -- ${quote(profilePattern(m))}); found=$?; [ "$found" -le 1 ] || exit 3`,
+  `for pid in $pids; do case "$(ps -o args= -p "$pid" 2>/dev/null)" in *" run "*"--dir $prof/mawsd"|*" run "*"--dir $prof/mawsd "*) exit 6;; esac; done`,
+];
+/** The line that says whether the scratch mawsd runs (exit 6), as `reapLine` reads it, signalling nothing. */
+export const scratchDaemonLine = (m: BenchMachine): string => [...scratchProcesses(m), 'exit 0'].join('; ');
+
+/**
+ * The line that ends every process left whose command line names the scratch profile (its hosts, its session hosts, an
+ * agent or stub that outlived its end), never the scratch mawsd itself: each is signalled only once it is identified by
+ * its pid and its start time (`ps -o lstart=`, read before the signal and read again just before it) and its command line
+ * names the profile's path (the path, then a `/`, a space or the end: never a profile it prefixes); SIGTERM, then
+ * SIGKILL to any left after 10 s. The profile is built at run time from its path less the leading slash, so the line's own
+ * shell names no profile and is never one of its targets. Exit 0 once none is left, 3 when pgrep fails, 6 when the
+ * scratch mawsd still runs (nothing signalled), 7 when one outlives SIGKILL.
+ */
+export function reapLine(m: BenchMachine): string {
+  return [
+    ...scratchProcesses(m),
+    `names() { case "$(ps -o args= -p "$1" 2>/dev/null)" in *"$prof/"*|*"$prof "*|*"$prof") return 0;; esac; return 1; }`,
+    `for sig in TERM KILL; do for pid in $pids; do started=$(ps -o lstart= -p "$pid" 2>/dev/null) || continue; names "$pid" || continue; [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" = "$started" ] && kill -$sig "$pid" 2>/dev/null; done; i=0; while [ $i -lt 10 ]; do left=; for pid in $pids; do kill -0 "$pid" 2>/dev/null && names "$pid" && left=1; done; [ -z "$left" ] && exit 0; sleep 1; i=$((i + 1)); done; done; exit 7`,
+  ].join('; ');
 }
 
 /**
@@ -439,7 +488,7 @@ export class BenchRun {
   /** The profile's own directories made (each checked by the guard first), before anything else is written or run there. */
   async #scratchReady(): Promise<void> {
     const dirs = scratchDirs(this.#m);
-    await this.#write(dirs, `mkdir -p ${dirs.map(quote).join(' ')}`, 'making the scratch profile’s directories');
+    await this.#write(dirs, makeScratchDirs(this.#m), 'making the scratch profile’s directories');
   }
 
   /** Copies the agent's bundle (a local file) to the machine and runs its `prepare`: the stub's wrapper, the store's trust. */
@@ -499,8 +548,18 @@ export class BenchRun {
     await this.#scratchReady();
     if (m.stage === 'runner') {
       if (!(await this.#prepared())) throw new Error(`${m.name}: not prepared at ${m.commit.slice(0, 9)}: run prepare-vm before the sitting (MAWS_REMOTE_BENCH_PREPARE=1)`);
-      await this.#must(startLine(m, mawsdEntry(m)), 'starting the scratch mawsd');
+      // before the launch, so a launch whose answer is lost is still stopped, or its stop fails as unverified; the hosts'
+      // end runs after the daemon's (the last registered first), once nothing can wake them again
+      this.#teardown.push({
+        what: 'the scratch hosts and every process naming the profile',
+        step: async () => {
+          const left = await this.#endScratchProcesses();
+          if (left === 'daemon') throw new Error(`${m.name}: the scratch mawsd still runs, so its hosts are not ended`);
+          if (left.length > 0) throw new Error(`${m.name}: ${left.length} process${left.length === 1 ? '' : 'es'} naming the scratch profile still run${left.length === 1 ? 's' : ''} (pid${left.length === 1 ? '' : 's'} ${left.join(', ')})`);
+        },
+      });
       this.#teardown.push({ what: 'the scratch mawsd', step: () => this.#stopDaemon() });
+      await this.#must(startLine(m, mawsdEntry(m)), 'starting the scratch mawsd');
     } else {
       if (stageHeadOf(m) === 'copy') {
         if (archive === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
@@ -559,10 +618,15 @@ export class BenchRun {
     await this.#write([this.#m.head], `find ${quote(this.#m.head)} -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`, 'making node-pty’s spawn-helper executable');
   }
 
-  /** The VM's scratch daemon stopped by its recorded pid, once that pid is shown to be the daemon's. */
-  async #stopDaemon(): Promise<void> {
+  /**
+   * The VM's scratch daemon stopped by its recorded pid, once that pid is shown to be the daemon's. No pid recorded is
+   * unverified, and throws, unless `unrecorded` allows it (the removal, whose process check follows).
+   */
+  async #stopDaemon(unrecorded: 'unverified' | 'allowed' = 'unverified'): Promise<void> {
     const m = this.#m;
     const stopped = await this.#remote(stopLine(m), { timeoutMs: 60_000 });
+    if (stopped.code === 3 && unrecorded === 'allowed') return;
+    if (stopped.code === 3) throw new Error(`${m.name}: no pid of the scratch mawsd is recorded: whether it runs is unverified`);
     if (stopped.code === 4) throw new Error(`${m.name}: refused to signal the recorded pid: its command line is not the scratch mawsd's (--dir ${m.profile}/mawsd)`);
     if (stopped.code !== 0) throw new Error(`${m.name}: stopping the scratch mawsd failed (exit ${stopped.code})`);
   }
@@ -581,7 +645,9 @@ export class BenchRun {
 
   /**
    * The machine enrolled and listed under its name: skipped when the scratch profile already is (a rerun); else the code
-   * file streamed into `mawsd enroll`, exit 4 waited out, the key id shown, and the code file removed whatever happened.
+   * file streamed into `mawsd enroll`, which returns once the machine has posted its key (no `--wait`), the code file
+   * removed whatever happened; then the machine's key shown as soon as `mawsd keys` reads it, for the owner to compare with
+   * the one their terminal shows before they type y; then the listing waited for, within the code's TTL of the key shown.
    */
   async enroll(): Promise<void> {
     const m = this.#m;
@@ -592,14 +658,14 @@ export class BenchRun {
       this.#deps.say(`[bench] ${m.name}: already enrolled and listed in ${before.org ?? 'the org'} (the profile is kept between runs); the unused code file is removed`);
       return;
     }
-    const enrollMs = (ENROLL_WAIT_S + 60) * 1000;
-    this.#quiet(enrollMs); // before the code is taken: a refused enroll leaves its file for the next try
-    const started = this.#now();
+    // before the code is taken, the whole span: the enroll, the key's posting and the owner's y (a refused enroll leaves
+    // its file for the next try)
+    this.#quiet(REMOTE_CALL_MS + KEY_WITHIN_MS + ENROLL_WAIT_S * 1000);
     let code: number | null;
     let answer: { enrollment?: string; name?: string; org?: string } = {};
     try {
-      this.#deps.say(`[bench] ${m.name}: enrolling with the code from its file (the owner compares the key below and types y)`);
-      const result = await this.#remote(`${guardedLine(m, [m.profile, `${m.profile}/mawsd`], '')}${mawsd(m)} enroll ${scoped(m)} --name ${quote(m.name)} --wait ${ENROLL_WAIT_S} --json`, { stdinFile: m.codeFile, timeoutMs: enrollMs });
+      this.#deps.say(`[bench] ${m.name}: enrolling with the code from its file (the machine's key is shown below as soon as it is posted; the owner compares it with their terminal's and types y)`);
+      const result = await this.#remote(`${guardedLine(m, [m.profile, `${m.profile}/mawsd`], '')}${mawsd(m)} enroll ${scoped(m)} --name ${quote(m.name)} --json`, { stdinFile: m.codeFile });
       code = result.code;
       try {
         const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -613,9 +679,19 @@ export class BenchRun {
     }
     this.#deps.say(`[bench] ${m.name}: enroll exited ${code}${answer.enrollment === undefined ? '' : `: ${answer.enrollment}, ${answer.name ?? '?'} in ${answer.org ?? '?'}`}`);
     if (code !== 0 && code !== 4) throw new Error(`${m.name}: enroll failed (exit ${code}); its own output is not shown, read it with \`mawsd endpoint status\` there`);
-    await this.showKey();
+    // the key first, as soon as the machine has posted it: nothing waits on the owner's y before they can compare it
+    const keyBy = this.#now() + KEY_WITHIN_MS;
+    for (;;) {
+      const id = await this.#keyId();
+      if (id !== null) {
+        this.#deps.say(`[bench] ${m.name}: the machine's key id, to compare: ${id}`);
+        break;
+      }
+      if (this.#now() > keyBy) throw new Error(`${m.name}: the machine posted no key to compare within ${KEY_WITHIN_MS / 1000} s, so no y is asked for`);
+      await this.#sleep(STATUS_EVERY_MS);
+    }
     if (code === 0) return;
-    const deadline = started + ENROLL_WAIT_S * 1000;
+    const deadline = this.#now() + ENROLL_WAIT_S * 1000; // the code's TTL, from the key shown
     for (;;) {
       // after every wait the decision is asked again: listed now, under this name
       const now = await this.#enrollment();
@@ -623,22 +699,20 @@ export class BenchRun {
         this.#deps.say(`[bench] ${m.name}: listed in ${now.org ?? 'the org'}`);
         return;
       }
-      if (this.#now() > deadline) throw new Error(`${m.name}: not listed in the org within the code's ${ENROLL_WAIT_S} s (state ${now?.enrollment ?? 'unread'})`);
+      if (this.#now() > deadline) throw new Error(`${m.name}: not listed in the org within the code's ${ENROLL_WAIT_S} s of its key shown (state ${now?.enrollment ?? 'unread'})`);
       await this.#sleep(STATUS_EVERY_MS);
     }
   }
 
-  /** The machine's key id, from `mawsd keys`, for the owner to compare with what their terminal shows. */
-  async showKey(): Promise<void> {
+  /** The machine's key id from `mawsd keys`, null before it is posted (or unreadable). */
+  async #keyId(): Promise<string | null> {
     const m = this.#m;
     const keys = await this.#remote(`${mawsd(m)} keys ${scoped(m)} --json`);
-    let id: string | null;
     try {
-      id = (JSON.parse(keys.stdout) as { key?: { keyId?: string } | null }).key?.keyId ?? null;
+      return (JSON.parse(keys.stdout) as { key?: { keyId?: string } | null }).key?.keyId ?? null;
     } catch {
-      id = null;
+      return null;
     }
-    this.#deps.say(id === null ? `[bench] ${m.name}: no key id to compare yet (keys exited ${keys.code})` : `[bench] ${m.name}: the machine's key id, to compare: ${id}`);
   }
 
   /**
@@ -743,8 +817,7 @@ export class BenchRun {
   async benchProcesses(): Promise<string[]> {
     const m = this.#m;
     // `[/]…`: the shell that runs pgrep carries the pattern in its own arguments, which the pattern then doesn't match
-    const pattern = `[${m.profile[0]}]${m.profile.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
-    const found = await this.#remote(`pgrep -f -- ${quote(pattern)}`);
+    const found = await this.#remote(`pgrep -f -- ${quote(profilePattern(m))}`);
     const pids = found.stdout.split('\n').map((line) => line.trim()).filter((line) => /^\d+$/.test(line));
     if (found.code === 1 && pids.length === 0) return [];
     if (found.code !== 0 || pids.length === 0) throw new Error(`${m.name}: the bench process check failed (pgrep exit ${found.code}${found.code === 0 ? ', no pid' : ''}): whether a bench process lives there is unknown`);
@@ -752,17 +825,41 @@ export class BenchRun {
   }
 
   /**
-   * Once the bench is done: the scratch profile removed with everything the bench put in it, unless a bench process still
-   * lives on the machine (on the mini, mini-ops stops its scratch mawsd first), when it refuses, saying so, and leaves the
-   * profile; it throws, removing nothing, when the profile's path goes through a symlink or the process check can't say.
-   * True when the profile goes.
+   * The scratch profile's own processes ended, the scratch mawsd's never (its own stop, or mini-ops', comes first, and
+   * nothing is told or signalled while it runs): its engine host and pty host told to exit through their own sockets (the agent's `stop-hosts`, whose failure is said,
+   * not thrown), then any process still naming the profile ended by its pid and start time (`reapLine`), then the process
+   * check. The pids left, or 'daemon' when the scratch mawsd still runs (nothing is signalled then).
+   */
+  async #endScratchProcesses(): Promise<string[] | 'daemon'> {
+    const m = this.#m;
+    const daemon = await this.#remote(scratchDaemonLine(m));
+    if (daemon.code === 6) return 'daemon';
+    if (daemon.code !== 0) throw new Error(`${m.name}: reading whether the scratch mawsd runs failed (exit ${daemon.code}): whether a bench process lives there is unknown`);
+    const told = await this.#remote(agent(m, 'stop-hosts', this.#deps.engineVersion), { timeoutMs: 90_000 });
+    if (told.code !== 0) this.#deps.say(`[bench] ${m.name}: the hosts’ own stop exited ${told.code}; any host left is ended by its pid and start time`);
+    const reaped = await this.#remote(reapLine(m), { timeoutMs: 60_000 });
+    if (reaped.code === 6) return 'daemon';
+    if (reaped.code !== 0) throw new Error(`${m.name}: ending the processes naming the scratch profile failed (exit ${reaped.code}${reaped.code === 7 ? ': one outlived SIGKILL' : reaped.code === 3 ? ': pgrep failed' : ''})`);
+    return this.benchProcesses();
+  }
+
+  /**
+   * Once the bench is done: the scratch profile removed with everything the bench put in it, once its processes are
+   * ended (`#endScratchProcesses`; on the VM its daemon stopped first, on the mini mini-ops stops it first and the removal
+   * refuses while it runs). It refuses, saying so, and leaves the profile while a bench process still lives there; it
+   * throws, removing nothing, when the profile's path goes through a symlink or the process check can't say. True when
+   * the profile goes.
    */
   async removeProfile(): Promise<boolean> {
     const m = this.#m;
-    if (m.stage === 'runner') await this.#stopDaemon();
-    const left = await this.benchProcesses();
+    if (m.stage === 'runner') await this.#stopDaemon('allowed');
+    const left = await this.#endScratchProcesses();
+    if (left === 'daemon') {
+      this.#deps.say(`[bench] ${m.name}: refused to remove the scratch profile: its scratch mawsd still runs; ${m.stage === 'mini-ops' ? `mini-ops stops it (${stopLine(m)})` : 'it outlived its stop'}, then remove it again`);
+      return false;
+    }
     if (left.length > 0) {
-      this.#deps.say(`[bench] ${m.name}: refused to remove the scratch profile: ${left.length} bench process${left.length === 1 ? '' : 'es'} still run${left.length === 1 ? 's' : ''} there (pids ${left.join(', ')}); ${m.stage === 'mini-ops' ? `mini-ops stops them (${stopLine(m)} for the daemon)` : 'end them'} and remove it again`);
+      this.#deps.say(`[bench] ${m.name}: refused to remove the scratch profile: ${left.length} bench process${left.length === 1 ? '' : 'es'} still run${left.length === 1 ? 's' : ''} there (pids ${left.join(', ')}); end them and remove it again`);
       return false;
     }
     // the profile and all the bench put in it: the head, a tarball left by a failed unpack, the pack, the stores

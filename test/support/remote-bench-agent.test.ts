@@ -2,13 +2,15 @@
 // and the fake sminos's socket: prepare writes only under the scratch profile; serve starts the stub's session and lists
 // it for the owners named; and its life is its transport's: stdin's end, or its parent's loss, stops the session,
 // withdraws the listing, closes the fake sminos and ends the bench's stubs, once.
+import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENT_CLEANUP_MS, agentPaths, BenchAgent, BENCH_PROJECT, bindLifetime, openSminos, parseAgentArgs, prepare, type AgentArgs, type MachineClient, type ServeDeps } from './remote-bench-agent';
+import { AGENT_CLEANUP_MS, agentPaths, askExit, BenchAgent, BENCH_PROJECT, bindLifetime, hostDeps, openSminos, parseAgentArgs, prepare, scratchHosts, stopHosts, type AgentArgs, type MachineClient, type ServeDeps } from './remote-bench-agent';
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 
 const scratch: string[] = [];
 afterEach(() => {
@@ -303,4 +305,84 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
     expect(readFileSync(`${profile}/bench/latency-engine`, 'utf8')).toContain('exec ');
     expect(readdirSync(`${profile}/bench`).filter((n) => n.includes('.tmp-'))).toEqual([]);
   });
+
+  // ---- the hosts' own stop (the milestone review's fix 4) -----------------------------------------------------------
+
+  /** A host's socket as the engine host and pty host serve it: the hello read, `answer` written, the exit recorded. */
+  async function fakeHostSocket(path: string, answer: object) {
+    const heard: Record<string, unknown>[] = [];
+    const server = createServer((socket) => {
+      let buffer = '';
+      socket.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString();
+        for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+          const frame = JSON.parse(buffer.slice(0, at)) as Record<string, unknown>;
+          buffer = buffer.slice(at + 1);
+          heard.push(frame);
+          if (frame.t === 'hello') socket.write(`${JSON.stringify(answer)}\n`);
+          if (frame.t === 'exit') socket.end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(path, resolve));
+    return { heard, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+
+  it('tells a host to exit through its own socket: the hello with its token, its answer waited for, then exit now; a refused token is no exit', async () => {
+    const root = realpathSync(mkdtempSync('/tmp/bra-'));
+    scratch.push(root);
+    const welcome = await fakeHostSocket(`${root}/w.sock`, { t: 'welcome', protocol: SOCKET_PROTOCOL, minor: 0, build: 'b', capabilities: [], pid: 1, startedAt: '', liveSessions: 0, rows: 0 });
+    const refusedWire = await fakeHostSocket(`${root}/r.sock`, { t: 'refuse', reason: 'wire', protocol: SOCKET_PROTOCOL, buildId: 'b', wire: 'w', liveSessions: 1 });
+    const refusedToken = await fakeHostSocket(`${root}/t.sock`, { t: 'refuse', reason: 'token', protocol: SOCKET_PROTOCOL, buildId: 'b', wire: 'w', liveSessions: 0 });
+    try {
+      await askExit(`${root}/w.sock`, 'host-token');
+      expect(welcome.heard).toEqual([{ t: 'hello', protocol: SOCKET_PROTOCOL, token: 'host-token', minor: expect.any(Number), build: 'remote-bench-agent', capabilities: [], appPid: process.pid }, { t: 'exit', when: 'now' }]);
+      // a refused connection's one exit is still honoured by the host (the wire's, not the token's)
+      await askExit(`${root}/r.sock`, 'host-token');
+      expect(refusedWire.heard.map((f) => f.t)).toEqual(['hello', 'exit']);
+      await expect(askExit(`${root}/t.sock`, 'stale')).rejects.toThrow(/refused its token/);
+      expect(refusedToken.heard.map((f) => f.t)).toEqual(['hello']);
+      await expect(askExit(`${root}/none.sock`, 't')).rejects.toThrow(/ENOENT/);
+    } finally {
+      await Promise.all([welcome.close(), refusedWire.close(), refusedToken.close()]);
+    }
+  });
+
+  /** A host process of the profile's: its lock and token written where the daemon's hosts keep them, its socket served. */
+  async function startHost(dir: string, options: { obeys: boolean }, children: ChildProcess[]): Promise<ChildProcess> {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(`${dir}/host.token`, 'tok\n', { mode: 0o600 });
+    const script = `const net = require('node:net'); const server = net.createServer((s) => { let b = ''; s.on('data', (c) => { b += c; if (b.includes('"hello"') && !s.welcomed) { s.welcomed = true; s.write(JSON.stringify({ t: 'welcome' }) + '\\n'); } if (b.includes('"exit"') && ${options.obeys}) process.exit(0); }); }); server.listen(process.argv[1], () => process.stdout.write('up\\n')); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['-e', script, `${dir}/host.sock`], { stdio: ['ignore', 'pipe', 'ignore'] });
+    children.push(child);
+    await new Promise((resolve) => child.stdout!.once('data', resolve));
+    writeFileSync(`${dir}/host.lock`, JSON.stringify({ pid: child.pid, procStart: '', protocol: SOCKET_PROTOCOL, buildId: 'b', socketPath: `${dir}/host.sock`, startedAt: '' }));
+    return child;
+  }
+
+  it('stop-hosts: the engine host and pty host its locks name told to exit through their sockets and waited for; one that stays is named', async () => {
+    const root = realpathSync(mkdtempSync('/tmp/bra-'));
+    scratch.push(root);
+    const a: AgentArgs = { ...ARGS, profile: `${root}/p`, bench: `${root}/p/bench`, head: `${root}/p/head` };
+    expect(scratchHosts(a)).toEqual([{ name: 'the engine host', dir: `${root}/p/supervisor` }, { name: 'the pty host', dir: `${root}/p/mawsd/pty-host` }]);
+    const children: ChildProcess[] = [];
+    const alive = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
+    try {
+      // none running: nothing to do
+      expect(await stopHosts(a, hostDeps(), 1_000)).toEqual([]);
+      const engine = await startHost(`${root}/p/supervisor`, { obeys: true }, children);
+      const pty = await startHost(`${root}/p/mawsd/pty-host`, { obeys: false }, children);
+      expect(await stopHosts(a, hostDeps(), 1_000)).toEqual(['the pty host']);
+      await expect.poll(() => alive(engine)).toBe(false);
+      expect(alive(pty)).toBe(true); // left for the runner's reap, by its pid and start time
+      // a lock naming a socket outside the profile is never connected to
+      pty.kill('SIGKILL');
+      const outside = await startHost(`${root}/elsewhere`, { obeys: true }, children);
+      writeFileSync(`${root}/p/supervisor/host.lock`, JSON.stringify({ pid: outside.pid, procStart: '', protocol: SOCKET_PROTOCOL, buildId: 'b', socketPath: `${root}/elsewhere/host.sock`, startedAt: '' }));
+      expect(await stopHosts(a, hostDeps(), 500)).toEqual(['the engine host']);
+      expect(alive(outside)).toBe(true);
+    } finally {
+      for (const child of children) if (alive(child)) child.kill('SIGKILL');
+    }
+  }, 30_000);
 });
