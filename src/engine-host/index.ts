@@ -31,7 +31,9 @@ import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: Li
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
 import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles } from './holder/roster'; // P5 O16 M3
-import { adoptable, adoptAll } from './holder/adopt'; // P5 O16 M3
+import { adoptable, adoptAll, holdsEngine } from './holder/adopt'; // P5 O16 M3; panel fix wave 1: holdsEngine
+import { stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1
+import { SESSION_HOST_PROTOCOL } from './holder/protocol'; // P5 O16 panel fix wave 1 follow-up
 import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
 import { readFileSync } from 'node:fs'; // P5 O16 M3
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O16 M3
@@ -281,9 +283,23 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
     log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
     removeHostFiles(hostsDir, entry);
   }
-  const held = adoptable(live).take.flatMap((entry) => (entry.appSessionId !== null && entry.child !== null ? [entry.appSessionId as AppSessionId] : []));
-  engine.table.holdForAdoption(held);
+  // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
+  // adoption reserves its row stops it through its session host (scalpel-1#1)
+  const holding = new Map(adoptable(live).take.filter(holdsEngine).map((entry) => [entry.appSessionId as AppSessionId, entry]));
+  const held = [...holding.keys()];
+  const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
+  engine.table.holdForAdoption(held, (id) => stopHeldHost(holding.get(id)!, stopDeps));
   void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
+    // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
+    // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
+    // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed
+    // adoption whose row was reserved is that row's
+    for (const { entry } of outcome.failed) {
+      if (!holdsEngine(entry) || entry.protocol !== SESSION_HOST_PROTOCOL) continue;
+      const id = entry.appSessionId as AppSessionId;
+      if (engine.table.get(id)?.status().holder?.holderId === entry.holderId) continue;
+      engine.table.unattach(id, { holderId: entry.holderId, host: { pid: entry.pid, procStart: entry.procStart }, stop: () => stopHeldHost(entry, stopDeps) });
+    }
     for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
     if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
     life.adoptionsEnded(outcome.failed.length);

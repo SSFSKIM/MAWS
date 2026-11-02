@@ -199,7 +199,7 @@ export interface EngineIpc {
   // entry's exit order and host.stopAll; closes the table's and the runner's admission for good
   // P5 O16 M3b: `detach` detaches the rows under a session host instead (the detached exit order's, but a stop-all's)
   shutdown(graceMs: number, mode?: 'stop' | 'detach'): Promise<{ stopped: number; forced: number }>;
-  adopt(entry: RosterEntry): Promise<AppSessionId>; // P5 O16 M3: the launcher's adoption of a running session host
+  adopt(entry: RosterEntry): Promise<AppSessionId | null>; // P5 O16 M3: the launcher's adoption of a running session host; null: released, it held no engine
 }
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
@@ -720,6 +720,12 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
+    // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, and
+    // its adopter reads the stored spec and resumes the journal meanwhile; it is live, as a launch's refusal reads it
+    if (table.isAdopting(id)) throw new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' });
+    // follow-up (the architect's ruling): an unattached session host of the session (no row, its engine running) is
+    // stopped first, then the session forgotten, its `session.forgotten` clearing what it left
+    for (const { holderId, outcome } of await table.stopUnattached(id)) log(`${id}: its unattached session host ${holderId} stopped before the forget (${outcome})`);
     // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
     // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
     if (session) await session.exited;
