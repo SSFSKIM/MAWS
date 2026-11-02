@@ -614,6 +614,27 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     await row.end();
   });
 
+  // The landing fix wave: in a host mawsd spawned, the spawner read at start (pid and start) is the producer until a
+  // declaring hello replaces it, so a mawsd that dies before its first hello settles the adoptions it left lost
+  it('in a host mawsd spawned, mawsd dies before its first hello and main falls back: the adopted lost row settles at its due time and is released', async () => {
+    const alive = new Set([4242]);
+    const h = host({ spawnedByMawsd: true, spawner: { pid: 4242, procStart: 'Mon Nov  2 09:00:00 2026' }, processes: { isAlive: (pid) => alive.has(pid), procStartOf: (pid) => (alive.has(pid) ? 'Mon Nov  2 09:00:00 2026' : null) } });
+    const row = await adopting(h);
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    h.link(MAIN); // main's fallback, ready while mawsd still lives: nothing settles
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    row.transport.push(STOP);
+    await vi.waitFor(() => expect(row.session.status().work?.unknown).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    alive.delete(4242); // mawsd gone before it ever said hello to this host
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(row.session.browserEntry()).toBeNull();
+    expect(row.transport.requestsOf('end_session')).toHaveLength(1);
+    vi.useRealTimers();
+    await row.end();
+  });
+
   it('in a host mawsd spawned, an adoption reserved while main\'s link already serves is the lost link\'s too', async () => {
     const h = host({ spawnedByMawsd: true });
     h.link(MAIN);

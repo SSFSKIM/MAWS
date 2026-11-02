@@ -33,8 +33,8 @@
 //
 // The landing fix wave. (1) A lost link's `unknown` is settled by its producer's death. The producer is the last
 // declaring client's process, pid and start as its hello gave them (the start read then; one record per host process,
-// replaced at each declaring hello). Its render host exits when that `mawsd`'s machine.sock goes, and the profile's lock
-// makes it the only producer, so once that process is dead, or its pid runs another start, every lost link's `unknown`
+// replaced at each declaring hello; in a host `mawsd` spawned, that parent read at start until then). Its render host
+// exits when that `mawsd`'s machine.sock goes, and the profile's lock makes it the only producer, so once that process is dead, or its pid runs another start, every lost link's `unknown`
 // is cleared. A start that cannot be read counts as alive. The check runs at a non-declaring client's ready and at the
 // table's own evaluations (the idle release's due handling of a row held by its tab alone, the budget's), never on a
 // timer of its own. A `mawsd` alive behind main's transient direct link keeps its holds. (2) A fresh link tells its
@@ -63,6 +63,7 @@ export interface BrowserWorkOptions {
   hold?: () => Promise<void>; // the e2e's hold on a snapshot's application (MAWS_E2E_BROWSER_WORK_HOLD)
   spawnedByMawsd?: boolean; // fix 4: this host's own launch named `mawsd` as its spawner (spawner.ts)
   processes?: { isAlive(pid: number): boolean; procStartOf(pid: number): string | null }; // the landing fix wave: the producer's reads
+  spawner?: { pid: number; procStart: string } | null; // the landing fix wave: the first producer, `mawsd` as this host's parent (spawner.ts)
 }
 
 // The kept set of every link whose snapshot named no session: shared, so an empty snapshot keeps nothing of its own
@@ -82,7 +83,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
   // The landing fix wave (1): the producer, as the last declaring hello named it ('' for a start ps could not read)
   const processes = opts.processes ?? { isAlive, procStartOf };
-  let producer: { pid: number; procStart: string } | null = null;
+  let producer: { pid: number; procStart: string } | null = opts.spawner ?? null; // until the first declaring hello
   client.onDeclaringHello((pid) => void (producer = { pid, procStart: processes.procStartOf(pid) ?? '' }));
   const settleIfProducerDead = () => {
     const lost = live().filter((session) => session.browserEntry() === 'unknown:lost');

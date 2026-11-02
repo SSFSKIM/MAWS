@@ -12,3 +12,11 @@ export function takeSpawnedByMawsd(env: NodeJS.ProcessEnv): boolean {
   delete env[ENGINE_HOST_SPAWNER_ENV];
   return spawner === 'mawsd';
 }
+
+// The landing fix wave: in a host `mawsd` spawned, its parent while that `mawsd` lives, as browser work's first producer
+// (pid and start, '' for a start ps cannot read), read once at start; a later declaring hello replaces it. None in a host
+// main spawned (main produces nothing), or once reparented to launchd (ppid 1: that `mawsd` is already gone).
+export function spawnerProcess(spawnedByMawsd: boolean, ppid: number, procStartOf: (pid: number) => string | null): { pid: number; procStart: string } | null {
+  if (!spawnedByMawsd || ppid === 1) return null;
+  return { pid: ppid, procStart: procStartOf(ppid) ?? '' };
+}
