@@ -884,9 +884,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return { state: 'deferred', inFlight: asked.value.inFlight };
     }
     log(`restart --engine-host: pid ${before} hands its sessions over`);
-    const pid = await successorReady(before, SUCCESSOR_READY_MS);
-    if (pid === null) return { state: 'detaching', inFlight: 0 };
-    const adopted = await adoptionsEnded(ADOPTIONS_WAIT_MS);
+    const ready = await successorReady(before, SUCCESSOR_READY_MS);
+    if (ready === null) return { state: 'detaching', inFlight: 0 };
+    const { pid, adopted } = await adoptionsEnded(ready, ADOPTIONS_WAIT_MS);
     log(`restart --engine-host: pid ${before} → ${pid}${adopted === null ? '' : `, ${adopted} sessions adopted`}`);
     return { state: 'detaching', inFlight: 0, pid, ...(adopted !== null && { adopted }) };
   }
@@ -907,14 +907,20 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     });
   }
   // the successor's supervisor status once its start's adoptions have ended (`holder.adopting` false or absent): how many
-  // sessions it adopted; null past `ms`
-  async function adoptionsEnded(ms: number): Promise<number | null> {
+  // sessions it adopted, null past `ms`. Each answer names the host that gave it: a successor replaced while it adopted
+  // (a crash, the ladder's restart) is followed to the newest, whose pid the count is reported with (O16 panel 1)
+  async function adoptionsEnded(successor: number, ms: number): Promise<{ pid: number; adopted: number | null }> {
     const until = Date.now() + ms;
+    let pid = successor;
     for (;;) {
       const answered = await hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
-      const holder = answered.ok ? (answered.value as SupervisorStatus).holder : undefined;
-      if (answered.ok && holder?.adopting !== true) return holder?.adopted ?? 0;
-      if (Date.now() >= until) return null;
+      const status = answered.ok ? (answered.value as SupervisorStatus) : null;
+      if (status && status.pid !== pid) {
+        log(`restart --engine-host: successor pid ${pid} replaced by ${status.pid} before its adoptions ended`);
+        pid = status.pid;
+      }
+      if (status && status.holder?.adopting !== true) return { pid, adopted: status.holder?.adopted ?? 0 };
+      if (Date.now() >= until) return { pid, adopted: null };
       await new Promise((resolve) => setTimeout(resolve, ADOPTIONS_POLL_MS).unref());
     }
   }
