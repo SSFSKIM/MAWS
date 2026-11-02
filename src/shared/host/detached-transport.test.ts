@@ -278,9 +278,9 @@ describe('the detached transport: connecting', () => {
   }
 
   it('a capable host whose status probe times out once is asked again and served only once it answers', async () => {
-    let fake!: FakeSupervisor;
-    const probe = probed((asked) => (asked === 1 ? new Promise(() => {}) : Promise.resolve(supervisorStatus(fake.pid))));
-    fake = await startFake({ register: probe.register });
+    const pid = processes.newPid();
+    const probe = probed((asked) => (asked === 1 ? new Promise(() => {}) : Promise.resolve(supervisorStatus(pid))));
+    const fake = await startFake({ pid, register: probe.register });
     await supervisor.start();
     expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(probe.readyAt, 'ready only after the second probe answered').toEqual([2]);
@@ -288,9 +288,9 @@ describe('the detached transport: connecting', () => {
   });
 
   it('a capable host whose status probe errs is asked again and served once it answers', async () => {
-    let fake!: FakeSupervisor;
-    const probe = probed((asked) => (asked === 1 ? Promise.reject(new Error('not yet')) : Promise.resolve(supervisorStatus(fake.pid))));
-    fake = await startFake({ register: probe.register });
+    const pid = processes.newPid();
+    const probe = probed((asked) => (asked === 1 ? Promise.reject(new Error('not yet')) : Promise.resolve(supervisorStatus(pid))));
+    const fake = await startFake({ pid, register: probe.register });
     await supervisor.start();
     expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(probe.readyAt).toEqual([2]);
