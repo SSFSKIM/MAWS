@@ -541,7 +541,7 @@ export class ProcessTable {
   }
 
   // Registered infrastructure, bound by identity across the row's reads (D52, D69): the bridge child the row's observer
-  // named, and the launch's stdio MCP servers, by their command lines and
+  // named (or, until it names one, the bridge by its argv), and the launch's stdio MCP servers, by their command lines and
   // by count, asked of the engine when the tree shows it children the row cannot name. Null for a read that began before
   // the newest the row applied: the caller keeps the newer count.
   private countUnder(session: EngineSession, pid: number, tree: ReturnType<typeof parseTree>, read: number): number | null {
@@ -554,7 +554,7 @@ export class ProcessTable {
 
   private registeredOf(session: EngineSession): Registered {
     const childPid = this.reaps.get(session)?.channel.childPid ?? null;
-    return { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: session.mcpCommands() ?? [] };
+    return { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: session.mcpCommands() ?? [], sessionIds: session.engineSessionIds() };
   }
 
   // After a read: the bindings saved when they changed (an adopter restores them), and `mcp_status` asked when the read

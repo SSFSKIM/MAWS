@@ -304,11 +304,12 @@ describe('the descendant veto after an adoption', () => {
     { name: 'plugin:ptc:ptc', status: 'connected', scope: 'dynamic', source: 'plugin', transport: 'stdio', config: { type: 'stdio', command: PTC, args: [] } },
     { name: 'flag', status: 'connected', scope: 'dynamic', source: 'dynamic', transport: 'stdio', config: { type: 'stdio', command: '/usr/bin/node', args: ABS } },
   ] } }) };
-  const resting = () => [
+  const resting = (session: string) => [
     at(4101, 4100, BORN, '/u/.local/share/claude/versions/2.1.316 -p --input-format stream-json'),
     at(820, 4101, BORN, `node ${CUA.join(' ')}`),
     at(821, 4101, BORN, '/u/.ptc/venvs/4c410075651a/bin/python -m ptc.mcp'),
     at(822, 4101, BORN, `/usr/bin/node ${ABS.join(' ')}`),
+    at(823, 4101, BORN, `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /u/.claude/plugins/cache/doperpowers/sminos/1.31.0/skills/sminos/scripts/sminos.py bridge --session ${session} --launch=k9vHeE6YTaP3bkSm5E93tw`),
   ];
   const BASH = [at(830, 4101, HOUR, "/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1793629565532-co9nny.sh 2>/dev/null || true && eval 'sleep 600'"), at(831, 830, HOUR, 'sleep 600')];
 
@@ -329,22 +330,22 @@ describe('the descendant veto after an adoption', () => {
   }
   const work = (session: { status(): { work?: { descendants: number | null } } }) => session.status().work?.descendants;
 
-  it('restores what the launch’s manager saved: a bare command and an exec’d launcher with nothing to resolve, and the releases take it', async () => {
+  it('restores what the launch’s manager saved: a bare command and an exec’d launcher with nothing to resolve, the bridge, and the releases take it', async () => {
     const { launchId, entry } = launched();
     const store = new MemorySessionStateStore();
     await store.saveInfrastructure(ID, { launch: launchId, processes: [
-      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' },
+      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' }, { pid: 823, start: BORN, kind: 'bridge' },
     ] });
-    let tree = resting();
+    let tree = resting(entry.engineSessionId!);
     const a = await adopted(() => tree, store);
     const session = await ready(a, entry);
     await a.table.sampleMemory();
     expect(work(session)).toBe(0);
     expect(a.transports[0]!.requestsOf('mcp_status')).toEqual([]); // nothing left to ask about
-    tree = [...resting(), ...BASH];
+    tree = [...resting(entry.engineSessionId!), ...BASH];
     await a.table.sampleMemory();
     expect(work(session)).toBe(2); // a background Bash is still the session's work
-    tree = resting();
+    tree = resting(entry.engineSessionId!);
     await a.table.sampleMemory();
     a.table.setIdleRelease({ idleMs: 200, active: true });
     await until(() => a.transports[0]!.requestsOf('end_session').length > 0, 'the idle release');
@@ -352,16 +353,16 @@ describe('the descendant veto after an adoption', () => {
     await session.exited;
   });
 
-  it('adopted from a manager that saved nothing (a build before D69): the servers by count; the budget release takes it', async () => {
+  it('adopted from a manager that saved nothing (a build before D69): the servers by count, the bridge by its argv; the budget release takes it', async () => {
     const { entry } = launched();
     const store = new MemorySessionStateStore();
-    let tree = [...resting(), ...BASH];
+    let tree = [...resting(entry.engineSessionId!), ...BASH];
     const a = await adopted(() => tree, store);
     const session = await ready(a, entry);
     await a.table.sampleMemory();
     await until(() => work(session) === 2, 'the servers bound, the Bash still counted');
-    await until(() => store.infrastructure.get(ID)?.processes.length === 3, 'the bindings saved for the next adopter');
-    tree = resting();
+    await until(() => store.infrastructure.get(ID)?.processes.length === 4, 'the bindings saved for the next adopter');
+    tree = resting(entry.engineSessionId!);
     a.table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
     await a.table.sampleMemory();
     expect(work(session)).toBe(0);

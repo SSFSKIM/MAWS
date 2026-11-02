@@ -4,6 +4,8 @@
 // - the sminos bridge child its observer's gate `hello` named by pid. The bridge's binding is the process first found at
 //   the named pid as a child of `claude` (M0 Q4); once it is gone or re-parented, neither it nor another process at that
 //   pid is exempt again, until a hello names another pid;
+// - interim, until O12 M4's observer says that hello (D69): the bridge by its own argv, `sminos[.py] bridge --session
+//   <S>` with S one of the row's engine session ids, while no hello has named a pid (`isBridgeOf`);
 // - each stdio MCP server of the launch, by either of two routes. By command line: one direct child of `claude` whose
 //   command line is a server's `mcp_status` `config.{command, args}` as the kernel ran it (`expectedArgv`); a server's
 //   binding lasts while that process lives as a child of `claude`, one gone (or re-parented) frees the server for its
@@ -37,10 +39,11 @@ export const PS_TREE_ENV = { LC_ALL: 'C', TZ: 'UTC' } as const; // `lstart` comp
 
 export interface TreeProcess { pid: number; ppid: number; stat: string; start: string; command: string }
 export type ProcessTree = ReadonlyMap<number, TreeProcess>;
-// The registrations: the bridge child's pid (the observer's hello) and each stdio MCP server's argv as it runs.
-export interface Registered { pids: ReadonlySet<number>; mcpCommands: readonly (readonly string[])[] }
+// The registrations: the bridge child's pid (the observer's hello), each stdio MCP server's argv as it runs, and the
+// row's engine session ids (D69's interim bridge rule; none, no bridge by argv).
+export interface Registered { pids: ReadonlySet<number>; mcpCommands: readonly (readonly string[])[]; sessionIds?: ReadonlySet<string> }
 // A binding as the state file keeps it for an adopter (D69): the process, and what it was bound as.
-export interface Binding { pid: number; start: string; kind: 'server' }
+export interface Binding { pid: number; start: string; kind: 'server' | 'bridge' }
 // What a fresh `mcp_status` says of the launch's stdio servers (the count rule's input).
 export interface StdioServers { connected: number; pending: number }
 
@@ -124,8 +127,23 @@ export function matchesArgv(command: string, argv: readonly string[]): boolean {
 
 // claude's own Bash wrapper, the process every Bash a tool runs (foreground, background, a Monitor, a subagent's) starts
 // as: `<shell> -c source <config>/shell-snapshots/snapshot-<shell>-….sh …` (M0 Q4; the owner's tree). It is work like any
-// unbound process; the shape only keeps it out of what the count rule may bind.
+// unbound process; the shape only keeps it out of what the count rule and the bridge rule may bind.
 export const isBashWrapper = (command: string): boolean => /^(?:\S*\/)?(?:bash|zsh|sh|dash|ksh) -c (?:source|\.) \S*\/shell-snapshots\/snapshot-/.test(command);
+
+// D69, interim until O12 M4's observer hello: the sminos bridge child as its mod spawns it (`<root>/skills/sminos/scripts/
+// sminos bridge --session <S> [--launch=<id>] [--lane <verdict>]`, a bash launcher that execs `<python> …/sminos.py bridge
+// --session <S> …`, so the process reads `sminos.py` after the exec and `sminos` only before it). A `sminos` or
+// `sminos.py` word first or second (after its interpreter, whatever that interpreter's path), then `bridge --session S`
+// with S one of the row's engine session ids, then anything; never a Bash wrapper, whose command line can carry the same
+// words. A path with a space in it is not matched: its process stays work.
+export function isBridgeOf(command: string, sessionIds: ReadonlySet<string>): boolean {
+  if (sessionIds.size === 0 || isBashWrapper(command)) return false;
+  const words = command.split(' ');
+  return [0, 1].some((at) => {
+    const name = basename(words[at] ?? '');
+    return (name === 'sminos' || name === 'sminos.py') && words[at + 1] === 'bridge' && words[at + 2] === '--session' && sessionIds.has(words[at + 3] ?? '');
+  });
+}
 
 interface Identity { pid: number; start: string; ppid: number }
 const same = (identity: Identity, p: TreeProcess | undefined): p is TreeProcess => p !== undefined && p.start === identity.start && p.ppid === identity.ppid;
@@ -139,6 +157,7 @@ export class Infrastructure {
   private serversKey = '';
   private readonly counted = new Map<number, Identity>(); // by count, or restored: a server's process by its pid (D69)
   private readonly bridges = new Map<number, Identity | null>(); // a named pid -> the process first found there (null: gone)
+  private bridgeArgv: Identity | null = null; // D69's interim bridge, bound by its argv while no hello names a pid
   private restored: Binding[] | null; // an adopter's: bound at the first read, each only if the same process is there
   private newest = -Infinity;
   private unbound: TreeProcess[] = []; // the last applied read's unbound direct children that are not Bash wrappers
@@ -183,10 +202,13 @@ export class Infrastructure {
     return this.unbound.length > 0 && this.unboundEarly;
   }
 
-  // The bindings an adopter would restore: every server's process (a hello's bridge is named again by the observer's
-  // next hello).
+  // The bindings an adopter would restore: every server's process and the argv-bound bridge (a hello's bridge is named
+  // again by the observer's next hello).
   bindings(): Binding[] {
-    return [...this.servers.values(), ...this.counted.values()].map(({ pid, start }) => ({ pid, start, kind: 'server' as const }));
+    return [
+      ...[...this.servers.values(), ...this.counted.values()].map(({ pid, start }) => ({ pid, start, kind: 'server' as const })),
+      ...(this.bridgeArgv === null ? [] : [{ pid: this.bridgeArgv.pid, start: this.bridgeArgv.start, kind: 'bridge' as const }]),
+    ];
   }
 
   // The bindings when they changed since the last call (or the restored set), else null: what the caller saves.
@@ -223,10 +245,11 @@ export class Infrastructure {
       if (this.bridges.get(pid) && p !== undefined) bound.add(pid);
     }
     if (this.restored !== null) {
-      for (const { pid, start } of this.restored) {
+      for (const { pid, start, kind } of this.restored) {
         const p = tree.get(pid);
         if (p === undefined || p.start !== start || p.ppid !== claudePid || p.stat.startsWith('Z')) continue;
-        this.counted.set(pid, { pid, start, ppid: claudePid });
+        if (kind === 'server') this.counted.set(pid, { pid, start, ppid: claudePid });
+        else if (kind === 'bridge') this.bridgeArgv = { pid, start, ppid: claudePid };
       }
       this.restored = null;
     }
@@ -244,7 +267,14 @@ export class Infrastructure {
       if (live(identity) === null) this.counted.delete(pid);
       else bound.add(pid);
     }
+    // D69: the bridge by its argv, superseded by any hello that names a pid; one process at a time
+    if (registered.pids.size > 0 || (this.bridgeArgv !== null && live(this.bridgeArgv) === null)) this.bridgeArgv = null;
     const children = [...tree.values()].filter((p) => p.ppid === claudePid && !p.stat.startsWith('Z'));
+    if (registered.pids.size === 0 && this.bridgeArgv === null) {
+      const p = children.find((child) => !bound.has(child.pid) && isBridgeOf(child.command, registered.sessionIds ?? NO_IDS));
+      if (p !== undefined) this.bridgeArgv = { pid: p.pid, start: p.start, ppid: p.ppid };
+    }
+    if (this.bridgeArgv !== null) bound.add(this.bridgeArgv.pid);
     // by command line: a process bound by count (or restored) that matches a server's argv takes that server's index, so a
     // second process matching it while the first lives stays work
     registered.mcpCommands.forEach((argv, i) => {
@@ -283,9 +313,10 @@ function startMs(start: string): number | null {
 // of a kind this build does not know.
 export function restoredBindings(record: InfrastructureRecord | null, launchId: string): Binding[] {
   if (record === null || record.launch !== launchId) return [];
-  return record.processes.flatMap(({ pid, start, kind }) => (kind === 'server' ? [{ pid, start, kind }] : []));
+  return record.processes.flatMap(({ pid, start, kind }) => (kind === 'server' || kind === 'bridge' ? [{ pid, start, kind }] : []));
 }
 
+const NO_IDS: ReadonlySet<string> = new Set();
 const keyOf = (bindings: readonly Binding[]): string => bindings.map((b) => `${b.kind}:${b.pid}@${b.start}`).sort().join(',');
 
 // The processes under `claudePid` that are its work, from a single read (no binding carried over).

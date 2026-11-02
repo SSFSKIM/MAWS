@@ -277,9 +277,9 @@ describe('the work under the engine', () => {
 
 // The plan's D69: the registration after landing, over the owner's server shapes as the veto probe recorded them
 // (spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl) and the live MacBook's tree: cua's bare `node`,
-// ptc's launcher exec'd into its venv's python (no configured command line matches it) and a configured absolute path.
-// Each is claude's direct child, spawned in the same second as claude; a background Bash is claude's Bash wrapper with
-// its command under it.
+// ptc's launcher exec'd into its venv's python (no configured command line matches it), a configured absolute path, and
+// sminos's bridge child with no observer hello (sminos 1.31.0 has none yet). Each is claude's direct child, spawned in the
+// same second as claude; a background Bash is claude's Bash wrapper with its command under it.
 describe('D69: the owner’s server shapes on a fresh launch', () => {
   const BORN = 'Mon Nov  2 14:26:56 2026';
   const HOUR = 'Mon Nov  2 15:31:40 2026';
@@ -294,11 +294,13 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
     { name: 'notion', status: 'connected', scope: 'dynamic', config: { type: 'http', url: 'https://mcp.notion.com/mcp' } },
     { name: 'maws', status: 'connected', scope: 'dynamic', transport: 'sdk' },
   ];
+  const SESSION = `${PINNED.slice(0, -1)}0`; // row a's engine session id
   const resting = () => [
     at(ENGINE, 1, BORN, '/u/.local/share/claude/versions/2.1.316 -p --input-format stream-json'),
     at(820, ENGINE, BORN, `node ${CUA.join(' ')}`),
     at(821, ENGINE, BORN, '/u/.ptc/venvs/4c410075651a/bin/python -m ptc.mcp'),
     at(822, ENGINE, BORN, `/usr/bin/node ${ABS.join(' ')}`),
+    at(823, ENGINE, BORN, `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /u/.claude/plugins/cache/doperpowers/sminos/1.31.0/skills/sminos/scripts/sminos.py bridge --session ${SESSION} --launch=k9vHeE6YTaP3bkSm5E93tw`),
   ];
   const BASH = [at(830, ENGINE, HOUR, "/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1793629565532-co9nny.sh 2>/dev/null || true && eval 'sleep 600'"), at(831, 830, HOUR, 'sleep 600')];
   const work = (x: Row) => x.session.status().work?.descendants;
@@ -356,16 +358,20 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
     expect(releasing(s.a!)).toBe(false);
   });
 
-  it('the bindings are kept in the state file for an adopter', async () => {
+  it('the bridge bound by its argv stays bound when its observer’s hello names it, and the bindings are kept for an adopter', async () => {
     const store = new MemorySessionStateStore();
     const { table, s } = await rows(['a'], { servers: SERVERS, store });
     tree = resting();
     await table.sampleMemory();
     await until(() => work(s.a!) === 0, 'the servers bound');
-    await until(() => (store.infrastructure.get('a' as AppSessionId)?.processes.length ?? 0) === 3, 'the bindings saved');
+    await until(() => (store.infrastructure.get('a' as AppSessionId)?.processes.length ?? 0) === 4, 'the bindings saved');
     expect(store.infrastructure.get('a' as AppSessionId)).toEqual({ launch: s.a!.session.status().launchId, processes: expect.arrayContaining([
-      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' },
+      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' }, { pid: 823, start: BORN, kind: 'bridge' },
     ]) });
+    await observe(s.a!, { childPid: 823 });
+    await table.sampleMemory();
+    expect(work(s.a!)).toBe(0);
+    await until(() => store.infrastructure.get('a' as AppSessionId)?.processes.length === 3, 'the bridge left to its hello');
   });
 });
 

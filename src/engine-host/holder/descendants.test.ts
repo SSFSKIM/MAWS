@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { countWork, expectedArgv, Infrastructure, isBashWrapper, matchesArgv, parseTree, PS_TREE_ARGS, readTreeSync, restoredBindings, SERVER_SPAWN_WINDOW_MS } from './descendants';
+import { countWork, expectedArgv, Infrastructure, isBashWrapper, isBridgeOf, matchesArgv, parseTree, PS_TREE_ARGS, readTreeSync, restoredBindings, SERVER_SPAWN_WINDOW_MS } from './descendants';
 
 const CLAUDE = 500;
 const MCP: string[][] = [['/usr/bin/node', '/tmp/o16-mcp.mjs', 'user'], ['/usr/bin/node', '/tmp/o16-mcp.mjs', 'flag']];
@@ -172,10 +172,11 @@ describe('the registration is bound by identity, pid and start time', () => {
 // D69 (the veto's registration after landing): the owner's server shapes as the veto probe recorded them
 // (spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl, the live MacBook's tree in the plan's D69): a
 // bare command (cua's `node --disable-sigusr1 …/cua-shim.mjs`), a launcher that execs another binary (ptc's
-// `…/bin/ptc-launch`, running as its venv's python), a configured absolute path, and sminos's bridge child (named by
-// its observer's hello here). Every process of a server is a direct child of claude spawned within a second of claude.
-describe('D69: the count rule and the restored bindings', () => {
+// `…/bin/ptc-launch`, running as its venv's python), a configured absolute path, and sminos's bridge before its
+// observer says hello. Every process of a server is a direct child of claude spawned within a second of claude itself.
+describe('D69: the bridge by its argv, the count rule, the restored bindings', () => {
   const SESSION = '06b89407-68e7-4316-adcd-b62748ee9b3a';
+  const IDS = new Set([SESSION]);
   const BORN = 'Mon Nov  2 14:26:56 2026';
   const SOON = 'Mon Nov  2 14:26:57 2026';
   const HOUR = 'Mon Nov  2 15:30:02 2026';
@@ -193,7 +194,7 @@ describe('D69: the count rule and the restored bindings', () => {
     lined(505, CLAUDE, SOON, BRIDGE),
     ...extra,
   ].join('\n'));
-  const fresh = { pids: new Set([505]), mcpCommands: [CUA, PTC, ABS] };
+  const fresh = { pids: new Set<number>(), mcpCommands: [CUA, PTC, ABS], sessionIds: IDS };
   const all = { connected: 3, pending: 0 };
 
   it('claude’s Bash wrapper shape, and nothing else', () => {
@@ -205,7 +206,20 @@ describe('D69: the count rule and the restored bindings', () => {
     expect(isBashWrapper('node /x/shell-snapshots/snapshot-bash-1.sh')).toBe(false);
   });
 
-  it('a fresh launch: cua and the absolute server by command line, ptc by count once mcp_status settles', () => {
+  it('the bridge: `sminos` or `sminos.py`, first or after its interpreter, then `bridge --session` and one of the row’s ids', () => {
+    expect(isBridgeOf(BRIDGE, IDS)).toBe(true);
+    expect(isBridgeOf(`bash /p/sminos/skills/sminos/scripts/sminos bridge --session ${SESSION} --lane match`, IDS)).toBe(true); // before its exec
+    expect(isBridgeOf(`/p/scripts/sminos bridge --session ${SESSION}`, IDS)).toBe(true);
+    expect(isBridgeOf(BRIDGE, new Set(['another-session']))).toBe(false);
+    expect(isBridgeOf(BRIDGE, new Set())).toBe(false);
+    expect(isBridgeOf(`python3 /p/sminos.py watch --session ${SESSION}`, IDS)).toBe(false);
+    expect(isBridgeOf(`python3 /p/not-sminos.py bridge --session ${SESSION}`, IDS)).toBe(false);
+    expect(isBridgeOf(`/bin/bash -c sminos bridge --session ${SESSION}`, IDS)).toBe(false); // a shell's -c, not the bridge
+    expect(isBridgeOf(`python3 -I /p/sminos.py bridge --session ${SESSION}`, IDS)).toBe(false); // not first or second: stays work
+    expect(isBridgeOf(`/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1-x.sh && sminos bridge --session ${SESSION}`, IDS)).toBe(false);
+  });
+
+  it('a fresh launch: cua and the absolute server by command line, the bridge by its argv, ptc by count once mcp_status settles', () => {
     const infra = new Infrastructure();
     expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // ptc's python matches no configured command line (it and its kernel)
     expect(infra.unnamed.map((p) => p.pid)).toEqual([502]);
@@ -213,7 +227,7 @@ describe('D69: the count rule and the restored bindings', () => {
     expect(infra.settle(owner(), CLAUDE, fresh, { connected: 3, pending: 1 })).toBe(2); // a server still pending: nothing by count
     expect(infra.settle(owner(), CLAUDE, fresh, all)).toBe(0);
     expect(infra.count(owner(), CLAUDE, fresh)).toBe(0); // bound by identity from then on, its kernel with it (D52)
-    expect(infra.bindings()).toEqual(expect.arrayContaining([{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }]));
+    expect(infra.bindings()).toEqual(expect.arrayContaining([{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 505, start: SOON, kind: 'bridge' }]));
   });
 
   it('a background Bash keeps counting, and never stops the count from binding the servers', () => {
@@ -225,7 +239,7 @@ describe('D69: the count rule and the restored bindings', () => {
     expect(infra.count(owner(), CLAUDE, fresh)).toBe(0);
   });
 
-  it('the count binds nothing while any other child is unnamed: a hook, a second server-like child, another bridge', () => {
+  it('the count binds nothing while any other child is unnamed: a hook, a second server-like child, the bridge of another session', () => {
     for (const extra of [lined(610, CLAUDE, SOON, '/bin/sh -c "${CLAUDE_PLUGIN_ROOT}/hooks/smns-record.sh"'), lined(611, CLAUDE, SOON, '/x/other-server --stdio'), lined(612, CLAUDE, SOON, BRIDGE.replace(SESSION, 'another-session'))]) {
       const infra = new Infrastructure();
       expect(infra.settle(owner(extra), CLAUDE, fresh, all)).toBe(3); // ptc, its kernel and the stranger
@@ -256,10 +270,21 @@ describe('D69: the count rule and the restored bindings', () => {
     expect(infra.count(teammate, CLAUDE, fresh)).toBe(1);
   });
 
+  it('the bridge: one process at a time, rebound once gone; a hello naming a pid supersedes it', () => {
+    const infra = new Infrastructure();
+    const second = lined(506, CLAUDE, HOUR, BRIDGE);
+    expect(infra.count(owner(second), CLAUDE, { ...fresh, mcpCommands: [CUA, ABS] })).toBe(3); // ptc and its kernel, and the second bridge
+    const restarted = parseTree([lined(CLAUDE, 1, BORN, 'claude'), second].join('\n'));
+    expect(infra.count(restarted, CLAUDE, fresh)).toBe(0); // the first gone: the next one is the bridge
+    expect(infra.count(restarted, CLAUDE, { ...fresh, pids: new Set([506]) })).toBe(0); // the hello names it
+    expect(infra.bindings()).toEqual([]); // the hello's bridge is named again by the next hello, never restored
+    expect(infra.count(owner(), CLAUDE, { ...fresh, pids: new Set([777]) })).toBe(3); // a hello naming another pid: the argv's bridge is work (ptc and its kernel unbound)
+  });
+
   it('an adopter restores the bindings of the same processes: a bare command and an exec’d launcher without any command line', () => {
-    const rebuilt = { pids: new Set([505]), mcpCommands: [ABS] }; // a bare command dropped
-    const restored = restoredBindings({ launch: 'L1', processes: [{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 9, start: BORN, kind: 'lsp' }] }, 'L1');
-    expect(restored).toHaveLength(3); // a kind this build does not know is skipped
+    const rebuilt = { pids: new Set<number>(), mcpCommands: [ABS], sessionIds: new Set<string>() }; // a bare command dropped, the lineage not yet read
+    const restored = restoredBindings({ launch: 'L1', processes: [{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 505, start: SOON, kind: 'bridge' }, { pid: 9, start: BORN, kind: 'lsp' }] }, 'L1');
+    expect(restored).toHaveLength(4); // a kind this build does not know is skipped
     expect(restoredBindings({ launch: 'L0', processes: [{ pid: 501, start: BORN, kind: 'server' }] }, 'L1')).toEqual([]); // another launch's
     const infra = new Infrastructure(restored);
     expect(infra.count(owner(), CLAUDE, rebuilt)).toBe(0);
@@ -270,10 +295,10 @@ describe('D69: the count rule and the restored bindings', () => {
   it('the bindings are offered for saving when they change, and only then', () => {
     const infra = new Infrastructure();
     infra.count(owner(), CLAUDE, fresh);
-    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 504]);
+    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 504, 505]);
     expect(infra.changed()).toBeNull();
     infra.settle(owner(), CLAUDE, fresh, all);
-    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 502, 504]);
+    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 502, 504, 505]);
   });
 });
 
