@@ -3,11 +3,14 @@
 // the host's hold and answers an unforgeable handle bound to the asking window: another window cannot release it, and the
 // window's closing, navigating or crashing releases every hold it took, released or not by its page. A hold that lands
 // after its window went is released at once; the host's going takes its holds with it, so main forgets theirs.
+// P5 O7 M5c round 3: another machine's artifact is held on its machine, over that machine's link (the endpoint's
+// per-channel holds, behind `rl2.asset-holds`); a machine whose endpoint doesn't list it draws unheld, said once.
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { commands } from '@shared/ipc/schema/artifacts';
+import type { MachineRef } from '@shared/machine/ref';
 import { CommandFailure } from '../ipc/router';
 import { clientOf } from '../ipc/clients';
 import { createDatasetHolds } from './holds';
@@ -127,6 +130,136 @@ describe('a window’s dataset holds (E3)', () => {
     holds.hostLost();
     h.call.mockClear();
     expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });
+    expect(h.call).not.toHaveBeenCalled();
+  });
+});
+
+const REMOTE_ID = '00000000-0000-4000-8000-0000000000e2';
+const MINI = 'mini-machine-ref-0001' as MachineRef;
+
+/** Another machine's link as main's holds reach it: its current channel (the peer's list, one array per channel) and its calls. */
+function machineLink(capabilities: readonly string[] = ['rl2.artifacts', 'rl2.asset-holds']) {
+  const held = new Set<string>();
+  const asked: Array<{ name: string; input: unknown; options: unknown }> = [];
+  let next = 0;
+  let channel: readonly string[] | null = [...capabilities];
+  let gate: Promise<void> | null = null;
+  const link = {
+    name: 'mini',
+    peerCapabilities: () => channel,
+    call: vi.fn(async (name: string, input: unknown, options?: unknown) => {
+      asked.push({ name, input, options });
+      if (name === 'artifacts.holdAssets') {
+        if (gate) await gate;
+        const assetHoldId = `00000000-0000-4000-9000-${String(++next).padStart(12, '0')}`;
+        held.add(assetHoldId);
+        return { ok: true as const, output: { assetHoldId } };
+      }
+      if (name === 'artifacts.releaseAssets') return { ok: true as const, output: { released: held.delete((input as { assetHoldId: string }).assetHoldId) } };
+      return { ok: false as const, error: { code: 'not-offered' } };
+    }),
+  };
+  return {
+    link,
+    held,
+    asked,
+    /** The channel replaced by the next one (the endpoint released every hold of the old one with it). */
+    relink: () => {
+      channel = [...capabilities];
+      held.clear();
+    },
+    hold: (until: Promise<void> | null) => (gate = until),
+  };
+}
+
+describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
+  const setup = (capabilities?: readonly string[]) => {
+    const h = host();
+    const m = machineLink(capabilities);
+    const log: string[] = [];
+    const holds = createDatasetHolds({
+      call: h.call as never,
+      log: (line) => log.push(line),
+      machineOf: (artifactId) => (artifactId === REMOTE_ID ? MINI : null),
+      remote: (machine) => (machine === MINI ? (m.link as never) : null),
+    });
+    return { h, m, log, holds };
+  };
+
+  it('takes a remote artifact’s hold on its machine, on the channel current, and a local one on this Mac’s host', async () => {
+    const { h, m, holds } = setup();
+    const window = new Window(20);
+    const remote = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    expect(m.asked).toEqual([{ name: 'artifacts.holdAssets', input: { artifactId: REMOTE_ID, refs: ['assets/a.json'] }, options: { oneChannel: true } }]);
+    expect(h.call).not.toHaveBeenCalled();
+    expect(m.held.size).toBe(1);
+    expect(remote.holdId).not.toBe([...m.held][0]); // the machine's id never reaches the window either
+    const local = await holds.hold({ artifactId: ID, refs: ['assets/b.json'] }, owner(window));
+    expect(h.log).toEqual(['hold assets/b.json']);
+    expect(m.asked).toHaveLength(1);
+    expect(await holds.release(remote, owner(window))).toEqual({ released: true });
+    expect(m.held.size).toBe(0);
+    expect(m.asked[1]).toMatchObject({ name: 'artifacts.releaseAssets', options: { oneChannel: true } });
+    expect(await holds.release(local, owner(window))).toEqual({ released: true });
+    expect(h.held.size).toBe(0);
+  });
+
+  it('releases a closed window’s remote holds on their machine', async () => {
+    const { m, holds } = setup();
+    const window = new Window(21);
+    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    expect(m.held.size).toBe(1);
+    window.destroy();
+    await vi.waitFor(() => expect(m.held.size).toBe(0));
+  });
+
+  it('asks nothing of a channel that ended: the endpoint released its holds, and a hold answered after it is refused', async () => {
+    const { m, holds } = setup();
+    const window = new Window(22);
+    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    m.relink();
+    m.link.call.mockClear();
+    expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });
+    expect(m.link.call).not.toHaveBeenCalled();
+    let open!: () => void;
+    m.hold(new Promise<void>((resolve) => (open = resolve)));
+    const late = holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window));
+    await vi.waitFor(() => expect(m.link.call).toHaveBeenCalledTimes(1));
+    m.relink();
+    open();
+    await expect(late).rejects.toThrow(/made again/);
+    expect(m.link.call).toHaveBeenCalledTimes(1); // no release on the next channel: the hold was the ended one's
+  });
+
+  it('keeps remote holds when this Mac’s engine host goes (it held none of them)', async () => {
+    const { m, holds } = setup();
+    const window = new Window(23);
+    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    expect(m.held.size).toBe(1);
+    holds.hostLost();
+    expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });
+    expect(m.held.size).toBe(0);
+  });
+
+  it('draws unheld on a machine whose endpoint holds nothing for a device (no `rl2.asset-holds`), saying so once for the machine', async () => {
+    const { h, m, log, holds } = setup(['rl2.artifacts']);
+    const window = new Window(24);
+    const one = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window));
+    expect(m.link.call).not.toHaveBeenCalled();
+    expect(h.call).not.toHaveBeenCalled();
+    expect(log.filter((line) => line.includes('mini'))).toHaveLength(1);
+    expect(log[0]).toMatch(/unheld/);
+    expect(await holds.release(one, owner(window))).toEqual({ released: true });
+    expect(m.link.call).not.toHaveBeenCalled();
+  });
+
+  it('refuses a remote artifact’s hold while no link or no channel reaches its machine', async () => {
+    const h = host();
+    const holds = createDatasetHolds({ call: h.call as never, machineOf: () => MINI, remote: () => null });
+    const refused = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(new Window(25))).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(CommandFailure);
+    expect((refused as CommandFailure).error.code).toBe('host_unavailable');
     expect(h.call).not.toHaveBeenCalled();
   });
 });

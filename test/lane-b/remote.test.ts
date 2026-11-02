@@ -53,6 +53,8 @@ import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
 import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
+import { fakeAssetHolds } from '../endpoint/fake-services';
+import { createDatasetHolds } from '../../src/main/dashboard/holds';
 import { item, project, record, status } from '../support/builders';
 import { fakeBus } from '../support/fake-bus';
 import { CONNECTOR_ART, CONNECTOR_FP, FakeConnectorHost } from '../support/fake-connector-host';
@@ -2492,5 +2494,39 @@ describe('O4’s surfaces across machines (P5 O7 M5c)', { timeout: 30_000 }, () 
     expect(m.exported.every((path) => !existsSync(path))).toBe(true); // the export made on the machine, removed after the send
     await until(() => l.a.emitted.some((e) => e.name === 'delivery.receipt' && e.payload.artifactId === LIVE), 'the receipt from the machine');
     expect(l.a.confirmed).toEqual([]); // `manage`: no step-up
+  });
+});
+
+// P5 O7 M5c round 3: a remote dashboard's snapshot holds, main's (src/main/dashboard/holds.ts) over the real link to the
+// real endpoint (src/endpoint/asset-holds.ts), the machine's engine host's holds as the endpoint suite's fake keeps them.
+describe('a remote dashboard’s snapshot holds (P5 O7 M5c)', { timeout: 30_000 }, () => {
+  const BOARD = '7c1f0c4e-6b2d-4c8a-9e1f-2b3c4d5e6f71';
+
+  it('holds another machine’s snapshot there for the window, released by it; a forced drop takes the channel’s holds, and main asks nothing of the next', async () => {
+    const l = await lab({ link: { UP_GRACE_MS: 100, BACKOFF_MS: [0, 100, 100] } });
+    l.host.add('app-1');
+    l.place('app-1');
+    l.host.artifact(BOARD, ['app-1'], { kind: 'dashboard' });
+    const machine = l.f.ref as MachineRef;
+    const host = fakeAssetHolds(l.f.services);
+    const holds = createDatasetHolds({ call: () => Promise.reject(new Error('this Mac’s host holds nothing of the machine')), machineOf: (id) => (id === BOARD ? machine : null), remote: (ref) => (ref === machine ? l.a.link : null) });
+    const { client } = l.a.page('page-board');
+    const first = await holds.hold({ artifactId: BOARD, refs: ['assets/query-1.json'] }, client);
+    expect(host.held(BOARD, 'assets/query-1.json')).toBe(true);
+    expect(await holds.release(first, client)).toEqual({ released: true });
+    expect(host.released()).toBe(1);
+
+    const second = await holds.hold({ artifactId: BOARD, refs: ['assets/query-2.json'] }, client);
+    const was = l.a.link.peerCapabilities();
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => host.released() === 2, 'the endpoint’s release of the dropped channel’s hold');
+    await until(() => l.a.link.state() === 'up' && l.a.link.peerCapabilities() !== null && l.a.link.peerCapabilities() !== was, 'the next channel');
+    const asked = host.releaseAsked();
+    expect(await holds.release(second, client)).toEqual({ released: true });
+    expect(host.releaseAsked()).toBe(asked); // the hold was the ended channel's: nothing asked of the next
+
+    await holds.hold({ artifactId: BOARD, refs: ['assets/query-3.json'] }, client); // on the next channel
+    client.end();
+    await until(() => host.released() === 3, 'the window’s end released its hold on the machine');
   });
 });

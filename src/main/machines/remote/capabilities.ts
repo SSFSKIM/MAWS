@@ -28,6 +28,9 @@ export const DEVICE_CAPABILITIES = [
   // M5c: the client port across the channel: the endpoint's `client` (a machine service's request of this device: a
   // consent page to open) and this device's `clientAnswer`.
   'rl2.client-port',
+  // M5c (round 3): a remote dashboard's snapshot holds (`artifacts.holdAssets`, `releaseAssets`), asked by main alone and
+  // only of an endpoint that listed it; without it the dashboard draws unheld (src/main/dashboard/holds.ts).
+  'rl2.asset-holds',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 

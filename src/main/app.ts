@@ -846,6 +846,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     'dataset-holds',
     registerDatasetHolds(registerMainHandler, {
       call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      // P5 O7 M5c: another machine's artifact is held on that machine, over its link
+      machineOf: (artifactId) => artifactMachines.machineOf(artifactId),
+      remote: (machine) => machines.remote(machine),
       onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
     }),
   );
