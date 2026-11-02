@@ -35,7 +35,8 @@ function codecKey(value: Record<string, unknown>): string | null {
   return keys.length === 1 && (keys[0] === BYTES_KEY || keys[0] === ESCAPE_KEY) ? keys[0] : null;
 }
 
-function needsCodec(value: unknown): boolean {
+/** Whether `value` crosses differently through the codec: a Uint8Array anywhere in it, or a look-alike it escapes. */
+export function needsCodec(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   if (value instanceof Uint8Array) return true;
   if (Array.isArray(value)) return value.some(needsCodec);

@@ -52,8 +52,8 @@ import type { OrgSession, SignedIn } from '../../org/session';
 import type { CommandBudgets } from '../budgets';
 import type { LinkState, MachineLink } from '../manager';
 import { ActTable, type ActHandle, type ActRequest } from './acts';
-import { fromWire, toWire } from '@shared/host/json-bytes';
-import { ANSWERS_BYTES, needsTagging } from './bytes';
+import { fromWire, needsCodec, toWire } from '@shared/host/json-bytes';
+import { ANSWERS_BYTES } from './bytes';
 import { peerLists } from './capabilities';
 import { CARRIER_CLOSED, dialDirect as dialDirectCarrier, isTailnetAddress, openRelaySocket, raceDirect, RelayUpgradeError, type RelaySocket } from './carriers';
 import { dispatchOverLink } from './dispatch';
@@ -708,7 +708,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     const fellBack = pending.lacking !== undefined && peerCapabilities()?.includes(pending.lacking.capability) !== true;
     const input = fellBack ? pending.lacking!.input : pending.input;
     // P5 O7 M5a: bytes, in the input or the answer, cross only to a peer that tags them (./bytes.ts)
-    const tagged = needsTagging(input);
+    const tagged = needsCodec(input);
     if ((tagged || ANSWERS_BYTES.has(pending.name)) && !peerLists({ peerCapabilities }, 'rl2.bytes')) {
       calls.delete(pending.id);
       clearTimeout(pending.timer);

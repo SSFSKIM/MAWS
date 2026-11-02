@@ -32,8 +32,8 @@
 import { base64urlEncode, isAction, MESSAGE_MAX_BYTES, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
-import { fromWire, toWire } from '@shared/host/json-bytes';
-import { BYTES_CAPABILITY, needsTagging } from './bytes';
+import { fromWire, needsCodec, toWire } from '@shared/host/json-bytes';
+import { BYTES_CAPABILITY } from './bytes';
 import { peerTakesExecutor } from './capabilities';
 import type { RemoteTiming } from './timing';
 
@@ -157,7 +157,7 @@ export class ActTable {
     const createdAt = now();
     const opCreated = new Date(createdAt).toISOString();
     const signedIn = this.#deps.signedIn();
-    const tagged = needsTagging(request.args);
+    const tagged = needsCodec(request.args);
     const action = {
       v: 1,
       org: signedIn?.identity.org ?? '',
