@@ -861,3 +861,29 @@ describe('a stop-all by the machine link', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 });
+
+// P5 O16 wave 1 verification (group D's handover mark, scoped by owner): the engine host's word that it handed its
+// sessions over (`holder.detached`) is kept until its own close is classified; a welcome of another owner's host (the pty
+// host's reconnect, in `mawsd`) is no news about it and must not erase it, or the clean handover reads as a crash
+describe('a handover mark across two owners', () => {
+  it('a pty host welcomed between the engine host’s handover and its close leaves the mark: the close is planned', async () => {
+    const at = siblingProfile('pty-host');
+    const pty = await startFake({}, at);
+    const engine = await startFake();
+    const supervisor = makeSupervisor({ 'engine-host': {}, 'pty-host': { detached: detachedOptions({ files: filesOf(at), start: { kind: 'none' } }) } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && supervisor.snapshot('pty-host').state === 'ready');
+    const said = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // its word, heard alone (`handover` none: no take-back on this link, which a draining status would start), as another
+    // client's handover leaves it (`mawsd restart --engine-host` on the daemon shape)
+    const detached = { ...engine.status(), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'none', inFlight: 0, detached: true } };
+    await until(() => engine.emit('host.supervisorStatus', detached as never));
+    await until(() => emitted.some(([name, payload]) => name === 'host.supervisorStatus' && (payload as { holder?: { detached?: boolean } }).holder?.detached === true));
+    pty.dropClient(); // the pty host's link lost quietly: it lives, and is welcomed again
+    await until(() => pty.connections.length === 2 && supervisor.snapshot('pty-host').state === 'ready');
+    await engine.die({ keepLock: true }); // the engine host leaves after its handover, its successor spawned
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && fakes.length === 3);
+    expect(said.mock.calls.flat().join('\n')).toContain('left after handing its sessions over');
+    expect([supervisor.snapshot('engine-host').restarts, supervisor.facts('engine-host').lastExit]).toEqual([0, null]);
+  });
+});

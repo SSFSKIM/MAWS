@@ -338,10 +338,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // before the exit), never on the intent (`draining`), so a host killed mid-drain is a crash. The panel fix (scalpel-4#6):
   // by process incarnation (the status's pid and `startedAt`, as its welcome declared them), so a later process reusing
   // the pid never inherits the mark; dropped once its process is gone (processGone) or another is welcomed (connected)
-  const handedOver = new Set<StartedAtKey>();
+  // Wave 1 verification: each mark keyed by its owner too, so a welcome clears its own owner's stale marks alone (a pty
+  // host's welcome in `mawsd` is no news about the engine host). Only the engine host's status carries `holder`.
+  const handedOver = new Map<StartedAtKey, HostOwner>();
   const noteHandover = (status: SupervisorStatus) => {
     const incarnation = startedAtKey(status.pid, status.startedAt);
-    if (status.holder?.detached === true) handedOver.add(incarnation);
+    if (status.holder?.detached === true) handedOver.set(incarnation, 'engine-host');
     else handedOver.delete(incarnation);
   };
   let utilitySpawns = 0; // the panel fix: a utility host's incarnation, which declares no start of its own
@@ -752,7 +754,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // so a held stop-all marks that drain's close (D61(4)) rather than an exit now
         // the panel fix (scalpel-4#6): a welcome names its process; a handover mark of any other one is stale from here
         const incarnation = startedAtKey(welcome.pid, welcome.startedAt);
-        for (const marked of handedOver) if (marked !== incarnation) handedOver.delete(marked);
+        for (const [marked, owner] of handedOver) if (owner === host.owner && marked !== incarnation) handedOver.delete(marked);
         if (facts?.draining && host.transport) {
           host.settleFirstLaunch();
           settle(host); // a recycle reached it
