@@ -415,7 +415,7 @@ describe('host.artifactOp over the host’s own registration', () => {
     const writes = keepArtifactWrites(hostOn);
     const documents = openDocuments(dir, () => {});
     const surface = registerArtifacts(writes.on, emit, { onDocPort: () => {} }, { documents, env: {} });
-    registerEngineIpc(writes.on, emit, { userData: dir, cwd: REPO_ROOT, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, artifactWrite: writes.handler });
+    registerEngineIpc(writes.on, emit, { userData: dir, replayEnabled: false, cwd: REPO_ROOT, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, artifactWrite: writes.handler });
     try {
       for (const name of ARTIFACT_OP_COMMANDS) expect(writes.handler(name), name).toBe(handlers.get(name));
       expect(writes.handler('artifacts.get')).toBeUndefined(); // the lookup holds the writes alone
