@@ -176,6 +176,9 @@
 | `RemoteLink` keeps its last 512 pongs' stamps; a bench `ping()` apart from `probe()` (one exchange per channel per millisecond, at most 16 pending, settled at a carrier swap) | main's remote link (`src/main/machines/remote/link.ts`) | O7 | the remote benches (`e2e:remote-latency`, `e2e:remote-latency-live`) |
 | `relayOnlyDial(env, packaged)`, `installRemoteBenchSeam(env, packaged, {machines, link})`: e2e-only seams, installed only with `MAWS_E2E=1` in an unpackaged build | main's bench seam (`src/main/machines/remote/bench-seam.ts`) | O7 | O7's benches only; any later child adding an e2e seam to main follows the same gate |
 | `e2e:remote-latency` (`MEASURED_E2E`, the mini under CI-opt), `e2e:remote-latency-check` (hosted, no bounds), `e2e:remote-latency-live` (the owner's sitting) | CI groups (`.github`, `package.json`) | O7 | CI-opt (books the measured group), the desk track (the sitting's bench conditions) |
+| `RowReap`, `Infrastructure`, `session.restoredInfrastructure` and `saveInfrastructure`, and the per-launch `infrastructure {launch, processes}` the session persists and an adopter restores (the veto's bindings by pid, start time and parent `claude`) | the descendant veto (`src/engine-host/holder/descendants.ts`, `session.ts`, `process-table.ts`) | O16 | O17 (`process-table.ts`'s reaps), any child that adopts sessions |
+| `GateChannel.arm()` answering an arm id or null, `acknowledged(id)`, the listener's `armed(fence, armId)`, `Reap.confirmed()`, `session.reap('idle', {mayTerm})` and `reap('budget', {release})`, the journal's reap phases `end_session`, `term`, `term_ignored` and `term_withheld` | the gate and reap (`src/engine-host/holder/gate.ts`, `reap.ts`, `session.ts`) | O16 | O12 M4a and M4b (one `armed` per arm, in order), O17 (`process-table.ts`) |
+| `turnUnderWay(status)`, the one predicate the idle step's `isIdleRow` and the SIGTERM's re-read share | `src/engine-host/budget.ts` | O16 | O17 (its browser hold beside `holdsWork` in the same file) |
 
 ## Shared files and who goes first
 
@@ -273,3 +276,4 @@
 - 2026-11-02, the architect: O16 landed (PR #442, P5 Decision Log 200); its names from M3b onward added above.
 - 2026-11-02, the architect: O7 M5b landed (PR #445, P5 Decision Log 202); its names added above.
 - 2026-11-02, the architect: O7 M7 landed as code (PR #451, P5 Decision Log 204); its names added above.
+- 2026-11-02, the architect: O16's veto fix and gate and reap wave landed (PRs #448 and #449, P5 Decision Log 205); their names added above.
