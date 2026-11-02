@@ -25,6 +25,7 @@ import type { LinkState } from '../machines/manager';
 import { StreamTable, type StreamRequest, type StreamSink } from '../machines/remote/streams';
 import { createRemoteLaneB, routeLaneB } from '../lane-b/remote';
 import { ArtifactMachines } from './machines';
+import { createRemoteDocuments } from './remote-open';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const DOC = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
@@ -72,6 +73,8 @@ class Machine {
   readonly doc = newDoc();
   revision = 0;
   deaf = false;
+  /** Takes the device's bytes but refunds none: its credit runs out while the channel lives (milestone review item 4). */
+  stingy = false;
   cut = 64 * 1024;
   /** The endpoint's credit for the device's bytes, granted at each open. */
   grant = 256 * 1024;
@@ -160,9 +163,11 @@ class Channel {
     expect(bytes.byteLength, 'the device stays within the endpoint’s credit').toBeLessThanOrEqual(this.#grantLeft);
     this.#in += bytes.byteLength;
     this.#grantLeft -= bytes.byteLength;
-    // refunded as taken in, as the endpoint's plane does
-    this.#grantLeft += bytes.byteLength;
-    this.machine.link.hear({ t: 'streamCredit', id: this.id, bytes: bytes.byteLength });
+    // refunded as taken in, as the endpoint's plane does, unless the machine has stopped refunding
+    if (!this.machine.stingy) {
+      this.#grantLeft += bytes.byteLength;
+      this.machine.link.hear({ t: 'streamCredit', id: this.id, bytes: bytes.byteLength });
+    }
     for (const raw of this.#frames.push(bytes) ?? []) this.#frame(decodeFrame(raw));
   }
 
@@ -384,6 +389,49 @@ describe('a reopen', () => {
     await synced(s, r, 1);
     await vi.waitFor(() => expect(r.provider.state.unsaved).toBe(0));
     expect(text(s.machine.doc)).toBe('kept');
+  });
+});
+
+// Milestone review item 4: what the window writes waits for the machine's credit only up to a bound; past it the bridge
+// closes, and the provider's reopen carries what never landed
+describe('the window’s writes past the machine’s credit', () => {
+  it('close the bridge once more than the bound waits, retaining nothing, and the reopen carries the edits', async () => {
+    const s = scene();
+    const bound = 64 * 1024;
+    const documents = createRemoteDocuments({ channel: () => (([port1, port2]) => ({ port1, port2 }))(End.pair()) as never, outboundMax: bound, log: () => {} });
+    stops.push(() => documents.stop());
+    const client = clientOf(s.window as never);
+    const r = replica();
+    s.machine.grant = 4 * 1024; // the endpoint lets 4 KiB be in flight
+    const opening = documents.open(s.link, DOC, client);
+    const first = s.machine.accept(await s.machine.open(0));
+    const answered = await opening;
+    r.provider.connect(s.posted(answered.channel));
+    await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'live', synced: true }));
+    s.machine.stingy = true; // its channel lives; its credit doesn't come back
+    s.machine.deaf = true; // and what it took never lands
+    let closedAt = -1;
+    for (let n = 0; n < 12; n += 1) {
+      r.doc.get('root').insert(0, String(n).padStart(2, '0') + 'x'.repeat(16 * 1024));
+      await flush();
+      if (closedAt < 0 && documents.size === 0) closedAt = n;
+    }
+    // bounded: 4 KiB in flight and four 16 KiB edits waiting pass the 64 KiB bound, and the next edit ends the bridge
+    expect(closedAt, 'the bridge closed as the queue passed its bound').toBe(5);
+    expect(documents.size).toBe(0);
+    expect(s.link.table.size, 'the stream gone: nothing waits in main').toBe(0);
+    expect(s.link.closes(first.id)).toHaveLength(1);
+    expect(r.provider.state).toMatchObject({ phase: 'off' });
+    expect(r.provider.state.unsaved).toBeGreaterThan(0);
+    // the machine takes again; the window's reopen carries every edit
+    s.machine.stingy = false;
+    s.machine.deaf = false;
+    s.machine.grant = 256 * 1024; // the endpoint's own grant: the reopen's step 2 goes without waiting
+    const again = documents.open(s.link, DOC, client);
+    s.machine.accept(await s.machine.open(1));
+    r.provider.connect(s.posted((await again).channel));
+    await vi.waitFor(() => expect(r.provider.state).toMatchObject({ phase: 'live', synced: true, unsaved: 0 }));
+    for (let n = 0; n < 12; n += 1) expect(text(s.machine.doc)).toContain(String(n).padStart(2, '0') + 'x');
   });
 });
 

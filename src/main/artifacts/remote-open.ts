@@ -11,7 +11,8 @@
 //   forwards from a `view` port only what the endpoint would (step 1 and awareness), so a replica's local edits never
 //   reach a channel that would drop them and close.
 // - The frames. Each document frame (src/artifacts/provider/frames.ts) crosses length-prefixed (frame-stream.ts): the
-//   window's go into the stream, which sends within the endpoint's credit; the machine's are taken within the credit given
+//   window's go into the stream, which sends within the endpoint's credit and holds the rest up to DOCUMENT_OUTBOUND_MAX
+//   (past it the bridge ends: the host socket's own queue rule); the machine's are taken within the credit given
 //   at the open, refunded as they are taken in (one frame at most is assembled here), and posted to the window whole.
 // - The reopen is the window's. Any end of the stream (a carrier lost, the machine's `host`, `reset` or `upstream`, a
 //   re-check's `removed`, `behind`, `malformed`) closes the window's port, and the renderer's ArtifactHost opens again
@@ -46,6 +47,13 @@ import { notAnswered, notOffered, offline, OPEN_TIMEOUT_MS } from './remote-sche
 export const DOCUMENT_STREAM_CREDIT = 1024 * 1024;
 /** The largest frame either way, the endpoint's own bound (the engine host's socket resets a channel queued past it). */
 export const DOCUMENT_FRAME_MAX = DOC_HIGH_WATER;
+/**
+ * Milestone review item 4: the window's frames waiting here for the machine's credit, at most, as the engine host's own
+ * socket bounds its queue (src/shared/host/doc-channels.ts' `write`): a frame that comes while more than this waits closes
+ * the bridge, and one that comes while less waits is taken whole, whatever its size up to the frame maximum. A machine
+ * that keeps its channel but takes nothing can't grow main's memory; the reopen's step 2 carries what never landed.
+ */
+export const DOCUMENT_OUTBOUND_MAX = DOC_HIGH_WATER;
 /** An open not answered by then, from its start (the preflight and both stream attempts in it), is answered `timeout`: a page's bound. */
 export const DOCUMENT_OPEN_MS = OPEN_TIMEOUT_MS;
 
@@ -60,6 +68,8 @@ export interface RemoteDocumentsDeps {
   /** `new MessageChannelMain()` in the app. */
   channel(): Pick<MessageChannelMain, 'port1' | 'port2'>;
   openMs?: number;
+  /** DOCUMENT_OUTBOUND_MAX by default. */
+  outboundMax?: number;
   log(line: string): void;
 }
 
@@ -121,6 +131,7 @@ function preflightFailure(error: IpcError, machine: string): CommandFailure {
 
 export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocuments {
   const openMs = deps.openMs ?? DOCUMENT_OPEN_MS;
+  const outboundMax = deps.outboundMax ?? DOCUMENT_OUTBOUND_MAX;
   const bridges = new Set<Bridge>();
   // Review fix 3: the app's stop ends every open, those still before a bridge too, and answers every open after it
   let stopped = false;
@@ -223,7 +234,10 @@ export function createRemoteDocuments(deps: RemoteDocumentsDeps): RemoteDocument
         this.#dropped += 1;
         return;
       }
-      this.#stream?.send(lengthPrefixed(data));
+      if (this.#stream === null) return;
+      // review item 4: past the bound the machine isn't taking what it is sent; the bridge ends, the provider reopens
+      if (this.#stream.queued() > outboundMax) return this.end('behind');
+      this.#stream.send(lengthPrefixed(data));
     }
 
     #fromMachine(offset: number, bytes: Uint8Array): void {
