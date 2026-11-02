@@ -105,7 +105,7 @@ describe('host.browserWork (P5 O17 M7)', () => {
   it('a snapshot holds every live row it names and clears every other, each published through its session before the answer', async () => {
     const h = host();
     const [a, b, c] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902), await launch(h.table, 'c', 903)];
-    c.session.setBrowserHold('unknown');
+    c.session.setBrowserHold('unknown:lost');
     const published: EngineSessionStatus[] = [];
     h.table.onChange((status) => void published.push(status));
     const mawsd = h.link();
@@ -137,8 +137,9 @@ describe('host.browserWork (P5 O17 M7)', () => {
   it.each([
     ['its connection detached', (h: ReturnType<typeof host>) => h.runtime.detach(), 'unknown'],
     ['another mawsd served in its place', (h: ReturnType<typeof host>) => void h.runtime.serve(fakePort().port, DECLARING), 'unknown'],
-    // fix 2: a ready client that tells no browser work (main's own link here) leaves nothing to settle it: cleared
-    ['main served and ready in its place', (h: ReturnType<typeof host>) => void h.link(MAIN), null],
+    // fix 3: main's own link, ready in its place, clears no lost link's unknown (mawsd may still hold the tab); fix 2
+    // cleared it here
+    ['main served and ready in its place', (h: ReturnType<typeof host>) => void h.link(MAIN), 'unknown'],
   ])('the permanent link\'s end (%s, heard through the runtime) turns held into unknown; the next link\'s snapshot settles it', async (_how, end, after) => {
     const h = host();
     const [a, b] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902)];
@@ -174,7 +175,7 @@ describe('host.browserWork: the link lost while a snapshot applies, and what a l
   it('a publication that finds the client gone ends the link: every row the snapshot would hold reads unknown or stays as the end left it, none held on the dead link', async () => {
     const h = host({}, true);
     const [a, b, c] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902), await launch(h.table, 'c', 903)];
-    b.session.setBrowserHold('unknown'); // as an earlier link's end left it
+    b.session.setBrowserHold('unknown:lost'); // as an earlier link's end left it
     const mawsd = h.link(DECLARING, (message) => statusOf('a')(message) && holdOf(message) === 'held'); // a's held status writes nothing
     const answer = await mawsd.request('host.browserWork', { held: ['a', 'b', 'c'] });
     expect(answer).toMatchObject({ ok: true });
@@ -302,6 +303,70 @@ describe('the link\'s first snapshot, logged, and the e2e\'s hold on it (P5 O17 
   });
 });
 
+// P5 O17 M7 fix 3 (the architect's option (B)): `unknown` tagged by its cause. A lost link's (a held row whose capable
+// link ended) is cleared only by a declaring client that tells no browser work (another mawsd, a rolled-back one);
+// main's direct link leaves it, so the row is not released while mawsd may still hold its tab. An adoption's (a row
+// reserved while this host has had no capable client) is cleared by any ready client that tells none, main's included:
+// the embedded shape releases as before. A capable client's first snapshot settles both.
+describe('host.browserWork: unknown by its cause (P5 O17 M7 fix 3)', () => {
+  const IDLE_MS = 10 * 60_000;
+  async function idleHost() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(new Date('2026-11-02T10:00:00.000Z'));
+    const h = host();
+    const a = await launch(h.table, 'a');
+    await vi.advanceTimersByTimeAsync(0);
+    return { h, a };
+  }
+
+  it('a lost link\'s unknown: main\'s direct link, ready in its place, clears nothing, and the row is not released past its idle time', async () => {
+    const { h, a } = await idleHost();
+    await h.link().request('host.browserWork', { held: ['a'] });
+    h.runtime.detach(); // mawsd's link lost, mawsd and its render host's tab still alive
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    const main = h.link(MAIN); // main reaches the engine host directly before mawsd reconnects
+    expect(browser(a)).toBe('unknown');
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(2 * IDLE_MS);
+    expect(a.transport.requestsOf('end_session')).toEqual([]);
+    expect(main.events('host.browserIdle')).toEqual([]);
+  });
+
+  it('the rollback: a declaring client that tells no browser work clears a lost link\'s unknown, and the row is released when idle', async () => {
+    const { h, a } = await idleHost();
+    await h.link().request('host.browserWork', { held: ['a'] });
+    h.runtime.detach();
+    h.link(MAIN);
+    expect(browser(a)).toBe('unknown');
+    h.link(OLDER_MAWSD);
+    expect(browser(a)).toBeNull();
+    expect(a.session.browserEntry()).toBeNull();
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(a.transport.requestsOf('end_session')).toHaveLength(1);
+  });
+
+  it('a row reserved on a capable link before its first snapshot is the link\'s: after the link\'s end main\'s link clears nothing', async () => {
+    const h = host();
+    h.link();
+    const a = await launch(h.table, 'a');
+    expect(a.session.browserEntry()).toBe('unknown:lost');
+    h.runtime.detach();
+    h.link(MAIN);
+    expect(browser(a)).toBe('unknown');
+  });
+
+  it('a capable client\'s first snapshot settles both causes', async () => {
+    const h = host();
+    const [a, b, c] = [await launch(h.table, 'a', 901), await launch(h.table, 'b', 902), await launch(h.table, 'c', 903)];
+    a.session.setBrowserHold('unknown:adopted');
+    b.session.setBrowserHold('unknown:lost');
+    c.session.setBrowserHold('unknown:lost');
+    await h.link().request('host.browserWork', { held: ['b'] });
+    expect([a.session.browserEntry(), b.session.browserEntry(), c.session.browserEntry()]).toEqual([null, 'held', null]);
+  });
+});
+
 describe('host.browserIdle through the real wiring (P5 O17 M7, D20)', () => {
   const IDLE_MS = 10 * 60_000;
 
@@ -357,7 +422,7 @@ describe('host.browserIdle through the real wiring (P5 O17 M7, D20)', () => {
   it('no client that did not declare host.attachment is told', async () => {
     const { h, a } = await idleHost();
     const main = h.link(MAIN);
-    a.session.setBrowserHold('unknown'); // as an adoption with no mawsd snapshot leaves it
+    a.session.setBrowserHold('unknown:adopted'); // as an adoption with no mawsd snapshot leaves it
     h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(main.events('host.browserIdle')).toEqual([]);
@@ -371,6 +436,8 @@ describe('host.browserIdle through the real wiring (P5 O17 M7, D20)', () => {
 // takes its verdict.
 describe('an adopted session and the link\'s snapshot, in both arrival orders (P5 O17 M7)', () => {
   const ID = id('app-adopted');
+  const IDLE_MS = 10 * 60_000;
+  const STOP = { type: 'control_request', request_id: 'stop-1', request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, last_assistant_message: 'Done.', background_tasks: [], session_crons: [] } } };
   const SPEC = launchSpec({ appSessionId: ID, cwd: '/tmp/maws-session' });
   let userData: string;
   beforeEach(() => {
@@ -423,7 +490,7 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     transports[0]!.pushProblem({ kind: 'host_caught_up', message: 'caught up', length: 0, typeGuess: null });
     expect(await adopted).toBe(ID);
     const session = h.table.get(ID)!;
-    return { session, reserved, published, end: async () => { transports[0]!.exit(0); await session.exited; } };
+    return { session, transport: transports[0]!, reserved, published, end: async () => { transports[0]!.exit(0); await session.exited; } };
   }
 
   it('adoption with no link reads unknown; a client that will tell no browser work (a rolled-back mawsd, main\'s own link) clears it at its connection, and an adoption under it starts clear', async () => {
@@ -477,12 +544,46 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     await row.end();
   });
 
-  it('an adoption after the link that applied the snapshot ended reads unknown again', async () => {
+  it('an adoption after the link that applied the snapshot ended reads unknown again, the lost link\'s: main\'s link clears nothing (fix 3)', async () => {
     const h = host();
     await h.link().request('host.browserWork', { held: [] });
     h.runtime.detach();
     const row = await adopting(h);
     expect(row.reserved).toBe('unknown');
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    h.link(MAIN);
+    expect(row.session.status().work?.holds).toEqual({ browser: 'unknown' });
+    await row.end();
+  });
+
+  // P5 O17 M7 fix 3: the adoption's cause
+  it('the embedded shape: an adoption before any capable client is the adoption\'s unknown; main\'s link clears it, and the row is released when idle', async () => {
+    const h = host();
+    const row = await adopting(h);
+    expect(row.session.browserEntry()).toBe('unknown:adopted');
+    h.link(MAIN);
+    expect(row.session.status().work?.holds).toBeUndefined();
+    expect(row.published.at(-1)).toBeNull();
+    row.transport.push(STOP); // the adopted row's work known again at its next Stop
+    await vi.waitFor(() => expect(row.session.status().work?.unknown).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(row.transport.requestsOf('end_session')).toHaveLength(1);
+    vi.useRealTimers();
+    await row.end();
+  });
+
+  it('a capable link that came and went before its first snapshot makes the adoption\'s unknown the lost link\'s: main\'s link clears nothing', async () => {
+    const h = host();
+    const row = await adopting(h);
+    h.link(); // mawsd, ended before it told its snapshot
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    h.runtime.detach();
+    h.link(MAIN);
+    expect(row.session.status().work?.holds).toEqual({ browser: 'unknown' });
+    h.link(OLDER_MAWSD); // a declaring client that tells none still clears it
+    expect(row.session.status().work?.holds).toBeUndefined();
     await row.end();
   });
 });

@@ -1701,7 +1701,7 @@ describe('process table (P5 O17 M7): the idle exception for a headless tab', () 
 
   it('`unknown` is waited on the same way', async () => {
     const { table, s, asked } = await idleTable(['a']);
-    s.a!.session.setBrowserHold('unknown');
+    s.a!.session.setBrowserHold('unknown:lost');
     table.setIdleRelease({ idleMs: IDLE_MS, active: true });
     await vi.advanceTimersByTimeAsync(IDLE_MS);
     expect(asked).toEqual(['a']);

@@ -9,12 +9,23 @@
 // A snapshot is applied to every row before it is answered: a live row it names is `held`, every other row's entry is
 // cleared (an exited row's included), each set on its session and published as its status. The set is kept for the link's life and gives its
 // verdict to every row created after it (a launch, or an adoption that finishes later). With no snapshot applied on the
-// current link, an adopted row reads `unknown` from its reservation, and so does a launched one while a declaring link is
+// current link, an adopted row reads `unknown` from its reservation, and so does a launched one while a telling link is
 // up: the kept set is per engine-host process, so a successor's adoptions all read `unknown` until `mawsd`'s first
 // snapshot to it. The link's end voids the set and turns every `held` into `unknown`, once however it is heard; a
 // publication that finds the client gone during a snapshot ends the link there, the rest of it not applied. The next
-// snapshot settles both. An empty snapshot keeps the shared empty set; each link keeps one subscription to its end. Nothing here enters the checkpoint, journal, roster or
-// session hosts (O16's condition, R4): the hold lives on the session's status, which budget.ts `holdsWork` reads.
+// snapshot settles both. An empty snapshot keeps the shared empty set; each link keeps one subscription to its end.
+//
+// Fix 3 (option (B)): an `unknown` carries its cause on the row's entry, which decides who may clear it at a connection.
+// An adoption's (`unknown:adopted`, reserved while this host process has had no client that tells browser work) is
+// cleared by any ready client that tells none, main's direct link included: the embedded shape releases as before. A
+// lost link's (`unknown:lost`: a held row whose link ended, a row reserved on a telling link before its first snapshot,
+// an adoption once a telling client has been served) only by a declaring client that tells none (a rolled-back `mawsd`;
+// the per-profile lock makes another `mawsd` the only other declaring client): main's direct link while `mawsd` lives
+// says nothing of `mawsd`'s tabs. A telling client's first snapshot settles both. The engine host cannot tell from its
+// own launch whether `mawsd` or main spawned it (both spawn it alike: detached-transport.ts `spawnCandidate`), so an
+// adoption in a successor `mawsd` started reads `unknown:adopted` too, and main reaching that successor first clears it
+// (the residual corner, in the M7 report). Nothing here enters the checkpoint, journal, roster or session hosts (O16's
+// condition, R4): the entry lives on the session's work state, published as its hold, which budget.ts `holdsWork` reads.
 //
 // The idle release (idle-release.ts) asks, through the table, for a due session held by its headless tab alone; that ask
 // is `host.browserIdle` to the declaring client, which closes the session's tabs. A fresh link's first snapshot has
@@ -51,31 +62,48 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   // The connection whose snapshots are the kept set (null while the current link has applied none), and that set
   let applied: ClientRef | null = null;
   let kept: ReadonlySet<AppSessionId> = NONE;
+  // Fix 3: whether this host process has had a client that tells browser work; from then on an `unknown` is a lost link's
+  let capableSeen = false;
+  const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
 
   // The applying link's end, heard once whichever way it comes (the runtime's gone hook for a ready client, the
-  // connection's own end for any): the set is void and every `held` becomes `unknown`
+  // connection's own end for any): the set is void and every `held` becomes a lost link's `unknown`
   const linkEnded = () => {
     if (applied === null) return;
     applied = null;
     kept = NONE;
-    for (const session of sessions.list()) if (session.lifecycle !== 'exited' && session.status().work?.holds?.browser === 'held') session.setBrowserHold('unknown');
+    for (const session of live()) if (session.browserEntry() === 'held') session.setBrowserHold('unknown:lost');
   };
   client.onClientGone(linkEnded);
-  // Fix 2: a ready client that will tell no browser work leaves nothing to settle an `unknown` (an adoption's before any
-  // link, a lost link's): every entry is cleared
+  // Fix 3 (option (B)): who clears an `unknown` at its connection depends on its cause. A client that tells browser work
+  // settles both with its first snapshot; until then an adoption's becomes a lost link's, since should the link end
+  // first `mawsd`, the tabs' owner, may still be alive. A ready client that tells none clears an adoption's, main's own link included (the
+  // embedded shape, which has no fenced tab); a lost link's only when it is declaring (another `mawsd`: a rolled-back
+  // one, the per-profile lock's only other holder), since main's direct link while `mawsd` lives says nothing of its tabs
   client.onConnect(() => {
-    if (tells()) return;
-    for (const session of sessions.list()) if (session.lifecycle !== 'exited' && session.status().work?.holds?.browser !== undefined) session.setBrowserHold(null);
+    if (tells()) {
+      capableSeen = true;
+      for (const session of live()) if (session.browserEntry() === 'unknown:adopted') session.setBrowserHold('unknown:lost');
+      return;
+    }
+    const declaring = client.declaresAttachment();
+    for (const session of live()) {
+      const entry = session.browserEntry();
+      if (entry !== null && (declaring || entry === 'unknown:adopted')) session.setBrowserHold(null);
+    }
   });
 
-  // A row created later: the kept set's verdict; with none applied on the current link, `unknown` for any row while a
-  // client that tells browser work is served (its first snapshot settles it) and for an adopted row while no client is
-  // (the next one settles it, or clears it at its connection), clear otherwise. Told at its reservation, before its
-  // start, so its first status carries it; nothing is kept per row.
+  // A row created later: the kept set's verdict; with none applied on the current link, a lost link's `unknown` while a
+  // client that tells browser work is served (its first snapshot settles it), and for an adopted row while no client is:
+  // an adoption's while this host has had no client that tells, a lost link's after one. Clear otherwise. Told at its
+  // reservation, before its start, so its first status carries it.
   sessions.onReserved((session) => {
     const status = session.status();
-    const hold = applied !== null ? (kept.has(status.appSessionId) ? 'held' : null) : tells() || (status.holder?.adopted === true && !client.hasClient()) ? 'unknown' : null;
-    if (hold !== null) session.setBrowserHold(hold, false);
+    const entry = applied !== null ? (kept.has(status.appSessionId) ? 'held' : null)
+      : tells() ? 'unknown:lost'
+      : status.holder?.adopted === true && !client.hasClient() ? (capableSeen ? 'unknown:lost' : 'unknown:adopted')
+      : null;
+    if (entry !== null) session.setBrowserHold(entry, false);
   });
 
   on('host.browserWork', async ({ held }, ctx) => {
@@ -84,6 +112,7 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     const connection = ctx.client;
     const fresh = applied !== connection;
     if (fresh) {
+      capableSeen = true;
       linkEnded(); // an earlier link's set, if its end was not heard
       applied = connection;
       connection.onGone(linkEnded); // run at once when it has already ended: then nothing is applied
