@@ -835,6 +835,36 @@ describe('the document stream', () => {
     expect(busy.map((other) => closeOf(a, other) ?? 'open')).toEqual(['open', 'open', 'open']);
   });
 
+  it('counts a frame against the link budget at its whole size until its last byte goes: tails a device leaves unread still hold their frames', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const got = (id: string) => ofStream(a, id).filter((m) => m.t === 'streamData').reduce((n, m) => n + Buffer.from(m.data as string, 'base64url').byteLength, 0);
+    // A 40 MiB frame taken but for its last KiB: the whole frame is still held.
+    const forty = randomBytes(40 * 1024 * 1024);
+    forty[0] = 0;
+    const tail = await openDoc(a, { artifactId: x, mode: 'edit' }, 4 * 1024 * 1024);
+    docs.send(docs.last().channel, forty);
+    const leave = forty.byteLength + 4 - 1024;
+    for (let taken = 4 * 1024 * 1024; taken < leave; taken += 4 * 1024 * 1024) {
+      await until(() => got(tail.id) === taken || undefined, 'the credit taken', 10_000);
+      await a.channel.send({ t: 'streamCredit', id: tail.id, bytes: Math.min(4 * 1024 * 1024, leave - taken) });
+    }
+    await until(() => got(tail.id) === leave || undefined, 'all but the tail', 10_000);
+    // A 30 MiB frame on a second stream is admitted (the rest of the link holds 40 MiB); a third stream's next frame then
+    // finds 70 MiB held, past the budget.
+    const thirty = randomBytes(30 * 1024 * 1024);
+    thirty[0] = 0;
+    const second = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+    docs.send(docs.last().channel, thirty);
+    const third = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+    docs.send(docs.last().channel, encodeFrame({ type: 'ack', frames: 1, revision: 1 }));
+    await until(() => closeOf(a, third.id), 'the close');
+    expect(closeOf(a, third.id)).toBe('behind');
+    expect([closeOf(a, tail.id), closeOf(a, second.id)]).toEqual([undefined, undefined]);
+  });
+
   it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {
     const { f, docs } = await startDocuments();
     const x = randomUUID();

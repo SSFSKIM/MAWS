@@ -50,7 +50,8 @@ const CHANNEL_SPAN = 2 ** 31;
 export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
 /**
  * The document bytes one link (a device's channel) retains, at most: every document stream's frames queued for the device
- * (their 4-byte prefixes counted) and the frame it is assembling from the device (its storage). Checked as the host checks
+ * (their 4-byte prefixes counted), each at its whole size until its last byte is sent (a device that takes all of a frame
+ * but its tail still holds the frame), and the frame it is assembling from the device (its storage). Checked as the host checks
  * its socket's queue (doc-channels.ts), before a stream's next frame is admitted and never against the frame in flight:
  * a host frame, or a device chunk, that finds the rest of the link holding more closes its stream `behind`, its bytes
  * given back. "The rest" leaves out the stream's own frame being sent and its own frame being assembled, so a single
@@ -152,9 +153,14 @@ class DocumentStream extends Stream {
   #dropped = { frames: 0, bytes: 0 };
   /** The channel is open on the host's side. */
   #upstream = true;
-  /** Where each host frame queued for the device ends, in `#out`'s count; `#head` indexes the one being sent. */
+  /**
+   * Where each host frame queued for the device ends, in `#out`'s count; `#head` indexes the one being sent, which began at
+   * `#headStart`. A frame is retained whole until its last byte is sent (the queue slices it, keeping its buffer), so what
+   * the stream holds for the device is `#out - #headStart`, never only its unsent bytes.
+   */
   readonly #ends: number[] = [];
   #head = 0;
+  #headStart = 0;
   readonly #log: (line: string) => void;
 
   constructor(
@@ -183,33 +189,37 @@ class DocumentStream extends Stream {
     this.#ends.push(this.#out);
   }
 
-  /** What this stream retains: its frames queued for the device and the frame it is assembling. */
+  /** What this stream retains: its frames queued for the device, each whole until its last byte goes, and the frame it is assembling. */
   get retained(): number {
-    return this.backlog + this.#frames.held;
+    this.#settle();
+    return this.#out - this.#headStart + this.#frames.held;
   }
 
-  /** What its link retains but for this stream's own frames in flight (the one being sent, the one being assembled). */
+  /** What its link retains but for this stream's own frames in flight (the one being sent, whole, and the one being assembled). */
   #restOfLink(): number {
     let rest = 0;
     for (const peer of this.peers) rest += peer.retained;
-    const sending = this.backlog - this.#queuedBehindHead();
+    const sending = this.#head < this.#ends.length ? this.#ends[this.#head] - this.#headStart : 0;
     return rest - sending - this.#frames.held;
   }
 
   /** The bytes queued behind the frame being sent (none when it is the only one, or nothing is queued). */
   #queuedBehindHead(): number {
+    this.#settle();
+    return this.#head < this.#ends.length ? this.#out - this.#ends[this.#head] : 0;
+  }
+
+  /** Moves `#head` past the frames wholly sent. */
+  #settle(): void {
     const sent = this.#out - this.backlog;
-    while (this.#head < this.#ends.length && this.#ends[this.#head] <= sent) this.#head++;
+    while (this.#head < this.#ends.length && this.#ends[this.#head] <= sent) this.#headStart = this.#ends[this.#head++];
     if (this.#head === this.#ends.length) {
       this.#ends.length = 0;
       this.#head = 0;
-      return 0;
-    }
-    if (this.#head >= 1024) {
+    } else if (this.#head >= 1024) {
       this.#ends.splice(0, this.#head);
       this.#head = 0;
     }
-    return this.#out - this.#ends[this.#head];
   }
 
   /** The channel ended on the host's side: the stream closes with its word once what it holds is sent. */
