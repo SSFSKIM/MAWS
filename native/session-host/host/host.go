@@ -231,7 +231,7 @@ func (h *Host) finish() {
 	h.awaitSpawn()
 	h.mu.Lock()
 	h.closing = true
-	childAlive := h.child != nil && h.exit == nil
+	childAlive := h.signallable() // a child reaped while its output drains is gone, whether or not its exit is recorded
 	for c := range h.conns {
 		c.closed = true
 		c.poke()

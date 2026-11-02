@@ -589,3 +589,16 @@ func TestTheHostsSignalAfterTheReapSignalsNoOne(t *testing.T) {
 		t.Fatalf("the host signalled a reaped child's group:\n%s", log)
 	}
 }
+
+func TestTheHostsSignalAfterTheReapRemovesTheRosterEntry(t *testing.T) {
+	hs := start(t, func(l *Limits) { l.ExitDrain = 30 * time.Second })
+	w := hs.writer(1)
+	hs.reapedWhileDraining(w)
+	hs.signals <- syscall.SIGTERM
+	if code := hs.waitExit(3 * time.Second); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if _, err := os.Lstat(filepath.Join(hs.dir, "TESTHOST.json")); !os.IsNotExist(err) {
+		t.Fatal("the roster entry of a child already reaped survived its host")
+	}
+}
