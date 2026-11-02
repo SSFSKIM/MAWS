@@ -296,6 +296,79 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // idempotent once they ended
   });
 
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host, one the start left running
+  // with its engine and no row (a failed adoption, D59(6); a losing host, D59(10)). Not live for supervision; a stop-all
+  // stops it and counts it; a reservation under its id is refused until it is stopped; a gone one is dropped on consult.
+  describe('an unattached session host', () => {
+    const U = 'app-u' as AppSessionId;
+    const KEY = { pid: 4242, procStart: 'then' };
+    const tableWith = (alive: { now: boolean }) => new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === KEY.pid && alive.now, procStartOf: () => 'then' });
+
+    it('is no row, no hold and no launch: nothing holds the host for it', () => {
+      const table = tableWith({ now: true });
+      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => 'stopped' });
+      expect([table.list().length, table.adoptingCount, table.launching(), table.isAdopting(U), table.unattachedHosts(U).map((h) => h.holderId)]).toEqual([0, 0, false, false, ['L1']]);
+    });
+
+    it('a stop-all stops it and counts it; a detaching exit leaves it', async () => {
+      const alive = { now: true };
+      const asked: string[] = [];
+      const stop = async () => {
+        asked.push('L1');
+        alive.now = false;
+        return 'forced' as const;
+      };
+      const detaching = tableWith(alive);
+      detaching.unattach(U, { holderId: 'L1', host: KEY, stop });
+      expect(await detaching.shutdown({ graceMs: 0, mode: 'detach' })).toEqual({ stopped: 0, forced: 0 });
+      expect(asked).toEqual([]);
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, stop });
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 1 });
+      expect(asked).toEqual(['L1']);
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // stopped, and gone: not asked again
+    });
+
+    it('a reservation under its id is refused until it is stopped, each stopped once, then admitted', async () => {
+      const alive = { now: true };
+      let stops = 0;
+      let finish!: () => void;
+      const finishing = new Promise<void>((resolve) => (finish = resolve));
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => {
+        stops += 1;
+        await finishing;
+        alive.now = false;
+        return 'stopped';
+      } });
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      const first = table.stopUnattached(U);
+      const second = table.stopUnattached(U);
+      finish();
+      expect(await first).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect(await second).toEqual([{ holderId: 'L1', outcome: 'stopped' }]);
+      expect(stops).toBe(1);
+      expect(table.unattachedHosts(U)).toEqual([]);
+      const s = scriptedSession({ spec: { appSessionId: U } });
+      expect(table.reserve(U, () => s.session)).toMatchObject({ status: 'launching' });
+      s.transport.exit(0);
+      await s.session.exited;
+    });
+
+    it('a gone one is dropped on consult and never stopped', async () => {
+      const alive = { now: true };
+      let stops = 0;
+      const table = tableWith(alive);
+      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => ((stops += 1), 'stopped' as const) });
+      alive.now = false; // its host exited on its own
+      expect(table.unattachedHosts(U)).toEqual([]);
+      table.unattach(U, { holderId: 'L2', host: KEY, stop: async () => ((stops += 1), 'stopped' as const) });
+      expect(await table.stopUnattached(U)).toEqual([]);
+      expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
+      expect(stops).toBe(0);
+    });
+  });
+
   // P5 O16 M4 ("Stream redelivery"): a read of a session held for adoption waits for its row, or for its adoption's end
   describe('a read of a session held for adoption (adoptionSettled)', () => {
     const S = 'app-s' as AppSessionId;

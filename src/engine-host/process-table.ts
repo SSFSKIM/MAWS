@@ -49,11 +49,11 @@ import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type Bu
 import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M2
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
-import { procStartOf as psProcStart } from './supervisor-files'; // E10
+import { isAlive as pidAlive, isSameProcess, procStartOf as psProcStart } from './supervisor-files'; // E10; P5 O16 panel fix wave 1 follow-up: isAlive, isSameProcess
 import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
-import type { HeldStopOutcome } from './holder/stop-held'; // P5 O16 panel fix wave 1
+import type { HeldStopOutcome, ProcessKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcessKey
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -101,6 +101,15 @@ const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {},
 // P5 O16 M3b (D9): the launch refusal while the engine host hands its sessions over
 export const HANDING_OVER = 'the engine host is handing over; try again in a moment';
 
+// P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with its engine and
+// no row: its adoption failed (D59(6)), or a newer host of its session was adopted (D59(10)). Its host, by pid and start
+// time, and how to stop it (holder/stop-held.ts).
+export interface UnattachedHost {
+  holderId: string;
+  host: ProcessKey;
+  stop(): Promise<HeldStopOutcome>;
+}
+
 export class ProcessTable {
   private readonly rows = new Map<AppSessionId, EngineSession>();
   private readonly listeners = new Set<(status: EngineSessionStatus) => void>();
@@ -138,6 +147,9 @@ export class ProcessTable {
   private readonly adoptionsFailed = new Set<AppSessionId>(); // P5 O16 M4: held still, their adoption given up
   private stopHeld: ((appSessionId: AppSessionId) => Promise<HeldStopOutcome>) | null = null; // P5 O16 panel fix wave 1
   private readonly heldStops = new Map<AppSessionId, { outcome: Promise<HeldStopOutcome>; ended: boolean }>(); // and each one asked
+  // P5 O16 panel fix wave 1 follow-up: the unattached session hosts by session, each with its stop once asked
+  private readonly unattached = new Map<AppSessionId, { host: UnattachedHost; stopping: Promise<HeldStopOutcome> | null }[]>();
+  private readonly isAlive: (pid: number) => boolean;
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -155,11 +167,12 @@ export class ProcessTable {
 
   // O16 M5: `gate`, the engine host's (absent: no observer, ever); `psSync`, the reap's step's tree read (by default `ps`
   // itself, or, when a test injects the sampler's `ps`, that sampler's last output: the test's process world)
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */; gate?: Gate; psSync?: () => string /* O16 M5 */ } = {}) {
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */; procStartOf?: (pid: number) => string | null /* E10 */; gate?: Gate; psSync?: () => string /* O16 M5 */; isAlive?: (pid: number) => boolean /* P5 O16 panel fix wave 1 follow-up */ } = {}) {
     this.ps = opts.ps ?? runPs;
     this.gate = opts.gate ?? null; // O16 M5
     this.psSync = opts.psSync ?? (opts.ps ? () => this.lastPs : readTreeSync); // O16 M5
     this.procStartOf = opts.procStartOf ?? psProcStart; // E10
+    this.isAlive = opts.isAlive ?? pidAlive; // P5 O16 panel fix wave 1 follow-up
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
     // C12 start
@@ -184,6 +197,9 @@ export class ProcessTable {
       const state = existing.status().process;
       if (state !== 'exited') return { status: 'refused', reason: 'already_live', message: `process is ${state}` };
     }
+    // P5 O16 panel fix wave 1 follow-up: a launch stops the session's unattached host first (the launcher's
+    // stopUnattached); one still standing here would be a second engine on the session
+    if (opts.adoption !== true && this.unattachedHosts(appSessionId).length > 0) return { status: 'refused', reason: 'already_live', message: 'process is unattached: its session host still runs it' };
     const session = create();
     this.rows.set(appSessionId, session);
     this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
@@ -373,6 +389,43 @@ export class ProcessTable {
 
   get adoptingCount(): number {
     return this.adopting.size;
+  }
+
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling) -------------------------------------------------------------
+  // An unattached session host is no row and no hold: nothing reads it as live (the supervisor's idle exit, the park and
+  // `liveSessions` run past it, so the next start reads the roster and retries its adoption, D59(6)). It is consulted
+  // where it would otherwise outlive a deliberate act: a launch or reservation of its session (stopped first, so no second
+  // engine runs the session), a forget (stopped, then forgotten) and a stop-all (stopped and counted). Its liveness is
+  // read at each consult (its pid and start time, no watcher): one whose host is gone is dropped.
+  unattach(appSessionId: AppSessionId, host: UnattachedHost): void {
+    this.unattached.set(appSessionId, [...(this.unattached.get(appSessionId) ?? []), { host, stopping: null }]);
+  }
+
+  // The session's unattached hosts whose process still runs; the gone ones dropped.
+  unattachedHosts(appSessionId: AppSessionId): UnattachedHost[] {
+    return this.liveUnattached(appSessionId).map((entry) => entry.host);
+  }
+
+  private liveUnattached(appSessionId: AppSessionId): { host: UnattachedHost; stopping: Promise<HeldStopOutcome> | null }[] {
+    const entries = (this.unattached.get(appSessionId) ?? []).filter((entry) => entry.stopping !== null || isSameProcess(entry.host.host, { isAlive: this.isAlive, procStartOf: this.procStartOf }));
+    if (entries.length > 0) this.unattached.set(appSessionId, entries);
+    else this.unattached.delete(appSessionId);
+    return entries;
+  }
+
+  // Stops the session's unattached hosts, each once (a stop under way is awaited), and drops each once stopped.
+  async stopUnattached(appSessionId: AppSessionId): Promise<{ holderId: string; outcome: HeldStopOutcome }[]> {
+    return Promise.all(this.liveUnattached(appSessionId).map(async (entry) => {
+      entry.stopping ??= entry.host.stop().catch((error: unknown): HeldStopOutcome => {
+        this.log(`${appSessionId}: its unattached session host ${entry.host.holderId} was not stopped: ${error instanceof Error ? error.message : String(error)}`);
+        return 'gone';
+      }).finally(() => {
+        const left = (this.unattached.get(appSessionId) ?? []).filter((other) => other !== entry);
+        if (left.length > 0) this.unattached.set(appSessionId, left);
+        else this.unattached.delete(appSessionId);
+      });
+      return { holderId: entry.host.holderId, outcome: await entry.stopping };
+    }));
   }
 
   async preparing<T>(launch: () => Promise<T>): Promise<T> {
@@ -717,7 +770,8 @@ export class ProcessTable {
   // a stop-all stays deliberate).
   // P5 O16 panel fix wave 1 (scalpel-1#1): `stop` stops every session held for adoption too, whose reservation the closed
   // admission now refuses, through the hold's stop, and counts it as a row's (`gone`, in neither): one under way is
-  // awaited, never asked twice. `detach` leaves the holds, as it leaves the hosted rows, for the successor.
+  // awaited, never asked twice. `detach` leaves the holds, as it leaves the hosted rows, for the successor. Follow-up: so
+  // are the unattached hosts, stopped and counted the same way, left the same way.
   async shutdown(opts: { graceMs: number; mode?: 'stop' | 'detach' }): Promise<{ stopped: number; forced: number }> {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
     this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
@@ -726,7 +780,11 @@ export class ProcessTable {
     // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped
     const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending) : [];
     const stopping = live.filter((session) => !detaching.includes(session));
-    const held = opts.mode === 'detach' ? [] : this.stopHolds(); // P5 O16 panel fix wave 1
+    // P5 O16 panel fix wave 1: the holds' stops; follow-up: the unattached hosts' too
+    const held: Promise<HeldStopOutcome[]>[] = opts.mode === 'detach' ? [] : [
+      ...this.stopHolds().map(async (outcome) => [await outcome]),
+      ...[...this.unattached.keys()].map(async (id) => (await this.stopUnattached(id)).map((stop) => stop.outcome)),
+    ];
     const [results, heldOutcomes] = await Promise.all([
       Promise.all(stopping.map(async (session) => ({ session, result: await session.stop('quit', { graceMs: opts.graceMs }) }))),
       Promise.all(held),
@@ -738,7 +796,7 @@ export class ProcessTable {
       if (session.forcedKill) forced += 1;
       else stopped += 1;
     }
-    for (const outcome of heldOutcomes) {
+    for (const outcome of heldOutcomes.flat()) {
       if (outcome === 'stopped') stopped += 1;
       if (outcome === 'forced') forced += 1;
     }

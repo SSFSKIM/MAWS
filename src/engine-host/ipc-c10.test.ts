@@ -13,6 +13,7 @@ import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validat
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import { FileSessionStateStore } from './store/file-session-state-store';
+import { ProcessTable } from './process-table'; // P5 O16 panel fix wave 1 follow-up
 
 const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -151,6 +152,51 @@ describe('session.forget', () => {
 
     await host.call('session.forget', { appSessionId: 'app-never-launched' }); // nothing to erase is not an error
     await expect(host.handlers.get('session.forget')!({ appSessionId: '../escape' })).rejects.toBeInstanceOf(HostCommandError);
+  });
+
+  // P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host (its adoption failed, or a
+  // newer host of its session was adopted) runs its engine with no row. A launch of its id stops it first, so no second
+  // engine ever runs the session; a forget stops it, then forgets, and tells `session.forgotten`.
+  function unattached(id: AppSessionId, seen: () => string | null = () => null) {
+    const alive = { now: true };
+    const order: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242 && alive.now, procStartOf: () => 'then' });
+    table.onRowsChanged(() => void (table.get(id) && order.push('reserved')));
+    table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, stop: async () => {
+      order.push(`stopping (row ${table.get(id) ? 'present' : 'absent'})`);
+      const what = seen();
+      if (what !== null) order.push(what);
+      await new Promise((r) => setTimeout(r, 20));
+      alive.now = false;
+      order.push('stopped');
+      return 'stopped';
+    } });
+    return { table, order };
+  }
+
+  it('a launch of an unattached session stops its host first, then launches', async () => {
+    const id = 'app-unattached-launch' as AppSessionId;
+    const { table, order } = unattached(id);
+    const host = engineHost({ table });
+    await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    expect(order).toEqual(['stopping (row absent)', 'stopped', 'reserved']);
+    await until(() => table.get(id)?.lifecycle === 'ready', 'ready');
+    await table.shutdown({ graceMs: 0 });
+  });
+
+  it('a forget of an unattached session stops its host, then erases it and tells session.forgotten', async () => {
+    const id = 'app-unattached-forget' as AppSessionId;
+    const state = join(userData, 'engine-host', 'state', `${id}.json`);
+    const journal = join(userData, 'engine-host', 'journal', id);
+    const { table, order } = unattached(id, () => `files ${existsSync(state) && existsSync(journal) ? 'kept' : 'erased'}`);
+    const host = engineHost({ table });
+    await new FileSessionStateStore(userData).saveLaunchSpec(id, spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl'));
+    await mkdir(journal, { recursive: true });
+    await host.call('session.forget', { appSessionId: id });
+    expect(order).toEqual(['stopping (row absent)', 'files kept', 'stopped']);
+    expect([existsSync(state), existsSync(journal)]).toEqual([false, false]);
+    expect(host.emitted.filter((e) => e.name === 'session.forgotten').map((e) => e.payload)).toEqual([{ appSessionId: id }]);
+    expect(table.unattachedHosts(id)).toEqual([]);
   });
 
   // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, while

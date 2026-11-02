@@ -982,3 +982,48 @@ describe('the handover', () => {
     expect(h.supervision.status().holder?.adopting).toBe(false);
   });
 });
+
+// P5 O16 panel fix wave 1 follow-up (the architect's ruling): an unattached session host (a failed adoption, D59(6); a
+// losing host, D59(10)) is no live session: the idle exit and the park's exit-when-idle run past it, so the next start
+// reads the roster and retries its adoption; a hold, by contrast, keeps the host.
+describe('an unattached session host and the supervisor’s clocks', () => {
+  function withTable(table: ProcessTable) {
+    const supervision = new Supervision({
+      mode: 'detached', identity: IDENTITY, role: 'laptop', table,
+      plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
+      shutdown: async () => ({ stopped: 0, forced: 0 }),
+      emit: () => true,
+      log: () => {},
+    });
+    const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
+    supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>), { onConnect: () => {} });
+    const exits: SupervisorExit[] = [];
+    supervision.started(DETACHED, (reason) => void exits.push(reason));
+    return { supervision, exits, call: (name: string, input: unknown) => handlers.get(name)!(input, { client: endableClientRef('1') }) };
+  }
+  const unattachedTable = () => {
+    const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: () => true, procStartOf: () => 'then' });
+    table.unattach('app-u' as AppSessionId, { holderId: 'L1', host: { pid: 4242, procStart: 'then' }, stop: async () => 'stopped' });
+    return table;
+  };
+
+  it('the idle exit fires with one standing, and its status counts no live session', async () => {
+    const { supervision, exits } = withTable(unattachedTable());
+    expect(supervision.status()).toMatchObject({ liveSessions: 0, rows: 0 });
+    await vi.advanceTimersByTimeAsync(DEFAULT_IDLE_EXIT_MS);
+    expect(exits).toEqual(['idle']);
+  });
+
+  it('the park’s exit-when-idle leaves with one standing; a hold would keep the host', async () => {
+    const parked = withTable(unattachedTable());
+    parked.supervision.clientChanged(true);
+    await parked.call('host.exitWhenIdle', { armed: true });
+    expect(parked.exits).toEqual(['exitWhenIdle']);
+    const held = new ProcessTable({ ps: async () => '', log: () => {} });
+    held.holdForAdoption(['app-u' as AppSessionId]);
+    const holding = withTable(held);
+    holding.supervision.clientChanged(true);
+    await holding.call('host.exitWhenIdle', { armed: true });
+    expect(holding.exits).toEqual([]);
+  });
+});

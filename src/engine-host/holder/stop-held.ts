@@ -1,4 +1,4 @@
-// P5 O16 panel fix wave 1 (scalpel-1#1; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3, Interfaces §D; D61(3)
+// P5 O16 panel fix wave 1 (scalpel-1#1; follow-up: an unattached host's stop too, process-table.ts `UnattachedHost`; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3, Interfaces §D; D61(3)
 // and (4), D64(7)): a stop-all's stop of a session the start holds for adoption. A stop-all closes reservation, so such a
 // session never becomes a row the ladder could stop, and its adoption, under way or given up, leaves its engine running.
 // It is ended through its session host's own shutdown: SIGTERM to the host, which closes admission, waits for a fork
@@ -25,15 +25,16 @@ export interface HeldStopDeps {
   graceMs?: number; // HOST_EXIT_GRACE_MS + HELD_STOP_MARGIN_MS
 }
 
-type Identity = { pid: number; procStart: string };
+// A process by pid and start time (the roster's, the orphan ledger's shape), never by pid alone.
+export type ProcessKey = { pid: number; procStart: string };
 
 // `stopped` when the engine (or the spawn the host was forking) ended within the grace, `forced` when its group was
 // killed, `gone` when neither the host nor an engine was running.
 export async function stopHeldHost(entry: RosterEntry, deps: HeldStopDeps): Promise<HeldStopOutcome> {
-  const same = (p: Identity | null): p is Identity => p !== null && p.procStart !== '' && deps.isAlive(p.pid) && deps.procStartOf(p.pid) === p.procStart;
+  const same = (p: ProcessKey | null): p is ProcessKey => p !== null && p.procStart !== '' && deps.isAlive(p.pid) && deps.procStartOf(p.pid) === p.procStart;
   const current = () => readRoster(deps.hostsDir, () => {}).find((e) => e.holderId === entry.holderId) ?? null;
-  const childNow = (): Identity | null => current()?.child ?? entry.child;
-  const host: Identity = { pid: entry.pid, procStart: entry.procStart };
+  const childNow = (): ProcessKey | null => current()?.child ?? entry.child;
+  const host: ProcessKey = { pid: entry.pid, procStart: entry.procStart };
   const name = `session host ${entry.holderId} (pid ${entry.pid}) of ${entry.appSessionId ?? 'no session'}, held for adoption`;
   const hostLive = same(host);
   const child = childNow();

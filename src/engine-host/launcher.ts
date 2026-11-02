@@ -101,6 +101,10 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     const liveNow = deps.table.get(spec.appSessionId);
     if (liveNow && liveNow.lifecycle !== 'exited') return refused('already_live', `process is ${liveNow.lifecycle}`);
     if (deps.table.isAdopting(spec.appSessionId)) return refused('already_live', 'process is being adopted'); // P5 O16 M3, before a session host starts
+    // P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with this
+    // session's engine and no row (its adoption failed, or a newer host of the session was adopted) is stopped first, so
+    // no second engine runs the session; a resume keeps the conversation, which the engine wrote to its own transcript
+    for (const { holderId, outcome } of await deps.table.stopUnattached(spec.appSessionId)) deps.log(`${spec.appSessionId}: its unattached session host ${holderId} stopped before this launch (${outcome})`);
 
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
