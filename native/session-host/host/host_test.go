@@ -91,9 +91,10 @@ func (hs *harness) waitExit(within time.Duration) int {
 }
 
 type client struct {
-	t  *testing.T
-	nc net.Conn
-	br *bufio.Reader
+	t    *testing.T
+	nc   net.Conn
+	br   *bufio.Reader
+	held []msg // read while waiting for another type, in arrival order: the protocol orders `applied` and the echo's `out` in no way
 }
 
 type msg struct {
@@ -155,22 +156,34 @@ func (c *client) next() (msg, error) {
 	return m, nil
 }
 
-// expect reads until a message of type t, failing on any type in `never`.
+// expect returns the first message of type t, held or read next, failing on any type in `never` that comes before it.
+// What it passes over is held for a later expect.
 func (c *client) expect(t string, never ...string) msg {
 	c.t.Helper()
-	for {
-		m, err := c.next()
-		if err != nil {
-			c.t.Fatalf("waiting for %s: %v", t, err)
-		}
+	check := func(m msg) {
 		for _, bad := range never {
 			if m.T == bad {
 				c.t.Fatalf("got %s while waiting for %s: %v", m.T, t, m.Raw)
 			}
 		}
+	}
+	for i, m := range c.held {
+		check(m)
+		if m.T == t {
+			c.held = append(c.held[:i:i], c.held[i+1:]...)
+			return m
+		}
+	}
+	for {
+		m, err := c.next()
+		if err != nil {
+			c.t.Fatalf("waiting for %s: %v", t, err)
+		}
+		check(m)
 		if m.T == t {
 			return m
 		}
+		c.held = append(c.held, m)
 	}
 }
 
