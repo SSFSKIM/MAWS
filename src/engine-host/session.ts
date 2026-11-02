@@ -793,7 +793,10 @@ export class EngineSession {
     return this.tracker.firstTurnAt;
   }
 
-  sminosRoots(): string[] {
+  // null until the engine has reported its plugins (a system/init or a reload); then the paths it loaded sminos from,
+  // none when it loaded none
+  sminosRoots(): string[] | null {
+    if (this.tracker.pluginsObservedAt === null) return null;
     return this.tracker.plugins.filter((p) => p.name === 'sminos' && p.path.startsWith('/')).map((p) => p.path);
   }
 

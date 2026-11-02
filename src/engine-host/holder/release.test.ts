@@ -360,7 +360,7 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
 
   it('the probe’s d after the first turn: a child born after it, even in the engine’s first minute, is work, never a dead server’s replacement', async () => {
     const { table, s } = await rows(['a'], { servers: SERVERS });
-    s.a!.transport.push({ type: 'system', subtype: 'init', timestamp: '2026-11-02T14:27:01.400Z', cwd: '/w', session_id: SESSION, tools: [], mcp_servers: [], model: 'm', permissionMode: 'default', slash_commands: [], claude_code_version: '2.1.316', output_style: 'default', uuid: 'i-1' });
+    s.a!.transport.push({ type: 'system', subtype: 'init', timestamp: '2026-11-02T14:27:01.400Z', cwd: '/w', session_id: SESSION, tools: [], mcp_servers: [], model: 'm', permissionMode: 'default', slash_commands: [], claude_code_version: '2.1.316', output_style: 'default', uuid: 'i-1', plugins: [{ name: 'sminos', path: '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0', source: 'sminos@doperpowers', version: '1.31.0' }] });
     await until(() => s.a!.session.firstTurnAt === '2026-11-02T14:27:01.400Z', 'the first turn');
     tree = resting();
     await table.sampleMemory();

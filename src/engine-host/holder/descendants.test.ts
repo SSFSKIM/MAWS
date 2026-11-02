@@ -214,6 +214,7 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     const root = '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0';
     expect(isBridgeOf(BRIDGE, IDS, [root])).toBe(true); // once the engine names sminos's root, only that root's script
     expect(isBridgeOf(`python3 /work/skills/sminos/scripts/sminos.py bridge --session ${SESSION}`, IDS, [root])).toBe(false);
+    expect(isBridgeOf(BRIDGE, IDS, [])).toBe(false); // the engine reported its plugins, and sminos is not among them
     expect(isBridgeOf(BRIDGE, new Set(['another-session']))).toBe(false);
     expect(isBridgeOf(BRIDGE, new Set())).toBe(false);
     expect(isBridgeOf(`python3 /p/sminos.py watch --session ${SESSION}`, IDS)).toBe(false);
@@ -272,9 +273,13 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     expect(infra.settle(early('Mon Nov  2 14:27:26 2026'), CLAUDE, turned, all)).toBe(1); // 30 s after claude, 25 s after the turn
     expect(infra.settle(early('Mon Nov  2 14:27:02 2026'), CLAUDE, turned, all)).toBe(1); // the second after the turn's
     expect(infra.countable).toBe(false);
-    // the turn's own second still counts as before it (lstart's resolution); a server spawns in claude's first second
-    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:57.000Z' }, all)).toBe(0);
-    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:56.200Z' }, all)).toBe(0);
+    // lstart counts seconds: a child of the turn's own second may have started after it, so it is never counted
+    const sameSecond = { ...fresh, firstTurnAt: '2026-11-02T14:27:01.100Z' };
+    const fill = new Infrastructure();
+    expect(fill.settle(owner(), CLAUDE, sameSecond, all)).toBe(0);
+    expect(fill.settle(early('Mon Nov  2 14:27:01 2026'), CLAUDE, sameSecond, all)).toBe(1); // born in the turn's second, after it began
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:57.000Z' }, all)).toBe(0); // servers a second before
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:56.900Z' }, all)).toBe(2); // ptc shares the turn's second: never by count
   });
 
   it('the probe’s d: a bound server killed stays `connected`, and a child started after it is work, not its replacement', () => {
@@ -292,6 +297,9 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // the bridge by the plugin's layout; ptc and its kernel unbound
     expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/u/.claude/plugins/cache/doperpowers/sminos/1.31.0'] })).toBe(2); // that root: still the bridge
     expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/elsewhere/sminos'] })).toBe(3); // another root: work
+    const unloaded = new Infrastructure();
+    expect(unloaded.count(owner(), CLAUDE, fresh)).toBe(2);
+    expect(unloaded.count(owner(), CLAUDE, { ...fresh, sminosRoots: [] })).toBe(3); // the engine reports no sminos: no bridge
   });
 
   it('the bridge: one process at a time, rebound once gone; a hello naming a pid supersedes it', () => {
