@@ -10,9 +10,11 @@
 // its line stays, whichever view shows; Customize keeps the section mounted once visited.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import type { PluginsScope } from '@shared/plugins/cli';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
+import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { SECONDARY } from '../../sessions/ui';
 import { LibrarySwitch, type LibraryTab } from '../../widgets/plugins/LibraryHeader';
@@ -142,7 +144,9 @@ function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOp
 function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
-  const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready').map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
+  // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
+  // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
+  const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
   const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null });
   const liveOf = (name: string) => {
     if (attached === null || !read.data) return undefined;
