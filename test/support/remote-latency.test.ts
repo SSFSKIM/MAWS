@@ -2,7 +2,7 @@
 // same run's local numbers and its own round trip, the misses named, and the run's validity (the local bench's per case,
 // the pings, Rule B on the load).
 import { describe, expect, it } from 'vitest';
-import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, remoteLine, rttStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
+import { boundsOf, budgetMisses, clockEstimate, engineStartOf, clockVoid, deltaVerdict, EXPECTED_MARKERS, invalidReasons, liveClock, liveJudgement, loadVerdict, remoteLine, rttStats, signedStats, type CaseRun, type Measures, type RemoteMeasures } from './remote-latency';
 
 const stats = (p50: number, p95 = p50, n = 600) => ({ p50, p95, n });
 const LOCAL: Measures = { deltaToFrame: stats(24.5, 37.5), roundTrip: stats(0.9, 1.3, 200), openToFirstRowMs: 180, resumeMs: null, engineStartMs: 420 };
@@ -89,7 +89,9 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
 
   it('places the offset in [sent − arrived, received − at], widened by the stamps’ millisecond, and keeps the narrowest', () => {
     const estimate = clockEstimate([exchange(0, 10, 10), exchange(100, 2, 4), exchange(200, 30, 1)])!;
-    expect(estimate).toEqual({ offsetMs: 999, intervalMs: [995, 1003], samples: 3 }); // the 2 + 4 exchange: [1000 − 4 − 1, 1000 + 2 + 1]
+    expect(estimate).toMatchObject({ offsetMs: 999, intervalMs: [995, 1003], samples: 3 }); // the 2 + 4 exchange: [1000 − 4 − 1, 1000 + 2 + 1]
+    expect(estimate.estimates).toEqual([1000, 999, 1014.5]); // each exchange's own ((received − at) + (sent − arrived)) / 2
+    expect(estimate.spreadMs).toBe(15.5);
     expect(estimate.intervalMs[0]).toBeLessThanOrEqual(1000);
     expect(estimate.intervalMs[1]).toBeGreaterThanOrEqual(1000);
     expect(clockEstimate([{ at: 0, received: null, sent: null, arrived: 3 }])).toBeNull();
@@ -127,9 +129,9 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
     const fifty = (offset: number, up = 1, down = 1) => Array.from({ length: 50 }, (_, i) => exchange(i * 10, up, down, offset));
     const rtt = stats(2);
     const clock = liveClock(fifty(1000), fifty(1000))!; // [998, 1002]
-    const base = { roundTrip: stats(20), openToFirstRowMs: 400, rtt, clock };
+    const base = { roundTrip: stats(20), openToFirstRowMs: 400, rtt, clock, rawSamples: [-970, -969, -971], resumeMs: null };
     // the bound: local 24.5 + rtt 2 + 10 = 36.5 ms; a true 30 ms reads −970, its p50 in [27, 33]
-    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970) })).toMatchObject({ void: null, delta: { verdict: 'pass', p50IntervalMs: [27, 33], wide: false }, misses: [], inconclusive: [], bounds: { deltaToFrameP50Ms: 36.5, roundTripP50Ms: 24 } });
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970) })).toMatchObject({ void: null, delta: { verdict: 'pass', p50IntervalMs: [27, 33], wide: false }, misses: [], inconclusive: [], bounds: { deltaToFrameP50Ms: 36.5, roundTripP50Ms: 24 }, verdicts: { deltaToFrame: 'pass', roundTrip: 'pass', openToFirstRow: 'pass', resume: 'not measured' } });
     expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-966) }).inconclusive).toEqual(['direct: delta-to-frame p50 in [31, 37] ms across the clocks, which straddles its bound 36.5 ms']);
     expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-960), roundTrip: stats(25), openToFirstRowMs: 1600 }).misses).toEqual([
       'direct: delta-to-frame p50 in [37, 43] ms across the clocks, over its bound 36.5 ms',
@@ -140,6 +142,37 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
     const slow = liveClock(fifty(1000, 30, 30), fifty(1000, 30, 30))!; // [969, 1031]
     expect(liveJudgement('relay', LOCAL, { ...base, rtt: stats(20), clock: slow, rawDelta: stats(-970) })).toMatchObject({ delta: { verdict: 'inconclusive', wide: true }, misses: [], inconclusive: ['relay: delta-to-frame p50 in [-2, 62] ms across the clocks, its clock’s interval 62 ms wider than its allowance 30 ms (10 ms and the round trip)'] });
     const spread = liveJudgement('direct', LOCAL, { ...base, clock: liveClock(fifty(1000), fifty(1007)), rawDelta: stats(-970) });
-    expect(spread).toMatchObject({ void: 'direct: the clock’s spread 7 ms is over 5 ms', delta: null, inconclusive: [] });
+    expect(spread).toMatchObject({ void: 'direct: the clock’s spread 7 ms is over 5 ms', delta: null, inconclusive: [], verdicts: { deltaToFrame: 'void' } });
+    // a resume measured live is held to the local engine start plus the rtt
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970), resumeMs: 430 })).toMatchObject({ verdicts: { resume: 'miss' }, misses: ['direct: resume 430 ms over its bound 422 ms'] });
+    expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970), resumeMs: 300 }).verdicts.resume).toBe('pass');
+  });
+
+  it('voids the run on one exchange whose estimate lies more than 5 ms from the rest, though the narrowest agree', () => {
+    const steady = Array.from({ length: 50 }, (_, i) => exchange(i * 10, 1, 1));
+    const outlier = exchange(600, 1, 17); // a pong held 16 ms on its way back: its estimate reads 8 ms low
+    const clock = liveClock([...steady, outlier], steady)!;
+    expect(clock.intervalMs).toEqual([998, 1002]); // the offset and its uncertainty are still the narrowest exchanges'
+    expect(clock.spreadMs).toBe(8);
+    expect(clockVoid(clock)).toBe('the clock’s spread 8 ms is over 5 ms');
+    expect(clockVoid(liveClock(steady, steady))).toBeNull();
+  });
+
+  it('carries a live case’s signed delays through stats, validity and judgement: negative before the clock is applied, valid after', () => {
+    // the machine’s clock 1 s ahead: a true 25 ms delay reads −975 across the clocks
+    const delays = Array.from({ length: EXPECTED_MARKERS }, (_, i) => -975 + (i % 7));
+    const run: CaseRun = { samples: delays, expected: EXPECTED_MARKERS, missing: [], clock };
+    const fifty = Array.from({ length: 50 }, (_, i) => exchange(i * 10, 1, 1));
+    const clockOf = liveClock(fifty, fifty)!;
+    const raw = signedStats(delays)!;
+    expect(raw).toMatchObject({ p50: -972, n: EXPECTED_MARKERS });
+    expect(signedStats([])).toBeNull();
+    expect(invalidReasons({ cases: { local: valid(), direct: run, relay: run }, pings: { direct: 100, relay: 100 }, loads: [1, 1, 1], signed: ['direct', 'relay'] })).toEqual([]);
+    expect(invalidReasons({ cases: { local: valid(), direct: run, relay: run }, pings: { direct: 100, relay: 100 }, loads: [1, 1, 1] })).toEqual([`direct: ${EXPECTED_MARKERS} negative samples`, `relay: ${EXPECTED_MARKERS} negative samples`]);
+    const judged = liveJudgement('direct', LOCAL, { rawDelta: raw, rawSamples: delays, roundTrip: stats(20), openToFirstRowMs: 400, rtt: stats(2), clock: clockOf, resumeMs: null });
+    expect(judged).toMatchObject({ void: null, verdicts: { deltaToFrame: 'pass' } });
+    // one delay under zero even at the interval’s high edge (θ ≤ 1002 + 1): the clocks disagree
+    const early = liveJudgement('direct', LOCAL, { rawDelta: raw, rawSamples: [...delays, -1010], roundTrip: stats(20), openToFirstRowMs: 400, rtt: stats(2), clock: clockOf, resumeMs: null });
+    expect(early).toMatchObject({ void: 'direct: 1 delay under zero across the whole clock interval: the clocks disagree', delta: null });
   });
 });

@@ -23,7 +23,7 @@
 // (P5 Decision Log 139, test/support/daemon-idle.ts): the run is void on load only when its 1-minute peak reached 5 and
 // its 30 s pair reached 4.7.
 import { IDLE_RUN, loadPair } from './daemon-idle';
-import { BENCH, invalidReasons as localInvalidReasons, summarize, type ClockCheck, type LatencySummary } from './local-latency';
+import { BENCH, invalidReasons as localInvalidReasons, nearestRank, summarize, type ClockCheck, type LatencySummary } from './local-latency';
 
 export type Stats = LatencySummary;
 export type Carrier = 'direct' | 'relay';
@@ -116,11 +116,11 @@ export function loadVerdict(loads: readonly number[], terminal: number | null = 
 }
 
 /** Why the run is invalid, each reason one line naming its case; empty when it is valid. */
-export function invalidReasons(run: { cases: Readonly<Record<'local' | Carrier, CaseRun | null>>; pings: Readonly<Record<Carrier, number>>; loads: readonly number[]; terminalLoad?: number | null; notes?: readonly string[] }): string[] {
+export function invalidReasons(run: { cases: Readonly<Record<'local' | Carrier, CaseRun | null>>; pings: Readonly<Record<Carrier, number>>; loads: readonly number[]; terminalLoad?: number | null; notes?: readonly string[]; signed?: readonly Carrier[] }): string[] {
   const reasons: string[] = [...(run.notes ?? [])];
   for (const [name, one] of Object.entries(run.cases)) {
     if (one === null) reasons.push(`${name}: not measured`);
-    else for (const reason of localInvalidReasons(one)) reasons.push(`${name}: ${reason}`);
+    else for (const reason of localInvalidReasons(one, { signed: (run.signed ?? []).includes(name as Carrier) })) reasons.push(`${name}: ${reason}`);
   }
   for (const carrier of CARRIERS) {
     if (run.pings[carrier] < REMOTE_BENCH.pings) reasons.push(`${carrier}: ${run.pings[carrier]} of ${REMOTE_BENCH.pings} pings answered`);
@@ -168,42 +168,57 @@ export interface ClockEstimate {
   intervalMs: [number, number];
   /** the exchanges that carried the machine's stamps */
   samples: number;
+  /** every such exchange's own estimate, ((received − at) + (sent − arrived)) / 2 */
+  estimates: number[];
+  /** their range, max − min */
+  spreadMs: number;
 }
 
-/** The narrowest offset interval of the exchanges that carry the machine's stamps; null with none. */
+/**
+ * The narrowest offset interval of the exchanges that carry the machine's stamps (the offset and its uncertainty), and
+ * every exchange's own estimate with their range; null with none.
+ */
 export function clockEstimate(exchanges: readonly Exchange[]): ClockEstimate | null {
   const q = LIVE_BENCH.stampResolutionMs;
   let best: [number, number] | null = null;
-  let samples = 0;
+  const estimates: number[] = [];
   for (const e of exchanges) {
     if (e.received === null || e.sent === null) continue;
-    samples += 1;
+    estimates.push((e.received - e.at + (e.sent - e.arrived)) / 2);
     const interval: [number, number] = [e.sent - e.arrived - q, e.received - e.at + q];
     if (best === null || interval[1] - interval[0] < best[1] - best[0]) best = interval;
   }
-  return best === null ? null : { offsetMs: (best[0] + best[1]) / 2, intervalMs: best, samples };
+  return best === null ? null : { offsetMs: (best[0] + best[1]) / 2, intervalMs: best, samples: estimates.length, estimates, spreadMs: Math.max(...estimates) - Math.min(...estimates) };
 }
 
 export interface LiveClock {
   offsetMs: number;
   intervalMs: [number, number];
+  /** the range of every exchange's estimate across the start's and the end's sets */
   spreadMs: number;
   samples: { start: number; end: number };
-  start: ClockEstimate;
-  end: ClockEstimate;
+  start: Omit<ClockEstimate, 'estimates'>;
+  end: Omit<ClockEstimate, 'estimates'>;
 }
 
-/** The run's clock from its start's and its end's exchanges; null when either carried none of the machine's stamps. */
+/**
+ * The run's clock from its start's and its end's exchanges; null when either carried none of the machine's stamps. The
+ * offset and its interval are the narrowest exchanges' (the union of the two sets'); the spread is every exchange's
+ * estimate's range, within each set and across both, so one exchange off by more than 5 ms voids the run even when the
+ * narrowest agree.
+ */
 export function liveClock(start: readonly Exchange[], end: readonly Exchange[]): LiveClock | null {
   const [s, e] = [clockEstimate(start), clockEstimate(end)];
   if (s === null || e === null) return null;
+  const all = [...s.estimates, ...e.estimates];
+  const kept = (c: ClockEstimate) => ({ offsetMs: c.offsetMs, intervalMs: c.intervalMs, samples: c.samples, spreadMs: c.spreadMs });
   return {
     offsetMs: (s.offsetMs + e.offsetMs) / 2,
     intervalMs: [Math.min(s.intervalMs[0], e.intervalMs[0]), Math.max(s.intervalMs[1], e.intervalMs[1])],
-    spreadMs: Math.abs(e.offsetMs - s.offsetMs),
+    spreadMs: Math.max(...all) - Math.min(...all),
     samples: { start: s.samples, end: e.samples },
-    start: s,
-    end: e,
+    start: kept(s),
+    end: kept(e),
   };
 }
 
@@ -228,19 +243,33 @@ export function deltaVerdict(rawP50: number, clock: LiveClock, bound: number, al
   return { verdict: wide ? 'inconclusive' : verdict, p50IntervalMs, wide };
 }
 
+/** p50, p95 and n of signed samples (a cross-clock delay, negative while the clocks' offset is unapplied); null with none. */
+export function signedStats(samples: readonly number[]): Stats | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return { p50: nearestRank(sorted, 50), p95: nearestRank(sorted, 95), n: sorted.length };
+}
+
 /** A live carrier's measures: its delta read across the two clocks (this Mac's frame less the machine's write), the rest on this Mac's. */
 export interface LiveMeasures {
   rawDelta: Stats;
+  /** the raw delays themselves, signed, whose sign is judged once the clock's interval is applied */
+  rawSamples: readonly number[];
   roundTrip: Stats;
   openToFirstRowMs: number;
   rtt: Stats;
   clock: LiveClock | null;
+  /** the link's reconnect (its channel up) to the first event of the turn written while it was down; null unmeasured */
+  resumeMs: number | null;
 }
+export type BoundVerdict = Verdict | 'void' | 'not measured';
 export interface LiveJudgement {
   bounds: Bounds;
   /** why the carrier's clock voids its run, naming it; null when it stands */
   void: string | null;
   delta: ReturnType<typeof deltaVerdict> | null;
+  /** each of item 3's bounds' verdict (§S) */
+  verdicts: { deltaToFrame: BoundVerdict; roundTrip: BoundVerdict; openToFirstRow: BoundVerdict; resume: BoundVerdict };
   misses: string[];
   inconclusive: string[];
 }
@@ -254,7 +283,13 @@ export function liveJudgement(carrier: Carrier, local: Measures, live: LiveMeasu
   const bounds = boundsOf(local, live.rtt);
   const misses: string[] = [];
   const inconclusive: string[] = [];
-  const voided = clockVoid(live.clock);
+  let voided = clockVoid(live.clock);
+  // a delay can't precede its write: a sample under zero even at the clock interval's high edge says the clocks disagree
+  if (voided === null) {
+    const high = live.clock!.intervalMs[1] + LIVE_BENCH.stampResolutionMs;
+    const below = live.rawSamples.filter((sample) => sample + high < 0).length;
+    if (below > 0) voided = `${below} delay${below === 1 ? '' : 's'} under zero across the whole clock interval: the clocks disagree`;
+  }
   let delta: LiveJudgement['delta'] = null;
   if (voided === null) {
     const allowance = bounds.deltaToFrameP50Ms - local.deltaToFrame.p50;
@@ -265,10 +300,16 @@ export function liveJudgement(carrier: Carrier, local: Measures, live: LiveMeasu
     else if (delta.verdict === 'inconclusive') inconclusive.push(`${said}, which straddles its bound ${ms(bounds.deltaToFrameP50Ms)} ms`);
     else if (delta.verdict === 'miss') misses.push(`${said}, over its bound ${ms(bounds.deltaToFrameP50Ms)} ms`);
   }
-  const over = (label: string, value: number, bound: number) => {
-    if (value > bound) misses.push(`${carrier}: ${label} ${ms(value)} ms over its bound ${ms(bound)} ms`);
+  const over = (label: string, value: number, bound: number): BoundVerdict => {
+    if (value <= bound) return 'pass';
+    misses.push(`${carrier}: ${label} ${ms(value)} ms over its bound ${ms(bound)} ms`);
+    return 'miss';
   };
-  over('round trip p50', live.roundTrip.p50, bounds.roundTripP50Ms);
-  over('open to first row', live.openToFirstRowMs, bounds.openToFirstRowMs);
-  return { bounds, void: voided === null ? null : `${carrier}: ${voided}`, delta, misses, inconclusive };
+  const verdicts: LiveJudgement['verdicts'] = {
+    deltaToFrame: delta === null ? 'void' : delta.wide ? 'inconclusive' : delta.verdict,
+    roundTrip: over('round trip p50', live.roundTrip.p50, bounds.roundTripP50Ms),
+    openToFirstRow: over('open to first row', live.openToFirstRowMs, bounds.openToFirstRowMs),
+    resume: live.resumeMs === null ? 'not measured' : over('resume', live.resumeMs, bounds.resumeMs),
+  };
+  return { bounds, void: voided === null ? null : `${carrier}: ${voided}`, delta, verdicts, misses, inconclusive };
 }

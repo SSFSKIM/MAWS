@@ -39,7 +39,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
 import { BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
-import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
+import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { cleanupAll, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, type Written } from './support/remote-latency-page';
 import { showProjectList, sidebarOf } from './support/sidebar';
@@ -187,7 +187,7 @@ async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: Ma
   const end = await pings(app, ref, LIVE_BENCH.clockExchanges);
   const after = await carried();
   if (after !== `up/${carrier}`) reasons.push(`${carrier}: the link was ${after} after the case's measures, not up/${carrier}`);
-  const measures: LiveMeasures | null = delays.length === 0 || start.length === 0 ? null : { rawDelta: summarize(delays, 0), roundTrip: summarize(trips, BENCH.roundTripWarmup), openToFirstRowMs, rtt: rttStats(start), clock: liveClock(start, end) };
+  const measures: LiveMeasures | null = delays.length === 0 || start.length === 0 ? null : { rawDelta: signedStats(delays)!, rawSamples: delays, roundTrip: summarize(trips, BENCH.roundTripWarmup), openToFirstRowMs, rtt: rttStats(start), clock: liveClock(start, end), resumeMs: null };
   return { measures, run, exchanges: { start, end }, roundTripsMs: trips };
 }
 
@@ -270,7 +270,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     misses.push(...j.misses);
     inconclusive.push(...j.inconclusive);
   }
-  const all = invalidReasons({ cases, pings: { direct: live.direct?.exchanges.start.length ?? 0, relay: live.relay?.exchanges.start.length ?? 0 }, loads, terminalLoad: terminalLoad ?? null, notes: reasons });
+  const all = invalidReasons({ cases, pings: { direct: live.direct?.exchanges.start.length ?? 0, relay: live.relay?.exchanges.start.length ?? 0 }, loads, terminalLoad: terminalLoad ?? null, notes: reasons, signed: CARRIERS });
   const load = loadVerdict(loads, terminalLoad ?? null);
   const lines = [
     ...(localMeasures === null ? [] : [remoteLine('local', localMeasures)]),
