@@ -6,8 +6,10 @@
 //
 // Per machine, from its inputs (`BenchMachine`): a scratch `mawsd` from M7's head with its own profile, label and port,
 // never the default profile, the label `dev.maws.mawsd`, `mawsd install` or ~/.local/bin/mawsd:
-//   1. stage: on the VM the runner fetches the commit into its checkout, packs it there (`pnpm mawsd:pack`) and starts
-//      the pack's mawsd; on the mini, the runner copies this Mac's head bundle (`buildHeadBundle`: the pack of this
+//   1. stage: on the VM the runner sends this checkout's source at the commit (`buildSourceArchive`, `git archive`: no
+//      clone or fetch there, whose GitHub credential the scratch environment never holds) and unpacks it into `head`,
+//      installs it from the registry (pnpm's store and caches in the profile), makes node-pty's spawn-helper
+//      executable, packs it there and starts the pack's mawsd; on the mini, the runner copies this Mac's head bundle (`buildHeadBundle`: the pack of this
 //      checkout at the commit, the stub and its fixtures) as a tarball over the same ssh and unpacks it into `head`, once
 //      the MAWS binary's Electron is the bundle's and the volume has room (`stageHead: 'present'`: mini-ops put it there);
 //      then mini-ops starts the daemon under the production mawsd's runtime, the MAWS binary run as Node as production
@@ -60,8 +62,6 @@ export interface BenchMachine {
   commit: string;
   /** the node runtime that runs the agent (on the mini, the production mawsd's) */
   node: string;
-  /** the repository the VM's checkout is cloned from when it has none */
-  repo?: string;
   /** a daily UTC window ("HH:MM", from, to) in which no call reaches the machine; the mini's is 06:45 to 07:00 */
   quietUtc?: readonly [string, string];
   /** what `node` is: the production app's Electron run as Node (the mini's default: ELECTRON_RUN_AS_NODE=1,
@@ -271,15 +271,24 @@ export class BenchRun {
   }
 
   /** The scratch daemon from M7's head: packed and started here on the VM; on the mini, mini-ops' start waited for. */
-  async stage(headBundle?: HeadBundle): Promise<void> {
+  /**
+   * The scratch daemon from M7's head. `archive`: on the VM, this checkout's source at the commit (`buildSourceArchive`);
+   * on a mini whose head is copied, its head bundle (`buildHeadBundle`).
+   */
+  async stage(archive?: HeadBundle): Promise<void> {
     const m = this.#m;
     if (m.stage === 'runner') {
-      const repo = m.repo ?? 'https://github.com/SSFSKIM/MAWS.git';
-      await this.#must(`test -d ${quote(`${m.head}/.git`)} || git clone --quiet ${quote(repo)} ${quote(m.head)}`, 'the checkout', { timeoutMs: 10 * 60_000 });
-      await this.#must(`cd ${quote(m.head)} && git fetch --quiet origin ${quote(m.commit)} && git checkout --quiet --detach ${quote(m.commit)} && test "$(git rev-parse HEAD)" = ${quote(m.commit)}`, `M7's head ${m.commit.slice(0, 9)}`, { timeoutMs: 10 * 60_000 });
-      // pnpm's store and the downloads' caches in the profile too (the pack's own downloads are under --out)
+      // the source by `git archive` from this Mac, never a clone or fetch there (the scratch environment holds no
+      // GitHub credential); then the registry's packages, pnpm's store and the downloads' caches in the profile too
+      if (archive === undefined) throw new Error(`${m.name}: the VM's head is this checkout's source archive, and none was built`);
+      if (archive.commit !== m.commit) throw new Error(`${m.name}: the source archive is of ${archive.commit.slice(0, 9)}, not ${m.commit.slice(0, 9)}`);
+      await this.#unpack(archive, 'source');
       const caches = envWords({ npm_config_store_dir: `${m.profile}/pnpm-store`, XDG_CACHE_HOME: `${m.profile}/cache`, ELECTRON_CACHE: `${m.profile}/cache/electron` });
-      const packed = await this.#must(`cd ${quote(m.head)} && env ${caches} pnpm install --frozen-lockfile >&2 && env ${caches} pnpm --silent mawsd:pack --out ${quote(packDir(m))}`, 'the pack (pnpm mawsd:pack)', { timeoutMs: 30 * 60_000 });
+      await this.#must(`cd ${quote(m.head)} && env ${caches} pnpm install --frozen-lockfile >&2`, 'pnpm install', { timeoutMs: 30 * 60_000 });
+      await this.#spawnHelpers();
+      // mawsd-pack's own API with the commit named, since the unpacked source is no git checkout for it to read
+      const script = `const { pack } = await import("./scripts/mawsd-pack.mjs"); process.stdout.write((await pack({ out: ${JSON.stringify(packDir(m))}, commit: ${JSON.stringify(m.commit.slice(0, 8))} })) + "\\n");`;
+      const packed = await this.#must(`cd ${quote(m.head)} && env ${caches} ${quote(m.node)} --input-type=module -e ${quote(script)}`, 'the pack (scripts/mawsd-pack.mjs)', { timeoutMs: 30 * 60_000 });
       const pack = packed.stdout.trim().split('\n').at(-1) ?? '';
       if (!pack.startsWith(packDir(m))) throw new Error(`${m.name}: the pack printed no path under ${packDir(m)}`);
       await this.#must(`printf '%s' ${quote(pack)} > ${quote(packPath(m))}`, 'recording the pack');
@@ -287,8 +296,8 @@ export class BenchRun {
       this.#teardown.push({ what: 'the scratch mawsd', step: () => this.#stopDaemon() });
     } else {
       if (stageHeadOf(m) === 'copy') {
-        if (headBundle === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
-        await this.#copyHead(headBundle);
+        if (archive === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
+        await this.#copyHead(archive);
       }
       this.#deps.say(`[bench] ${m.name}: mini-ops starts the scratch mawsd from ${m.head} at ${m.commit.slice(0, 9)} under the production mawsd's runtime, with:`);
       this.#deps.say(`[bench]   ${startLine(m, mawsdEntry(m))}`);
@@ -315,15 +324,27 @@ export class BenchRun {
     if (bundle.commit !== m.commit) throw new Error(`${m.name}: the head bundle is of ${bundle.commit.slice(0, 9)}, not ${m.commit.slice(0, 9)}`);
     const versions = await this.#must(`env ${envWords(profileEnv(m))} ${quote(m.node)} -p process.versions.electron`, 'reading the runtime’s Electron version');
     const electron = versions.stdout.trim();
-    if (electron !== bundle.electron) throw new Error(`${m.name}: refused to copy the head: the runtime ${m.node} is Electron ${electron || '(none: not an Electron)'}, the head bundle's is Electron ${bundle.electron}`);
+    if (bundle.electron === null || electron !== bundle.electron) throw new Error(`${m.name}: refused to copy the head: the runtime ${m.node} is Electron ${electron || '(none: not an Electron)'}, the head bundle's is Electron ${bundle.electron}`);
     const df = await this.#must(`df -Pk ${quote(m.profile)}`, 'reading the profile volume’s free space');
     const available = Number(df.stdout.trim().split('\n').at(-1)?.trim().split(/\s+/)[3]) * 1024;
     const needed = bundle.tarBytes + 2 * bundle.unpackedBytes;
     if (!Number.isFinite(available) || available < needed) throw new Error(`${m.name}: refused to copy the head: the profile's volume has ${mib(available)} MiB free, under the ${mib(needed)} MiB the bundle needs (its ${mib(bundle.tarBytes)} MiB tarball and twice its ${mib(bundle.unpackedBytes)} MiB unpacked)`);
-    const tar = `${benchDir(m)}/head.tar`;
-    await this.#must(`mkdir -p ${quote(benchDir(m))} && cat > ${quote(tar)}`, 'copying the head bundle', { stdinFile: bundle.tar, timeoutMs: 10 * 60_000 });
-    await this.#must(`rm -rf ${quote(m.head)} && mkdir -p ${quote(m.head)} && tar -xf ${quote(tar)} -C ${quote(m.head)} && rm -f ${quote(tar)}`, 'unpacking the head bundle', { timeoutMs: 10 * 60_000 });
+    await this.#unpack(bundle, 'head');
+    await this.#spawnHelpers();
     this.#deps.say(`[bench] ${m.name}: the head ${m.commit.slice(0, 9)} is unpacked in ${m.head} (Electron ${electron}, ${mib(bundle.unpackedBytes)} MiB)`);
+  }
+
+  /** A tarball sent by `cat >` into the bench directory and unpacked under `head` alone, `head` emptied first, the tarball removed. */
+  async #unpack(archive: HeadBundle, name: 'head' | 'source'): Promise<void> {
+    const m = this.#m;
+    const tar = `${benchDir(m)}/${name}.tar`;
+    await this.#must(`mkdir -p ${quote(benchDir(m))} && cat > ${quote(tar)}`, `copying the ${name} archive`, { stdinFile: archive.tar, timeoutMs: 10 * 60_000 });
+    await this.#must(`rm -rf ${quote(m.head)} && mkdir -p ${quote(m.head)} && tar -xf ${quote(tar)} -C ${quote(m.head)} && rm -f ${quote(tar)}`, `unpacking the ${name} archive`, { timeoutMs: 10 * 60_000 });
+  }
+
+  /** node-pty's spawn-helper made executable: an install that skips its scripts (or a copy of one) leaves it 0644. */
+  async #spawnHelpers(): Promise<void> {
+    await this.#must(`find ${quote(this.#m.head)} -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`, 'making node-pty’s spawn-helper executable');
   }
 
   async #stopDaemon(): Promise<void> {
@@ -475,13 +496,26 @@ export class BenchRun {
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
 
-/** This Mac's head bundle for a machine whose head is copied: the tarball, its size, what it unpacks to, its Electron. */
+/** A tarball of M7's head from this Mac: the mini's head bundle (its Electron the pin's), or the VM's source (none). */
 export interface HeadBundle {
   tar: string;
   tarBytes: number;
   unpackedBytes: number;
-  electron: string;
+  electron: string | null;
   commit: string;
+}
+
+/** The VM's source: `git archive` of `commit` from `repo`, its entries checked. */
+export async function buildSourceArchive(repo: string, out: string, runner: CommandRunner, commit: string): Promise<HeadBundle> {
+  mkdirSync(out, { recursive: true });
+  const tar = join(out, 'source.tar');
+  const made = await runner.run(['git', '-C', repo, 'archive', '--format=tar', '-o', tar, commit]);
+  if (made.code !== 0) throw new Error(`git archive ${commit.slice(0, 9)} failed (exit ${made.code}): ${made.stderr.trim().slice(-600)}`);
+  const listed = await runner.run(['tar', '-tf', tar]);
+  const problems = archiveProblems(listed.stdout.split('\n').filter(Boolean));
+  if (listed.code !== 0 || problems.length > 0) throw new Error(problems.join('\n') || `tar -tf failed (exit ${listed.code})`);
+  const tarBytes = statSync(tar).size;
+  return { tar, tarBytes, unpackedBytes: tarBytes, electron: null, commit };
 }
 
 /** The fixtures the latency stub reads (each quoted `….jsonl` in its source), under spikes/protocol-probe/fixtures. */

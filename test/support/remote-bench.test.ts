@@ -10,7 +10,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { archiveProblems, BenchRun, buildHeadBundle, machineProblems, meetsQuiet, processRunner, productionProblem, quote, stubFixtures, transportArgv, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, machineProblems, meetsQuiet, processRunner, productionProblem, quote, stubFixtures, transportArgv, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -81,7 +81,7 @@ function machineScript(options: { enrollExit?: number; listedAfter?: number; alr
       return { code: 0, stdout: JSON.stringify({ enrollment: listed ? 'org-listed' : options.already === false ? 'none' : 'hub-confirmed', name: command.includes('vm-bench') ? 'vm-bench' : 'mini-bench', org: 'org-1' }), stderr: '' };
     }
     if (/ keys /.test(command)) return { code: 0, stdout: JSON.stringify({ key: { keyId: 'KEYID-for-compare', heldKeys: 1 } }), stderr: '' };
-    if (/mawsd:pack/.test(command)) return { code: 0, stdout: '/home/dev/maws-bench/vm-bench/bench/pack/0.0.0-aaaa-1234\n', stderr: '' };
+    if (/mawsd-pack\.mjs/.test(command)) return { code: 0, stdout: '/home/dev/maws-bench/vm-bench/bench/pack/0.0.0-aaaaaaaa-1234\n', stderr: '' };
     if (/ -p process\.versions\.electron$/.test(command)) return { code: 0, stdout: '44.4.5\n', stderr: '' };
     if (/^df -Pk /.test(command)) return { code: 0, stdout: DF(200 * 1024 * 1024), stderr: '' };
     return undefined;
@@ -176,18 +176,28 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     });
   }
 
-  it('the VM: fetches the commit, packs it and starts the pack’s mawsd under its own profile, label, port and the stub; stops it at teardown', async () => {
+  it('the VM: this Mac’s source archive unpacked under its head (no clone, no fetch), installed, spawn-helper made executable, packed at the commit, and the pack’s mawsd started under its own profile, label, port and the stub; stopped at teardown', async () => {
     const file = codeFile();
-    const { calls } = await fullRun(VM(file), machineScript({ listedAfter: 0 }));
+    const { calls, failure } = await fullRun(VM(file), machineScript({ listedAfter: 0 }));
+    expect(failure).toBeNull();
     const lines = calls.map((c) => c.argv.at(-1)!);
     const at = (pattern: RegExp) => lines.findIndex((line) => pattern.test(line));
-    expect(at(/bench-agent\.cjs prepare/)).toBeLessThan(at(/nohup/)); // the wrapper and trust before the daemon reads them
-    expect(lines[at(/git fetch/)]).toContain(`git checkout --quiet --detach ${COMMIT}`);
-    expect(lines[at(/mawsd:pack/)]).toContain('--out /home/dev/maws-bench/vm-bench/bench/pack');
+    const p = '/home/dev/maws-bench/vm-bench';
+    expect(lines.filter((line) => /\bgit\b/.test(line))).toEqual([]);
+    const copy = calls.find((c) => c.stdinFile === BUNDLE.tar)!;
+    expect(copy.argv.at(-1)).toBe(`mkdir -p ${p}/bench && cat > ${p}/bench/source.tar`);
+    expect(lines[at(/tar -xf/)]).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/source.tar -C ${p}/head && rm -f ${p}/bench/source.tar`);
+    expect(lines[at(/pnpm install/)]).toBe(`cd ${p}/head && env npm_config_store_dir=${p}/pnpm-store XDG_CACHE_HOME=${p}/cache ELECTRON_CACHE=${p}/cache/electron pnpm install --frozen-lockfile >&2`);
+    expect(lines[at(/spawn-helper/)]).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
+    expect(lines[at(/mawsd-pack\.mjs/)]).toContain(`pack({ out: "${p}/bench/pack", commit: "aaaaaaaa" })`);
+    const order = [at(/cat > .*source\.tar/), at(/tar -xf/), at(/pnpm install/), at(/spawn-helper/), at(/mawsd-pack\.mjs/), at(/nohup/)];
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(at(/bench-agent\.cjs'? prepare/)).toBeLessThan(at(/nohup/)); // the wrapper and trust before the daemon reads them
     const start = lines[at(/nohup/)]!;
     for (const part of ['MAWS_USER_DATA=/home/dev/maws-bench/vm-bench', 'MAWS_MAWSD_LABEL=dev.maws.bench.vm', 'CLAUDE_CONFIG_DIR=/home/dev/maws-bench/vm-bench/claude-config', 'MAWS_E2E=1', 'MAWS_E2E_ENGINE_BIN=/home/dev/maws-bench/vm-bench/bench/latency-engine', 'MAWS_ENDPOINT_DIRECT=1', 'MAWS_ENDPOINT_PORT=47902', 'run --private --dir /home/dev/maws-bench/vm-bench/mawsd']) expect(start).toContain(part);
     expect(lines.at(-1)).toMatch(/kill "\$pid"/);
-    expect(lines.some((line) => /rm -rf/.test(line))).toBe(false); // the profile is kept until the bench is done
+    expect(lines.some((line) => line.includes(`rm -rf ${p}`) && !line.includes(`rm -rf ${p}/head`))).toBe(false); // the profile is kept until the bench is done
   });
 
   it('the mini: says mini-ops’ start and waits for it, never starts or stops a daemon itself', async () => {
@@ -316,6 +326,8 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const copy = calls.find((c) => c.stdinFile === BUNDLE.tar)!;
     expect(copy.argv.at(-1)).toBe(`mkdir -p ${p}/bench && cat > ${p}/bench/head.tar`);
     expect(lines[at(/tar -xf/)]).toBe(`rm -rf ${p}/head && mkdir -p ${p}/head && tar -xf ${p}/bench/head.tar -C ${p}/head && rm -f ${p}/bench/head.tar`);
+    expect(lines[at(/spawn-helper/)]).toBe(`find ${p}/head -path '*/node-pty/prebuilds/*/spawn-helper' -type f -exec chmod +x {} +`);
+    expect(at(/tar -xf/)).toBeLessThan(at(/spawn-helper/));
     expect(at(/process\.versions\.electron/)).toBeLessThan(at(/^df -Pk/));
     expect(at(/^df -Pk/)).toBeLessThan(lines.indexOf(copy.argv.at(-1)!));
     expect(lines.indexOf(copy.argv.at(-1)!)).toBeLessThan(at(/tar -xf/));
@@ -325,7 +337,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     // `present`: mini-ops put the head there; nothing is copied
     const present = await fullRun({ ...MINI(codeFile()), stageHead: 'present' }, machineScript({ listedAfter: 0 }), 0, null);
     expect(present.failure).toBeNull();
-    expect(present.calls.some((c) => /tar -xf|head\.tar|process\.versions/.test(c.argv.at(-1)!))).toBe(false);
+    expect(present.calls.some((c) => /tar -xf|head\.tar|process\.versions|spawn-helper/.test(c.argv.at(-1)!))).toBe(false);
   });
 
   it('refuses to copy the head when the runtime’s Electron is not the bundle’s, or the volume is short of room, saying both', async () => {
@@ -396,6 +408,35 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     await expect(buildHeadBundle(repo, join(root, 'out2'), runner, 'c'.repeat(40))).rejects.toThrow(/is built from ccccccccc, and .* is at aaaaaaaaa/);
     dirty = true;
     await expect(buildHeadBundle(repo, join(root, 'out3'), runner, COMMIT)).rejects.toThrow(/has tracked changes/);
+  });
+
+  it('builds the VM’s source by git archive of the commit, its entries checked, and the VM refuses one of another commit or none', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'bench-source-'));
+    scratch.push(root);
+    const tree = join(root, 'tree');
+    mkdirSync(join(tree, 'scripts'), { recursive: true });
+    writeFileSync(join(tree, 'scripts/mawsd-pack.mjs'), '// pack');
+    let argvSeen: readonly string[] = [];
+    const runner: CommandRunner = {
+      async run(argv) {
+        if (argv[0] === 'git') {
+          argvSeen = argv;
+          const ran = spawnSync('tar', ['-C', tree, '-cf', argv[argv.indexOf('-o') + 1]!, '.'], { encoding: 'utf8' });
+          return { code: ran.status, stdout: '', stderr: ran.stderr };
+        }
+        const ran = spawnSync(argv[0]!, argv.slice(1), { encoding: 'utf8' });
+        return { code: ran.status, stdout: ran.stdout, stderr: ran.stderr };
+      },
+      start: () => {
+        throw new Error('no process is started');
+      },
+    };
+    const source = await buildSourceArchive('/repo', join(root, 'out'), runner, COMMIT);
+    expect(argvSeen).toEqual(['git', '-C', '/repo', 'archive', '--format=tar', '-o', join(root, 'out', 'source.tar'), COMMIT]);
+    expect(source).toMatchObject({ tar: join(root, 'out', 'source.tar'), electron: null, commit: COMMIT });
+    expect(source.tarBytes).toBeGreaterThan(0);
+    expect((await fullRun(VM(codeFile()), machineScript({ listedAfter: 0 }), 0, { ...source, commit: 'b'.repeat(40) })).failure).toMatchObject({ message: expect.stringMatching(/the source archive is of bbbbbbbbb, not aaaaaaaaa/) });
+    expect((await fullRun(VM(codeFile()), machineScript({ listedAfter: 0 }), 0, null)).failure).toMatchObject({ message: expect.stringMatching(/no(ne)? .*source archive|source archive, and none was built/) });
   });
 
   it('runs a child with the file’s descriptor as its stdin and neither SMINOS_RL10 nor MAWS_USER_DATA in its environment', async () => {
