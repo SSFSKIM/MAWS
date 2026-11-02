@@ -296,6 +296,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
       return session;
       }, { adoption: true });
     } catch (error) {
+      transport.detach?.(); // P5 O16 panel fix wave 1: its connection closed, nothing released or signalled
       await journal.close().catch(() => {}); // the host stays, for the next start
       throw error;
     }

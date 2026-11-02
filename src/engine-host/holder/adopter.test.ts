@@ -182,6 +182,31 @@ describe('the launcher’s adoption', () => {
     await until(() => woken, 'the reads woken at the failure');
   });
 
+  // P5 O16 panel fix wave 1 follow-up (discovery 2): a reservation refused by closed admission (a stop-all or the exit
+  // order between the attach and the reserve) lets the host go as an abandoned adoption does: its connection closed,
+  // nothing released or signalled, so the next start attaches it again
+  it('a reservation refused after the attach detaches the attached transport, its engine untouched', async () => {
+    const { entry } = launched();
+    let attach: () => void = () => {};
+    const attached = new Promise<void>((resolve) => (attach = resolve));
+    const a = await adopter();
+    const hosting = a.deps.holder!;
+    const adoptHost = hosting.adopt!;
+    hosting.adopt = async (...args) => {
+      const adopted = await adoptHost(...args);
+      await attached;
+      return adopted;
+    };
+    a.table.holdForAdoption([ID]);
+    const adopting = a.adopt(entry);
+    await until(() => a.transports.length === 1, 'the attach');
+    await a.table.shutdown({ graceMs: 0, mode: 'detach' });
+    attach();
+    await expect(adopting).rejects.toThrow(/shutting down/);
+    expect(a.transports[0]!.calls).toEqual(['detach']);
+    expect(a.transports[0]!.writes).toEqual([]);
+  });
+
   it('a failure after the reservation is the adoption’s, counted by adoptAll', async () => {
     const { entry } = launched();
     const a = await adopter({ responder: { initialize: () => ({ error: 'no session to resume' }) } });
