@@ -287,7 +287,7 @@ describe('the http read open', () => {
         window: { ready: () => {} } as unknown as StreamWindow,
         over: () => {},
         cancelled: () => false,
-        decide: async (publish) => ({ ok: true, value: publish({ input, stands: () => true }) }),
+        decide: async (publish) => ({ ok: true as const, value: publish({ input, stands: () => true }) }),
         install: (s) => void (stream = s),
         refuse: () => {},
         log: () => {},
