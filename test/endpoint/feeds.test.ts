@@ -10,6 +10,11 @@
 // change: a session that leaves it is emptied, one that joins shows its items at once, and nothing of a session the
 // member can't view goes, however a change of rights and a change of items interleave. `attention.list` and
 // `session.search` are answered the same cut.
+//
+// P5 O7 M5a (§R, M5 "Events that cross"): the machine's `artifacts` feed, admitted at `list`, opens with nothing to snap
+// and carries every `library.changed` and each `artifacts.changed` whose artifact the member views by the `artifact` rule,
+// in order, one queued at a time and taken back when the member's rights go before the device takes it. A session's
+// `checkout` feed carries its `session.capabilitiesChanged`, as its `session.changed`.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,9 +56,9 @@ function session(f: Fixture, appSessionId: string, directory: string, additional
   return record;
 }
 
-async function feed(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string } | null, kind: 'checkout' | 'attention' = 'checkout'): Promise<Msg> {
+async function feed(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string } | null, kind: 'checkout' | 'attention' | 'artifacts' = 'checkout', credit = 4 * 1024 * 1024): Promise<Msg> {
   const from = r.inbox.length;
-  await r.channel.send({ t: 'sub', sub, feed: kind, ...(session === null ? {} : { session }), cursor: null, credit: 4 * 1024 * 1024 });
+  await r.channel.send({ t: 'sub', sub, feed: kind, ...(session === null ? {} : { session }), cursor: null, credit });
   return waitFor(r, (m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to feed ${sub}`, from);
 }
 
@@ -211,6 +216,22 @@ describe('a session’s checkout feed', () => {
     expect(names(a, 'f1')).toEqual([['session.changed', live]]);
     expect(f.host.calls.filter((c) => c.name === 'session.status')).toHaveLength(engineReads);
     expect(f.interest.filter(([kind, , sessions]) => kind === 'report' && (sessions ?? []).includes('app-1'))).toEqual([]);
+  });
+
+  it('carries its session’s capabilities as they change (O5’s tools), and no other session’s (P5 O7 M5a)', async () => {
+    const repo = scratch();
+    const f = await startEndpoint(org, started);
+    session(f, 'app-1', repo);
+    session(f, 'app-2', repo);
+    f.spine.handle('git.status', () => status(repo));
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'f1', { lane: 'B', id: 'app-1' });
+    const changed = (appSessionId: string, available: boolean) => ({ appSessionId, capabilities: { browser: { available, ...(available ? {} : { reason: 'no display' }) } } });
+    f.host.emitMachine('session.capabilitiesChanged', changed('app-2', true));
+    f.host.emitMachine('session.capabilitiesChanged', changed('app-1', false));
+    await until(() => evs(a, 'f1').length >= 1, 'the capabilities’ change');
+    await settle();
+    expect(names(a, 'f1')).toEqual([['session.capabilitiesChanged', changed('app-1', false)]]);
   });
 
   it('is refused to a caller who can’t view the session, and for a lane A session', async () => {
@@ -728,5 +749,86 @@ describe('a watch the channel installed', () => {
     } finally {
       files.dispose();
     }
+  });
+});
+
+describe('the machine’s artifacts feed (P5 O7 M5a)', () => {
+  const changed = (artifactId: string, change = 'updated') => ({ artifactId, kind: 'document', revision: 2, change });
+  const feedNames = (r: Remote, sub: string, from = 0) => evs(r, sub, from).map((e) => e.body as { name: string; payload: Record<string, unknown> });
+
+  it('opens with nothing to snap, then carries every library change and each change of an artifact the member views, in order, at the next seq', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null); // listed: B holds `list`, below `view`
+    const [mine, theirs, orphan] = [randomUUID(), randomUUID(), randomUUID()];
+    f.host.artifact(mine, ['app-1']);
+    f.host.artifact(theirs, ['app-2']);
+    f.host.artifact(orphan);
+    const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+    const opened = await feed(b, 'art', null, 'artifacts');
+    expect(opened).toMatchObject({ t: 'subbed', mode: 'snapshot', seq: 0 });
+    expect(opened.epoch).toMatch(/^artifacts:/);
+    expect(await feed(a, 'art', null, 'artifacts')).toMatchObject({ t: 'subbed' });
+
+    f.host.emitHost('artifacts.changed', changed(theirs));
+    f.host.emitHost('artifacts.changed', changed(mine));
+    f.host.emitMachine('library.changed', { revision: 7 });
+    f.host.emitHost('artifacts.changed', changed(orphan, 'created'));
+    await until(() => evs(b, 'art').length >= 2 && evs(a, 'art').length >= 4, 'the changes');
+    await settle();
+    expect(evs(b, 'art').map((e) => [e.epoch, e.seq])).toEqual([1, 2].map((seq) => [opened.epoch, seq]));
+    expect(feedNames(b, 'art')).toEqual([
+      { name: 'artifacts.changed', payload: changed(mine) },
+      { name: 'library.changed', payload: { revision: 7 } },
+    ]);
+    // The machine's owner hears of every artifact, none of them placed.
+    expect(feedNames(a, 'art').map((e) => e.payload.artifactId ?? e.name)).toEqual([theirs, mine, 'library.changed', orphan]);
+    expect(of(b, 'art').filter((m) => m.t === 'snap')).toEqual([]);
+  });
+
+  it('carries the change of an artifact newly linked into a session the member views (the relink places it again)', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    const doc = randomUUID();
+    f.host.artifact(doc, ['app-2']);
+    const b = await openRemote(f, org.b1, org.B);
+    await feed(b, 'art', null, 'artifacts');
+    f.host.emitHost('artifacts.changed', changed(doc)); // decided while B views none of its sessions: not B's
+    await settle();
+    f.host.link(doc, 'app-1');
+    await until(() => evs(b, 'art').length >= 1, 'the relink');
+    await settle();
+    expect(feedNames(b, 'art')).toEqual([{ name: 'artifacts.changed', payload: { ...changed(doc, 'linked'), revision: 1 } }]);
+  });
+
+  it('takes back a change queued while the device read nothing once the member’s share goes, and goes on', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    const doc = randomUUID();
+    f.host.artifact(doc, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B);
+    await feed(b, 'art', null, 'artifacts', 1);
+    f.host.emitMachine('library.changed', { revision: 1 }); // spends the credit
+    await until(() => evs(b, 'art').length >= 1, 'the first change');
+    f.host.emitHost('artifacts.changed', changed(doc)); // decided and queued: the device can't take it yet
+    await settle();
+    expect(evs(b, 'art')).toHaveLength(1);
+    shared(f, 'app-1', null); // the share goes
+    await settle();
+    f.host.emitMachine('library.changed', { revision: 2 });
+    await b.channel.send({ t: 'credit', sub: 'art', bytes: 1024 * 1024 });
+    await until(() => evs(b, 'art').length >= 2, 'the next change');
+    await settle();
+    expect(feedNames(b, 'art')).toEqual([
+      { name: 'library.changed', payload: { revision: 1 } },
+      { name: 'library.changed', payload: { revision: 2 } },
+    ]);
+  });
+
+  it('is refused to a web-cards device', async () => {
+    const f = await startEndpoint(org, started);
+    const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
+    expect(await feed(c, 'art', null, 'artifacts')).toMatchObject({ t: 'ended', reason: 'class' });
   });
 });

@@ -63,6 +63,8 @@ export interface RemoteChannel {
   readonly clientClass: DeviceClass;
   /** The channel as the machine's asker (P5 O7 M2): passed to every `dispatch` its requests make, ended at its close. */
   readonly client: ClientRef;
+  /** P5 O7 M5a: what the device listed in its `h1` (`rl2.bytes`: bytes.ts). */
+  readonly capabilities: readonly string[];
   readonly closed: boolean;
   /** Sends `message` after everything sent before it; false once the channel is closed. */
   send(message: EndpointMessage): boolean;
@@ -156,6 +158,7 @@ class Remote implements RemoteChannel {
   readonly member: string;
   readonly device: string;
   readonly clientClass: DeviceClass;
+  readonly capabilities: readonly string[];
   readonly #client: EndableClientRef;
 
   constructor(key: string, carrier: Carrier, channel: Channel, io: ChannelCarrier, peer: DevicePeer, log: (line: string) => void) {
@@ -166,6 +169,7 @@ class Remote implements RemoteChannel {
     this.member = peer.member;
     this.device = peer.device;
     this.clientClass = peer.clientClass;
+    this.capabilities = [...peer.capabilities];
     this.#log = log;
     // The RL2 channel id is fresh per handshake, so no later channel (a hub number given again) shares the ref's id.
     this.#client = endableClientRef(`${peer.device}/${channel.id}`);

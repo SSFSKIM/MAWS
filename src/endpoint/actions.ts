@@ -33,10 +33,22 @@
 // Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
 // result by the nonce it answers.
 //
+// P5 O7 M5a (M5 "Artifact writes are engine-host acts with no session"): an artifact's write (an engine-host row whose
+// target rule is `artifact`) names no session and is sealed with no context, so it goes to the engine host's ledger as
+// `host.artifactOp` (ARTIFACT_OP): the claim's fields and `target`, the artifact authorization placed (`artifact:<id>`,
+// `artifact:` for the orphan form), which the ledger keeps and `host.opQuery` answers, so a query re-places the artifact
+// (queries.ts); no status is read, the rule having placed the target. Its `input` is the action's `args` as sealed, in the
+// bytes codec's tagged form for a device that carries bytes (the ledger decodes its own copy). An engine host that
+// predates the command answers `unknown_command` (its runtime: a name outside its registry): nothing ran, and the act is
+// `refused {reason: 'unavailable'}`, logged, until the host is replaced. Every `done` result goes to a device that listed
+// `rl2.bytes` tagged (bytes.ts).
+//
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
 // asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
 import { actionFingerprint, type ActMessage, type RefusalReason } from 'org-protocol';
+import type { ArtifactTarget } from './authorize';
+import { doneMessage } from './bytes';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
@@ -50,6 +62,12 @@ export const STOP_WAIT_MS = 2000;
 
 /** `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4). */
 export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload']);
+
+/**
+ * P5 O7 M5a: the engine host's ledger command for an act with no session (an artifact's write), and the answer of a host
+ * that predates it, which the act reads as `refused unavailable`.
+ */
+export const ARTIFACT_OP = { name: 'host.artifactOp', predates: 'unknown_command' } as const;
 
 export type ActionsContext = {
   freshness: Freshness;
@@ -86,6 +104,11 @@ export function closedLedgerOf(value: unknown): string | null {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** P5 O7 M5a: the prefix of the target a claim stores for an artifact act, which a query reads back (queries.ts). */
+export const ARTIFACT_TARGET = 'artifact:';
+/** The target an artifact act's claim stores: `artifact:<id>`, `artifact:` for the orphan form. */
+const artifactTarget = ({ artifactId }: ArtifactTarget): string => `${ARTIFACT_TARGET}${artifactId ?? ''}`;
 
 export class Actions {
   readonly #inflight = new Set<Promise<unknown>>();
@@ -170,7 +193,7 @@ export class Actions {
       accept();
       const release = this.#hold();
       try {
-        channel.send({ t: 'done', opId: action.opId, outcome: answered(await this.ctx.own.run(action, who, fingerprint, channel)) });
+        channel.send(doneMessage(channel, action.opId, answered(await this.ctx.own.run(action, who, fingerprint, channel))));
       } finally {
         release();
       }
@@ -186,7 +209,33 @@ export class Actions {
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        channel.send({ t: 'done', opId: action.opId, outcome });
+        channel.send(doneMessage(channel, action.opId, outcome));
+      } finally {
+        release();
+      }
+      return;
+    }
+
+    // P5 O7 M5a: an artifact's write, under the engine host's ledger with the artifact as its target and no session.
+    if (row.target === 'artifact') {
+      if (decision.artifact === undefined) return refuse('malformed');
+      accept();
+      const release = this.#hold();
+      try {
+        const answer = await dispatch('engine-host', ARTIFACT_OP.name, {
+          opId: action.opId,
+          opCreated: action.opCreated,
+          member: who.member,
+          device: who.device,
+          fingerprint,
+          target: artifactTarget(decision.artifact),
+          name: action.action,
+          input: action.args,
+        });
+        if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
+        else if (answer.error.code === ARTIFACT_OP.predates) this.ctx.log(`endpoint: the engine host predates \`${ARTIFACT_OP.name}\`: \`${action.action}\` refused unavailable until it is replaced`);
+        const outcome = answer.ok ? answered(answer.value) : answer.error.code === ARTIFACT_OP.predates ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
+        channel.send(doneMessage(channel, action.opId, outcome));
       } finally {
         release();
       }
@@ -219,7 +268,7 @@ export class Actions {
         ...(action.requestDigest === undefined ? {} : { requestDigest: action.requestDigest }),
       });
       if (answer.ok) this.ctx.engineHostLedger?.(closedLedgerOf(answer.value));
-      channel.send({ t: 'done', opId: action.opId, outcome: answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code } });
+      channel.send(doneMessage(channel, action.opId, answer.ok ? answered(answer.value) : { state: 'unknown', reason: answer.error.code }));
     } finally {
       release();
     }

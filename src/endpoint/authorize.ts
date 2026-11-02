@@ -57,10 +57,22 @@
 // machine; what it answers is then cut per session, at the registry's grade, by a check that reads the session's record
 // when it is asked, with the machine's owners as the head now gives them: the cut and the answer's sending happen in one
 // synchronous step, so a record change can't come between them.
-import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right, SessionRef, SubMessage } from 'org-protocol';
+//
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule"): the `artifact`
+// rule at step 4. A member who is one of the machine's owners stands on every artifact, read before any link is placed;
+// anyone else's standing is artifacts.ts' `holdsArtifact` over the links targets.ts placed, each linked session's record
+// read through this decision's `Reads` (so the bridge's standing is read with the record's, and `recordsMoved` takes the
+// decision again when a record arrives mid-decision), the placement through the channel's cache (`ArtifactRanks`), a
+// cached entry dropped mid-decision moving it as a record does. An unknown artifact is `grade`. The decision's target is
+// the artifact (`Decision.artifact`), which actions.ts writes into the act's claim and a query reads back (`#query`).
+// A by-effect rule may read an artifact's standing too (`copyAsset`'s `from`, by-effect.ts). Step 2 holds every registry
+// command's input to its schema, a row with its own grade too (M5a's `library.list` and `library.spaces`); an act's input
+// is the request's, which the gate decoded from the bytes codec's tagged form for a device that listed `rl2.bytes`.
+import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
+import { holdsArtifact, type ArtifactRanks, type PlacedArtifact } from './artifacts';
 import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-effect';
 import { machineOwnerMembers } from './grants';
 import { higher, isMachineGrade, isRoutingClass, isSessionRank, owns, rankAtLeast, sessionRank } from './grades';
@@ -69,7 +81,7 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Placement, type Resolved, type Spawner } from './targets';
+import { artifactShortCut, CheckoutBounds, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type Placement, type Placing, type Resolved, type Spawner } from './targets';
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
@@ -78,12 +90,14 @@ import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, typ
 export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub' | 'stream'; name: string; input: unknown; action?: Action; session?: SessionRef };
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
 export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
-export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reason: RefusalReason };
+/** `artifact` (P5 O7 M5a): the artifact an `artifact`-rule request was decided on (null: the orphan form). */
+export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget } | { ok: false; reason: RefusalReason };
+export type ArtifactTarget = { artifactId: string | null };
 /**
  * What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. P5 O12 M11:
  * `launchedBy`, the spawner the placement of a lane B target read from the spine's record.
  */
-export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner };
+export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner; artifact?: ArtifactTarget };
 /** The sender an act's ledger stored, which a stream opened under the act (or kept open) is authorized against. */
 export type StreamBinding = { member: string; device: string };
 /**
@@ -91,7 +105,12 @@ export type StreamBinding = { member: string; device: string };
  * `current`: whether the head and everything else the machine's owners were read against still stand; a check made once
  * it doesn't holds nothing, and its holder reads the ranks again.
  */
-export type SessionRanks = { holds(placement: Placement, grade: SessionRank): boolean; current(): boolean };
+export type SessionRanks = {
+  holds(placement: Placement, grade: SessionRank): boolean;
+  /** P5 O7 M5a: whether the member is one of the machine's owners (the `artifact` rule's short cut), while `current`. */
+  ownsMachine(): boolean;
+  current(): boolean;
+};
 
 export type AuthorizeContext = {
   ref(): string | null;
@@ -113,6 +132,8 @@ export type AuthorizeContext = {
   webauthn: { origin(): string | null; counter(credentialId: string): number; setCounter(credentialId: string, counter: number): void };
   /** What else a decision rests on that can change under it (the grant ledger), compared by identity. */
   stamp?(): unknown;
+  /** P5 O7 M5a: the `artifact` rule's placements, kept per channel; absent, each decision reads its own. */
+  artifacts?: ArtifactRanks;
   /** The suites' seams: another offer table, grade declaration or registry (a fixture namespace). */
   offers?: Offers;
   gradeOf?(name: string): GradeSpec | undefined;
@@ -151,15 +172,55 @@ class Reads implements EffectReads {
   #owners: Promise<string[]> | null = null;
   readonly #pending = new Map<string, Promise<string | null>>();
   readonly #records = new Map<string, { target: SessionTarget; launchedBy?: Spawner; standing: string | null }>();
+  /** P5 O7 M5a: whether each cached artifact placement this decision read still stands. */
+  readonly #artifacts: Array<() => boolean> = [];
 
   constructor(
     private readonly ctx: AuthorizeContext,
     private readonly org: { head: OrgState; certificates: Certificates },
     private readonly ref: string,
     private readonly now: Date,
+    private readonly who: Who,
     /** The machine as this decision reads it: on behalf of the asker. */
     readonly dispatch: EndpointServices['dispatch'],
   ) {}
+
+  /** How this decision places a lane B session (`live`: targets.ts' `Placing`), or an artifact (through the cache). */
+  placing(live: boolean): Placing {
+    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId) };
+  }
+
+  /** P5 O7 M5a: the artifact's placement, through the channel's cache. */
+  async artifact(artifactId: string): Promise<Resolved> {
+    const placing: Placing = { dispatch: this.dispatch, log: (line) => this.ctx.log(line) };
+    if (this.ctx.artifacts === undefined) return placeArtifact(artifactId, placing);
+    const placed = await this.ctx.artifacts.of(this.who.client, artifactId, placing);
+    this.#artifacts.push(placed.current);
+    return placed.resolved;
+  }
+
+  /** Whether a cached artifact placement read here was dropped since (a relink, a record, a head). */
+  artifactsMoved(): boolean {
+    return this.#artifacts.some((current) => !current());
+  }
+
+  /**
+   * P5 O7 M5a: whether the member holds `grade` on the placed artifact (artifacts.ts' predicate): as one of the machine's
+   * owners, or on a linked session, its record read here.
+   */
+  async holdsArtifact(artifact: Pick<PlacedArtifact, 'sessions' | 'orphan'>, grade: SessionRank): Promise<boolean> {
+    const owners = await this.owners();
+    const member = this.who.member;
+    return holdsArtifact(artifact, owners.includes(member), (s) => rankAtLeast(sessionRank(this.record(s.target, s.launchedBy), member, owners), grade));
+  }
+
+  /** The same by the artifact's id (a by-effect rule's read): an owner before any placement; unknown, held by nobody else. */
+  async holdsArtifactId(artifactId: string, grade: SessionRank): Promise<boolean> {
+    if ((await this.owners()).includes(this.who.member)) return true;
+    const placed = await this.artifact(artifactId);
+    if (placed.kind === 'refused') throw new Refused(placed.reason);
+    return placed.kind === 'artifact' && (await this.holdsArtifact(placed, grade));
+  }
 
   /** The machine's owners as members. */
   owners(): Promise<string[]> {
@@ -214,8 +275,8 @@ export class Authorizer {
       const ref = this.ctx.ref();
       if (org === null || ref === null) return refuse('unavailable');
       const before = this.#stamp();
-      const reads = new Reads(this.ctx, org, ref, new Date(now), dispatchAs(this.ctx.dispatch, who.client));
-      const moved = () => reads.recordsMoved() || !sameStamp(before, this.#stamp());
+      const reads = new Reads(this.ctx, org, ref, new Date(now), who, dispatchAs(this.ctx.dispatch, who.client));
+      const moved = () => reads.recordsMoved() || reads.artifactsMoved() || !sameStamp(before, this.#stamp());
       let standing: Standing;
       try {
         if (request.kind === 'query') standing = decided(await this.#query(request, who, reads));
@@ -251,9 +312,10 @@ export class Authorizer {
       return {
         current,
         holds: (placement, grade) => placement !== null && current() && rankAtLeast(sessionRank(recordOf(records, placement.target, placement.launchedBy), member, owners), grade),
+        ownsMachine: () => current() && owners.includes(member),
       };
     }
-    return { current: () => false, holds: () => false };
+    return { current: () => false, holds: () => false, ownsMachine: () => false };
   }
 
   /** What a decision rests on beyond the records it reads: the head, the certificates, the policy and the grant ledger. */
@@ -280,14 +342,15 @@ export class Authorizer {
     if (kind === 'act' && row.kind !== 'act') return no('not-offered');
     if (kind === 'call' && row.kind === 'act') return no('act-required');
     if (kind === 'act' && (action === undefined || action.action !== name || action.org !== org.head.org || action.machine !== ref || action.device !== who.device)) return no('malformed');
-    const input = kind === 'act' ? action!.args : request.input;
+    // An act's args as the gate read them (P5 O7 M5a: decoded from the bytes codec's form, for a device that sent it).
+    const input = request.input;
 
     // 2. A grade, and an input its command takes.
     const spec = this.#gradeOf(name, row);
     if (spec === undefined) return no('ungraded');
     const floor = spec === null || typeof spec === 'string' ? spec : spec.floor;
     if (floor !== null && isRoutingClass(floor)) return no('grade');
-    if (row.grade === undefined ? !this.#validInput(name, input) : row.accepts?.(input) === false) return no('malformed');
+    if (row.grade === undefined || this.#registered(name) ? !this.#validInput(name, input) : row.accepts?.(input) === false) return no('malformed');
 
     // 3. The class.
     const webCards = who.clientClass === 'web-cards';
@@ -295,13 +358,15 @@ export class Authorizer {
 
     // 4. The caller's standing at the floor, before anything of the session is read.
     // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
-    const placing = { dispatch: reads.dispatch, log: (line: string) => this.ctx.log(line), live: !(kind === 'act' && row.executor === 'engine-host') };
-    const resolved = await resolveTarget(row.target, input, action, placing, request.session);
+    const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'));
+    // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed.
+    const resolved = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action) : await resolveTarget(row.target, input, action, placing, request.session, name);
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
+    const artifact = resolved.kind === 'artifact' ? resolved : undefined;
     const record = target === undefined ? null : reads.record(target, resolved.kind === 'session' ? resolved.launchedBy : undefined);
-    const atFloor = await this.#stands(floor, target, record, who, reads);
+    const atFloor = await this.#stands(floor, target, record, who, reads, artifact);
     if (atFloor !== null) return no(atFloor);
     // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
     if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
@@ -314,7 +379,7 @@ export class Authorizer {
     if (grade !== null && isRoutingClass(grade)) return no('grade');
     if (kind === 'call' && grade !== 'list' && grade !== 'view') return no('act-required');
     if (grade !== floor) {
-      const atGrade = await this.#stands(grade, target, record, who, reads);
+      const atGrade = await this.#stands(grade, target, record, who, reads, artifact);
       if (atGrade !== null) return no(atGrade);
     }
 
@@ -337,7 +402,7 @@ export class Authorizer {
     }
 
     // 8. Presence, once the decision is known to stand.
-    const granted: Decision = target === undefined ? { ok: true } : { ok: true, target };
+    const granted: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
     if (kind !== 'act') return decided(granted);
     const device = deviceOf(org.head, who.member, who.device);
     if (device === undefined) return no('removed');
@@ -350,10 +415,14 @@ export class Authorizer {
     return { decision: granted, presence: async () => ((await verifyDeviceStepUp(action!, device, org.head)) ? granted : refuse('step-up')) };
   }
 
-  /** Whether the member holds `grade` on the target (a session rank) or the machine (a right); null when they do. */
-  async #stands(grade: Grade | null, target: SessionTarget | undefined, record: SessionRecord | null, who: Who, reads: Reads): Promise<RefusalReason | null> {
+  /**
+   * Whether the member holds `grade` on the target (a session rank; P5 O7 M5a: on the artifact, when the rule placed one)
+   * or the machine (a right); null when they do.
+   */
+  async #stands(grade: Grade | null, target: SessionTarget | undefined, record: SessionRecord | null, who: Who, reads: Reads, artifact?: PlacedArtifact): Promise<RefusalReason | null> {
     if (grade === null) return null;
     if (isSessionRank(grade)) {
+      if (artifact !== undefined) return (await reads.holdsArtifact(artifact, grade)) ? null : 'grade';
       if (target === undefined) return grade === 'list' ? null : 'no-target';
       return rankAtLeast(sessionRank(record, who.member, await reads.owners()), grade) ? null : 'grade';
     }
@@ -366,6 +435,11 @@ export class Authorizer {
     return holdsToSchema(name, input, this.ctx.registry);
   }
 
+  /** Whether `name` is a registry command (whose input step 2 holds to its schema, whatever grade its row carries). */
+  #registered(name: string): boolean {
+    return Object.hasOwn((this.ctx.registry ?? REGISTRY).commands, name);
+  }
+
   /** The grade the input's effect takes (null: the action's signatures are its authority), or a refusal. */
   async #effectiveGrade(name: string, spec: GradeSpec | null, input: unknown, reads: Reads): Promise<Grade | null | Decision> {
     if (spec === null || typeof spec === 'string') return spec;
@@ -374,6 +448,7 @@ export class Authorizer {
     if (!isObject(input)) return refuse('malformed');
     const grade = await rule(input, reads);
     if (grade === NO_RULE) return refuse('no-rule');
+    if (typeof grade === 'object') return refuse(grade.refused); // P5 O7 M5a: what the effect reads isn't the member's
     return isSessionRank(grade) && isSessionRank(spec.floor) ? higher(grade, spec.floor) : grade;
   }
 
@@ -404,8 +479,9 @@ export class Authorizer {
    */
   async #sub(input: unknown, who: Who, reads: Reads): Promise<Decision> {
     const message = input as SubMessage;
-    if (message.feed === 'attention') {
-      if (!this.#offers.feeds.includes('attention')) return refuse('not-offered');
+    // The machine's own feeds (M6's `attention`, M5a's `artifacts`): `list`, cut by what they carry as it goes.
+    if (isMachineFeedSub(message)) {
+      if (!this.#offers.feeds.includes(message.feed)) return refuse('not-offered');
       return who.clientClass === 'web-cards' ? refuse('class') : { ok: true };
     }
     const feed = message.feed;
@@ -451,6 +527,14 @@ export class Authorizer {
   async #query(request: AuthorizeRequest, who: Who, reads: Reads): Promise<Decision> {
     const binding = request.input as QueryBinding;
     if (binding.member !== who.member) return refuse('grade');
+    // P5 O7 M5a: an artifact act's stored target, placed again through the rule: `view` on it still (the orphan form, the
+    // machine's owners alone). A web-cards device acts on no artifact.
+    if (binding.artifact !== undefined) {
+      if (who.clientClass === 'web-cards') return refuse('class');
+      const { artifactId } = binding.artifact;
+      const holds = artifactId === null ? (await reads.owners()).includes(who.member) : await reads.holdsArtifactId(artifactId, 'view');
+      return holds ? { ok: true, artifact: binding.artifact } : refuse('grade');
+    }
     const record = binding.target === null ? null : reads.record(binding.target, binding.launchedBy);
     // A web-cards device hears only what its class may do: an answer or approval on a session its member owns.
     if (who.clientClass === 'web-cards' && !(QUERYABLE_BY_WEB_CARDS.has(request.name) && owns(record, who.member, await reads.owners()))) return refuse('class');

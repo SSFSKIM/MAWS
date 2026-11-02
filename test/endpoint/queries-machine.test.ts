@@ -46,7 +46,7 @@ function lab() {
   });
   const ask = (member: string, opId: string, opCreated: string) =>
     new Promise<Record<string, unknown>>((resolve) => {
-      const channel = { key: 'c', member, device: 'dev-1', clientClass: 'desktop', send: (m: Record<string, unknown>) => resolve(m) } as unknown as RemoteChannel;
+      const channel = { key: 'c', member, device: 'dev-1', clientClass: 'desktop', capabilities: [], send: (m: Record<string, unknown>) => resolve(m) } as unknown as RemoteChannel;
       queries.route(channel, { t: 'query', opId, opCreated, executor: 'machine' } as never);
     });
   return { ops, ask, asked, dispatched };

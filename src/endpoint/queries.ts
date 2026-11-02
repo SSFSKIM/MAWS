@@ -17,10 +17,16 @@
 // `op_lock`. A tombstone that fails because the original claimed the id meanwhile answers the claim's state instead,
 // after the same check. An `opCreated` past OP_HORIZON is `expired` whether or not a ledger still holds the op. An
 // outcome reads as `done`'s does (actions.ts's `outcomeOf`).
+//
+// P5 O7 M5a: an artifact act's stored target is `artifact:<id>` (`artifact:` for the orphan form), which the binding
+// carries to authorization as the artifact, placed again there through the `artifact` rule (`view` on it still, the orphan
+// form the machine's owners'); an artifact the rule can't place now (the store or the spine away) answers `unavailable`, as
+// an unplaceable session does. An outcome's `result` goes to a device that listed `rl2.bytes` tagged (bytes.ts).
 import { OP_HORIZON_S, type DeviceClass, type QueriedMessage, type QueryMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
-import { closedLedgerOf, outcomeOf } from './actions';
-import type { AuthorizeRequest, Decision, QueryBinding, Who } from './authorize';
+import { ARTIFACT_TARGET, closedLedgerOf, outcomeOf } from './actions';
+import type { ArtifactTarget, AuthorizeRequest, Decision, QueryBinding, Who } from './authorize';
+import { writeOutcome } from './bytes';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { QueryAnswer, Rl10 } from './rl10/link';
@@ -40,7 +46,7 @@ export type QueriesContext = {
 };
 
 /** An executor's answer, as read here: its state, the op's outcome, and the binding it stored (absent: none). */
-type Answer = { state: string; outcome?: unknown; binding: { member: string; target: SessionTarget | null; launchedBy?: Spawner; name: string } | null | 'unplaceable' };
+type Answer = { state: string; outcome?: unknown; binding: { member: string; target: SessionTarget | null; launchedBy?: Spawner; artifact?: ArtifactTarget; name: string } | null | 'unplaceable' };
 
 const REVEALING: ReadonlySet<string> = new Set(['done', 'refused', 'in-progress']);
 const SILENT: ReadonlySet<string> = new Set(['not-received', 'expired', 'unavailable']);
@@ -78,11 +84,12 @@ export class Queries {
     if (!REVEALING.has(answer.state)) return queried({ state: 'unavailable' });
     if (answer.binding === 'unplaceable') return queried({ state: 'unavailable' });
     if (answer.binding === null) return queried({ state: 'refused', reason: 'grade' });
-    const { member, target, launchedBy } = answer.binding;
-    const input: QueryBinding = { member, target, ...(launchedBy === undefined ? {} : { launchedBy }) }; // P5 O12 M11: the placement's spawner
+    const { member, target, launchedBy, artifact } = answer.binding;
+    // P5 O12 M11: the placement's spawner; P5 O7 M5a: the artifact, placed by authorization
+    const input: QueryBinding = { member, target, ...(launchedBy === undefined ? {} : { launchedBy }), ...(artifact === undefined ? {} : { artifact }) };
     const decision = await this.ctx.authorize({ kind: 'query', name: answer.binding.name, input }, who, this.ctx.now());
-    if (!decision.ok) return queried({ state: 'refused', reason: decision.reason });
-    return queried({ state: answer.state as QueriedMessage['state'], ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }) });
+    if (!decision.ok) return artifact !== undefined && decision.reason === 'unavailable' ? queried({ state: 'unavailable' }) : queried({ state: 'refused', reason: decision.reason });
+    return queried({ state: answer.state as QueriedMessage['state'], ...(answer.outcome === undefined ? {} : { outcome: writeOutcome(channel, answer.outcome) }) });
   }
 
   /**
@@ -101,6 +108,12 @@ export class Queries {
     // A pty op acts on the machine (`shell`), whatever session its claim names: its standing is the machine's right.
     let target: SessionTarget | null = null;
     let launchedBy: Spawner | undefined; // P5 O12 M11
+    const done = value.state === 'done' ? { outcome: outcomeOf(value.outcome) } : {};
+    // P5 O7 M5a: an artifact act's target, re-placed by authorization through the `artifact` rule.
+    if (owner !== 'pty-host' && isText(value.target) && value.target.startsWith(ARTIFACT_TARGET)) {
+      const artifactId = value.target.slice(ARTIFACT_TARGET.length);
+      return { state: value.state as string, ...done, binding: { member: value.member, target: null, artifact: { artifactId: artifactId === '' ? null : artifactId }, name: value.name } };
+    }
     if (owner !== 'pty-host' && value.target !== null && value.target !== undefined) {
       const resolved = isText(value.target) ? await resolveTarget('appSessionId', { appSessionId: value.target }, undefined, { dispatch, log: (line) => this.ctx.log(line) }) : null;
       if ((resolved?.kind === 'refused' && resolved.reason === 'unavailable') || (resolved?.kind === 'session' && resolved.unavailable === true)) return { state: value.state as string, binding: 'unplaceable' };
@@ -108,7 +121,7 @@ export class Queries {
       target = resolved.target;
       launchedBy = resolved.launchedBy;
     }
-    return { state: value.state as string, ...(value.state === 'done' ? { outcome: outcomeOf(value.outcome) } : {}), binding: { member: value.member, target, ...(launchedBy === undefined ? {} : { launchedBy }), name: value.name } };
+    return { state: value.state as string, ...done, binding: { member: value.member, target, ...(launchedBy === undefined ? {} : { launchedBy }), name: value.name } };
   }
 
   /** The endpoint's own ledger: its actions' target is the machine. */

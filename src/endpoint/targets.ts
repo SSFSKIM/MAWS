@@ -21,6 +21,18 @@
 // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): a lane B session's placement
 // also answers who spawned it, the `launchedBy` of the spine record it read, beside the target and never inside it, so the
 // decision's bridge (authorize.ts) rests on the read that placed it.
+//
+// P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "The `artifact` target rule"): `artifact`. An
+// artifact names no session; its links to sessions are the store's rows, which `library.entry` answers with the artifact
+// in one read (on the asker's behalf). The rule reads the artifact from the input (`artifactKey`): its `artifactId`
+// (`copyAsset`'s `to`, the write), or, for a listing that names a session (`artifacts.list {filter: {appSessionId}}`),
+// that session, placed as the `appSessionId` rule places it; `artifacts.create` (no id yet) and a `pruneVersions` naming
+// no artifact (every one's) take the orphan form, which only the machine's owners hold. Each linked session is placed
+// through `laneB` and nothing else, its target with the record's `launchedBy` (O12 M11's bridge keys on the app session);
+// one that places `unknown`, or on an engine session the host no longer runs, is left out; a spine or an engine host
+// that can't answer leaves the artifact `unavailable`, as it leaves every lane B session (the machine's condition, not
+// the artifact's). An artifact `library.entry` answers null for is `unknown` (`grade`, as an unknown session). The
+// member's standing on it is artifacts.ts' (`holdsArtifact`), cached per channel there (`ArtifactRanks`).
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
@@ -40,7 +52,26 @@ export type Resolved =
   /** A session the input names that this machine can't place: no record can be found for it, so nobody holds a rank. */
   | { kind: 'unknown' }
   | { kind: 'machine' }
+  /**
+   * P5 O7 M5a: an artifact and its linked sessions, each placed through `laneB` (unplaceable ones left out); `artifactId`
+   * null and `orphan` for the orphan form (`artifacts.create`, a machine-wide `pruneVersions`). `orphan`: no link at all,
+   * so the machine's owners' alone. `linked`: every app session the store links it to, placed or not (what a change of
+   * one of them makes stale: artifacts.ts).
+   */
+  | { kind: 'artifact'; artifactId: string | null; sessions: PlacedSession[]; orphan: boolean; linked: string[] }
   | { kind: 'refused'; reason: 'no-target' | 'malformed' | 'unavailable' };
+
+/** A lane B session as `laneB` placed it: the target and the spawner its record names (O12 M11). */
+export type PlacedSession = { target: Extract<SessionTarget, { lane: 'B' }>; launchedBy?: Spawner };
+
+/** The orphan form: an artifact with no link, or none yet (`artifacts.create`). */
+export const ORPHAN: Extract<Resolved, { kind: 'artifact' }> = { kind: 'artifact', artifactId: null, sessions: [], orphan: true, linked: [] };
+
+/**
+ * What the `artifact` rule reads of a command's input: the artifact, the session a listing names, or the orphan form.
+ * Null: nothing it can read (`no-target`).
+ */
+export type ArtifactKey = { artifactId: string } | { appSessionId: string } | { orphan: true };
 
 /** P5 O12 M11: the spine record's `launchedBy`, as far as the bridge reads it: the member who spawned the session. */
 export type Spawner = Pick<LaunchedBy, 'member'>;
@@ -50,15 +81,29 @@ export type Spawner = Pick<LaunchedBy, 'member'>;
  * is said to, and whether the engine session placed is checked here against the live row (P5 O7 M2). `live: false` only
  * where the executor checks it itself, against the status it reads anyway (an engine host act's context, actions.ts);
  * the live row is read either way, so an engine host that can't answer meets every request alike (P5 O7 M4, fix wave 2).
+ * P5 O7 M5a: `artifact`, how the `artifact` rule places an artifact by its id (the asking channel's cache, artifacts.ts);
+ * absent, `placeArtifact` reads it afresh.
  */
-export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean };
+export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved> };
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
 const field = (input: unknown, name: string): unknown => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>)[name] : undefined);
 
-/** The target `rule` reads from `input` (an action's `args`, or a call's input), or from the call's `session` (`checkout`). */
-export async function resolveTarget(rule: TargetRule, input: unknown, action: Action | undefined, placing: Placing, session?: SessionRef): Promise<Resolved> {
+/**
+ * The target `rule` reads from `input` (an action's `args`, or a call's input), or from the call's `session` (`checkout`);
+ * `name`, the command's (the `artifact` rule reads its input by it).
+ */
+export async function resolveTarget(rule: TargetRule, input: unknown, action: Action | undefined, placing: Placing, session?: SessionRef, name?: string): Promise<Resolved> {
   if (rule === 'machine' || rule === 'each-session') return action?.session === undefined ? { kind: 'machine' } : { kind: 'refused', reason: 'malformed' };
+  if (rule === 'artifact') {
+    // An artifact act names no session (the third act shape): one that does is about something else.
+    if (action?.session !== undefined) return { kind: 'refused', reason: 'malformed' };
+    const key = artifactKey(name ?? '', input);
+    if (key === null) return { kind: 'refused', reason: 'no-target' };
+    if ('orphan' in key) return ORPHAN;
+    if ('appSessionId' in key) return laneB(key.appSessionId, placing);
+    return (placing.artifact ?? ((id) => placeArtifact(id, placing)))(key.artifactId);
+  }
   // A checkout is a lane B session's, named by the call (its rows are calls); lane A's checkouts are sminos's.
   if (rule === 'checkout') return action === undefined && session?.lane === 'B' && isId(session.id) ? laneB(session.id, placing) : { kind: 'refused', reason: 'no-target' };
   const id = field(input, rule);
@@ -114,6 +159,56 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
   const running = status.ok ? field(status.value, 'engineSessionId') : undefined;
   if (isId(recorded)) return live && status.ok && running !== recorded ? { ...placed(recorded), unavailable: true } : placed(recorded);
   return isId(running) ? placed(running) : { kind: 'unknown' };
+}
+
+/**
+ * The `artifact` rule's reading of `name`'s input (P5 O7 M5a): `artifacts.list` names the session its listing is of (a
+ * listing with none is `no-target`: `library.list` is the library's listing); `copyAsset` its `to` (the write; its `from`
+ * is by-effect.ts'); `create` and a `pruneVersions` with no `artifactId` the orphan form; anything else its `artifactId`.
+ */
+export function artifactKey(name: string, input: unknown): ArtifactKey | null {
+  if (name === 'artifacts.list') {
+    const id = field(field(input, 'filter'), 'appSessionId');
+    return isId(id) ? { appSessionId: id } : null;
+  }
+  if (name === 'artifacts.create') return { orphan: true };
+  const id = field(input, name === 'artifacts.copyAsset' ? 'to' : 'artifactId');
+  if (isId(id)) return { artifactId: id };
+  return name === 'artifacts.pruneVersions' && id === undefined ? { orphan: true } : null;
+}
+
+/**
+ * The `artifact` rule for one of the machine's owners (P5 O7 M5a), who stands on every artifact: what the input names,
+ * read before any link is placed (a listing's session isn't placed either), so a request costs no read of the store.
+ */
+export function artifactShortCut(name: string, input: unknown, action: Action | undefined): Resolved {
+  if (action?.session !== undefined) return { kind: 'refused', reason: 'malformed' };
+  const key = artifactKey(name, input);
+  if (key === null) return { kind: 'refused', reason: 'no-target' };
+  if ('orphan' in key) return ORPHAN;
+  return { kind: 'artifact', artifactId: 'artifactId' in key ? key.artifactId : null, sessions: [], orphan: false, linked: [] };
+}
+
+/**
+ * An artifact and its links, read from the machine's store (`library.entry`, the engine host's, on the asker's behalf), each
+ * linked session placed through `laneB` with `live: false` (the request runs against the artifact, never the session, so
+ * a session whose live engine session lags its record is placed on its record, which is what the machine says it is).
+ * A host that can't answer, or a spine or engine host that can't place a link, is `unavailable`; a null artifact
+ * `unknown`; a link placed `unknown` is left out (no record and no live row: nobody holds a rank on it).
+ */
+export async function placeArtifact(artifactId: string, placing: Placing): Promise<Resolved> {
+  const entry = await placing.dispatch('engine-host', 'library.entry', { artifactId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
+  if (!entry.ok) {
+    placing.log(`endpoint: artifact ${artifactId} not placed: the engine host answered ${entry.error.code} (${entry.error.message})`);
+    return { kind: 'refused', reason: 'unavailable' };
+  }
+  if (field(entry.value, 'artifact') === null || field(entry.value, 'artifact') === undefined) return { kind: 'unknown' };
+  const links = field(entry.value, 'links');
+  const linked = [...new Set((Array.isArray(links) ? links : []).map((link) => field(link, 'appSessionId')).filter(isId))];
+  const placed = await Promise.all(linked.map((id) => laneB(id, { dispatch: placing.dispatch, log: placing.log, live: false })));
+  if (placed.some((p) => p.kind === 'refused')) return { kind: 'refused', reason: 'unavailable' };
+  const sessions = placed.flatMap((p) => (p.kind === 'session' && p.target.lane === 'B' ? [{ target: p.target, ...(p.launchedBy === undefined ? {} : { launchedBy: p.launchedBy }) }] : []));
+  return { kind: 'artifact', artifactId, sessions, orphan: linked.length === 0, linked };
 }
 
 /**

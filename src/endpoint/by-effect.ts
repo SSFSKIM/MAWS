@@ -13,13 +13,21 @@ import type { Grade, SessionRank } from '@shared/ipc/grades';
 
 export const NO_RULE = 'no-rule';
 
-/** What a rule may read beyond the input: the event that opened a pending broker request (`session.pendingRequest`). */
+/**
+ * What a rule may read beyond the input: the event that opened a pending broker request (`session.pendingRequest`), and
+ * (P5 O7 M5a) the asker's standing on an artifact the input names besides its target, by the `artifact` rule.
+ */
 export type EffectReads = {
   /** The `kind` of the event that opened the request (`question.requested`, `permission.requested`, …), or null when none is pending. */
   pendingKind(appSessionId: string, requestId: string): Promise<string | null>;
+  /** Whether the asker holds `grade` on the artifact (the machine's owners every one; an unknown one nobody else). */
+  holdsArtifactId(artifactId: string, grade: SessionRank): Promise<boolean>;
 };
 
-export type EffectRule = (input: Readonly<Record<string, unknown>>, reads: EffectReads) => Grade | typeof NO_RULE | Promise<Grade | typeof NO_RULE>;
+/** A rule's refusal of the request outright (P5 O7 M5a: what its effect reads is not the asker's). */
+export type EffectRefusal = { refused: 'grade' | 'malformed' };
+
+export type EffectRule = (input: Readonly<Record<string, unknown>>, reads: EffectReads) => Grade | typeof NO_RULE | EffectRefusal | Promise<Grade | typeof NO_RULE | EffectRefusal>;
 
 /** Slash commands that change only this session's model or effort, or only read: `converse` (RL §5.5). */
 const CONVERSE_COMMANDS: ReadonlySet<string> = new Set(['model', 'effort', 'fast', 'cost', 'context', 'status', 'help']);
@@ -98,4 +106,10 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   // itself, but the endpoint grades it right on its own; a text that is no string is graded as the most it could be).
   'sminos.command': (input) => (typeof input.name === 'string' ? slashGrade(input.name) : 'manage'),
   'sminos.send': (input) => (typeof input.text === 'string' ? textGrade(input.text) : 'manage'),
+  // P5 O7 M5a: an asset copied from `from` into `to` (the target, `manage`, the write): the store checks only that both
+  // are live, so the copy also reads `from`, which the asker must hold `view` on, as the `artifact` rule ranks it.
+  'artifacts.copyAsset': async (input, reads) => {
+    if (typeof input.from !== 'string') return { refused: 'malformed' };
+    return (await reads.holdsArtifactId(input.from, 'view')) ? 'manage' : { refused: 'grade' };
+  },
 };

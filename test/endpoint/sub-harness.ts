@@ -17,6 +17,13 @@
 // P5 O12 M11: `session.list` answers every record the suite injected, by `appId` as the index lists them (the handed-off
 // mark's pruning reads it).
 //
+// P5 O7 M5a: the engine host keeps an artifact store as the real one answers it (`artifact`, `link`): `library.entry`
+// answers an artifact with its links (null with none for one it doesn't hold), `artifacts.get` its row, and
+// `artifacts.update` runs under the real ledger's `host.artifactOp` (`artifactRuns`); `emitHost` is an engine host event as
+// `mawsd`'s permanent link forwards it, app or none. `predatesArtifactOp` makes it a host built before `host.artifactOp`:
+// that command is answered by the real host runtime over a registry without it. A device may list capabilities
+// (`openRemote`'s `capabilities`: `rl2.bytes`).
+//
 // The org: A, an admin who owns the machine (device a1); B, a member (b1); C, a member with a phone (c1, web-cards).
 import * as fs from 'node:fs';
 import type { Server } from 'node:http';
@@ -29,6 +36,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { ClientRef, HandlerContext, HandlerOp } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
+import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
@@ -129,6 +138,14 @@ export class FakeEngineHost {
   readonly runs: Array<{ appSessionId: string; content: unknown; launchId: string }> = [];
   /** `host.op` handlers a suite serves beside `session.send` and `session.answer` (P5 O7 M2b: an interrupt), by name. */
   readonly handlers = new Map<string, (input: unknown) => unknown>();
+  /** P5 O7 M5a: the artifact store, by id: each artifact's row and its links to sessions. */
+  readonly artifacts = new Map<string, { row: Record<string, unknown>; links: Array<{ artifactId: string; appSessionId: string; role: 'created' | 'edited' | 'viewed' | 'commented'; lastAt: number }> }>();
+  /** Each artifact write the ledger ran (`host.artifactOp`), in order, with the input its handler received. */
+  readonly artifactRuns: Array<{ name: string; input: unknown }> = [];
+  /** P5 O7 M5a: a host built before `host.artifactOp`, which its runtime answers as a name outside its registry. */
+  predatesArtifactOp = false;
+  /** P5 O7 M5a: engine-host reads a suite answers (an artifact's `versionState`, its bytes), by name. */
+  readonly reads = new Map<string, (input: unknown) => unknown>();
 
   /** Wires the fake into `services`' dispatch, onEvent, onAttachment and onUpstream, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
@@ -140,8 +157,10 @@ export class FakeEngineHost {
           : name === 'session.send'
             ? (input) => Promise.resolve(this.#send(input as { appSessionId: string; content: unknown }))
             : this.handlers.has(name)
-              ? (input) => Promise.resolve(this.handlers.get(name)!(input))
-              : undefined,
+              ? (input) => Promise.resolve(this.#artifactRun(name, input, () => this.handlers.get(name)!(input)))
+              : name === 'artifacts.update'
+                ? (input) => Promise.resolve(this.#artifactRun(name, input, () => this.#update(input as { artifactId: string } & Record<string, unknown>)))
+                : undefined,
       status: (id) => {
         const s = this.sessions.get(id);
         return s === undefined || s.engineSessionId === null ? null : { launchId: s.launchId, engineSessionId: s.engineSessionId };
@@ -300,6 +319,11 @@ export class FakeEngineHost {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'host.op'>, { client: {} } as HandlerContext)) : no('internal');
     }
+    if (owner === 'engine-host' && name === 'host.artifactOp' && this.#ops !== null) {
+      if (this.predatesArtifactOp) return beforeArtifactOp(name, input);
+      const checked = validateCommandInput(name, input);
+      return checked.ok ? ok(await this.#ops.artifactOp(checked.value as CommandInput<'host.artifactOp'>, { client: {} } as HandlerContext)) : no('internal');
+    }
     if (owner === 'engine-host' && name === 'host.opQuery' && this.#ops !== null) {
       if (this.#failing.has(name)) return no('host_unavailable');
       const checked = validateCommandInput(name, input);
@@ -312,6 +336,15 @@ export class FakeEngineHost {
 
   answer(owner: string, name: string, input: unknown): HostResponse {
     if (owner !== 'engine-host') return no('unknown_command');
+    // P5 O7 M5a: the artifact store's reads, keyed by the artifact.
+    const artifactId = (input as { artifactId?: unknown } | null | undefined)?.artifactId;
+    if (name === 'library.entry' && typeof artifactId === 'string') {
+      const held = this.artifacts.get(artifactId);
+      return ok(held === undefined ? { artifact: null, links: [] } : { artifact: held.row, links: held.links });
+    }
+    if (name === 'artifacts.get' && typeof artifactId === 'string') return ok({ artifact: this.artifacts.get(artifactId)?.row ?? null });
+    const read = this.reads.get(name);
+    if (read !== undefined) return ok(read(input));
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };
     const s = appSessionId === undefined ? undefined : this.sessions.get(appSessionId);
     if (name === 'engine.sessions') return ok([...this.sessions.values()].map((x) => this.status(x)));
@@ -333,6 +366,50 @@ export class FakeEngineHost {
       default:
         return no('unknown_command');
     }
+  }
+
+  /** P5 O7 M5a: an artifact in the store, linked to `sessions` (created by the first), its row as `artifacts.get` answers it. */
+  artifact(artifactId: string, sessions: string[] = [], fields: Record<string, unknown> = {}): Record<string, unknown> {
+    const at = Date.now();
+    const row = { id: artifactId, kind: 'document', title: `artifact ${artifactId.slice(0, 8)}`, createdBy: { kind: 'human' }, createdAt: at, updatedAt: at, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, ...fields };
+    this.artifacts.set(artifactId, { row, links: sessions.map((appSessionId, i) => ({ artifactId, appSessionId, role: i === 0 ? 'created' : 'edited', lastAt: at })) });
+    return row;
+  }
+
+  /** The artifact linked to one more session, and the store's `artifacts.changed {change: 'linked'}` published. */
+  link(artifactId: string, appSessionId: string): void {
+    const held = this.artifacts.get(artifactId);
+    if (held === undefined) throw new Error(`no artifact ${artifactId}`);
+    held.links.push({ artifactId, appSessionId, role: 'edited', lastAt: Date.now() });
+    this.emitHost('artifacts.changed', { artifactId, kind: held.row.kind, revision: held.row.revision, change: 'linked' });
+  }
+
+  /** The artifact's links cut to `sessions` (a link the store forgot), its relink published as `link` does. */
+  unlink(artifactId: string, keep: string[]): void {
+    const held = this.artifacts.get(artifactId);
+    if (held === undefined) throw new Error(`no artifact ${artifactId}`);
+    held.links = held.links.filter((link) => keep.includes(link.appSessionId));
+    this.emitHost('artifacts.changed', { artifactId, kind: held.row.kind, revision: held.row.revision, change: 'linked' });
+  }
+
+  /** An engine host event as `mawsd`'s permanent link forwards it to the endpoint, an app attached or not (O3-D). */
+  emitHost(name: string, payload: unknown): void {
+    for (const listener of this.#events) listener('engine-host', { name, payload });
+  }
+
+  /** An artifact write the ledger ran: recorded with the input its handler received, then run. */
+  #artifactRun(name: string, input: unknown, run: () => unknown): unknown {
+    if (name.startsWith('artifacts.')) this.artifactRuns.push({ name, input });
+    return run();
+  }
+
+  /** `artifacts.update`: the row's fields set, its revision moved, the store's change published. */
+  #update({ artifactId, ...fields }: { artifactId: string } & Record<string, unknown>): Record<string, unknown> {
+    const held = this.artifacts.get(artifactId);
+    if (held === undefined) throw new Error(`no artifact ${artifactId}`);
+    held.row = { ...held.row, ...fields, revision: (held.row.revision as number) + 1, updatedAt: Date.now() };
+    this.emitHost('artifacts.changed', { artifactId, kind: held.row.kind, revision: held.row.revision, change: 'updated' });
+    return { artifact: held.row };
   }
 
   /** A request still listed among the broker's items. */
@@ -485,6 +562,22 @@ export class FakeSpine {
     else if (launched) this.host.relaunch(appSessionId);
     return { status: 'ready', appSessionId, launched, joined: !launched };
   }
+}
+
+/**
+ * P5 O7 M5a: an engine host built before `host.artifactOp` answers it: the real host runtime, over the registry less that
+ * command, answers whatever it answers a name outside its registry.
+ */
+async function beforeArtifactOp(name: string, input: unknown): Promise<HostResponse> {
+  const commands = Object.fromEntries(Object.entries(REGISTRY.commands).filter(([command]) => command !== 'host.artifactOp'));
+  const registry: WireRegistry = { ...REGISTRY, commands };
+  const listeners: Array<(event: { data: unknown }) => void> = [];
+  let answered!: (response: HostResponse) => void;
+  const response = new Promise<HostResponse>((resolve) => (answered = resolve));
+  const port: HostPort = { start: () => {}, on: (_event, listener) => void listeners.push(listener), postMessage: (message) => void answered(message as HostResponse) };
+  createHostRuntime(() => {}, { registry }).serve(port);
+  for (const listener of listeners) listener({ data: { t: 'req', id: '0', name, input } });
+  return response;
 }
 
 export function item(s: HostSession, requestId: string, kind: 'question' | 'permission'): Record<string, unknown> {
@@ -679,9 +772,9 @@ export function counter(session = 'la-1'): (sub: string, kind: string, body: unk
 export type Remote = { device: Device; channel: Channel; inbox: ChannelMessage[]; carrier: () => ByteDuplex; member: string };
 
 /** A device's channel to the endpoint: over the direct listener unless `dial` gives another carrier. */
-export async function openRemote(f: Fixture, who: TestDevice, member: string, options: { dial?: () => Promise<ByteDuplex>; passkey?: SoftwareAuthenticator } = {}): Promise<Remote> {
+export async function openRemote(f: Fixture, who: TestDevice, member: string, options: { dial?: () => Promise<ByteDuplex>; passkey?: SoftwareAuthenticator; capabilities?: string[] } = {}): Promise<Remote> {
   const device = new Device({
-    identity: { org: f.org ?? ORG, member, device: who.device.id, clientClass: who.device.class, channelKey: who.channel, build: 'subs', capabilities: [] },
+    identity: { org: f.org ?? ORG, member, device: who.device.id, clientClass: who.device.class, channelKey: who.channel, build: 'subs', capabilities: options.capabilities ?? [] },
     org: memoryOrgView({ chain: [...f.chain] }),
     ...(who.device.stepUpPub === undefined ? {} : { stepUpKey: who.stepUp }),
     ...(options.passkey === undefined ? {} : { authenticator: options.passkey }),

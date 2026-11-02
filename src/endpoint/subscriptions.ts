@@ -34,7 +34,7 @@
 // the feeds' plane (plane-feeds.ts); a session's `checkout` feed is no interest in its stream. The machine's `attention`
 // feed (M6) names no session, so it has no target to re-check: its plane hears every change of access instead
 // (`Plane.accessChanged`) and cuts what it carries to the member's sessions as it goes.
-import { MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SessionSubMessage, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
+import { isMachineFeedSub, MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SessionSubMessage, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { Granted } from './gate';
@@ -86,7 +86,7 @@ export class Subscription implements StreamSource {
   readonly id: string;
   readonly channel: RemoteChannel;
   readonly who: Who;
-  /** Its session; null for the machine's `attention` feed (P5 O7 M6), which names none (`SessionSubscription` names one). */
+  /** Its session; null for the machine's own feeds (P5 O7 M6's `attention`, M5a's `artifacts`), which name none. */
   readonly session: SessionRef | null;
   readonly view: 'full' | 'cards';
   readonly cursor: Cursor | null;
@@ -116,8 +116,8 @@ export class Subscription implements StreamSource {
     this.id = message.sub;
     this.channel = channel;
     this.who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
-    this.session = message.feed === 'attention' ? null : message.session;
-    this.view = message.feed === 'attention' ? 'full' : (message.view ?? 'full');
+    this.session = isMachineFeedSub(message) ? null : message.session;
+    this.view = isMachineFeedSub(message) ? 'full' : (message.view ?? 'full');
     this.cursor = message.cursor;
     this.message = message;
     this.#credit = Math.min(message.credit, SUB_CREDIT_MAX);
@@ -446,7 +446,7 @@ export class Subscriptions {
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
     sub.close();
     // Opened by its plane once authorized: a session's with its target; the machine's feed with none.
-    if (sub.target !== null || sub.message.feed === 'attention') this.#toPlane(sub, (plane, s) => plane.close(s, retain));
+    if (sub.target !== null || isMachineFeedSub(sub.message)) this.#toPlane(sub, (plane, s) => plane.close(s, retain));
     this.#report(sub.channel);
   }
 
