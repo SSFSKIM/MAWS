@@ -52,6 +52,35 @@ describe('the remote bench seam (P5 O7 M7)', () => {
   });
 });
 
+describe('the live bench’s resume (P5 O7 M7)', () => {
+  it('drops a link through its hold, and on release answers the instant of its next up and that up’s carrier', async () => {
+    const { link, deps } = linked();
+    const calls: string[] = [];
+    link.benchHold = () => (calls.push('hold'), true);
+    link.benchRelease = () => void calls.push('release');
+    let clock = 1_000;
+    const seam = remoteBenchSeam({ ...deps, now: () => clock });
+    expect(seam.drop(MINI)).toBe(true);
+    link.set('down', null);
+    const released = seam.release(MINI, 5_000);
+    expect(calls).toEqual(['hold', 'release']);
+    clock = 1_250;
+    link.set('connecting', null); // not up yet: still waited for
+    clock = 1_400;
+    link.set('up', 'relay');
+    await expect(released).resolves.toEqual({ upAt: 1_400, carrier: 'relay' });
+    expect(() => seam.drop('GoneMachine0000000000' as MachineRef)).toThrow(/no RL2 link/);
+  });
+
+  it('refuses a release while the link still reports up (a reconnect within its grace), and answers null when no up comes in time', async () => {
+    const { link, deps } = linked();
+    const seam = remoteBenchSeam(deps);
+    await expect(seam.release(MINI)).rejects.toThrow(/still reports up/);
+    link.set('down', null);
+    await expect(seam.release(MINI, 10)).resolves.toBeNull();
+  });
+});
+
 describe('the live bench’s relay case (P5 O7 M7)', () => {
   it('refuses every direct dial only under MAWS_E2E=1 and MAWS_E2E_REMOTE_CARRIER=relay in an unpackaged build', async () => {
     const on = { MAWS_E2E: '1', MAWS_E2E_REMOTE_CARRIER: 'relay' };

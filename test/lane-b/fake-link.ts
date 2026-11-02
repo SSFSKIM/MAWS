@@ -118,6 +118,16 @@ export class FakeLink implements RemoteLink {
   pongs(): readonly PongStamps[] {
     return [];
   }
+  /** P5 O7 M7: the live bench's hold, as the bench seam calls it. */
+  held = false;
+  benchHold(): boolean {
+    const had = !this.held && this.#state === 'up';
+    this.held = true;
+    return had;
+  }
+  benchRelease(): void {
+    this.held = false;
+  }
 
   /** The link's state, carrier and refusal moved, as the real link's `onState` says it. */
   set(state: LinkState, carrier: 'direct' | 'relay' | null = state === 'up' ? 'direct' : null, refusal: string | null = null): void {

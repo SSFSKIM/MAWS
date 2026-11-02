@@ -17,10 +17,14 @@
 //   4. per carrier, a fresh launch of the app over its profile: direct (the tailnet), then relay
 //      (MAWS_E2E_REMOTE_CARRIER=relay refuses the direct dial, so the link comes up through the hub): the clock's start
 //      exchanges, open to first row, 3 turns of 300 deltas sent from the pane (each frame and each write on the wall
-//      clock), 220 round trips, the clock's end exchanges.
+//      clock), 220 round trips, resume, the clock's end exchanges.
 //
-// Resume after a drop is the measured group's (one clock) and the sitting's lid-close (P5 acceptance 7's app half), not
-// this bench's. Everything goes to test-results/remote-latency-live.json. The machine is torn down on every path; its
+// Resume, with no routing touched (the bench seam's `drop` and `release`, src/main/machines/remote/bench-seam.ts): main
+// closes the link's current channel as a loss and holds the link off the machine; once the link reports down, the agent
+// sends the session a turn and the stub writes it all; then main lifts the hold, the link attempts at once, and resume
+// runs from its `up` again (main's Date.now) to the first event batch of that turn in A's renderer (its Date.now: one
+// clock, this Mac's), judged against the same run's local engine start plus the rtt. When the link came back over the
+// other carrier, the measure is void, with its reason. Everything goes to test-results/remote-latency-live.json. The machine is torn down on every path; its
 // scratch profile is kept until the bench is done (`MAWS_REMOTE_BENCH_REMOVE=1`, below). The file name's `-live` keeps
 // main's output out of the test's evidence (e2e/support/process-evidence.mjs's captureAllowed), and Playwright's tracing
 // and screenshots must be off, so the pairing code is in no artifact.
@@ -44,7 +48,8 @@ import { BENCH, summarize } from '../test/support/local-latency';
 import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
 import { CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { cleanupAll, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, type Written } from './support/remote-latency-page';
+import { markerOf } from '../test/support/latency-engine';
+import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, TURN_MS, type Written } from './support/remote-latency-page';
 import { showProjectList, sidebarOf } from './support/sidebar';
 
 test.skip(process.env.MAWS_REMOTE_LATENCY_LIVE !== '1', 'the live remote bench runs under pnpm e2e:remote-latency-live, on the owner’s go');
@@ -147,9 +152,60 @@ function served(): Served & { onLine(line: string): void } {
 
 type LiveCase = { measures: LiveMeasures | null; run: CaseRun | null; exchanges: { start: Exchange[]; end: Exchange[] }; roundTripsMs: number[] };
 
+type Seam = { drop(ref: string): boolean; release(ref: string, timeoutMs: number): Promise<{ upAt: number; carrier: Carrier | null } | null> };
+
+// A's renderer's event batches of the session that carry `turn` (its prompt or one of its markers), each with its
+// arrival on the renderer's Date.now, kept from now on.
+async function keepTurnArrivals(page: Page, machine: MachineRef, app: string, turn: number): Promise<void> {
+  await page.evaluate(([on, id, needles]) => {
+    const kept: number[] = [];
+    (window as unknown as { __turnArrivals: number[] }).__turnArrivals = kept;
+    window.maws.on('session.eventBatch', (batch, from) => {
+      if (from !== on || (batch as { appSessionId?: string }).appSessionId !== id) return;
+      const at = Date.now();
+      const text = JSON.stringify(batch);
+      if (needles.some((needle) => text.includes(needle))) kept.push(at);
+    });
+  }, [machine, app, [prompt(turn), `${markerOf(turn, 1).split(':')[0]}:`]] as const);
+}
+const turnArrivals = (page: Page) => page.evaluate(() => (window as unknown as { __turnArrivals: number[] }).__turnArrivals);
+
+// The live resume: the link dropped through the seam and held down while the machine's session writes a turn, then
+// released; from its `up` again to the turn's first event batch in A. Null with the reason when not measured.
+async function liveResume(page: Page, app: Parameters<typeof pings>[0], ref: MachineRef, session: string, carrier: Carrier, samples: () => Written[], turn: (content: string) => void, reasons: string[]): Promise<number | null> {
+  const gapTurn = lastTurn(samples()) + 1;
+  await keepTurnArrivals(page, ref, session, gapTurn);
+  if (!(await app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.drop(machine), ref))) {
+    reasons.push(`${carrier}: resume: the link had no channel to drop`);
+    return null;
+  }
+  await expect.poll(async () => (await linkOf(page, ref))?.state, { timeout: 30_000, message: 'the link down once dropped' }).toBe('down');
+  turn(prompt(gapTurn));
+  await expect.poll(() => samples().filter((w) => w.turn === gapTurn).length, { timeout: TURN_MS, message: `turn ${gapTurn} written on the machine while the link is down` }).toBe(BENCH.markersPerTurn);
+  const shown = (await turnArrivals(page)).length;
+  if (shown > 0) {
+    reasons.push(`${carrier}: resume: turn ${gapTurn} reached A while its link was held down`);
+    return null;
+  }
+  const up = await app.evaluate((_electron, machine) => (globalThis as { __maws_remote_bench?: Seam }).__maws_remote_bench!.release(machine, 60_000), ref);
+  if (up === null) {
+    reasons.push(`${carrier}: resume: the link did not come up within 60 s of its release`);
+    return null;
+  }
+  let first: number | null = null;
+  await expect.poll(async () => (first = (await turnArrivals(page))[0] ?? null), { timeout: 60_000, message: `turn ${gapTurn}'s first event in A` }).not.toBeNull();
+  await expect.poll(async () => (await main(page).evaluate((region) => region.textContent ?? '')).includes(markerOf(gapTurn, BENCH.markersPerTurn).trim()), { timeout: 30_000, message: `turn ${gapTurn} in A’s pane` }).toBe(true);
+  // the reconnect's carrier is the case's, or its resume is no number of that carrier's
+  if (up.carrier !== carrier) {
+    reasons.push(`${carrier}: resume: the link came back over ${up.carrier ?? 'no carrier'}, so its resume is not ${carrier}'s`);
+    return null;
+  }
+  return first! - up.upAt;
+}
+
 // One carrier over a fresh launch of the bench app: its link up over that carrier, the clock's start, open, turns, round
 // trips, the clock's end, and the carrier asserted again; null with the reason when the link came up over another.
-async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: MachineRef, session: string, carrier: Carrier, samples: () => Written[], reasons: string[]): Promise<LiveCase | null> {
+async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: MachineRef, session: string, carrier: Carrier, samples: () => Written[], turn: (content: string) => void, reasons: string[]): Promise<LiveCase | null> {
   const carried = async () => {
     const m = await linkOf(page, ref);
     return m === undefined ? 'gone' : `${m.state}/${m.carrier ?? 'none'}`;
@@ -189,10 +245,12 @@ async function liveCarrier(page: Page, app: Parameters<typeof pings>[0], ref: Ma
     closed,
   }, 'wall');
   const trips = await roundTrips(page, session, ref);
+  const resumeMs = await liveResume(page, app, ref, session, carrier, samples, turn, reasons);
+  await expect.poll(closed, { timeout: TURN_MS, message: 'the resume’s turn closed' }).toBe(true);
   const end = await pings(app, ref, LIVE_BENCH.clockExchanges);
   const after = await carried();
   if (after !== `up/${carrier}`) reasons.push(`${carrier}: the link was ${after} after the case's measures, not up/${carrier}`);
-  const measures: LiveMeasures | null = delays.length === 0 || start.length === 0 ? null : { rawDelta: signedStats(delays)!, rawSamples: delays, roundTrip: summarize(trips, BENCH.roundTripWarmup), openToFirstRowMs, rtt: rttStats(start), clock: liveClock(start, end), resumeMs: null };
+  const measures: LiveMeasures | null = delays.length === 0 || start.length === 0 ? null : { rawDelta: signedStats(delays)!, rawSamples: delays, roundTrip: summarize(trips, BENCH.roundTripWarmup), openToFirstRowMs, rtt: rttStats(start), clock: liveClock(start, end), resumeMs };
   return { measures, run, exchanges: { start, end }, roundTripsMs: trips };
 }
 
@@ -248,7 +306,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     for (const carrier of CARRIERS) {
       rmSync(join(config.app.profile, 'layout.json'), { force: true }); // a restored tab would show the history before the click
       a = await launchMaws({ userData: config.app.profile, env: carrier === 'relay' ? { MAWS_E2E_REMOTE_CARRIER: 'relay' } : {} });
-      const one = await liveCarrier(a.page, a.app, ref, app, carrier, () => stream.samples, reasons);
+      const one = await liveCarrier(a.page, a.app, ref, app, carrier, () => stream.samples, (content) => bench.turn(content), reasons);
       if (one !== null) {
         live[carrier] = one;
         cases[carrier] = one.run;
@@ -284,7 +342,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
       if (m == null || j === undefined) return [];
       const f = (value: number) => value.toFixed(1);
       const delta = j.delta === null ? 'not judged (the clock voids it)' : `[${f(j.delta.p50IntervalMs[0])}, ${f(j.delta.p50IntervalMs[1])}] ms, ${j.delta.verdict}`;
-      return [`[remote-latency-live] ${c}: delta-to-frame p50 ${delta} (bound ${f(j.bounds.deltaToFrameP50Ms)} ms, n=${m.rawDelta.n}) · round trip p50 ${f(m.roundTrip.p50)} ms · open to first row ${f(m.openToFirstRowMs)} ms · rtt p50 ${f(m.rtt.p50)} ms (n=${m.rtt.n}) · clock spread ${m.clock === null ? '?' : f(m.clock.spreadMs)} ms`];
+      return [`[remote-latency-live] ${c}: delta-to-frame p50 ${delta} (bound ${f(j.bounds.deltaToFrameP50Ms)} ms, n=${m.rawDelta.n}) · round trip p50 ${f(m.roundTrip.p50)} ms · open to first row ${f(m.openToFirstRowMs)} ms · resume ${m.resumeMs === null ? 'not measured' : `${f(m.resumeMs)} ms (bound ${f(j.bounds.resumeMs)} ms)`} · rtt p50 ${f(m.rtt.p50)} ms (n=${m.rtt.n}) · clock spread ${m.clock === null ? '?' : f(m.clock.spreadMs)} ms`];
     }),
   ];
   const info = test.info();

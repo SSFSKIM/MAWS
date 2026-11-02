@@ -670,10 +670,19 @@ export class BenchRun {
 
   /** Tells the agent the owner's member, so its fake sminos lists the session. */
   list(owners: readonly string[], title: string): void {
+    this.#tell({ list: { owners, title } });
+  }
+
+  /** Tells the agent to send its session a turn (the live resume's, written while the app's link is held down). */
+  turn(content: string): void {
+    this.#tell({ turn: { content } });
+  }
+
+  #tell(message: object): void {
     if (this.#agent === null) throw new Error('the bench agent is not serving');
     if (this.#ending !== null) throw new Error(`${this.#m.name}: the bench agent is ending`);
     this.#quiet(0);
-    this.#agent.write(JSON.stringify({ list: { owners, title } }));
+    this.#agent.write(JSON.stringify(message));
   }
 
   /**

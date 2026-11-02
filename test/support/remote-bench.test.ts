@@ -311,11 +311,12 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
 
   it('a rerun on a profile already listed under the name enrolls nothing, and removes the unused code file', async () => {
     const file = codeFile();
-    const { calls, started } = await fullRun(VM(file), machineScript({ already: true }));
+    const { calls, started, run } = await fullRun(VM(file), machineScript({ already: true }));
     expect(calls.some((c) => / enroll /.test(c.argv.at(-1)!))).toBe(false);
     expect(calls.some((c) => c.stdinFile === file)).toBe(false);
     expect(existsSync(file)).toBe(false);
     expect(started[0]!.written).toEqual([JSON.stringify({ list: { owners: ['member-1'], title: 'the bench session' } })]);
+    expect(() => run.turn('latency bench turn 5')).toThrow(/the bench agent is ending/); // torn down already
     expect(started[0]!.ended).toBe(true);
   });
 
@@ -700,11 +701,14 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     bench.serve(() => undefined);
     expect(deadlines).toHaveLength(1);
     expect(deadlines[0]!.ms).toBe(105 * 60_000 - QUIET_MARGIN_MS);
+    bench.turn('latency bench turn 2');
+    expect(fake.started[0]!.written).toEqual([JSON.stringify({ turn: { content: 'latency bench turn 2' } })]);
     deadlines[0]!.fire();
     await expect.poll(() => fake.started[0]!.ended).toBe(true);
     expect(said).toContain('[bench] mini-bench: its quiet window is 2 minutes off: the bench agent is ended now, its session and stubs with it');
     expect(() => bench.list(['member-1'], 'late')).toThrow(/the bench agent is ending/);
-    expect(fake.started[0]!.written).toEqual([]);
+    expect(() => bench.turn('latency bench turn 9')).toThrow(/the bench agent is ending/);
+    expect(fake.started[0]!.written).toHaveLength(1);
     await bench.teardown();
     expect(deadlines[0]!.cancelled).toBe(true);
     expect(said.at(-1)).toMatch(/torn down;/);

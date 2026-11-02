@@ -5,7 +5,13 @@
 //
 // - machines: each RL2 link's machine, name, reported state, carrier and whether its peer listed `rl2.pong-clock`;
 // - ping: `count` sequential pings on a machine's link (link.ts `ping`), each answered with its pong's stamps or null;
-// - probe: a link's probe, as the network watch makes one when the network returns (the forced drop's restore).
+// - probe: a link's probe, as the network watch makes one when the network returns (the forced drop's restore);
+// - drop and release, the live bench's resume (e2e:remote-latency-live), with no routing touched: `drop` closes the
+//   link's current channel as a loss and holds the link off its machine (link.ts `benchHold`: no attempt, no retry, no
+//   probe), so the machine's session writes a turn while the link is down; `release` lifts the hold (an attempt at once,
+//   as a network's return makes one) and answers the instant of the link's next `up` on this Mac's wall clock, which
+//   the renderer's Date.now reads too, with the carrier it came up over. Only the bench's own app calls them, on its
+//   scratch profile.
 //
 // And the live bench's relay case (e2e:remote-latency-live): MAWS_E2E_REMOTE_CARRIER=relay, under the same two
 // conditions, refuses every direct dial at once, so each link comes up through the hub, as on a network with no tailnet
@@ -20,13 +26,16 @@ export interface RemoteBenchSeam {
   machines(): { ref: MachineRef; name: string; state: LinkState; carrier: Carrier | null; clock: boolean }[];
   ping(ref: MachineRef, count: number, timeoutMs?: number): Promise<(PongStamps | null)[]>;
   probe(ref: MachineRef, reason: ProbeReason): void;
+  drop(ref: MachineRef): boolean;
+  release(ref: MachineRef, timeoutMs?: number): Promise<{ upAt: number; carrier: Carrier | null } | null>;
 }
 
 declare global {
   var __maws_remote_bench: RemoteBenchSeam | undefined;
 }
 
-export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }[]; link(ref: MachineRef): RemoteLink | null }): RemoteBenchSeam {
+export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }[]; link(ref: MachineRef): RemoteLink | null; now?(): number }): RemoteBenchSeam {
+  const now = deps.now ?? Date.now;
   const linkOf = (ref: MachineRef): RemoteLink => {
     const link = deps.link(ref);
     if (link === null) throw new Error(`no RL2 link to machine ${ref}`);
@@ -45,6 +54,26 @@ export function remoteBenchSeam(deps: { machines(): readonly { ref: MachineRef }
       return answers;
     },
     probe: (ref, reason) => linkOf(ref).probe(reason),
+    drop: (ref) => linkOf(ref).benchHold(),
+    release(ref, timeoutMs = 60_000) {
+      const link = linkOf(ref);
+      // a link that still reports up is reconnecting within its grace, whose `up` again would be heard by no one
+      if (link.state() === 'up') return Promise.reject(new Error(`the link to ${ref} still reports up: release it once it is down`));
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          stop();
+          resolve(null);
+        }, timeoutMs);
+        const stop = link.onState((state) => {
+          if (state !== 'up') return;
+          const upAt = now();
+          clearTimeout(timer);
+          stop();
+          resolve({ upAt, carrier: link.carrier() });
+        });
+        link.benchRelease();
+      });
+    },
   };
 }
 

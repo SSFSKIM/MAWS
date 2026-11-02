@@ -851,3 +851,57 @@ describe('close()', () => {
     expect(heard).toEqual(['down']);
   });
 });
+
+// P5 O7 M7: the live bench's resume, measured without touching routing (the bench seam's `drop` and `release`): the
+// current channel closed as a loss, and the link held off its machine until released, so a turn is written while it is
+// down; then it reconnects at once, as on a network's return.
+describe('the bench hold', () => {
+  it('closes the current channel as a loss, attempts nothing while held (no retry, no probe), and reconnects at once on release', async () => {
+    const h = await harness();
+    await settle();
+    expect(h.link.benchHold()).toBe(true);
+    expect(h.channels[0]!.closedWith).toBe('closed');
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    await advance(30_000);
+    expect(h.link.state()).toBe('down');
+    h.link.probe('network');
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    expect(h.link.benchHold()).toBe(false); // held already: no channel to close
+    h.link.benchRelease();
+    await settle();
+    expect(h.link.state()).toBe('up');
+    expect(h.attempts).toHaveLength(2);
+    expect(h.states).toEqual(['up', 'down', 'up']);
+  });
+
+  it('discards an attempt that completes while held', async () => {
+    const h = await harness();
+    await settle();
+    h.hold(true);
+    h.last().end('carrier');
+    await settle();
+    expect(h.pending).toHaveLength(1);
+    expect(h.link.benchHold()).toBe(false); // the channel was lost already
+    h.hold(false);
+    h.pending.shift()!.release();
+    await settle();
+    expect(h.channels.at(-1)!.closedWith).toBe('closed');
+    await advance(3_000);
+    expect(h.link.state()).toBe('down');
+    h.link.benchRelease();
+    await settle();
+    expect(h.link.state()).toBe('up');
+  });
+
+  it('holds nothing on a closed link, and a release with no hold is nothing', async () => {
+    const h = await harness();
+    await settle();
+    h.link.benchRelease();
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    h.link.close();
+    expect(h.link.benchHold()).toBe(false);
+  });
+});
