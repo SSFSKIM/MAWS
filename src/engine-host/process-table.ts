@@ -49,11 +49,11 @@ import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type Bu
 import { IdleRelease, type IdleReleasePolicy } from './idle-release'; // P5 O2 M2
 import type { LiveRow } from './live-ledger'; // E10
 import type { EngineSession } from './session';
-import { isAlive as pidAlive, isSameProcess, procStartOf as psProcStart } from './supervisor-files'; // E10; P5 O16 panel fix wave 1 follow-up: isAlive, isSameProcess
+import { isAlive as pidAlive, procStartOf as psProcStart } from './supervisor-files'; // E10; P5 O16 panel fix wave 1 follow-up: isAlive
 import { Infrastructure, parseTree, PS_TREE_ARGS, PS_TREE_ENV, readTreeSync } from './holder/descendants'; // O16 M5
 import type { Gate, GateChannel } from './holder/gate'; // O16 M5
 import { Reap, type ReapReason } from './holder/reap'; // O16 M5
-import { stopUnresolved, type HeldStopOutcome, type ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart)
+import { processState, stopUnresolved, type HeldStopOutcome, type ProcStartKey } from './holder/stop-held'; // P5 O16 panel fix wave 1; follow-up: ProcStartKey (pid and procStart); re-verification: processState
 
 export const MEMORY_SAMPLE_MS = 10_000;
 
@@ -103,10 +103,11 @@ export const HANDING_OVER = 'the engine host is handing over; try again in a mom
 
 // P5 O16 panel fix wave 1 follow-up (the architect's ruling): a session host the start left running with its engine and
 // no row: its adoption failed (D59(6)), or a newer host of its session was adopted (D59(10)). Its host, by pid and start
-// time, and how to stop it (holder/stop-held.ts).
+// time, its engine as the roster names it now (null: none known), and how to stop it (holder/stop-held.ts).
 export interface UnattachedHost {
   holderId: string;
   host: ProcStartKey;
+  child(): ProcStartKey | null;
   stop(): Promise<HeldStopOutcome>;
 }
 
@@ -396,20 +397,25 @@ export class ProcessTable {
   // `liveSessions` run past it, so the next start reads the roster and retries its adoption, D59(6)). It is consulted
   // where it would otherwise outlive a deliberate act: a launch or reservation of its session (stopped first, so no second
   // engine runs the session), a forget (stopped, then forgotten) and a stop-all (stopped and counted). Its liveness is
-  // read at each consult (its pid and start time, no watcher): one whose host is gone is dropped.
+  // read at each consult (its pid and start time, no watcher): one whose host and engine are verified gone is dropped.
   unattach(appSessionId: AppSessionId, host: UnattachedHost): void {
     const entries = this.unattached.get(appSessionId) ?? [];
     if (entries.some((entry) => entry.host.holderId === host.holderId)) return; // recorded once (wave 1 verification)
     this.unattached.set(appSessionId, [...entries, { host, stopping: null }]);
   }
 
-  // The session's unattached hosts whose process still runs; the gone ones dropped.
+  // The session's unattached hosts that still guard a process; the ones verified gone dropped.
   unattachedHosts(appSessionId: AppSessionId): UnattachedHost[] {
     return this.liveUnattached(appSessionId).map((entry) => entry.host);
   }
 
+  // Wave 1 re-verification: a record is dropped only when every process it guards is verified gone (stop-held.ts
+  // `processState`): its host, and its engine when one is known. A host gone past its grace with its engine alive and
+  // its start unreadable (`unverified`) stays, so the guard holds and each consult asks its stop again.
   private liveUnattached(appSessionId: AppSessionId): { host: UnattachedHost; stopping: Promise<HeldStopOutcome> | null }[] {
-    const entries = (this.unattached.get(appSessionId) ?? []).filter((entry) => entry.stopping !== null || isSameProcess(entry.host.host, { isAlive: this.isAlive, procStartOf: this.procStartOf }));
+    const known = { isAlive: this.isAlive, procStartOf: this.procStartOf };
+    const guards = (entry: { host: UnattachedHost }) => [entry.host.host, entry.host.child()].some((p) => processState(p, known) !== 'gone');
+    const entries = (this.unattached.get(appSessionId) ?? []).filter((entry) => entry.stopping !== null || guards(entry));
     if (entries.length > 0) this.unattached.set(appSessionId, entries);
     else this.unattached.delete(appSessionId);
     return entries;

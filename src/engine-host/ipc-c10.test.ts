@@ -162,7 +162,7 @@ describe('session.forget', () => {
     const order: string[] = [];
     const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242 && alive.now, procStartOf: () => 'then' });
     table.onRowsChanged(() => void (table.get(id) && order.push('reserved')));
-    table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, stop: async () => {
+    table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => {
       order.push(`stopping (row ${table.get(id) ? 'present' : 'absent'})`);
       const what = seen();
       if (what !== null) order.push(what);
@@ -180,7 +180,7 @@ describe('session.forget', () => {
     it(`a launch and a forget of an unattached session whose stop is ${outcome} are refused already_live, nothing launched or erased`, async () => {
       const id = `app-unattached-${outcome}` as AppSessionId;
       const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: (pid) => pid === 4242, procStartOf: () => 'then' });
-      table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, stop: async () => outcome });
+      table.unattach(id, { holderId: 'Lunattached', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => outcome });
       const host = engineHost({ table });
       const launched = await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
       expect(launched).toMatchObject({ status: 'refused', reason: 'already_live', message: expect.stringContaining(why) });

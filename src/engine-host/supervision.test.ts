@@ -1003,7 +1003,7 @@ describe('an unattached session host and the supervisor’s clocks', () => {
   }
   const unattachedTable = () => {
     const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive: () => true, procStartOf: () => 'then' });
-    table.unattach('app-u' as AppSessionId, { holderId: 'L1', host: { pid: 4242, procStart: 'then' }, stop: async () => 'stopped' });
+    table.unattach('app-u' as AppSessionId, { holderId: 'L1', host: { pid: 4242, procStart: 'then' }, child: () => null, stop: async () => 'stopped' });
     return table;
   };
 

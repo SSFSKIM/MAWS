@@ -32,7 +32,7 @@ import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from 
 import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
 import { adoptAll, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records
-import { stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1
+import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
 import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
 import { readFileSync } from 'node:fs'; // P5 O16 M3
 import { openSupervisorLog } from './supervisor-log';
@@ -284,14 +284,14 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
   // adoption reserves its row stops it through its session host (scalpel-1#1)
   const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
-  const stop = (entry: RosterEntry) => stopHeldHost(entry, stopDeps);
-  const held = recordStart(engine.table, live, stop);
+  const heldHosts = { stop: (entry: RosterEntry) => stopHeldHost(entry, stopDeps), child: (entry: RosterEntry) => heldChild(entry, hostsDir) };
+  const held = recordStart(engine.table, live, heldHosts);
   void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
     // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
     // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
     // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed
     // adoption whose row was reserved is that row's
-    recordFailed(engine.table, outcome.failed, stop);
+    recordFailed(engine.table, outcome.failed, heldHosts);
     for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
     if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
     life.adoptionsEnded(outcome.failed.length);

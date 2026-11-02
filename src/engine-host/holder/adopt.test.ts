@@ -98,7 +98,7 @@ describe('the start’s records', () => {
     const table = tableOf();
     const stopped: string[] = [];
     const stop = async (e: RosterEntry): Promise<HeldStopOutcome> => (stopped.push(e.holderId), 'stopped');
-    expect(recordStart(table, [older, newer], stop)).toEqual(['app-shared']);
+    expect(recordStart(table, [older, newer], { stop, child: () => null })).toEqual(['app-shared']);
     expect(table.unattachedHosts('app-shared' as AppSessionId).map((h) => h.holderId)).toEqual(['older001']);
     expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 2, forced: 0 }); // the adoption still under way
     expect(stopped.sort()).toEqual(['newer001', 'older001']);
@@ -109,8 +109,8 @@ describe('the start’s records', () => {
     const newer = entry('newer001', { appSessionId: 'app-shared', pid: 4400, startedAt: '2026-10-31T10:00:00.000Z' });
     const table = tableOf();
     const stop = async (): Promise<HeldStopOutcome> => 'stopped';
-    recordStart(table, [older, newer], stop);
-    recordFailed(table, [{ entry: older, reason: 'a newer session host (newer001) holds its session; left running' }, { entry: newer, reason: 'no stored launch spec' }], stop);
+    recordStart(table, [older, newer], { stop, child: () => null });
+    recordFailed(table, [{ entry: older, reason: 'a newer session host (newer001) holds its session; left running' }, { entry: newer, reason: 'no stored launch spec' }], { stop, child: () => null });
     expect(table.unattachedHosts('app-shared' as AppSessionId).map((h) => h.holderId)).toEqual(['older001', 'newer001']);
   });
 });

@@ -44,15 +44,26 @@ export type ProcStartKey = { pid: number; procStart: string };
 // yet appear. `unverified`: a process alive whose start time cannot be read (a `ps` timed out, under load) is neither
 // signalled nor taken for gone. A process is gone only when verified so: `kill(pid, 0)` refused (ESRCH), or its start
 // read and another's.
+// A process's state, verified: `gone` only when kill(pid, 0) refused (ESRCH) or its start read and another's (the pid
+// reused); alive with a start that cannot be read (or none recorded) is `unverifiable`. Wave 1 re-verification: also the
+// process table's test of whether an unattached host's record still guards anything (process-table.ts `liveUnattached`).
+export function processState(p: ProcStartKey | null, deps: Pick<HeldStopDeps, 'isAlive' | 'procStartOf'>): 'same' | 'gone' | 'unverifiable' {
+  if (p === null || !deps.isAlive(p.pid)) return 'gone';
+  const start = deps.procStartOf(p.pid);
+  if (start === null || p.procStart === '') return 'unverifiable';
+  return start === p.procStart ? 'same' : 'gone'; // another process under the pid
+}
+
+// The host's engine as the roster names it now (the host keeps its entry while its child outlives it), else as the
+// entry the start read named it
+export function heldChild(entry: RosterEntry, hostsDir: string): ProcStartKey | null {
+  return readRoster(hostsDir, () => {}).find((e) => e.holderId === entry.holderId)?.child ?? entry.child;
+}
+
 export async function stopHeldHost(entry: RosterEntry, deps: HeldStopDeps): Promise<HeldStopOutcome> {
-  const check = (p: ProcStartKey | null): 'same' | 'gone' | 'unverifiable' => {
-    if (p === null || !deps.isAlive(p.pid)) return 'gone';
-    const start = deps.procStartOf(p.pid);
-    if (start === null || p.procStart === '') return 'unverifiable';
-    return start === p.procStart ? 'same' : 'gone'; // another process under the pid
-  };
+  const check = (p: ProcStartKey | null) => processState(p, deps);
   const current = () => readRoster(deps.hostsDir, () => {}).find((e) => e.holderId === entry.holderId) ?? null;
-  const childNow = (): ProcStartKey | null => current()?.child ?? entry.child;
+  const childNow = (): ProcStartKey | null => heldChild(entry, deps.hostsDir);
   const host: ProcStartKey = { pid: entry.pid, procStart: entry.procStart };
   const name = `session host ${entry.holderId} (pid ${entry.pid}) of ${entry.appSessionId ?? 'no session'}, held for adoption`;
   const hostState = check(host);

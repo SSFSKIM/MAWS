@@ -3,7 +3,8 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: Reques
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { HANDING_OVER, parsePsTree, ProcessTable } from './process-table';
-import type { HeldStopOutcome } from './holder/stop-held'; // P5 O16 wave 1 verification
+import { stopHeldHost, type HeldStopOutcome } from './holder/stop-held'; // P5 O16 wave 1 verification; re-verification: stopHeldHost
+import type { RosterEntry } from './holder/roster'; // P5 O16 wave 1 re-verification
 import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
 import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
@@ -307,7 +308,7 @@ describe('process table: change notification, shutdown and reservations', () => 
 
     it('is no row, no hold and no launch: nothing holds the host for it', () => {
       const table = tableWith({ now: true });
-      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => 'stopped' });
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => 'stopped' });
       expect([table.list().length, table.adoptingCount, table.launching(), table.isAdopting(U), table.unattachedHosts(U).map((h) => h.holderId)]).toEqual([0, 0, false, false, ['L1']]);
     });
 
@@ -320,11 +321,11 @@ describe('process table: change notification, shutdown and reservations', () => 
         return 'forced' as const;
       };
       const detaching = tableWith(alive);
-      detaching.unattach(U, { holderId: 'L1', host: KEY, stop });
+      detaching.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop });
       expect(await detaching.shutdown({ graceMs: 0, mode: 'detach' })).toEqual({ stopped: 0, forced: 0 });
       expect(asked).toEqual([]);
       const table = tableWith(alive);
-      table.unattach(U, { holderId: 'L1', host: KEY, stop });
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop });
       expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 1 });
       expect(asked).toEqual(['L1']);
       expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 }); // stopped, and gone: not asked again
@@ -336,7 +337,7 @@ describe('process table: change notification, shutdown and reservations', () => 
       let finish!: () => void;
       const finishing = new Promise<void>((resolve) => (finish = resolve));
       const table = tableWith(alive);
-      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => {
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => {
         stops += 1;
         await finishing;
         alive.now = false;
@@ -364,7 +365,7 @@ describe('process table: change notification, shutdown and reservations', () => 
       const answers: HeldStopOutcome[] = ['incomplete', 'unverified', 'stopped'];
       let stops = 0;
       const table = tableWith(alive);
-      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => {
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => {
         const answer = answers[stops++]!;
         if (answer === 'stopped') alive.now = false;
         return answer;
@@ -387,14 +388,57 @@ describe('process table: change notification, shutdown and reservations', () => 
       expect(heldStops).toBe(2);
     });
 
+    // wave 1 re-verification: a record is dropped only when every process it guards is verified gone, its host and its
+    // engine (killed with ESRCH, or its start read and another's). A host gone past its grace with its engine alive and
+    // unreadable stays, guards the launch, is asked again at each consult (no signal to the unverified pid), and goes once
+    // its engine is verified gone.
+    it('a host gone with its engine alive and unverifiable keeps the record until the engine is verified gone', async () => {
+      const HOST = { pid: 4242, procStart: 'then' };
+      const CHILD = { pid: 5151, procStart: 'child-start' };
+      const world: Record<number, { alive: boolean; start: string | null }> = { [HOST.pid]: { alive: true, start: HOST.procStart }, [CHILD.pid]: { alive: true, start: CHILD.procStart } };
+      const isAlive = (pid: number) => world[pid]?.alive ?? false;
+      const procStartOf = (pid: number) => (world[pid]?.alive ? (world[pid]!.start ?? null) : null);
+      const signals: string[] = [];
+      const entry: RosterEntry = {
+        protocol: 1, holderId: 'L1', pid: HOST.pid, procStart: HOST.procStart, startedAt: '2026-11-01T10:00:00.000Z', socket: '/x/h.sock', binary: '/x/maws-session-host',
+        appSessionId: U, engineSessionId: 'eng', state: 'running', child: CHILD, fence: 1, exit: null,
+      };
+      const deps = { hostsDir: '/nonexistent/hosts', isAlive, procStartOf, signal: (pid: number, name: string) => void signals.push(`${name} ${pid}`), log: () => {}, graceMs: 300,
+        sleep: async () => {
+          world[HOST.pid]!.alive = false; // the host leaves after its grace
+          world[CHILD.pid]!.start = null; // its engine outlives it, and `ps` no longer answers for it
+        } };
+      const table = new ProcessTable({ ps: async () => '', log: () => {}, isAlive, procStartOf });
+      table.unattach(U, { holderId: 'L1', host: HOST, child: () => CHILD, stop: () => stopHeldHost(entry, deps) });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'unverified' }]);
+      expect(table.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L1']); // the host is gone; its engine is not
+      expect(table.reserve(U, () => scriptedSession().session)).toMatchObject({ status: 'refused', reason: 'already_live' });
+      expect(await table.stopUnattached(U)).toEqual([{ holderId: 'L1', outcome: 'unverified' }]); // asked again
+      expect(signals).toEqual([`SIGTERM ${HOST.pid}`]); // the unverified pid never signalled
+      world[CHILD.pid]!.start = 'another'; // its pid now another process's: verified gone
+      expect(table.unattachedHosts(U)).toEqual([]);
+      const s = scriptedSession({ spec: { appSessionId: U } });
+      expect(table.reserve(U, () => s.session)).toMatchObject({ status: 'launching' });
+      s.transport.exit(0);
+      await s.session.exited;
+
+      // a host that left on its own, its engine still running (known from the roster): kept, not dropped with its host
+      const kept = new ProcessTable({ ps: async () => '', log: () => {}, isAlive, procStartOf });
+      world[CHILD.pid] = { alive: true, start: CHILD.procStart };
+      kept.unattach(U, { holderId: 'L2', host: HOST, child: () => CHILD, stop: async () => 'forced' });
+      expect(kept.unattachedHosts(U).map((h) => h.holderId)).toEqual(['L2']);
+      world[CHILD.pid]!.alive = false; // ESRCH
+      expect(kept.unattachedHosts(U)).toEqual([]);
+    });
+
     it('a gone one is dropped on consult and never stopped', async () => {
       const alive = { now: true };
       let stops = 0;
       const table = tableWith(alive);
-      table.unattach(U, { holderId: 'L1', host: KEY, stop: async () => ((stops += 1), 'stopped' as const) });
+      table.unattach(U, { holderId: 'L1', host: KEY, child: () => null, stop: async () => ((stops += 1), 'stopped' as const) });
       alive.now = false; // its host exited on its own
       expect(table.unattachedHosts(U)).toEqual([]);
-      table.unattach(U, { holderId: 'L2', host: KEY, stop: async () => ((stops += 1), 'stopped' as const) });
+      table.unattach(U, { holderId: 'L2', host: KEY, child: () => null, stop: async () => ((stops += 1), 'stopped' as const) });
       expect(await table.stopUnattached(U)).toEqual([]);
       expect(await table.shutdown({ graceMs: 0 })).toEqual({ stopped: 0, forced: 0 });
       expect(stops).toBe(0);
