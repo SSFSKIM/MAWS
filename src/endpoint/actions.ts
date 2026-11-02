@@ -4,7 +4,10 @@
 //
 // The endpoint's checks, in order, the first refusal answering `ack {state: 'refused', reason}`:
 //   1. freshness and replay (freshness.ts: `stale`, `malformed`, `expired`, `replayed`), before anything is read;
-//   2. authorization (M5's gate, which calls `execute` with what it decided);
+//   2. authorization (M5's gate, which calls `execute` with what it decided). The action's fingerprint is taken before
+//      it is decided (P5 O7 M5a fix wave 1), so `execute` hands a lane B, machine, pty host or artifact act to its ledger
+//      in the step its decision was taken, with nothing awaited between: a right withdrawn after that step finds the act
+//      on its way, never run on a decision that no longer stood;
 //   3. the lane's shape and context: a lane B action carries a lane B context, the engine session it was authorized
 //      against is the one the session runs now (`unavailable`: the machine's index lags it, P5 O7 M2), and its
 //      `launchId` and `engineSessionId` are the session's now (`context`; the engine host rechecks both at its claim);
@@ -117,6 +120,10 @@ export class Actions {
   /** Every hold out for an action in flight; `stop` lets go of those still out once it has waited. */
   readonly #holds = new Set<() => void>();
   #stopping = false;
+  /** Each received action's fingerprint, taken before its decision (`receive`), read by `execute`. */
+  readonly #fingerprints = new WeakMap<ActMessage, string>();
+  /** Each received action's way back to authorization, taken once (a lane B act whose decision moved under its status read). */
+  readonly #decideAgain = new WeakMap<ActMessage, () => void>();
 
   constructor(private readonly ctx: ActionsContext) {
     this.#laneA = new LaneA({ rl10: ctx.rl10, hold: (reason) => ctx.hold(reason), now: () => ctx.now() });
@@ -126,7 +133,20 @@ export class Actions {
   receive(channel: RemoteChannel, m: ActMessage, authorized: (channel: RemoteChannel, m: ActMessage) => void): void {
     const refusal = this.#stopping ? 'restart' : this.ctx.freshness.check(m.action, channel.device, this.ctx.now());
     if (refusal !== null) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: refusal });
-    authorized(channel, m);
+    const fingerprinted = actionFingerprint(m.action).then(
+      (fingerprint) => {
+        if (channel.closed) return;
+        if (this.#stopping) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'restart' });
+        this.#fingerprints.set(m, fingerprint);
+        this.#decideAgain.set(m, () => authorized(channel, m));
+        authorized(channel, m);
+      },
+      (error: unknown) => {
+        this.ctx.log(`endpoint: an action on channel ${channel.key} could not be fingerprinted: ${(error as Error).message}`);
+        if (!channel.closed) channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'unavailable' });
+      },
+    );
+    this.#track(fingerprinted);
   }
 
   /** An authorized action, handed to its executing side (the gate's `act` executor). */
@@ -179,8 +199,9 @@ export class Actions {
     if (row.executor === 'main') return refuse('no-ledger');
     const who = { member: channel.member, device: channel.device };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
-    const fingerprint = await actionFingerprint(action);
-    if (channel.closed) return;
+    // Taken before the decision (`receive`): nothing is awaited from the decision to the ledger's dispatch.
+    const fingerprint = this.#fingerprints.get(m);
+    if (fingerprint === undefined) return refuse('unavailable');
 
     if (row.executor === 'sminos') {
       const refusal = await this.#laneA.hand(channel, action, who, fingerprint);
@@ -253,6 +274,13 @@ export class Actions {
     if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
     if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
     if (channel.closed) return;
+    // The status read was awaited: the decision is asked whether it stands in the step the act goes to the ledger, and
+    // taken again, once, when it moved meanwhile (authorize's own rule), `unavailable` when it moved again.
+    if (decision.stands?.() === false) {
+      const again = this.#decideAgain.get(m);
+      this.#decideAgain.delete(m);
+      return again === undefined ? refuse('unavailable') : again();
+    }
     accept();
     const release = this.#hold();
     try {

@@ -64,8 +64,13 @@ export class ArtifactsFeeds {
   readonly #epoch = `artifacts:${randomBytes(9).toString('base64url')}`;
   readonly #feeds = new Map<Subscription, Feed>();
 
+  readonly #offDropped: () => void;
+
   constructor(ctx: ArtifactsFeedsContext) {
     this.#ctx = ctx;
+    // Any placement dropped (a record, a relink, a delete, a `caps` refresh, a new head): what is queued is held and
+    // checked again in that step, before credit can let it go.
+    this.#offDropped = ctx.artifacts.onDropped(() => this.accessChanged());
   }
 
   open(sub: Subscription): void {
@@ -82,6 +87,7 @@ export class ArtifactsFeeds {
   }
 
   stop(): void {
+    this.#offDropped();
     this.#feeds.clear();
   }
 

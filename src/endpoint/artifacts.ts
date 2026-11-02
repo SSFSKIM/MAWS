@@ -17,10 +17,12 @@
 // each linked session's record when it is taken. An entry is dropped by everything that can change what it says or what
 // is decided on it: a record change naming one of its sessions (a record's first arrival included, which ends O12 M11's
 // bridge), a change of a linked session's engine session in the spine's index (`session.changed`), the artifact's
-// relink (`artifacts.changed {change: 'linked'}`), a `caps` refresh and a new head (`clear`); a channel's entries go
+// relink, delete or create (`artifacts.changed` but `updated`), a `caps` refresh and a new head (`clear`); a channel's entries go
 // with it (its ref's end). A placement in flight when anything is dropped is dropped too (what it read may predate the
 // change), and a reader handed an entry dropped while it read reads again, once, then answers `unavailable`, as a
-// decision whose reads moved twice does. A placement that could not be read (`unavailable`) is never kept.
+// decision whose reads moved twice does. A placement that could not be read (`unavailable`) is never kept. Every drop
+// is told (`onDropped`) in its own step: the `artifacts` feeds hold and recheck what they queued on a dropped placement
+// before credit can let it go.
 import type { ClientRef } from '@shared/ipc/client';
 import type { SessionTarget } from './sources';
 import { placeArtifact, type PlacedSession, type Placing, type Resolved } from './targets';
@@ -52,6 +54,14 @@ type Entry = {
 export class ArtifactRanks {
   /** Each channel's entries by artifact id, in insertion order. Keyed by the channel's ref; `null`: no channel. */
   readonly #channels = new Map<ClientRef | null, Map<string, Entry>>();
+  /** Told, in the step of each drop, that placements were dropped (the `artifacts` feeds' recheck). */
+  readonly #dropped = new Set<() => void>();
+
+  /** `listener` is told at every drop, synchronously, before anything else can act on what was dropped. */
+  onDropped(listener: () => void): () => void {
+    this.#dropped.add(listener);
+    return () => void this.#dropped.delete(listener);
+  }
 
   /**
    * The artifact's placement for `channel`, read on its behalf through `placing` when not kept. Read again, once, when
@@ -71,6 +81,7 @@ export class ArtifactRanks {
   /** The artifact relinked: every channel's entry for it dropped. */
   drop(artifactId: string): void {
     for (const entries of this.#channels.values()) entries.delete(artifactId);
+    this.#tell();
   }
 
   /**
@@ -82,6 +93,7 @@ export class ArtifactRanks {
     for (const entries of this.#channels.values()) {
       for (const [id, entry] of entries) if (entry.sessions === null || names.some((name) => name !== '' && entry.sessions!.has(name))) entries.delete(id);
     }
+    this.#tell();
   }
 
   /** The channel ended: its entries go with it. */
@@ -92,6 +104,11 @@ export class ArtifactRanks {
   /** A `caps` refresh or a new head: everything dropped. */
   clear(): void {
     for (const entries of this.#channels.values()) entries.clear();
+    this.#tell();
+  }
+
+  #tell(): void {
+    for (const listener of [...this.#dropped]) listener();
   }
 
   #stands(key: ClientRef | null, artifactId: string, entry: Entry): boolean {

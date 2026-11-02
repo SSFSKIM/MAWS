@@ -91,7 +91,12 @@ export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub' | 'strea
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
 export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
 /** `artifact` (P5 O7 M5a): the artifact an `artifact`-rule request was decided on (null: the orphan form). */
-export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget } | { ok: false; reason: RefusalReason };
+/**
+ * A decision. An act's admission's `stands` says, synchronously, whether what it was taken on stands still (the records and
+ * placements it read, the head, the policy): an executor that must await something between the decision and the effect
+ * (a lane B act's status read) asks it in the step it hands the act on.
+ */
+export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean } | { ok: false; reason: RefusalReason };
 export type ArtifactTarget = { artifactId: string | null };
 /**
  * What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. P5 O12 M11:
@@ -172,6 +177,8 @@ class Reads implements EffectReads {
   #owners: Promise<string[]> | null = null;
   readonly #pending = new Map<string, Promise<string | null>>();
   readonly #records = new Map<string, { target: SessionTarget; launchedBy?: Spawner; standing: string | null }>();
+  /** A record this decision read twice and found standing otherwise the second time. */
+  #readOtherwise = false;
   /** P5 O7 M5a: whether each cached artifact placement this decision read still stands. */
   readonly #artifacts: Array<() => boolean> = [];
 
@@ -230,12 +237,19 @@ class Reads implements EffectReads {
   /** P5 O12 M11: `launchedBy`, the spawner the target's placement read (`recordOf`'s bridge). */
   record(target: SessionTarget, launchedBy?: Spawner): SessionRecord | null {
     const record = recordOf(this.ctx.records, target, launchedBy);
-    this.#records.set(`${target.lane}\n${target.session}`, { target, launchedBy, standing: standingOf(record) });
+    const key = `${target.lane}\n${target.session}`;
+    const standing = standingOf(record);
+    const first = this.#records.get(key);
+    // Every reading stands for what was decided on it: a session read again (copyAsset's `from` after `to`) that reads
+    // otherwise moved under the decision, whatever its record says by the end.
+    if (first === undefined) this.#records.set(key, { target, launchedBy, standing });
+    else if (first.standing !== standing) this.#readOtherwise = true;
     return record;
   }
 
-  /** Whether a record read here now stands otherwise (P5 O12 M11: the bridge's standing included). */
+  /** Whether a record read here now stands otherwise, or was read two ways (P5 O12 M11: the bridge's standing included). */
   recordsMoved(): boolean {
+    if (this.#readOtherwise) return true;
     for (const { target, launchedBy, standing } of this.#records.values()) if (standingOf(recordOf(this.ctx.records, target, launchedBy)) !== standing) return true;
     return false;
   }
@@ -288,9 +302,11 @@ export class Authorizer {
         standing = decided(refuse(error.reason));
       }
       if (moved()) continue;
-      if (standing.presence === undefined) return standing.decision;
+      // An act's admission says whether it stands still, for an executor that awaits before its ledger (actions.ts).
+      const stands = (decision: Decision): Decision => (decision.ok && request.kind === 'act' ? { ...decision, stands: () => !moved() } : decision);
+      if (standing.presence === undefined) return stands(standing.decision);
       const decision = await standing.presence();
-      return moved() ? refuse('unavailable') : decision;
+      return moved() ? refuse('unavailable') : stands(decision);
     }
     return refuse('unavailable');
   }

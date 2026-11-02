@@ -826,6 +826,56 @@ describe('the machine’s artifacts feed (P5 O7 M5a)', () => {
     ]);
   });
 
+  it('holds a change queued on its placement when a `caps` refresh drops the placement, and takes it back once it no longer stands', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    const doc = randomUUID();
+    f.host.artifact(doc, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B);
+    await feed(b, 'art', null, 'artifacts', 1);
+    f.host.emitMachine('library.changed', { revision: 1 }); // spends the credit
+    await until(() => evs(b, 'art').length >= 1, 'the first change');
+    f.host.emitHost('artifacts.changed', changed(doc)); // placed, decided and queued: the device can't take it yet
+    await settle();
+    f.host.artifacts.get(doc)!.links = []; // silently an orphan: only the refresh says the placement is old
+    f.endpoint.channels.refreshCaps();
+    await b.channel.send({ t: 'credit', sub: 'art', bytes: 1024 * 1024 }); // nothing else happens to the feed meanwhile
+    await settle();
+    f.host.emitMachine('library.changed', { revision: 2 });
+    await until(() => evs(b, 'art').length >= 2, 'the next change');
+    await settle();
+    expect(feedNames(b, 'art')).toEqual([
+      { name: 'library.changed', payload: { revision: 1 } },
+      { name: 'library.changed', payload: { revision: 2 } },
+    ]);
+  });
+
+  it('widens as a session of an artifact becomes the member’s, and narrows as it stops being so', async () => {
+    const f = await startEndpoint(org, started);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    const doc = randomUUID();
+    f.host.artifact(doc, ['app-2']);
+    const b = await openRemote(f, org.b1, org.B);
+    await feed(b, 'art', null, 'artifacts');
+    f.host.emitHost('artifacts.changed', { ...changed(doc), revision: 2 }); // B views none of its sessions
+    await settle();
+    shared(f, 'app-2', 'view'); // widens
+    await settle();
+    f.host.emitHost('artifacts.changed', { ...changed(doc), revision: 3 });
+    await until(() => evs(b, 'art').length >= 1, 'the widened change');
+    shared(f, 'app-2', null); // narrows
+    await settle();
+    f.host.emitHost('artifacts.changed', { ...changed(doc), revision: 4 });
+    f.host.emitMachine('library.changed', { revision: 9 });
+    await until(() => evs(b, 'art').length >= 2, 'the library change');
+    await settle();
+    expect(feedNames(b, 'art')).toEqual([
+      { name: 'artifacts.changed', payload: { ...changed(doc), revision: 3 } },
+      { name: 'library.changed', payload: { revision: 9 } },
+    ]);
+  });
+
   it('is refused to a web-cards device', async () => {
     const f = await startEndpoint(org, started);
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });

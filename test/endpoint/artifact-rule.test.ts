@@ -202,6 +202,18 @@ describe('the rule’s cache', () => {
     expect(await get(b, x)).toBe('grade');
   });
 
+  it('places an artifact again once it is deleted (`artifacts.changed {deleted}`), so a deleted row is unknown to every channel', async () => {
+    const f = await startEndpoint(org, started);
+    session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await get(b, x)).toBe('ok'); // placed and kept
+    f.host.artifacts.delete(x); // `library.entry` answers no row, as the store does after a soft delete
+    f.host.emitHost('artifacts.changed', { artifactId: x, kind: 'document', revision: 3, change: 'deleted' });
+    expect(codeOf(await call(b, 'artifacts.get', { artifactId: x, includeDeleted: true }))).toBe('grade');
+  });
+
   it('answers `unavailable` when the store can’t say what an artifact is linked to', async () => {
     const f = await startEndpoint(org, started);
     session(f, 'app-1', ['@machine'], shared(org.B));
@@ -242,6 +254,38 @@ describe('the rule’s standing, read through the decision', () => {
     const b = await openRemote(f, org.b1, org.B);
     records.next = { lane: 'B', session: s1.engineSessionId!, owners: ['@machine'], access: 'private' };
     expect(await get(b, x)).toBe('grade');
+  });
+
+  it('takes `copyAsset` again when its `from` read finds the record its `manage` on `to` stood on moved (one session, read twice)', async () => {
+    const records = new Moving();
+    const f = await startEndpoint(org, started, { records });
+    const s1 = session(f, 'app-1', [org.B]);
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    f.host.handlers.set('artifacts.copyAsset', () => ({ assetId: randomUUID(), ref: 'assets/copied.png' }));
+    const b = await openRemote(f, org.b1, org.B);
+    // B owns the session as `to` is ranked; by `from`'s read, B holds a view share alone.
+    records.next = { lane: 'B', session: s1.engineSessionId!, owners: ['@machine'], access: 'private', shares: [{ member: org.B, grade: 'view' }] };
+    expect(await run(b, actOf(f, b, 'artifacts.copyAsset', { from: x, ref: 'assets/source.png', to: x }))).toEqual({ ack: 'grade' });
+    expect(f.host.artifactRuns).toEqual([]);
+  });
+
+  it('hands an artifact write to its ledger in the step its decision is taken: a share withdrawn the moment after finds it on its way', async () => {
+    const f = await startEndpoint(org, started);
+    const s1 = session(f, 'app-1', [org.B]);
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B);
+    const execute = f.endpoint.actions.execute.bind(f.endpoint.actions);
+    let sentAtDecision: boolean | null = null;
+    f.endpoint.actions.execute = (channel, message, decision) => {
+      execute(channel, message, decision);
+      sentAtDecision = f.host.calls.some((c) => c.name === 'host.artifactOp');
+      f.records.set({ lane: 'B', session: s1.engineSessionId!, owners: ['@machine'], access: 'private' }, 'app-1');
+    };
+    expect(await run(b, update(f, b, x))).toMatchObject({ ack: 'ok', outcome: { state: 'done' } });
+    expect(sentAtDecision).toBe(true);
+    expect(await run(b, update(f, b, x, 'after'))).toEqual({ ack: 'grade' });
   });
 
   it('gives a session’s spawner its artifacts while sminos lists no record of it, then only what the record grants, the placement read again', async () => {

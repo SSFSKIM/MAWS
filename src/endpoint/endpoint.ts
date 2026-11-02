@@ -39,8 +39,9 @@
 // P5 O7 M5a: the `artifact` target rule's placements are kept per channel (`artifactRanks`, artifacts.ts), read by the
 // decisions, `library.list`'s cut and the machine's `artifacts` feed, and dropped by everything that can change what they
 // say or what is decided on them: a record change naming a linked session (the record source's listener here runs before
-// the subscriptions' re-check), the spine's `session.changed` of one and an artifact's relink (before the feeds hear the
-// event), a `caps` refresh and a new head.
+// the subscriptions' re-check), the spine's `session.changed` of one and an artifact's relink, create or delete (before the
+// feeds hear the event), a `caps` refresh and a new head. Every drop rechecks the `artifacts` feeds' queued output at once
+// (ArtifactRanks' `onDropped`).
 //
 // P5 O7 M3: a device's streams (streams.ts) open under its acts: a terminal's bytes, read from the pty host's ring and its
 // `onFrame` output, and a forwarded port's connections, each naming a forward the endpoint keeps per device for the resume
@@ -833,7 +834,9 @@ export class Endpoint implements EndpointModule {
    */
   #artifactEvent(owner: string, message: { name: string; payload: unknown }): void {
     const payload = message.payload as { artifactId?: unknown; change?: unknown; record?: { appId?: unknown } } | null;
-    if (owner === 'engine-host' && message.name === 'artifacts.changed' && payload?.change === 'linked' && typeof payload.artifactId === 'string') this.artifactRanks.drop(payload.artifactId);
+    // Every change but a write's (`updated`, which moves neither the artifact's existence nor its links: a write that
+    // links its session says `linked` too) changes what `library.entry` answers: a relink, a delete, a create.
+    if (owner === 'engine-host' && message.name === 'artifacts.changed' && payload?.change !== 'updated' && typeof payload?.artifactId === 'string') this.artifactRanks.drop(payload.artifactId);
     if (owner === 'machine' && message.name === 'session.changed' && typeof payload?.record?.appId === 'string') this.artifactRanks.dropSession(payload.record.appId);
   }
 

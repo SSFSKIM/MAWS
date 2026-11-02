@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { OFFERS } from '../../src/endpoint/offers';
-import { act, makeOrg, openRemote, startEndpoint, stopAll, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
+import { act, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -140,5 +140,29 @@ describe('lane B’s offer rows (M2)', () => {
       expect([name, ran(f, name)]).toEqual([name, true]);
       expect([name, (await call(a, name, args)).error]).toEqual([name, { code: 'act-required' }]);
     }
+  });
+});
+
+describe('a lane B act between its decision and its ledger', () => {
+  it('is decided again when a right it stood on is withdrawn while its session’s status is read, and runs nothing', async () => {
+    const f = await startEndpoint(org, started);
+    const s = f.host.add(APP);
+    f.spine.set(APP, s.engineSessionId);
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.B] }, APP);
+    const b = await openRemote(f, org.b1, org.B);
+    const execute = f.endpoint.actions.execute.bind(f.endpoint.actions);
+    f.endpoint.actions.execute = (channel, message, decision) => {
+      f.host.hold('session.status'); // the executor's own read of the session, after its decision
+      execute(channel, message, decision);
+    };
+    const context = { lane: 'B' as const, launchId: s.launchId, engineSessionId: s.engineSessionId! };
+    const sent = act(b, b.device.action({ machine: f.ref, action: 'session.send', session: APP, context, args: at({ content: 'hi' }) }));
+    // The placement's status read, then the executor's, held.
+    await until(() => f.host.calls.filter((c) => c.name === 'session.status').length === 2, 'the executor’s status read');
+    f.endpoint.actions.execute = execute;
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP); // B's ownership withdrawn
+    f.host.release('session.status');
+    expect(await sent).toBe('grade');
+    expect(ran(f, 'session.send')).toBe(false);
   });
 });

@@ -17,8 +17,11 @@ import { readBytes } from './bytes';
 import type { ChannelRoutes, RemoteChannel } from './channels';
 import type { SessionTarget } from './sources';
 
-/** An authorized request's decision: the session it is about, where it names one, or the artifact (P5 O7 M5a). */
-export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget };
+/**
+ * An authorized request's decision: the session it is about, where it names one, or the artifact (P5 O7 M5a); `stands`,
+ * whether it stands still (authorize.ts' `Decision`).
+ */
+export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean };
 
 export type Executors = {
   call(channel: RemoteChannel, message: CallMessage, decision: Granted): void;
@@ -79,7 +82,7 @@ export class Gate {
       .authorize(request, who, this.ctx.now())
       .then((decision) => {
         if (channel.closed) return;
-        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }) });
+        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }), ...(decision.stands === undefined ? {} : { stands: decision.stands }) });
         else answer.refused(decision.reason);
       })
       .catch((error: unknown) => {
