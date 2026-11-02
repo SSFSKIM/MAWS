@@ -153,6 +153,25 @@ describe('session.forget', () => {
     await expect(host.handlers.get('session.forget')!({ appSessionId: '../escape' })).rejects.toBeInstanceOf(HostCommandError);
   });
 
+  // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, while
+  // the adopter reads its stored spec and resumes its journal; its forget is refused as a live process's is, erasing nothing
+  it('refuses already_live for a session held for adoption, its state file and journal kept', async () => {
+    const host = engineHost();
+    const id = 'app-forget-held' as AppSessionId;
+    const state = join(userData, 'engine-host', 'state', `${id}.json`);
+    const journal = join(userData, 'engine-host', 'journal', id);
+    await new FileSessionStateStore(userData).saveLaunchSpec(id, spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl'));
+    await mkdir(journal, { recursive: true });
+    await writeFile(join(journal, 'launch-1.jsonl'), '');
+    host.ipc.table.holdForAdoption([id]);
+    await expect(host.handlers.get('session.forget')!({ appSessionId: id })).rejects.toEqual(new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' }));
+    expect([existsSync(state), existsSync(journal)]).toEqual([true, true]);
+    expect(host.emitted.filter((e) => e.name === 'session.forgotten')).toEqual([]);
+    host.ipc.table.adoptionEnded(id); // a failed adoption's hold released: the forget goes ahead
+    await host.call('session.forget', { appSessionId: id });
+    expect([existsSync(state), existsSync(journal)]).toEqual([false, false]);
+  });
+
   it("forgotten as soon as the process reads exited (the bootstrap's release on process.exited), the exit's queue save still lands first: no state file comes back", async () => {
     const inner = new FileSessionStateStore(userData);
     let release!: () => void;

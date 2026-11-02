@@ -720,6 +720,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
+    // P5 O16 panel fix wave 1 (scalpel-1#3): a session held for adoption has no row until its adoption reserves one, and
+    // its adopter reads the stored spec and resumes the journal meanwhile; it is live, as a launch's refusal reads it
+    if (table.isAdopting(id)) throw new HostCommandError({ code: 'internal', message: 'already_live: process is being adopted' });
     // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
     // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
     if (session) await session.exited;
