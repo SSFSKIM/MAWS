@@ -4,7 +4,7 @@
 // The spawn row names the engine as `bin` and the host as `holder`; SMNS_MEMBER in the engine's environment is the
 // host's pid; the acks empty the host's ring; a host that will not start answers `host_unavailable`; a host killed with
 // SIGKILL ends the session as a crash with `host_lost`. Runs wherever a prebuild matches the platform.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -24,7 +24,7 @@ import { isAlive, procStartOf } from '../supervisor-files';
 import { mapFileOf } from './checkpoint';
 import { HostConnection } from './client';
 import { hostsDirOf, sessionHostBinary } from './files';
-import { startSessionHost, type StartedHost } from './transport';
+import { startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
@@ -65,7 +65,7 @@ function spec(appSessionId: string): LaunchSpec {
 }
 
 // The engine host's handlers over the stub engine, every live launch under a session host of the committed binary.
-function engineHost(stub: string, over: { binary?: string } = {}) {
+function engineHost(stub: string, over: { binary?: string; child?: SessionHostDeps['child'] } & Pick<SessionHostDeps, 'startMs' | 'hostArgs' | 'onConnection'> = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
@@ -78,7 +78,7 @@ function engineHost(stub: string, over: { binary?: string } = {}) {
   const holder: EngineIpcDeps['holder'] = {
     gateSocket: join(userData, 'supervisor', 'gate.sock'),
     start: async (launchId) => {
-      const host = await startSessionHost(launchId, { hostsDir: hostsDirOf(join(userData, 'supervisor')), binary: over.binary ?? BINARY, userData, tmpdir: tmpdir(), log: () => {}, child: { isAlive, procStartOf, signal: signalOrphan, graceMs: 1_000 } });
+      const host = await startSessionHost(launchId, { hostsDir: hostsDirOf(join(userData, 'supervisor')), binary: over.binary ?? BINARY, userData, tmpdir: tmpdir(), log: () => {}, child: over.child ?? { isAlive, procStartOf, signal: signalOrphan, graceMs: 1_000 }, startMs: over.startMs, hostArgs: over.hostArgs, onConnection: over.onConnection });
       hosts.push(host);
       return host;
     },
@@ -191,5 +191,56 @@ describe.skipIf(!existsSync(BINARY))('a live launch under a session host', () =>
     // (a write in flight at the loss may raise its own `write_failed` first)
     expect(host.events(id).filter((e) => e.kind === 'error.raised')).toContainEqual(expect.objectContaining({ code: 'host_lost' }));
     await until(() => !isAliveNow(engine), 'the engine ended', 8_000);
+  });
+
+  // O16 panel wave 1 (scalpel-4#1): an engine that outlives its lost host's SIGTERM keeps its session reserved, so a
+  // relaunch never runs a second engine beside it
+  it('a session whose host was lost keeps its reservation until its engine is gone: a relaunch meanwhile is refused', { timeout: LONG }, async () => {
+    const inner = writeStubEngine(join(scratch, 'claude-lost-held-inner'), bundle, { fixture: PERMISSION });
+    // the stub ends at its stdin's EOF; this engine outlives it, as one finishing a turn with no stdio does (E10 M0 Q1)
+    const stub = join(scratch, 'claude-lost-held');
+    writeFileSync(stub, `#!/bin/sh\n'${inner}' "$@"\nwhile :; do sleep 1; done\n`, { mode: 0o755 });
+    const signals: string[] = [];
+    // an engine that ignores SIGTERM: the SIGTERM is recorded and not sent, the SIGKILL after the grace is
+    const child: SessionHostDeps['child'] = { isAlive, procStartOf, graceMs: 2_000, signal: (pid, name) => {
+      signals.push(name);
+      if (name === 'SIGKILL') signalOrphan(pid, name);
+    } };
+    const host = engineHost(stub, { child });
+    const id = 'app-lost-held';
+    await host.call('session.launch', { spec: spec(id) });
+    await until(() => host.status(id).process === 'ready', 'ready');
+    const engine = host.status(id).pid!;
+    process.kill(hosts[0]!.pid, 'SIGKILL');
+    await until(() => signals.includes('SIGTERM'), 'the SIGTERM to the engine');
+    await sleep(500); // within the grace: the engine lives
+    expect(isAliveNow(engine)).toBe(true);
+    expect(host.status(id).process).not.toBe('exited');
+    expect(await host.call('session.launch', { spec: spec(id) })).toMatchObject({ status: 'refused', reason: 'already_live' });
+    expect(hosts).toHaveLength(1); // no second session host was started
+    await until(() => host.events(id).some((e) => e.kind === 'process.exited'), 'process.exited', 10_000);
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(isAliveNow(engine)).toBe(false);
+  });
+
+  // O16 panel wave 1 (scalpel-4#1, the controller's follow-up): a host given up on mid-spawn may still fork the engine;
+  // its own shutdown ends that fork's group, so the session stays reserved until the host is gone
+  it('a session whose host was given up on mid-spawn keeps its reservation until the host is gone: a relaunch meanwhile is refused', { timeout: LONG }, async () => {
+    const stub = writeStubEngine(join(scratch, 'claude-mid-spawn'), bundle, { fixture: PERMISSION });
+    let first: HostConnection | null = null;
+    const host = engineHost(stub, { startMs: 2_000, hostArgs: ['--spawn-delay-ms', '5000'], onConnection: (c) => (first ??= c) });
+    const id = 'app-mid-spawn';
+    await host.call('session.launch', { spec: spec(id) });
+    const roster = () => (existsSync(hosts[0]?.paths.roster ?? '') ? (JSON.parse(readFileSync(hosts[0]!.paths.roster, 'utf8')) as { state: string }).state : null);
+    await until(() => roster() === 'committed', 'the commit, its fork held open');
+    first!.close(); // the spawn's answer is lost with the connection; the reconnect's bound passes before the fork
+    const hostPid = hosts[0]!.pid;
+    await sleep(3_000); // the reconnect's 2 s bound has passed and the spawn is given up; the fork is still held (5 s)
+    expect(isAliveNow(hostPid)).toBe(true);
+    expect(host.status(id).process).not.toBe('exited');
+    expect(await host.call('session.launch', { spec: spec(id) })).toMatchObject({ status: 'refused', reason: 'already_live' });
+    expect(hosts).toHaveLength(1);
+    await until(() => host.status(id).process === 'exited', 'exited', 20_000);
+    expect(isAliveNow(hostPid)).toBe(false);
   });
 });

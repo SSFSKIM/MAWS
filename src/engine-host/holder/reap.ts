@@ -63,7 +63,7 @@ export class Reap {
   private fence = 0;
   private armSentAt = 0;
   private armTimer: ReturnType<typeof setTimeout> | null = null;
-  private renewTimer: ReturnType<typeof setInterval> | null = null;
+  private renewTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private readonly leaseMs: number;
   private readonly marginMs: number;
@@ -150,10 +150,7 @@ export class Reap {
   private signal(): void {
     this.clearTimers();
     this.set('signalled');
-    if (this.observer !== 'absent') {
-      this.renewTimer = setInterval(() => this.deps.gate.arm(this.fence, this.leaseMs), this.leaseMs - this.marginMs);
-      (this.renewTimer as { unref?: () => void }).unref?.();
-    }
+    if (this.observer !== 'absent') this.renewLater();
     this.deps.log(`${this.reason} reap of ${this.label}: signalled${this.observer === 'absent' ? ' (no observer was ever seen on the process)' : ` (fence ${this.fence})`}`);
     this.deps.reap(this.reason).then(
       (outcome) => this.settled(outcome),
@@ -162,6 +159,18 @@ export class Reap {
         this.settled('ignored');
       },
     );
+  }
+
+  // O16 panel wave 1 (sweep#2): each renewal is due at the lease in force less the margin, the first against the arm
+  // the step signalled under (`armSentAt`), not a whole lease from the signal, so the fence never lapses while it runs.
+  private renewLater(): void {
+    const due = this.armSentAt + this.leaseMs - this.marginMs;
+    this.renewTimer = setTimeout(() => {
+      this.armSentAt = this.deps.now();
+      this.deps.gate.arm(this.fence, this.leaseMs);
+      this.renewLater();
+    }, Math.max(0, due - this.deps.now()));
+    (this.renewTimer as { unref?: () => void }).unref?.();
   }
 
   private settled(outcome: 'exited' | 'ignored'): void {
@@ -230,7 +239,7 @@ export class Reap {
 
   private clearTimers(): void {
     if (this.armTimer !== null) clearTimeout(this.armTimer);
-    if (this.renewTimer !== null) clearInterval(this.renewTimer);
+    if (this.renewTimer !== null) clearTimeout(this.renewTimer);
     this.armTimer = null;
     this.renewTimer = null;
   }
