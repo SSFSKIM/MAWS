@@ -39,8 +39,11 @@ const CHANNEL_BASE = 2 ** 31;
 const CHANNEL_SPAN = 2 ** 31;
 /** The largest frame either way: the engine host's socket resets a document channel queued past it anyway. */
 export const DOCUMENT_FRAME_MAX = DOC_HIGH_WATER;
-/** The host's frames held past the device's credit, at most: past it the stream closes `behind`. */
-export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
+/**
+ * The host's frames held past the device's credit, at most, their length prefixes counted: one frame of the largest size
+ * with its prefix fits, so the frame bound and this one agree; past it the stream closes `behind`.
+ */
+export const DOCUMENT_BACKLOG_BYTES = DOCUMENT_FRAME_MAX + 4;
 /** A `view` open's device frames dropped, at most: past it the stream closes `read-only`. */
 export const VIEW_DROPPED_MAX = 64 * 1024;
 

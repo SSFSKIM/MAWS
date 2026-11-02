@@ -606,6 +606,35 @@ describe('the document stream', () => {
     expect(docs.channels.get(channel)!.ended).toBe('endpoint');
   });
 
+  it('carries a host frame of exactly the largest size whole, under ample credit, never `behind`', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 4 * 1024 * 1024);
+    const largest = randomBytes(8 * 1024 * 1024);
+    largest[0] = 0;
+    docs.send(docs.last().channel, largest);
+    let granted = 4 * 1024 * 1024;
+    await until(
+      () => {
+        if (closeOf(a, id) !== undefined) return true;
+        const got = ofStream(a, id).filter((m) => m.t === 'streamData').reduce((n, m) => n + Buffer.from(m.data as string, 'base64url').byteLength, 0);
+        if (got === largest.byteLength + 4) return true;
+        if (got === granted) {
+          granted += 4 * 1024 * 1024;
+          void a.channel.send({ t: 'streamCredit', id, bytes: 4 * 1024 * 1024 });
+        }
+        return undefined;
+      },
+      'the frame',
+      20_000,
+    );
+    expect(closeOf(a, id)).toBeUndefined();
+    expect(framesOf(a, id)).toHaveLength(1);
+    expect(framesOf(a, id)[0].equals(largest)).toBe(true);
+  });
+
   it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {
     const { f, docs } = await startDocuments();
     const x = randomUUID();
