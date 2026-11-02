@@ -9,7 +9,8 @@
 //   (P5 O16 M3b fix wave 2, the handover's completion route): a completion (host-supervisor.ts DRAIN_REPLIES) whose
 //   raising engine host is gone is no need: it is answered `host_unavailable` at once, waits on no park and wakes,
 //   holds or launches no host, since no call is left for it to settle;
-// - while any is in flight no park is asked (`DaemonClocks.engineRequests`);
+// - while any is in flight no park is asked (`DaemonClocks.engineRequests`), and its end is a need again, told before
+//   the count, so the clock starts there and the last count's evaluation asks nothing on the start's clock;
 // - one that arrives after the ask was sent waits for that host's exit (bounded by EXIT_SETTLE_MS), and then goes as any
 //   request to a parked host does: the supervisor holds it and starts the next host for it. A host still serving after
 //   the bound is not leaving (it holds live rows): the ask is taken back (`takeBackPark`) and the request goes to it.
@@ -66,6 +67,9 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
       }
       return (await hosts.forward(owner, request)) as HostResponse;
     } finally {
+      // The need first: the count's evaluation then reads the clock started at the end, never the one from the start (a
+      // request that outlived the idle time would otherwise have the park asked the moment it ends)
+      clocks.engineNeeded();
       inFlight -= 1;
       clocks.engineRequests(inFlight);
     }
