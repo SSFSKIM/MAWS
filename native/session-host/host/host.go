@@ -91,6 +91,7 @@ type Host struct {
 	child       *proto.Child
 	stdinW      *os.File
 	exit        *proto.Exit
+	reaped      bool          // the child has been waited for: its pid may be another process's, and is never signalled
 	exited      chan struct{} // closed at the child's exit, once it is recorded
 	spawning    chan struct{} // non-nil while a commit's fork is under way; closed once its outcome is recorded
 	spawnFailed bool
@@ -184,14 +185,14 @@ func (h *Host) requestQuit(code int) {
 func (h *Host) onSignal(sig os.Signal) int {
 	h.awaitSpawn()
 	h.mu.Lock()
-	alive := h.child != nil && h.exit == nil
+	signallable := h.signallable()
 	pgid, exited := 0, h.exited
-	if alive {
+	if signallable {
 		pgid = h.child.Pid
 	}
 	h.mu.Unlock()
 	h.log.printf("%v: ending the child's process group", sig)
-	if alive {
+	if signallable {
 		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
 			h.log.printf("SIGTERM to group %d: %v", pgid, err)
 		}
@@ -203,6 +204,13 @@ func (h *Host) onSignal(sig os.Signal) int {
 	}
 	h.finish()
 	return 0
+}
+
+// signallable says the child's pid is still the child's: it has been spawned and not yet reaped. The exit is recorded
+// only once the output has drained, after the reap, and a pid reaped in between may already be another process's. The
+// caller holds mu.
+func (h *Host) signallable() bool {
+	return h.child != nil && !h.reaped
 }
 
 // awaitSpawn closes admission (no commit starts a fork after it) and waits for a fork already under way to record its
@@ -571,7 +579,7 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 			c.send(proto.Error{T: "error", Message: "signal takes SIGTERM, SIGINT or SIGKILL"})
 			return
 		}
-		if h.child == nil || h.exit != nil {
+		if !h.signallable() {
 			c.send(proto.Error{T: "error", Message: "no running child"})
 			return
 		}

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -528,5 +529,63 @@ func TestExitIsTerminalForOutput(t *testing.T) {
 	hs.h.mu.Unlock()
 	if last != 1 {
 		t.Fatalf("the ring took records after the exit: last seq %d", last)
+	}
+}
+
+// reapedWhileDraining launches a child that exits at once and leaves a descendant in its own process group holding
+// stdout, and returns once the child has been reaped (its pid is free for reuse) while the host still drains its output
+// and has not recorded the exit.
+func (hs *harness) reapedWhileDraining(w *client) int {
+	hs.t.Helper()
+	spawned := hs.launchCat(w, "/bin/sh", "-c", "set -m; sleep 30 & echo $!")
+	pid := int(spawned.Raw["pid"].(float64))
+	descendant, err := strconv.Atoi(string(w.expect("out").Data))
+	if err != nil {
+		hs.t.Fatal(err)
+	}
+	hs.t.Cleanup(func() { syscall.Kill(descendant, syscall.SIGKILL) })
+	for deadline := time.Now().Add(5 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			hs.t.Fatalf("the child %d was not reaped", pid)
+		}
+	}
+	hs.h.mu.Lock()
+	recorded := hs.h.exit != nil
+	hs.h.mu.Unlock()
+	if recorded {
+		hs.t.Fatal("the exit was recorded before the output drained")
+	}
+	return pid
+}
+
+func TestASignalAfterTheReapIsRefused(t *testing.T) {
+	hs := start(t, func(l *Limits) { l.ExitDrain = 30 * time.Second })
+	w := hs.writer(1)
+	hs.reapedWhileDraining(w)
+	for _, group := range []bool{false, true} {
+		w.send(map[string]any{"t": "signal", "name": "SIGKILL", "group": group})
+		if e := w.expect("error", "exit"); e.Raw["message"] != "no running child" {
+			t.Fatalf("a signal (group %v) after the reap: %v", group, e.Raw)
+		}
+	}
+}
+
+func TestTheHostsSignalAfterTheReapSignalsNoOne(t *testing.T) {
+	hs := start(t, func(l *Limits) {
+		l.ExitDrain = 30 * time.Second
+		l.HostExitGrace = 20 * time.Second
+	})
+	w := hs.writer(1)
+	hs.reapedWhileDraining(w)
+	hs.signals <- syscall.SIGTERM
+	if code := hs.waitExit(3 * time.Second); code != 0 { // no grace waited out for a child already gone
+		t.Fatalf("exit code %d", code)
+	}
+	log, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), "SIGTERM to group") {
+		t.Fatalf("the host signalled a reaped child's group:\n%s", log)
 	}
 }
