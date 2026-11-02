@@ -51,6 +51,7 @@ import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
 import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
+import { relayOnlyDial } from './machines/remote/bench-seam'; // P5 O7 M7: the live bench's relay case
 // C3 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -357,6 +358,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
+  const relayOnly = relayOnlyDial(process.env, app.isPackaged);
   const machines = startMachines({
     local,
     localName,
@@ -369,8 +371,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
-    // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in)
-    ...(devOrg === null ? {} : { linkDeps: { dialDirect: (url: string, timeoutMs: number) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs) } }),
+    // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in); P5 O7 M7:
+    // the live bench's relay case before it (MAWS_E2E_REMOTE_CARRIER=relay, MAWS_E2E, unpackaged), every direct dial refused
+    ...(relayOnly !== null ? { linkDeps: { dialDirect: relayOnly } } : devOrg === null ? {} : { linkDeps: { dialDirect: (url: string, timeoutMs: number) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs) } }),
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
   // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes

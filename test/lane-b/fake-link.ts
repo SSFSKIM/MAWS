@@ -5,7 +5,7 @@ import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
-import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
+import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, DeviceCaps, PongStamps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
 export const MINI = 'MiniMachineRef00000000' as MachineRef;
 
@@ -112,6 +112,22 @@ export class FakeLink implements RemoteLink {
   }
   close(): void {}
   probe(): void {}
+  ping(): Promise<PongStamps | null> {
+    return Promise.resolve(null);
+  }
+  pongs(): readonly PongStamps[] {
+    return [];
+  }
+  /** P5 O7 M7: the live bench's hold, as the bench seam calls it. */
+  held = false;
+  benchHold(): boolean {
+    const had = !this.held && this.#state === 'up';
+    this.held = true;
+    return had;
+  }
+  benchRelease(): void {
+    this.held = false;
+  }
 
   /** The link's state, carrier and refusal moved, as the real link's `onState` says it. */
   set(state: LinkState, carrier: 'direct' | 'relay' | null = state === 'up' ? 'direct' : null, refusal: string | null = null): void {

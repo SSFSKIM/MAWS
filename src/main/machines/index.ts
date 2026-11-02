@@ -20,6 +20,7 @@ import { KNOWN_MACHINES_FILE } from './known-machines';
 import { createLocalLink } from './local-link';
 import { createConnectionManager } from './manager';
 import { createSocketLink } from './socket-link';
+import { installRemoteBenchSeam } from './remote/bench-seam';
 import type { RemoteLink, RemoteLinkDeps } from './remote/link';
 import { createRemoteSource } from './remote/source';
 
@@ -71,6 +72,8 @@ export function startMachines(deps: MachinesDeps): Machines {
   powerMonitor.on('unlock-screen', onUnlock);
   app.on('browser-window-focus', onFocus);
   deps.register('machines.list', () => ({ machines: manager.list() }));
+  // P5 O7 M7: the remote bench's handle on the links (MAWS_E2E=1, unpackaged), read through Playwright's app.evaluate
+  const removeBenchSeam = installRemoteBenchSeam(env, packaged, { machines: () => remote.machines(), link: (ref) => remote.link(ref) });
   manager.onChanged((machines) => void emit('machines.changed', { machines }));
 
   return {
@@ -84,6 +87,7 @@ export function startMachines(deps: MachinesDeps): Machines {
       powerMonitor.off('resume', onWake);
       powerMonitor.off('unlock-screen', onUnlock);
       app.off('browser-window-focus', onFocus);
+      removeBenchSeam();
       manager.close();
       remote.close();
     },

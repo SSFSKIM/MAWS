@@ -155,6 +155,11 @@ env:
   # trip in detached mode, held to the baseline test/support/local-latency.ts records from three runs on the mini.
   # local-latency-daemon (P5 O2 M7) is the same bench on the daemon shape, `mawsd`'s relay on the measured path, held to
   # the same baseline and budget.
+  # remote-latency (P5 O7 M7, acceptance 3) is the remote bench: the local bench's measures taken through the remote pane
+  # over e2e:remote's scene with the stub engine on profile B, on the direct carrier and on the relay, plus open to first
+  # row, resume after a forced drop and the link's own round trip, each carrier held to acceptance 3's bounds against
+  # the same run's local case; about 10 minutes past the build. e2e:remote-latency-check runs the same scene unbounded, a
+  # functional check for any lane (no switch, so not on this list).
   # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: on the daemon shape since
   # O2's M9, mawsd and the engine host's physical footprint and CPU holding one kept idle session over 600 s, held to the
   # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline.
@@ -180,7 +185,7 @@ env:
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale remote-latency tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of

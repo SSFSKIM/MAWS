@@ -47,6 +47,24 @@ describe('the latency engine stub', () => {
     expect(stderr).toMatch(/no recorded answer for control_request mcp_toggle/);
   });
 
+  // P5 O7 M7: a remote pane asks the session's models (`session.listModels`), which a stub that exited 70 on it would end
+  it('answers list_models with the recorded success, under the host’s request id', async () => {
+    const { bin } = scratch();
+    const child = spawn(bin, ['--input-format', 'stream-json'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    const answered = new Promise<Record<string, unknown>>((resolve) =>
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+        const line = stdout.split('\n').find((l) => l.trim() !== '');
+        if (line !== undefined && stdout.includes('\n')) resolve(JSON.parse(line) as Record<string, unknown>);
+      }),
+    );
+    child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'r-models', request: { subtype: 'list_models' } })}\n`);
+    expect(await answered).toMatchObject({ type: 'control_response', response: { subtype: 'success', request_id: 'r-models' } });
+    child.stdin.end();
+    await new Promise((resolve) => child.once('exit', resolve));
+  });
+
   it("reaches ready under the host's Session, answers a context read, plays two whole turns of 300 paced markers, and ends on end_session", { timeout: 60_000 }, async () => {
     const { root, bin, samples } = scratch();
     const spec = LaunchSpecSchema.parse({

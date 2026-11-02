@@ -9,7 +9,7 @@ import { genesis, memberId, newDevice, successor, type TestDevice } from '../../
 import { heldOrgSession, watchedView, type SignedIn } from '../../org/session';
 import type { RelaySocket } from './carriers';
 import type { EndpointRecords } from './endpoint-records';
-import { createRemoteLink, type RemoteLinkDeps } from './link';
+import { createRemoteLink, PINGS_PENDING_MAX, PONG_STAMPS_KEPT, type RemoteLinkDeps } from './link';
 import type { SubscriptionSink } from './subs';
 
 // An attempt computes key ids (`trustOf`), which WebCrypto's digest runs on libuv's thread pool. Under a loaded runner
@@ -501,6 +501,135 @@ describe('probes and liveness', () => {
   });
 });
 
+// P5 O7 M7 (`rl2.pong-clock`): the remote bench's clock. Each pong the link hears is kept with its four stamps, the
+// device's `at` (the ping's send) and `arrived` (the pong's arrival) and, from a peer that lists the capability, the
+// endpoint's `received` and `sent`; `ping()` sends one ping on the current channel and answers its pong's stamps.
+describe('the pong clock', () => {
+  const T0 = Date.parse('2026-10-28T12:00:00.000Z');
+
+  it('answers a ping with its pong’s four stamps and the carrier, and keeps every pong heard', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const channel = h.last();
+    const at = Date.now();
+    const answer = h.link.ping();
+    expect(channel.of('ping')).toEqual([{ t: 'ping', at }]);
+    await vi.advanceTimersByTimeAsync(3);
+    channel.deliver({ t: 'pong', at, received: T0 + 5_001, sent: T0 + 5_002 });
+    expect(await answer).toEqual({ at, received: T0 + 5_001, sent: T0 + 5_002, arrived: at + 3, carrier: 'direct' });
+    // a probe's pong, and one the link did not ask for (the endpoint's answer to its silence ping), are kept the same way
+    h.link.probe('focus');
+    const probeAt = Date.now();
+    channel.deliver({ t: 'pong', at: probeAt, received: T0 + 6_000, sent: T0 + 6_000 });
+    expect(h.link.pongs()).toEqual([
+      { at, received: T0 + 5_001, sent: T0 + 5_002, arrived: at + 3, carrier: 'direct' },
+      { at: probeAt, received: T0 + 6_000, sent: T0 + 6_000, arrived: probeAt, carrier: 'direct' },
+    ]);
+  });
+
+  it('keeps no endpoint stamps from a peer that does not list `rl2.pong-clock`', async () => {
+    const h = await harness();
+    await settle();
+    const answer = h.link.ping();
+    const at = Date.now();
+    h.last().deliver({ t: 'pong', at, received: 1, sent: 2 });
+    expect(await answer).toEqual({ at, received: null, sent: null, arrived: at, carrier: 'direct' });
+  });
+
+  it('answers null with no channel, and when its channel is lost or stays silent; never closes the channel nor rechecks direct', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    expect(await h.link.ping()).toBeNull(); // still connecting
+    h.net.direct = false;
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    const attempts = h.attempts.length;
+    const silent = h.link.ping({ timeoutMs: 1_000 });
+    await advance(1_000);
+    expect(await silent).toBeNull();
+    expect(h.last().closed).toBe(false);
+    expect(h.attempts).toHaveLength(attempts); // a probe on the relay would have tried the direct carrier
+    const lost = h.link.ping();
+    h.last().end('carrier');
+    expect(await lost).toBeNull();
+  });
+
+  it('joins a second ping in the same millisecond to the first exchange, sending one ping for both', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const at = Date.now();
+    const [one, two] = [h.link.ping(), h.link.ping()];
+    expect(h.last().of('ping')).toEqual([{ t: 'ping', at }]);
+    h.last().deliver({ t: 'pong', at, received: T0 + 1, sent: T0 + 2 });
+    expect(await one).toEqual(await two);
+    expect(h.link.pongs()).toHaveLength(1);
+  });
+
+  it('never lets the link’s own ping share a pending exchange’s millisecond: a probe then leaves its ping out, and a ping after a probe waits for the next', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const channel = h.last();
+    const at = Date.now();
+    const benched = h.link.ping();
+    h.link.probe('focus'); // the same millisecond: the exchange's pong answers the probe
+    expect(channel.of('ping')).toEqual([{ t: 'ping', at }]);
+    channel.deliver({ t: 'pong', at, received: T0 + 1, sent: T0 + 1 });
+    expect(await benched).toMatchObject({ at, received: T0 + 1 });
+    await advance(3_000);
+    expect(channel.closed).toBe(false); // the probe was answered
+
+    await vi.advanceTimersByTimeAsync(10);
+    const probeAt = Date.now();
+    h.link.probe('focus');
+    const after = h.link.ping(); // in the probe's millisecond: it waits for the next
+    expect(channel.of('ping').at(-1)).toEqual({ t: 'ping', at: probeAt });
+    channel.deliver({ t: 'pong', at: probeAt, received: T0 + 5, sent: T0 + 5 }); // the probe's answer settles nothing
+    await vi.advanceTimersByTimeAsync(1);
+    expect(channel.of('ping').at(-1)).toEqual({ t: 'ping', at: probeAt + 1 });
+    channel.deliver({ t: 'pong', at: probeAt + 1, received: T0 + 6, sent: T0 + 6 });
+    expect(await after).toMatchObject({ at: probeAt + 1, received: T0 + 6 });
+  });
+
+  it('settles a relay ping at once when a direct recheck takes the channel over', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    h.net.direct = false;
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    let answer: unknown = 'pending';
+    void h.link.ping({ timeoutMs: 60_000 }).then((stamps) => (answer = stamps));
+    h.net.direct = true;
+    h.link.probe('wake');
+    await settle();
+    expect(h.link.carrier()).toBe('direct');
+    expect(answer).toBeNull();
+  });
+
+  it('answers null without sending past PINGS_PENDING_MAX pending exchanges', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    await settle();
+    const pending = [];
+    for (let i = 0; i < PINGS_PENDING_MAX; i += 1) {
+      pending.push(h.link.ping({ timeoutMs: 60_000 }));
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(h.last().of('ping')).toHaveLength(PINGS_PENDING_MAX);
+    expect(await h.link.ping()).toBeNull();
+    expect(h.last().of('ping')).toHaveLength(PINGS_PENDING_MAX);
+  });
+
+  it('keeps the newest PONG_STAMPS_KEPT pongs', async () => {
+    const h = await harness();
+    await settle();
+    for (let i = 0; i < PONG_STAMPS_KEPT + 5; i += 1) h.last().deliver({ t: 'pong', at: i });
+    const kept = h.link.pongs();
+    expect(kept).toHaveLength(PONG_STAMPS_KEPT);
+    expect(kept[0]!.at).toBe(5);
+    expect(kept.at(-1)!.at).toBe(PONG_STAMPS_KEPT + 4);
+  });
+});
+
 describe('the switch from relay to direct', () => {
   it('rechecks direct every 60 s, swaps once the handshake completes, resumes subscriptions and ignores the old channel', async () => {
     const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
@@ -720,5 +849,76 @@ describe('close()', () => {
     h.link.close();
     expect(h.link.ended()).toBe('closed');
     expect(heard).toEqual(['down']);
+  });
+});
+
+// P5 O7 M7: the live bench's resume, measured without touching routing (the bench seam's `drop` and `release`): the
+// current channel closed as a loss, and the link held off its machine until released, so a turn is written while it is
+// down; then it reconnects at once, as on a network's return.
+describe('the bench hold', () => {
+  it('closes the current channel as a loss, attempts nothing while held (no retry, no probe), and reconnects at once on release', async () => {
+    const h = await harness();
+    await settle();
+    expect(h.link.benchHold()).toBe(true);
+    expect(h.channels[0]!.closedWith).toBe('closed');
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    await advance(30_000);
+    expect(h.link.state()).toBe('down');
+    h.link.probe('network');
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    expect(h.link.benchHold()).toBe(false); // held already
+    h.link.benchRelease();
+    await settle();
+    expect(h.link.state()).toBe('up');
+    expect(h.attempts).toHaveLength(2);
+    expect(h.states).toEqual(['up', 'down', 'up']);
+  });
+
+  it('adopts nothing a direct recheck brings while held: the link stays held and down, the new channel closed', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    h.net.direct = false;
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    h.net.direct = true;
+    h.hold(true);
+    await advance(60_000); // the recheck's direct handshake, held in flight
+    expect(h.pending.map((p) => p.carrier)).toEqual(['direct']);
+    expect(h.link.benchHold()).toBe(true);
+    h.hold(false);
+    h.pending.shift()!.release();
+    await settle();
+    expect(h.channels.at(-1)!.carrier).toBe('direct');
+    expect(h.channels.at(-1)!.closedWith).toBe('closed');
+    await advance(3_000);
+    expect(h.link.state()).toBe('down');
+    h.link.benchRelease();
+    await settle();
+    expect(h.link.state()).toBe('up');
+  });
+
+  it('holds nothing without a channel: a drop then is false and leaves the link to reconnect on its own', async () => {
+    const h = await harness();
+    await settle();
+    h.net.direct = false;
+    h.net.relay = false;
+    h.last().end('carrier');
+    await advance(3_000);
+    expect(h.link.state()).toBe('down');
+    expect(h.link.benchHold()).toBe(false);
+    h.net.relay = true;
+    await advance(10_000); // the backoff's own retry, unheld
+    expect(h.link.state()).toBe('up');
+  });
+
+  it('holds nothing on a closed link, and a release with no hold is nothing', async () => {
+    const h = await harness();
+    await settle();
+    h.link.benchRelease();
+    await settle();
+    expect(h.attempts).toHaveLength(1);
+    h.link.close();
+    expect(h.link.benchHold()).toBe(false);
   });
 });
