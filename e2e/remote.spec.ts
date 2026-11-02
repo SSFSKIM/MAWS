@@ -1079,7 +1079,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         .toBe(true);
       type NotionStatus = { state: string; source?: { server: string } };
       const observed = await b.request<NotionStatus>('delivery.status', { target: 'notion', artifactId: plan.id });
-      expect(observed, `B's connectors observed its servers from the observer's report\nlive on B: ${(await liveOnB()).join(', ')}\nB's log:\n${bLines(/replay|connector|mcp|deliver/i)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
+      // what the observer's launch journalled past its turn (each control and its answer, an unrecorded read's meta row)
+      const observerJournal = async () => {
+        const { journalPath } = await b.request<{ journalPath: string }>('session.status', { appSessionId: observerApp });
+        const rows = readFileSync(journalPath, 'utf8').trim().split('\n');
+        return rows.slice(rows.findLastIndex((row) => row.includes('"result"'))).map((row) => row.slice(0, 600)).join('\n');
+      };
+      expect(observed, `B's connectors observed its servers from the observer's report: ${JSON.stringify(observed)}\nlive on B: ${(await liveOnB()).join(', ')}\nthe observer's journal past its turn:\n${await observerJournal().catch(String)}\nB's log:\n${bLines(/replay|connector|mcp|deliver|observ|locat/i)}`).toMatchObject({ state: 'ready', source: { server: NOTION } });
       await b.request('session.stop', { appSessionId: observerApp, reason: 'stop' });
       await expect.poll(liveOnB, { timeout: 30_000, message: 'B’s observer stopped' }).toEqual([]);
 
