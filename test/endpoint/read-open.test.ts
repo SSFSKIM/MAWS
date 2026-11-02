@@ -239,6 +239,19 @@ describe('the http read open', () => {
     expect(closeOf(a, id)).toBe('closed');
   });
 
+  it('closes `closed` a body that spends the device’s credit exactly, with no more credit given, the close behind the data', async () => {
+    const { f, store } = await start();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const file = randomBytes(1024);
+    store.put(x, 'data.bin', file);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openHttp(a, { url: url(x, 'data.bin') }, 1024);
+    await until(() => closeOf(a, id), 'the close');
+    expect(body(a, id).equals(file)).toBe(true);
+    expect(ofStream(a, id).at(-1)).toMatchObject({ t: 'streamClose', reason: 'closed' });
+  });
+
   it('queues no more of a buffer-backed html page than the device’s credit (one 2 MiB source chunk, 1 KiB of credit), the rest read on as credit comes', async () => {
     const services = fakeServices();
     try {

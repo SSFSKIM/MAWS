@@ -5,10 +5,11 @@
 // open is admitted and before it is answered; the decision is then asked whether it stands in the step the stream is
 // published (`decide`). `streamOpened {http: {status, headers}}` carries the answer's status and headers as received, then
 // the body as `streamData` from offset 0, then `streamClose closed`; a HEAD, a 304, a 404 and a 416, and an answer with no
-// body, close right after `streamOpened`. The body is read from its `ReadableStream` only while the device's credit
-// allows and nothing read waits to be sent, and what a read brings is queued for the device a piece at a time, each at
-// most what the credit allows (and a chunk): the stream's queue never holds more than the credit, the rest of the read
-// (one source chunk: a bridged `html` page is one buffer, up to the tool's 16 MiB) waits here, and it is never `behind`.
+// body, close right after `streamOpened`. The body is read from its `ReadableStream` one read ahead, whatever the credit
+// (so its end is seen, and the close queued behind the data, when the body spends the credit exactly), and what a read
+// brings is queued for the device a piece at a time, each at most what the credit allows (and a chunk), once nothing
+// queued waits to be sent: the stream's queue never holds more than the credit, the read ahead (one source chunk: a
+// bridged `html` page is one buffer, up to the tool's 16 MiB) waits here, and it is never `behind`.
 // The device sends no data and no control on it (`malformed`). A body that fails mid-way closes the stream `unavailable`;
 // the device holds the length the headers said. A re-check that refuses it ends it `removed`, the body let go.
 import { STREAM_CHUNK_BYTES, type StreamHttpOpen } from 'org-protocol';
@@ -62,21 +63,20 @@ class HttpStream extends Stream {
   }
 
   /**
-   * The body's next piece queued, while the device's credit allows and nothing queued waits to be sent: what the last read
-   * left, or the next read's.
+   * The body's next piece queued, while the device's credit allows and nothing queued waits to be sent, and the next read
+   * made once the last one's bytes are all queued.
    */
   pull(): void {
-    if (this.ended || this.held || this.backlog > 0 || this.creditLeft <= 0) return;
+    if (this.ended) return;
     const pending = this.#pending;
-    if (pending !== null) {
+    if (pending !== null && !this.held && this.backlog === 0 && this.creditLeft > 0) {
       const n = Math.min(pending.byteLength, this.creditLeft, STREAM_CHUNK_BYTES);
       this.#pending = n === pending.byteLength ? null : pending.subarray(n);
       this.push(this.#queued, pending.subarray(0, n));
       this.#queued += n;
-      return;
     }
     const reader = this.#reader;
-    if (reader === null || this.#reading) return;
+    if (reader === null || this.#reading || this.#pending !== null || this.ended) return;
     this.#reading = true;
     reader.read().then(
       (next) => {
