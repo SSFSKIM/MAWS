@@ -340,6 +340,8 @@ export class Streams {
   readonly #inputs = new Map<string, InputRecord>();
   /** Re-checks begun per stream or forward: only the latest one's verdict is taken. */
   readonly #checks = new Map<unknown, number>();
+  /** The last re-check's token: each check takes a fresh one, never reused, so a superseded check's answer is always stale. */
+  #lastCheck = 0;
   /** Counts `recheck` calls, so a decision asked while one began is asked again (`decide`). */
   #epoch = 0;
   /** The pty host's restarts as its last `pty.hostState` counted them; null before the first. */
@@ -477,6 +479,8 @@ export class Streams {
     const request: AuthorizeRequest = { kind: 'stream', name: stream.act, input: read === null ? stream.binding : read.input };
     this.#check(stream, request, this.#who(stream.channel), (verdict, decision) => {
       if (verdict === 'granted') {
+        // A grant whose decision moved before it was heard is decided again, never taken as it stands.
+        if (decision !== undefined && decision.ok && decision.stands !== undefined && !decision.stands()) return this.#recheckStream(stream);
         if (read !== null) {
           const stands = decision !== undefined && decision.ok ? decision.stands : undefined;
           stream.read = { input: read.input, stands: stands ?? (() => true) };
@@ -817,7 +821,7 @@ export class Streams {
    * `unanswered` after the last. A grant comes with its decision (a read stream keeps its `stands`).
    */
   #check(key: unknown, request: AuthorizeRequest, who: Who, verdict: (verdict: 'granted' | 'refused' | 'unanswered', decision?: Decision) => void, attempt = 0): void {
-    const n = attempt === 0 ? (this.#checks.get(key) ?? 0) + 1 : this.#checks.get(key)!;
+    const n = attempt === 0 ? ++this.#lastCheck : this.#checks.get(key)!;
     this.#checks.set(key, n);
     const current = () => this.#checks.get(key) === n && !(key instanceof Stream && key.ended);
     const done = (answer: 'granted' | 'refused' | 'unanswered', decision?: Decision) => {

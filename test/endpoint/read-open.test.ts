@@ -757,6 +757,74 @@ describe('a read stream authorized again', () => {
   });
 });
 
+describe('a stream’s re-checks', () => {
+  it('takes only the latest re-check’s verdict: a superseded check answering after a newer one began releases nothing, and the newer refusal ends the stream `removed`', async () => {
+    const pty = new FakePtyHost();
+    const { f } = await start({ pty });
+    const ptyId = pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const attach = await a.device.stepUp(a.device.action({ machine: f.ref, action: 'pty.attach', args: { ptyId } }));
+    const from = a.inbox.length;
+    expect(await act(a, attach)).toBe('ok');
+    await done(a, attach, from);
+    const id = id16();
+    await a.channel.send({ t: 'streamOpen', id, kind: 'pty', op: attach.opId, credit: 1024 * 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } });
+    expect(await waitFor(a, (m) => m.id === id && m.t !== 'streamData', 'the pty open')).toMatchObject({ t: 'streamOpened' });
+    // Each re-check's authorization answered when the suite says, with the real decision or the one it names.
+    const authorizer = f.endpoint.authorizer;
+    const authorize = authorizer.authorize.bind(authorizer);
+    const pending: Array<(answer?: { ok: false; reason: 'grade' }) => void> = [];
+    authorizer.authorize = (request, who, now) =>
+      request.kind !== 'stream' ? authorize(request, who, now) : new Promise((resolve) => pending.push((answer) => resolve(answer ?? authorize(request, who, now))));
+    const data = () => ofStream(a, id).filter((m) => m.t === 'streamData').length;
+    f.endpoint.streams.recheck(); // A
+    f.endpoint.streams.recheck(); // B, superseding A
+    pending[1](); // B grants
+    await sleep(30);
+    f.endpoint.streams.recheck(); // C: the stream held again
+    pending[0](); // A's late grant
+    await sleep(30);
+    const before = data();
+    pty.emit(ptyId, 'secret output');
+    await sleep(60);
+    expect(data()).toBe(before);
+    pending[2]({ ok: false, reason: 'grade' }); // C refuses
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('removed');
+    expect(data()).toBe(before);
+  });
+
+  it('decides again a grant whose decision no longer stands when it is heard, releasing nothing on it', async () => {
+    const pty = new FakePtyHost();
+    const { f } = await start({ pty });
+    const ptyId = pty.spawn('app-1');
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const attach = await a.device.stepUp(a.device.action({ machine: f.ref, action: 'pty.attach', args: { ptyId } }));
+    const from = a.inbox.length;
+    expect(await act(a, attach)).toBe('ok');
+    await done(a, attach, from);
+    const id = id16();
+    await a.channel.send({ t: 'streamOpen', id, kind: 'pty', op: attach.opId, credit: 1024 * 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } });
+    expect(await waitFor(a, (m) => m.id === id && m.t !== 'streamData', 'the pty open')).toMatchObject({ t: 'streamOpened' });
+    const authorizer = f.endpoint.authorizer;
+    const authorize = authorizer.authorize.bind(authorizer);
+    const pending: Array<(answer: Awaited<ReturnType<typeof authorize>>) => void> = [];
+    authorizer.authorize = (request, who, now) => (request.kind !== 'stream' ? authorize(request, who, now) : new Promise((resolve) => pending.push(resolve)));
+    const data = () => ofStream(a, id).filter((m) => m.t === 'streamData').length;
+    f.endpoint.streams.recheck();
+    pending[0]({ ok: true, stands: () => false }); // granted on what has moved since
+    await sleep(30);
+    const before = data();
+    pty.emit(ptyId, 'secret output');
+    await sleep(60);
+    expect(data()).toBe(before);
+    expect(pending).toHaveLength(2);
+    pending[1]({ ok: false, reason: 'grade' });
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('removed');
+  });
+});
+
 describe('the act open beside it', () => {
   it('still opens a pty stream under its act (`op`), and the validator refuses a pty open naming none and any `browser.screencast` open, closing the channel `malformed`', async () => {
     const pty = new FakePtyHost();
