@@ -97,6 +97,8 @@ const runPs = (): Promise<string> =>
 
 // O16 M5: a row's reap, its gate channel and its registered infrastructure (D69: and what its last `mcp_status` ask was about)
 interface RowReap { reap: Reap; channel: GateChannel; infrastructure: Infrastructure; asked: string | null; pending: boolean; asking: boolean }
+// D69: the children a row's read left unnamed, as the key of what its `mcp_status` ask was about
+const keyOfUnnamed = (infrastructure: Infrastructure): string => infrastructure.unnamed.map((p) => `${p.pid}@${p.start}`).join(',');
 // O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
 const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
 
@@ -554,7 +556,7 @@ export class ProcessTable {
 
   private registeredOf(session: EngineSession): Registered {
     const childPid = this.reaps.get(session)?.channel.childPid ?? null;
-    return { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: session.mcpCommands() ?? [], sessionIds: session.engineSessionIds() };
+    return { pids: new Set(childPid === null ? [] : [childPid]), mcpCommands: session.mcpCommands() ?? [], sessionIds: session.engineSessionIds(), sminosRoots: session.sminosRoots(), firstTurnAt: session.firstTurnAt };
   }
 
   // After a read: the bindings saved when they changed (an adopter restores them), and `mcp_status` asked when the read
@@ -565,7 +567,7 @@ export class ProcessTable {
     const bindings = held.infrastructure.changed();
     if (bindings !== null) session.saveInfrastructure(bindings);
     const unnamed = held.infrastructure.unnamed;
-    const key = unnamed.map((p) => `${p.pid}@${p.start}`).join(',');
+    const key = keyOfUnnamed(held.infrastructure);
     const want = session.mcpCommands() === null ? unnamed.length > 0 : held.infrastructure.countable && (key !== held.asked || held.pending);
     if (!want || held.asking) return;
     held.asking = true;
@@ -582,10 +584,15 @@ export class ProcessTable {
       try {
         tree = parseTree(this.psSync());
       } catch {
-        return; // the next read asks again
+        held.asked = null; // the next read asks again
+        return;
       }
       const count = held.infrastructure.settle(tree, pid, this.registeredOf(session), stdio, ++this.reads);
-      if (count === null) return;
+      if (count === null) {
+        held.asked = null; // a newer read overtook this one: the next read asks again
+        return;
+      }
+      held.asked = keyOfUnnamed(held.infrastructure); // what was left unnamed in the tree this answer was counted on
       const saved = held.infrastructure.changed();
       if (saved !== null) session.saveInfrastructure(saved);
       session.noteDescendants(count);

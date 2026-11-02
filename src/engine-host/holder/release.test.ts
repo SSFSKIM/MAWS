@@ -358,6 +358,49 @@ describe('D69: the owner’s server shapes on a fresh launch', () => {
     expect(releasing(s.a!)).toBe(false);
   });
 
+  it('the probe’s d after the first turn: a child born after it, even in the engine’s first minute, is work, never a dead server’s replacement', async () => {
+    const { table, s } = await rows(['a'], { servers: SERVERS });
+    s.a!.transport.push({ type: 'system', subtype: 'init', timestamp: '2026-11-02T14:27:01.400Z', cwd: '/w', session_id: SESSION, tools: [], mcp_servers: [], model: 'm', permissionMode: 'default', slash_commands: [], claude_code_version: '2.1.316', output_style: 'default', uuid: 'i-1' });
+    await until(() => s.a!.session.firstTurnAt === '2026-11-02T14:27:01.400Z', 'the first turn');
+    tree = resting();
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 0, 'the servers bound');
+    tree = [...resting().filter((l) => !l.startsWith('821 ')), at(840, ENGINE, 'Mon Nov  2 14:27:26 2026', '/u/.local/bin/claude --teammate')];
+    await table.sampleMemory();
+    await sleep(20);
+    await table.sampleMemory();
+    expect(work(s.a!)).toBe(1);
+  });
+
+  it('an answer counted against a tree with a passing helper in it is asked again once the helper is gone; so is one whose tree could not be read', async () => {
+    for (const failure of ['helper', 'ps'] as const) {
+      const list = SERVERS.map((server) => (server.name === 'plugin:ptc:ptc' ? { ...server, status: 'pending' } : { ...server }));
+      const helper = at(850, ENGINE, BORN, '/bin/sh -c "${CLAUDE_PLUGIN_ROOT}/hooks/smns-record.sh"');
+      let reads = 0;
+      const { table, s } = await rows(['a'], {
+        servers: list,
+        psSync: () => {
+          reads += 1;
+          if (reads === 2 && failure === 'ps') throw new Error('ps: no');
+          return [...resting(), ...(reads === 2 && failure === 'helper' ? [helper] : [])].join('\n');
+        },
+      });
+      const asks = () => s.a!.transport.requestsOf('mcp_status').length;
+      tree = resting();
+      await table.sampleMemory(); // asked: ptc pending, so nothing by count
+      await until(() => reads === 1, 'the first answer counted');
+      list[1]!.status = 'connected';
+      await table.sampleMemory(); // asked again (a server was pending), counted against the helper's tree, or none read
+      await until(() => reads === 2, 'the second answer counted');
+      await sleep(10);
+      expect(work(s.a!)).not.toBe(0);
+      await table.sampleMemory(); // the helper gone: asked again, and bound
+      await until(() => work(s.a!) === 0, `the servers bound (${failure})`);
+      expect(asks()).toBe(3);
+      tables.splice(tables.indexOf(table), 1)[0]!.setIdleRelease({ idleMs: null, active: false });
+    }
+  });
+
   it('the bridge bound by its argv stays bound when its observer’s hello names it, and the bindings are kept for an adopter', async () => {
     const store = new MemorySessionStateStore();
     const { table, s } = await rows(['a'], { servers: SERVERS, store });

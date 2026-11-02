@@ -209,7 +209,11 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
   it('the bridge: `sminos` or `sminos.py`, first or after its interpreter, then `bridge --session` and one of the row’s ids', () => {
     expect(isBridgeOf(BRIDGE, IDS)).toBe(true);
     expect(isBridgeOf(`bash /p/sminos/skills/sminos/scripts/sminos bridge --session ${SESSION} --lane match`, IDS)).toBe(true); // before its exec
-    expect(isBridgeOf(`/p/scripts/sminos bridge --session ${SESSION}`, IDS)).toBe(true);
+    expect(isBridgeOf(`/p/skills/sminos/scripts/sminos bridge --session ${SESSION}`, IDS)).toBe(true);
+    expect(isBridgeOf(`python3 /work/sminos.py bridge --session ${SESSION}`, IDS)).toBe(false); // a script of that name elsewhere: not the plugin's
+    const root = '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0';
+    expect(isBridgeOf(BRIDGE, IDS, [root])).toBe(true); // once the engine names sminos's root, only that root's script
+    expect(isBridgeOf(`python3 /work/skills/sminos/scripts/sminos.py bridge --session ${SESSION}`, IDS, [root])).toBe(false);
     expect(isBridgeOf(BRIDGE, new Set(['another-session']))).toBe(false);
     expect(isBridgeOf(BRIDGE, new Set())).toBe(false);
     expect(isBridgeOf(`python3 /p/sminos.py watch --session ${SESSION}`, IDS)).toBe(false);
@@ -260,6 +264,19 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     expect(new Infrastructure().settle(parseTree([line(CLAUDE, 1, 'S', 'claude'), line(502, CLAUDE, 'S', 'python -m ptc.mcp')].join('\n')), CLAUDE, { pids: new Set(), mcpCommands: [PTC] }, { connected: 1, pending: 0 })).toBe(1); // no start time: never
   });
 
+  it('the probe’s d after the first turn: a teammate born in the engine’s first minute is work, never a dead server’s replacement', () => {
+    const turned = { ...fresh, firstTurnAt: '2026-11-02T14:27:01.400Z' }; // the first turn, 5 s after claude
+    const infra = new Infrastructure();
+    expect(infra.settle(owner(), CLAUDE, turned, all)).toBe(0);
+    const early = (start: string) => parseTree([...owner().values()].filter((p) => p.pid !== 502 && p.pid !== 503).map((p) => lined(p.pid, p.ppid, p.start, p.command)).concat(lined(700, CLAUDE, start, '/u/.local/bin/claude --teammate')).join('\n'));
+    expect(infra.settle(early('Mon Nov  2 14:27:26 2026'), CLAUDE, turned, all)).toBe(1); // 30 s after claude, 25 s after the turn
+    expect(infra.settle(early('Mon Nov  2 14:27:02 2026'), CLAUDE, turned, all)).toBe(1); // the second after the turn's
+    expect(infra.countable).toBe(false);
+    // the turn's own second still counts as before it (lstart's resolution); a server spawns in claude's first second
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:57.000Z' }, all)).toBe(0);
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:56.200Z' }, all)).toBe(0);
+  });
+
   it('the probe’s d: a bound server killed stays `connected`, and a child started after it is work, not its replacement', () => {
     const infra = new Infrastructure();
     expect(infra.settle(owner(), CLAUDE, fresh, all)).toBe(0);
@@ -268,6 +285,13 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
     expect(infra.settle(killed, CLAUDE, fresh, all)).toBe(0);
     expect(infra.settle(teammate, CLAUDE, fresh, all)).toBe(1); // 2 bound + 1 unnamed = 3 connected, but it started late
     expect(infra.count(teammate, CLAUDE, fresh)).toBe(1);
+  });
+
+  it('the bridge bound before the engine names sminos’s root is dropped if it turns out to be another root’s', () => {
+    const infra = new Infrastructure();
+    expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // the bridge by the plugin's layout; ptc and its kernel unbound
+    expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/u/.claude/plugins/cache/doperpowers/sminos/1.31.0'] })).toBe(2); // that root: still the bridge
+    expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/elsewhere/sminos'] })).toBe(3); // another root: work
   });
 
   it('the bridge: one process at a time, rebound once gone; a hello naming a pid supersedes it', () => {
@@ -282,7 +306,7 @@ describe('D69: the bridge by its argv, the count rule, the restored bindings', (
   });
 
   it('an adopter restores the bindings of the same processes: a bare command and an exec’d launcher without any command line', () => {
-    const rebuilt = { pids: new Set<number>(), mcpCommands: [ABS], sessionIds: new Set<string>() }; // a bare command dropped, the lineage not yet read
+    const rebuilt = { pids: new Set<number>(), mcpCommands: [ABS], sessionIds: IDS }; // a bare command dropped (the lineage holds the launch's own id)
     const restored = restoredBindings({ launch: 'L1', processes: [{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 505, start: SOON, kind: 'bridge' }, { pid: 9, start: BORN, kind: 'lsp' }] }, 'L1');
     expect(restored).toHaveLength(4); // a kind this build does not know is skipped
     expect(restoredBindings({ launch: 'L0', processes: [{ pid: 501, start: BORN, kind: 'server' }] }, 'L1')).toEqual([]); // another launch's

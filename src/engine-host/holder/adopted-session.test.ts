@@ -588,6 +588,24 @@ describe('an adopted session, fix wave 1', () => {
     await a.session.exited;
   });
 
+  // O16 D69: the veto's count binds nothing born after the launch's first turn, so an adopter needs that turn's time from
+  // the journal, not its own clock; and the engine's sminos root from the journaled system/init
+  it('the fold restores the launch’s first turn time and the roots the engine loaded sminos from', async () => {
+    const plan = planOf();
+    predecessor(plan, (w) => {
+      w.row('in', { type: 'system', subtype: 'init', timestamp: '2026-11-02T14:27:01.400Z', cwd: '/w', session_id: plan.sessionId, tools: [], mcp_servers: [], model: 'm', permissionMode: 'default', slash_commands: [], claude_code_version: '2.1.316', output_style: 'default', uuid: 'i-1', plugins: [{ name: 'sminos', path: '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0', source: 'sminos@doperpowers', version: '1.31.0' }] });
+      w.row('in', { type: 'system', subtype: 'init', timestamp: '2026-11-02T15:40:00.000Z', cwd: '/w', session_id: plan.sessionId, tools: [], mcp_servers: [], model: 'm', permissionMode: 'default', slash_commands: [], claude_code_version: '2.1.316', output_style: 'default', uuid: 'i-2', plugins: [{ name: 'sminos', path: '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0', source: 'sminos@doperpowers', version: '1.31.0' }] }); // every init repeats them
+    });
+    const a = adopter(plan);
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    expect(a.session.firstTurnAt).toBe('2026-11-02T14:27:01.400Z');
+    expect(a.session.sminosRoots()).toEqual(['/u/.claude/plugins/cache/doperpowers/sminos/1.31.0']);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+
   // M3a fix wave 2 (the re-review's three ordering residuals)
   describe('fix wave 2', () => {
     it('D49 holds when the re-initialize is answered at once, before its write has resolved', async () => {

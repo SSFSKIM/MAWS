@@ -787,6 +787,16 @@ export class EngineSession {
     return this.opts.adopted?.infrastructure ?? [];
   }
 
+  // D69: when the launch's first turn started (null before any), and where the engine loaded sminos (its system/init's
+  // plugins), what the veto's count rule and bridge rule are bounded by
+  get firstTurnAt(): string | null {
+    return this.tracker.firstTurnAt;
+  }
+
+  sminosRoots(): string[] {
+    return this.tracker.plugins.filter((p) => p.name === 'sminos' && p.path.startsWith('/')).map((p) => p.path);
+  }
+
   saveInfrastructure(bindings: readonly Binding[]): void {
     this.storeWrite(this.store.saveInfrastructure(this.spec.appSessionId, { launch: this.plan.launchId, processes: bindings.map((b) => ({ ...b })) }), 'infrastructure');
   }
@@ -1396,7 +1406,7 @@ export class EngineSession {
         for (const event of events) {
           if (isRequested(event)) this.restored.set((event as { requestId: string }).requestId, event); // P5 O16 M3c fix wave 1
           if (event.parentToolUseId !== null) continue;
-          if (event.kind === 'turn.started') this.tracker.turnStarted(event.id);
+          if (event.kind === 'turn.started') this.tracker.turnStarted(event.id, event.at);
           else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
             this.tracker.turnEnded();
             for (const uuid of event.userMessageUuids) ended.add(uuid);
@@ -1933,7 +1943,7 @@ export class EngineSession {
     for (const event of events) {
       if (event.parentToolUseId !== null) continue;
       if (event.kind === 'turn.started') {
-        this.tracker.turnStarted(event.id);
+        this.tracker.turnStarted(event.id, event.at);
       } else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
         this.tracker.turnEnded(); // P5 O2 M2: the work state's turn edge
         this.lastUsedAt = new Date().toISOString(); // C12: a turn's end is use, on the host's clock like every other (the status goes out with the frame's touch)

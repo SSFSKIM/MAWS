@@ -16,8 +16,9 @@
 //   it closes), so when a fresh `mcp_status` names no server pending and the unbound direct children that are not
 //   claude's Bash wrappers (`isBashWrapper`), with the servers already bound, are exactly as many as the connected stdio
 //   servers, those children are the servers and are bound (`settle`), provided each started within a minute of
-//   `claude` itself, when the engine spawns its stdio servers (`SERVER_SPAWN_WINDOW_MS`). Any other child makes the
-//   numbers disagree or falls outside the window, and nothing is bound by count until it is gone;
+//   `claude` itself and no later than the launch's first turn, when the engine spawns its stdio servers and before any
+//   child the model's work can start (`SERVER_SPAWN_WINDOW_MS`). Any other child makes the numbers disagree or falls
+//   outside the window, and nothing is bound by count until it is gone;
 // - what an adopter restores from the state file: the bindings the process's previous manager made (`Binding`), each
 //   bound again only if the same process (pid, start, parent) is still there.
 //
@@ -40,9 +41,17 @@ export const PS_TREE_ENV = { LC_ALL: 'C', TZ: 'UTC' } as const; // `lstart` comp
 
 export interface TreeProcess { pid: number; ppid: number; stat: string; start: string; command: string }
 export type ProcessTree = ReadonlyMap<number, TreeProcess>;
-// The registrations: the bridge child's pid (the observer's hello), each stdio MCP server's argv as it runs, and the
-// row's engine session ids (D69's bridge by argv; none, no bridge by argv).
-export interface Registered { pids: ReadonlySet<number>; mcpCommands: readonly (readonly string[])[]; sessionIds?: ReadonlySet<string> }
+// The registrations: the bridge child's pid (the observer's hello), each stdio MCP server's argv as it runs; and (D69)
+// the row's engine session ids and the roots the engine loaded sminos from (its system/init's plugins; none yet before
+// the first turn), which the bridge by argv is matched against, and when the launch's first turn started (null before
+// any), before which no child of the engine is the model's work.
+export interface Registered {
+  pids: ReadonlySet<number>;
+  mcpCommands: readonly (readonly string[])[];
+  sessionIds?: ReadonlySet<string>;
+  sminosRoots?: readonly string[];
+  firstTurnAt?: string | null;
+}
 // A binding as the state file keeps it for an adopter (D69): the process, and what it was bound as.
 export interface Binding { pid: number; start: string; kind: 'server' | 'bridge' }
 // What a fresh `mcp_status` says of the launch's stdio servers (the count rule's input).
@@ -134,16 +143,17 @@ export const isBashWrapper = (command: string): boolean => /^(?:\S*\/)?(?:bash|z
 // D69: the sminos bridge of a process whose bridge never says the observer's hello, as its mod spawns it
 // (`<root>/skills/sminos/scripts/sminos bridge --session <S> [--launch=<id>] [--lane <verdict>]`, a bash launcher that
 // execs `<python> …/sminos.py bridge --session <S> …`, so the process reads `sminos.py` after the exec and `sminos` only
-// before it). A `sminos` or `sminos.py` word first or second (after its interpreter, whatever that interpreter's path),
-// then `bridge --session S` with S one of the row's engine session ids, then anything; never a Bash wrapper, whose
-// command line can carry the same words. A path with a space in it is not matched: its process stays work.
-export function isBridgeOf(command: string, sessionIds: ReadonlySet<string>): boolean {
+// before it). The plugin's own script, first or second (after its interpreter, whatever that interpreter's path):
+// `<root>/skills/sminos/scripts/sminos` or `sminos.py` for a root the engine loaded sminos from, or, before the engine has
+// said where (its first system/init), any path ending so; then `bridge --session S` with S one of the row's engine
+// session ids, then anything. Never a Bash wrapper, whose command line can carry the same words. A path with a space in
+// it is not matched: its process stays work.
+const SMINOS_SCRIPT = /\/skills\/sminos\/scripts\/sminos(?:\.py)?$/;
+export function isBridgeOf(command: string, sessionIds: ReadonlySet<string>, roots: readonly string[] = []): boolean {
   if (sessionIds.size === 0 || isBashWrapper(command)) return false;
   const words = command.split(' ');
-  return [0, 1].some((at) => {
-    const name = basename(words[at] ?? '');
-    return (name === 'sminos' || name === 'sminos.py') && words[at + 1] === 'bridge' && words[at + 2] === '--session' && sessionIds.has(words[at + 3] ?? '');
-  });
+  const script = (word: string): boolean => (roots.length === 0 ? SMINOS_SCRIPT.test(word) : roots.some((root) => word === `${root}/skills/sminos/scripts/sminos` || word === `${root}/skills/sminos/scripts/sminos.py`));
+  return [0, 1].some((at) => script(words[at] ?? '') && words[at + 1] === 'bridge' && words[at + 2] === '--session' && sessionIds.has(words[at + 3] ?? ''));
 }
 
 interface Identity { pid: number; start: string; ppid: number }
@@ -269,10 +279,15 @@ export class Infrastructure {
       else bound.add(pid);
     }
     // D69: the bridge by its argv, superseded by any hello that names a pid; one process at a time
-    if (registered.pids.size > 0 || (this.bridgeArgv !== null && live(this.bridgeArgv) === null)) this.bridgeArgv = null;
+    // (and while it still reads as the bridge: once the engine names sminos's root, a process elsewhere is no bridge)
+    const isBridge = (command: string): boolean => isBridgeOf(command, registered.sessionIds ?? NO_IDS, registered.sminosRoots ?? []);
+    if (this.bridgeArgv !== null) {
+      const p = live(this.bridgeArgv);
+      if (registered.pids.size > 0 || p === null || !isBridge(p.command)) this.bridgeArgv = null;
+    }
     const children = [...tree.values()].filter((p) => p.ppid === claudePid && !p.stat.startsWith('Z'));
     if (registered.pids.size === 0 && this.bridgeArgv === null) {
-      const p = children.find((child) => !bound.has(child.pid) && isBridgeOf(child.command, registered.sessionIds ?? NO_IDS));
+      const p = children.find((child) => !bound.has(child.pid) && isBridge(child.command));
       if (p !== undefined) this.bridgeArgv = { pid: p.pid, start: p.start, ppid: p.ppid };
     }
     if (this.bridgeArgv !== null) bound.add(this.bridgeArgv.pid);
@@ -289,18 +304,22 @@ export class Infrastructure {
     });
     this.unbound = children.filter((p) => !bound.has(p.pid) && !isBashWrapper(p.command));
     const born = startMs(tree.get(claudePid)?.start ?? '');
+    const turn = registered.firstTurnAt ? Date.parse(registered.firstTurnAt) : NaN;
+    const turnSecond = Number.isNaN(turn) ? Infinity : Math.floor(turn / 1000) * 1000; // lstart counts whole seconds
     this.unboundEarly = born !== null && this.unbound.every((p) => {
       const at = startMs(p.start);
-      return at !== null && at - born <= SERVER_SPAWN_WINDOW_MS;
+      return at !== null && at - born <= SERVER_SPAWN_WINDOW_MS && at <= turnSecond;
     });
     return bound;
   }
 }
 
-// D69: the engine spawns its stdio servers at its own start (under a second after it, the veto probe's b), and a server it
-// starts later (a reconnect, a toggle, a plugin reload) is never bound by count: `mcp_status` keeps a server whose process
-// died `connected` (the probe's d), so after a crash the count's premise fails, and the next new child would fill the
-// dead server's place. A child started later than this after `claude` keeps the count from binding anything.
+// D69: the engine spawns its stdio servers at its own start (under a second after it, the veto probe's b), before any
+// turn, and a server it starts later (a reconnect, a toggle, a plugin reload) is never bound by count: `mcp_status` keeps
+// a server whose process died `connected` (the probe's d), so after a crash the count's premise fails, and any child
+// alive then would fill the dead server's place. So the count binds only children started within this of `claude` and no
+// later than the launch's first turn (to lstart's second), when no model-driven child (a teammate, a hook of a turn) can
+// exist yet; any other unnamed child keeps the count from binding anything.
 export const SERVER_SPAWN_WINDOW_MS = 60_000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // `lstart` under the C locale and UTC ("Mon Nov  2 14:26:56 2026") in ms; null for anything else (a test's empty start).
