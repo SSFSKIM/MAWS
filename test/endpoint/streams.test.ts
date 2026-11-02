@@ -462,6 +462,47 @@ describe('forwarded ports', () => {
 });
 
 describe('a grant withdrawn', () => {
+  it('decides an endpoint act (`forward.open`) again when `shell` goes between its decision and the gate’s handing it on, and opens nothing', async () => {
+    const f = await start();
+    expect(await grant(f, org.B, ['shell'])).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    const authorize = f.endpoint.authorizer.authorize.bind(f.endpoint.authorizer);
+    let revoked = false;
+    // As the pty act's case below: the grant withdrawn inside the gap from the decision to the gate's continuation.
+    f.endpoint.authorizer.authorize = (request, who, now) =>
+      authorize(request, who, now).then(async (decision) => {
+        if (!revoked && request.kind === 'act') {
+          revoked = true;
+          expect(await grant(f, org.B, [], 2)).toContain('no rights');
+        }
+        return decision;
+      });
+    expect(await act(b, await shellAct(f, b, 'forward.open', { port: 8080 }))).toBe('grade');
+    expect(revoked).toBe(true);
+    expect(f.endpoint.forwards.list()).toEqual([]);
+  });
+
+  it('decides a pty act again when `shell` goes between its decision and the gate’s handing it on, and dispatches nothing', async () => {
+    const f = await start();
+    expect(await grant(f, org.B, ['shell'])).toContain('shell');
+    const b = await openRemote(f, org.b1, org.B);
+    const authorize = f.endpoint.authorizer.authorize.bind(f.endpoint.authorizer);
+    let revoked = false;
+    // The decision taken, B's grant withdrawn, then the gate's continuation (a grant is kept asynchronously, so the
+    // continuation waits for it: the same gap, decision to hand-off, with the revocation inside it).
+    f.endpoint.authorizer.authorize = (request, who, now) =>
+      authorize(request, who, now).then(async (decision) => {
+        if (!revoked && request.kind === 'act') {
+          revoked = true;
+          expect(await grant(f, org.B, [], 2)).toContain('no rights');
+        }
+        return decision;
+      });
+    expect(await act(b, await shellAct(f, b, 'pty.spawn', { appSessionId: 'app-1', label: 't1', cwd: '/work', cols: 80, rows: 24 }))).toBe('grade');
+    expect(revoked).toBe(true);
+    expect(f.pty.calls.some((c) => c.name === 'pty.op')).toBe(false);
+  });
+
   it('ends a terminal’s stream `removed` when the machine is made read-only, and opens none while it is', async () => {
     const f = await start();
     const ptyId = f.pty.spawn('app-1');

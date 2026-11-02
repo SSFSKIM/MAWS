@@ -6,9 +6,9 @@
 //   1. freshness and replay (freshness.ts: `stale`, `malformed`, `expired`, `replayed`), before anything is read;
 //   2. authorization (M5's gate, which calls `execute` with what it decided). The action's fingerprint is taken before
 //      it is decided (P5 O7 M5a fix wave 1), so `execute` hands a lane B, machine, pty host or artifact act to its ledger
-//      with nothing awaited from its decision's continuation, and a lane B or artifact act asks the decision whether it
-//      stands (`stands`) in the step it is accepted and sent, decided again once when it moved: a right withdrawn after
-//      that step finds the act on its way, never run on a decision that no longer stood;
+//      with nothing awaited from its decision's continuation, and each asks the decision whether it stands (`stands`)
+//      in the step it is accepted and sent, decided again once when it moved: a right withdrawn after that step finds
+//      the act on its way, never run on a decision that no longer stood;
 //   3. the lane's shape and context: a lane B action carries a lane B context, the engine session it was authorized
 //      against is the one the session runs now (`unavailable`: the machine's index lags it, P5 O7 M2), and its
 //      `launchId` and `engineSessionId` are the session's now (`context`; the engine host rechecks both at its claim);
@@ -207,6 +207,11 @@ export class Actions {
     // Taken before the decision (`receive`): nothing is awaited from the decision to the ledger's dispatch.
     const fingerprint = this.#fingerprints.get(m);
     if (fingerprint === undefined) return refuse('unavailable');
+    // The gate hands the act on in a later continuation than its decision's, and no executor takes this decision again:
+    // it is asked whether it still stands before any branch, and taken again once when it moved
+    // (P5 O7 M5a's milestone review). Nothing is awaited from here to a branch's `accept()` but its own work, after
+    // which the lane B and artifact branches ask again.
+    if (decision.stands?.() === false) return this.#again(m, refuse);
 
     if (row.executor === 'sminos') {
       const refusal = await this.#laneA.hand(channel, action, who, fingerprint);

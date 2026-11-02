@@ -166,3 +166,27 @@ describe('a lane B act between its decision and its ledger', () => {
     expect(ran(f, 'session.send')).toBe(false);
   });
 });
+
+describe('a machine act between its decision and its ledger', () => {
+  it('is decided again when a right it stood on goes between its decision and the gate’s handing it on, and dispatches nothing', async () => {
+    const f = await startEndpoint(org, started);
+    const s = f.host.add(APP);
+    f.spine.set(APP, s.engineSessionId);
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.B] }, APP);
+    const b = await openRemote(f, org.b1, org.B);
+    const authorize = f.endpoint.authorizer.authorize.bind(f.endpoint.authorizer);
+    let revoked = false;
+    f.endpoint.authorizer.authorize = (request, who, now) => {
+      const decided = authorize(request, who, now);
+      // Queued on the decision before the gate's own continuation: B's ownership goes once it is taken.
+      if (!revoked && request.kind === 'act') {
+        revoked = true;
+        void decided.then(() => f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP));
+      }
+      return decided;
+    };
+    expect(await act(b, b.device.action({ machine: f.ref, action: 'session.acquire', args: at({ reason: 'send' }) }))).toBe('grade');
+    expect(revoked).toBe(true);
+    expect(f.host.calls.some((c) => c.name === 'machine.op')).toBe(false);
+  });
+});
