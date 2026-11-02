@@ -1,12 +1,14 @@
 // O16 M5: the gate's server (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E; D13, D27, D29,
-// D37): OX10 on `gate.sock` over a real Unix socket, a fake observer on the other end. An observer is keyed by the
+// D37, D69): OX10 on `gate.sock` over a real Unix socket, a fake observer on the other end. An observer is keyed by the
 // engine session id its hello carries against each row's lineage, pid a cross-check; a hello no row matches is closed;
-// an observer is healthy while its last heartbeat is recent, unhealthy once silent or gone after it was seen, absent
-// until then; a turn is answered by the row's listener, `proceed` when it has none.
+// an observer is healthy while its last heartbeat is recent on a monotonic clock, unhealthy once silent or gone after it
+// was seen (a later heartbeat on the same connection heals a silence; a closed connection needs a reconnect's hello),
+// absent until then; an `armed` answers the oldest unanswered arm of its fence on its connection; a turn is answered by
+// the row's listener, `proceed` when it has none.
 import { lstatSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeObserver } from './fake-observer';
 import { Gate, STOP_REASON, type GateChannel, type GateListener, type ObserverState } from './gate';
 
@@ -24,6 +26,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const o of observers.splice(0)) if (!o.isClosed) await o.close();
   await gate.close();
   rmSync(root, { recursive: true, force: true });
@@ -128,7 +131,7 @@ describe('hello', () => {
 });
 
 describe('health', () => {
-  it('heartbeats keep the observer healthy; silence past the window makes it unhealthy; a heartbeat is not a second hello', async () => {
+  it('heartbeats keep the observer healthy; silence past the window makes it unhealthy; a later heartbeat on the same connection heals it', async () => {
     const r = row(['eng-1']);
     const o = await connect();
     o.hello('eng-1');
@@ -139,16 +142,13 @@ describe('health', () => {
     o.stopHeartbeat();
     await until(() => r.health.includes('unhealthy'), 'silence, told'); // the getter reads the clock first
     expect(r.health).toEqual(['healthy', 'unhealthy']);
-    o.hb();
-    await sleep(30);
-    expect(r.channel.observer).toBe('unhealthy'); // heard again only by a fresh hello
-    o.hello('eng-1');
-    await o.next('welcome');
-    expect(r.channel.observer).toBe('healthy');
-    expect(r.seen).toHaveLength(1); // seen once per process
+    o.hb(); // D69: the connection never broke, so its next heartbeat is heard
+    await until(() => r.channel.observer === 'healthy', 'the heal');
+    expect(r.health).toEqual(['healthy', 'unhealthy', 'healthy']);
+    expect(r.seen).toHaveLength(1); // seen once per process: a heartbeat is no sighting
   });
 
-  it('is read against the clock: past the window it reads unhealthy before the silence timer runs, and a late heartbeat does not revive it', async () => {
+  it('is read against the clock: past the window it reads unhealthy before the silence timer runs, and the late heartbeat tells the silence before it heals', async () => {
     const r = row(['eng-1']);
     const o = await connect();
     o.hello('eng-1');
@@ -157,9 +157,33 @@ describe('health', () => {
     while (Date.now() < blockedUntil) { /* a slow synchronous step */ }
     expect(r.channel.observer).toBe('unhealthy');
     o.hb(); // queued behind the silence
-    await sleep(30);
-    expect(r.channel.observer).toBe('unhealthy');
-    expect(r.health).toEqual(['healthy', 'unhealthy']);
+    await until(() => r.channel.observer === 'healthy', 'the heal');
+    expect(r.health).toEqual(['healthy', 'unhealthy', 'healthy']); // the span is told, so the reap cancels what it armed
+  });
+
+  // D69: silence is judged on a monotonic clock, which a sleeping Mac does not advance (nor the observer's, asleep too)
+  it('sleep is not silence: a 20 s wall-clock jump with no monotonic time passed leaves the observer healthy', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+    const slept = new Gate({ log: () => {} }); // the production window and the default clock
+    const at = join(root, 'supervisor', 'slept.sock');
+    await slept.listen(at);
+    try {
+      const health: ObserverState[] = [];
+      const channel = slept.channel({ lineage: () => new Set(['eng-z']), pid: () => null });
+      channel.listen({ armed: () => {}, turn: () => 'proceed', health: (s) => void health.push(s) });
+      const o = await connect(at);
+      o.hello('eng-z');
+      await o.next('welcome');
+      vi.setSystemTime(Date.now() + 20_000); // the wall clock jumps; the monotonic clock and the timers do not move
+      expect(channel.observer).toBe('healthy');
+      o.hb();
+      o.send({ t: 'turn', fence: 1, origin: 'query' }); // its answer follows the heartbeat's handling
+      expect(await o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+      expect(channel.observer).toBe('healthy');
+      expect(health).toEqual(['healthy']);
+    } finally {
+      await slept.close();
+    }
   });
 
   // P5 O16 M3 (D37, D53): an adopted row whose observer was seen on the process before the handover starts unhealthy,
@@ -207,16 +231,62 @@ describe('frames', () => {
     return { channel, o };
   }
 
-  it('arm and disarm reach the observer; its armed reaches the listener', async () => {
-    const armed: number[] = [];
-    const { channel, o } = await observed({ armed: (fence) => void armed.push(fence) });
-    channel.arm(3, 10_000);
+  it('arm and disarm reach the observer; its armed reaches the listener with the arm it answers', async () => {
+    const armed: [number, number][] = [];
+    const { channel, o } = await observed({ armed: (fence, arm) => void armed.push([fence, arm]) });
+    const arm = channel.arm(3, 10_000);
+    expect(arm).not.toBeNull();
     expect(await o.next()).toEqual({ t: 'arm', fence: 3, leaseMs: 10_000 });
+    expect(channel.acknowledged(arm!)).toBe(false);
     o.send({ t: 'armed', fence: 3 });
     await until(() => armed.length === 1, 'armed');
-    expect(armed).toEqual([3]);
+    expect(armed).toEqual([[3, arm]]);
+    expect(channel.acknowledged(arm!)).toBe(true);
     channel.disarm(3);
     expect(await o.next()).toEqual({ t: 'disarm', fence: 3 });
+    expect(channel.acknowledged(arm!)).toBe(false); // a disarmed fence holds no lease
+  });
+
+  // D69: `armed` names its fence alone, so it answers the oldest unanswered arm of that fence on the connection it came
+  // on (the stream is ordered); a later arm stays unconfirmed until its own answer
+  it('with two renewals in flight and only the first answered, the second stays unconfirmed until its own armed', async () => {
+    const armed: [number, number][] = [];
+    const { channel, o } = await observed({ armed: (fence, arm) => void armed.push([fence, arm]) });
+    const first = channel.arm(1, 10_000)!;
+    const second = channel.arm(1, 10_000)!;
+    expect(second).toBeGreaterThan(first);
+    await o.next('arm');
+    await o.next('arm');
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => armed.length === 1, 'the first armed');
+    expect(armed).toEqual([[1, first]]);
+    expect(channel.acknowledged(first)).toBe(true);
+    expect(channel.acknowledged(second)).toBe(false);
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => armed.length === 2, 'the second armed');
+    expect(armed).toEqual([[1, first], [1, second]]);
+    expect(channel.acknowledged(second)).toBe(true);
+  });
+
+  it('an armed that answers no arm on its connection reaches no listener, and an answer on a replaced connection confirms nothing', async () => {
+    const armed: [number, number][] = [];
+    const { channel, o } = await observed({ armed: (fence, arm) => void armed.push([fence, arm]) });
+    o.send({ t: 'armed', fence: 7 }); // no arm of fence 7 was written
+    const arm = channel.arm(2, 10_000)!;
+    await o.next('arm');
+    o.send({ t: 'armed', fence: 2 });
+    await until(() => armed.length === 1, 'armed');
+    expect(armed).toEqual([[2, arm]]);
+    const again = await connect(); // a reconnect (a new bridge child, say) replaces the connection
+    again.hello('eng-1');
+    await again.next('welcome');
+    await o.closed;
+    expect(channel.acknowledged(arm)).toBe(false); // the stale connection's answer holds no lease on the new one
+    again.send({ t: 'armed', fence: 2 }); // the arm was written on the old connection: nothing here answers it
+    again.send({ t: 'turn', fence: 2, origin: 'query' });
+    await again.next('proceed');
+    expect(armed).toHaveLength(1);
+    expect(channel.arm(2, 10_000)).toBeGreaterThan(arm);
   });
 
   it('a turn is answered as the listener says: proceed, or stop with the reason text', async () => {
@@ -234,7 +304,7 @@ describe('frames', () => {
 
   it('a turn with no listener proceeds; arm and disarm with no observer connected are dropped', async () => {
     const channel = gate.channel({ lineage: () => new Set(['eng-2']), pid: () => null });
-    channel.arm(1, 10_000); // nothing to write to
+    expect(channel.arm(1, 10_000)).toBeNull(); // nothing to write to
     const o = await connect();
     o.hello('eng-2');
     await o.next('welcome');

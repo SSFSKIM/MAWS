@@ -1,5 +1,5 @@
 // O16 M5: the gate, OX10's server (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §E; D13, D14,
-// D27, D29, D37). The engine host serves `<profile>/supervisor/gate.sock`, where sminos's observer bridge inside a lane B
+// D27, D29, D37, D69). The engine host serves `<profile>/supervisor/gate.sock`, where sminos's observer bridge inside a lane B
 // process connects: newline-delimited JSON, many clients, no token (the uid boundary: the socket reveals no session data
 // and takes no control). A server of its own over `node:net` with @shared/host/private-listen's checks, since
 // @shared/host/socket-server speaks the token-authenticated host protocol in both its modes.
@@ -11,14 +11,19 @@
 // welcomed and its `childPid` registered as infrastructure for the descendant veto; a later hello for the same session
 // (its reconnect, whenever its connection closed) replaces the older connection.
 //
-// Health (D29): an observer is healthy while its last hello or heartbeat is under OBSERVER_SILENCE_MS old; once seen on
-// the process, a silence past that or a closed connection makes it unhealthy until a fresh hello; a row whose process
-// never had one is absent (owner Q1). The row is told each change (its listener's `health`) and the first hello of the
-// process (`seen`, which the session keeps in its state file as `observerSeenLaunch`, D37).
+// Health (D29, D69): an observer is healthy while its last hello or heartbeat is under OBSERVER_SILENCE_MS old by a
+// monotonic clock (a sleeping machine is no silence: the observer sleeps too); once seen on the process, a silence past
+// that or a closed connection makes it unhealthy. A later heartbeat on the same unbroken connection heals a silence,
+// re-arming nothing; a closed connection is healed only by a reconnect's hello. A row whose process never had one is
+// absent (owner Q1). The row is told each change (its listener's `health`) and the first hello of the process (`seen`,
+// which the session keeps in its state file as `observerSeenLaunch`, D37).
 //
 // The reap (reap.ts) drives the fence through its row's channel (`arm`, `disarm`) and answers the observer's `armed` and
-// `turn` through its listener; a turn on a row with no listener is answered `proceed`. Each row's channel lives from
-// the launch's reservation to its exit (`close`).
+// `turn` through its listener; a turn on a row with no listener is answered `proceed`. An `armed` names its fence alone,
+// so it answers the oldest unanswered arm of that fence written on its connection (the stream is ordered; D69): each arm
+// has an id, and an answer counts (`acknowledged`) only while its connection is still the observer's, so a reconnect's
+// observer (a new bridge child, say) holds no lease an older one confirmed. Each row's channel lives from the launch's
+// reservation to its exit (`close`).
 import { chmodSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { dirname } from 'node:path';
@@ -36,7 +41,7 @@ export type TurnAnswer = 'proceed' | 'stop';
 
 // What the reap hears from its row's observer.
 export interface GateListener {
-  armed(fence: number): void;
+  armed(fence: number, arm: number): void; // `arm`: the id `GateChannel.arm` gave the arm this answers
   turn(fence: number, origin: string, delivery: string | null): TurnAnswer; // answered at once
   health(state: ObserverState): void;
 }
@@ -54,7 +59,8 @@ export interface GateRow {
 export interface GateChannel {
   readonly observer: ObserverState;
   readonly childPid: number | null; // the bridge child the observer's hello named
-  arm(fence: number, leaseMs: number): void;
+  arm(fence: number, leaseMs: number): number | null; // the arm's id; null when no observer connection took it
+  acknowledged(arm: number): boolean; // answered `armed` on its connection, which is still the observer's
   disarm(fence: number): void;
   listen(listener: GateListener): void;
   close(flush?: boolean): void; // the row's process exited: its observer is closed and no hello matches it again; P5 O16 M3b fix wave 1: `flush`, after what was written (a handover's disarm)
@@ -62,7 +68,9 @@ export interface GateChannel {
 
 // The gate's socket path is holder/files.ts `gateSocketPath` (M2's, which every hosted launch's MAWS_HOLDER_SOCKET names).
 
-interface Connection { socket: Socket; row: Row | null }
+// `arms`: what this connection was sent, oldest first, for its `armed` answers to pair with (a fence's entries go at its
+// disarm, and an answered arm drops the older ones of its fence).
+interface Connection { socket: Socket; row: Row | null; arms: { fence: number; id: number; answered: boolean }[] }
 
 class Row implements GateChannel {
   conn: Connection | null = null;
@@ -73,6 +81,7 @@ class Row implements GateChannel {
   listener: GateListener | null = null;
   private silence: ReturnType<typeof setTimeout> | null = null;
   private lastHeard = 0;
+  private arms = 0;
 
   constructor(readonly match: GateRow, private readonly silenceMs: number, private readonly now: () => number, private readonly dropped: (row: Row) => void) {
     this.seenOnce = match.seenBefore === true;
@@ -92,12 +101,33 @@ class Row implements GateChannel {
     return this.child;
   }
 
-  arm(fence: number, leaseMs: number): void {
+  arm(fence: number, leaseMs: number): number | null {
+    const conn = this.conn;
+    if (!conn || conn.socket.destroyed) return null;
+    const id = ++this.arms;
+    conn.arms.push({ fence, id, answered: false });
     this.write({ t: 'arm', fence, leaseMs });
+    return id;
+  }
+
+  acknowledged(arm: number): boolean {
+    const conn = this.conn;
+    return conn !== null && !conn.socket.destroyed && conn.arms.some((a) => a.id === arm && a.answered);
   }
 
   disarm(fence: number): void {
+    if (this.conn) this.conn.arms = this.conn.arms.filter((a) => a.fence !== fence);
     this.write({ t: 'disarm', fence });
+  }
+
+  // The observer's `armed` on its connection: the oldest arm of that fence it has not answered; one that answers no arm
+  // written there is no answer.
+  answered(conn: Connection, fence: number): void {
+    const arm = conn.arms.find((a) => a.fence === fence && !a.answered);
+    if (!arm) return;
+    arm.answered = true;
+    conn.arms = conn.arms.filter((a) => a.fence !== fence || a.id >= arm.id);
+    this.listener?.armed(fence, arm.id);
   }
 
   listen(listener: GateListener): void {
@@ -135,10 +165,12 @@ class Row implements GateChannel {
     this.heard(true);
   }
 
-  // A heartbeat (or the hello): healthy for another silence window. Heard while unhealthy only by a fresh hello.
+  // A heartbeat (or the hello): healthy for another silence window. A heartbeat reaches a row only on its observer's
+  // present connection (a closed one is gone with it, and a new one starts with its hello), so one heard while unhealthy
+  // ends a silence on that connection and heals the row (D69). A silence the clock shows that its timer has not yet run
+  // is told first, so the reap sees the span unhealthy and cancels what it armed; healing re-arms nothing.
   heard(hello: boolean): void {
     if (!hello && this.healthy && this.stale()) this.unhealthy(); // its timer not yet run: the silence came first
-    if (!this.healthy && !hello) return;
     this.lastHeard = this.now();
     this.stopSilence();
     this.silence = setTimeout(() => this.unhealthy(), this.silenceMs);
@@ -170,6 +202,8 @@ export class Gate {
   private readonly silenceMs: number;
   private readonly helloWindowMs: number;
 
+  // `now`: a monotonic clock in milliseconds (D69: a sleep advances the wall clock and not this one), the silence's only
+  // reader; performance.now() unless a test gives one.
   constructor(private readonly opts: { log(line: string): void; silenceMs?: number; helloWindowMs?: number; now?: () => number }) {
     this.silenceMs = opts.silenceMs ?? OBSERVER_SILENCE_MS;
     this.helloWindowMs = opts.helloWindowMs ?? HELLO_WINDOW_MS;
@@ -177,7 +211,7 @@ export class Gate {
 
   // A row's channel, from its reservation until its exit closes it.
   channel(match: GateRow): GateChannel {
-    const row = new Row(match, this.silenceMs, this.opts.now ?? (() => Date.now()), (gone) => this.rows.delete(gone));
+    const row = new Row(match, this.silenceMs, this.opts.now ?? (() => performance.now()), (gone) => this.rows.delete(gone));
     this.rows.add(row);
     return row;
   }
@@ -209,7 +243,7 @@ export class Gate {
   }
 
   private accept(socket: Socket): void {
-    const conn: Connection = { socket, row: null };
+    const conn: Connection = { socket, row: null, arms: [] };
     this.connections.add(conn);
     const window = setTimeout(() => {
       if (conn.row === null) socket.destroy();
@@ -247,7 +281,7 @@ export class Gate {
       case 'hb':
         return row.heard(false);
       case 'armed':
-        if (typeof frame.fence === 'number') row.listener?.armed(frame.fence);
+        if (typeof frame.fence === 'number') row.answered(conn, frame.fence);
         return;
       case 'turn': {
         if (typeof frame.fence !== 'number') return;

@@ -3,14 +3,15 @@
 // fake observer on a real Unix socket, with scripted sessions and the table's `ps` stood in by a tree the test writes:
 // the observer's arm before any signal and its turn cancelling, a silent observer holding the row, the work under the
 // engine read at each sample and again at the step, the registrations (the bridge child by the observer's pid, the MCP
-// servers by `mcp_status`), the gate's counts, and the observer seen kept in the state file.
+// servers by `mcp_status`), the gate's counts, the observer seen kept in the state file, and the SIGTERM's lease (D69).
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { handshakeResponder, scriptedSession } from '../conformance/session-harness';
 import { ProcessTable } from '../process-table';
+import { LADDER_MS } from '../session-ladder';
 import { MemorySessionStateStore } from '../store/memory-session-state-store';
 import { FakeObserver } from './fake-observer';
 import { Gate } from './gate';
@@ -36,6 +37,7 @@ beforeEach(async () => {
   tree = [];
 });
 afterEach(async () => {
+  vi.useRealTimers();
   for (const o of observers.splice(0)) if (!o.isClosed) await o.close();
   for (const t of tables.splice(0)) t.setIdleRelease({ idleMs: null, active: false });
   await gate.close();
@@ -314,5 +316,51 @@ describe('the budget release through the gate', () => {
     o.send({ t: 'turn', fence: 2, origin: 'cron' });
     await o.next('disarm');
     await until(() => table.budgetState().releasing === null, 'the budget reap’s marker cleared');
+  });
+});
+
+// D69, on fake timers over the real gate socket (Date, performance and the timers faked; setImmediate and
+// process.hrtime real, so the socket's I/O runs between the steps of `pass`), at the table's production lease.
+describe('the SIGTERM under the lease, through the table (D69)', () => {
+  const settle = async (check: () => boolean, what: string, ms = 2_000) => {
+    const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
+    while (!check()) {
+      if (process.hrtime.bigint() > end) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setImmediate(r));
+    }
+  };
+  const pass = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 250) {
+      await vi.advanceTimersByTimeAsync(Math.min(250, left));
+      await settle(() => false, 'nothing', 5).catch(() => {});
+    }
+  };
+
+  it('an idle reap whose renewal goes unanswered withholds its SIGTERM: the row stays ready and its clock starts again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
+    await gate.close();
+    gate = new Gate({ log: () => {} }); // the production silence window
+    await gate.listen(path);
+    const { table, s, logs } = await rows(['a']);
+    const o = await observe(s.a!, { beat: false });
+    o.beat(5_000);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await pass(IDLE_MS);
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: 10_000 });
+    await pass(7_000); // answered late, inside the lease less its margin: the renewal falls due before the SIGTERM
+    o.send({ t: 'armed', fence: 1 });
+    await settle(() => releasing(s.a!), 'the end_session');
+    await pass(2_000);
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: 10_000 }); // the renewal, left unanswered
+    await pass(LADDER_MS.endSession - 2_000);
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: 10_000 }); // the re-arm at the SIGTERM's due time
+    await pass(9_000);
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    expect(s.a!.transport.calls).toEqual([]); // no SIGTERM, and stdin open
+    expect(s.a!.session.lifecycle).toBe('ready');
+    expect(s.a!.session.status().reap).toEqual({ state: 'idle', observer: 'healthy' });
+    expect(logs.some((l) => /idle reap of a: no SIGTERM/.test(l))).toBe(true);
+    await pass(IDLE_MS);
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 2, leaseMs: 10_000 }); // the row's clock started again
   });
 });

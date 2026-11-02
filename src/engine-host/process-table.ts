@@ -96,7 +96,7 @@ const runPs = (): Promise<string> =>
   new Promise((resolve, reject) => execFile('/bin/ps', PS_TREE_ARGS, { env: PS_TREE_ENV, timeout: 5_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
 
 // O16 M5: a row with no gate (a harness, the table before the engine host's gate is made) has no observer, ever.
-const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm() {}, disarm() {}, listen() {}, close() {} };
+const NO_OBSERVER: GateChannel = { observer: 'absent', childPid: null, arm: () => null, acknowledged: () => false, disarm() {}, listen() {}, close() {} };
 
 // P5 O16 M3b (D9): the launch refusal while the engine host hands its sessions over
 export const HANDING_OVER = 'the engine host is handing over; try again in a moment';
@@ -484,13 +484,13 @@ export class ProcessTable {
       stateful: () => this.stateful,
       interest: () => this.idle.held(id),
       descendants: () => this.descendantsNow(session),
-      reap: (reason: ReapReason) => {
-        if (reason === 'idle') return session.reap('idle');
+      reap: (reason: ReapReason, mayTerm) => {
+        if (reason === 'idle') return session.reap('idle', { mayTerm }); // D69: the SIGTERM's gate
         const release = this.budgetReleases.get(session) ?? { limitKiB: this.policy.limitKiB, totalKiB: this.budget.totalKiB };
         this.lastRelease = { appSessionId: id, at: new Date().toISOString(), totalKiB: release.totalKiB };
         this.budget = { ...this.budget, lastRelease: this.lastRelease };
         this.emitBudget(false);
-        return session.reap('budget', release);
+        return session.reap('budget', { release });
       },
       now: () => Date.now(),
       log: (line) => this.log(line),

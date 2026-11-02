@@ -3,16 +3,20 @@
 // never closes stdin and never sends SIGKILL, so a session whose engine ignored both stays usable and an explicit stop
 // afterwards runs the ladder whole; a `budget` reap keeps the ladder. And what the reap reads off the session: its
 // status's `reap` and `work.descendants`, the observer's state as unknown work, its lineage for the gate's hello, the
-// stdio MCP servers' command lines from `mcp_status`, and the observer seen on this launch kept in the state file.
+// stdio MCP servers' command lines from `mcp_status`, and the observer seen on this launch kept in the state file. D69:
+// with an observer, no SIGTERM goes in without a confirmed live lease at its instant; the reap re-arms for one when it
+// holds none, and withholds the SIGTERM when no armed confirms it.
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { handshakeResponder, scriptedSession } from '../conformance/session-harness';
 import { LADDER_MS } from '../session-ladder';
 import { MemorySessionStateStore } from '../store/memory-session-state-store';
-import { REAP_TERM_MS } from './reap';
+import { FakeObserver } from './fake-observer';
+import { Gate } from './gate';
+import { LEASE_MARGIN_MS, LEASE_MS, Reap, REAP_TERM_MS, type ReapReason } from './reap';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -24,6 +28,8 @@ const ready = async (opts: Parameters<typeof scriptedSession>[0] = {}) => {
   return s;
 };
 const stop = (id: string) => ({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, last_assistant_message: 'Done.', background_tasks: [], session_crons: [] } } });
+// An engine-started turn: the main lane's init opens one (normalizer.ts), as a peer delivery's or a cron's would.
+const ENGINE_TURN = { type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-turn' };
 const reapRows = (s: Awaited<ReturnType<typeof ready>>) => s.journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'reap').map((r) => (r.frame as { phase: string }).phase);
 
 describe('session.reap(idle)', () => {
@@ -125,7 +131,7 @@ describe('session.reap(budget)', () => {
   it('runs the stop ladder with the budget’s numbers', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const s = await ready();
-    const reaped = s.session.reap('budget', { limitKiB: 10, totalKiB: 20 });
+    const reaped = s.session.reap('budget', { release: { limitKiB: 10, totalKiB: 20 } });
     expect(s.session.lifecycle).toBe('exiting');
     s.transport.exit(0);
     expect(await reaped).toBe('exited');
@@ -217,5 +223,165 @@ describe('what the reap reads off the session', () => {
     expect(await store.loadObserverSeen('app-s' as AppSessionId)).toBeNull();
     s.session.observerSeen();
     await vi.waitFor(async () => expect(await store.loadObserverSeen('app-s' as AppSessionId)).toBe(s.session.status().launchId));
+  });
+});
+
+// D69, on fake timers over the real gate socket, at production timings: the session's idle reap and its row's Reap wired
+// as the process table wires them. The observer answers the first arm late (7 s, inside the lease less its margin), so
+// the step signals at 7 s, the renewal is due at 9 s (the arm's lease less its margin) and the SIGTERM at 10 s (the
+// end_session grace). Date, performance and the timers are faked; setImmediate and process.hrtime stay real, so the
+// socket's I/O runs between the steps of `pass`.
+describe('the SIGTERM under the lease (D69)', () => {
+  const FAKE = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] } as const;
+  const settle = async (check: () => boolean, what: string, ms = 2_000) => {
+    const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
+    while (!check()) {
+      if (process.hrtime.bigint() > end) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setImmediate(r));
+    }
+  };
+  const drain = (ms = 5) => settle(() => false, 'nothing', ms).catch(() => {});
+  const pass = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 250) {
+      await vi.advanceTimersByTimeAsync(Math.min(250, left));
+      await drain();
+    }
+  };
+  let dir: string;
+  let gate: Gate;
+  let at: string;
+  const observers: FakeObserver[] = [];
+  beforeEach(async () => {
+    vi.useFakeTimers(FAKE);
+    dir = mkdtempSync(join(tmpdir(), 'maws-reap-lease-'));
+    at = join(dir, 'supervisor', 'gate.sock');
+    gate = new Gate({ log: () => {} });
+    await gate.listen(at);
+  });
+  afterEach(async () => {
+    vi.useRealTimers();
+    for (const o of observers.splice(0)) if (!o.isClosed) await o.close();
+    await gate.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function wired() {
+    const s = await ready();
+    const channel = gate.channel({ lineage: () => s.session.engineSessionIds(), pid: () => s.session.pid });
+    const w = { verdict: null as Promise<'exited' | 'ignored' | 'withheld'> | null, logs: [] as string[], cancelled: [] as ReapReason[] };
+    const reap = new Reap('app-s', {
+      gate: channel, current: () => s.session.status(), stateful: () => new Set(), interest: () => false, descendants: () => 0,
+      reap: (_reason, mayTerm) => (w.verdict = s.session.reap('idle', { mayTerm })), // process-table.ts's wiring for an idle reap
+      now: () => Date.now(), log: (line) => void w.logs.push(line), cancelled: (reason) => void w.cancelled.push(reason), ignored: () => {},
+      changed: (view) => s.session.noteReap(view),
+    });
+    const o = await FakeObserver.connect(at);
+    observers.push(o);
+    o.hello(s.session.status().engineSessionId!, { pid: s.session.pid });
+    await o.next('welcome');
+    o.beat(5_000); // the bridge's heartbeat, throughout
+    reap.due('idle');
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE_MS });
+    await pass(7_000);
+    o.send({ t: 'armed', fence: 1 });
+    await settle(() => s.transport.requestsOf('end_session').length === 1, 'the step’s end_session');
+    expect(reap.state).toBe('signalled');
+    await pass(LEASE_MS - LEASE_MARGIN_MS - 7_000); // 9 s: the renewal
+    expect(await o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE_MS });
+    return Object.assign(w, { s, reap, o });
+  }
+  const arms = (o: FakeObserver) => o.pending().filter((f) => f.t === 'arm');
+
+  it('the renewal answered, the SIGTERM goes in at its due time with no re-arm', async () => {
+    const w = await wired();
+    w.o.send({ t: 'armed', fence: 1 });
+    await pass(LADDER_MS.endSession - 2_000); // 10 s
+    expect(w.s.transport.calls).toEqual(['kill:SIGTERM']);
+    expect(arms(w.o)).toEqual([]);
+    w.s.transport.exit(null, 'SIGTERM');
+    expect(await w.verdict).toBe('exited');
+    expect(reapRows(w.s)).toEqual(['end_session', 'term']);
+  });
+
+  it('the renewal unanswered, the SIGTERM is withheld: re-armed, no armed within the lease less its margin, the reap ends idle with the fence disarmed', async () => {
+    const w = await wired();
+    await pass(LADDER_MS.endSession - 2_000); // 10 s: the SIGTERM is due, the latest arm unconfirmed
+    expect(await w.o.next('arm')).toEqual({ t: 'arm', fence: 1, leaseMs: LEASE_MS }); // the re-arm
+    expect(w.s.transport.calls).toEqual([]);
+    expect(w.reap.state).toBe('signalled'); // a turn asked meanwhile is still told stop
+    await pass(LEASE_MS - LEASE_MARGIN_MS - 250);
+    expect(w.s.transport.calls).toEqual([]);
+    await pass(250);
+    expect(await w.o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    expect(await w.verdict).toBe('withheld');
+    expect(w.s.transport.calls).toEqual([]); // no SIGTERM, ever, and stdin stays open
+    expect(w.reap.state).toBe('idle');
+    expect(w.cancelled).toEqual(['idle']); // the row's clock restarts
+    expect(w.logs.some((l) => /no SIGTERM/.test(l))).toBe(true);
+    expect(reapRows(w.s)).toEqual(['end_session', 'term_withheld']);
+    expect(w.s.session.lifecycle).toBe('ready');
+    expect(w.s.session.status().work?.unknown).toBeNull(); // the observer is healthy: nothing unknown
+    w.o.send({ t: 'turn', fence: 1, origin: 'query' }); // the fence is disarmed: a turn proceeds
+    expect(await w.o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+  });
+
+  it('an armed answering the earlier renewal does not confirm the re-arm; the re-arm’s own armed does, and the SIGTERM goes in', async () => {
+    const w = await wired();
+    await pass(LADDER_MS.endSession - 2_000); // 10 s: re-armed with the renewal still unanswered
+    await w.o.next('arm');
+    w.o.send({ t: 'armed', fence: 1 }); // answers the renewal, the older of the two in flight
+    await pass(1_000);
+    expect(w.s.transport.calls).toEqual([]);
+    w.o.send({ t: 'armed', fence: 1 }); // answers the re-arm
+    await settle(() => w.s.transport.calls.length === 1, 'the SIGTERM');
+    expect(w.s.transport.calls).toEqual(['kill:SIGTERM']);
+    w.s.transport.exit(null, 'SIGTERM');
+    expect(await w.verdict).toBe('exited');
+  });
+
+  // D69: a lease proves the observer listening, not that no turn runs: the host's own turn state is the SIGTERM's last read
+  it('a turn admitted while the lease had lapsed, the re-arm then answered: the host’s own status shows the turn and the SIGTERM is withheld', async () => {
+    const w = await wired(); // the renewal unanswered: by the observer's clock its lease may run out
+    await pass(LADDER_MS.endSession - 2_000); // 10 s: re-armed
+    await w.o.next('arm');
+    w.s.transport.push(ENGINE_TURN); // the engine starts a turn the lapsed fence did not hold
+    await drain();
+    expect(w.s.session.status().turn).not.toBeNull();
+    w.o.send({ t: 'armed', fence: 1 }); // the renewal's
+    w.o.send({ t: 'armed', fence: 1 }); // the re-arm's: the lease is confirmed
+    expect(await w.o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    expect(await w.verdict).toBe('withheld');
+    expect(w.s.transport.calls).toEqual([]);
+    expect(w.logs.some((l) => /no SIGTERM: a turn is under way/.test(l))).toBe(true);
+    expect(reapRows(w.s)).toEqual(['end_session', 'term_withheld']);
+  });
+
+  it('with no observer ever seen there is no fence, but a turn under way at the SIGTERM still withholds it', async () => {
+    const s = await ready();
+    const channel = gate.channel({ lineage: () => s.session.engineSessionIds(), pid: () => s.session.pid });
+    let verdict: Promise<'exited' | 'ignored' | 'withheld'> | null = null;
+    const cancelled: ReapReason[] = [];
+    const reap = new Reap('app-s', {
+      gate: channel, current: () => s.session.status(), stateful: () => new Set(), interest: () => false, descendants: () => 0,
+      reap: (_reason, mayTerm) => (verdict = s.session.reap('idle', { mayTerm })),
+      now: () => Date.now(), log: () => {}, cancelled: (reason) => void cancelled.push(reason), ignored: () => {}, changed: (view) => s.session.noteReap(view),
+    });
+    expect(reap.observer).toBe('absent');
+    reap.due('idle');
+    expect(s.transport.requestsOf('end_session')).toHaveLength(1);
+    s.transport.push(ENGINE_TURN);
+    await pass(LADDER_MS.endSession);
+    expect(await verdict).toBe('withheld');
+    expect(s.transport.calls).toEqual([]);
+    expect([reap.state, cancelled]).toEqual(['idle', ['idle']]);
+  });
+
+  it('a reap disposed while it awaits the re-arm’s armed (its row handed over) withholds the SIGTERM at once', async () => {
+    const w = await wired();
+    await pass(LADDER_MS.endSession - 2_000);
+    await w.o.next('arm');
+    w.reap.dispose();
+    expect(await w.verdict).toBe('withheld');
+    expect(w.s.transport.calls).toEqual([]);
   });
 });

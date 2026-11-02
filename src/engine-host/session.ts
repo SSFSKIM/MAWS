@@ -656,9 +656,14 @@ export class EngineSession {
   // it is an `idle` release through the exit path; past it the session goes on (`ignored`) with its work unknown
   // (`reap_term_ignored`) and its stop reason `idle`, so a later exit is still the release, until the next Stop clears
   // both. An explicit stop meanwhile takes over through the ladder. `budget` runs `stop('budget')`'s ladder (charter §4.4).
-  async reap(reason: 'idle' | 'budget', release?: BudgetRelease): Promise<'exited' | 'ignored'> {
+  // D69: `mayTerm`, the reap's (holder/reap.ts), gates the SIGTERM at its instant: a fenced row's confirmed live lease
+  // (the reap re-arming for one when it holds none), then no turn under way by the host's own status; when it says no,
+  // the session goes on (`withheld`) with its stop reason `idle` until the next Stop, as after an ignored SIGTERM (the
+  // end_session stands), and nothing unknown of its own.
+  // The journal's `reap {phase}` rows: `end_session`, `term`, `term_ignored`, `term_withheld`.
+  async reap(reason: 'idle' | 'budget', opts: { release?: BudgetRelease; mayTerm?: () => Promise<boolean> } = {}): Promise<'exited' | 'ignored' | 'withheld'> {
     if (reason === 'budget') {
-      await this.stop('budget', { release: release ?? { limitKiB: 0, totalKiB: 0 } });
+      await this.stop('budget', { release: opts.release ?? { limitKiB: 0, totalKiB: 0 } });
       return this.processState === 'exited' ? 'exited' : 'ignored';
     }
     const transport = this.transport;
@@ -676,6 +681,14 @@ export class EngineSession {
       this.reapRow('end_session');
       endSession(client, { reason: 'stop' }).catch(() => {}); // the exit is the answer that matters
       if (await this.exitWithin(LADDER_MS.endSession) || await taken()) return 'exited';
+      if (opts.mayTerm && !(await opts.mayTerm())) {
+        if (await taken()) return 'exited';
+        this.reapRow('term_withheld');
+        this.reapIgnored = true; // the end_session stands: an exit before the next Stop is still the idle release
+        this.touch();
+        return 'withheld';
+      }
+      if (this.processState !== 'ready' && await taken()) return 'exited'; // an exit or an explicit stop while it confirmed
       this.reapRow('term');
       transport.kill('SIGTERM');
       if (await this.exitWithin(REAP_TERM_MS) || await taken()) return 'exited';
@@ -695,7 +708,7 @@ export class EngineSession {
     }
   }
 
-  private reapRow(phase: 'end_session' | 'term' | 'term_ignored'): void {
+  private reapRow(phase: 'end_session' | 'term' | 'term_ignored' | 'term_withheld'): void {
     try {
       this.record('meta', { event: 'reap', phase });
     } catch (error) {
