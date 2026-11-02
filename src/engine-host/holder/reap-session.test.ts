@@ -169,24 +169,27 @@ describe('what the reap reads off the session', () => {
     expect(s.session.engineSessionIds().has('after-clear')).toBe(true);
   });
 
-  it('the stdio MCP servers’ command lines, from one mcp_status read (concurrent asks share it; a failure is asked again later)', async () => {
+  it('the stdio MCP servers from mcp_status: their command lines and the connected and pending counts (concurrent asks share one answer; a failure is null)', async () => {
     const servers = [
       { name: 'a', status: 'connected', config: { type: 'stdio', command: '/usr/bin/node', args: ['/tmp/a.mjs', 'user'] } },
       { name: 'b', status: 'pending', config: { type: 'stdio', command: 'uvx', args: [] } },
       { name: 'c', status: 'connected', config: { type: 'http', url: 'https://x' } },
-      { name: 'maws', status: 'connected', config: { type: 'sdk' } },
+      { name: 'maws', status: 'connected', transport: 'sdk' },
+      { name: 'd', status: 'failed', config: { type: 'stdio', command: '/x/d', args: [] } },
     ];
     let fail = true;
     const s = await ready({ responder: handshakeResponder({ mcp_status: () => (fail ? { error: 'not now' } : { response: { mcpServers: servers } }) }) });
     expect(s.session.mcpCommands()).toBeNull();
-    await s.session.readMcpCommands();
+    expect(await s.session.stdioServers()).toBeNull();
     expect(s.session.mcpCommands()).toBeNull();
     fail = false;
-    await Promise.all([s.session.readMcpCommands(), s.session.readMcpCommands()]);
+    const [one, two] = await Promise.all([s.session.stdioServers(), s.session.stdioServers()]);
     expect(s.transport.requestsOf('mcp_status')).toHaveLength(2);
-    expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx']]);
-    await s.session.readMcpCommands();
-    expect(s.transport.requestsOf('mcp_status')).toHaveLength(2); // once read, never again for the launch
+    expect(one).toEqual({ connected: 1, pending: 1 });
+    expect(two).toBe(one);
+    expect(s.session.mcpCommands()).toEqual([['/usr/bin/node', '/tmp/a.mjs', 'user'], ['uvx'], ['/x/d']]);
+    servers[1]!.status = 'connected';
+    expect(await s.session.stdioServers()).toEqual({ connected: 2, pending: 0 }); // asked afresh each time
   });
 
   it('D52: a `#!` server is registered as the kernel runs it, resolved through the launch’s PATH, never the host’s', async () => {
@@ -203,7 +206,7 @@ describe('what the reap reads off the session', () => {
         { name: 'b', status: 'connected', config: { type: 'stdio', command: 'o16-host-only', args: [] } },
       ];
       const s = await ready({ responder: handshakeResponder({ mcp_status: () => ({ response: { mcpServers: servers } }) }) });
-      await s.session.readMcpCommands();
+      await s.session.stdioServers();
       expect(s.session.mcpCommands()).toEqual([['node', join(dir, 'o16-script'), '--stdio'], ['o16-host-only']]);
     } finally {
       process.env.PATH = hostPath;

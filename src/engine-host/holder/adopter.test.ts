@@ -54,10 +54,10 @@ function launched(spec = SPEC): { launchId: string; entry: RosterEntry } {
   return { launchId: plan.launchId, entry };
 }
 
-async function adopter(opts: { responder?: Responder; adoptMs?: number; spec?: typeof SPEC; deps?: Partial<LauncherDeps> } = {}) {
-  const store = new MemorySessionStateStore();
+async function adopter(opts: { responder?: Responder; adoptMs?: number; spec?: typeof SPEC; deps?: Partial<LauncherDeps>; store?: MemorySessionStateStore; ps?: () => Promise<string> } = {}) {
+  const store = opts.store ?? new MemorySessionStateStore();
   await store.saveLaunchSpec(ID, opts.spec ?? SPEC);
-  const table = new ProcessTable({ ps: async () => '', log: () => {} });
+  const table = new ProcessTable({ ps: opts.ps ?? (async () => ''), log: () => {} });
   const transports: ScriptedTransport[] = [];
   const logs: string[] = [];
   const deps: LauncherDeps = {
@@ -284,5 +284,104 @@ describe('an adopted session’s bridges', () => {
     expect(captures[0]).toMatchObject({ requestId: 'e-shot' });
     t.exit(0);
     await a.table.get(ID)!.exited;
+  });
+});
+
+// The plan's D69: the descendant veto after an adoption, over the owner's server shapes (the veto probe's fixtures,
+// spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl). The plan is rebuilt (`environmentRebuilt`), so a
+// bare command is never resolved through the adopter's PATH: cua's `node` is bound by what the launch's manager saved, or
+// by count when it saved nothing (a build before D69); ptc's launcher, exec'd into its venv's python, likewise. The
+// engine is pid 4101, born in the same second as its servers.
+describe('the descendant veto after an adoption', () => {
+  const BORN = 'Mon Nov  2 14:26:56 2026';
+  const HOUR = 'Mon Nov  2 15:31:40 2026';
+  const at = (pid: number, ppid: number, start: string, command: string) => `${pid} ${ppid} 1024 S ${start} ${command}`;
+  const CUA = ['--disable-sigusr1', '/u/.claude/plugins/cache/cua/cua/0.21.0/cua-shim.mjs'];
+  const PTC = '/u/.claude/plugins/cache/ptc-tool/ptc/0.6.1/bin/ptc-launch';
+  const ABS = ['/x/server.mjs', 'flag'];
+  const servers = { mcp_status: () => ({ response: { mcpServers: [
+    { name: 'plugin:cua:cua_repl', status: 'connected', scope: 'dynamic', source: 'plugin', transport: 'stdio', config: { type: 'stdio', command: 'node', args: CUA } },
+    { name: 'plugin:ptc:ptc', status: 'connected', scope: 'dynamic', source: 'plugin', transport: 'stdio', config: { type: 'stdio', command: PTC, args: [] } },
+    { name: 'flag', status: 'connected', scope: 'dynamic', source: 'dynamic', transport: 'stdio', config: { type: 'stdio', command: '/usr/bin/node', args: ABS } },
+  ] } }) };
+  const resting = () => [
+    at(4101, 4100, BORN, '/u/.local/share/claude/versions/2.1.316 -p --input-format stream-json'),
+    at(820, 4101, BORN, `node ${CUA.join(' ')}`),
+    at(821, 4101, BORN, '/u/.ptc/venvs/4c410075651a/bin/python -m ptc.mcp'),
+    at(822, 4101, BORN, `/usr/bin/node ${ABS.join(' ')}`),
+  ];
+  const BASH = [at(830, 4101, HOUR, "/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1793629565532-co9nny.sh 2>/dev/null || true && eval 'sleep 600'"), at(831, 830, HOUR, 'sleep 600')];
+
+  async function adopted(tree: () => string[], store = new MemorySessionStateStore()) {
+    const a = await adopter({ responder: servers, store, ps: async () => tree().join('\n') });
+    return a;
+  }
+  // adopted, then a Stop: an adopted row's work is unknown until its first Stop (D32)
+  async function ready(a: Awaited<ReturnType<typeof adopted>>, entry: RosterEntry) {
+    const adopting = a.adopt(entry);
+    await until(() => a.transports.length === 1 && a.table.get(ID) !== undefined, 'the reservation');
+    caughtUp(a.transports[0]!);
+    await adopting;
+    const session = a.table.get(ID)!;
+    a.transports[0]!.push({ type: 'control_request', request_id: 'stop-1', request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, last_assistant_message: 'Done.', background_tasks: [], session_crons: [] } } });
+    await until(() => session.status().work?.unknown === null, 'the first Stop');
+    return session;
+  }
+  const work = (session: { status(): { work?: { descendants: number | null } } }) => session.status().work?.descendants;
+
+  it('restores what the launch’s manager saved: a bare command and an exec’d launcher with nothing to resolve, and the releases take it', async () => {
+    const { launchId, entry } = launched();
+    const store = new MemorySessionStateStore();
+    await store.saveInfrastructure(ID, { launch: launchId, processes: [
+      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' },
+    ] });
+    let tree = resting();
+    const a = await adopted(() => tree, store);
+    const session = await ready(a, entry);
+    await a.table.sampleMemory();
+    expect(work(session)).toBe(0);
+    expect(a.transports[0]!.requestsOf('mcp_status')).toEqual([]); // nothing left to ask about
+    tree = [...resting(), ...BASH];
+    await a.table.sampleMemory();
+    expect(work(session)).toBe(2); // a background Bash is still the session's work
+    tree = resting();
+    await a.table.sampleMemory();
+    a.table.setIdleRelease({ idleMs: 200, active: true });
+    await until(() => a.transports[0]!.requestsOf('end_session').length > 0, 'the idle release');
+    a.transports[0]!.exit(0);
+    await session.exited;
+  });
+
+  it('adopted from a manager that saved nothing (a build before D69): the servers by count; the budget release takes it', async () => {
+    const { entry } = launched();
+    const store = new MemorySessionStateStore();
+    let tree = [...resting(), ...BASH];
+    const a = await adopted(() => tree, store);
+    const session = await ready(a, entry);
+    await a.table.sampleMemory();
+    await until(() => work(session) === 2, 'the servers bound, the Bash still counted');
+    await until(() => store.infrastructure.get(ID)?.processes.length === 3, 'the bindings saved for the next adopter');
+    tree = resting();
+    a.table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
+    await a.table.sampleMemory();
+    expect(work(session)).toBe(0);
+    await a.table.sampleMemory();
+    await until(() => a.transports[0]!.requestsOf('end_session').length > 0, 'the budget release');
+    a.transports[0]!.exit(0);
+    await session.exited;
+  });
+
+  it('a saved binding whose process is gone, or another process now at its pid, binds nothing', async () => {
+    const { launchId, entry } = launched();
+    const store = new MemorySessionStateStore();
+    await store.saveInfrastructure(ID, { launch: launchId, processes: [{ pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }] });
+    const tree = [at(4101, 4100, BORN, 'claude'), at(820, 4101, HOUR, 'sleep 900'), at(821, 4101, HOUR, `node ${CUA.join(' ')}`)];
+    const a = await adopted(() => tree, store);
+    const session = await ready(a, entry);
+    await a.table.sampleMemory();
+    await sleep(20);
+    expect(work(session)).toBe(2); // neither is the process saved, and both started past the engine's spawn window
+    a.transports[0]!.exit(0);
+    await session.exited;
   });
 });

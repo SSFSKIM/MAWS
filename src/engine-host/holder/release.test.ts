@@ -52,11 +52,11 @@ const until = async (check: () => boolean, what: string, ms = 3_000) => {
 };
 const proc = (pid: number, ppid: number, command: string, stat = 'S') => `${pid} ${ppid} 1024 ${stat} ${command}`;
 
-async function rows(names: string[], opts: { mcp?: string[][]; store?: MemorySessionStateStore; psSync?: () => string; ps?: () => Promise<string>; hosted?: boolean } = {}) {
+async function rows(names: string[], opts: { mcp?: string[][]; servers?: Record<string, unknown>[]; store?: MemorySessionStateStore; psSync?: () => string; ps?: () => Promise<string>; hosted?: boolean } = {}) {
   const logs: string[] = [];
   const table = new ProcessTable({ ps: opts.ps ?? (async () => tree.join('\n')), psSync: opts.psSync, sampleMs: 60_000, gate, log: (line) => void logs.push(line) });
   tables.push(table);
-  const servers = (opts.mcp ?? []).map(([command, ...args], i) => ({ name: `s${i}`, status: 'connected', config: { type: 'stdio', command, args } }));
+  const servers = opts.servers ?? (opts.mcp ?? []).map(([command, ...args], i) => ({ name: `s${i}`, status: 'connected', config: { type: 'stdio', command, args } }));
   const s = Object.fromEntries(names.map((name, i) => {
     const x = scriptedSession({
       spec: { appSessionId: name as AppSessionId, sessionId: `${PINNED.slice(0, -1)}${i}` as never },
@@ -272,6 +272,100 @@ describe('the work under the engine', () => {
     fail = false;
     await table.sampleMemory();
     expect(x.session.status().work).toMatchObject({ descendants: 0, unknown: null });
+  });
+});
+
+// The plan's D69: the registration after landing, over the owner's server shapes as the veto probe recorded them
+// (spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl) and the live MacBook's tree: cua's bare `node`,
+// ptc's launcher exec'd into its venv's python (no configured command line matches it) and a configured absolute path.
+// Each is claude's direct child, spawned in the same second as claude; a background Bash is claude's Bash wrapper with
+// its command under it.
+describe('D69: the owner’s server shapes on a fresh launch', () => {
+  const BORN = 'Mon Nov  2 14:26:56 2026';
+  const HOUR = 'Mon Nov  2 15:31:40 2026';
+  const at = (pid: number, ppid: number, start: string, command: string) => `${pid} ${ppid} 1024 S ${start} ${command}`;
+  const CUA = ['--disable-sigusr1', '/u/.claude/plugins/cache/cua/cua/0.21.0/cua-shim.mjs'];
+  const PTC = '/u/.claude/plugins/cache/ptc-tool/ptc/0.6.1/bin/ptc-launch';
+  const ABS = ['/x/server.mjs', 'flag'];
+  const SERVERS = [
+    { name: 'plugin:cua:cua_repl', status: 'connected', scope: 'dynamic', source: 'plugin', transport: 'stdio', config: { type: 'stdio', command: 'node', args: CUA } },
+    { name: 'plugin:ptc:ptc', status: 'connected', scope: 'dynamic', source: 'plugin', transport: 'stdio', config: { type: 'stdio', command: PTC, args: [] } },
+    { name: 'flag', status: 'connected', scope: 'dynamic', source: 'dynamic', transport: 'stdio', config: { type: 'stdio', command: '/usr/bin/node', args: ABS } },
+    { name: 'notion', status: 'connected', scope: 'dynamic', config: { type: 'http', url: 'https://mcp.notion.com/mcp' } },
+    { name: 'maws', status: 'connected', scope: 'dynamic', transport: 'sdk' },
+  ];
+  const resting = () => [
+    at(ENGINE, 1, BORN, '/u/.local/share/claude/versions/2.1.316 -p --input-format stream-json'),
+    at(820, ENGINE, BORN, `node ${CUA.join(' ')}`),
+    at(821, ENGINE, BORN, '/u/.ptc/venvs/4c410075651a/bin/python -m ptc.mcp'),
+    at(822, ENGINE, BORN, `/usr/bin/node ${ABS.join(' ')}`),
+  ];
+  const BASH = [at(830, ENGINE, HOUR, "/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1793629565532-co9nny.sh 2>/dev/null || true && eval 'sleep 600'"), at(831, 830, HOUR, 'sleep 600')];
+  const work = (x: Row) => x.session.status().work?.descendants;
+
+  it('nothing under the engine is its work once mcp_status names the servers, and the idle release takes the row', async () => {
+    const { table, s } = await rows(['a'], { servers: SERVERS });
+    tree = resting();
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 0, 'the servers bound');
+    expect(s.a!.transport.requestsOf('mcp_status')).toHaveLength(1);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await until(() => releasing(s.a!), 'the idle release');
+  });
+
+  it('the budget release takes the row as well', async () => {
+    const { table, s } = await rows(['a'], { servers: SERVERS });
+    tree = resting();
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 0, 'the servers bound');
+    table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    await until(() => releasing(s.a!), 'the budget release');
+    expect(table.budgetState().releasing).toBe('a');
+  });
+
+  it('a background Bash is still work under either release, until it ends', async () => {
+    const { table, s } = await rows(['a'], { servers: SERVERS });
+    tree = [...resting(), ...BASH];
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 2, 'the servers bound, the Bash counted');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    table.configure({ enabled: true, limitKiB: 1, statefulMcpServers: [] });
+    await table.sampleMemory();
+    await sleep(3 * IDLE_MS);
+    expect(releasing(s.a!)).toBe(false);
+    tree = resting();
+    await table.sampleMemory();
+    expect(work(s.a!)).toBe(0);
+    await until(() => releasing(s.a!), 'a release once the Bash ended');
+  });
+
+  it('the probe’s d: a server killed stays connected, and a child the engine starts after it is work, not its replacement', async () => {
+    const { table, s } = await rows(['a'], { servers: SERVERS });
+    tree = resting();
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 0, 'the servers bound');
+    tree = [...resting().filter((l) => !l.startsWith('821 ')), at(840, ENGINE, HOUR, '/u/.local/bin/claude --teammate')];
+    await table.sampleMemory();
+    await sleep(20);
+    await table.sampleMemory();
+    expect(work(s.a!)).toBe(1);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await sleep(3 * IDLE_MS);
+    expect(releasing(s.a!)).toBe(false);
+  });
+
+  it('the bindings are kept in the state file for an adopter', async () => {
+    const store = new MemorySessionStateStore();
+    const { table, s } = await rows(['a'], { servers: SERVERS, store });
+    tree = resting();
+    await table.sampleMemory();
+    await until(() => work(s.a!) === 0, 'the servers bound');
+    await until(() => (store.infrastructure.get('a' as AppSessionId)?.processes.length ?? 0) === 3, 'the bindings saved');
+    expect(store.infrastructure.get('a' as AppSessionId)).toEqual({ launch: s.a!.session.status().launchId, processes: expect.arrayContaining([
+      { pid: 820, start: BORN, kind: 'server' }, { pid: 821, start: BORN, kind: 'server' }, { pid: 822, start: BORN, kind: 'server' },
+    ]) });
   });
 });
 

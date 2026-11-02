@@ -33,6 +33,7 @@ import { readCheckpoint } from './holder/checkpoint'; // P5 O16 M3
 import { launchRows, spawnRowOf } from './holder/restore'; // P5 O16 M3
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import { holdsEngine } from './holder/adopt'; // P5 O16 panel fix wave 1
+import { restoredBindings } from './holder/descendants'; // O16 D69
 import { stopUnresolved, UNRESOLVED_STOP } from './holder/stop-held'; // P5 O16 wave 1 verification
 import type { SessionId } from '@shared/graph/ids'; // P5 O16 M3
 import { unsettledPrompts } from './prompt-history'; // P2-C
@@ -263,10 +264,11 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
     if (spec === null) throw new HostAdoptFailed('the session has no stored launch spec');
     const spawned = spawnRowOf(launchRows(dir, launchId));
     if (spawned === null) throw new HostAdoptFailed(`launch ${launchId} has no spawn row`);
-    const [captured, owedInterrupt, observerLaunch] = await Promise.all([
+    const [captured, owedInterrupt, observerLaunch, infrastructure] = await Promise.all([
       deps.captureEnv(),
       deps.store.loadOwedInterrupt(appSessionId).catch(() => false),
       deps.store.loadObserverSeen(appSessionId).catch(() => null),
+      deps.store.loadInfrastructure(appSessionId).catch(() => null), // O16 D69
     ]);
     left();
     const built = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: spawned.bin, engineVersion: spawned.engineVersion, spawnerPid: entry.pid, holder: { gateSocket: hosting.gateSocket } });
@@ -299,7 +301,7 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
         unsettledPrompts: () => unsettledPrompts(dir, launchId),
         observedFacts: deps.observedFacts, artifacts: deps.artifacts, datasetRefresh: deps.datasetRefresh,
         holder: { pid: entry.pid, holderId: launchId, binary: entry.binary },
-        adopted: { fence, frontier: checkpoint.frontier, owedInterrupt, observerSeen: observerLaunch === launchId },
+        adopted: { fence, frontier: checkpoint.frontier, owedInterrupt, observerSeen: observerLaunch === launchId, infrastructure: restoredBindings(infrastructure, launchId) },
       });
       deps.wire(session, plan, spec, journal.lastSeq); // P5 O16 M3c: the launch's events before the adoption, from its journal
       return session;

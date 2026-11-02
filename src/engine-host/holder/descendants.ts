@@ -1,20 +1,28 @@
-// O16 M5: the descendant veto (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; D17, D48, D52).
-// Every process under `claude` counts as the session's work unless it is registered infrastructure, bound by identity
-// (its pid and its start time, as supervisor-files.ts `procStartOf` reads it): the sminos bridge child its observer's
-// gate `hello` named by pid, and, for each stdio MCP server of the launch (`mcp_status`'s `config.{command, args}`, M0's
-// question 4), one direct child of `claude` whose command line is the server's as the kernel ran it (`expectedArgv`).
-// A server's binding lasts while that process lives as a child of `claude`; one gone (or re-parented) frees the server
-// for its next process, and a second process matching a server while the first lives is work. The bridge's binding is
-// the process first found at the named pid as a child of `claude` (M0 Q4); once it is gone or re-parented, neither it nor
-// another process at that pid is exempt again, until a hello names another pid.
+// O16 M5: the descendant veto (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; D17, D48, D52,
+// D69). Every process under `claude` counts as the session's work unless it is registered infrastructure, bound by
+// identity (its pid and its start time, as supervisor-files.ts `procStartOf` reads it, and its parent, `claude`):
+// - the sminos bridge child its observer's gate `hello` named by pid. The bridge's binding is the process first found at
+//   the named pid as a child of `claude` (M0 Q4); once it is gone or re-parented, neither it nor another process at that
+//   pid is exempt again, until a hello names another pid;
+// - each stdio MCP server of the launch, by either of two routes. By command line: one direct child of `claude` whose
+//   command line is a server's `mcp_status` `config.{command, args}` as the kernel ran it (`expectedArgv`); a server's
+//   binding lasts while that process lives as a child of `claude`, one gone (or re-parented) frees the server for its
+//   next process, and a second process matching a server while the first lives is work. By count (D69), which also
+//   covers a launcher that execs another binary and a bare command an adopter cannot resolve: a connected stdio server
+//   always has exactly one live process as `claude`'s direct child (the transport's spawn, which ends the connection when
+//   it closes), so when a fresh `mcp_status` names no server pending and the unbound direct children that are not
+//   claude's Bash wrappers (`isBashWrapper`), with the servers already bound, are exactly as many as the connected stdio
+//   servers, those children are the servers and are bound (`settle`), provided each started within a minute of
+//   `claude` itself, when the engine spawns its stdio servers (`SERVER_SPAWN_WINDOW_MS`). Any other child makes the
+//   numbers disagree or falls outside the window, and nothing is bound by count until it is gone;
+// - what an adopter restores from the state file: the bindings the process's previous manager made (`Binding`), each
+//   bound again only if the same process (pid, start, parent) is still there.
 //
 // D52: the subtree of a bound process is infrastructure too (npx, uvx and their like run the real server as a child of
 // the registered process); the bound process is the only way in, never a process whose parent merely looks like
 // infrastructure. The work the veto exists for (background Bash, Monitors, subagents' shells) runs under claude's own
-// Bash wrappers, which no registration names. A zombie (`stat` Z) holds nothing and is never counted. M0 found nothing
-// else under a resting `-p` session but transient startup children, so an unnamed one is a finding that extends the
-// registration with evidence, never a rule by group or start time (a Bash a tool runs leads a group and session of its
-// own, so only the tree sees it).
+// Bash wrappers, which no registration names and the count rule never binds. A zombie (`stat` Z) holds nothing and is
+// never counted. Nothing is ever exempted by its name, its group or its start time alone.
 //
 // One read serves the table's memory sample and the reap's step: `ps -axo pid=,ppid=,rss=,stat=,lstart=,command=` under
 // the C locale and UTC (`lstart` as `procStartOf` reads it), whose first three columns are the sampler's (process-table.ts
@@ -22,6 +30,7 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, closeSync, constants, openSync, readSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import type { InfrastructureRecord } from '@shared/engine/session-state-store';
 
 export const PS_TREE_ARGS = ['-axo', 'pid=,ppid=,rss=,stat=,lstart=,command='] as const;
 export const PS_TREE_ENV = { LC_ALL: 'C', TZ: 'UTC' } as const; // `lstart` comparable with procStartOf's
@@ -30,6 +39,10 @@ export interface TreeProcess { pid: number; ppid: number; stat: string; start: s
 export type ProcessTree = ReadonlyMap<number, TreeProcess>;
 // The registrations: the bridge child's pid (the observer's hello) and each stdio MCP server's argv as it runs.
 export interface Registered { pids: ReadonlySet<number>; mcpCommands: readonly (readonly string[])[] }
+// A binding as the state file keeps it for an adopter (D69): the process, and what it was bound as.
+export interface Binding { pid: number; start: string; kind: 'server' }
+// What a fresh `mcp_status` says of the launch's stdio servers (the count rule's input).
+export interface StdioServers { connected: number; pending: number }
 
 const LSTART = '[A-Z][a-z]{2} [A-Z][a-z]{2} [ \\d]\\d \\d\\d:\\d\\d:\\d\\d \\d{4}';
 const LINE = new RegExp(`^\\s*(\\d+)\\s+(\\d+)\\s+\\d+(?:\\s+(\\S+)(?:\\s+(${LSTART}))?(?:\\s+(.*))?)?\\s*$`);
@@ -109,6 +122,11 @@ export function matchesArgv(command: string, argv: readonly string[]): boolean {
   return head !== '' && !head.includes(' ') && basename(head) === basename(argv0);
 }
 
+// claude's own Bash wrapper, the process every Bash a tool runs (foreground, background, a Monitor, a subagent's) starts
+// as: `<shell> -c source <config>/shell-snapshots/snapshot-<shell>-….sh …` (M0 Q4; the owner's tree). It is work like any
+// unbound process; the shape only keeps it out of what the count rule may bind.
+export const isBashWrapper = (command: string): boolean => /^(?:\S*\/)?(?:bash|zsh|sh|dash|ksh) -c (?:source|\.) \S*\/shell-snapshots\/snapshot-/.test(command);
+
 interface Identity { pid: number; start: string; ppid: number }
 const same = (identity: Identity, p: TreeProcess | undefined): p is TreeProcess => p !== undefined && p.start === identity.start && p.ppid === identity.ppid;
 
@@ -117,22 +135,82 @@ const same = (identity: Identity, p: TreeProcess | undefined): p is TreeProcess 
 // (`read`); one older than the newest applied (an asynchronous sample whose `ps` began before a synchronous step's) is a
 // view of the past: it neither binds nor retires anything and is not counted (null), so its caller keeps what it has.
 export class Infrastructure {
-  private readonly servers = new Map<number, Identity>(); // a server's index in the registration -> its process
+  private readonly servers = new Map<number, Identity>(); // by command line: a server's index in the registration -> its process
   private serversKey = '';
+  private readonly counted = new Map<number, Identity>(); // by count, or restored: a server's process by its pid (D69)
   private readonly bridges = new Map<number, Identity | null>(); // a named pid -> the process first found there (null: gone)
+  private restored: Binding[] | null; // an adopter's: bound at the first read, each only if the same process is there
   private newest = -Infinity;
+  private unbound: TreeProcess[] = []; // the last applied read's unbound direct children that are not Bash wrappers
+  private unboundEarly = false; // and whether each of them started inside the engine's spawn window
+  private savedKey: string;
+
+  constructor(restored: readonly Binding[] = []) {
+    this.restored = restored.length > 0 ? [...restored] : null;
+    this.savedKey = keyOf(restored);
+  }
 
   // The processes under `claudePid` that are its work; null for a read older than the newest applied.
   count(tree: ProcessTree, claudePid: number, registered: Registered, read?: number): number | null {
-    if (read !== undefined) {
-      if (read < this.newest) return null;
-      this.newest = read;
-    }
+    if (!this.applies(read)) return null;
     return walk(tree, claudePid, this.bind(tree, claudePid, registered));
+  }
+
+  // D69's count rule over a read taken after a fresh `mcp_status` (`stdio`): with no stdio server pending, the unbound
+  // direct children that are not Bash wrappers are bound as servers when they and the servers already bound are exactly
+  // as many as the connected stdio servers. Then the work under `claudePid`, as `count` reads it.
+  settle(tree: ProcessTree, claudePid: number, registered: Registered, stdio: StdioServers, read?: number): number | null {
+    if (!this.applies(read)) return null;
+    const bound = this.bind(tree, claudePid, registered);
+    if (stdio.pending === 0 && this.countable && this.servers.size + this.counted.size + this.unbound.length === stdio.connected) {
+      for (const p of this.unbound) {
+        this.counted.set(p.pid, { pid: p.pid, start: p.start, ppid: p.ppid });
+        bound.add(p.pid);
+      }
+      this.unbound = [];
+    }
+    return walk(tree, claudePid, bound);
+  }
+
+  // The last applied read's direct children of `claude` that no registration names and that are not Bash wrappers.
+  get unnamed(): readonly TreeProcess[] {
+    return this.unbound;
+  }
+
+  // Whether a count could bind them: there are some, and each started within SERVER_SPAWN_WINDOW_MS of `claude` itself
+  // (what the caller asks `mcp_status` about).
+  get countable(): boolean {
+    return this.unbound.length > 0 && this.unboundEarly;
+  }
+
+  // The bindings an adopter would restore: every server's process (a hello's bridge is named again by the observer's
+  // next hello).
+  bindings(): Binding[] {
+    return [...this.servers.values(), ...this.counted.values()].map(({ pid, start }) => ({ pid, start, kind: 'server' as const }));
+  }
+
+  // The bindings when they changed since the last call (or the restored set), else null: what the caller saves.
+  changed(): Binding[] | null {
+    const bindings = this.bindings();
+    const key = keyOf(bindings);
+    if (key === this.savedKey) return null;
+    this.savedKey = key;
+    return bindings;
+  }
+
+  private applies(read: number | undefined): boolean {
+    if (read === undefined) return true;
+    if (read < this.newest) return false;
+    this.newest = read;
+    return true;
   }
 
   private bind(tree: ProcessTree, claudePid: number, registered: Registered): Set<number> {
     const bound = new Set<number>();
+    const live = (identity: Identity): TreeProcess | null => {
+      const p = tree.get(identity.pid);
+      return same(identity, p) && !p.stat.startsWith('Z') ? p : null;
+    };
     for (const pid of [...this.bridges.keys()]) if (!registered.pids.has(pid)) this.bridges.delete(pid);
     for (const pid of registered.pids) {
       const p = tree.get(pid);
@@ -144,27 +222,71 @@ export class Infrastructure {
       }
       if (this.bridges.get(pid) && p !== undefined) bound.add(pid);
     }
+    if (this.restored !== null) {
+      for (const { pid, start } of this.restored) {
+        const p = tree.get(pid);
+        if (p === undefined || p.start !== start || p.ppid !== claudePid || p.stat.startsWith('Z')) continue;
+        this.counted.set(pid, { pid, start, ppid: claudePid });
+      }
+      this.restored = null;
+    }
     const key = JSON.stringify(registered.mcpCommands);
     if (key !== this.serversKey) {
       this.servers.clear();
       this.serversKey = key;
     }
     for (const [i, identity] of this.servers) {
-      const p = tree.get(identity.pid);
-      if (!same(identity, p) || p.stat.startsWith('Z')) this.servers.delete(i);
+      const p = live(identity);
+      if (p === null) this.servers.delete(i);
       else bound.add(p.pid);
     }
+    for (const [pid, identity] of this.counted) {
+      if (live(identity) === null) this.counted.delete(pid);
+      else bound.add(pid);
+    }
     const children = [...tree.values()].filter((p) => p.ppid === claudePid && !p.stat.startsWith('Z'));
+    // by command line: a process bound by count (or restored) that matches a server's argv takes that server's index, so a
+    // second process matching it while the first lives stays work
     registered.mcpCommands.forEach((argv, i) => {
       if (this.servers.has(i)) return;
-      const p = children.find((child) => !bound.has(child.pid) && matchesArgv(child.command, argv));
+      const matching = children.filter((child) => (!bound.has(child.pid) || this.counted.has(child.pid)) && matchesArgv(child.command, argv));
+      const p = matching.find((child) => this.counted.has(child.pid)) ?? matching[0];
       if (p === undefined) return;
+      this.counted.delete(p.pid);
       this.servers.set(i, { pid: p.pid, start: p.start, ppid: p.ppid });
       bound.add(p.pid);
+    });
+    this.unbound = children.filter((p) => !bound.has(p.pid) && !isBashWrapper(p.command));
+    const born = startMs(tree.get(claudePid)?.start ?? '');
+    this.unboundEarly = born !== null && this.unbound.every((p) => {
+      const at = startMs(p.start);
+      return at !== null && at - born <= SERVER_SPAWN_WINDOW_MS;
     });
     return bound;
   }
 }
+
+// D69: the engine spawns its stdio servers at its own start (under a second after it, the veto probe's b), and a server it
+// starts later (a reconnect, a toggle, a plugin reload) is never bound by count: `mcp_status` keeps a server whose process
+// died `connected` (the probe's d), so after a crash the count's premise fails, and the next new child would fill the
+// dead server's place. A child started later than this after `claude` keeps the count from binding anything.
+export const SERVER_SPAWN_WINDOW_MS = 60_000;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// `lstart` under the C locale and UTC ("Mon Nov  2 14:26:56 2026") in ms; null for anything else (a test's empty start).
+function startMs(start: string): number | null {
+  const m = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d\d):(\d\d):(\d\d) (\d{4})$/.exec(start);
+  const month = m === null ? -1 : MONTHS.indexOf(m[1]!);
+  return m === null || month < 0 ? null : Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]));
+}
+
+// D69: what the state file kept for the adopted launch, as bindings: nothing for another launch's record, and no process
+// of a kind this build does not know.
+export function restoredBindings(record: InfrastructureRecord | null, launchId: string): Binding[] {
+  if (record === null || record.launch !== launchId) return [];
+  return record.processes.flatMap(({ pid, start, kind }) => (kind === 'server' ? [{ pid, start, kind }] : []));
+}
+
+const keyOf = (bindings: readonly Binding[]): string => bindings.map((b) => `${b.kind}:${b.pid}@${b.start}`).sort().join(',');
 
 // The processes under `claudePid` that are its work, from a single read (no binding carried over).
 export function countWork(tree: ProcessTree, claudePid: number, registered: Registered): number {

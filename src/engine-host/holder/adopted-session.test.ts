@@ -582,7 +582,7 @@ describe('an adopted session, fix wave 1', () => {
     a.caughtUp();
     await until(() => a.session.lifecycle === 'ready', 'ready');
     expect(a.session.connectorLaunchContext()).toBeNull();
-    await a.session.readMcpCommands();
+    expect(await a.session.stdioServers()).toEqual({ connected: 2, pending: 0 }); // the bare one is still counted
     expect(a.session.mcpCommands()).toEqual([['/bin/sh', '-c', 'true']]);
     a.transport.exit(0);
     await a.session.exited;

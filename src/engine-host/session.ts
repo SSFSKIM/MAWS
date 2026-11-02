@@ -34,7 +34,7 @@ import { HostHookRegistry, isStopCallbackId, registerStopHook } from './host-hoo
 import type { LaunchKind } from './work-state'; // P5 O2 M2
 import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2 M2
 import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
-import { expectedArgv } from './holder/descendants'; // O16 M5, D52
+import { expectedArgv, type Binding, type StdioServers } from './holder/descendants'; // O16 M5, D52; D69
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { HostMap } from './holder/checkpoint'; // P5 O16 M2
 import { launchRows, OutstandingSet, type Outstanding } from './holder/restore'; // P5 O16 M3
@@ -180,6 +180,13 @@ export class AdoptionFailed extends Error {
   }
 }
 
+// O16 D69: a `mcp_status` entry's stdio config, when it carries one (`{type: 'stdio', command, args}` on both engines the
+// veto probe read, spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl)
+function stdioConfigOf(server: object): { type?: unknown; command?: unknown; args?: unknown } | undefined {
+  const config = (server as { config?: unknown }).config;
+  return typeof config === 'object' && config !== null ? config : undefined;
+}
+
 // P5 O16 M3a fix wave 2: a test seam, null in production. `beforeFold` runs synchronously as an adoption's fold begins,
 // while the fold holds the event loop, so a test can make the session host's ring overflow under a reader that reads
 // nothing, deterministically (holder/adoption.test.ts); a throw is a failed fold.
@@ -190,6 +197,7 @@ export interface AdoptedLaunch {
   frontier: number;
   owedInterrupt: boolean;
   observerSeen: boolean;
+  infrastructure?: readonly Binding[]; // O16 D69: what the previous manager's descendant veto bound for this launch
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -293,7 +301,7 @@ export class EngineSession {
   private reapVerdict: Promise<void> | null = null;
   private freezeDue = false;
   private mcpServerCommands: string[][] | null = null;
-  private mcpRead: Promise<void> | null = null;
+  private mcpRead: Promise<StdioServers | null> | null = null;
   private observerSaved = false;
   // O16 M5 end
   // P5 O16 M3 start: an adoption's state. The barrier: the outstanding set from the fold until the replay has caught up
@@ -741,28 +749,46 @@ export class EngineSession {
     return this.mcpServerCommands;
   }
 
-  // Reads them from `mcp_status` (M0's question 4: `get_settings` carries none), once for the launch; asked when the
-  // tree first shows a child of the engine, a failure asked again at the next such read.
-  readMcpCommands(): Promise<void> {
+  // Asks `mcp_status` (M0's question 4: `get_settings` carries none) for the launch's stdio servers: their command lines,
+  // kept for the veto's argv route, and how many are connected and pending, the count rule's input (D69). Asked by the
+  // table when the tree shows children of the engine the row cannot name; concurrent asks share one answer; null when
+  // the engine cannot be asked or the ask failed.
+  stdioServers(): Promise<StdioServers | null> {
     const client = this.client;
-    if (this.mcpServerCommands !== null || client === null || this.processState !== 'ready') return Promise.resolve();
+    if (client === null || this.processState !== 'ready') return Promise.resolve(null);
     this.mcpRead ??= mcpStatus(client, {}).then(
       (answer) => {
-        this.mcpServerCommands = answer.mcpServers.flatMap((server) => {
-          const config = (server as { config?: { type?: unknown; command?: unknown; args?: unknown } }).config;
+        const stdio = answer.mcpServers.filter((server) => (stdioConfigOf(server)?.type ?? (server as { transport?: unknown }).transport) === 'stdio');
+        const commands = stdio.flatMap((server) => {
+          const config = stdioConfigOf(server);
           if (config?.type !== 'stdio' || typeof config.command !== 'string') return [];
           // P5 O16 M3a fix wave 1: a rebuilt environment's PATH is not the engine's, so a bare command resolved through
-          // it could match the wrong process; it is left unmatched instead, and its process counts as work
+          // it could match the wrong process; it is left to the count rule and the restored bindings instead (D69)
           if (this.plan.environmentRebuilt === true && !config.command.includes('/')) return [];
           const argv = [config.command, ...(Array.isArray(config.args) ? config.args.filter((a): a is string => typeof a === 'string') : [])];
           return [expectedArgv(argv, { path: this.plan.env.PATH, cwd: this.plan.cwd })]; // D52: as the kernel runs it, through the launch's PATH
         });
+        if (JSON.stringify(commands) !== JSON.stringify(this.mcpServerCommands)) this.mcpServerCommands = commands;
+        return { connected: stdio.filter((server) => server.status === 'connected').length, pending: stdio.filter((server) => server.status === 'pending').length };
       },
-      (error: unknown) => this.log(`mcp_status for the descendant veto failed: ${messageOf(error)}`),
+      (error: unknown) => {
+        this.log(`mcp_status for the descendant veto failed: ${messageOf(error)}`);
+        return null;
+      },
     ).finally(() => {
       this.mcpRead = null;
     });
     return this.mcpRead;
+  }
+
+  // D69: what the previous manager's veto bound for this launch (an adopted process's), and the bindings now, kept in the
+  // state file for an adopter whenever they change.
+  get restoredInfrastructure(): readonly Binding[] {
+    return this.opts.adopted?.infrastructure ?? [];
+  }
+
+  saveInfrastructure(bindings: readonly Binding[]): void {
+    this.storeWrite(this.store.saveInfrastructure(this.spec.appSessionId, { launch: this.plan.launchId, processes: bindings.map((b) => ({ ...b })) }), 'infrastructure');
   }
 
   // The gate saw this process's observer bridge: kept in the state file, once per launch, so an adopter restores it (D37).
