@@ -269,9 +269,13 @@ func (h *Host) writeStdin(w *os.File) {
 
 // wait records the child's exit once its output has reached end of file, tells every client, and starts the linger.
 // When a descendant still holds the pipes after ExitDrain, the host closes its read ends and waits for its readers to
-// stop, so `exit` is the last thing the stream says: nothing is recorded after it.
+// stop, so `exit` is the last thing the stream says: nothing is recorded after it. The reap itself is noted at once:
+// from then on the child's pid may be reused, and no signal goes to it while the output drains (signallable).
 func (h *Host) wait(cmd *exec.Cmd, readers *sync.WaitGroup, outR, errR *os.File) {
 	cmd.Wait()
+	h.mu.Lock()
+	h.reaped = true
+	h.mu.Unlock()
 	drained := make(chan struct{})
 	go func() {
 		readers.Wait()
