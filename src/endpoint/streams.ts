@@ -56,11 +56,12 @@
 // `malformed`). It names no act: the stream row of its kind (offers.ts' READ_OPENS) admits it, through authorization's
 // eight steps with the open's kind fields as the input (authorize.ts; its refusal read as the device reads it: `malformed`,
 // `unavailable`, `read-only`, else `grade`), and its kind's plane runs it (stream-base.ts' `ReadPlane`: stream-http.ts for
-// `http`; `document` is M5b's next task's, refused `unavailable` until it is here). The plane publishes the stream in the
-// step its decision is found to stand (`stands`), taken again once when it moved. A read stream is authorized again with
-// its open's input at every refresh, as every stream is, and at every change that can move its decision (`accessMoved`:
-// a record change, a relink, a linked session's new placement, after the artifact cache dropped its entry), each stream
-// whose decision no longer stands decided again and ended `removed` once refused, what it holds dropped.
+// `http`, stream-document.ts for `document`, its channel's frames and end routed here from `onFrame` and
+// `documents.onClosed`). The plane publishes the stream in the step its decision is found to stand (`stands`), taken
+// again once when it moved. A read stream is authorized again with its open's input at every refresh, as every stream
+// is, and at every change that can move its decision (`accessMoved`: a record change, a relink, a linked session's new
+// placement, after the artifact cache dropped its entry), each stream whose decision no longer stands decided again and
+// ended `removed` once refused, what it holds dropped.
 import { createConnection, type Socket } from 'node:net';
 import { TextDecoder } from 'node:util';
 import {
@@ -87,6 +88,7 @@ import { READ_OPENS } from './offers';
 import { dispatchAs, type EndpointServices } from './services';
 import { RECHECK_RETRY_MS, TRANSMIT_DEADLINE_MS } from './subscriptions';
 import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
+import { documentPlane, type DocumentChannels, type DocumentPlane } from './stream-document';
 import { httpPlane } from './stream-http';
 import { StreamWindow } from './stream-window';
 
@@ -102,6 +104,8 @@ export type StreamsContext = {
   dispatch: EndpointServices['dispatch'];
   /** P5 O7 M5b: the machine's artifact endpoint, which an `http` read open's request goes to. */
   artifacts: EndpointServices['artifacts'];
+  /** P5 O7 M5b: the engine host's document channels in the endpoint's range, which a `document` read open opens. */
+  documents: DocumentChannels;
   own: Pick<EndpointActions, 'query'>;
   forwards: Forwards;
   now(): number;
@@ -343,15 +347,15 @@ export class Streams {
   /** The pty host's last state was `crashed`: it runs no terminal this endpoint can reach until it is `ready` again. */
   #hostCrashed = false;
   readonly #offRemoved: () => void;
-  /**
-   * P5 O7 M5b: the read open's planes by kind, each run once its open is admitted. `document` is M5b's next task's
-   * (stream-document.ts); until it is here an admitted document open is refused `unavailable`.
-   */
+  /** P5 O7 M5b: the read open's planes by kind, each run once its open is admitted. */
   readonly #planes: Partial<Record<ReadStreamKind, ReadPlane>>;
+  /** P5 O7 M5b: the `document` plane, which the host's side of its channels reaches too. */
+  readonly #documents: DocumentPlane;
 
   constructor(ctx: StreamsContext) {
     this.#ctx = ctx;
-    this.#planes = { http: httpPlane((request) => ctx.artifacts.fetch(request)) };
+    this.#documents = documentPlane({ documents: ctx.documents, dispatch: ctx.dispatch, log: ctx.log });
+    this.#planes = { http: httpPlane((request) => ctx.artifacts.fetch(request)), document: this.#documents.open };
     // A forward removed (its member lost `shell`) or forgotten takes its connections with it.
     this.#offRemoved = ctx.forwards.onRemoved((forward) => {
       for (const streams of this.#channels.values())
@@ -381,6 +385,16 @@ export class Streams {
   /** A pty's output frame (`onFrame`). */
   frame(frame: { ptyId: string; offset: number; data: Uint8Array }): void {
     for (const stream of this.#byPty.get(frame.ptyId) ?? []) stream.frame(frame.offset, frame.data);
+  }
+
+  /** P5 O7 M5b: a frame of the engine host's on one of the endpoint's document channels (`onFrame`). */
+  documentFrame(channel: number, bytes: Uint8Array): void {
+    this.#documents.frame(channel, bytes);
+  }
+
+  /** P5 O7 M5b: one of the endpoint's document channels ended on the host's side (`documents.onClosed`). */
+  documentClosed(channel: number, reason: 'host' | 'reset' | 'upstream'): void {
+    this.#documents.closed(channel, reason);
   }
 
   /**
@@ -583,6 +597,7 @@ export class Streams {
         },
         install,
         refuse,
+        recheck: (stream) => this.#recheckStream(stream),
         log: this.#ctx.log,
       };
       await plane(opening);

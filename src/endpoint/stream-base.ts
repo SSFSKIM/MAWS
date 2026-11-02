@@ -20,7 +20,7 @@ export type ReadAccess = { input: unknown; stands: () => boolean };
 
 /**
  * P5 O7 M5b: a read open admitted, as its kind's plane takes it (streams.ts runs the admission; a plane is the seam each
- * kind fills: stream-http.ts' `http`, M5b's next task's `document`). `act` is the stream row's name and `binding` the
+ * kind fills: stream-http.ts' `http`, stream-document.ts' `document`). `act` is the stream row's name and `binding` the
  * channel's member and device, which the stream is made with; `input` the open's kind fields as authorized. The plane does
  * what the stream needs before it can answer, then publishes it through `decide`, which runs `publish` only in the step
  * the decision is found to stand (handing it the access the stream keeps: set it as `stream.read`), and answers the
@@ -41,6 +41,11 @@ export type ReadOpening = {
   decide<R>(publish: (access: ReadAccess) => R): Promise<{ ok: true; value: R } | { ok: false; reason: StreamRefusal }>;
   install(stream: Stream): void;
   refuse(reason: StreamRefusal): void;
+  /**
+   * The stream found its decision no longer standing before a forward (stream-document.ts asks before each): it is held
+   * and authorized again, as a re-check does, and ends `removed` once refused.
+   */
+  recheck(stream: Stream): void;
   log(line: string): void;
 };
 /** A read open's kind's plane (P5 O7 M5b). */

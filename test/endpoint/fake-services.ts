@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import { endpointLibrary, type ContentLookup } from '../../src/services/artifacts/scheme/endpoint-library';
 import type { EndpointServices } from '../../src/endpoint/services';
@@ -72,4 +73,73 @@ export function scratchArtifacts(services: FakeServices): { put(artifactId: stri
     },
     fetches: () => fetches,
   };
+}
+
+/** P5 O7 M5b: one endpoint document channel as the fake host port holds it. */
+export type FakeDocumentChannel = { open: DocumentsOpen; received: Uint8Array[]; ended: 'endpoint' | 'host' | 'reset' | 'upstream' | null };
+
+/**
+ * P5 O7 M5b: `documents` over a fake host port, in place of the fake's stub (which opens nothing): the endpoint's document
+ * channels as `mawsd` relays them to the engine host (daemon.ts' `EndpointChannel`). Each open is kept with the frames the
+ * endpoint wrote to it (`received`) and how it ended; `send` is a host frame on a channel, through `onFrame` as `mawsd`
+ * hands it (`{owner: 'engine-host', channel, bytes}`), and `end` the host's or the link's end of one (`onClosed`).
+ * `refuse` makes the next opens answer false (no engine-host link). Installed before the endpoint starts.
+ */
+export function fakeDocuments(services: FakeServices): {
+  channels: Map<number, FakeDocumentChannel>;
+  /** The channel the endpoint opened last. */
+  last(): FakeDocumentChannel & { channel: number };
+  send(channel: number, bytes: Uint8Array): void;
+  end(channel: number, reason: 'host' | 'reset' | 'upstream'): void;
+  refuse: boolean;
+} {
+  const channels = new Map<number, FakeDocumentChannel>();
+  const frames = new Set<Parameters<FakeServices['onFrame']>[0]>();
+  const closed = new Set<(channel: number, reason: 'host' | 'reset' | 'upstream') => void>();
+  const others = services.onFrame;
+  services.onFrame = (listener) => {
+    const off = others(listener);
+    frames.add(listener);
+    return () => {
+      off();
+      frames.delete(listener);
+    };
+  };
+  const fake = {
+    channels,
+    refuse: false,
+    last() {
+      const [channel, held] = [...channels].at(-1)!;
+      return { channel, ...held };
+    },
+    send(channel: number, bytes: Uint8Array) {
+      if (channels.get(channel)?.ended !== null) return;
+      for (const listener of [...frames]) listener({ owner: 'engine-host', channel, bytes });
+    },
+    end(channel: number, reason: 'host' | 'reset' | 'upstream') {
+      const held = channels.get(channel);
+      if (held === undefined || held.ended !== null) return;
+      held.ended = reason;
+      for (const listener of [...closed]) listener(channel, reason);
+    },
+  };
+  services.documents = {
+    open(message) {
+      if (fake.refuse || message.channel < 2 ** 31 || channels.get(message.channel)?.ended === null) return false;
+      channels.set(message.channel, { open: message, received: [], ended: null });
+      return true;
+    },
+    close(channel) {
+      const held = channels.get(channel);
+      if (held !== undefined && held.ended === null) held.ended = 'endpoint';
+    },
+    frame(channel, bytes) {
+      const held = channels.get(channel);
+      if (held === undefined || held.ended !== null) return false;
+      held.received.push(bytes.slice());
+      return true;
+    },
+    onClosed: (listener) => (closed.add(listener), () => void closed.delete(listener)),
+  };
+  return fake;
 }

@@ -2,14 +2,19 @@
 // open" and "The `http` stream"; Interfaces §L's M5b rows, §N): a `streamOpen` that names no `op`, behind `rl2.read-open`,
 // admitted by a stream row of the offer table through authorization's eight steps at the row's grade, on the `artifact`
 // rule. The `http` plane over a real artifact endpoint (the scheme's own handler over a scratch store: its headers, its
-// ranges, its not-found), the body pulled within the device's credit; the `document` opens' grades and `read-only` (their
-// plane is the next task's); a read stream authorized again at the record change and the relink that withdraw it; and
-// the act open beside it, unchanged, with `browser.screencast` reserved.
+// ranges, its not-found), the body pulled within the device's credit; the `document` opens' grades and `read-only`, and
+// their plane over a fake host port (the endpoint's document channel, its frames relayed both ways length-prefixed under
+// each side's credit, a `view` open's writes dropped, the channel's end and the stream's); a read stream authorized again
+// at the record change and the relink that withdraw it; and the act open beside it, unchanged, with `browser.screencast`
+// reserved.
 import { randomBytes, randomUUID } from 'node:crypto';
+import { WITHHELD_SESSION } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { decodeFrame, encodeFrame } from '../../src/artifacts/provider/frames';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
-import { scratchArtifacts } from './fake-services';
+import { STREAM_INPUT_CREDIT } from '../../src/endpoint/stream-base';
+import { fakeDocuments, fakeServices, scratchArtifacts } from './fake-services';
 import { FakePtyHost } from './fake-pty-host';
 import { act, done, makeOrg, openRemote, sleep, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
@@ -217,7 +222,7 @@ describe('the http read open', () => {
   });
 });
 
-describe('the document read open’s grades (its plane is M5b’s next task)', () => {
+describe('the document read open’s grades', () => {
   const who = (member: string, device: string) => ({ member, device, clientClass: 'native-mac' as const });
   const decide = (f: Fixture, member: string, device: string, input: Record<string, unknown>) => f.endpoint.authorizer.authorize({ kind: 'stream', name: 'documents.open', input }, who(member, device), Date.now());
 
@@ -248,6 +253,294 @@ describe('the document read open’s grades (its plane is M5b’s next task)', (
     expect(await openDocument(a, { artifactId: x, mode: 'edit' })).toMatchObject({ t: 'streamRefused', reason: 'read-only' });
     expect(a.channel.closed).toBe(false);
     expect(await decide(f, org.A, 'a1', { artifactId: x, mode: 'view' })).toMatchObject({ ok: true });
+  });
+});
+
+describe('the document stream', () => {
+  async function startDocuments() {
+    const services = fakeServices();
+    const docs = fakeDocuments(services);
+    const f = await startEndpoint(org, started, { services });
+    return { f, docs };
+  }
+  type Doc = { artifactId: string; mode: 'edit' | 'view' };
+  /** A `document` read open and the endpoint's answer. */
+  async function openDoc(r: Remote, document: Doc, credit = 1024 * 1024): Promise<{ id: string; answer: Msg }> {
+    const id = id16();
+    const from = r.inbox.length;
+    await r.channel.send({ t: 'streamOpen', id, kind: 'document', credit, document });
+    return { id, answer: await waitFor(r, (m) => m.id === id && (m.t === 'streamOpened' || m.t === 'streamRefused'), `the answer to stream ${id}`, from) };
+  }
+  /** Frames as the stream carries them: each prefixed by its u32be length. */
+  const prefixed = (...frames: Uint8Array[]) =>
+    Buffer.concat(
+      frames.flatMap((frame) => {
+        const length = Buffer.alloc(4);
+        length.writeUInt32BE(frame.byteLength);
+        return [length, Buffer.from(frame)];
+      }),
+    );
+  /** The whole frames the device read on a stream so far. */
+  function framesOf(r: Remote, id: string): Buffer[] {
+    const bytes = body(r, id);
+    const frames: Buffer[] = [];
+    for (let at = 0; at + 4 <= bytes.byteLength; ) {
+      const length = bytes.readUInt32BE(at);
+      if (at + 4 + length > bytes.byteLength) break;
+      frames.push(bytes.subarray(at + 4, at + 4 + length));
+      at += 4 + length;
+    }
+    return frames;
+  }
+  const sent = new Map<string, number>();
+  /** The device's bytes on a stream, cut first at `cuts` (sizes), then in chunks of at most 64 KiB, at its running offset. */
+  async function write(r: Remote, id: string, bytes: Buffer, cuts: number[] = []): Promise<void> {
+    let at = 0;
+    const sizes = [...cuts];
+    while (at < bytes.byteLength) {
+      const size = Math.min(sizes.shift() ?? 64 * 1024, bytes.byteLength - at);
+      const offset = sent.get(id) ?? 0;
+      await r.channel.send({ t: 'streamData', id, offset, data: bytes.subarray(at, at + size).toString('base64url') });
+      sent.set(id, offset + size);
+      at += size;
+    }
+  }
+  const asBuffers = (frames: Uint8Array[]) => frames.map((frame) => Buffer.from(frame));
+  const step1 = encodeFrame({ type: 'step1', sv: Uint8Array.of(0) });
+  const awareness = encodeFrame({ type: 'awareness', update: Uint8Array.of(1, 2, 3) });
+  const update = (size: number) => encodeFrame({ type: 'update', update: randomBytes(size) });
+  const step2 = (size: number) => encodeFrame({ type: 'step2', update: randomBytes(size), revision: 4 });
+
+  it('opens an endpoint document channel as the human and answers `streamOpened` with its credit alone', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id, answer } = await openDoc(a, { artifactId: x, mode: 'edit' });
+    expect(answer).toEqual({ t: 'streamOpened', id, credit: STREAM_INPUT_CREDIT });
+    const { channel, open } = docs.last();
+    expect(channel).toBeGreaterThanOrEqual(2 ** 31);
+    expect(channel).toBeLessThanOrEqual(0xffff_ffff);
+    expect(open).toEqual({ t: 'documents.open', channel, artifactId: x, actor: { kind: 'human' } });
+    await openDoc(a, { artifactId: x, mode: 'view' });
+    expect(docs.last().channel).not.toBe(channel);
+  });
+
+  it('relays the document frames both ways, each prefixed by its u32be length, across chunk boundaries; the stream’s close closes the channel', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' });
+    const { channel } = docs.last();
+    // The host's: a step 2 larger than a chunk, then an ack.
+    const host = [step2(100 * 1024), encodeFrame({ type: 'ack', frames: 1, revision: 4 })];
+    for (const frame of host) docs.send(channel, frame);
+    await until(() => framesOf(a, id).length === 2 || undefined, 'the host’s frames');
+    expect(framesOf(a, id)).toEqual(asBuffers(host));
+    expect(ofStream(a, id).filter((m) => m.t === 'streamData').length).toBeGreaterThan(1);
+    // The device's: cut inside a length prefix, inside a frame, and across frames.
+    const device = [step1, update(70 * 1024), awareness];
+    await write(a, id, prefixed(...device), [2, 3, 1, 30_000]);
+    await until(() => docs.channels.get(channel)!.received.length === 3 || undefined, 'the device’s frames');
+    expect(asBuffers(docs.channels.get(channel)!.received)).toEqual(asBuffers(device));
+    expect(docs.channels.get(channel)!.ended).toBeNull();
+    await a.channel.send({ t: 'streamClose', id, reason: 'closed' });
+    await until(() => docs.channels.get(channel)!.ended, 'the channel closed');
+    expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+  });
+
+  it('in a `view` open forwards only the device’s step 1 and awareness, dropping its update and step 2 (counted, logged), and closes `read-only` past 64 KiB dropped', async () => {
+    const { f, docs } = await startDocuments();
+    session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B, { capabilities: READ });
+    const { id, answer } = await openDoc(b, { artifactId: x, mode: 'view' });
+    expect(answer).toMatchObject({ t: 'streamOpened' });
+    const { channel } = docs.last();
+    await write(b, id, prefixed(step1, update(100), awareness, step2(100)));
+    await until(() => docs.channels.get(channel)!.received.length === 2 || undefined, 'the forwarded frames');
+    await sleep(30);
+    expect(asBuffers(docs.channels.get(channel)!.received)).toEqual(asBuffers([step1, awareness]));
+    expect(f.services.lines.some((line) => /dropped/.test(line))).toBe(true);
+    expect(closeOf(b, id)).toBeUndefined();
+    await write(b, id, prefixed(update(40 * 1024), update(40 * 1024)));
+    await until(() => closeOf(b, id), 'the close');
+    expect(closeOf(b, id)).toBe('read-only');
+    expect(docs.channels.get(channel)!.received).toHaveLength(2);
+    expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+    expect(b.channel.closed).toBe(false);
+  });
+
+  it('closes an open stream `removed` at the record change that withdraws the member’s share (no `caps` refresh), the channel with it and nothing it held sent', async () => {
+    const { f, docs } = await startDocuments();
+    const engine = session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B, { capabilities: READ });
+    const { id } = await openDoc(b, { artifactId: x, mode: 'view' }, 16);
+    const { channel } = docs.last();
+    docs.send(channel, step2(1024));
+    await until(() => body(b, id).byteLength === 16 || undefined, 'the credit spent');
+    const caps = b.inbox.filter((m) => m.t === 'caps').length;
+    f.records.set({ lane: 'B', session: engine, owners: ['@machine'], access: 'private' }, 'app-1');
+    await until(() => closeOf(b, id), 'the close');
+    expect(closeOf(b, id)).toBe('removed');
+    expect(b.inbox.filter((m) => m.t === 'caps')).toHaveLength(caps);
+    expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+    await b.channel.send({ t: 'streamCredit', id, bytes: 1024 * 1024 });
+    await sleep(40);
+    expect(body(b, id).byteLength).toBe(16);
+  });
+
+  it('asks the decision before each forward either way: a withdrawal no trigger reported still sends nothing, and the stream closes `removed`', async () => {
+    const { f, docs } = await startDocuments();
+    const engine = session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const b = await openRemote(f, org.b1, org.B, { capabilities: READ });
+    const { id } = await openDoc(b, { artifactId: x, mode: 'view' });
+    const { channel } = docs.last();
+    f.endpoint.streams.accessMoved = () => {}; // the record change's trigger, missed
+    f.records.set({ lane: 'B', session: engine, owners: ['@machine'], access: 'private' }, 'app-1');
+    docs.send(channel, step2(100));
+    await write(b, id, prefixed(step1));
+    await until(() => closeOf(b, id), 'the close');
+    expect(closeOf(b, id)).toBe('removed');
+    expect(body(b, id).byteLength).toBe(0);
+    expect(docs.channels.get(channel)!.received).toHaveLength(0);
+    expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+  });
+
+  it('opens no channel when the share is withdrawn while the open is read: the decision is asked again in the step the channel would open', async () => {
+    const { f, docs } = await startDocuments();
+    const engine = session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const dispatch = f.services.dispatch;
+    f.services.dispatch = async (owner, name, input, client) => {
+      const answer = await dispatch(owner, name, input, client);
+      if (name === 'artifacts.get') f.records.set({ lane: 'B', session: engine, owners: ['@machine'], access: 'private' }, 'app-1');
+      return answer;
+    };
+    const b = await openRemote(f, org.b1, org.B, { capabilities: READ });
+    const { id, answer } = await openDoc(b, { artifactId: x, mode: 'view' });
+    expect(answer).toMatchObject({ t: 'streamRefused', reason: 'grade' });
+    await sleep(30);
+    expect(ofStream(b, id).map((m) => m.t)).toEqual(['streamRefused']);
+    expect(docs.channels.size).toBe(0);
+  });
+
+  it('closes the stream with the channel’s own word when the host ends it (`documents.onClosed {host}`), after the frames before it', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' });
+    const { channel } = docs.last();
+    const ack = encodeFrame({ type: 'ack', frames: 2, revision: 7 });
+    docs.send(channel, ack);
+    docs.end(channel, 'host');
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('host');
+    expect(framesOf(a, id)).toEqual(asBuffers([ack]));
+    expect(ofStream(a, id).at(-1)).toMatchObject({ t: 'streamClose', reason: 'host' });
+    expect(a.channel.closed).toBe(false);
+  });
+
+  it('sends the host’s frames within the device’s credit, and holds the device’s unrefunded while a re-check holds the stream, past the endpoint’s credit `malformed`', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    // The device's credit: 1000 bytes, then what it refunds.
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 1000);
+    const { channel } = docs.last();
+    const big = step2(3000);
+    docs.send(channel, big);
+    await until(() => body(a, id).byteLength === 1000 || undefined, 'the credit spent');
+    await sleep(40);
+    expect(body(a, id).byteLength).toBe(1000);
+    await a.channel.send({ t: 'streamCredit', id, bytes: 1024 * 1024 });
+    await until(() => framesOf(a, id).length === 1 || undefined, 'the rest');
+    expect(framesOf(a, id)).toEqual(asBuffers([big]));
+
+    // The endpoint's: what the device sends while a re-check holds the stream waits, unrefunded.
+    const authorizer = f.endpoint.authorizer;
+    const authorize = authorizer.authorize.bind(authorizer);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    authorizer.authorize = async (...request) => (await gate, authorize(...request));
+    f.endpoint.streams.recheck();
+    const frame = update(STREAM_INPUT_CREDIT - 100);
+    const bytes = prefixed(frame);
+    const credits = () => ofStream(a, id).filter((m) => m.t === 'streamCredit').length;
+    const before = credits();
+    await write(a, id, bytes.subarray(0, STREAM_INPUT_CREDIT));
+    await sleep(40);
+    expect(credits()).toBe(before);
+    expect(docs.channels.get(channel)!.received).toHaveLength(0);
+    release();
+    await until(() => credits() > before || undefined, 'the refund');
+    await write(a, id, bytes.subarray(STREAM_INPUT_CREDIT));
+    await until(() => docs.channels.get(channel)!.received.length === 1 || undefined, 'the frame');
+    expect(asBuffers(docs.channels.get(channel)!.received)).toEqual(asBuffers([frame]));
+
+    // Past the endpoint's credit while held: `malformed`.
+    let again!: () => void;
+    const held = new Promise<void>((resolve) => (again = resolve));
+    authorizer.authorize = async (...request) => (await held, authorize(...request));
+    f.endpoint.streams.recheck();
+    await write(a, id, Buffer.alloc(STREAM_INPUT_CREDIT + 1));
+    await until(() => closeOf(a, id), 'the close');
+    expect(closeOf(a, id)).toBe('malformed');
+    again();
+    expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+  });
+
+  it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const zero = Buffer.alloc(4);
+    const huge = Buffer.from([0xff, 0xff, 0xff, 0xff]);
+    const garbled = Buffer.from([0, 0, 0, 3, 9, 9, 9]);
+    for (const bad of [zero, huge, garbled]) {
+      const { id } = await openDoc(a, { artifactId: x, mode: 'edit' });
+      const { channel } = docs.last();
+      await write(a, id, bad);
+      await until(() => closeOf(a, id), 'the close');
+      expect([bad.toString('hex'), closeOf(a, id)]).toEqual([bad.toString('hex'), 'malformed']);
+      expect(docs.channels.get(channel)!.received).toHaveLength(0);
+      expect(docs.channels.get(channel)!.ended).toBe('endpoint');
+    }
+    expect(a.channel.closed).toBe(false);
+  });
+
+  it('withholds the session an agent’s provisional frame names, its other fields as the host sent them', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' });
+    const layer = { toolUseId: 'toolu_1', appSessionId: 'app-hidden', artifactId: x, kind: 'document', state: 'streaming', at: 1, name: 'Claude', color: 'var(--author-1)', ops: [] };
+    docs.send(docs.last().channel, encodeFrame({ type: 'provisional', json: JSON.stringify(layer) }));
+    await until(() => framesOf(a, id).length === 1 || undefined, 'the frame');
+    const frame = decodeFrame(new Uint8Array(framesOf(a, id)[0]));
+    expect(frame.type).toBe('provisional');
+    expect(JSON.parse((frame as { json: string }).json)).toEqual({ ...layer, appSessionId: WITHHELD_SESSION });
+  });
+
+  it('answers `unavailable` while the machine’s engine host can take no document channel', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    docs.refuse = true;
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    expect((await openDoc(a, { artifactId: x, mode: 'edit' })).answer).toMatchObject({ t: 'streamRefused', reason: 'unavailable' });
+    expect(docs.channels.size).toBe(0);
   });
 });
 

@@ -405,6 +405,12 @@ export class Endpoint implements EndpointModule {
       artifacts: {
         fetch: (request) => (this.#services === null ? Promise.reject(new Error('the endpoint has not started')) : this.#services.artifacts.fetch(request)),
       },
+      // P5 O7 M5b: a `document` read open's channel, in the endpoint's range (read when asked, as above).
+      documents: {
+        open: (message) => this.#services?.documents.open(message) ?? false,
+        close: (channel) => this.#services?.documents.close(channel),
+        frame: (channel, bytes) => this.#services?.documents.frame(channel, bytes) ?? false,
+      },
       own: this.own,
       forwards: this.forwards,
       now: this.deps.now,
@@ -519,8 +525,10 @@ export class Endpoint implements EndpointModule {
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
       }),
-      // P5 O7 M3: a pty's output, for the terminal streams reading it.
-      services.onFrame((frame) => frame.owner === 'pty-host' && this.streams.frame(frame)),
+      // P5 O7 M3: a pty's output, for the terminal streams reading it; P5 O7 M5b: a document channel's frames and its end,
+      // for the document stream on it (the endpoint's range carries nothing else).
+      services.onFrame((frame) => (frame.owner === 'pty-host' ? this.streams.frame(frame) : this.streams.documentFrame(frame.channel, frame.bytes))),
+      services.documents.onClosed((channel, reason) => this.streams.documentClosed(channel, reason)),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
       services.onUpstream((link) => {
         if (!link.connected) return;
