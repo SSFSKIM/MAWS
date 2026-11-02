@@ -232,7 +232,7 @@ describe('what the reap reads off the session', () => {
 // end_session grace). Date, performance and the timers are faked; setImmediate and process.hrtime stay real, so the
 // socket's I/O runs between the steps of `pass`.
 describe('the SIGTERM under the lease (D69)', () => {
-  const FAKE = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] } as const;
+  const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] };
   const settle = async (check: () => boolean, what: string, ms = 2_000) => {
     const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
     while (!check()) {

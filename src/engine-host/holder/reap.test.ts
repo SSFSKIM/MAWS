@@ -432,7 +432,7 @@ describe('the signal’s outcome', () => {
 // performance.now(), the lease reads both it and Date.now()); setImmediate and process.hrtime stay real, so socket I/O
 // runs and `settle` waits on it. Production timings throughout.
 describe('the clocks (D69)', () => {
-  const FAKE = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] } as const;
+  const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] };
   const settle = async (check: () => boolean, what: string, ms = 2_000) => {
     const end = process.hrtime.bigint() + BigInt(ms) * 1_000_000n;
     while (!check()) {
